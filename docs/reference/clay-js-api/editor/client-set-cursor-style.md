@@ -4,36 +4,48 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSetCursorStyle
 js_facade: runtime/js/editor.js::clientSetCursorStyle
-backing_rust: src/editor/surface.rs::EditorSurface::paint_caret
+backing_rust: src/editor/surface.rs::EditorSurface::set_caret_style_override
 deno_op: op_clay_editor_set_cursor_style
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_set_cursor_style
 name: clientSetCursorStyle
 user_facing_name: Set Cursor Style
-summary: Set Cursor Style through the planned `clay:editor` Clay JavaScript facade.
+summary: Set the caret shape and blink through the `clay:editor` Clay JavaScript facade.
 owner: client
 phase: Phase 8
 visibility: public
 permissions: []
 key_bindings: []
 custom_properties:
-  - name: color
-    type: string
-    default: inherited
-    description: Cursor color as an inherited theme value or CSS-like color string such as #ffcc00; defaults to inherited.
-  - name: blinking
-    type: boolean
-    default: true
-    description: Whether the caret blinks; defaults to true and remains client-local UI metadata.
-  - name: type
+  - name: shape
     type: enum
     default: bar
-    description: Caret shape; allowed values are block, bar, and underline, and the default is bar.
+    description: Caret glyph shape; allowed values are bar, line, block, and underline; the default is bar. Colour stays theme-owned (base.caret).
+  - name: blink
+    type: enum
+    default: solid
+    description: Blink behaviour; allowed values are solid, blink, phase, and smooth; the default is solid (never hides, reduced-motion friendly).
+  - name: widthPx
+    type: number
+    default: "1.5"
+    description: Stroke thickness for bar/line/underline in pixels; defaults to 1.5.
+  - name: heightPct
+    type: number
+    default: "1"
+    description: Caret height as a fraction of the line height; defaults to 1 (full line).
+  - name: hollow
+    type: boolean
+    default: false
+    description: Render the block caret as an outline; defaults to false.
+  - name: stopBlinkOnTyping
+    type: boolean
+    default: true
+    description: Restart the blink to visible on typing; defaults to true.
 security: Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.
 agent_guidance: Use `clay.editor.clientSetCursorStyle` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [cursorstylecustomization, editor, js-api]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: false
 ---
 
@@ -41,13 +53,13 @@ async: false
 
 ## Summary
 
-Set Cursor Style through the planned `clay:editor` Clay JavaScript facade.
+Set the caret shape and blink through the `clay:editor` Clay JavaScript facade.
 
 ## Description
 
-`clientSetCursorStyle` is the planned public API for **Set Cursor Style**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
+`clientSetCursorStyle` is the public API for **Set Cursor Style**. The `op_clay_editor_set_cursor_style` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. The client applies the style through `EditorSurface::set_caret_style_override`, which takes precedence over the per-mode manifest `caret_style` and the editor `StyleRegistry` default.
 
-Authority: `configuration-driven-client-ui-state`. Runtime path: `configuration-api-to-client-ui`. Cursor styling is paint-time UI metadata delivered as configuration/customization state; changing it must not route ordinary keypresses through JavaScript or block paint/input on server work.
+Authority: `configuration-driven-client-ui-state`. Runtime path: `configuration-api-to-client-ui`. Cursor styling is paint-time UI metadata; changing it does not route ordinary keypresses through JavaScript or block paint/input on server work. Caret **colour** stays theme-owned (`base.caret`); this API owns shape and blink only.
 
 ## When to use
 
@@ -58,40 +70,44 @@ Use this API when JavaScript configuration, extensions, or future Clay automatio
 ```ts
 import { clientSetCursorStyle } from "clay:editor";
 
-clientSetCursorStyle({ color: "#ffcc00", blinking: true, type: "bar" });
+clientSetCursorStyle({ shape: "block", blink: "solid" });
 ```
 
 ## Example
 
 ```ts
-clientSetCursorStyle({ color: "#ffcc00", blinking: true, type: "bar" });
+clientSetCursorStyle({ shape: "underline", widthPx: 2, blink: "blink" });
 ```
 
 ## Options
 
-- `color` (`string`): Optional inherited theme value or CSS-like color string such as `#ffcc00`; default `inherited`.
-- `blinking` (`boolean`): Whether the caret blinks; default `true`.
-- `type` (`"block" | "bar" | "underline"`): Caret shape; allowed values are `"block"`, `"bar"`, and `"underline"`; default `"bar"`.
+- `shape` (`"bar" | "line" | "block" | "underline"`): Caret glyph shape; allowed values are `"bar"`, `"line"`, `"block"`, and `"underline"`; default `"bar"`.
+- `blink` (`"solid" | "blink" | "phase" | "smooth"`): Blink behaviour; allowed values are `"solid"`, `"blink"`, `"phase"`, and `"smooth"`; default `"solid"` (never hides).
+- `widthPx` (`number`): Stroke thickness for bar/line/underline in pixels; default `1.5`.
+- `heightPct` (`number`): Caret height as a fraction of the line height; default `1` (full line).
+- `hollow` (`boolean`): Render the block caret as an outline; default `false`.
+- `stopBlinkOnTyping` (`boolean`): Restart the blink to visible on typing; default `true`.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.editor.clientSetCursorStyle` in `~/.config/clay/init.js`.
+No default key binding is assigned. `clientSetCursorStyle` is a programmatic, argument-bearing API; per-mode defaults are set through the behavior manifest `editorRules.caretStyle`, and the caret colour stays theme-owned.
 
 ## Custom properties
 
-- `color` (`string`, default `inherited`): Cursor color as an inherited theme value or CSS-like color string such as `#ffcc00`.
-- `blinking` (`boolean`, default `true`): Whether the caret blinks; remains client-local UI metadata.
-- `type` (`enum`, default `bar`): Caret shape; allowed values are `block`, `bar`, and `underline`.
+- `shape` (`enum`, default `bar`): Caret glyph shape; allowed values are `bar`, `line`, `block`, and `underline`.
+- `blink` (`enum`, default `solid`): Blink behaviour; allowed values are `solid`, `blink`, `phase`, and `smooth`. `solid` never hides (reduced-motion friendly).
+- `widthPx` (`number`, default `1.5`): Stroke thickness for bar/line/underline in pixels.
+- `heightPct` (`number`, default `1`): Caret height as a fraction of the line height.
+- `hollow` (`boolean`, default `false`): Render the block caret as an outline.
+- `stopBlinkOnTyping` (`boolean`, default `true`): Restart the blink to visible on typing.
 
 ## Return and async behavior
 
-Returns client-local cursor style state when runtime wiring exists; the planned facade is synchronous and local.
-
-Current Phase 7 facade/runtime status is `planned`; this page defines the public contract before executable `deno_core` op wiring exists.
+Returns the validated command descriptor (`{ commandId, shape, blink, widthPx, heightPct, hollow, stopBlinkOnTyping }`) synchronously. The facade is synchronous and local.
 
 ## Errors
 
-The planned runtime should fail if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. Current Phase 7 stubs throw a planned-runtime error rather than performing the operation.
+The op fails (deny-by-default) if a present `shape` or `blink` value is not one of the documented values, or if the options are not valid JSON. Absent fields fall back to the active style.
 
 ## Permissions and security
 
@@ -108,9 +124,9 @@ Use `clay.editor.clientSetCursorStyle` when the user asks for set cursor style t
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientSetCursorStyle`
-- Future Deno op: `src/server/ops/editor.rs::op_clay_editor_set_cursor_style` (`op_clay_editor_set_cursor_style`)
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::paint_caret`
-- Current implementation audit path: `src/editor/surface.rs::CARET_COLOR; src/editor/surface.rs::CARET_WIDTH`
+- Deno op: `src/server/ops/editor.rs::op_clay_editor_set_cursor_style` (`op_clay_editor_set_cursor_style`)
+- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::set_caret_style_override`
+- Paint: `src/editor/surface.rs::EditorSurface::paint_caret` (shape-aware), `src/editor/layout.rs::caret_cell_for_visible_byte_offset`
 
 ## Lookup metadata
 
@@ -119,5 +135,5 @@ Use `clay.editor.clientSetCursorStyle` when the user asks for set cursor style t
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientSetCursorStyle`
 - Default key bindings: none
-- Custom properties: `color`, `blinking`, `type`
+- Custom properties: `shape`, `blink`, `widthPx`, `heightPct`, `hollow`, `stopBlinkOnTyping`
 - Tags: `cursorstylecustomization`, `editor`, `js-api`

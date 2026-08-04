@@ -68,6 +68,10 @@ await loadPackage("@clay/markdown");
 
 With that one line, a `.md` file activates the Markdown package mode (package-declared pattern wins precedence over the built-in fallback), while a `.rs` file still resolves to `core.code` because no package claims it. With the line removed, `.md` falls back to `core.text` — still editable, just without Markdown-specific behavior/decorations. No copied package manifests, low-level facade plumbing, manual primitive registration, or test-only wiring is required for fallback editing to work in a user config: the built-in modes ship their own default behavior manifests (`minimal_text_editing` for `core.text`, `core_code_editing` for `core.code`) without an owning package. Built-in modes grant only existing manifest/classification authority — "always-available" implies no new filesystem, network, or shell authority.
 
+## Per-mode movement and caret settings (Plan 071)
+
+Plan 071 (tasks 4/6/11) extends the manifest's `editorRules` with two optional declarative blocks validated by `parse_movement_rules` / `parse_caret_style` (`src/server/ops/modes.rs`): `movement` (`wordSeparators` code/prose/custom, `treatUnderscoreAsWord`, `camelCaseSubWord`, `paragraphStyle`, `stopAtEolWordEnd`, `lineMovement`, `stickyColumn`) and `caretStyle` (shape/blink/width/height/hollow/stopBlinkOnTyping). Built-in fallbacks (`core_code_editing`/`minimal_text_editing`) ship code-style movement and no caret override; `@clay/markdown` declares prose movement through `buildCodeEditingManifest`, and the code packages declare explicit code movement. Absent fields fall back deny-by-default to server defaults — no silent behavior change. Ligatures are deliberately not a manifest field; they follow the mode's font-role typography profile. See [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md).
+
 ## Code Examples
 
 ```rust

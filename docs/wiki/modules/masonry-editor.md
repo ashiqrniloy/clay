@@ -162,6 +162,16 @@ Plan 070 moved editor content from `post_paint` to `paint` (background fill + `E
 
 Caret/selection/diagnostics stay on `StyleRegistry` (`base.caret`/`base.selection`/`diagnostic_style`); no new `BaseUiColorKey`. See [Phase 20.4 Core Component Uplift](phase20.4-core-component-uplift-primitive-review.md) and [Server-Driven UI Protocol Schema](server-driven-ui.md).
 
+## Plan 071: movement, multi-cursor, caret, text objects
+
+Plan 071 extends the widget and surface with first-class editing primitives; see [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md) for the full implementation page. Widget-level facts:
+
+- Default key bindings for word/paragraph movement, line/word selection, multi-cursor (`Ctrl+Alt+Up/Down`, `Shift+Alt+arrows`, `Ctrl+D` select-next-match, `Ctrl+Shift+L`, `Ctrl+U` cursor undo) live in `EditorWidget::on_text_event` alongside the pre-existing arrow/home/end defaults; package `bindKey` manifests can override them.
+- Direction-specific command IDs (`clay.editor.clientMoveCursor.nextWordStart`, `...clientAddCursor.below`, textobject/smart-select IDs) dispatch client-locally through `EditorClientCommand::from_command_id` — no server round-trip; textobject/smart-select IDs instead enqueue a `SelectionQueryRequest` and apply the asynchronous result with stale-version guards (`pending_selection_query`).
+- Caret blinking is the first Masonry animation-frame consumer: `on_anim_frame` advances the surface `CaretBlink` state machine while `ctx.request_anim_frame()` keeps the loop alive; only the primary caret blinks, secondaries paint solid.
+- The selection set replaced the old single cursor+selection pair (`EditorSurface.selections: SelectionState`); copy/cut/paste, undo/redo, IME commit, and paint all iterate the set (edits apply right-to-left by byte offset).
+- Escape priority chain: completion menu > snippet session > multi-selection cancel.
+
 ## Related
 
 - [Masonry Shell Runtime](masonry-shell.md)
@@ -169,6 +179,7 @@ Caret/selection/diagnostics stay on `StyleRegistry` (`base.caret`/`base.selectio
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [End-to-End File Browser Workflow Primitive Review](end-to-end-file-browser-workflow-primitive-review.md)
 - [Editor Theme Registry](editor-theme-registry.md)
+- [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md)
 - [Range Diagnostics](range-diagnostics.md)
 - [Client Copy Selection Clay JS API](../../reference/clay-js-api/editor/client-copy-selection.md)
 - [Client Cut Selection Clay JS API](../../reference/clay-js-api/editor/client-cut-selection.md)

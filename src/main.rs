@@ -500,6 +500,18 @@ impl AppDriver for Driver {
                             }
                         });
                 }
+                ClientUiCommandResult::EditorCommand(command) => {
+                    let editor_widget_id = self.editor_action_target(widget_id);
+                    ctx.render_root(window_id)
+                        .edit_widget(editor_widget_id, |mut widget| {
+                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>()
+                                && editor.widget.apply_editor_client_command(command)
+                            {
+                                editor.ctx.request_render();
+                                editor.ctx.request_accessibility_update();
+                            }
+                        });
+                }
             },
         }
     }
@@ -522,6 +534,7 @@ enum ClientUiCommandResult {
     ShowOpenDocuments,
     RequestResync,
     DismissRecovery,
+    EditorCommand(clay::masonry_editor::EditorClientCommand),
 }
 
 fn handle_client_ui_command(command: &clay::client::ClientUiCommandRoute) -> ClientUiCommandResult {
@@ -542,6 +555,12 @@ fn handle_client_ui_command(command: &clay::client::ClientUiCommandRoute) -> Cli
         "clay.editor.clientShowOpenDocuments" => ClientUiCommandResult::ShowOpenDocuments,
         "clay.editor.clientRequestResync" => ClientUiCommandResult::RequestResync,
         "clay.editor.clientDismissRecovery" => ClientUiCommandResult::DismissRecovery,
+        command_id
+            if let Some(command) =
+                clay::masonry_editor::EditorClientCommand::from_command_id(command_id) =>
+        {
+            ClientUiCommandResult::EditorCommand(command)
+        }
         _ => ClientUiCommandResult::None,
     }
 }
@@ -611,7 +630,8 @@ fn apply_native_dialog_completion(
                 | ClientUiCommandResult::Redo
                 | ClientUiCommandResult::ShowOpenDocuments
                 | ClientUiCommandResult::RequestResync
-                | ClientUiCommandResult::DismissRecovery => false,
+                | ClientUiCommandResult::DismissRecovery
+                | ClientUiCommandResult::EditorCommand(_) => false,
             };
             editor.widget.sync_region(&mut editor.ctx);
             editor.widget.sync_panels(&mut editor.ctx);

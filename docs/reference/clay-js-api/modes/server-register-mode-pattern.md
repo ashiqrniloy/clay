@@ -40,6 +40,10 @@ custom_properties:
     type: string
     default: required
     description: Behavior-changing setting `apiPrefix` for this primitive gate API.
+  - name: editorRules
+    type: 'object | undefined'
+    default: built-in code-editing defaults
+    description: Optional declarative editor rules stored with the mode declaration and applied at activation. Generic rule fields (enter, tab, pairs, comments, electricCharacters, autocompleteTriggers) plus per-mode movement and caretStyle (Plan 071 tasks 4/6/11). Optional movement policy (Plan 071 task 4/11), validated by the server. Fields — wordSeparators ('code', 'prose', or { custom: string[] }), treatUnderscoreAsWord, camelCaseSubWord, paragraphStyle ('blankLine' | 'blankLineOrWhitespace'), stopAtEolWordEnd, lineMovement ('character' | 'screenLine'), stickyColumn. Absent fields fall back to the code-editing defaults. Optional caret appearance override (Plan 071 task 6/11), validated by the server. Fields — shape ('bar' | 'line' | 'block' | 'underline'), widthPx, heightPct, hollow, blink ('solid' | 'blink' | 'phase' | 'smooth'), smoothAnimationMs, stopBlinkOnTyping. Absent means the reduced-motion-safe editor default bar; clientSetCursorStyle overrides it at runtime. Every field is validated server-side; unknown keys and values are rejected deny-by-default. Build the object with clay.behavior.buildCodeEditingManifest.
 security: Requires mode-registration permission and server validation of package prefix, static pattern schema, duplicate modes, and bounded open-document metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority.
 agent_guidance: Use `clay.modes.serverRegisterModePattern` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [js-api, modedocumentclassification, modes]

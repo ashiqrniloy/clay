@@ -49,6 +49,8 @@ When a plan adds or changes server-side Rust public functions or public programm
 - How the generated registry is updated from Markdown.
 - Which `cargo test` coverage test fails if the Rust function, Clay JS API, docs, index link, registry entry, or lookup API is missing/stale.
 - How users and AI agents discover and inspect the capability by stable ID, kind, owner, JS module/export, backing Rust path, op name, or tag.
+- Whether the new/changed user-facing configuration surface must be added to the canonical example configuration `examples/init.js` (mandatory per-plan task; see `.agents/skills/create-plan/references/clay.md`).
+- Which `test-plan/` module files need new/updated manual steps for user-visible behavior changes (mandatory per-plan manual test plan task; index and coverage matrix in `test-plan/index.md`).
 
 ## Anti-Patterns
 
@@ -58,3 +60,5 @@ When a plan adds or changes server-side Rust public functions or public programm
 - A separately authored registry becoming the source of truth.
 - AI/tool capabilities only implicit in source code.
 - Tests that pass when Clay JS APIs, docs, master-index links, generated registry entries, or lookup APIs are missing.
+- `examples/init.js` drifting behind the implemented configuration surface (missing options, stale enums, wrong ordering).
+- Manual verification steps living only in plan documents or chat history instead of `test-plan/` module files.

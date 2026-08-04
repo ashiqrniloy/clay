@@ -23,7 +23,8 @@ use crate::{
         LanguageIntelligenceFeature, LanguageIntelligencePayload, LanguageIntelligenceResult,
         LanguageIntelligenceStatus, PROTOCOL_VERSION, ParseByteRange, ParseInputEdit, ParsePolicy,
         ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, SduiActionArgument,
-        SduiActionIntent, SduiActionSource, SduiActionValue, ServerMessage, WorkspaceRootId,
+        SduiActionIntent, SduiActionSource, SduiActionValue, SelectionQueryRange,
+        SelectionQueryResult, ServerMessage, WorkspaceRootId,
         codec::{Codec, CodecError},
         completion::estimated_result_payload_bytes,
     },
@@ -122,6 +123,7 @@ fn client_message_identity(message: &ClientMessage) -> Option<ClientId> {
         | ClientMessage::CloseDocument { client_id, .. } => Some(*client_id),
         ClientMessage::CompletionRequest { request } => Some(request.client_id),
         ClientMessage::LanguageIntelligenceRequest { request } => Some(request.client_id),
+        ClientMessage::SelectionQueryRequest { request } => Some(request.client_id),
     }
 }
 
@@ -270,6 +272,11 @@ where
 {
     let mut typography_updates = runtime_generation.subscribe_typography();
     let mut runtime_state_updates = runtime_generation.subscribe_runtime_state();
+    // Follow-up round (`editor-control`): advisory gated programmatic
+    // editor-command execution requests. Lagged requests drop (advisory);
+    // the channel survives generation replacement so one subscription
+    // covers the connection's lifetime.
+    let mut editor_command_updates = runtime_generation.subscribe_editor_commands().await;
     // Plan 060 T6 (P1-8): bounded per-connection result lanes. A saturated
     // lane means the client is not reading; results drop with a counter and
     // log line instead of growing memory without bound.
@@ -394,6 +401,22 @@ where
                     codec
                         .write_server_message(&mut stream, &ServerMessage::ActiveTypography(typography))
                         .await?;
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
+            },
+            editor_command = editor_command_updates.recv() => match editor_command {
+                Ok(request) => {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::EditorCommandRequest(Box::new(request)),
+                        )
+                        .await?;
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // Advisory execution requests never replay: drop and move on.
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
@@ -1154,6 +1177,71 @@ where
                         runtime_generation_id,
                     )
                     .await;
+            }
+            ClientMessage::SelectionQueryRequest { request } => {
+                // Plan 071 task 10: read-only tree-sitter text-object/smart-
+                // select ranges. Every miss (validation, no grammar, no parse
+                // handler, timed-out parse) degrades to empty ranges so an
+                // advisory selection query can never block editing.
+                if let Err(rejection) = request.validate() {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::Error {
+                                code: ProtocolErrorCode::InvalidMessage,
+                                message: format!("selection query request rejected: {rejection:?}"),
+                            },
+                        )
+                        .await?;
+                    continue;
+                }
+                let metadata = workspace
+                    .lock()
+                    .await
+                    .document_metadata(request.document_id, client_id)
+                    .await
+                    .ok();
+                let mut ranges: Vec<Option<SelectionQueryRange>> =
+                    vec![None; request.selections.len()];
+                if let Some(metadata) = metadata {
+                    let document_text =
+                        document_for_message(request.document_id, &document, &workspace)
+                            .await
+                            .lock()
+                            .await
+                            .text();
+                    let runtime = runtime_generation.current().await;
+                    if let Some((meta, _policy)) = runtime
+                        .service
+                        .registered_native_syntax_handler(runtime.id, &metadata.path)
+                        && let Some(handler) =
+                            parse_coordinator.handler_for(&meta.package_prefix, &meta.mode_id)
+                        && let Some(query_ranges) = handler.selection_query_ranges(
+                            request.document_id,
+                            request.document_version,
+                            &document_text,
+                            request.query,
+                            &request.selections,
+                        )
+                    {
+                        ranges = query_ranges;
+                    }
+                }
+                codec
+                    .write_server_message(
+                        &mut stream,
+                        &ServerMessage::SelectionQueryResult {
+                            result: SelectionQueryResult {
+                                request_id: request.request_id,
+                                client_id,
+                                document_id: request.document_id,
+                                document_version: request.document_version,
+                                behavior_version: request.behavior_version,
+                                ranges,
+                            },
+                        },
+                    )
+                    .await?;
             }
             ClientMessage::Hello { .. } => {
                 codec
@@ -4100,7 +4188,7 @@ await loadPackage("@clay/markdown");"#,
         let _snapshot = codec.read_server_message(&mut client).await.unwrap();
         assert_eq!(
             codec.read_server_message(&mut client).await.unwrap(),
-            ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1))
+            ServerMessage::BehaviorManifest(Box::new(BehaviorManifest::minimal_text_editing(1)))
         );
 
         drop(client);

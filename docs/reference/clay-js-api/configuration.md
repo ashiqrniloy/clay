@@ -5,6 +5,7 @@ Clay configuration is JavaScript loaded from `~/.config/clay/init.js`. The confi
 ## Configuration Entry Point
 
 - Default file: `~/.config/clay/init.js`
+- Canonical example: `examples/init.js` in the Clay repository demonstrates every supported configuration surface with all documented options annotated; copy it and adjust. Plans that add configuration surfaces must keep it current.
 - The file is loaded by Clay's server-side JavaScript runtime during server startup or explicit configuration reload work.
 - Phase 13 runtime-backs this entry point on the server: it evaluates supported local configuration JavaScript through documented `clay:*` facades while still never executing JavaScript in the Rust client.
 - `init.js` may load other local configuration files through [`loadConfigurationModule`](configuration/load-configuration-module.md) so users can keep settings modular.
@@ -25,13 +26,18 @@ Each configuration option is exposed as a Clay JS API. That means it must have:
 
 ## Phase 18.16.5 typography configuration
 
-[`clay.theme.setTypography`](theme/set-typography.md) atomically configures user-owned monospace, proportional, and UI family stacks and logical-pixel sizes. No call is required for defaults.
+[`clay.theme.setTypography`](theme/set-typography.md) atomically configures user-owned monospace, proportional, and UI family stacks, logical-pixel sizes, and optional per-role ligature/feature policies (Plan 071 task 7). No call is required for defaults; absent `ligatures` keeps standard (`liga`+`clig`) and contextual (`calt`) ligatures enabled.
 
 ```js
 import { setTypography } from "clay:theme";
 
 setTypography({
-  monospace: { families: ["JetBrains Mono", "monospace"], size: 16 },
+  monospace: {
+    families: ["JetBrains Mono", "monospace"],
+    size: 16,
+    // Optional: disable contextual alternates for code, keep standard ligatures.
+    ligatures: { enableStandard: true, enableContextual: false },
+  },
   proportional: { families: ["Inter", "sans-serif"], size: 17 },
   ui: { families: ["system-ui"], size: 13 },
 });
@@ -230,8 +236,10 @@ User-visible Phase 18.18 configuration surfaces:
 | Package loading | [`clay.packages.loadPackage`](packages/load-package.md) | One call per language; no auto-load, no hidden `autoLoadLanguagePackages` key |
 | Active theme (color/style resolution) | [`clay.theme.setTheme`](theme/set-theme.md) | Theme `tokenType` + `modifiers` rules resolve all vocabulary token colors; no per-language color overrides |
 | Engine tier override | [`clay.syntax.setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md) | Optional explicit tier choice; native is the default for all four first-party languages |
-| Typography (font families/sizes) | [`clay.theme.setTypography`](theme/set-typography.md) | User-owned families and sizes; packages declare semantic roles only |
+| Typography (font families/sizes/ligatures) | [`clay.theme.setTypography`](theme/set-typography.md) | User-owned families, sizes, and per-role ligature policy; packages declare semantic roles only and a mode's font role selects which policy applies |
 | Editor behavior (indent/pairs/electric/comment/autocomplete triggers) | [`clay.behavior.buildCodeEditingManifest`](behavior/build-code-editing-manifest.md) | Package-owned manifest declared at load time through `serverRegisterModePattern`; no per-language behavior toggle |
+| Per-mode movement and caret appearance | `editorRules.movement` / `editorRules.caretStyle` via [`serverRegisterModePattern`](modes/server-register-mode-pattern.md) | Plan 071 tasks 4/6/11: package-declared inert manifest data validated server-side; absent fields fall back to the code-editing/editor defaults; no hidden keys |
+| Runtime caret override | [`clay.editor.clientSetCursorStyle`](editor/client-set-cursor-style.md) | User-level caret shape/blink override from `init.js`; takes precedence over per-mode manifest values |
 | Completion keyword/snippet items | [`clay.completion.serverRegisterCompletionProvider`](completion/server-register-completion-provider.md) | Package-owned validated static items; no user-facing keyword-list toggle or per-language item filter |
 | Markdown preview/status panel visibility | [`clay.configuration.setPackageOption`](configuration/set-package-option.md) / [`clay.ui.serverSetLayoutOverride`](ui/server-set-layout-override.md) | Existing `markdown.layout.defaultVisibility` option and `markdown.preview` `visibility` override; no new panel-display API |
 | Package enable/disable | `PackageService` (CLI, not `init.js`) | Privileged operation, not a user-configuration key |

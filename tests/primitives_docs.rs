@@ -344,7 +344,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 68);
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 77);
 
     let facades = read("src/server/facades.rs")
         .lines()
@@ -372,7 +372,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
         }
     }
     let package_section = marked_section(&plan, "package-inventory");
-    assert_exact_inventory(package_section, &packages, 11);
+    assert_exact_inventory(package_section, &packages, 14);
     assert_eq!(package_section.matches("`packages/lsp-shared`").count(), 1);
 }
 

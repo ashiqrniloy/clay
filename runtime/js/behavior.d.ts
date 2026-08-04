@@ -26,6 +26,28 @@ export interface CodeEditingManifestOptions {
     }>;
     electricOutdentCharacters?: string[];
     autocompleteTriggers?: string[];
+    /** Declarative movement policy override (`editorRules.movement`). Absent
+     * fields fall back to the code-editing defaults server-side. */
+    movement?: {
+        wordSeparators?: "code" | "prose" | { custom: string[] };
+        treatUnderscoreAsWord?: boolean;
+        camelCaseSubWord?: boolean;
+        paragraphStyle?: "blankLine" | "blankLineOrWhitespace";
+        stopAtEolWordEnd?: boolean;
+        lineMovement?: "character" | "screenLine";
+        stickyColumn?: boolean;
+    };
+    /** Declarative caret appearance override (`editorRules.caretStyle`).
+     * Absent fields fall back to the editor default bar server-side. */
+    caretStyle?: {
+        shape?: "bar" | "line" | "block" | "underline";
+        widthPx?: number;
+        heightPct?: number;
+        hollow?: boolean;
+        blink?: "solid" | "blink" | "phase" | "smooth";
+        smoothAnimationMs?: number;
+        stopBlinkOnTyping?: boolean;
+    };
 }
 export declare function getActiveBehaviorManifest(documentId?: string): Promise<BehaviorManifestSummary>;
 export declare function listBehaviorRoutes(documentId?: string): Promise<BehaviorRoute[]>;

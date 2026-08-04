@@ -23,6 +23,7 @@ use std::{
 
 use crate::editor::{
     EditorCompletionRequestEvent, EditorEditEvent, EditorLanguageIntelligenceRequestEvent,
+    EditorSelectionQueryRequestEvent,
 };
 use crate::ipc::IpcEndpoint;
 use crate::perf::metrics::{MetricMetadata, global_recorder};
@@ -30,10 +31,11 @@ use crate::protocol::{
     ActiveTypography, BehaviorManifest, BehaviorVersion, ClientId, ClientMessage,
     CompletionRejection, CompletionRequest, CompletionRequestId, CompletionResultSet,
     DecorationSet, DiagnosticSet, DocumentAccess, DocumentId, DocumentMetadata, DocumentVersion,
-    EditOperation, EditRejection, FileErrorCode, LanguageIntelligenceRejection,
-    LanguageIntelligenceRequest, LanguageIntelligenceRequestId, LanguageIntelligenceResult,
-    PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent, SduiTree,
-    SduiTreeUpdate, ServerMessage, TransactionId, WorkspaceRootId,
+    EditOperation, EditRejection, EditorCommandRequest, FileErrorCode,
+    LanguageIntelligenceRejection, LanguageIntelligenceRequest, LanguageIntelligenceRequestId,
+    LanguageIntelligenceResult, PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic,
+    SduiActionIntent, SduiTree, SduiTreeUpdate, SelectionQueryRequest, SelectionQueryResult,
+    ServerMessage, TransactionId, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
@@ -404,6 +406,24 @@ impl ClientEditQueue {
             })
     }
 
+    pub(crate) fn enqueue_selection_query_request(
+        &self,
+        event: EditorSelectionQueryRequestEvent,
+        request_id: u64,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::SelectionQueryRequest {
+            request: SelectionQueryRequest {
+                request_id,
+                client_id: self.client_id,
+                document_id: event.document_id,
+                document_version: event.document_version,
+                behavior_version: event.behavior_version,
+                query: event.query,
+                selections: event.selections,
+            },
+        })
+    }
+
     pub fn enqueue_open_selected_file(
         &self,
         selected_path: PathBuf,
@@ -642,6 +662,12 @@ pub enum ClientConnectionEvent {
         request_id: LanguageIntelligenceRequestId,
         reason: LanguageIntelligenceRejection,
     },
+    /// Plan 071 task 10: read-only text-object/smart-select ranges for one
+    /// selection query; the widget applies them as selections.
+    SelectionQueryResult(SelectionQueryResult),
+    /// Plan 071 follow-up round (`editor-control`): gated programmatic
+    /// editor-command execution request pushed by the server.
+    EditorCommandRequest(EditorCommandRequest),
     RuntimeDiagnostic(RuntimeDiagnostic),
     EditTransaction(ServerMessage),
     ServerError {
@@ -869,9 +895,9 @@ where
 
     let behavior_manifest = match codec.read_server_message(&mut *stream).await? {
         ServerMessage::BehaviorManifest(manifest) => {
-            behavior::ClientBehaviorState::new(manifest.clone())
+            behavior::ClientBehaviorState::new(manifest.as_ref().clone())
                 .map_err(|_| ClientBootstrapError::UnexpectedMessage("invalid BehaviorManifest"))?;
-            manifest
+            *manifest
         }
         ServerMessage::Error { code, message } => {
             return Err(ClientBootstrapError::ServerError { code, message });
@@ -1128,6 +1154,14 @@ async fn run_connection<S>(
                     Ok(ServerMessage::LanguageIntelligenceRejected { request_id, reason }) => {
                         let _ = events.send(ClientConnectionEvent::LanguageIntelligenceRejected { request_id, reason }).await;
                     }
+                    Ok(ServerMessage::SelectionQueryResult { result }) => {
+                        let _ = events.send(ClientConnectionEvent::SelectionQueryResult(result)).await;
+                    }
+                    Ok(ServerMessage::EditorCommandRequest(request)) => {
+                        let _ = events
+                            .send(ClientConnectionEvent::EditorCommandRequest(*request))
+                            .await;
+                    }
                     Ok(ServerMessage::RuntimeDiagnostic(diagnostic)) => {
                         let _ = events.send(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)).await;
                     }
@@ -1162,10 +1196,10 @@ async fn run_connection<S>(
                         let install_result = behavior_state
                             .lock()
                             .expect("client behavior state poisoned")
-                            .install_replacement(manifest.clone());
+                            .install_replacement(manifest.as_ref().clone());
                         match install_result {
                             Ok(()) => {
-                                let _ = events.send(ClientConnectionEvent::BehaviorManifestInstalled { behavior_version, manifest }).await;
+                                let _ = events.send(ClientConnectionEvent::BehaviorManifestInstalled { behavior_version, manifest: *manifest }).await;
                             }
                             Err(error) => {
                                 let _ = events.send(ClientConnectionEvent::BehaviorManifestRejected {
@@ -1345,7 +1379,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(9)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(9),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -2046,7 +2082,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(3),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -2146,7 +2184,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(3),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -2253,7 +2293,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(3),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -2374,7 +2416,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(5)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(5),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -2437,7 +2481,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(24)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(24),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -2501,7 +2547,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(44)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(44),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -2577,7 +2625,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(3),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -2662,7 +2712,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(4)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(4),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -2748,7 +2800,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(4)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(4),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -2843,7 +2897,9 @@ mod tests {
                 codec
                     .write_server_message(
                         &mut server,
-                        &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(4)),
+                        &ServerMessage::BehaviorManifest(Box::new(
+                            BehaviorManifest::minimal_text_editing(4),
+                        )),
                     )
                     .await
                     .unwrap();
@@ -2924,7 +2980,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(4)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(4),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -2949,7 +3007,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(5)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(5),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -3051,7 +3111,9 @@ mod tests {
         codec
             .write_server_message(
                 server,
-                &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1)),
+                &ServerMessage::BehaviorManifest(Box::new(BehaviorManifest::minimal_text_editing(
+                    1,
+                ))),
             )
             .await
             .unwrap();
@@ -3190,7 +3252,9 @@ mod tests {
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(4)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(4),
+                    )),
                 )
                 .await
                 .unwrap();
@@ -3217,7 +3281,10 @@ mod tests {
                 .commands
                 .push(CommandDeclaration::client_edit("text.insert", "Duplicate"));
             codec
-                .write_server_message(&mut server, &ServerMessage::BehaviorManifest(invalid))
+                .write_server_message(
+                    &mut server,
+                    &ServerMessage::BehaviorManifest(Box::new(invalid)),
+                )
                 .await
                 .unwrap();
             codec
@@ -3814,7 +3881,9 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
             codec
                 .write_server_message(
                     &mut server,
-                    &ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1)),
+                    &ServerMessage::BehaviorManifest(Box::new(
+                        BehaviorManifest::minimal_text_editing(1),
+                    )),
                 )
                 .await
                 .unwrap();

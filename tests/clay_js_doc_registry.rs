@@ -648,14 +648,14 @@ fn generated_registry_preserves_configuration_metadata() {
     );
     assert_eq!(
         cursor_style.backing_rust,
-        "src/editor/surface.rs::EditorSurface::paint_caret"
+        "src/editor/surface.rs::EditorSurface::set_caret_style_override"
     );
     assert_eq!(cursor_style.deno_op, "op_clay_editor_set_cursor_style");
     assert!(cursor_style.permissions.is_empty());
     assert!(cursor_style.key_bindings.is_empty());
     assert!(cursor_style.lookup_tags.iter().any(|tag| tag == "editor"));
     assert!(cursor_style.security.contains("does not grant filesystem"));
-    for property in ["color", "blinking", "type"] {
+    for property in ["shape", "blink", "stopBlinkOnTyping"] {
         assert!(
             cursor_style
                 .custom_properties
@@ -1174,7 +1174,7 @@ fn lookup_finds_api_by_stable_id_and_export() {
 fn lookup_finds_configuration_by_custom_property() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 
-    for property in ["color", "blinking", "type"] {
+    for property in ["shape", "blink", "stopBlinkOnTyping"] {
         let matches = registry.by_custom_property(property);
         assert!(
             matches
@@ -1192,46 +1192,51 @@ fn cursor_style_custom_properties_are_complete() {
         .by_id("clay.editor.clientSetCursorStyle")
         .expect("cursor style customization API");
 
-    let color = cursor_style
+    let shape = cursor_style
         .custom_properties
         .iter()
-        .find(|property| property.name == "color")
-        .expect("color custom property");
-    assert_eq!(color.property_type, "string");
-    assert_eq!(color.default, "inherited");
-    assert!(color.description.contains("#ffcc00"));
-
-    let blinking = cursor_style
-        .custom_properties
-        .iter()
-        .find(|property| property.name == "blinking")
-        .expect("blinking custom property");
-    assert_eq!(blinking.property_type, "boolean");
-    assert_eq!(blinking.default, "true");
-    assert!(blinking.description.contains("client-local UI metadata"));
-
-    let cursor_type = cursor_style
-        .custom_properties
-        .iter()
-        .find(|property| property.name == "type")
-        .expect("type custom property");
-    assert_eq!(cursor_type.property_type, "enum");
-    assert_eq!(cursor_type.default, "bar");
-    for allowed in ["block", "bar", "underline"] {
+        .find(|property| property.name == "shape")
+        .expect("shape custom property");
+    assert_eq!(shape.property_type, "enum");
+    assert_eq!(shape.default, "bar");
+    for allowed in ["bar", "line", "block", "underline"] {
         assert!(
-            cursor_type.description.contains(allowed),
-            "type custom property must document allowed value {allowed}"
+            shape.description.contains(allowed),
+            "shape custom property must document allowed value {allowed}"
         );
     }
+
+    let blink = cursor_style
+        .custom_properties
+        .iter()
+        .find(|property| property.name == "blink")
+        .expect("blink custom property");
+    assert_eq!(blink.property_type, "enum");
+    assert_eq!(blink.default, "solid");
+    for allowed in ["solid", "blink", "phase", "smooth"] {
+        assert!(
+            blink.description.contains(allowed),
+            "blink custom property must document allowed value {allowed}"
+        );
+    }
+
+    let stop_blink = cursor_style
+        .custom_properties
+        .iter()
+        .find(|property| property.name == "stopBlinkOnTyping")
+        .expect("stopBlinkOnTyping custom property");
+    assert_eq!(stop_blink.property_type, "boolean");
+    assert_eq!(stop_blink.default, "true");
 
     let root = repository_root();
     let text = std::fs::read_to_string(
         root.join("docs/reference/clay-js-api/editor/client-set-cursor-style.md"),
     )
     .expect("read cursor style API doc");
-    assert!(text.contains("default `inherited`"));
-    assert!(text.contains("default `true`"));
-    assert!(text.contains("allowed values are `\"block\"`, `\"bar\"`, and `\"underline\"`"));
+    assert!(text.contains("default `solid`"));
+    assert!(
+        text.contains("allowed values are `\"bar\"`, `\"line\"`, `\"block\"`, and `\"underline\"`")
+    );
 }
 
 #[test]
@@ -1277,7 +1282,7 @@ fn configuration_lookup_finds_cursor_customization() {
             .any(|entry| entry.id == "clay.editor.clientSetCursorStyle"),
         "cursor style customization should be discoverable by lookup tag"
     );
-    for property in ["color", "blinking", "type"] {
+    for property in ["shape", "blink", "stopBlinkOnTyping"] {
         assert!(
             registry
                 .by_custom_property(property)
@@ -1297,6 +1302,9 @@ fn lookup_lists_empty_default_key_bindings() {
         "clay.keybindings.unbindKey",
         "clay.keybindings.listKeyBindings",
         "clay.editor.clientSetCursorStyle",
+        "clay.editor.clientSelectPrevMatch",
+        "clay.editor.clientKeepSelection",
+        "clay.editor.clientRemoveSelection",
     ] {
         let entry = registry
             .by_id(id)
@@ -1308,8 +1316,12 @@ fn lookup_lists_empty_default_key_bindings() {
     }
 
     let escape = registry.by_key_binding("Escape");
-    assert_eq!(escape.len(), 1);
-    assert_eq!(escape[0].id, "clay.application.quit");
+    assert_eq!(escape.len(), 2);
+    let escape_ids: Vec<&str> = escape.iter().map(|entry| entry.id.as_str()).collect();
+    assert!(escape_ids.contains(&"clay.application.quit"));
+    // Plan 071 task 9: the editor consumes Escape first (menu > snippet >
+    // cancel multiple selections); app-level quit remains the fallback.
+    assert!(escape_ids.contains(&"clay.editor.clientCancelMultipleSelections"));
 }
 
 #[test]

@@ -95,6 +95,14 @@ Primitive customization flows through token contributions:
 - `clay.ui.serverRegisterThemeToken` (register new tokens)
 - `clay.contributions.themeTokens` / `designTokens` (override token values)
 
+Editor chrome is **not** SDUI chrome (Plan 071 task 12): caret shape/blink and the font-ligature baseline are editor/typography chrome, not `ComponentKind` components or theme tokens. Packages cannot register a caret style, blink policy, or ligature policy through `serverRegisterThemeToken`, `designTokens`, or any component contribution. The only package surfaces are:
+
+- **Caret shape/blink**: inert `editorRules.caretStyle` manifest data (`shape`, `blink`, `widthPx`, `heightPct`, `hollow`, `stopBlinkOnTyping`), validated at mode registration like every other editor rule. Omitted means the reduced-motion-safe editor default bar (`StyleRegistry` caret style).
+- **Caret color**: stays theme-owned — the `caret` theme token, overridable through theme-token contributions like any other color. Shape/blink and color are deliberately separate authorities.
+- **Ligatures**: follow the mode's font role. Each `FontProfile` (monospace/proportional/ui) carries a user-owned `LigaturePolicy`; a mode's `defaultFontRole` selects which profile applies to its document text. No package capability grants ligature overrides. See [Semantic Typography Roles](typography.md#ligature-policy).
+
+Rendering of both surfaces stays in native code (`paint_caret` in `src/editor/surface.rs`; parley `StyleProperty::FontFeatures` in the layout path); no package JavaScript runs in caret paint or text shaping.
+
 See [Creating Clay Packages](../packages/creating-packages.md#ui-chrome-conformance-phase-202) for the full package authoring contract.
 
 ## Performance

@@ -10,9 +10,10 @@ use crate::{
         modes::{DocumentClassificationInput, ModeDeclaration, ModeDiagnostic},
     },
     protocol::{
-        AutocompleteTrigger, CommentContinuationRule, EditorBehaviorRules, ElectricCharacterRule,
-        ElectricEffect, EnterRule, PairRule, PairRuleContext, RoutingPolicy, TabMode, TabRule,
-        TextEditCapability,
+        AutocompleteTrigger, BlinkStyle, CaretShape, CaretStyle, CommentContinuationRule,
+        EditorBehaviorRules, ElectricCharacterRule, ElectricEffect, EnterRule, LineMovementStyle,
+        MovementRules, PairRule, PairRuleContext, ParagraphStyle, RoutingPolicy, TabMode, TabRule,
+        TextEditCapability, WordSeparatorPolicy,
     },
 };
 
@@ -334,6 +335,113 @@ fn parse_editor_rules(value: &Value) -> Result<EditorBehaviorRules, String> {
         comments,
         electric_characters,
         autocomplete_triggers,
+        movement: parse_movement_rules(value.get("movement")),
+        caret_style: parse_caret_style(value.get("caretStyle")),
+    })
+}
+
+/// Parse the optional `editorRules.movement` override; absent or partial values
+/// fall back to [`MovementRules::default`] so existing modes gain the new
+/// primitives with no behaviour change.
+fn parse_movement_rules(value: Option<&Value>) -> MovementRules {
+    let Some(value) = value else {
+        return MovementRules::default();
+    };
+    let word_separators = match value.get("wordSeparators") {
+        Some(Value::String(s)) if s == "prose" => WordSeparatorPolicy::Prose,
+        Some(Value::String(s)) if s == "code" => WordSeparatorPolicy::Code,
+        Some(Value::Object(_)) => {
+            let separators = value
+                .get("wordSeparators")
+                .and_then(|v| v.get("custom"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item.as_str().and_then(|s| s.chars().next()))
+                .collect::<Vec<char>>();
+            WordSeparatorPolicy::Custom(separators)
+        }
+        _ => WordSeparatorPolicy::Code,
+    };
+    MovementRules {
+        word_separators,
+        treat_underscore_as_word: value
+            .get("treatUnderscoreAsWord")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        camel_case_sub_word: value
+            .get("camelCaseSubWord")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        paragraph_style: match value.get("paragraphStyle").and_then(Value::as_str) {
+            Some("blankLine") => ParagraphStyle::BlankLine,
+            _ => ParagraphStyle::BlankLineOrWhitespace,
+        },
+        stop_at_eol_word_end: value
+            .get("stopAtEolWordEnd")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        line_movement: match value.get("lineMovement").and_then(Value::as_str) {
+            Some("screenLine") => LineMovementStyle::ScreenLine,
+            _ => LineMovementStyle::Character,
+        },
+        sticky_column: value
+            .get("stickyColumn")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+    }
+}
+
+/// Parse the optional `editorRules.caretStyle` override. Returns `None` when
+/// absent so the editor `StyleRegistry` default applies; partial objects fall
+/// back field-by-field to [`CaretStyle::default`].
+fn parse_caret_style(value: Option<&Value>) -> Option<CaretStyle> {
+    let value = value?;
+    let base = CaretStyle::default();
+    let shape = match value.get("shape").and_then(Value::as_str) {
+        Some("bar") => CaretShape::Bar,
+        Some("line") => CaretShape::Line,
+        Some("block") => CaretShape::Block,
+        Some("underline") => CaretShape::Underline,
+        _ => base.shape,
+    };
+    let blink = match value.get("blink").and_then(Value::as_str) {
+        Some("solid") => BlinkStyle::Solid,
+        Some("blink") => BlinkStyle::Blink {
+            on_ms: 500,
+            off_ms: 500,
+            wait_ms: 500,
+        },
+        Some("phase") => BlinkStyle::Phase { period_ms: 1000 },
+        Some("smooth") => BlinkStyle::Smooth { period_ms: 1000 },
+        _ => base.blink,
+    };
+    Some(CaretStyle {
+        shape,
+        width_px: value
+            .get("widthPx")
+            .and_then(Value::as_f64)
+            .map(|v| v as f32)
+            .unwrap_or(base.width_px),
+        height_pct: value
+            .get("heightPct")
+            .and_then(Value::as_f64)
+            .map(|v| v as f32)
+            .unwrap_or(base.height_pct),
+        hollow: value
+            .get("hollow")
+            .and_then(Value::as_bool)
+            .unwrap_or(base.hollow),
+        blink,
+        smooth_animation_ms: value
+            .get("smoothAnimationMs")
+            .and_then(Value::as_u64)
+            .map(|v| v as u32)
+            .unwrap_or(base.smooth_animation_ms),
+        stop_blink_on_typing: value
+            .get("stopBlinkOnTyping")
+            .and_then(Value::as_bool)
+            .unwrap_or(base.stop_blink_on_typing),
     })
 }
 
@@ -576,4 +684,38 @@ fn mode_error(code: &'static str) -> impl Fn(ModeDiagnostic) -> JsErrorBox {
 
 fn serialize_error(code: &'static str) -> impl Fn(serde_json::Error) -> JsErrorBox {
     move |error| JsErrorBox::generic(format!("{code}: failed to serialize result ({error})"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{BlinkStyle, CaretShape, CaretStyle};
+
+    #[test]
+    fn parse_caret_style_absent_is_none() {
+        assert_eq!(parse_caret_style(None), None);
+    }
+
+    #[test]
+    fn parse_caret_style_maps_shape_and_blink() {
+        let value: Value = serde_json::from_str(
+            r#"{"shape":"block","blink":"blink","widthPx":2.0,"hollow":true}"#,
+        )
+        .unwrap();
+        let style = parse_caret_style(Some(&value)).expect("present object parses");
+        assert_eq!(style.shape, CaretShape::Block);
+        assert!(matches!(style.blink, BlinkStyle::Blink { .. }));
+        assert_eq!(style.width_px, 2.0);
+        assert!(style.hollow);
+    }
+
+    #[test]
+    fn parse_caret_style_partial_falls_back_to_defaults() {
+        let value: Value = serde_json::from_str(r#"{"shape":"underline"}"#).unwrap();
+        let style = parse_caret_style(Some(&value)).expect("partial parses");
+        assert_eq!(style.shape, CaretShape::Underline);
+        assert_eq!(style.blink, BlinkStyle::Solid);
+        assert_eq!(style.width_px, CaretStyle::default().width_px);
+        assert!(!style.hollow);
+    }
 }

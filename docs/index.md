@@ -37,6 +37,7 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixture generation, Criterion baseline commands, Phase 14 budgets/guardrails, opt-in profiling hooks, and validation commands.
 - [UI Observability and SDUI Structural Regression](development/ui-observability.md) — headless SDUI structural regression coverage, status observability, window-driver smoke relationship, and deferred GPU-backed pixel snapshot path.
 - [Windows MSVC Development](development/windows.md) — Rust MSVC setup, Windows local named-pipe IPC notes, and validation commands.
+- [Manual Test Plan](../test-plan/index.md) — module-segregated human verification guide for the whole application (launch, configuration, files, editing, multi-cursor, caret/typography, syntax, packages, keybindings, performance, Windows); every behavior-changing plan must execute and maintain it.
 
 ## Clay JS API Registry Source Files
 
@@ -77,6 +78,18 @@ The generated documentation registry must read this section as the explicit incl
 - [clientSetCursorStyle](reference/clay-js-api/editor/client-set-cursor-style.md) — `clay.editor.clientSetCursorStyle`
 - [clientSetSelection](reference/clay-js-api/editor/client-set-selection.md) — `clay.editor.clientSetSelection`
 - [clientSetViewport](reference/clay-js-api/editor/client-set-viewport.md) — `clay.editor.clientSetViewport`
+- [clientAddCursor](reference/clay-js-api/editor/client-add-cursor.md) — `clay.editor.clientAddCursor`
+- [clientColumnSelect](reference/clay-js-api/editor/client-column-select.md) — `clay.editor.clientColumnSelect`
+- [clientSelectNextMatch](reference/clay-js-api/editor/client-select-next-match.md) — `clay.editor.clientSelectNextMatch`
+- [clientSelectPrevMatch](reference/clay-js-api/editor/client-select-prev-match.md) — `clay.editor.clientSelectPrevMatch`
+- [clientSelectAllMatches](reference/clay-js-api/editor/client-select-all-matches.md) — `clay.editor.clientSelectAllMatches`
+- [clientCancelMultipleSelections](reference/clay-js-api/editor/client-cancel-multiple-selections.md) — `clay.editor.clientCancelMultipleSelections`
+- [clientKeepSelection](reference/clay-js-api/editor/client-keep-selection.md) — `clay.editor.clientKeepSelection`
+- [clientRemoveSelection](reference/clay-js-api/editor/client-remove-selection.md) — `clay.editor.clientRemoveSelection`
+- [clientUndoCursorMove](reference/clay-js-api/editor/client-undo-cursor-move.md) — `clay.editor.clientUndoCursorMove`
+- [clientSelectTextobject](reference/clay-js-api/editor/client-select-textobject.md) — `clay.editor.clientSelectTextobject`
+- [clientSmartSelect](reference/clay-js-api/editor/client-smart-select.md) — `clay.editor.clientSmartSelect`
+- [clientExecuteEditorCommand](reference/clay-js-api/editor/client-execute-editor-command.md) — `clay.editor.clientExecuteEditorCommand`
 - [serverDeleteRange](reference/clay-js-api/editor/server-delete-range.md) — `clay.editor.serverDeleteRange`
 - [serverInsertNewline](reference/clay-js-api/editor/server-insert-newline.md) — `clay.editor.serverInsertNewline`
 - [serverInsertText](reference/clay-js-api/editor/server-insert-text.md) — `clay.editor.serverInsertText`

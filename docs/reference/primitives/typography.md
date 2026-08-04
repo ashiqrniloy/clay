@@ -15,6 +15,15 @@ One role selects both ordered family fallback stack and logical-pixel size. Pack
 
 User configuration is documented by [`clay.theme.setTypography`](../clay-js-api/theme/set-typography.md). Its `monospace`, `proportional`, and `ui` profiles are complete user-owned values. No package permission allows overriding them.
 
+## Ligature Policy
+
+Each `FontProfile` carries a `ligatures` policy (Plan 071 task 7) that resolves to parley `StyleProperty::FontFeatures` at layout time. Ownership mirrors the role table above: ligatures are **user-owned typography baseline**, not mode- or package-owned.
+
+- **Semantic toggles first**: `enableStandard` (maps to `liga` + `clig`) and `enableContextual` (maps to `calt`) cover the ordinary ligature decision. `discretionaryFeatures`/`disableFeatures` accept bounded OpenType tag lists, and `rawFeatures` accepts a bounded CSS-font-feature string as the escape hatch for stylistic alternates (`ss0X`, `cv0X`, `zero`, `onum`, ...).
+- **Default behavior**: a `setTypography` profile that omits `ligatures`, and every profile before the first `setTypography` call, resolves to `LigaturePolicy::default()` — standard and contextual ligatures enabled. Disabling ligatures is explicit user configuration (`enableStandard: false, enableContextual: false`), never an implicit default.
+- **Mode/package surface**: a mode's `defaultFontRole` selects which profile's policy applies to its document text (Markdown → proportional; code modes → monospace). Packages never set ligature policy directly, and no package capability grants that authority — role selection is the only package-side lever, per the [authoring contract](ui-chrome-primitives.md#package-authoring-contract).
+- **Cache correctness**: feature resolution is part of the layout cache key; a `setTypography` ligature change invalidates cached layout for the affected role without a typography-revision bump.
+
 ## Mode Default
 
 Declare document-wide intent when registering a mode:

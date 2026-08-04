@@ -1190,7 +1190,9 @@ fn fallback_activation_manifest_fits_payload_budget() {
             .select_behavior_manifest_for_document(document_id, &[])
             .expect("fallback manifest composes");
         let frame = codec
-            .encode_server_message(&ServerMessage::BehaviorManifest(selection.manifest.clone()))
+            .encode_server_message(&ServerMessage::BehaviorManifest(Box::new(
+                selection.manifest.clone(),
+            )))
             .expect("fallback behavior manifest must encode");
         let payload = protocol_payload_len(&frame);
         assert!(

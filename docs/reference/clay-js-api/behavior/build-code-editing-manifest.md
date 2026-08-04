@@ -48,6 +48,14 @@ custom_properties:
     type: string[]
     default: []
     description: Up to 32 unique single-character autocomplete triggers, e.g. [".", ":"].
+  - name: movement
+    type: 'object | undefined'
+    default: code-editing defaults
+    description: Optional movement policy (Plan 071 task 4/11), validated by the server. Fields — wordSeparators ('code', 'prose', or { custom: string[] }), treatUnderscoreAsWord, camelCaseSubWord, paragraphStyle ('blankLine' | 'blankLineOrWhitespace'), stopAtEolWordEnd, lineMovement ('character' | 'screenLine'), stickyColumn. Absent fields fall back to the code-editing defaults.
+  - name: caretStyle
+    type: 'object | undefined'
+    default: editor default bar
+    description: Optional caret appearance override (Plan 071 task 6/11), validated by the server. Fields — shape ('bar' | 'line' | 'block' | 'underline'), widthPx, heightPct, hollow, blink ('solid' | 'blink' | 'phase' | 'smooth'), smoothAnimationMs, stopBlinkOnTyping. Absent means the reduced-motion-safe editor default bar; clientSetCursorStyle overrides it at runtime.
 security: Pure helper emitting inert declarative editor rules. Does not produce executable callbacks, client JavaScript, native handles, or raw authority fields, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
 agent_guidance: Use this helper when registering a language major mode instead of hand-rolling editorRules that may drift from the server validator.
 lookup_tags: [js-api, behavior, manifest, editor-rules, phase18.18]
@@ -65,13 +73,13 @@ Build a generic code-editing behavior manifest from language-specific parameters
 
 ## Description
 
-`buildCodeEditingManifest` produces an `editorRules` object matching the shape validated by `clay:modes` registration and activation. It covers generic Enter behavior, indentation size, delimiter pairs, line-comment continuation, electric outdent characters, and autocomplete trigger characters.
+`buildCodeEditingManifest` produces an `editorRules` object matching the shape validated by `clay:modes` registration and activation. It covers generic Enter behavior, indentation size, delimiter pairs, line-comment continuation, electric outdent characters, autocomplete trigger characters, and the optional per-mode `movement` and `caretStyle` settings (Plan 071 tasks 4/6/11).
 
 The helper is intentionally declarative: it emits only inert metadata and never produces executable callbacks, client-side JavaScript, native handles, or raw authority fields.
 
 ## When to use
 
-Use this helper inside a language package load entry to build the `editorRules` passed to `clay.modes.serverRegisterModePattern`. It keeps the package's behavior manifest aligned with the server-side validator and reduces hand-rolled rule drift.
+Use this helper inside a language package load entry to build the `editorRules` passed to `clay.modes.serverRegisterModePattern`. It keeps the package's behavior manifest aligned with the server-side validator and reduces hand-rolled rule drift. Prose modes pass `movement: { wordSeparators: "prose", treatUnderscoreAsWord: false, camelCaseSubWord: false }`; ligatures are not configured here — they follow the mode's font-role typography profile via `clay.theme.setTypography`.
 
 ## JavaScript usage
 

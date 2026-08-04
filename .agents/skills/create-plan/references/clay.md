@@ -171,6 +171,51 @@ Place this task near the Clay JS API task and before the final project-wiki task
 
 Decision source: `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`.
 
+## Example Configuration Maintenance Task
+
+Each Clay plan document that introduces or materially changes a user-facing configuration surface — new `init.js`-callable Clay JS APIs, new options/custom properties on existing configuration APIs, new first-party packages users should load, new bindable command IDs, new theme/appearance/typography/caret/ligature options, or new trust-boundary declarations users must write (e.g. `clay.editorControl`) — must include a dedicated task that updates the canonical example configuration.
+
+The task should require:
+
+- Update `examples/init.js`, the canonical example configuration users copy to `~/.config/clay/init.js`. It must stay comprehensive: every supported configuration surface appears exactly once, in its section, with all documented options annotated in comments.
+- Add the new option/API with the same documentation style: section comment explaining purpose and ownership, every option name/type/default/allowed value, and a commented example for non-default variants.
+- Keep the file valid JavaScript (`node --check examples/init.js`) and keep the active (uncommented) part safe to copy verbatim: heavy or environment-specific setup (LSP grants, optional packages, behavior overrides) stays commented with instructions.
+- Preserve the documented ordering constraints (e.g. `authorizeLanguageServer` before the first `loadPackage`) and the planned-but-not-callable section at the end when a facade is promoted from planned to implemented.
+- Cross-check the example against the Clay JS API docs and `api-inventory.toml` custom properties for the touched APIs; option names, enums, and defaults must match the validated server-side parsers, not prose.
+
+Recommended task title:
+
+```markdown
+- [ ] Update the canonical example configuration (examples/init.js)
+```
+
+Place this task next to the Clay Configuration task and before the final project-wiki task when present.
+
+Decision source: user instruction 2026-08-03 (canonical `examples/init.js` + per-plan maintenance duty).
+
+## Manual Test Plan Task
+
+Each Clay plan document that changes user-visible behavior — editor features, UI, rendering, configuration, keybindings, packages/modes, file workflows, protocol/IPC behavior, or platform behavior — must include a dedicated task that runs and maintains the manual test plan in `test-plan/`.
+
+The task should require:
+
+- Identify which `test-plan/` module files the change affects (module map and coverage matrix live in `test-plan/index.md`) and execute the relevant steps on a real Linux build, recording pass/fail against the numbered steps.
+- Add new numbered steps (module + step IDs) to the affected module file(s) for any new user-visible behavior the plan ships, with expected results, negative checks, and known ceilings.
+- Update `test-plan/index.md` when a new module file is added, when the coverage matrix changes, or when a deep-reference doc moves.
+- If the change cannot be tested manually (pure internal refactor, automated-only surface), the task records that explicitly with the reason instead of being silently dropped.
+- Never weaken or delete existing steps to make a failing check pass; a failing step is a defect or a documented known ceiling (in the file's ceilings section), decided explicitly.
+- Cross-link new module steps to the deep-reference docs under `docs/development/` where they exist instead of duplicating them.
+
+Recommended task title:
+
+```markdown
+- [ ] Execute and update the manual test plan (test-plan/)
+```
+
+Place this task after implementation/verification tasks (the feature must be buildable) and before the final project-wiki task when present.
+
+Decision source: user instruction 2026-08-04 (test-plan/ folder + per-plan manual verification duty).
+
 ## Clay UI Primitives-First Task
 
 Each Clay plan that touches the app UI (components, panels, overlays, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, theme, typography, tokens, or layout) must route through UI skill selection and reuse the established UI catalog before proposing new UI code.

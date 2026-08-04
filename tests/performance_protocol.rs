@@ -231,7 +231,8 @@ fn representative_protocol_payloads_fit_phase14_budgets() {
         "edit ack payload {edit_ack_payload} exceeds budget {EDIT_ACK_PAYLOAD_BUDGET_BYTES}"
     );
 
-    let manifest = ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3));
+    let manifest =
+        ServerMessage::BehaviorManifest(Box::new(BehaviorManifest::minimal_text_editing(3)));
     let manifest_payload = payload_len(&codec.encode_server_message(&manifest).unwrap());
     assert!(
         manifest_payload <= BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES,
@@ -861,7 +862,8 @@ fn oversized_and_invalid_frames_still_rejected_with_metrics_enabled() {
     install_global_recorder(PerfConfig::enabled());
 
     let codec = Codec::new(32);
-    let oversized = ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1));
+    let oversized =
+        ServerMessage::BehaviorManifest(Box::new(BehaviorManifest::minimal_text_editing(1)));
     assert!(matches!(
         codec.encode_server_message(&oversized),
         Err(CodecError::FrameTooLarge { max: 32, .. })

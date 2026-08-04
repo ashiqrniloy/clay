@@ -190,6 +190,7 @@ pub(super) fn op_clay_packages_validate_manifest(
         "apiPrefix": manifest.clay.api_prefix,
         "permissions": manifest.clay.permissions.iter().map(|permission| permission.as_str()).collect::<Vec<_>>(),
         "modes": manifest.clay.modes,
+        "editorControlModes": manifest.clay.editor_control_modes,
         "entry": manifest.clay.entry,
         "loadEntry": manifest.clay.load_entry,
     }))

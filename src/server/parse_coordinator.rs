@@ -36,6 +36,21 @@ pub type ParseHandlerFuture =
 /// client never receives or executes parser code.
 pub trait ParseHandler: Send + Sync + 'static {
     fn parse(&self, notification: ParseEditNotification) -> ParseHandlerFuture;
+
+    /// Plan 071 task 10: read-only tree-sitter text-object/smart-select byte
+    /// ranges for one selection query. Default `None` = this handler cannot
+    /// answer (JS parse handlers); the server then returns an empty result.
+    /// Implementations must never mutate the document or spawn external work.
+    fn selection_query_ranges(
+        &self,
+        _document_id: crate::protocol::DocumentId,
+        _document_version: u64,
+        _text: &str,
+        _query: crate::protocol::SelectionQuery,
+        _selections: &[crate::protocol::SelectionQueryCursor],
+    ) -> Option<Vec<Option<crate::protocol::SelectionQueryRange>>> {
+        None
+    }
 }
 
 impl<F, Fut> ParseHandler for F
@@ -387,6 +402,25 @@ impl ParseCoordinator {
             },
         );
         Ok(meta)
+    }
+
+    /// Plan 071 task 10: look up the registered handler for a package/mode key
+    /// so read-only selection queries can reuse its parsed tree. Returns the
+    /// live handler regardless of generation; callers treat a miss as "no
+    /// grammar".
+    pub fn handler_for(
+        &self,
+        package_prefix: &str,
+        mode_id: &str,
+    ) -> Option<Arc<dyn ParseHandler>> {
+        let inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        inner
+            .handlers
+            .get(&HandlerKey {
+                package_prefix: package_prefix.to_string(),
+                mode_id: mode_id.to_string(),
+            })
+            .map(|registered| registered.handler.clone())
     }
 
     /// Cancel handlers and active work for one exact generation.

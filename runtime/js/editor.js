@@ -1,43 +1,85 @@
 // Clay editor facade skeleton.
 //
-// This file defines planned user-facing APIs for the future server-side
-// JavaScript runtime. These exports intentionally do not call raw
-// `Deno.core.ops` functions; Phase 11 will wire them to explicit Clay op
-// wrappers behind this stable facade.
-function plannedApi(name) {
-    throw new Error(`${name} is planned; Clay JS runtime op wiring is not implemented yet`);
+// This file defines user-facing APIs for the server-side JavaScript runtime.
+// Cursor/selection facades validate typed args via Clay deno ops; the argless
+// command-id facades return stable registry IDs for key binding (Plan 071 task 5).
+const editorOps = globalThis.Deno?.core?.ops;
+function requireEditorOps() {
+    if (!editorOps) {
+        throw new Error("clay.editor.runtime_unavailable: Clay editor APIs require the server runtime");
+    }
+    return editorOps;
+}
+function parseResult(json) {
+    return JSON.parse(json);
 }
 export async function serverInsertText(options) {
     void options;
-    plannedApi("clay.editor.serverInsertText");
+    throw new Error("clay.editor.serverInsertText is planned; Clay JS runtime op wiring is not implemented yet");
 }
 export async function serverDeleteRange(options) {
     void options;
-    plannedApi("clay.editor.serverDeleteRange");
+    throw new Error("clay.editor.serverDeleteRange is planned; Clay JS runtime op wiring is not implemented yet");
 }
 export function clientMoveCursor(options) {
-    void options;
-    plannedApi("clay.editor.clientMoveCursor");
+    return parseResult(requireEditorOps().op_clay_editor_move_cursor(JSON.stringify(options ?? {})));
 }
 export function clientSetSelection(options) {
-    void options;
-    plannedApi("clay.editor.clientSetSelection");
+    return parseResult(requireEditorOps().op_clay_editor_set_selection(JSON.stringify(options ?? {})));
 }
 export function clientScrollTo(options) {
     void options;
-    plannedApi("clay.editor.clientScrollTo");
+    throw new Error("clay.editor.clientScrollTo is planned; Clay JS runtime op wiring is not implemented yet");
 }
 export async function serverInsertNewline(options) {
     void options;
-    plannedApi("clay.editor.serverInsertNewline");
+    throw new Error("clay.editor.serverInsertNewline is planned; Clay JS runtime op wiring is not implemented yet");
 }
 export function clientSetCursorStyle(options) {
-    void options;
-    plannedApi("clay.editor.clientSetCursorStyle");
+    return parseResult(requireEditorOps().op_clay_editor_set_cursor_style(JSON.stringify(options ?? {})));
+}
+// Plan 071 task 9 multi-cursor APIs. Direction-bearing commands validate via
+// Clay deno ops and return a direction-specific commandId; argless commands
+// return their stable registry ID for key binding.
+export function clientAddCursor(options) {
+    return parseResult(requireEditorOps().op_clay_editor_add_cursor(JSON.stringify(options ?? {})));
+}
+export function clientColumnSelect(options) {
+    return parseResult(requireEditorOps().op_clay_editor_column_select(JSON.stringify(options ?? {})));
+}
+export function clientSelectTextobject(options) {
+    return parseResult(requireEditorOps().op_clay_editor_select_textobject(JSON.stringify(options ?? {})));
+}
+export function clientSmartSelect(options) {
+    return parseResult(requireEditorOps().op_clay_editor_smart_select(JSON.stringify(options ?? {})));
+}
+export function clientExecuteEditorCommand(options) {
+    return parseResult(requireEditorOps().op_clay_editor_execute_command(JSON.stringify(options ?? {})));
+}
+export function clientSelectNextMatch() {
+    return "clay.editor.clientSelectNextMatch";
+}
+export function clientSelectPrevMatch() {
+    return "clay.editor.clientSelectPrevMatch";
+}
+export function clientSelectAllMatches() {
+    return "clay.editor.clientSelectAllMatches";
+}
+export function clientCancelMultipleSelections() {
+    return "clay.editor.clientCancelMultipleSelections";
+}
+export function clientKeepSelection() {
+    return "clay.editor.clientKeepSelection";
+}
+export function clientRemoveSelection() {
+    return "clay.editor.clientRemoveSelection";
+}
+export function clientUndoCursorMove() {
+    return "clay.editor.clientUndoCursorMove";
 }
 export function clientSetViewport(options) {
     void options;
-    plannedApi("clay.editor.clientSetViewport");
+    throw new Error("clay.editor.clientSetViewport is planned; Clay JS runtime op wiring is not implemented yet");
 }
 export function clientCopySelection() {
     return "clay.editor.clientCopySelection";

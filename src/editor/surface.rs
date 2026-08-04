@@ -1,7 +1,8 @@
+use std::collections::VecDeque;
 use std::ops::Range;
 
 use masonry::core::{BrushIndex, PaintCtx, render_text};
-use masonry::kurbo::{Affine, Point, Rect};
+use masonry::kurbo::{Affine, Point, Rect, Stroke};
 use masonry::parley::style::StyleProperty;
 use masonry::peniko::{Color, Fill};
 
@@ -17,11 +18,12 @@ use crate::perf::{
     metrics::PerfRecorder,
 };
 use crate::protocol::{
-    BehaviorManifest, BehaviorVersion, CompletionItemTextFormat, CompletionReplacementRange,
-    CompletionTrigger, DecorationChunkKey, DecorationKind, DecorationSet, DecorationSpan,
-    DiagnosticChunkKey, DiagnosticSet, DiagnosticSpan, DocumentAccess, DocumentFontRole,
-    DocumentId, DocumentVersion, EditOperation, ElectricCharacterRule, ElectricEffect, EnterRule,
-    FontRole, KeyCode, KeyStroke, PairRule, TokenType, compose_diagnostic_spans,
+    BehaviorManifest, BehaviorVersion, BlinkStyle, CaretShape, CaretStyle,
+    CompletionItemTextFormat, CompletionReplacementRange, CompletionTrigger, DecorationChunkKey,
+    DecorationKind, DecorationSet, DecorationSpan, DiagnosticChunkKey, DiagnosticSet,
+    DiagnosticSpan, DocumentAccess, DocumentFontRole, DocumentId, DocumentVersion, EditOperation,
+    ElectricCharacterRule, ElectricEffect, EnterRule, FontRole, KeyCode, KeyStroke, MovementRules,
+    PairRule, TokenType, WordSeparatorPolicy, compose_diagnostic_spans,
 };
 use crate::shell::CompletionMenuAcceptAction;
 
@@ -31,7 +33,7 @@ use super::cursor::CursorState;
 use super::history::{EditHistory, HistoryEntry, HistorySelection, invert_edit_operation};
 use super::is_printable_text;
 use super::layout::{LayoutCacheKey, LayoutState, VisibleTextStyleRun};
-use super::selection::SelectionState;
+use super::selection::{Selection, SelectionState};
 use super::snippet::{SnippetPlaceholder, parse_snippet};
 use super::theme::{StyleRegistry, TextAttributes};
 use super::typography::TypographyRegistry;
@@ -49,6 +51,18 @@ const SCROLLBAR_MIN_THUMB: f64 = 24.0;
 pub(super) const TEXT_INSET: f64 = 48.0;
 const PLACEHOLDER_TEXT: &str = "Start typing in the Clay native text canvas…";
 
+/// Bound for the cursor-undo stack (Plan 071 task 9). One snapshot per
+/// caret-moving command; oldest drops first.
+const CURSOR_UNDO_MAX_DEPTH: usize = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CursorSelectDirection {
+    Down,
+    Up,
+    Left,
+    Right,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorCommand<'a> {
     Insert(&'a str),
@@ -65,6 +79,104 @@ pub enum EditorCommand<'a> {
     LineEnd,
     DocumentStart,
     DocumentEnd,
+    MoveWordStart {
+        forward: bool,
+        long: bool,
+        extend: bool,
+    },
+    MoveWordEnd {
+        forward: bool,
+        long: bool,
+        extend: bool,
+    },
+    MoveSubWord {
+        forward: bool,
+        extend: bool,
+    },
+    MoveParagraph {
+        forward: bool,
+        to_end: bool,
+        extend: bool,
+    },
+    MoveFirstNonWhitespace {
+        extend: bool,
+    },
+    MoveLastNonWhitespace {
+        extend: bool,
+    },
+    MoveMatchingPair {
+        extend: bool,
+    },
+    SelectWord,
+    SelectLine,
+    SelectParagraph,
+    /// Add a collapsed caret one visual line below/above the primary caret at
+    /// the same scalar column (Plan 071 task 9, VSCode insertCursorBelow/Above).
+    AddCursor {
+        direction: CursorSelectDirection,
+    },
+    /// Column/box selection: Down/Up adds a caret one line below/above the
+    /// primary (growing the box); Left/Right moves every caret one scalar
+    /// (Plan 071 task 9, VSCode cursorColumnSelect*).
+    ColumnSelect {
+        direction: CursorSelectDirection,
+    },
+    /// Select the next occurrence of the current selection/word as a new
+    /// primary selection (VSCode addSelectionToNextFindMatch, Ctrl+D).
+    SelectNextMatch,
+    /// Symmetric backwards variant of [`SelectNextMatch`].
+    SelectPrevMatch,
+    /// Replace the selection set with every occurrence of the current
+    /// selection/word (VSCode selectHighlights, Ctrl+Shift+L).
+    SelectAllMatches,
+    /// Collapse the selection set to the primary caret (Escape).
+    CancelMultipleSelections,
+    /// Keep only the primary selection (Helix keep_primary_selection).
+    KeepSelection,
+    /// Remove the primary selection, keeping the rest (Helix remove_primary_selection).
+    RemoveSelection,
+    /// Restore the previous selection set from the cursor-undo stack (Ctrl+U,
+    /// VSCode cursorUndo). Cursor movements only; edits have their own history.
+    UndoCursorMove,
+}
+
+impl EditorCommand<'_> {
+    /// True for commands that move the caret or reshape the selection set
+    /// without editing text. These snapshot the selection set for cursor-undo
+    /// (Plan 071 task 9). Edits and `UndoCursorMove` itself do not snapshot.
+    pub fn is_selection_changing(&self) -> bool {
+        matches!(
+            self,
+            EditorCommand::MoveLeft
+                | EditorCommand::MoveRight
+                | EditorCommand::SelectLeft
+                | EditorCommand::SelectRight
+                | EditorCommand::MoveUp
+                | EditorCommand::MoveDown
+                | EditorCommand::LineStart
+                | EditorCommand::LineEnd
+                | EditorCommand::DocumentStart
+                | EditorCommand::DocumentEnd
+                | EditorCommand::MoveWordStart { .. }
+                | EditorCommand::MoveWordEnd { .. }
+                | EditorCommand::MoveSubWord { .. }
+                | EditorCommand::MoveParagraph { .. }
+                | EditorCommand::MoveFirstNonWhitespace { .. }
+                | EditorCommand::MoveLastNonWhitespace { .. }
+                | EditorCommand::MoveMatchingPair { .. }
+                | EditorCommand::SelectWord
+                | EditorCommand::SelectLine
+                | EditorCommand::SelectParagraph
+                | EditorCommand::AddCursor { .. }
+                | EditorCommand::ColumnSelect { .. }
+                | EditorCommand::SelectNextMatch
+                | EditorCommand::SelectPrevMatch
+                | EditorCommand::SelectAllMatches
+                | EditorCommand::CancelMultipleSelections
+                | EditorCommand::KeepSelection
+                | EditorCommand::RemoveSelection
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,7 +190,13 @@ pub struct EditorEditEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorCommandOutcome {
     pub changed: bool,
+    /// First edit event (single-caret edits and test readers). Multi-cursor
+    /// edits expose every per-caret event through `edit_events`.
     pub edit_event: Option<EditorEditEvent>,
+    /// Every edit event produced by the command, right-to-left for
+    /// multi-cursor edits. The connection layer stamps each with an ascending
+    /// optimistic base version, so the server applies them in order.
+    pub edit_events: Vec<EditorEditEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,18 +290,41 @@ pub(crate) struct EditorLanguageIntelligenceRequestEvent {
     pub(crate) feature: crate::protocol::LanguageIntelligenceFeature,
 }
 
+/// Plan 071 task 10: captured selection-query context (document/behavior
+/// versions + the whole selection set) for a tree-sitter text-object or
+/// smart-select request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EditorSelectionQueryRequestEvent {
+    pub(crate) document_id: DocumentId,
+    pub(crate) document_version: DocumentVersion,
+    pub(crate) behavior_version: BehaviorVersion,
+    pub(crate) query: crate::protocol::SelectionQuery,
+    pub(crate) selections: Vec<crate::protocol::SelectionQueryCursor>,
+}
+
 impl EditorCommandOutcome {
     fn unchanged() -> Self {
         Self {
             changed: false,
             edit_event: None,
+            edit_events: Vec::new(),
         }
     }
 
     fn changed(edit_event: Option<EditorEditEvent>) -> Self {
         Self {
             changed: true,
+            edit_events: edit_event.iter().cloned().collect(),
             edit_event,
+        }
+    }
+
+    /// Multi-cursor edit outcome: one event per caret (Plan 071 task 9).
+    fn changed_multi(edit_events: Vec<EditorEditEvent>) -> Self {
+        Self {
+            changed: true,
+            edit_event: edit_events.first().cloned(),
+            edit_events,
         }
     }
 
@@ -191,11 +332,12 @@ impl EditorCommandOutcome {
         Self {
             changed,
             edit_event: None,
+            edit_events: Vec::new(),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EditorDocumentState {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -899,7 +1041,10 @@ const fn font_role_rank(role: Option<FontRole>) -> u8 {
 }
 
 fn is_completion_word_character(character: char) -> bool {
-    character == '_' || character.is_alphanumeric()
+    // Unify with movement/selection: one classifier, the `Code` policy with
+    // underscore-as-word. Completion deliberately stays on the code default so
+    // token detection is stable across prose/custom movement policies.
+    WordSeparatorPolicy::Code.is_word_char(character, true)
 }
 
 fn edit_extent(operation: &EditOperation) -> Option<(u64, u64, &str)> {
@@ -1094,12 +1239,89 @@ struct SnippetSession {
     active_index: usize,
 }
 
+/// Blink phase for the caret state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum BlinkPhase {
+    /// Idle delay before the first off-phase (caret stays visible).
+    #[default]
+    Wait,
+    On,
+    Off,
+}
+
+/// Pure caret-blink state machine. The widget drives [`CaretBlink::advance`]
+/// from masonry animation frames and [`CaretBlink::reset`] on user input;
+/// `paint_caret` reads [`CaretBlink::is_visible`]. Kept on `EditorSurface` so
+/// the timing logic is unit-testable without a widget/event loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CaretBlink {
+    phase: BlinkPhase,
+    elapsed_ms: u64,
+    visible: bool,
+}
+
+impl Default for CaretBlink {
+    fn default() -> Self {
+        // The caret starts visible; the first animation frame (or a Solid
+        // style) keeps it so.
+        Self {
+            phase: BlinkPhase::Wait,
+            elapsed_ms: 0,
+            visible: true,
+        }
+    }
+}
+
+impl CaretBlink {
+    /// Advance the blink clock by `delta_ms` under `style`. `Solid` always
+    /// shows; discrete/phase styles cycle Wait -> On -> Off -> On. Zero-length
+    /// phases are skipped (bounded so a degenerate all-zero period cannot spin).
+    fn advance(&mut self, style: &BlinkStyle, delta_ms: u64) {
+        if !style.animates() {
+            self.phase = BlinkPhase::On;
+            self.elapsed_ms = 0;
+            self.visible = true;
+            return;
+        }
+        self.elapsed_ms += delta_ms;
+        for _ in 0..4 {
+            let limit = match self.phase {
+                BlinkPhase::Wait => style.wait_ms(),
+                BlinkPhase::On => style.on_ms(),
+                BlinkPhase::Off => style.off_ms(),
+            } as u64;
+            if limit != 0 && self.elapsed_ms < limit {
+                break;
+            }
+            if limit != 0 {
+                self.elapsed_ms -= limit;
+            }
+            self.phase = match self.phase {
+                BlinkPhase::Wait => BlinkPhase::On,
+                BlinkPhase::On => BlinkPhase::Off,
+                BlinkPhase::Off => BlinkPhase::On,
+            };
+        }
+        self.visible = !matches!(self.phase, BlinkPhase::Off);
+    }
+
+    /// Reset to visible and restart the idle wait (called on user input).
+    fn reset(&mut self) {
+        self.phase = BlinkPhase::Wait;
+        self.elapsed_ms = 0;
+        self.visible = true;
+    }
+
+    fn is_visible(&self) -> bool {
+        self.visible
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct EditorSurface {
     buffer: EditorBuffer,
     document: EditorDocumentState,
-    cursor: CursorState,
-    selection: Option<SelectionState>,
+    selections: SelectionState,
     history: EditHistory,
     composition: CompositionState,
     snippet_session: Option<SnippetSession>,
@@ -1142,6 +1364,17 @@ pub struct EditorSurface {
     /// no authority.
     pointer_pos: Option<masonry::kurbo::Point>,
     pointer_pressed: bool,
+    /// Runtime caret appearance override set by `clientSetCursorStyle`. Takes
+    /// precedence over the per-mode manifest `caret_style` and the editor
+    /// `StyleRegistry` default. Client-local; carries no authority.
+    caret_style_override: Option<CaretStyle>,
+    /// Caret blink state machine, driven by widget animation frames.
+    caret_blink: CaretBlink,
+    /// Cursor-undo stack (Plan 071 task 9, VSCode cursorUndo / Ctrl+U).
+    /// Snapshots of the selection set taken before each caret-moving or
+    /// selection-reshaping command; `UndoCursorMove` pops the latest. Bounded
+    /// by [`CURSOR_UNDO_MAX_DEPTH`].
+    cursor_undo_stack: VecDeque<SelectionState>,
     perf: PerfRecorder,
 }
 
@@ -1157,8 +1390,8 @@ impl EditorSurface {
         self.document.document_id = document_id;
         self.document.document_version = version;
         self.document.access = access;
-        self.cursor.set_caret(0);
-        self.selection = None;
+        self.selections = SelectionState::default();
+        self.cursor_undo_stack.clear();
         self.history.clear();
         self.composition.clear();
         self.snippet_session = None;
@@ -1180,7 +1413,7 @@ impl EditorSurface {
         text: String,
         access: DocumentAccess,
     ) {
-        let caret = (self.document.document_id == document_id).then_some(self.cursor.caret());
+        let caret = (self.document.document_id == document_id).then_some(self.caret());
         self.load_snapshot(document_id, version, text, access);
         if let Some(caret) = caret {
             self.navigate_to_byte_offset(caret as u64);
@@ -1255,16 +1488,22 @@ impl EditorSurface {
         if self.typography == next {
             return false;
         }
-        let caret = self.cursor.caret();
-        let selection = self.selection;
+        let caret = self.caret();
+        let selection_anchor = self
+            .has_selection()
+            .then_some(self.selections.primary_anchor());
         let visual_scroll_y = self.visual_scroll_y;
         let last_visual_max_scroll_y = self.last_visual_max_scroll_y;
         let follow_visual_end = self.follow_visual_end;
         let pin_caret_visible = self.pin_caret_visible;
         self.typography = next;
         self.layout = LayoutState::default();
-        self.cursor.set_caret(caret);
-        self.selection = selection;
+        self.set_primary_focus(caret);
+        if let Some(anchor) = selection_anchor {
+            self.selections.primary_mut().set_anchor(anchor);
+        } else {
+            self.clear_selection();
+        }
         self.visual_scroll_y = visual_scroll_y;
         self.last_visual_max_scroll_y = last_visual_max_scroll_y;
         self.follow_visual_end = follow_visual_end;
@@ -1502,6 +1741,14 @@ impl EditorSurface {
         if matches!(key.key, KeyCode::Escape) && self.snippet_session.take().is_some() {
             return EditorKeyOutcome::client(EditorCommandOutcome::from_changed(true));
         }
+        // Plan 071 task 9: with no menu (widget-handled) or snippet session
+        // active, Escape collapses the selection set to the primary caret.
+        if matches!(key.key, KeyCode::Escape)
+            && (self.selections.selection_count() > 1 || self.has_selection())
+        {
+            let changed = self.cancel_multiple_selections();
+            return EditorKeyOutcome::client(EditorCommandOutcome::from_changed(changed));
+        }
 
         let Some(manifest) = &self.document.behavior_manifest else {
             return EditorKeyOutcome::unhandled();
@@ -1578,6 +1825,11 @@ impl EditorSurface {
     }
 
     pub fn command(&mut self, command: EditorCommand<'_>) -> bool {
+        // Any user command (edit or movement) restarts the blink idle phase so
+        // the caret stays solid while typing, when the style asks for it.
+        if self.effective_caret_style().stop_blink_on_typing {
+            self.caret_blink.reset();
+        }
         self.command_with_event(command).changed
     }
 
@@ -1591,6 +1843,9 @@ impl EditorSurface {
     }
 
     pub fn command_with_event(&mut self, command: EditorCommand<'_>) -> EditorCommandOutcome {
+        if command.is_selection_changing() {
+            self.snapshot_selection_set();
+        }
         match command {
             EditorCommand::Insert(text) => self.insert_text_with_event(text),
             EditorCommand::Newline => self.insert_newline_with_event(),
@@ -1612,6 +1867,73 @@ impl EditorSurface {
             EditorCommand::DocumentEnd => {
                 EditorCommandOutcome::from_changed(self.move_to_document_end())
             }
+            EditorCommand::MoveWordStart {
+                forward,
+                long,
+                extend,
+            } => EditorCommandOutcome::from_changed(self.move_word_start(forward, long, extend)),
+            EditorCommand::MoveWordEnd {
+                forward,
+                long,
+                extend,
+            } => EditorCommandOutcome::from_changed(self.move_word_end(forward, long, extend)),
+            EditorCommand::MoveSubWord { forward, extend } => {
+                EditorCommandOutcome::from_changed(self.move_sub_word(forward, extend))
+            }
+            EditorCommand::MoveParagraph {
+                forward,
+                to_end,
+                extend,
+            } => EditorCommandOutcome::from_changed(self.move_paragraph(forward, to_end, extend)),
+            EditorCommand::MoveFirstNonWhitespace { extend } => {
+                EditorCommandOutcome::from_changed(self.move_first_non_blank(extend))
+            }
+            EditorCommand::MoveLastNonWhitespace { extend } => {
+                EditorCommandOutcome::from_changed(self.move_last_non_blank(extend))
+            }
+            EditorCommand::MoveMatchingPair { extend } => {
+                EditorCommandOutcome::from_changed(self.move_matching_pair(extend))
+            }
+            EditorCommand::SelectWord => EditorCommandOutcome::from_changed(self.select_word()),
+            EditorCommand::SelectLine => EditorCommandOutcome::from_changed(self.select_line()),
+            EditorCommand::SelectParagraph => {
+                EditorCommandOutcome::from_changed(self.select_paragraph())
+            }
+            EditorCommand::AddCursor { direction } => EditorCommandOutcome::from_changed(
+                self.add_cursor_line(matches!(direction, CursorSelectDirection::Down)),
+            ),
+            EditorCommand::ColumnSelect { direction } => match direction {
+                CursorSelectDirection::Down | CursorSelectDirection::Up => {
+                    EditorCommandOutcome::from_changed(
+                        self.add_cursor_line(matches!(direction, CursorSelectDirection::Down)),
+                    )
+                }
+                CursorSelectDirection::Left => {
+                    EditorCommandOutcome::from_changed(self.move_all_carets(false))
+                }
+                CursorSelectDirection::Right => {
+                    EditorCommandOutcome::from_changed(self.move_all_carets(true))
+                }
+            },
+            EditorCommand::SelectNextMatch => {
+                EditorCommandOutcome::from_changed(self.select_next_match(true))
+            }
+            EditorCommand::SelectPrevMatch => {
+                EditorCommandOutcome::from_changed(self.select_next_match(false))
+            }
+            EditorCommand::SelectAllMatches => {
+                EditorCommandOutcome::from_changed(self.select_all_matches())
+            }
+            EditorCommand::CancelMultipleSelections => {
+                EditorCommandOutcome::from_changed(self.cancel_multiple_selections())
+            }
+            EditorCommand::KeepSelection => {
+                EditorCommandOutcome::from_changed(self.keep_selection())
+            }
+            EditorCommand::RemoveSelection => {
+                EditorCommandOutcome::from_changed(self.remove_selection())
+            }
+            EditorCommand::UndoCursorMove => self.undo_cursor_move(),
         }
     }
 
@@ -1742,9 +2064,13 @@ impl EditorSurface {
     }
 
     fn select_snippet_placeholder(&mut self, placeholder: SnippetPlaceholder) {
-        self.cursor.set_caret(placeholder.byte_end);
-        let selection = SelectionState::new(placeholder.byte_start, placeholder.byte_end);
-        self.selection = (!selection.is_collapsed()).then_some(selection);
+        self.set_primary_focus(placeholder.byte_end);
+        let start = placeholder.byte_start;
+        let end = self.caret();
+        self.selections.primary_mut().set_anchor(start);
+        if start == end {
+            self.clear_selection();
+        }
         self.ensure_caret_line_visible();
         self.follow_visual_end = false;
     }
@@ -1869,6 +2195,32 @@ impl EditorSurface {
             return EditorCommandOutcome::unchanged();
         }
 
+        if self.selections.selection_count() > 1 {
+            return self.multi_caret_edit(|surface, focus, range| {
+                if range.start < range.end {
+                    Some((
+                        EditOperation::Replace {
+                            start: range.start as u64,
+                            end: range.end as u64,
+                            text: "\n".to_string(),
+                        },
+                        range.start + 1,
+                    ))
+                } else {
+                    let offset = surface.buffer.clamp_byte_offset(focus);
+                    let text = surface.newline_text_at(offset);
+                    let final_caret = offset + text.len();
+                    Some((
+                        EditOperation::Insert {
+                            byte_offset: offset as u64,
+                            text,
+                        },
+                        final_caret,
+                    ))
+                }
+            });
+        }
+
         let operation = if let Some(range) = self.selected_range() {
             EditOperation::Replace {
                 start: range.start as u64,
@@ -1876,7 +2228,7 @@ impl EditorSurface {
                 text: "\n".to_string(),
             }
         } else {
-            let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
+            let byte_offset = self.buffer.clamp_byte_offset(self.caret());
             let text = self.newline_text_at(byte_offset);
             EditOperation::Insert {
                 byte_offset: byte_offset as u64,
@@ -1895,6 +2247,30 @@ impl EditorSurface {
             return EditorCommandOutcome::unchanged();
         }
 
+        if self.selections.selection_count() > 1 {
+            return self.multi_caret_edit(|surface, focus, range| {
+                if range.start < range.end {
+                    Some((
+                        EditOperation::Delete {
+                            start: range.start as u64,
+                            end: range.end as u64,
+                        },
+                        range.start,
+                    ))
+                } else {
+                    let caret = surface.buffer.clamp_byte_offset(focus);
+                    let previous = surface.buffer.previous_scalar_boundary(caret)?;
+                    Some((
+                        EditOperation::Delete {
+                            start: previous as u64,
+                            end: caret as u64,
+                        },
+                        previous,
+                    ))
+                }
+            });
+        }
+
         if let Some(range) = self.selected_range() {
             return self.apply_and_record_local_edit(
                 EditOperation::Delete {
@@ -1905,7 +2281,7 @@ impl EditorSurface {
             );
         }
 
-        let caret = self.buffer.clamp_byte_offset(self.cursor.caret());
+        let caret = self.buffer.clamp_byte_offset(self.caret());
         let Some(previous) = self.buffer.previous_scalar_boundary(caret) else {
             let result = self.buffer.backspace_at(caret);
             return self.finish_edit(result);
@@ -1928,6 +2304,30 @@ impl EditorSurface {
             return EditorCommandOutcome::unchanged();
         }
 
+        if self.selections.selection_count() > 1 {
+            return self.multi_caret_edit(|surface, focus, range| {
+                if range.start < range.end {
+                    Some((
+                        EditOperation::Delete {
+                            start: range.start as u64,
+                            end: range.end as u64,
+                        },
+                        range.start,
+                    ))
+                } else {
+                    let caret = surface.buffer.clamp_byte_offset(focus);
+                    let next = surface.buffer.next_scalar_boundary(caret)?;
+                    Some((
+                        EditOperation::Delete {
+                            start: caret as u64,
+                            end: next as u64,
+                        },
+                        caret,
+                    ))
+                }
+            });
+        }
+
         if let Some(range) = self.selected_range() {
             return self.apply_and_record_local_edit(
                 EditOperation::Delete {
@@ -1938,7 +2338,7 @@ impl EditorSurface {
             );
         }
 
-        let caret = self.buffer.clamp_byte_offset(self.cursor.caret());
+        let caret = self.buffer.clamp_byte_offset(self.caret());
         let Some(next) = self.buffer.next_scalar_boundary(caret) else {
             let result = self.buffer.delete_after(caret);
             return self.finish_edit(result);
@@ -1977,11 +2377,31 @@ impl EditorSurface {
     }
 
     pub fn move_up(&mut self) -> bool {
-        self.move_cursor(|cursor, buffer| cursor.move_to_previous_line(buffer))
+        let sticky = self.sticky_column_enabled();
+        self.move_cursor(|cursor, buffer| {
+            if sticky {
+                cursor.move_to_previous_line(buffer)
+            } else if cursor.move_to_previous_line(buffer) {
+                cursor.move_to_line_start(buffer);
+                true
+            } else {
+                false
+            }
+        })
     }
 
     pub fn move_down(&mut self) -> bool {
-        self.move_cursor(|cursor, buffer| cursor.move_to_next_line(buffer))
+        let sticky = self.sticky_column_enabled();
+        self.move_cursor(|cursor, buffer| {
+            if sticky {
+                cursor.move_to_next_line(buffer)
+            } else if cursor.move_to_next_line(buffer) {
+                cursor.move_to_line_start(buffer);
+                true
+            } else {
+                false
+            }
+        })
     }
 
     pub fn move_to_line_start(&mut self) -> bool {
@@ -1998,6 +2418,567 @@ impl EditorSurface {
 
     pub fn move_to_document_end(&mut self) -> bool {
         self.move_cursor(|cursor, buffer| cursor.move_to_document_end(buffer))
+    }
+
+    /// Active movement policy (cloned per command; never on the typing hot path).
+    fn movement_rules(&self) -> MovementRules {
+        self.document
+            .behavior_manifest
+            .as_ref()
+            .map(|manifest| manifest.editor_rules.movement.clone())
+            .unwrap_or_default()
+    }
+
+    fn sticky_column_enabled(&self) -> bool {
+        self.document
+            .behavior_manifest
+            .as_ref()
+            .is_none_or(|manifest| manifest.editor_rules.movement.sticky_column)
+    }
+
+    /// Resolve the effective caret style: runtime `clientSetCursorStyle`
+    /// override -> per-mode manifest `caret_style` -> editor `StyleRegistry`
+    /// default.
+    pub fn effective_caret_style(&self) -> CaretStyle {
+        if let Some(style) = self.caret_style_override {
+            return style;
+        }
+        self.document
+            .behavior_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.editor_rules.caret_style)
+            .unwrap_or(self.theme.caret_style)
+    }
+
+    /// Set (or clear, with `None`) the runtime caret style override.
+    pub fn set_caret_style_override(&mut self, style: Option<CaretStyle>) {
+        self.caret_style_override = style;
+        self.caret_blink.reset();
+    }
+
+    /// Advance the blink clock by `delta_ms` under the effective blink style.
+    /// Returns true when the caret visibility changed (so the widget knows to
+    /// repaint).
+    pub fn advance_blink(&mut self, delta_ms: u64) -> bool {
+        let style = self.effective_caret_style().blink;
+        let before = self.caret_blink.is_visible();
+        self.caret_blink.advance(&style, delta_ms);
+        before != self.caret_blink.is_visible()
+    }
+
+    /// True when the caret should animate (effective blink style is not Solid).
+    pub fn caret_animates(&self) -> bool {
+        self.effective_caret_style().blink.animates()
+    }
+
+    /// Whether the caret is currently visible in its blink cycle.
+    pub fn caret_blink_visible(&self) -> bool {
+        self.caret_blink.is_visible()
+    }
+
+    /// Whether the caret at `selection_index` should paint this frame. The
+    /// primary caret honours the blink cycle; secondary carets stay solid so
+    /// every cursor remains visible while typing with multiple selections
+    /// (Plan 071 task 8).
+    fn caret_should_paint(&self, selection_index: usize) -> bool {
+        if selection_index == self.selections.primary_index() {
+            self.caret_blink.is_visible()
+        } else {
+            true
+        }
+    }
+
+    fn move_or_extend(
+        &mut self,
+        extend: bool,
+        movement: impl FnOnce(&mut CursorState, &EditorBuffer) -> bool,
+    ) -> bool {
+        if extend {
+            self.extend_selection(movement)
+        } else {
+            self.move_cursor(movement)
+        }
+    }
+
+    pub fn move_word_start(&mut self, forward: bool, long: bool, extend: bool) -> bool {
+        let policy = self.movement_rules().word_separators.clone();
+        let underscore = self.movement_rules().treat_underscore_as_word;
+        self.move_or_extend(extend, |cursor, buffer| {
+            if forward {
+                cursor.move_to_next_word_start(buffer, &policy, underscore, long)
+            } else {
+                cursor.move_to_prev_word_start(buffer, &policy, underscore, long)
+            }
+        })
+    }
+
+    pub fn move_word_end(&mut self, forward: bool, long: bool, extend: bool) -> bool {
+        let rules = self.movement_rules();
+        let policy = rules.word_separators.clone();
+        let underscore = rules.treat_underscore_as_word;
+        let stop_at_eol = rules.stop_at_eol_word_end;
+        self.move_or_extend(extend, |cursor, buffer| {
+            if forward {
+                cursor.move_to_next_word_end(buffer, &policy, underscore, long, stop_at_eol)
+            } else {
+                cursor.move_to_prev_word_end(buffer, &policy, underscore, long)
+            }
+        })
+    }
+
+    pub fn move_sub_word(&mut self, forward: bool, extend: bool) -> bool {
+        let camel = self.movement_rules().camel_case_sub_word;
+        self.move_or_extend(extend, |cursor, buffer| {
+            if forward {
+                cursor.move_to_next_sub_word_start(buffer, camel)
+            } else {
+                cursor.move_to_prev_sub_word_start(buffer, camel)
+            }
+        })
+    }
+
+    pub fn move_paragraph(&mut self, forward: bool, to_end: bool, extend: bool) -> bool {
+        let style = self.movement_rules().paragraph_style;
+        self.move_or_extend(extend, |cursor, buffer| {
+            if to_end {
+                cursor.move_to_paragraph_end(buffer, style)
+            } else if forward {
+                cursor.move_to_next_paragraph(buffer, style)
+            } else {
+                cursor.move_to_prev_paragraph(buffer, style)
+            }
+        })
+    }
+
+    pub fn move_first_non_blank(&mut self, extend: bool) -> bool {
+        self.move_or_extend(extend, |cursor, buffer| {
+            cursor.move_to_first_non_blank(buffer)
+        })
+    }
+
+    pub fn move_last_non_blank(&mut self, extend: bool) -> bool {
+        self.move_or_extend(extend, |cursor, buffer| {
+            cursor.move_to_last_non_blank(buffer)
+        })
+    }
+
+    /// Matching-pair motion: resolves the single-char open/close pair around the
+    /// caret from the inert manifest `pairs`, then asks the buffer to jump to
+    /// its match. `ponytail:` single-char distinct pairs only (quotes/multi-char
+    /// pairs are skipped); bracket matching is the common case.
+    pub fn move_matching_pair(&mut self, extend: bool) -> bool {
+        let pairs: Vec<(char, char)> = self
+            .document
+            .behavior_manifest
+            .as_ref()
+            .into_iter()
+            .flat_map(|manifest| manifest.editor_rules.pairs.iter())
+            .filter_map(|pair| {
+                let mut open_chars = pair.open.chars();
+                let mut close_chars = pair.close.chars();
+                let open = open_chars.next()?;
+                let close = close_chars.next()?;
+                if open_chars.next().is_some() || close_chars.next().is_some() || open == close {
+                    return None;
+                }
+                Some((open, close))
+            })
+            .collect();
+        let caret = self.caret();
+        let candidate = self
+            .buffer
+            .char_at(caret)
+            .or_else(|| self.buffer.char_before(caret));
+        let Some(target) = candidate else {
+            return false;
+        };
+        let Some((open, close)) = pairs
+            .into_iter()
+            .find(|(o, c)| *o == target || *c == target)
+        else {
+            return false;
+        };
+        self.move_or_extend(extend, move |cursor, buffer| {
+            cursor.move_to_matching_pair(buffer, open, close)
+        })
+    }
+
+    /// Select the word run containing the caret (code policy + underscore).
+    /// No-op when the caret is on a separator/whitespace.
+    /// `ponytail:` between-words caret no-ops (VSCode selects the next word);
+    /// add when a `count`-aware select op needs it.
+    pub fn select_word(&mut self) -> bool {
+        let rules = self.movement_rules();
+        let policy = rules.word_separators.clone();
+        let underscore = rules.treat_underscore_as_word;
+        let caret = self.caret();
+        let Some((start, end)) = self.buffer.word_range_at(caret, &policy, underscore, false)
+        else {
+            return false;
+        };
+        self.set_selection_range(start, end)
+    }
+
+    /// Select the caret's line content (excludes the line terminator).
+    pub fn select_line(&mut self) -> bool {
+        let (start, end) = self.buffer.line_range(self.caret());
+        self.set_selection_range(start, end)
+    }
+
+    /// Select the paragraph (maximal non-blank line run) containing the caret.
+    pub fn select_paragraph(&mut self) -> bool {
+        let style = self.movement_rules().paragraph_style;
+        let (start, end) = self.buffer.paragraph_range(self.caret(), style);
+        self.set_selection_range(start, end)
+    }
+
+    /// Establish a collapsed-or-expanded selection over `[start, end]` and move
+    /// the caret to `end`. A degenerate range clears the selection.
+    fn set_selection_range(&mut self, start: usize, end: usize) -> bool {
+        let start = self.buffer.clamp_byte_offset(start);
+        let end = self.buffer.clamp_byte_offset(end);
+        let caret_was = self.caret();
+        self.set_primary_focus(end);
+        self.selections.primary_mut().set_anchor(start);
+        let has_range = start != end;
+        if !has_range {
+            self.clear_selection();
+        }
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = false;
+        end != caret_was || has_range
+    }
+
+    // ------------------------------------------------------------------
+    // Plan 071 task 9: multi-cursor commands. Every command operates on the
+    // selection set generically; paint already iterates the set (task 8), so
+    // no command carries its own paint path.
+    // ------------------------------------------------------------------
+
+    /// Snapshot the selection set for cursor-undo. Skips a snapshot identical
+    /// to the newest one (e.g. a move that hit the document edge).
+    fn snapshot_selection_set(&mut self) {
+        if self.cursor_undo_stack.back() == Some(&self.selections) {
+            return;
+        }
+        self.cursor_undo_stack.push_back(self.selections.clone());
+        while self.cursor_undo_stack.len() > CURSOR_UNDO_MAX_DEPTH {
+            self.cursor_undo_stack.pop_front();
+        }
+    }
+
+    /// Restore the previous selection set (Ctrl+U / cursorUndo). Cursor
+    /// movements only; edits have their own undo history.
+    fn undo_cursor_move(&mut self) -> EditorCommandOutcome {
+        let Some(mut snapshot) = self.cursor_undo_stack.pop_back() else {
+            return EditorCommandOutcome::unchanged();
+        };
+        // Snapshots may predate edits; clamp every caret/anchor back in range.
+        snapshot.clamp_to(&self.buffer);
+        self.selections = snapshot;
+        self.snippet_session = None;
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = false;
+        EditorCommandOutcome::from_changed(true)
+    }
+
+    /// Add a collapsed caret one line below/above the primary caret at the
+    /// same scalar column (add-cursor-below/above and column-select-down/up
+    /// share this primitive). Refuses to stack two carets on one line.
+    fn add_cursor_line(&mut self, below: bool) -> bool {
+        let focus = self.selections.primary_focus();
+        let line = self.buffer.line_of_byte(focus);
+        let target_line = if below {
+            line.checked_add(1)
+        } else {
+            line.checked_sub(1)
+        };
+        let Some(target_line) = target_line else {
+            return false;
+        };
+        if target_line >= self.buffer.line_len() {
+            return false;
+        }
+        if self
+            .selections
+            .selections()
+            .iter()
+            .any(|selection| self.buffer.line_of_byte(selection.focus()) == target_line)
+        {
+            return false;
+        }
+        let column = self.buffer.scalar_column_of_byte(focus);
+        let offset = self.buffer.byte_for_line_scalar_column(target_line, column);
+        self.selections
+            .push_and_make_primary(Selection::collapsed(offset));
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = false;
+        true
+    }
+
+    /// Move every caret one scalar left/right, collapsing each selection
+    /// (column-select-left/right: "left/right moves all carets").
+    fn move_all_carets(&mut self, right: bool) -> bool {
+        let mut changed = false;
+        for index in 0..self.selections.selection_count() {
+            let focus = self.selections.selection_mut(index).focus();
+            let target = if right {
+                self.buffer.next_scalar_boundary(focus)
+            } else {
+                self.buffer.previous_scalar_boundary(focus)
+            };
+            if let Some(target) = target {
+                let selection = self.selections.selection_mut(index);
+                selection.set_focus(target);
+                selection.set_anchor(target);
+                changed = true;
+            }
+        }
+        if changed {
+            self.ensure_caret_line_visible();
+            self.follow_visual_end = false;
+        }
+        changed
+    }
+
+    /// The current match needle: the primary selection's text when expanded,
+    /// otherwise the word at the primary caret (returned range is `Some` only
+    /// in the word case, marking "first press: select the word").
+    fn match_needle(&self) -> Option<(String, Option<Range<usize>>)> {
+        if let Some(range) = self.selections.primary_range() {
+            let text = self.buffer.text_range(range);
+            return (!text.is_empty()).then_some((text, None));
+        }
+        let rules = self.movement_rules();
+        let (start, end) = self.buffer.word_range_at(
+            self.selections.primary_focus(),
+            &rules.word_separators,
+            rules.treat_underscore_as_word,
+            false,
+        )?;
+        Some((self.buffer.text_range(start..end), Some(start..end)))
+    }
+
+    /// Add the next (forward) or previous (backward) occurrence of the needle
+    /// as a new primary selection. First press on a collapsed caret selects
+    /// the word itself. Searches wrap once around the document; returns false
+    /// when every occurrence is already selected (bounded: one scan).
+    fn select_next_match(&mut self, forward: bool) -> bool {
+        let Some((needle, word_range)) = self.match_needle() else {
+            return false;
+        };
+        if let Some(range) = word_range {
+            return self.set_selection_range(range.start, range.end);
+        }
+        let doc = self.buffer.text_range(0..self.buffer.document_end_byte());
+        let occurrences: Vec<Range<usize>> = doc
+            .match_indices(needle.as_str())
+            .map(|(start, matched)| start..start + matched.len())
+            .collect();
+        if occurrences.is_empty() {
+            return false;
+        }
+        let already: Vec<Range<usize>> = self
+            .selections
+            .selections()
+            .iter()
+            .map(|selection| selection.normalized_range())
+            .filter(|range| range.start < range.end)
+            .collect();
+        let unselected = |range: &&Range<usize>| !already.contains(range);
+        let focus = self.selections.primary_focus();
+        let next = if forward {
+            occurrences
+                .iter()
+                .find(|range| range.start >= focus && unselected(range))
+                .or_else(|| occurrences.iter().find(unselected))
+        } else {
+            occurrences
+                .iter()
+                .rev()
+                .find(|range| range.end <= focus && unselected(range))
+                .or_else(|| occurrences.iter().rev().find(unselected))
+        };
+        let Some(range) = next else {
+            return false;
+        };
+        self.selections
+            .push_and_make_primary(Selection::new(range.start, range.end));
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = false;
+        true
+    }
+
+    /// Replace the selection set with every occurrence of the needle; the
+    /// occurrence containing the original caret becomes primary.
+    fn select_all_matches(&mut self) -> bool {
+        let Some((needle, word_range)) = self.match_needle() else {
+            return false;
+        };
+        let doc = self.buffer.text_range(0..self.buffer.document_end_byte());
+        let occurrences: Vec<Range<usize>> = doc
+            .match_indices(needle.as_str())
+            .map(|(start, matched)| start..start + matched.len())
+            .collect();
+        if occurrences.is_empty() {
+            return false;
+        }
+        let original_focus = self.selections.primary_focus();
+        let primary = match word_range {
+            Some(range) => occurrences
+                .iter()
+                .position(|occurrence| *occurrence == range),
+            None => occurrences
+                .iter()
+                .position(|occurrence| occurrence.contains(&original_focus)),
+        }
+        .unwrap_or(0);
+        let selections: Vec<Selection> = occurrences
+            .iter()
+            .map(|range| Selection::new(range.start, range.end))
+            .collect();
+        if !self.selections.set_selections(selections, primary) {
+            return false;
+        }
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = false;
+        true
+    }
+
+    /// Escape: collapse the set to the primary caret.
+    fn cancel_multiple_selections(&mut self) -> bool {
+        let changed = self.selections.selection_count() > 1 || self.has_selection();
+        self.selections.keep_only_primary();
+        self.selections.collapse_primary();
+        self.snippet_session = None;
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = false;
+        changed
+    }
+
+    /// Helix keep_primary_selection: keep the primary (range intact), drop rest.
+    fn keep_selection(&mut self) -> bool {
+        if self.selections.selection_count() <= 1 {
+            return false;
+        }
+        self.selections.keep_only_primary();
+        self.ensure_caret_line_visible();
+        true
+    }
+
+    /// Helix remove_primary_selection: drop the primary, keep the rest.
+    fn remove_selection(&mut self) -> bool {
+        if self.selections.selection_count() <= 1 {
+            return false;
+        }
+        self.selections.remove_primary();
+        self.ensure_caret_line_visible();
+        true
+    }
+
+    /// Multi-cursor edit: one operation per caret, applied right-to-left so
+    /// byte offsets stay valid, recorded as ONE undo step and emitted as one
+    /// edit event per caret (the connection layer stamps ascending optimistic
+    /// base versions, so the server applies them in order).
+    ///
+    /// `per_caret` maps (surface, caret focus, normalized range) to the
+    /// operation + final caret for that selection. Returning `None` skips the
+    /// caret (e.g. backspace at document start).
+    ///
+    /// `ponytail:` overlapping selections are applied as-is (callers build
+    /// non-overlapping sets); snippet sessions are single-caret and are
+    /// dropped by a multi edit.
+    fn multi_caret_edit<F>(&mut self, per_caret: F) -> EditorCommandOutcome
+    where
+        F: Fn(&EditorSurface, usize, Range<usize>) -> Option<(EditOperation, usize)>,
+    {
+        let plans: Vec<(usize, Range<usize>)> = self
+            .selections
+            .selections()
+            .iter()
+            .map(|selection| (selection.focus(), selection.normalized_range()))
+            .collect();
+        let mut ops: Vec<(EditOperation, usize)> = Vec::with_capacity(plans.len());
+        for (focus, range) in plans {
+            if let Some(op) = per_caret(self, focus, range) {
+                ops.push(op);
+            }
+        }
+        if ops.is_empty() {
+            return EditorCommandOutcome::unchanged();
+        }
+
+        let primary_index = self.selections.primary_index();
+        let set_before: Vec<HistorySelection> = self
+            .selections
+            .selections()
+            .iter()
+            .map(|selection| HistorySelection {
+                caret: selection.focus(),
+                anchor: (!selection.is_collapsed()).then(|| selection.anchor()),
+            })
+            .collect();
+
+        // Apply right-to-left.
+        let mut order: Vec<usize> = (0..ops.len()).collect();
+        order.sort_by(|&a, &b| op_start_offset(&ops[b].0).cmp(&op_start_offset(&ops[a].0)));
+
+        let mut forward_ops: Vec<EditOperation> = Vec::with_capacity(ops.len());
+        let mut inverse_ops: Vec<EditOperation> = Vec::with_capacity(ops.len());
+        let mut final_carets = vec![0usize; ops.len()];
+        let mut decorations_changed = false;
+        for index in order {
+            let (operation, final_caret) = &ops[index];
+            let prior_text = self.prior_text_for_operation(operation);
+            inverse_ops.push(invert_edit_operation(operation, &prior_text));
+            forward_ops.push(operation.clone());
+            self.apply_buffer_operation(operation);
+            if self.decorations.apply_edit(operation) {
+                decorations_changed = true;
+            }
+            final_carets[index] = *final_caret;
+        }
+
+        let new_selections: Vec<Selection> = final_carets
+            .iter()
+            .map(|caret| Selection::collapsed(self.buffer.clamp_byte_offset(*caret)))
+            .collect();
+        let set_after: Vec<HistorySelection> = new_selections
+            .iter()
+            .map(|selection| HistorySelection {
+                caret: selection.focus(),
+                anchor: None,
+            })
+            .collect();
+        let _ = self
+            .selections
+            .set_selections(new_selections, primary_index);
+
+        self.snippet_session = None;
+        if decorations_changed {
+            self.bump_layout_style_revision();
+        }
+        self.history.record(HistoryEntry {
+            forward: forward_ops[0].clone(),
+            inverse: inverse_ops[0].clone(),
+            selection_before: set_before[primary_index.min(set_before.len() - 1)],
+            selection_after: HistorySelection::collapsed(
+                final_carets[primary_index.min(final_carets.len() - 1)],
+            ),
+            forward_ops: forward_ops.clone(),
+            inverse_ops,
+            selection_set_before: set_before,
+            selection_set_after: set_after,
+            primary_index,
+        });
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = true;
+        self.perf.record_counter("editor.input.local_edit", 1);
+        let events: Vec<EditorEditEvent> = forward_ops
+            .into_iter()
+            .filter_map(|operation| self.client_first_event(operation))
+            .collect();
+        EditorCommandOutcome::changed_multi(events)
     }
 
     pub fn visible_text(&self) -> String {
@@ -2071,14 +3052,14 @@ impl EditorSurface {
             return false;
         };
 
-        let previous = self.cursor.caret();
-        let had_selection = self.selection.is_some();
+        let previous = self.caret();
+        let had_selection = self.has_selection();
         self.snippet_session = None;
-        self.cursor.set_caret(caret);
-        self.selection = None;
+        self.set_primary_focus(caret);
+        self.clear_selection();
         self.follow_visual_end = false;
         self.ensure_caret_line_visible();
-        had_selection || previous != self.cursor.caret()
+        had_selection || previous != self.caret()
     }
 
     pub fn extend_selection_to_point(&mut self, point: Point) -> bool {
@@ -2086,20 +3067,17 @@ impl EditorSurface {
             return false;
         };
 
-        let previous_caret = self.cursor.caret();
-        let previous_selection = self.selection;
+        let previous_caret = self.caret();
+        let previous_anchor = self.selections.primary_anchor();
         self.snippet_session = None;
-        let anchor = self
-            .selection
-            .map_or(previous_caret, |selection| selection.anchor());
-        self.cursor.set_caret(focus);
-
-        let selection = SelectionState::new(anchor, self.cursor.caret()).clamped(&self.buffer);
-        self.selection = (!selection.is_collapsed()).then_some(selection);
+        self.set_primary_focus(focus);
+        self.selections.clamp_primary_anchor(&self.buffer);
+        let now_anchor = self.selections.primary_anchor();
+        let now_caret = self.caret();
         self.ensure_caret_line_visible();
         self.follow_visual_end = false;
 
-        previous_caret != self.cursor.caret() || previous_selection != self.selection
+        previous_caret != now_caret || previous_anchor != now_anchor
     }
 
     pub fn scroll_lines(&mut self, delta_lines: isize) -> bool {
@@ -2294,7 +3272,7 @@ impl EditorSurface {
         };
 
         let caret_visible_offset = self.visible_caret_offset(&snapshot);
-        let selection_visible_range = self.visible_selection_range(&snapshot);
+        let selection_visible_ranges = self.visible_selection_ranges(&snapshot);
         let diagnostic_visible_ranges = self.visible_diagnostic_ranges(&snapshot);
         let document_font_role = self.document_font_role();
         let key = LayoutCacheKey::new(self.buffer.revision(), self.viewport.revision(), max_width)
@@ -2302,7 +3280,8 @@ impl EditorSurface {
                 self.typography.revision(),
                 self.layout_style_revision,
                 document_font_role,
-            );
+            )
+            .with_ligatures(self.typography.profile(document_font_role).feature_hash());
         let decorations = &self.decorations;
         let document = &self.document;
         let document_end = self.buffer.document_end_byte();
@@ -2319,7 +3298,7 @@ impl EditorSurface {
             available_height,
             key,
             caret_visible_offset,
-            selection_visible_range,
+            &selection_visible_ranges,
             self.theme.base.selection,
             &diagnostic_visible_ranges,
             origin,
@@ -2344,13 +3323,7 @@ impl EditorSurface {
             self.last_visual_max_scroll_y = metrics.max_scroll_y(available_height);
         }
         if focused && !self.composition.is_active() {
-            self.paint_caret(
-                scene,
-                max_width,
-                available_height,
-                caret_visible_offset,
-                origin,
-            );
+            self.paint_caret(scene, max_width, available_height, &snapshot, origin);
         }
         if focused && self.composition.is_active() {
             self.paint_preedit_overlay(
@@ -2370,24 +3343,12 @@ impl EditorSurface {
         scene: &mut masonry::vello::Scene,
         max_width: f32,
         available_height: f64,
-        caret_visible_offset: Option<usize>,
+        snapshot: &VisibleSnapshot,
         origin: (f64, f64),
     ) {
-        let Some(visible_offset) = caret_visible_offset else {
-            return;
-        };
-        let Some(geometry) = self
-            .layout
-            .caret_geometry_for_visible_byte_offset(visible_offset, CARET_WIDTH as f32)
-        else {
-            return;
-        };
-        let caret = Rect::new(
-            origin.0 + geometry.rect.x0 + TEXT_INSET,
-            origin.1 + geometry.rect.y0 + TEXT_INSET - self.visual_scroll_y,
-            origin.0 + geometry.rect.x1 + TEXT_INSET,
-            origin.1 + geometry.rect.y1 + TEXT_INSET - self.visual_scroll_y,
-        );
+        let style = self.effective_caret_style();
+        let color = self.theme.base.caret;
+        let scroll = self.visual_scroll_y;
 
         let clip = Rect::new(
             origin.0 + TEXT_INSET,
@@ -2396,13 +3357,61 @@ impl EditorSurface {
             origin.1 + TEXT_INSET + available_height,
         );
         scene.push_clip_layer(Affine::IDENTITY, &clip);
-        scene.fill(
-            Fill::NonZero,
-            Affine::IDENTITY,
-            self.theme.base.caret,
-            None,
-            &caret,
-        );
+        for (index, selection) in self.selections.selections().iter().enumerate() {
+            if !self.caret_should_paint(index) {
+                continue;
+            }
+            let Some(visible_offset) = self.visible_byte_offset(selection.focus(), snapshot) else {
+                continue;
+            };
+            let Some(cell) = self
+                .layout
+                .caret_cell_for_visible_byte_offset(visible_offset)
+            else {
+                continue;
+            };
+
+            let line_height = (cell.line_bottom - cell.line_top).max(1.0);
+            let line_bottom_abs = origin.1 + cell.line_bottom + TEXT_INSET - scroll;
+            let drawn_height = line_height * f64::from(style.height_pct.clamp(0.1, 1.0));
+            let centre_y =
+                origin.1 + (cell.line_top + cell.line_bottom) / 2.0 + TEXT_INSET - scroll;
+            let top = centre_y - drawn_height / 2.0;
+            let bottom = centre_y + drawn_height / 2.0;
+            let left = origin.0 + cell.x + TEXT_INSET;
+            let stroke_width = f64::from(style.width_px).max(0.5);
+            let cell_width = cell.advance.max(stroke_width);
+
+            match style.shape {
+                CaretShape::Bar | CaretShape::Line => {
+                    let caret = Rect::new(left, top, left + stroke_width, bottom);
+                    scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &caret);
+                }
+                CaretShape::Block => {
+                    let block = Rect::new(left, top, left + cell_width, bottom);
+                    if style.hollow {
+                        scene.stroke(
+                            &Stroke::new(stroke_width),
+                            Affine::IDENTITY,
+                            color,
+                            None,
+                            &block,
+                        );
+                    } else {
+                        scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &block);
+                    }
+                }
+                CaretShape::Underline => {
+                    let underline = Rect::new(
+                        left,
+                        line_bottom_abs - stroke_width,
+                        left + cell_width,
+                        line_bottom_abs,
+                    );
+                    scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &underline);
+                }
+            }
+        }
         scene.pop_layer();
     }
 
@@ -2487,19 +3496,59 @@ impl EditorSurface {
             _ => 1.0,
         };
         let caret_x = insert_x + preedit_width * caret_frac;
-        let caret = Rect::new(
-            caret_x,
-            insert_y,
-            caret_x + CARET_WIDTH,
-            insert_y + line_height,
-        );
-        scene.fill(
-            Fill::NonZero,
-            Affine::IDENTITY,
-            self.theme.base.caret,
-            None,
-            &caret,
-        );
+        // Shape-consistent IME caret: honour the active caret shape/width. The
+        // preedit caret is always visible (composition is active) and uses a
+        // line-height-derived cell width because the preedit glyphs are laid
+        // out separately from the document layout.
+        let preedit_style = self.effective_caret_style();
+        let preedit_stroke = f64::from(preedit_style.width_px).max(0.5);
+        let preedit_cell = (line_height * 0.6).max(preedit_stroke);
+        let caret_color = self.theme.base.caret;
+        match preedit_style.shape {
+            CaretShape::Underline => {
+                let underline = Rect::new(
+                    caret_x,
+                    insert_y + line_height - preedit_stroke,
+                    caret_x + preedit_cell,
+                    insert_y + line_height,
+                );
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    caret_color,
+                    None,
+                    &underline,
+                );
+            }
+            CaretShape::Block => {
+                let block = Rect::new(
+                    caret_x,
+                    insert_y,
+                    caret_x + preedit_cell,
+                    insert_y + line_height,
+                );
+                if preedit_style.hollow {
+                    scene.stroke(
+                        &Stroke::new(preedit_stroke),
+                        Affine::IDENTITY,
+                        caret_color,
+                        None,
+                        &block,
+                    );
+                } else {
+                    scene.fill(Fill::NonZero, Affine::IDENTITY, caret_color, None, &block);
+                }
+            }
+            CaretShape::Bar | CaretShape::Line => {
+                let caret = Rect::new(
+                    caret_x,
+                    insert_y,
+                    caret_x + preedit_stroke,
+                    insert_y + line_height,
+                );
+                scene.fill(Fill::NonZero, Affine::IDENTITY, caret_color, None, &caret);
+            }
+        }
         scene.pop_layer();
     }
 
@@ -2508,7 +3557,7 @@ impl EditorSurface {
         snapshot: &VisibleSnapshot,
         width: f32,
     ) -> Option<Rect> {
-        let caret = self.cursor.caret();
+        let caret = self.caret();
         let visible_end = snapshot.start_byte_offset + snapshot.text.len();
         if caret < snapshot.start_byte_offset || caret > visible_end {
             return None;
@@ -2527,20 +3576,31 @@ impl EditorSurface {
     }
 
     fn visible_caret_offset(&self, snapshot: &VisibleSnapshot) -> Option<usize> {
-        let caret = self.cursor.caret();
-        let visible_end = snapshot.start_byte_offset + snapshot.text.len();
-        (caret >= snapshot.start_byte_offset && caret <= visible_end)
-            .then(|| caret - snapshot.start_byte_offset)
+        self.visible_byte_offset(self.caret(), snapshot)
     }
 
-    fn visible_selection_range(&self, snapshot: &VisibleSnapshot) -> Option<Range<usize>> {
-        let selection = self.selection?;
-        let range = selection.normalized_range();
+    fn visible_byte_offset(&self, byte: usize, snapshot: &VisibleSnapshot) -> Option<usize> {
+        let visible_end = snapshot.start_byte_offset + snapshot.text.len();
+        (byte >= snapshot.start_byte_offset && byte <= visible_end)
+            .then(|| byte - snapshot.start_byte_offset)
+    }
+
+    fn visible_selection_ranges(&self, snapshot: &VisibleSnapshot) -> Vec<Range<usize>> {
         let visible_start = snapshot.start_byte_offset;
         let visible_end = snapshot.start_byte_offset + snapshot.text.len();
-        let start = range.start.max(visible_start);
-        let end = range.end.min(visible_end);
-        (start < end).then(|| (start - visible_start)..(end - visible_start))
+        self.selections
+            .selections()
+            .iter()
+            .filter_map(|selection| {
+                if selection.is_collapsed() {
+                    return None;
+                }
+                let range = selection.normalized_range();
+                let start = range.start.max(visible_start);
+                let end = range.end.min(visible_end);
+                (start < end).then(|| (start - visible_start)..(end - visible_start))
+            })
+            .collect()
     }
 
     fn visible_decoration_ranges(&self, snapshot: &VisibleSnapshot) -> Vec<(Range<usize>, Color)> {
@@ -2618,15 +3678,31 @@ impl EditorSurface {
     }
 
     pub fn selected_text(&self) -> Option<String> {
-        self.selected_range()
-            .map(|range| self.buffer.text_range(range))
-            .filter(|text| !text.is_empty())
+        let mut ranges: Vec<Range<usize>> = self
+            .selections
+            .selections()
+            .iter()
+            .map(|selection| selection.normalized_range())
+            .filter(|range| range.start < range.end)
+            .collect();
+        if ranges.is_empty() {
+            return None;
+        }
+        // Multi-cursor copy joins every range in document order (Plan 071
+        // task 9); a single selection yields exactly its text (parity).
+        ranges.sort_by_key(|range| range.start);
+        let mut text = String::new();
+        for (index, range) in ranges.iter().enumerate() {
+            if index > 0 {
+                text.push('\n');
+            }
+            text.push_str(&self.buffer.text_range(range.clone()));
+        }
+        (!text.is_empty()).then_some(text)
     }
 
     fn selected_range(&self) -> Option<Range<usize>> {
-        let selection = self.selection?.clamped(&self.buffer);
-        let range = selection.normalized_range();
-        (range.start < range.end).then_some(range)
+        self.selections.primary_range()
     }
 
     fn completion_request_event(
@@ -2639,7 +3715,7 @@ impl EditorSurface {
         ) {
             return None;
         }
-        let cursor = self.buffer.clamp_byte_offset(self.cursor.caret());
+        let cursor = self.buffer.clamp_byte_offset(self.caret());
         let start = self.word_prefix_start(cursor);
         Some(EditorCompletionRequestEvent {
             document_id: self.document.document_id,
@@ -2670,7 +3746,7 @@ impl EditorSurface {
         &self,
         feature: crate::protocol::LanguageIntelligenceFeature,
     ) -> Option<EditorLanguageIntelligenceRequestEvent> {
-        let cursor = self.buffer.clamp_byte_offset(self.cursor.caret());
+        let cursor = self.buffer.clamp_byte_offset(self.caret());
         Some(EditorLanguageIntelligenceRequestEvent {
             document_id: self.document.document_id,
             document_version: self.document.document_version,
@@ -2678,6 +3754,45 @@ impl EditorSurface {
             cursor_byte_offset: cursor as u64,
             feature,
         })
+    }
+
+    /// Captures the current document/version and the whole selection set for
+    /// a text-object/smart-select request (Plan 071 task 10). Bounded by
+    /// `MAX_SELECTION_QUERY_CURSORS` so the server work stays finite.
+    pub(crate) fn selection_query_request_for(
+        &self,
+        query: crate::protocol::SelectionQuery,
+    ) -> Option<EditorSelectionQueryRequestEvent> {
+        let selections: Vec<crate::protocol::SelectionQueryCursor> = self
+            .selections
+            .selections()
+            .iter()
+            .take(crate::protocol::MAX_SELECTION_QUERY_CURSORS)
+            .map(|selection| crate::protocol::SelectionQueryCursor {
+                anchor: self.buffer.clamp_byte_offset(selection.anchor()) as u64,
+                focus: self.buffer.clamp_byte_offset(selection.focus()) as u64,
+            })
+            .collect();
+        Some(EditorSelectionQueryRequestEvent {
+            document_id: self.document.document_id,
+            document_version: self.document.document_version,
+            behavior_version: self.document.behavior_version,
+            query,
+            selections,
+        })
+    }
+
+    /// Installs selection-query ranges as the new selection set (multi-cursor
+    /// aware: one resulting selection per requested caret). Snapshotting the
+    /// previous set first keeps cursor-undo working across queries.
+    pub(crate) fn apply_selection_query_result(&mut self, selections: Vec<Selection>) {
+        if selections.is_empty() {
+            return;
+        }
+        let primary = self.selections.primary_index().min(selections.len() - 1);
+        self.snapshot_selection_set();
+        self.selections.set_selections(selections, primary);
+        self.selections.clamp_to(&self.buffer);
     }
 
     fn word_prefix_start(&self, cursor: usize) -> usize {
@@ -2761,7 +3876,7 @@ impl EditorSurface {
                 range.start + pair.open.len() + selected_text.len() + pair.close.len();
             (operation, final_caret)
         } else {
-            let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
+            let byte_offset = self.buffer.clamp_byte_offset(self.caret());
             let insertion = format!("{}{}", pair.open, pair.close);
             let operation = EditOperation::Insert {
                 byte_offset: byte_offset as u64,
@@ -2787,7 +3902,7 @@ impl EditorSurface {
             return EditorCommandOutcome::unchanged();
         }
 
-        let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
+        let byte_offset = self.buffer.clamp_byte_offset(self.caret());
         let line_start = self.buffer.line_start_byte(byte_offset);
         let leading = self.buffer.text_range(line_start..byte_offset);
 
@@ -2828,6 +3943,30 @@ impl EditorSurface {
     }
 
     fn replace_selection_or_insert_with_event(&mut self, text: &str) -> EditorCommandOutcome {
+        if self.selections.selection_count() > 1 {
+            let inserted = text.to_string();
+            return self.multi_caret_edit(|surface, focus, range| {
+                if range.start < range.end {
+                    Some((
+                        EditOperation::Replace {
+                            start: range.start as u64,
+                            end: range.end as u64,
+                            text: inserted.clone(),
+                        },
+                        range.start + inserted.len(),
+                    ))
+                } else {
+                    let offset = surface.buffer.clamp_byte_offset(focus);
+                    Some((
+                        EditOperation::Insert {
+                            byte_offset: offset as u64,
+                            text: inserted.clone(),
+                        },
+                        offset + inserted.len(),
+                    ))
+                }
+            });
+        }
         let operation = if let Some(range) = self.selected_range() {
             EditOperation::Replace {
                 start: range.start as u64,
@@ -2835,7 +3974,7 @@ impl EditorSurface {
                 text: text.to_string(),
             }
         } else {
-            let byte_offset = self.buffer.clamp_byte_offset(self.cursor.caret());
+            let byte_offset = self.buffer.clamp_byte_offset(self.caret());
             EditOperation::Insert {
                 byte_offset: byte_offset as u64,
                 text: text.to_string(),
@@ -2845,19 +3984,19 @@ impl EditorSurface {
     }
 
     fn collapse_selection_to(&mut self, caret: usize) -> bool {
-        let previous_caret = self.cursor.caret();
-        let had_selection = self.selection.is_some();
+        let previous_caret = self.caret();
+        let had_selection = self.has_selection();
         self.snippet_session = None;
-        self.cursor.set_caret(caret);
-        self.selection = None;
+        self.set_primary_focus(caret);
+        self.clear_selection();
         self.ensure_caret_line_visible();
         self.follow_visual_end = false;
-        had_selection || previous_caret != self.cursor.caret()
+        had_selection || previous_caret != self.caret()
     }
 
     fn finish_edit(&mut self, result: EditResult) -> EditorCommandOutcome {
-        self.cursor.set_caret(result.caret);
-        self.selection = None;
+        self.set_primary_focus(result.caret);
+        self.clear_selection();
         if !result.changed {
             return EditorCommandOutcome::unchanged();
         }
@@ -2896,6 +4035,17 @@ impl EditorSurface {
         let Some(entry) = self.history.undo() else {
             return EditorCommandOutcome::unchanged();
         };
+        if entry.is_multi() {
+            // Inverse ops were recorded in forward application order; undoing
+            // replays them in reverse (Plan 071 task 9).
+            let mut inverse_ops = entry.inverse_ops;
+            inverse_ops.reverse();
+            return self.apply_multi_history_restore(
+                inverse_ops,
+                entry.selection_set_before,
+                entry.primary_index,
+            );
+        }
         self.apply_history_restore(&entry.inverse, entry.selection_before)
     }
 
@@ -2908,6 +4058,13 @@ impl EditorSurface {
         let Some(entry) = self.history.redo() else {
             return EditorCommandOutcome::unchanged();
         };
+        if entry.is_multi() {
+            return self.apply_multi_history_restore(
+                entry.forward_ops,
+                entry.selection_set_after,
+                entry.primary_index,
+            );
+        }
         self.apply_history_restore(&entry.forward, entry.selection_after)
     }
 
@@ -2930,8 +4087,8 @@ impl EditorSurface {
                 self.bump_layout_style_revision();
             }
         }
-        self.cursor.set_caret(self.buffer.clamp_byte_offset(caret));
-        self.selection = None;
+        self.set_primary_focus(self.buffer.clamp_byte_offset(caret));
+        self.clear_selection();
         if !result.changed {
             return EditorCommandOutcome::unchanged();
         }
@@ -2946,6 +4103,11 @@ impl EditorSurface {
             inverse,
             selection_before,
             selection_after,
+            forward_ops: Vec::new(),
+            inverse_ops: Vec::new(),
+            selection_set_before: Vec::new(),
+            selection_set_after: Vec::new(),
+            primary_index: 0,
         });
         let edit_event = self.client_first_event(operation);
         EditorCommandOutcome::changed(edit_event)
@@ -2970,6 +4132,46 @@ impl EditorSurface {
         self.perf.record_counter("editor.input.local_edit", 1);
         let edit_event = self.client_first_event(operation.clone());
         EditorCommandOutcome::changed(edit_event)
+    }
+
+    /// Restore a combined multi-cursor history step (Plan 071 task 9): apply
+    /// every operation (stored right-to-left, so order keeps offsets valid)
+    /// and reinstall the whole selection set snapshot.
+    fn apply_multi_history_restore(
+        &mut self,
+        operations: Vec<EditOperation>,
+        set: Vec<HistorySelection>,
+        primary_index: usize,
+    ) -> EditorCommandOutcome {
+        let mut decorations_changed = false;
+        for operation in &operations {
+            self.apply_buffer_operation(operation);
+            if self.decorations.apply_edit(operation) {
+                decorations_changed = true;
+            }
+        }
+        if decorations_changed {
+            self.bump_layout_style_revision();
+        }
+        let selections: Vec<Selection> = set
+            .iter()
+            .map(|snapshot| {
+                Selection::new(snapshot.anchor.unwrap_or(snapshot.caret), snapshot.caret)
+            })
+            .collect();
+        let mut restored = SelectionState::default();
+        let _ = restored.set_selections(selections, primary_index);
+        restored.clamp_to(&self.buffer);
+        self.selections = restored;
+        self.snippet_session = None;
+        self.ensure_caret_line_visible();
+        self.follow_visual_end = true;
+        self.perf.record_counter("editor.input.local_edit", 1);
+        let events: Vec<EditorEditEvent> = operations
+            .into_iter()
+            .filter_map(|operation| self.client_first_event(operation))
+            .collect();
+        EditorCommandOutcome::changed_multi(events)
     }
 
     fn apply_buffer_operation(&mut self, operation: &EditOperation) -> EditResult {
@@ -2997,19 +4199,21 @@ impl EditorSurface {
 
     fn capture_history_selection(&self) -> HistorySelection {
         HistorySelection {
-            caret: self.cursor.caret(),
-            anchor: self.selection.map(|selection| selection.anchor()),
+            caret: self.caret(),
+            anchor: self
+                .has_selection()
+                .then(|| self.selections.primary_anchor()),
         }
     }
 
     fn restore_history_selection(&mut self, selection: HistorySelection) {
         let caret = self.buffer.clamp_byte_offset(selection.caret);
-        self.cursor.set_caret(caret);
-        self.selection = selection.anchor.and_then(|anchor| {
-            let restored = SelectionState::new(self.buffer.clamp_byte_offset(anchor), caret)
-                .clamped(&self.buffer);
-            (!restored.is_collapsed()).then_some(restored)
-        });
+        self.set_primary_focus(caret);
+        let clamped_anchor = selection
+            .anchor
+            .map(|anchor| self.buffer.clamp_byte_offset(anchor))
+            .unwrap_or(caret);
+        self.selections.primary_mut().set_anchor(clamped_anchor);
     }
 
     fn client_first_event(&self, operation: EditOperation) -> Option<EditorEditEvent> {
@@ -3038,7 +4242,7 @@ impl EditorSurface {
     }
 
     fn ensure_caret_line_visible(&mut self) -> bool {
-        let caret_line = self.buffer.line_of_byte(self.cursor.caret());
+        let caret_line = self.buffer.line_of_byte(self.caret());
         let changed = self
             .viewport
             .ensure_line_visible(caret_line, self.buffer.line_len());
@@ -3048,14 +4252,38 @@ impl EditorSurface {
         changed
     }
 
+    /// Active caret byte offset = the primary selection focus. Replaces the
+    /// legacy self.caret() reads.
+    fn caret(&self) -> usize {
+        self.selections.primary_focus()
+    }
+
+    /// Move the primary focus, clearing preferred_x (mirrors CursorState::set_caret).
+    /// Does not touch the anchor; pair with clear_selection when clearing.
+    fn set_primary_focus(&mut self, focus: usize) {
+        self.selections.set_primary_focus(focus);
+    }
+
+    /// Collapse the primary selection (anchor := focus), i.e. no active range.
+    /// Replaces the legacy self.selection = None.
+    fn clear_selection(&mut self) {
+        self.selections.collapse_primary();
+    }
+
+    /// True when the primary selection is an active range. Replaces
+    /// self.selection.is_some().
+    fn has_selection(&self) -> bool {
+        self.selections.has_selection()
+    }
+
     fn move_cursor(
         &mut self,
         movement: impl FnOnce(&mut CursorState, &EditorBuffer) -> bool,
     ) -> bool {
         self.snippet_session = None;
-        let had_selection = self.selection.is_some();
-        let changed = movement(&mut self.cursor, &self.buffer);
-        self.selection = None;
+        let had_selection = self.has_selection();
+        let changed = movement(self.selections.primary_mut().cursor_mut(), &self.buffer);
+        self.clear_selection();
         if changed || had_selection {
             self.ensure_caret_line_visible();
             self.follow_visual_end = false;
@@ -3068,21 +4296,11 @@ impl EditorSurface {
         movement: impl FnOnce(&mut CursorState, &EditorBuffer) -> bool,
     ) -> bool {
         self.snippet_session = None;
-        let anchor = self
-            .selection
-            .map_or_else(|| self.cursor.caret(), |selection| selection.anchor());
-        let changed = movement(&mut self.cursor, &self.buffer);
+        let changed = movement(self.selections.primary_mut().cursor_mut(), &self.buffer);
         if !changed {
             return false;
         }
-
-        let mut selection = SelectionState::new(anchor, self.cursor.caret()).clamped(&self.buffer);
-        if selection.is_collapsed() {
-            self.selection = None;
-        } else {
-            selection.set_focus(self.cursor.caret());
-            self.selection = Some(selection);
-        }
+        self.selections.clamp_primary_anchor(&self.buffer);
         self.ensure_caret_line_visible();
         self.follow_visual_end = false;
         true
@@ -3117,25 +4335,55 @@ impl EditorSurface {
     #[cfg(test)]
     pub(crate) fn set_caret_for_test(&mut self, caret: usize) {
         let caret = self.buffer.clamp_byte_offset(caret);
-        self.cursor.set_caret(caret);
+        self.set_primary_focus(caret);
+        self.clear_selection();
     }
 
     #[cfg(test)]
     pub(crate) fn caret_for_test(&self) -> usize {
-        self.cursor.caret()
+        self.caret()
     }
 
     #[cfg(test)]
     pub(crate) fn selection_for_test(&self) -> Option<(usize, usize)> {
-        self.selection
-            .map(|selection| (selection.anchor(), selection.focus()))
+        let selection = self.selections.primary();
+        (selection.anchor() != selection.focus()).then(|| (selection.anchor(), selection.focus()))
     }
 
     #[cfg(test)]
     pub(crate) fn set_selection_for_test(&mut self, anchor: usize, focus: usize) {
-        let selection = SelectionState::new(anchor, focus).clamped(&self.buffer);
-        self.cursor.set_caret(selection.focus());
-        self.selection = (!selection.is_collapsed()).then_some(selection);
+        let anchor = self.buffer.clamp_byte_offset(anchor);
+        let focus = self.buffer.clamp_byte_offset(focus);
+        self.set_primary_focus(focus);
+        self.selections.primary_mut().set_anchor(anchor);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn add_selection_for_test(&mut self, anchor: usize, focus: usize) {
+        let selection = Selection::new(
+            self.buffer.clamp_byte_offset(anchor),
+            self.buffer.clamp_byte_offset(focus),
+        );
+        self.selections.push_selection(selection);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn selection_count_for_test(&self) -> usize {
+        self.selections.selection_count()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn buffer_text_for_test(&self) -> String {
+        self.buffer.text_range(0..self.buffer.document_end_byte())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn selection_focus_positions_for_test(&self) -> Vec<usize> {
+        self.selections
+            .selections()
+            .iter()
+            .map(|selection| selection.focus())
+            .collect()
     }
 
     #[cfg(test)]
@@ -3159,6 +4407,17 @@ impl EditorSurface {
 /// This is the generic Rust-known transform engine behind
 /// [`ElectricEffect::OutdentOneLevel`]; it consults only the declarative tab
 /// kind/width from the manifest and contains no language-specific branch.
+/// Start byte offset of an edit operation, for right-to-left ordering of
+/// multi-cursor edits (Plan 071 task 9).
+fn op_start_offset(operation: &EditOperation) -> usize {
+    match operation {
+        EditOperation::Insert { byte_offset, .. } => *byte_offset as usize,
+        EditOperation::Delete { start, .. } | EditOperation::Replace { start, .. } => {
+            *start as usize
+        }
+    }
+}
+
 fn dedent_leading_one_level(
     leading: &str,
     tab_kind: crate::protocol::TabMode,
@@ -3194,17 +4453,18 @@ mod tests {
     use std::fmt::Write as _;
 
     use super::{
-        CARET_WIDTH, Color, EditorCommand, EditorSurface, SCROLLBAR_MARGIN, SCROLLBAR_WIDTH,
-        TEXT_INSET, normalize_visible_text_style_runs, subtract_half_open_range,
+        BlinkPhase, CARET_WIDTH, CaretBlink, Color, CursorSelectDirection, EditorCommand,
+        EditorSurface, SCROLLBAR_MARGIN, SCROLLBAR_WIDTH, Selection, TEXT_INSET,
+        normalize_visible_text_style_runs, subtract_half_open_range,
     };
     use crate::editor::layout::LayoutCacheKey;
     use crate::perf::{budgets::SYNTAX_CACHE_BUDGET_BYTES, metrics::PerfRecorder};
     use crate::protocol::{
-        ActiveTypography, BehaviorManifest, BehaviorScope, CommandAuthority, CommandDeclaration,
-        CompletionItemTextFormat, CompletionTrigger, DecorationKind, DecorationProvenance,
-        DecorationSet, DecorationSpan, DocumentAccess, DocumentFontRole, EditOperation, FontRole,
-        KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers, KeyStroke, Modifiers,
-        RoutingPolicy, TabMode, TokenType,
+        ActiveTypography, BehaviorManifest, BehaviorScope, BlinkStyle, CaretShape, CaretStyle,
+        CommandAuthority, CommandDeclaration, CompletionItemTextFormat, CompletionTrigger,
+        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentAccess,
+        DocumentFontRole, EditOperation, FontRole, KeyBindingContext, KeyBindingRule, KeyCode,
+        KeyModifiers, KeyStroke, Modifiers, RoutingPolicy, TabMode, TokenType,
     };
     use crate::shell::CompletionMenuAcceptAction;
     use masonry::kurbo::{Point, Rect};
@@ -4267,6 +5527,530 @@ mod tests {
     }
 
     #[test]
+    fn move_word_start_command_advances_caret_via_manifest_policy() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "foo.bar baz".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        editor.set_caret_for_test(0);
+
+        // Code policy (underscore joins): `foo` then `.` separator then `bar`.
+        assert!(editor.command(EditorCommand::MoveWordStart {
+            forward: true,
+            long: false,
+            extend: false,
+        }));
+        assert_eq!(editor.caret_for_test(), 4);
+
+        // Extend to the next word start (`b` of `baz` at offset 8) selects 4..8.
+        assert!(editor.command(EditorCommand::MoveWordStart {
+            forward: true,
+            long: false,
+            extend: true,
+        }));
+        assert_eq!(editor.caret_for_test(), 8);
+        assert_eq!(editor.selection_for_test(), Some((4, 8)));
+    }
+
+    #[test]
+    fn move_matching_pair_command_toggles_brackets_via_manifest_pairs() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "({[]})".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        editor.set_caret_for_test(0);
+
+        // `(` at 0 → matching `)` at 5.
+        assert!(editor.command(EditorCommand::MoveMatchingPair { extend: false }));
+        assert_eq!(editor.caret_for_test(), 5);
+        // `)` at 5 → matching `(` at 0.
+        assert!(editor.command(EditorCommand::MoveMatchingPair { extend: false }));
+        assert_eq!(editor.caret_for_test(), 0);
+    }
+
+    #[test]
+    fn select_word_selects_word_run_at_caret() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "foo.bar baz".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        // Caret inside "bar" (offset 4): selects "bar" (4..7).
+        editor.set_caret_for_test(4);
+        assert!(editor.command(EditorCommand::SelectWord));
+        assert_eq!(editor.selection_for_test(), Some((4, 7)));
+        assert_eq!(editor.caret_for_test(), 7);
+    }
+
+    #[test]
+    fn select_word_noop_on_separator() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "foo.bar".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        // Caret on "." (offset 3): no word run → no-op.
+        editor.set_caret_for_test(3);
+        assert!(!editor.command(EditorCommand::SelectWord));
+        assert_eq!(editor.selection_for_test(), None);
+    }
+
+    #[test]
+    fn select_line_selects_line_content() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "hello\nworld".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        // Caret in "world" (offset 8): selects "world" (6..11).
+        editor.set_caret_for_test(8);
+        assert!(editor.command(EditorCommand::SelectLine));
+        assert_eq!(editor.selection_for_test(), Some((6, 11)));
+        assert_eq!(editor.caret_for_test(), 11);
+    }
+
+    #[test]
+    fn select_paragraph_selects_non_blank_run() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "para1\nline2\n\npara2".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        // Caret in "line2" (offset 8): selects "para1\nline2" (0..11).
+        editor.set_caret_for_test(8);
+        assert!(editor.command(EditorCommand::SelectParagraph));
+        assert_eq!(editor.selection_for_test(), Some((0, 11)));
+        assert_eq!(editor.caret_for_test(), 11);
+    }
+
+    #[test]
+    fn caret_blink_solid_is_always_visible() {
+        let mut blink = CaretBlink::default();
+        for delta in [0, 100, 1000, 5000] {
+            blink.advance(&BlinkStyle::Solid, delta);
+            assert!(blink.is_visible(), "Solid caret must never hide");
+        }
+    }
+
+    #[test]
+    fn caret_blink_cycles_wait_on_off() {
+        let style = BlinkStyle::Blink {
+            on_ms: 100,
+            off_ms: 100,
+            wait_ms: 50,
+        };
+        let mut blink = CaretBlink::default();
+        assert!(blink.is_visible(), "caret starts visible");
+        // After the 50ms wait the caret is On (visible).
+        blink.advance(&style, 50);
+        assert_eq!(blink.phase, BlinkPhase::On);
+        assert!(blink.is_visible());
+        // After the 100ms on-phase the caret is Off (hidden).
+        blink.advance(&style, 100);
+        assert_eq!(blink.phase, BlinkPhase::Off);
+        assert!(!blink.is_visible());
+        // After the 100ms off-phase the caret is On again.
+        blink.advance(&style, 100);
+        assert_eq!(blink.phase, BlinkPhase::On);
+        assert!(blink.is_visible());
+    }
+
+    #[test]
+    fn caret_blink_reset_returns_to_visible_wait() {
+        let style = BlinkStyle::Blink {
+            on_ms: 100,
+            off_ms: 100,
+            wait_ms: 50,
+        };
+        let mut blink = CaretBlink::default();
+        blink.advance(&style, 150); // wait(50) + on(100) -> Off
+        assert!(!blink.is_visible());
+        blink.reset();
+        assert_eq!(blink.phase, BlinkPhase::Wait);
+        assert!(blink.is_visible(), "reset restarts visible + wait");
+    }
+
+    #[test]
+    fn effective_caret_style_resolves_override_manifest_theme() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "text".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        // No manifest, no override: the editor StyleRegistry default (Bar).
+        assert_eq!(editor.effective_caret_style().shape, CaretShape::Bar);
+
+        // Per-mode manifest override wins over the theme default.
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest.editor_rules.caret_style = Some(CaretStyle {
+            shape: CaretShape::Block,
+            ..CaretStyle::default()
+        });
+        editor.install_behavior_manifest(manifest);
+        assert_eq!(editor.effective_caret_style().shape, CaretShape::Block);
+
+        // Runtime clientSetCursorStyle override wins over the manifest.
+        editor.set_caret_style_override(Some(CaretStyle {
+            shape: CaretShape::Underline,
+            ..CaretStyle::default()
+        }));
+        assert_eq!(editor.effective_caret_style().shape, CaretShape::Underline);
+
+        // Clearing the override falls back to the manifest.
+        editor.set_caret_style_override(None);
+        assert_eq!(editor.effective_caret_style().shape, CaretShape::Block);
+    }
+
+    #[test]
+    fn command_resets_blink_when_stop_blink_on_typing() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "text".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        // An animating style with stop_blink_on_typing (the default).
+        editor.set_caret_style_override(Some(CaretStyle {
+            blink: BlinkStyle::Blink {
+                on_ms: 100,
+                off_ms: 100,
+                wait_ms: 50,
+            },
+            ..CaretStyle::default()
+        }));
+        // Drive the blink into its Off phase.
+        editor.advance_blink(50); // Wait -> On (still visible, no change)
+        assert!(editor.advance_blink(100)); // On -> Off (visibility flips)
+        assert!(!editor.caret_blink_visible());
+        // A user command resets the blink to visible.
+        editor.command(EditorCommand::MoveRight);
+        assert!(editor.caret_blink_visible(), "typing restarts the blink");
+    }
+
+    #[test]
+    fn multi_selection_paint_data_renders_both_ranges() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "one two three".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        // Primary selection over "one", secondary over "three".
+        editor.set_selection_for_test(0, 3);
+        editor.add_selection_for_test(8, 13);
+        assert_eq!(editor.selection_count_for_test(), 2);
+
+        let snapshot = editor.visible_snapshot();
+        let ranges = editor.visible_selection_ranges(&snapshot);
+        assert_eq!(ranges.len(), 2, "both selections feed the paint path");
+        // Ranges are visible-relative byte offsets.
+        assert_eq!(ranges[0], 0..3);
+        assert_eq!(ranges[1], 8..13);
+    }
+
+    #[test]
+    fn multi_caret_paint_gates_primary_on_blink_secondary_solid() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "one two three".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.set_selection_for_test(0, 3);
+        editor.add_selection_for_test(8, 13);
+        editor.set_caret_style_override(Some(CaretStyle {
+            blink: BlinkStyle::Blink {
+                on_ms: 100,
+                off_ms: 100,
+                wait_ms: 50,
+            },
+            ..CaretStyle::default()
+        }));
+
+        // Drive the primary blink into its Off phase.
+        editor.advance_blink(50); // Wait -> On
+        editor.advance_blink(100); // On -> Off
+        assert!(!editor.caret_should_paint(0), "primary hides on blink off");
+        assert!(editor.caret_should_paint(1), "secondary stays solid");
+
+        // Reset the blink: primary paints again, secondary unaffected.
+        editor.command(EditorCommand::MoveRight);
+        assert!(editor.caret_should_paint(0));
+        assert!(editor.caret_should_paint(1));
+    }
+
+    #[test]
+    fn ime_preedit_attaches_to_primary_caret_only() {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            "one two three".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        // Primary caret at byte 4 (inside "two"); a secondary selection exists.
+        editor.set_caret_for_test(4);
+        editor.add_selection_for_test(8, 13);
+        assert_eq!(editor.selection_count_for_test(), 2);
+
+        let snapshot = editor.visible_snapshot();
+        // The IME caret offset follows the PRIMARY caret, not the secondary.
+        let caret_offset = editor.visible_caret_offset(&snapshot);
+        assert_eq!(caret_offset, Some(4));
+    }
+
+    // ------------------------------------------------------------------
+    // Plan 071 task 9: multi-cursor commands.
+    // ------------------------------------------------------------------
+
+    fn multi_cursor_editor(text: &str) -> EditorSurface {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            1,
+            text.to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(1));
+        editor
+    }
+
+    #[test]
+    fn add_cursor_below_creates_two_carets_and_typing_inserts_at_both() {
+        let mut editor = multi_cursor_editor("aa\nbb\n");
+        editor.set_caret_for_test(1);
+
+        assert!(editor.command(EditorCommand::AddCursor {
+            direction: CursorSelectDirection::Down,
+        }));
+        assert_eq!(editor.selection_count_for_test(), 2);
+        // Primary is the newly added caret on line 2, same column.
+        assert_eq!(editor.caret_for_test(), 4);
+
+        // Typing inserts at both carets.
+        let outcome = editor.insert_text_with_event("X");
+        assert!(outcome.changed);
+        assert_eq!(editor.buffer_text_for_test(), "aXa\nbXb\n");
+        assert_eq!(outcome.edit_events.len(), 2, "one edit event per caret");
+        // Both carets survive the edit, advanced past the inserted char.
+        assert_eq!(editor.selection_count_for_test(), 2);
+    }
+
+    #[test]
+    fn add_cursor_refuses_to_stack_on_same_line_or_past_edges() {
+        let mut editor = multi_cursor_editor("aa\nbb\n");
+        editor.set_caret_for_test(1);
+        assert!(!editor.command(EditorCommand::AddCursor {
+            direction: CursorSelectDirection::Up,
+        }));
+        assert!(editor.command(EditorCommand::AddCursor {
+            direction: CursorSelectDirection::Down,
+        }));
+        // A second press targets line 2, which already has a caret -> no-op.
+        assert!(!editor.command(EditorCommand::AddCursor {
+            direction: CursorSelectDirection::Down,
+        }));
+        assert_eq!(editor.selection_count_for_test(), 2);
+    }
+
+    #[test]
+    fn select_next_match_selects_word_then_next_occurrences_and_wraps() {
+        let mut editor = multi_cursor_editor("foo bar foo baz foo");
+        editor.set_caret_for_test(1);
+
+        // First press selects the word under the caret.
+        assert!(editor.command(EditorCommand::SelectNextMatch));
+        assert_eq!(editor.selection_for_test(), Some((0, 3)));
+        assert_eq!(editor.selection_count_for_test(), 1);
+
+        // Second press adds the next occurrence as a new primary selection.
+        assert!(editor.command(EditorCommand::SelectNextMatch));
+        assert_eq!(editor.selection_count_for_test(), 2);
+        assert_eq!(editor.selection_for_test(), Some((8, 11)));
+
+        // Third press adds the last occurrence.
+        assert!(editor.command(EditorCommand::SelectNextMatch));
+        assert_eq!(editor.selection_count_for_test(), 3);
+        assert_eq!(editor.selection_for_test(), Some((16, 19)));
+
+        // All occurrences selected -> next press wraps and finds nothing new.
+        assert!(!editor.command(EditorCommand::SelectNextMatch));
+        assert_eq!(editor.selection_count_for_test(), 3);
+    }
+
+    #[test]
+    fn select_prev_match_walks_backwards_and_wraps() {
+        let mut editor = multi_cursor_editor("foo bar foo baz foo");
+        editor.set_selection_for_test(8, 11);
+
+        assert!(editor.command(EditorCommand::SelectPrevMatch));
+        assert_eq!(editor.selection_for_test(), Some((0, 3)));
+        assert_eq!(editor.selection_count_for_test(), 2);
+
+        // Wraps to the last occurrence.
+        assert!(editor.command(EditorCommand::SelectPrevMatch));
+        assert_eq!(editor.selection_for_test(), Some((16, 19)));
+        assert_eq!(editor.selection_count_for_test(), 3);
+    }
+
+    #[test]
+    fn select_all_matches_selects_every_occurrence_and_copy_unions_them() {
+        let mut editor = multi_cursor_editor("foo bar foo baz foo");
+        editor.set_caret_for_test(1);
+
+        assert!(editor.command(EditorCommand::SelectAllMatches));
+        assert_eq!(editor.selection_count_for_test(), 3);
+        // The occurrence containing the original caret is primary.
+        assert_eq!(editor.selection_for_test(), Some((0, 3)));
+        // Copy unions every range in document order.
+        assert_eq!(editor.selected_text().as_deref(), Some("foo\nfoo\nfoo"));
+    }
+
+    #[test]
+    fn column_select_down_grows_box_and_left_right_moves_all_carets() {
+        let mut editor = multi_cursor_editor("abcd\nefgh\n");
+        editor.set_caret_for_test(1);
+
+        assert!(editor.command(EditorCommand::ColumnSelect {
+            direction: CursorSelectDirection::Down,
+        }));
+        assert_eq!(editor.selection_count_for_test(), 2);
+        assert_eq!(editor.caret_for_test(), 6);
+
+        // Right moves every caret one scalar.
+        assert!(editor.command(EditorCommand::ColumnSelect {
+            direction: CursorSelectDirection::Right,
+        }));
+        assert_eq!(editor.selection_count_for_test(), 2);
+        assert_eq!(editor.caret_for_test(), 7);
+        let focus_positions: Vec<usize> = editor.selection_focus_positions_for_test();
+        assert_eq!(focus_positions, vec![2, 7]);
+
+        // Left moves them back.
+        assert!(editor.command(EditorCommand::ColumnSelect {
+            direction: CursorSelectDirection::Left,
+        }));
+        assert_eq!(editor.selection_focus_positions_for_test(), vec![1, 6]);
+    }
+
+    #[test]
+    fn cancel_multiple_selections_collapses_to_primary_caret() {
+        let mut editor = multi_cursor_editor("foo bar foo");
+        editor.set_selection_for_test(0, 3);
+        editor.add_selection_for_test(8, 11);
+        assert_eq!(editor.selection_count_for_test(), 2);
+
+        assert!(editor.command(EditorCommand::CancelMultipleSelections));
+        assert_eq!(editor.selection_count_for_test(), 1);
+        assert!(!editor.has_selection());
+    }
+
+    #[test]
+    fn keep_and_remove_primary_follow_helix_semantics() {
+        let mut editor = multi_cursor_editor("foo bar foo");
+        editor.set_selection_for_test(0, 3);
+        editor.add_selection_for_test(8, 11);
+
+        // Keep: only the primary (with its range) survives.
+        assert!(editor.command(EditorCommand::KeepSelection));
+        assert_eq!(editor.selection_count_for_test(), 1);
+        assert_eq!(editor.selection_for_test(), Some((0, 3)));
+
+        // Rebuild two selections; remove-primary drops the primary.
+        editor.add_selection_for_test(8, 11);
+        assert!(editor.command(EditorCommand::RemoveSelection));
+        assert_eq!(editor.selection_count_for_test(), 1);
+        assert_eq!(editor.selection_for_test(), Some((8, 11)));
+
+        // Removing the last selection is a no-op.
+        assert!(!editor.command(EditorCommand::RemoveSelection));
+        assert_eq!(editor.selection_count_for_test(), 1);
+    }
+
+    #[test]
+    fn cursor_undo_restores_previous_selection_set() {
+        let mut editor = multi_cursor_editor("foo bar foo");
+        editor.set_caret_for_test(0);
+
+        assert!(editor.command(EditorCommand::MoveRight));
+        // single-line doc: no-op, still snapshots dedup-safe
+        assert!(!editor.command(EditorCommand::AddCursor {
+            direction: CursorSelectDirection::Down,
+        }));
+        assert!(editor.command(EditorCommand::SelectAllMatches));
+        assert_eq!(editor.selection_count_for_test(), 2);
+
+        // Ctrl+U walks the set back through the snapshots.
+        assert!(editor.command(EditorCommand::UndoCursorMove));
+        assert_eq!(editor.selection_count_for_test(), 1);
+        assert!(editor.command(EditorCommand::UndoCursorMove));
+        assert_eq!(editor.caret_for_test(), 0);
+        // Stack exhausted -> unchanged.
+        assert!(!editor.command(EditorCommand::UndoCursorMove));
+    }
+
+    #[test]
+    fn multi_caret_typing_undoes_as_one_step() {
+        let mut editor = multi_cursor_editor("aa\nbb\n");
+        editor.set_caret_for_test(0);
+        assert!(editor.command(EditorCommand::AddCursor {
+            direction: CursorSelectDirection::Down,
+        }));
+
+        assert!(editor.insert_text_with_event("X").changed);
+        assert_eq!(editor.buffer_text_for_test(), "Xaa\nXbb\n");
+
+        // One undo reverses every caret's insert and restores both carets.
+        assert!(editor.undo_with_event().changed);
+        assert_eq!(editor.buffer_text_for_test(), "aa\nbb\n");
+        assert_eq!(editor.selection_count_for_test(), 2);
+
+        // Redo re-applies the combined step.
+        assert!(editor.redo_with_event().changed);
+        assert_eq!(editor.buffer_text_for_test(), "Xaa\nXbb\n");
+        assert_eq!(editor.selection_count_for_test(), 2);
+    }
+
+    #[test]
+    fn multi_caret_backspace_deletes_at_every_caret() {
+        let mut editor = multi_cursor_editor("Xa\nXb\n");
+        editor.set_caret_for_test(1);
+        assert!(editor.command(EditorCommand::AddCursor {
+            direction: CursorSelectDirection::Down,
+        }));
+        assert_eq!(editor.caret_for_test(), 4);
+
+        assert!(editor.backspace_with_event().changed);
+        assert_eq!(editor.buffer_text_for_test(), "a\nb\n");
+        assert_eq!(editor.selection_count_for_test(), 2);
+    }
+
+    #[test]
     fn editor_installs_minimal_behavior_manifest() {
         let mut editor = EditorSurface::default();
         let manifest = BehaviorManifest::minimal_text_editing(5);
@@ -4756,6 +6540,181 @@ mod tests {
             outcome.client_ui_command.unwrap().command_id,
             "clay.documents.clientOpenFileDialog"
         );
+    }
+
+    #[test]
+    fn editor_routes_rebound_move_cursor_command_to_client_ui() {
+        // Plan 071 task 5: rebinding Ctrl+Right to a direction-specific
+        // `clientMoveCursor.*` command ID routes it as a ClientUiCommand
+        // (client-local, no document mutation).
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            "para one\n\npara two".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        let mut manifest = BehaviorManifest::minimal_text_editing(3);
+        manifest.commands.push(CommandDeclaration::client_ui(
+            "clay.editor.clientMoveCursor.nextParagraph",
+            "Next Paragraph",
+        ));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "clay.editor.clientMoveCursor.nextParagraph".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::ArrowRight,
+                modifiers: KeyModifiers {
+                    control: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ClientUiCommand,
+        });
+        editor.install_behavior_manifest(manifest);
+        editor.set_caret_for_test(0);
+
+        let outcome = editor.route_key_with_event(&KeyStroke {
+            key: KeyCode::ArrowRight,
+            modifiers: KeyModifiers {
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        // The chord is routed to the client UI layer, not mutated locally here;
+        // main.rs dispatches it to EditorWidget::apply_editor_client_command.
+        assert!(!outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "para one\n\npara two");
+        assert_eq!(
+            outcome.client_ui_command.unwrap().command_id,
+            "clay.editor.clientMoveCursor.nextParagraph"
+        );
+    }
+
+    #[test]
+    fn editor_routes_rebound_multi_cursor_command_to_client_ui() {
+        // Plan 071 task 9: rebinding a chord to an allowlisted multi-cursor
+        // command ID routes it as a ClientUiCommand (client-local view state).
+        let mut editor = multi_cursor_editor("foo bar foo");
+        let mut manifest = BehaviorManifest::minimal_text_editing(3);
+        manifest.commands.push(CommandDeclaration::client_ui(
+            "clay.editor.clientSelectAllMatches",
+            "Select All Matches",
+        ));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "clay.editor.clientSelectAllMatches".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::Character("m".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    shift: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ClientUiCommand,
+        });
+        editor.install_behavior_manifest(manifest);
+        editor.set_caret_for_test(1);
+
+        let outcome = editor.route_key_with_event(&KeyStroke {
+            key: KeyCode::Character("m".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                shift: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert!(!outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "foo bar foo");
+        assert_eq!(
+            outcome.client_ui_command.unwrap().command_id,
+            "clay.editor.clientSelectAllMatches"
+        );
+    }
+
+    #[test]
+    fn editor_routes_textobject_command_as_ui_reactive_server_intent() {
+        // Plan 071 task 10: textobject/smart-select command IDs bind with
+        // UiReactivePriority + ServerIntent authority (bindKey's auto-
+        // declaration); routing hands the widget a server intent so it can
+        // capture the selection set locally and query the server read-only.
+        let mut editor = multi_cursor_editor("foo bar foo");
+        let mut manifest = BehaviorManifest::minimal_text_editing(3);
+        manifest.commands.push(CommandDeclaration::ui_reactive(
+            "clay.editor.clientSmartSelect.expand",
+            "Expand Selection",
+        ));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "clay.editor.clientSmartSelect.expand".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::Character("\\".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    shift: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::UiReactivePriority,
+        });
+        editor.install_behavior_manifest(manifest);
+        editor.set_caret_for_test(1);
+
+        let outcome = editor.route_key_with_event(&KeyStroke {
+            key: KeyCode::Character("\\".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                shift: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        // Read-only query: no local mutation; the intent reaches the widget.
+        assert!(!outcome.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "foo bar foo");
+        assert_eq!(
+            outcome.server_intent.unwrap().command_id,
+            "clay.editor.clientSmartSelect.expand"
+        );
+    }
+
+    #[test]
+    fn selection_query_request_captures_every_caret_and_apply_installs_ranges() {
+        // Plan 071 task 10: the request carries the whole selection set and
+        // applying a result installs one selection per requested caret.
+        let mut editor = multi_cursor_editor("foo bar foo\nfoo");
+        editor.set_selection_for_test(0, 3);
+        editor.selections.push_selection(Selection::collapsed(9));
+
+        let event = editor
+            .selection_query_request_for(crate::protocol::SelectionQuery::SmartSelect {
+                action: crate::protocol::SmartSelectAction::Expand,
+            })
+            .expect("request captured");
+        assert_eq!(
+            event.selections,
+            vec![
+                crate::protocol::SelectionQueryCursor {
+                    anchor: 0,
+                    focus: 3
+                },
+                crate::protocol::SelectionQueryCursor {
+                    anchor: 9,
+                    focus: 9
+                },
+            ]
+        );
+
+        // Applying ranges keeps the primary index and replaces each selection.
+        editor.apply_selection_query_result(vec![Selection::new(0, 7), Selection::new(8, 11)]);
+        assert_eq!(editor.selection_count_for_test(), 2);
+        assert_eq!(editor.selection_for_test(), Some((0, 7)));
+        // Cursor-undo restores the pre-query set.
+        assert!(editor.command(EditorCommand::UndoCursorMove));
+        assert_eq!(editor.selection_for_test(), Some((0, 3)));
     }
 
     #[test]

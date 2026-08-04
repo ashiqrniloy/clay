@@ -5,10 +5,12 @@
 
 use std::borrow::Cow;
 
-use masonry::parley::style::{FontFamily, FontStack, GenericFamily};
+use masonry::parley::style::{FontFamily, FontFeature, FontSettings, FontStack, GenericFamily};
+use masonry::parley::swash::tag_from_str_lossy;
 
 use crate::protocol::{
-    ActiveTypography, ActiveTypographyValidationError, FontProfile, FontRole, UiTypographyHierarchy,
+    ActiveTypography, ActiveTypographyValidationError, FontProfile, FontRole, LigaturePolicy,
+    UiTypographyHierarchy,
 };
 
 /// Shared conservative line-height policy for viewport extraction and logical
@@ -99,6 +101,10 @@ impl UiTextMetrics {
 pub(crate) struct ResolvedFontProfile {
     families: Vec<FontFamily<'static>>,
     size: f32,
+    /// Resolved OpenType feature list for this profile, sorted by tag with the
+    /// last-declared value winning duplicates. Built once at install time from
+    /// the user-owned `LigaturePolicy`; consumed by parley at shape time.
+    features: Vec<FontFeature>,
 }
 
 impl ResolvedFontProfile {
@@ -120,6 +126,7 @@ impl ResolvedFontProfile {
         Self {
             families,
             size: profile.size,
+            features: resolve_font_features(&profile.ligatures),
         }
     }
 
@@ -131,10 +138,65 @@ impl ResolvedFontProfile {
         self.size
     }
 
+    /// Resolved OpenType feature settings for this profile, borrowed for the
+    /// lifetime of the profile. Pushed into parley as `StyleProperty::FontFeatures`.
+    pub(crate) fn font_features(&self) -> FontSettings<'_, FontFeature> {
+        FontSettings::List(Cow::Borrowed(&self.features))
+    }
+
+    /// Stable hash of the resolved feature list, used to key the layout cache so
+    /// a ligature-policy change invalidates cached glyphs even if the layout
+    /// style revision is unchanged. Zero for the empty (font-default) policy.
+    pub(crate) fn feature_hash(&self) -> u64 {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for feature in &self.features {
+            hash ^= u64::from(feature.tag);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            hash ^= u64::from(feature.value);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash
+    }
+
     #[cfg(test)]
     fn families(&self) -> &[FontFamily<'static>] {
         &self.families
     }
+}
+
+/// Resolve a `LigaturePolicy` into a sorted, deduplicated feature list. Semantic
+/// toggles emit explicit on/off values; `raw_features` is parsed via `swash`;
+/// `disable_features` is applied last so it overrides everything else.
+/// `BTreeMap` gives tag-sorted output with last-declared-wins dedup.
+fn resolve_font_features(policy: &LigaturePolicy) -> Vec<FontFeature> {
+    use std::collections::BTreeMap;
+    let mut map: BTreeMap<u32, u16> = BTreeMap::new();
+    if policy.enable_standard {
+        map.insert(tag_from_str_lossy("liga"), 1);
+        map.insert(tag_from_str_lossy("clig"), 1);
+    } else {
+        map.insert(tag_from_str_lossy("liga"), 0);
+        map.insert(tag_from_str_lossy("clig"), 0);
+    }
+    if policy.enable_contextual {
+        map.insert(tag_from_str_lossy("calt"), 1);
+    } else {
+        map.insert(tag_from_str_lossy("calt"), 0);
+    }
+    for feature in &policy.discretionary_features {
+        map.insert(tag_from_str_lossy(feature), 1);
+    }
+    if let Some(raw) = &policy.raw_features {
+        for parsed in FontFeature::parse_list(raw) {
+            map.insert(parsed.tag, parsed.value);
+        }
+    }
+    for feature in &policy.disable_features {
+        map.insert(tag_from_str_lossy(feature), 0);
+    }
+    map.into_iter()
+        .map(|(tag, value)| FontFeature { tag, value })
+        .collect()
 }
 
 /// Installed typography snapshot plus cached Parley representations.
@@ -478,5 +540,145 @@ mod tests {
         assert!(active.validate().is_err());
         // And a valid hierarchy on an otherwise-default snapshot still validates.
         assert!(ActiveTypography::default().validate().is_ok());
+    }
+
+    fn liga_value(features: &[super::FontFeature]) -> Option<u16> {
+        features
+            .iter()
+            .find(|feature| feature.tag == super::tag_from_str_lossy("liga"))
+            .map(|feature| feature.value)
+    }
+
+    fn calt_value(features: &[super::FontFeature]) -> Option<u16> {
+        features
+            .iter()
+            .find(|feature| feature.tag == super::tag_from_str_lossy("calt"))
+            .map(|feature| feature.value)
+    }
+
+    #[test]
+    fn resolve_features_enables_standard_and_contextual_by_default() {
+        let features = super::resolve_font_features(&LigaturePolicy::default());
+        assert_eq!(liga_value(&features), Some(1));
+        assert_eq!(calt_value(&features), Some(1));
+        // clig is part of standard ligatures.
+        assert!(
+            features
+                .iter()
+                .any(|feature| feature.tag == super::tag_from_str_lossy("clig")
+                    && feature.value == 1)
+        );
+    }
+
+    #[test]
+    fn resolve_features_disable_standard_turns_liga_off() {
+        let policy = LigaturePolicy {
+            enable_standard: false,
+            ..LigaturePolicy::default()
+        };
+        let features = super::resolve_font_features(&policy);
+        assert_eq!(liga_value(&features), Some(0));
+        assert_eq!(calt_value(&features), Some(1));
+    }
+
+    #[test]
+    fn resolve_features_disable_list_overrides_enable_toggle() {
+        // enable_standard keeps liga on, but disable_features forces it off.
+        let policy = LigaturePolicy {
+            enable_standard: true,
+            disable_features: vec!["liga".to_string()],
+            ..LigaturePolicy::default()
+        };
+        let features = super::resolve_font_features(&policy);
+        assert_eq!(liga_value(&features), Some(0));
+        assert_eq!(calt_value(&features), Some(1));
+    }
+
+    #[test]
+    fn resolve_features_raw_source_disables_liga_only() {
+        // raw_features parses a CSS source; with standard on by default, the raw
+        // 'liga' 0 disables liga while calt stays on.
+        let policy = LigaturePolicy {
+            raw_features: Some("'calt' 1, 'liga' 0".to_string()),
+            ..LigaturePolicy::default()
+        };
+        let features = super::resolve_font_features(&policy);
+        assert_eq!(liga_value(&features), Some(0));
+        assert_eq!(calt_value(&features), Some(1));
+        // clig untouched by the raw source.
+        assert!(
+            features
+                .iter()
+                .any(|feature| feature.tag == super::tag_from_str_lossy("clig")
+                    && feature.value == 1)
+        );
+    }
+
+    #[test]
+    fn resolve_features_discretionary_tags_enabled() {
+        let policy = LigaturePolicy {
+            discretionary_features: vec!["ss01".to_string()],
+            ..LigaturePolicy::default()
+        };
+        let features = super::resolve_font_features(&policy);
+        assert!(
+            features
+                .iter()
+                .any(|feature| feature.tag == super::tag_from_str_lossy("ss01")
+                    && feature.value == 1)
+        );
+    }
+
+    #[test]
+    fn feature_hash_differs_for_on_vs_off_policy() {
+        let on = super::resolve_font_features(&LigaturePolicy::default());
+        let off = super::resolve_font_features(&LigaturePolicy {
+            enable_standard: false,
+            enable_contextual: false,
+            ..LigaturePolicy::default()
+        });
+        let hash_on = {
+            let p = ResolvedFontProfile {
+                families: Vec::new(),
+                size: 16.0,
+                features: on,
+            };
+            p.feature_hash()
+        };
+        let hash_off = {
+            let p = ResolvedFontProfile {
+                families: Vec::new(),
+                size: 16.0,
+                features: off,
+            };
+            p.feature_hash()
+        };
+        assert_ne!(hash_on, hash_off);
+    }
+
+    #[test]
+    fn per_role_policies_resolve_independently() {
+        // A fixture typography where monospace disables ligatures and
+        // proportional keeps them on: the two roles resolve different feature
+        // lists (markdown-prose vs code get different shaping).
+        let mut active = ActiveTypography::default();
+        active.monospace.ligatures = Box::new(LigaturePolicy {
+            enable_standard: false,
+            enable_contextual: false,
+            ..LigaturePolicy::default()
+        });
+        let registry = TypographyRegistry::from_active_typography(active).unwrap();
+        let mono = registry.profile(FontRole::Monospace).font_features();
+        let prop = registry.profile(FontRole::Proportional).font_features();
+        let mono_list = match &mono {
+            super::FontSettings::List(items) => items,
+            _ => unreachable!("resolved features are always a list"),
+        };
+        let prop_list = match &prop {
+            super::FontSettings::List(items) => items,
+            _ => unreachable!("resolved features are always a list"),
+        };
+        assert_ne!(liga_value(mono_list), Some(1));
+        assert_eq!(liga_value(prop_list), Some(1));
     }
 }

@@ -982,6 +982,27 @@ fn syntax_grammar_rejects_third_party_packages_in_phase18_10() {
 }
 
 #[test]
+fn syntax_grammar_rejects_unknown_query_kind_deny_by_default() {
+    // Plan 071 task 15: text-object queries are first-party native-descriptor
+    // contributions only; package grammar metadata must not declare them, and
+    // no unknown query key may slip through silently.
+    for key in ["textobjects", "localsX", "folds"] {
+        let mut package = grammar_package("rust", "rust", "rs");
+        package["clay"]["contributions"]["syntaxGrammars"][0]["queries"][key] =
+            json!("./queries/textobjects.scm");
+
+        let error = assemble_package_record(&package).unwrap_err();
+
+        assert_eq!(error.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(
+            error.message.contains(&format!("queries.{key}")),
+            "rejection must name the offending key: {}",
+            error.message
+        );
+    }
+}
+
+#[test]
 fn syntax_grammar_rejects_external_or_traversing_paths() {
     for path in [
         "../grammars/rust.wasm",

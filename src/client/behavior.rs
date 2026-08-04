@@ -4,7 +4,7 @@ use crate::protocol::{
     KeyModifiers, KeyStroke, RoutingPolicy,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ClientBehaviorState {
     active: BehaviorManifest,
 }

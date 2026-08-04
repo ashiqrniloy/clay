@@ -30,6 +30,7 @@ The coordinator never sends parser code to the Rust client and never waits for p
 - Validate parse-window document/version/provenance metadata, byte lengths, per-window limits, `SYNTAX_CACHE_BUDGET_BYTES`, stale versions, ranges, every parse-produced decoration chunk and optional range-diagnostic metadata, their viewport/provenance identity, component payload budgets, and per-member `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` before publishing updates to downstream consumers.
 - Instrument scheduled, cancelled, published, stale, and failed parse tasks through `ParseCoordinatorStats`.
 - Dual-publish updates/diagnostics to bounded internal test/tooling receivers and bounded access-scoped connection subscriptions; production connections never compete to drain a global receiver.
+- Answer advisory Plan 071 selection queries (text objects / smart select): `handler_for(package_prefix, mode_id)` exposes the registered handler to the connection loop, and the `ParseHandler::selection_query_ranges` default method returns `None` so JS handlers never participate — only `TreeSitterSyntaxHandler` implements it, in pure Rust over inert ranges. See [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md).
 
 ## How It Works
 

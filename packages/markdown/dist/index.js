@@ -102,7 +102,15 @@ export const markdownEditorRules = Object.freeze(
       { open: "__", close: "__" },
       { open: "`", close: "`" }
     ],
-    autocompleteTriggers: ["#", "[", "`"]
+    autocompleteTriggers: ["#", "[", "`"],
+    // Plan 071 task 11: prose movement. Underscore and camelCase carry no
+    // meaning in prose, so word motion splits on them; everything else defers
+    // to the code-editing movement defaults server-side.
+    movement: {
+      wordSeparators: "prose",
+      treatUnderscoreAsWord: false,
+      camelCaseSubWord: false
+    }
   })
 );
 

@@ -14,7 +14,10 @@ mod viewport;
 
 pub(crate) use surface::EditorCompletionRequestEvent;
 pub(crate) use surface::EditorLanguageIntelligenceRequestEvent;
-pub use surface::{EditorCommand, EditorCommandOutcome, EditorEditEvent, EditorSurface};
+pub(crate) use surface::EditorSelectionQueryRequestEvent;
+pub use surface::{
+    CursorSelectDirection, EditorCommand, EditorCommandOutcome, EditorEditEvent, EditorSurface,
+};
 
 pub fn is_printable_text(text: &str) -> bool {
     !text.is_empty() && text.chars().all(|character| !character.is_control())

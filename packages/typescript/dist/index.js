@@ -9,6 +9,9 @@ export { typescriptGrammarContract, loadTypescriptPackage } from "./load.js";
 export const typescriptEditorRules = buildCodeEditingManifest({
   indentSize: 2,
   lineComment: "//",
+  // Plan 071 task 11: explicit code movement (identical to the built-in
+  // default; declared for discoverability).
+  movement: { wordSeparators: "code" },
   pairs: [
     { open: "(", close: ")" },
     { open: "[", close: "]" },

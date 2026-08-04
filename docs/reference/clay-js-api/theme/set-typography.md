@@ -9,7 +9,7 @@ deno_op: op_clay_theme_set_typography
 deno_op_path: src/server/ops/typography.rs::op_clay_theme_set_typography
 name: setTypography
 user_facing_name: Set Typography
-summary: Atomically configure Clay's monospace, proportional, and UI font-family fallback stacks, logical-pixel sizes, and optional UI text-variant hierarchy.
+summary: Atomically configure Clay's monospace, proportional, and UI font-family fallback stacks, logical-pixel sizes, optional per-role ligature/feature policies, and optional UI text-variant hierarchy.
 owner: server
 phase: Phase 18.16.5
 visibility: public
@@ -24,6 +24,10 @@ custom_properties:
     type: number
     default: 20
     description: Monospace base size in logical pixels, from 6 through 96 inclusive.
+  - name: monospace.ligatures
+    type: 'object | undefined'
+    default: '{ enableStandard: true, enableContextual: true }'
+    description: Optional OpenType ligature/feature policy for code text. Fields — enableStandard (liga+clig, default true), enableContextual (calt, default true), discretionaryFeatures (up to 32 feature tags to enable), rawFeatures (CSS-font-features-format string, at most 256 bytes), disableFeatures (up to 32 feature tags forced off). Omission keeps standard and contextual ligatures enabled.
   - name: proportional.families
     type: string[]
     default: '["sans-serif"]'
@@ -32,6 +36,10 @@ custom_properties:
     type: number
     default: 20
     description: Proportional base size in logical pixels, from 6 through 96 inclusive.
+  - name: proportional.ligatures
+    type: 'object | undefined'
+    default: '{ enableStandard: true, enableContextual: true }'
+    description: Optional OpenType ligature/feature policy for prose text; same schema as monospace.ligatures.
   - name: ui.families
     type: string[]
     default: '["system-ui"]'
@@ -40,6 +48,10 @@ custom_properties:
     type: number
     default: 12
     description: UI base size in logical pixels, from 6 through 96 inclusive.
+  - name: ui.ligatures
+    type: 'object | undefined'
+    default: '{ enableStandard: true, enableContextual: true }'
+    description: Optional OpenType ligature/feature policy for Clay UI text; same schema as monospace.ligatures.
   - name: hierarchy
     type: 'object | undefined'
     default: '{ display: 1.5, title: 14/12, section: 13/12, body: 1, status: 1, detail: 10/12, caption: 0.75 }'
@@ -91,7 +103,9 @@ Atomically configures user-owned monospace, proportional, and UI typography prof
 
 `setTypography` validates one complete three-profile object before replacing active typography. Each profile contains an ordered family fallback stack and logical-pixel base size. The server publishes one bounded snapshot to clients at bootstrap or after a changed configuration evaluation; native layout then reads cached client state without JavaScript or IPC.
 
-Modes and packages may choose semantic roles such as monospace or proportional. They cannot choose concrete family names or sizes, which remain user-owned here.
+Each profile may also carry an optional `ligatures` policy (Plan 071 task 7): semantic toggles first — `enableStandard` (`liga` + `clig`) and `enableContextual` (`calt`) — with bounded `discretionaryFeatures`/`disableFeatures` tag lists and a `rawFeatures` CSS-format escape hatch for stylistic alternates. Absent fields default to ligatures enabled; disabling is explicit user configuration. A mode's font role selects which profile's policy applies to its document text, so ligature preferences follow the typography role rather than individual modes or packages.
+
+Modes and packages may choose semantic roles such as monospace or proportional. They cannot choose concrete family names, sizes, or ligature policies, which remain user-owned here.
 
 ## When to use
 
@@ -104,6 +118,20 @@ import { setTypography } from "clay:theme";
 
 setTypography({
   monospace: { families: ["JetBrains Mono", "monospace"], size: 16 },
+  proportional: { families: ["Inter", "sans-serif"], size: 17 },
+  ui: { families: ["system-ui"], size: 13 },
+});
+```
+
+With an optional per-role ligature policy (here disabling contextual alternates for code):
+
+```ts
+setTypography({
+  monospace: {
+    families: ["JetBrains Mono", "monospace"],
+    size: 16,
+    ligatures: { enableStandard: true, enableContextual: false },
+  },
   proportional: { families: ["Inter", "sans-serif"], size: 17 },
   ui: { families: ["system-ui"], size: 13 },
 });

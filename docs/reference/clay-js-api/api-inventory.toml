@@ -78,46 +78,322 @@ registry_public = true
 id = "clay.editor.clientMoveCursor"
 category = "cursor-movement"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:editor"
 js_export = "clientMoveCursor"
 user_facing_name = "Move Cursor"
 authority = "client-local-ui-state"
 runtime_path = "client-local-hot-path"
-hot_path_policy = "Arrow/Home/End movement updates local caret/viewport state without IPC, server work, or JavaScript."
+hot_path_policy = "Arrow/Home/End and Ctrl+arrow word/paragraph movement update local caret/viewport state without IPC, server work, or JavaScript."
 facade_path = "runtime/js/editor.js::clientMoveCursor"
-backing_rust = "src/editor/surface.rs::EditorSurface::move_left"
+backing_rust = "src/editor/surface.rs::EditorSurface::move_word_start"
 deno_op = "op_clay_editor_move_cursor"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_move_cursor"
 documentation_path = "docs/reference/clay-js-api/editor/client-move-cursor.md"
-key_bindings = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Ctrl+Home", "Ctrl+End"]
-custom_properties = ["direction:enum", "extendSelection:boolean=false"]
+key_bindings = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Ctrl+Home", "Ctrl+End", "Ctrl+Left", "Ctrl+Right", "Ctrl+Up", "Ctrl+Down"]
+custom_properties = ["direction:enum", "granularity:enum", "extend:boolean=false", "count:number=1"]
 permissions = []
 security_notes = "Changes only client-local caret/selection/viewport state and grants no document mutation or external authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/editor/cursor.rs::CursorState; src/editor/surface.rs::EditorSurface::command_with_event"
+current_rust_owner = "src/editor/surface.rs::EditorSurface::move_word_start; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
 id = "clay.editor.clientSetSelection"
 category = "selection"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:editor"
 js_export = "clientSetSelection"
 user_facing_name = "Set Selection"
 authority = "client-local-ui-state"
 runtime_path = "client-local-hot-path"
-hot_path_policy = "Shift-arrow and pointer-drag selection update local state and are not serialized unless followed by a document edit."
+hot_path_policy = "Shift-arrow, pointer-drag, Ctrl+L (line), and Ctrl+D (word) selection update local state and are not serialized unless followed by a document edit."
 facade_path = "runtime/js/editor.js::clientSetSelection"
-backing_rust = "src/editor/selection.rs::SelectionState"
+backing_rust = "src/editor/surface.rs::EditorSurface::select_word"
 deno_op = "op_clay_editor_set_selection"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_set_selection"
 documentation_path = "docs/reference/clay-js-api/editor/client-set-selection.md"
-key_bindings = ["Shift+ArrowLeft", "Shift+ArrowRight", "PrimaryPointerDrag"]
-custom_properties = []
+key_bindings = ["Shift+ArrowLeft", "Shift+ArrowRight", "PrimaryPointerDrag", "Ctrl+L", "Ctrl+D"]
+custom_properties = ["action:enum", "extend:boolean=false", "direction:enum=current"]
 permissions = []
 security_notes = "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::extend_selection_to_point; src/editor/surface.rs::EditorSurface::select_left"
+current_rust_owner = "src/editor/surface.rs::EditorSurface::select_word; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientAddCursor"
+category = "multi-cursor"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:editor"
+js_export = "clientAddCursor"
+user_facing_name = "Add Cursor"
+authority = "client-local-ui-state"
+runtime_path = "client-local-hot-path"
+hot_path_policy = "Ctrl+Alt+Down/Up add a caret on the adjacent line at the same column, updating local selection state without IPC, server work, or JavaScript."
+facade_path = "runtime/js/editor.js::clientAddCursor"
+backing_rust = "src/editor/surface.rs::EditorSurface::add_cursor_line"
+deno_op = "op_clay_editor_add_cursor"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_add_cursor"
+documentation_path = "docs/reference/clay-js-api/editor/client-add-cursor.md"
+key_bindings = ["Ctrl+Alt+Down", "Ctrl+Alt+Up"]
+custom_properties = ["direction:enum"]
+permissions = []
+security_notes = "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::add_cursor_line; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientColumnSelect"
+category = "multi-cursor"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:editor"
+js_export = "clientColumnSelect"
+user_facing_name = "Column Select"
+authority = "client-local-ui-state"
+runtime_path = "client-local-hot-path"
+hot_path_policy = "Shift+Alt+Down/Up grow the column box one line; Shift+Alt+Left/Right move every caret one scalar; all update local selection state without IPC, server work, or JavaScript."
+facade_path = "runtime/js/editor.js::clientColumnSelect"
+backing_rust = "src/editor/surface.rs::EditorSurface::add_cursor_line"
+deno_op = "op_clay_editor_column_select"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_column_select"
+documentation_path = "docs/reference/clay-js-api/editor/client-column-select.md"
+key_bindings = ["Shift+Alt+Down", "Shift+Alt+Up", "Shift+Alt+Left", "Shift+Alt+Right"]
+custom_properties = ["direction:enum"]
+permissions = []
+security_notes = "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::add_cursor_line; src/editor/surface.rs::EditorSurface::move_all_carets; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientSelectNextMatch"
+category = "multi-cursor"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientSelectNextMatch"
+user_facing_name = "Select Next Match"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; the selection change runs client-local after explicit user routing and stays off server IPC and JavaScript."
+facade_path = "runtime/js/editor.js::clientSelectNextMatch"
+backing_rust = "src/editor/surface.rs::EditorSurface::select_next_match"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-select-next-match.md"
+key_bindings = ["Ctrl+D"]
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::select_next_match; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientSelectPrevMatch"
+category = "multi-cursor"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientSelectPrevMatch"
+user_facing_name = "Select Previous Match"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; the selection change runs client-local after explicit user routing and stays off server IPC and JavaScript."
+facade_path = "runtime/js/editor.js::clientSelectPrevMatch"
+backing_rust = "src/editor/surface.rs::EditorSurface::select_next_match"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-select-prev-match.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::select_next_match; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientSelectAllMatches"
+category = "multi-cursor"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientSelectAllMatches"
+user_facing_name = "Select All Matches"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; the selection change runs client-local after explicit user routing and stays off server IPC and JavaScript."
+facade_path = "runtime/js/editor.js::clientSelectAllMatches"
+backing_rust = "src/editor/surface.rs::EditorSurface::select_all_matches"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-select-all-matches.md"
+key_bindings = ["Ctrl+Shift+L"]
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::select_all_matches; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientCancelMultipleSelections"
+category = "multi-cursor"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientCancelMultipleSelections"
+user_facing_name = "Cancel Multiple Selections"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; the selection collapse runs client-local after explicit user routing and stays off server IPC and JavaScript."
+facade_path = "runtime/js/editor.js::clientCancelMultipleSelections"
+backing_rust = "src/editor/surface.rs::EditorSurface::cancel_multiple_selections"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-cancel-multiple-selections.md"
+key_bindings = ["Escape"]
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::cancel_multiple_selections; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientKeepSelection"
+category = "multi-cursor"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientKeepSelection"
+user_facing_name = "Keep Selection"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; the selection change runs client-local after explicit user routing and stays off server IPC and JavaScript."
+facade_path = "runtime/js/editor.js::clientKeepSelection"
+backing_rust = "src/editor/surface.rs::EditorSurface::keep_selection"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-keep-selection.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::keep_selection; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientRemoveSelection"
+category = "multi-cursor"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientRemoveSelection"
+user_facing_name = "Remove Selection"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; the selection change runs client-local after explicit user routing and stays off server IPC and JavaScript."
+facade_path = "runtime/js/editor.js::clientRemoveSelection"
+backing_rust = "src/editor/surface.rs::EditorSurface::remove_selection"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-remove-selection.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::remove_selection; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientUndoCursorMove"
+category = "multi-cursor"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientUndoCursorMove"
+user_facing_name = "Undo Cursor Move"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; the selection-set restore runs client-local after explicit user routing and stays off server IPC and JavaScript."
+facade_path = "runtime/js/editor.js::clientUndoCursorMove"
+backing_rust = "src/editor/surface.rs::EditorSurface::undo_cursor_move"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-undo-cursor-move.md"
+key_bindings = ["Ctrl+U"]
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only; after explicit user routing it restores transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/editor/surface.rs::EditorSurface::undo_cursor_move; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientSelectTextobject"
+category = "textobjects"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:editor"
+js_export = "clientSelectTextobject"
+user_facing_name = "Select Textobject"
+authority = "client-local-ui-state"
+runtime_path = "ui-reactive-server-query"
+hot_path_policy = "The facade validates options and returns the direction-specific command ID synchronously; key-driven execution sends one bounded read-only grammar query per command and applies returned ranges client-local; it never runs on the typing hot path."
+facade_path = "runtime/js/editor.js::clientSelectTextobject"
+backing_rust = "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/masonry_editor.rs::EditorWidget::apply_selection_query_result"
+deno_op = "op_clay_editor_select_textobject"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_select_textobject"
+documentation_path = "docs/reference/clay-js-api/editor/client-select-textobject.md"
+key_bindings = []
+custom_properties = ["object:enum", "around:boolean", "direction:enum"]
+permissions = []
+security_notes = "Changes only transient client selection state from a read-only server grammar query; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/server/connection.rs handle SelectionQueryRequest; src/masonry_editor.rs::EditorWidget::apply_selection_query_result"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientSmartSelect"
+category = "textobjects"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:editor"
+js_export = "clientSmartSelect"
+user_facing_name = "Smart Select"
+authority = "client-local-ui-state"
+runtime_path = "ui-reactive-server-query"
+hot_path_policy = "The facade validates options and returns the action-specific command ID synchronously; key-driven execution sends one bounded read-only tree walk per command and applies returned ranges client-local; it never runs on the typing hot path."
+facade_path = "runtime/js/editor.js::clientSmartSelect"
+backing_rust = "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/masonry_editor.rs::EditorWidget::apply_selection_query_result"
+deno_op = "op_clay_editor_smart_select"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_smart_select"
+documentation_path = "docs/reference/clay-js-api/editor/client-smart-select.md"
+key_bindings = []
+custom_properties = ["action:enum"]
+permissions = []
+security_notes = "Changes only transient client selection state from a read-only server tree walk; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/server/connection.rs handle SelectionQueryRequest; src/masonry_editor.rs::EditorWidget::apply_selection_query_result"
+registry_public = true
+
+[[api]]
+id = "clay.editor.clientExecuteEditorCommand"
+category = "editor-control"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:editor"
+js_export = "clientExecuteEditorCommand"
+user_facing_name = "Execute Editor Command"
+authority = "client-local-ui-state"
+runtime_path = "server-gated-push"
+hot_path_policy = "The op validates the command ID against the editor allowlist and the editor-control gate, then publishes one advisory EditorCommandRequest; the client re-parses deny-by-default and dispatches through the keybinding path. Never runs on the typing hot path."
+facade_path = "runtime/js/editor.js::clientExecuteEditorCommand"
+backing_rust = "src/server/ops/editor.rs::op_clay_editor_execute_command; src/masonry_editor.rs::EditorWidget::apply_editor_command_request"
+deno_op = "op_clay_editor_execute_command"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_execute_command"
+documentation_path = "docs/reference/clay-js-api/editor/client-execute-editor-command.md"
+key_bindings = []
+custom_properties = ["commandId:string"]
+permissions = ["editor-control"]
+security_notes = "Gated programmatic cursor/selection control: package callers need approved editor-control and a declared active mode (clay.editorControl.modes); changes only transient client cursor/selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/ops/editor.rs::op_clay_editor_execute_command; src/server/connection.rs EditorCommandRequest fanout; src/masonry_editor.rs::EditorWidget::apply_editor_command_request"
 registry_public = true
 
 [[api]]
@@ -170,7 +446,7 @@ registry_public = true
 id = "clay.editor.clientSetCursorStyle"
 category = "cursor-style-customization"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:editor"
 js_export = "clientSetCursorStyle"
 user_facing_name = "Set Cursor Style"
@@ -178,15 +454,15 @@ authority = "configuration-driven-client-ui-state"
 runtime_path = "configuration-api-to-client-ui"
 hot_path_policy = "Cursor styling is paint-time UI metadata; changing it must not route ordinary keypresses through JavaScript."
 facade_path = "runtime/js/editor.js::clientSetCursorStyle"
-backing_rust = "src/editor/surface.rs::EditorSurface::paint_caret"
+backing_rust = "src/editor/surface.rs::EditorSurface::set_caret_style_override"
 deno_op = "op_clay_editor_set_cursor_style"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_set_cursor_style"
 documentation_path = "docs/reference/clay-js-api/editor/client-set-cursor-style.md"
 key_bindings = []
-custom_properties = ["color:string=inherited", "blinking:boolean=true", "type:enum=bar"]
+custom_properties = ["shape:enum=bar", "blink:enum=solid", "widthPx:number=1.5", "heightPct:number=1", "hollow:boolean=false", "stopBlinkOnTyping:boolean=true"]
 permissions = []
 security_notes = "Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority."
-current_rust_owner = "src/editor/surface.rs::CARET_COLOR; src/editor/surface.rs::CARET_WIDTH"
+current_rust_owner = "src/editor/surface.rs::EditorSurface::paint_caret; src/editor/layout.rs::caret_cell_for_visible_byte_offset"
 registry_public = true
 
 [[api]]
@@ -367,7 +643,7 @@ deno_op = "op_clay_modes_register_pattern"
 deno_op_path = "src/server/ops/modes.rs::op_clay_modes_register_pattern"
 documentation_path = "docs/reference/clay-js-api/behavior/build-code-editing-manifest.md"
 key_bindings = []
-custom_properties = ["indentSize:number=required", "lineComment:string=optional", "blockCommentStart:string=optional", "blockCommentEnd:string=optional", "enter:object=preserve-leading-whitespace", "pairs:object[]=default-delimiters", "electricOutdentCharacters:string[]=optional", "autocompleteTriggers:string[]=optional"]
+custom_properties = ["indentSize:number=required", "lineComment:string=optional", "blockCommentStart:string=optional", "blockCommentEnd:string=optional", "enter:object=preserve-leading-whitespace", "pairs:object[]=default-delimiters", "electricOutdentCharacters:string[]=optional", "autocompleteTriggers:string[]=optional", "movement:object|undefined=code-editing defaults", "caretStyle:object|undefined=editor default bar"]
 permissions = []
 security_notes = "Pure helper emitting inert declarative editor rules. Does not produce executable callbacks, client JavaScript, native handles, or raw authority fields, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
 current_rust_owner = "runtime/js/behavior.js"
@@ -947,7 +1223,7 @@ deno_op = "op_clay_modes_register_pattern"
 deno_op_path = "src/server/ops/modes.rs::op_clay_modes_register_pattern"
 documentation_path = "docs/reference/clay-js-api/modes/server-register-mode-pattern.md"
 key_bindings = []
-custom_properties = ["extensions:string[]=required", "mimeTypes:string[]=[]", "fileNames:string[]=[]", "fileNamePatterns:string[]=[]", "modeId:string=required", "apiPrefix:string=required"]
+custom_properties = ["extensions:string[]=required", "mimeTypes:string[]=[]", "fileNames:string[]=[]", "fileNamePatterns:string[]=[]", "modeId:string=required", "apiPrefix:string=required", "editorRules:object|undefined=built-in code-editing defaults"]
 permissions = ["mode-registration"]
 security_notes = "Requires mode-registration permission and server validation of package prefix, static pattern schema, duplicate modes, and bounded open-document metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority."
 current_rust_owner = "src/packages/modes.rs::ModeRegistry; src/packages/modes.rs::ModeDeclaration"
@@ -993,7 +1269,7 @@ deno_op = "op_clay_modes_activate_major_mode"
 deno_op_path = "src/server/ops/modes.rs::op_clay_modes_activate_major_mode"
 documentation_path = "docs/reference/clay-js-api/modes/server-activate-major-mode.md"
 key_bindings = []
-custom_properties = ["documentId:number=required", "path:string=optional", "mimeType:string=optional", "behaviorVersion:number=generated"]
+custom_properties = ["documentId:number=required", "path:string=optional", "mimeType:string=optional", "editorRules:object|undefined=registered-mode defaults", "behaviorVersion:number=generated"]
 permissions = ["mode-activation"]
 security_notes = "Requires mode-activation permission and server validation that the mode was registered and matches the target document metadata; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, or arbitrary client behavior authority."
 current_rust_owner = "src/packages/modes.rs::ModeRegistry; src/packages/modes.rs::MajorModeActivation"
@@ -2391,7 +2667,7 @@ deno_op = "op_clay_theme_set_typography"
 deno_op_path = "src/server/ops/typography.rs::op_clay_theme_set_typography"
 documentation_path = "docs/reference/clay-js-api/theme/set-typography.md"
 key_bindings = []
-custom_properties = ["monospace.families:string[]=[monospace]", "monospace.size:number=20", "proportional.families:string[]=[sans-serif]", "proportional.size:number=20", "ui.families:string[]=[system-ui]", "ui.size:number=12", "hierarchy:object|undefined=optional", "hierarchy.display:number=1.5", "hierarchy.title:number=14/12", "hierarchy.section:number=13/12", "hierarchy.body:number=1", "hierarchy.status:number=1", "hierarchy.detail:number=10/12", "hierarchy.caption:number=0.75"]
+custom_properties = ["monospace.families:string[]=[monospace]", "monospace.size:number=20", "proportional.families:string[]=[sans-serif]", "proportional.size:number=20", "ui.families:string[]=[system-ui]", "ui.size:number=12", "monospace.ligatures:object|undefined=optional", "proportional.ligatures:object|undefined=optional", "ui.ligatures:object|undefined=optional", "hierarchy:object|undefined=optional", "hierarchy.display:number=1.5", "hierarchy.title:number=14/12", "hierarchy.section:number=13/12", "hierarchy.body:number=1", "hierarchy.status:number=1", "hierarchy.detail:number=10/12", "hierarchy.caption:number=0.75"]
 permissions = []
 security_notes = "Accepts one bounded inert three-profile value plus an optional bounded UI hierarchy; performs no installed-font validation, font-file access, URL fetch, or download and does not grant filesystem, network, shell, package, extension loading, workspace mutation, AI mutation, native widget, WASM, raw-op, raw CSS, renderer callback, or client-side JavaScript authority. Packages may select semantic roles and variants but cannot override concrete user values or hierarchy scales."
 current_rust_owner = "src/server/ops/typography.rs::op_clay_theme_set_typography; src/server/mod.rs::RuntimeGenerationStore::replace_typography"

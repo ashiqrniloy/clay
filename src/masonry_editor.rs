@@ -7,8 +7,8 @@ use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, BrushIndex, ChildrenIds, EventCtx, KeyboardEvent,
     LayoutCtx, MutateCtx, NewWidget, PaintCtx, PointerButton, PointerEvent, PointerScrollEvent,
-    PropertiesMut, PropertiesRef, RegisterCtx, ScrollDelta, TextEvent, Widget, WidgetMut,
-    WidgetPod, render_text,
+    PropertiesMut, PropertiesRef, RegisterCtx, ScrollDelta, TextEvent, Update, UpdateCtx, Widget,
+    WidgetMut, WidgetPod, render_text,
 };
 use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::parley::style::{LineHeight, StyleProperty};
@@ -20,7 +20,7 @@ use crate::client::{
     ClientRuntimeStateInstallError, ClientUiCommandRoute, ClipboardSink, SystemClipboard,
 };
 use crate::editor::{
-    EditorCommand, EditorCommandOutcome, EditorSurface,
+    CursorSelectDirection, EditorCommand, EditorCommandOutcome, EditorSurface,
     document_session::{DocumentSessionStore, RetainedDocumentSession},
     typography::{UiTextMetrics, UiTextVariant},
 };
@@ -37,9 +37,9 @@ pub use crate::masonry_package_region::{
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
     BehaviorManifest, CompletionRequestId, CompletionResultSet, DocumentAccess, DocumentId,
-    DocumentMetadata, DocumentVersion, EditRejection, FileErrorCode, FontRole, KeyCode,
-    KeyModifiers, KeyStroke, LanguageIntelligenceRequestId, LanguageIntelligenceResult,
-    ProtocolErrorCode, RuntimeDiagnostic, RuntimeGenerationId,
+    DocumentMetadata, DocumentVersion, EditRejection, EditorCommandRequest, FileErrorCode,
+    FontRole, KeyCode, KeyModifiers, KeyStroke, LanguageIntelligenceRequestId,
+    LanguageIntelligenceResult, ProtocolErrorCode, RuntimeDiagnostic, RuntimeGenerationId,
 };
 
 #[derive(Debug, Default, PartialEq)]
@@ -88,6 +88,66 @@ pub enum EditorAction {
     /// overlay — the reconcile needs a `MutateCtx`, which only the action loop
     /// provides (`EventCtx` can't reach one), plan 070 step 13e.
     MenuStateChanged,
+}
+
+/// Argless, direction-specific editor client commands reachable from the
+/// keybinding `ClientUiCommand` route (Plan 071 task 5). Each maps 1:1 to an
+/// `EditorCommand` motion/selection. The generic `clientMoveCursor`/
+/// `clientSetSelection` *ops* (`src/server/ops/editor.rs`) are the programmatic
+/// typed-args validation surface; these IDs are the keybinding/rebinding
+/// execution surface (argless chords, client-local, no round trip).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorClientCommand {
+    MoveWordStartForward,
+    MoveWordStartBackward,
+    MoveParagraphForward,
+    MoveParagraphBackward,
+    SelectWord,
+    SelectLine,
+    /// Plan 071 task 9 multi-cursor commands.
+    AddCursorBelow,
+    AddCursorAbove,
+    ColumnSelectDown,
+    ColumnSelectUp,
+    ColumnSelectLeft,
+    ColumnSelectRight,
+    SelectNextMatch,
+    SelectPrevMatch,
+    SelectAllMatches,
+    CancelMultipleSelections,
+    KeepSelection,
+    RemoveSelection,
+    UndoCursorMove,
+}
+
+impl EditorClientCommand {
+    /// Maps an allowlisted `clay.editor.clientMoveCursor.*` /
+    /// `clay.editor.clientSetSelection.*` / multi-cursor command ID to its
+    /// editor command. `None` for IDs outside the allowlisted surface.
+    pub fn from_command_id(command_id: &str) -> Option<Self> {
+        match command_id {
+            "clay.editor.clientMoveCursor.nextWordStart" => Some(Self::MoveWordStartForward),
+            "clay.editor.clientMoveCursor.prevWordStart" => Some(Self::MoveWordStartBackward),
+            "clay.editor.clientMoveCursor.nextParagraph" => Some(Self::MoveParagraphForward),
+            "clay.editor.clientMoveCursor.prevParagraph" => Some(Self::MoveParagraphBackward),
+            "clay.editor.clientSetSelection.selectWord" => Some(Self::SelectWord),
+            "clay.editor.clientSetSelection.selectLine" => Some(Self::SelectLine),
+            "clay.editor.clientAddCursor.below" => Some(Self::AddCursorBelow),
+            "clay.editor.clientAddCursor.above" => Some(Self::AddCursorAbove),
+            "clay.editor.clientColumnSelect.down" => Some(Self::ColumnSelectDown),
+            "clay.editor.clientColumnSelect.up" => Some(Self::ColumnSelectUp),
+            "clay.editor.clientColumnSelect.left" => Some(Self::ColumnSelectLeft),
+            "clay.editor.clientColumnSelect.right" => Some(Self::ColumnSelectRight),
+            "clay.editor.clientSelectNextMatch" => Some(Self::SelectNextMatch),
+            "clay.editor.clientSelectPrevMatch" => Some(Self::SelectPrevMatch),
+            "clay.editor.clientSelectAllMatches" => Some(Self::SelectAllMatches),
+            "clay.editor.clientCancelMultipleSelections" => Some(Self::CancelMultipleSelections),
+            "clay.editor.clientKeepSelection" => Some(Self::KeepSelection),
+            "clay.editor.clientRemoveSelection" => Some(Self::RemoveSelection),
+            "clay.editor.clientUndoCursorMove" => Some(Self::UndoCursorMove),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -302,6 +362,11 @@ pub struct EditorWidget {
     active_completion_request_id: Option<CompletionRequestId>,
     next_language_intelligence_request_id: u64,
     active_language_intelligence_request_id: Option<LanguageIntelligenceRequestId>,
+    /// Plan 071 task 10: request-id allocator + outstanding selection query.
+    /// The snapshot of requested cursors lets a result restore input direction
+    /// and keep unmatched carets in place.
+    next_selection_query_request_id: u64,
+    pending_selection_query: Option<(u64, Vec<crate::protocol::SelectionQueryCursor>)>,
     pending_definition_navigation: Option<PendingDefinitionNavigation>,
     last_decoration_viewport: Option<(DocumentId, DocumentVersion, u64, u64)>,
     status: EditorStatus,
@@ -350,6 +415,8 @@ impl Default for EditorWidget {
             active_completion_request_id: None,
             next_language_intelligence_request_id: 1,
             active_language_intelligence_request_id: None,
+            next_selection_query_request_id: 1,
+            pending_selection_query: None,
             pending_definition_navigation: None,
             last_decoration_viewport: None,
             status,
@@ -398,6 +465,8 @@ impl EditorWidget {
             active_completion_request_id: None,
             next_language_intelligence_request_id: 1,
             active_language_intelligence_request_id: None,
+            next_selection_query_request_id: 1,
+            pending_selection_query: None,
             pending_definition_navigation: None,
             last_decoration_viewport: None,
             status,
@@ -662,6 +731,12 @@ impl EditorWidget {
                 } else {
                     false
                 }
+            }
+            ClientConnectionEvent::SelectionQueryResult(result) => {
+                self.apply_selection_query_result(result)
+            }
+            ClientConnectionEvent::EditorCommandRequest(request) => {
+                self.apply_editor_command_request(request)
             }
             ClientConnectionEvent::CompletionRejected { request_id, .. } => {
                 if self.active_completion_request_id == Some(request_id) {
@@ -1723,6 +1798,87 @@ impl EditorWidget {
         self.apply_local_edit_outcome(outcome) || cancelled
     }
 
+    /// Dispatch a direction-specific editor client command (Plan 071 task 5)
+    /// from the `ClientUiCommand` route to the underlying `EditorSurface`.
+    /// Returns whether the caret/selection changed.
+    /// Plan 071 follow-up round (`editor-control`): dispatch a gated
+    /// programmatic editor command pushed by the server. Deny-by-default:
+    /// wire-invalid or unknown command IDs drop silently. Known IDs reuse the
+    /// exact dispatch paths of keybinding-routed commands (text-object/
+    /// smart-select queries via the advisory selection-query round trip,
+    /// everything else via [`Self::apply_editor_client_command`]).
+    fn apply_editor_command_request(&mut self, request: EditorCommandRequest) -> bool {
+        if !request.validate() {
+            return false;
+        }
+        if let Some(query) = crate::protocol::SelectionQuery::from_command_id(&request.command_id) {
+            if let Some(event) = self.editor.selection_query_request_for(query) {
+                self.enqueue_selection_query_request(event);
+                return true;
+            }
+            return false;
+        }
+        let Some(command) = EditorClientCommand::from_command_id(&request.command_id) else {
+            return false;
+        };
+        self.apply_editor_client_command(command)
+    }
+
+    pub fn apply_editor_client_command(&mut self, command: EditorClientCommand) -> bool {
+        let editor_command = match command {
+            EditorClientCommand::MoveWordStartForward => EditorCommand::MoveWordStart {
+                forward: true,
+                long: false,
+                extend: false,
+            },
+            EditorClientCommand::MoveWordStartBackward => EditorCommand::MoveWordStart {
+                forward: false,
+                long: false,
+                extend: false,
+            },
+            EditorClientCommand::MoveParagraphForward => EditorCommand::MoveParagraph {
+                forward: true,
+                to_end: false,
+                extend: false,
+            },
+            EditorClientCommand::MoveParagraphBackward => EditorCommand::MoveParagraph {
+                forward: false,
+                to_end: false,
+                extend: false,
+            },
+            EditorClientCommand::SelectWord => EditorCommand::SelectWord,
+            EditorClientCommand::SelectLine => EditorCommand::SelectLine,
+            EditorClientCommand::AddCursorBelow => EditorCommand::AddCursor {
+                direction: crate::editor::CursorSelectDirection::Down,
+            },
+            EditorClientCommand::AddCursorAbove => EditorCommand::AddCursor {
+                direction: crate::editor::CursorSelectDirection::Up,
+            },
+            EditorClientCommand::ColumnSelectDown => EditorCommand::ColumnSelect {
+                direction: crate::editor::CursorSelectDirection::Down,
+            },
+            EditorClientCommand::ColumnSelectUp => EditorCommand::ColumnSelect {
+                direction: crate::editor::CursorSelectDirection::Up,
+            },
+            EditorClientCommand::ColumnSelectLeft => EditorCommand::ColumnSelect {
+                direction: crate::editor::CursorSelectDirection::Left,
+            },
+            EditorClientCommand::ColumnSelectRight => EditorCommand::ColumnSelect {
+                direction: crate::editor::CursorSelectDirection::Right,
+            },
+            EditorClientCommand::SelectNextMatch => EditorCommand::SelectNextMatch,
+            EditorClientCommand::SelectPrevMatch => EditorCommand::SelectPrevMatch,
+            EditorClientCommand::SelectAllMatches => EditorCommand::SelectAllMatches,
+            EditorClientCommand::CancelMultipleSelections => {
+                EditorCommand::CancelMultipleSelections
+            }
+            EditorClientCommand::KeepSelection => EditorCommand::KeepSelection,
+            EditorClientCommand::RemoveSelection => EditorCommand::RemoveSelection,
+            EditorClientCommand::UndoCursorMove => EditorCommand::UndoCursorMove,
+        };
+        self.editor.command(editor_command)
+    }
+
     /// Discard unfinished IME preedit without committing.
     pub fn cancel_composition(&mut self) -> bool {
         self.editor.cancel_composition()
@@ -1743,12 +1899,12 @@ impl EditorWidget {
     }
 
     fn apply_local_edit_outcome(&mut self, outcome: EditorCommandOutcome) -> bool {
-        if let Some(event) = outcome.edit_event
-            && let Some(edit_queue) = &self.edit_queue
-        {
-            let transaction_id = self.next_transaction_id;
-            self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
-            let _ = edit_queue.enqueue_edit_event(event, transaction_id);
+        if let Some(edit_queue) = &self.edit_queue {
+            for event in outcome.edit_events {
+                let transaction_id = self.next_transaction_id;
+                self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
+                let _ = edit_queue.enqueue_edit_event(event, transaction_id);
+            }
         }
         if outcome.changed {
             if !self.status.dirty {
@@ -1824,12 +1980,12 @@ impl EditorWidget {
     fn local_command(&mut self, ctx: &mut EventCtx<'_>, command: EditorCommand<'_>) {
         let _ = self.editor.cancel_composition();
         let outcome = self.editor.command_with_event(command);
-        if let Some(event) = outcome.edit_event
-            && let Some(edit_queue) = &self.edit_queue
-        {
-            let transaction_id = self.next_transaction_id;
-            self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
-            let _ = edit_queue.enqueue_edit_event(event, transaction_id);
+        if let Some(edit_queue) = &self.edit_queue {
+            for event in outcome.edit_events {
+                let transaction_id = self.next_transaction_id;
+                self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
+                let _ = edit_queue.enqueue_edit_event(event, transaction_id);
+            }
         }
         if outcome.changed {
             self.active_completion_request_id = None;
@@ -1888,6 +2044,14 @@ impl EditorWidget {
                 if let Some(diagnostic) = self.request_reload_active_document(false) {
                     let _ = self.apply_connection_event(diagnostic);
                     ctx.request_render();
+                }
+            } else if let Some(query) =
+                crate::protocol::SelectionQuery::from_command_id(&intent.command_id)
+            {
+                // Plan 071 task 10: text-object/smart-select commands capture
+                // the selection set locally and query the server read-only.
+                if let Some(event) = self.editor.selection_query_request_for(query) {
+                    self.enqueue_selection_query_request(event);
                 }
             } else if let Some(edit_queue) = &self.edit_queue {
                 let document = self.editor.document_state();
@@ -2090,12 +2254,12 @@ impl EditorWidget {
     }
 
     fn finish_local_outcome(&mut self, ctx: &mut EventCtx<'_>, outcome: EditorCommandOutcome) {
-        if let Some(event) = outcome.edit_event
-            && let Some(edit_queue) = &self.edit_queue
-        {
-            let transaction_id = self.next_transaction_id;
-            self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
-            let _ = edit_queue.enqueue_edit_event(event, transaction_id);
+        if let Some(edit_queue) = &self.edit_queue {
+            for event in outcome.edit_events {
+                let transaction_id = self.next_transaction_id;
+                self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
+                let _ = edit_queue.enqueue_edit_event(event, transaction_id);
+            }
         }
         if outcome.changed {
             self.enqueue_decoration_viewport_request();
@@ -2129,6 +2293,64 @@ impl EditorWidget {
             .max(1);
         self.active_language_intelligence_request_id = Some(request_id);
         let _ = edit_queue.enqueue_language_intelligence_request(event, request_id);
+    }
+
+    fn enqueue_selection_query_request(
+        &mut self,
+        event: crate::editor::EditorSelectionQueryRequestEvent,
+    ) {
+        let Some(edit_queue) = &self.edit_queue else {
+            return;
+        };
+        let request_id = self.next_selection_query_request_id;
+        self.next_selection_query_request_id = self
+            .next_selection_query_request_id
+            .saturating_add(1)
+            .max(1);
+        self.pending_selection_query = Some((request_id, event.selections.clone()));
+        let _ = edit_queue.enqueue_selection_query_request(event, request_id);
+    }
+
+    /// Plan 071 task 10: applies read-only text-object/smart-select ranges as
+    /// selections (multi-cursor aware). Stale results — a replaced request or
+    /// a document that moved on — drop without touching the selection set.
+    fn apply_selection_query_result(
+        &mut self,
+        result: crate::protocol::SelectionQueryResult,
+    ) -> bool {
+        let Some((request_id, requested_cursors)) = self.pending_selection_query.take() else {
+            return false;
+        };
+        if request_id != result.request_id {
+            return false;
+        }
+        let document = self.editor.document_state();
+        if document.document_id != result.document_id
+            || document.document_version != result.document_version
+        {
+            return true;
+        }
+        let mut selections: Vec<crate::editor::selection::Selection> = Vec::new();
+        for (index, cursor) in requested_cursors.iter().enumerate() {
+            match result.ranges.get(index) {
+                Some(Some(range)) => {
+                    let start = usize::try_from(range.start.min(range.end)).unwrap_or(0);
+                    let end = usize::try_from(range.end.max(range.start)).unwrap_or(0);
+                    selections.push(if cursor.anchor > cursor.focus {
+                        crate::editor::selection::Selection::new(end, start)
+                    } else {
+                        crate::editor::selection::Selection::new(start, end)
+                    });
+                }
+                // No object for this caret: keep the requested selection.
+                _ => selections.push(crate::editor::selection::Selection::new(
+                    usize::try_from(cursor.anchor).unwrap_or(0),
+                    usize::try_from(cursor.focus).unwrap_or(0),
+                )),
+            }
+        }
+        self.editor.apply_selection_query_result(selections);
+        true
     }
 
     fn enqueue_decoration_viewport_request(&mut self) {
@@ -2265,6 +2487,29 @@ fn is_redo_shortcut(key_event: &KeyboardEvent) -> bool {
     !cfg!(target_os = "macos")
         && is_primary_character_shortcut(key_event, "y")
         && !key_event.modifiers.shift()
+}
+
+/// Ctrl/Cmd+L selects the current line (VSCode `expandLineSelection`).
+fn is_select_line_shortcut(key_event: &KeyboardEvent) -> bool {
+    is_primary_character_shortcut(key_event, "l") && !key_event.modifiers.shift()
+}
+
+/// Ctrl/Cmd+Shift+L selects every occurrence of the current selection/word
+/// (VSCode `selectHighlights`).
+fn is_select_all_matches_shortcut(key_event: &KeyboardEvent) -> bool {
+    is_primary_character_shortcut(key_event, "l") && key_event.modifiers.shift()
+}
+
+/// Ctrl/Cmd+D selects the next occurrence of the current selection/word as a
+/// new caret (VSCode `addSelectionToNextFindMatch`). First press on a collapsed
+/// caret selects the word under it.
+fn is_select_next_match_shortcut(key_event: &KeyboardEvent) -> bool {
+    is_primary_character_shortcut(key_event, "d") && !key_event.modifiers.shift()
+}
+
+/// Ctrl/Cmd+U restores the previous selection set (VSCode `cursorUndo`).
+fn is_undo_cursor_move_shortcut(key_event: &KeyboardEvent) -> bool {
+    is_primary_character_shortcut(key_event, "u") && !key_event.modifiers.shift()
 }
 
 fn is_primary_character_shortcut(key_event: &KeyboardEvent, character: &str) -> bool {
@@ -2463,7 +2708,19 @@ impl Widget for EditorWidget {
                         self.local_key(ctx, key_stroke(KeyCode::Tab, key_event));
                     }
                     Key::Named(NamedKey::ArrowLeft) => {
-                        let command = if key_event.modifiers.shift() {
+                        let command = if key_event.modifiers.alt() && key_event.modifiers.shift() {
+                            // Shift+Alt+Left = column-select left (move all carets).
+                            EditorCommand::ColumnSelect {
+                                direction: CursorSelectDirection::Left,
+                            }
+                        } else if key_event.modifiers.ctrl() {
+                            // Ctrl+Left = previous word start; Shift extends.
+                            EditorCommand::MoveWordStart {
+                                forward: false,
+                                long: false,
+                                extend: key_event.modifiers.shift(),
+                            }
+                        } else if key_event.modifiers.shift() {
                             EditorCommand::SelectLeft
                         } else {
                             EditorCommand::MoveLeft
@@ -2471,7 +2728,19 @@ impl Widget for EditorWidget {
                         self.local_command(ctx, command);
                     }
                     Key::Named(NamedKey::ArrowRight) => {
-                        let command = if key_event.modifiers.shift() {
+                        let command = if key_event.modifiers.alt() && key_event.modifiers.shift() {
+                            // Shift+Alt+Right = column-select right (move all carets).
+                            EditorCommand::ColumnSelect {
+                                direction: CursorSelectDirection::Right,
+                            }
+                        } else if key_event.modifiers.ctrl() {
+                            // Ctrl+Right = next word start; Shift extends.
+                            EditorCommand::MoveWordStart {
+                                forward: true,
+                                long: false,
+                                extend: key_event.modifiers.shift(),
+                            }
+                        } else if key_event.modifiers.shift() {
                             EditorCommand::SelectRight
                         } else {
                             EditorCommand::MoveRight
@@ -2479,10 +2748,50 @@ impl Widget for EditorWidget {
                         self.local_command(ctx, command);
                     }
                     Key::Named(NamedKey::ArrowUp) => {
-                        self.local_command(ctx, EditorCommand::MoveUp);
+                        let command = if key_event.modifiers.alt() && key_event.modifiers.shift() {
+                            // Shift+Alt+Up = column-select up (grow box upward).
+                            EditorCommand::ColumnSelect {
+                                direction: CursorSelectDirection::Up,
+                            }
+                        } else if key_event.modifiers.alt() {
+                            // Ctrl/Cmd+Alt+Up = add cursor above.
+                            EditorCommand::AddCursor {
+                                direction: CursorSelectDirection::Up,
+                            }
+                        } else if key_event.modifiers.ctrl() {
+                            // Ctrl+Up = previous paragraph; Shift extends.
+                            EditorCommand::MoveParagraph {
+                                forward: false,
+                                to_end: false,
+                                extend: key_event.modifiers.shift(),
+                            }
+                        } else {
+                            EditorCommand::MoveUp
+                        };
+                        self.local_command(ctx, command);
                     }
                     Key::Named(NamedKey::ArrowDown) => {
-                        self.local_command(ctx, EditorCommand::MoveDown);
+                        let command = if key_event.modifiers.alt() && key_event.modifiers.shift() {
+                            // Shift+Alt+Down = column-select down (grow box downward).
+                            EditorCommand::ColumnSelect {
+                                direction: CursorSelectDirection::Down,
+                            }
+                        } else if key_event.modifiers.alt() {
+                            // Ctrl/Cmd+Alt+Down = add cursor below.
+                            EditorCommand::AddCursor {
+                                direction: CursorSelectDirection::Down,
+                            }
+                        } else if key_event.modifiers.ctrl() {
+                            // Ctrl+Down = next paragraph; Shift extends.
+                            EditorCommand::MoveParagraph {
+                                forward: true,
+                                to_end: false,
+                                extend: key_event.modifiers.shift(),
+                            }
+                        } else {
+                            EditorCommand::MoveDown
+                        };
+                        self.local_command(ctx, command);
                     }
                     Key::Named(NamedKey::Home) => {
                         let command = if key_event.modifiers.ctrl() || key_event.modifiers.meta() {
@@ -2499,6 +2808,34 @@ impl Widget for EditorWidget {
                             EditorCommand::LineEnd
                         };
                         self.local_command(ctx, command);
+                    }
+                    Key::Character(_) if is_select_all_matches_shortcut(key_event) => {
+                        if self.editor.command(EditorCommand::SelectAllMatches) {
+                            ctx.request_render();
+                            ctx.request_accessibility_update();
+                        }
+                        ctx.set_handled();
+                    }
+                    Key::Character(_) if is_select_line_shortcut(key_event) => {
+                        if self.editor.command(EditorCommand::SelectLine) {
+                            ctx.request_render();
+                            ctx.request_accessibility_update();
+                        }
+                        ctx.set_handled();
+                    }
+                    Key::Character(_) if is_select_next_match_shortcut(key_event) => {
+                        if self.editor.command(EditorCommand::SelectNextMatch) {
+                            ctx.request_render();
+                            ctx.request_accessibility_update();
+                        }
+                        ctx.set_handled();
+                    }
+                    Key::Character(_) if is_undo_cursor_move_shortcut(key_event) => {
+                        if self.editor.command(EditorCommand::UndoCursorMove) {
+                            ctx.request_render();
+                            ctx.request_accessibility_update();
+                        }
+                        ctx.set_handled();
                     }
                     Key::Character(_) if is_copy_shortcut(key_event) => {
                         if let Some(event) = self.copy_selection_to_system_clipboard() {
@@ -2630,6 +2967,35 @@ impl Widget for EditorWidget {
         _props: &mut PropertiesMut<'_>,
         _event: &AccessEvent,
     ) {
+    }
+
+    fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
+        // Kick off the caret-blink animation loop when the editor gains focus
+        // and the effective caret style animates. The loop self-perpetuates in
+        // `on_anim_frame` and stops when focus is lost or the style is Solid.
+        if let Update::FocusChanged(true) = event
+            && self.editor.caret_animates()
+        {
+            ctx.request_anim_frame();
+        }
+    }
+
+    fn on_anim_frame(
+        &mut self,
+        ctx: &mut UpdateCtx<'_>,
+        _props: &mut PropertiesMut<'_>,
+        interval: u64,
+    ) {
+        // `interval` is nanoseconds (0 on the first frame after idle).
+        let delta_ms = interval / 1_000_000;
+        if self.editor.advance_blink(delta_ms) {
+            ctx.request_paint_only();
+        }
+        // Keep blinking only while focused and animating; otherwise the loop
+        // ends by not re-requesting a frame.
+        if ctx.is_focus_target() && self.editor.caret_animates() {
+            ctx.request_anim_frame();
+        }
     }
 
     fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
@@ -2893,8 +3259,8 @@ fn edit_rejection_summary(reason: &EditRejection) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ClipboardCommandOutcome, EditorStatus, EditorWidget, SduiStatusObservation,
-        character_key_stroke,
+        ClipboardCommandOutcome, EditorClientCommand, EditorStatus, EditorWidget,
+        SduiStatusObservation, character_key_stroke,
     };
     use crate::client::{
         ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientResyncSnapshot,
@@ -2904,10 +3270,10 @@ mod tests {
     use crate::protocol::{
         BehaviorManifest, ClientMessage, CompletionItem, CompletionItemTextFormat,
         CompletionProvenance, CompletionReplacementRange, CompletionResultSet, CompletionStatus,
-        DocumentAccess, DocumentMetadata, EditOperation, EditRejection, FileErrorCode, FontRole,
-        KeyCode, KeyModifiers, LanguageIntelligenceResult, RuntimeDiagnostic, SduiEditorBinding,
-        SduiFlexDirection, SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation,
-        SduiTreeUpdate,
+        DocumentAccess, DocumentMetadata, EditOperation, EditRejection, EditorCommandRequest,
+        FileErrorCode, FontRole, KeyCode, KeyModifiers, LanguageIntelligenceResult,
+        RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId,
+        SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
     };
     use crate::shell::{
         FixedPackagePanel, FixedSlotId, FixedSlotState, PackagePanelVisibility,
@@ -3031,6 +3397,265 @@ mod tests {
             !widget.apply_connection_event(ClientConnectionEvent::ActiveTypography(typography))
         );
         assert!(!widget.take_layout_invalidation());
+    }
+
+    #[test]
+    fn editor_client_command_maps_ids_and_moves_caret() {
+        // Plan 071 task 5: the six direction-specific command IDs map to editor
+        // commands; unknown IDs (e.g. argless clipboard commands) map to None.
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientMoveCursor.nextWordStart"),
+            Some(EditorClientCommand::MoveWordStartForward)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientMoveCursor.prevWordStart"),
+            Some(EditorClientCommand::MoveWordStartBackward)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientMoveCursor.nextParagraph"),
+            Some(EditorClientCommand::MoveParagraphForward)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientMoveCursor.prevParagraph"),
+            Some(EditorClientCommand::MoveParagraphBackward)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientSetSelection.selectWord"),
+            Some(EditorClientCommand::SelectWord)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientSetSelection.selectLine"),
+            Some(EditorClientCommand::SelectLine)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientCopySelection"),
+            None
+        );
+        // Plan 071 task 9: the multi-cursor command IDs map to editor commands.
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientAddCursor.below"),
+            Some(EditorClientCommand::AddCursorBelow)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientAddCursor.above"),
+            Some(EditorClientCommand::AddCursorAbove)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientColumnSelect.down"),
+            Some(EditorClientCommand::ColumnSelectDown)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientColumnSelect.left"),
+            Some(EditorClientCommand::ColumnSelectLeft)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientSelectNextMatch"),
+            Some(EditorClientCommand::SelectNextMatch)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientSelectPrevMatch"),
+            Some(EditorClientCommand::SelectPrevMatch)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientSelectAllMatches"),
+            Some(EditorClientCommand::SelectAllMatches)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientCancelMultipleSelections"),
+            Some(EditorClientCommand::CancelMultipleSelections)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientKeepSelection"),
+            Some(EditorClientCommand::KeepSelection)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientRemoveSelection"),
+            Some(EditorClientCommand::RemoveSelection)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("clay.editor.clientUndoCursorMove"),
+            Some(EditorClientCommand::UndoCursorMove)
+        );
+
+        // Dispatch moves the caret/selection on the underlying EditorSurface.
+        // Text: "server text" ("server" 0..6, space 6, "text" 7..11).
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.set_caret_for_test(0);
+        assert!(widget.apply_editor_client_command(EditorClientCommand::MoveWordStartForward));
+        assert_eq!(widget.editor.caret_for_test(), 7);
+        assert!(widget.apply_editor_client_command(EditorClientCommand::SelectWord));
+        assert_eq!(widget.editor.selection_for_test(), Some((7, 11)));
+    }
+
+    #[test]
+    fn editor_client_command_dispatches_multi_cursor_commands() {
+        // Plan 071 task 9: the allowlisted multi-cursor command IDs dispatch
+        // through the same client-local path as the task-5 movement IDs.
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            12,
+            1,
+            "foo bar foo\nfoo".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        widget.editor.set_caret_for_test(1);
+
+        assert!(widget.apply_editor_client_command(EditorClientCommand::SelectNextMatch));
+        assert_eq!(widget.editor.selection_for_test(), Some((0, 3)));
+        assert!(widget.apply_editor_client_command(EditorClientCommand::SelectNextMatch));
+        assert_eq!(widget.editor.selection_count_for_test(), 2);
+
+        assert!(widget.apply_editor_client_command(EditorClientCommand::AddCursorBelow));
+        assert_eq!(widget.editor.selection_count_for_test(), 3);
+
+        assert!(widget.apply_editor_client_command(EditorClientCommand::KeepSelection));
+        assert_eq!(widget.editor.selection_count_for_test(), 1);
+
+        assert!(widget.apply_editor_client_command(EditorClientCommand::UndoCursorMove));
+        assert!(widget.apply_editor_client_command(EditorClientCommand::CancelMultipleSelections));
+        assert_eq!(widget.editor.selection_count_for_test(), 1);
+        assert_eq!(widget.editor.selection_for_test(), None);
+    }
+
+    #[test]
+    fn editor_command_request_applies_known_ids_and_drops_unknown() {
+        // Plan 071 follow-up round: server-pushed `EditorCommandRequest`s
+        // dispatch through the same client-local path as keybinding-routed
+        // command IDs; unknown or wire-invalid requests drop silently.
+        fn request(command_id: &str) -> EditorCommandRequest {
+            EditorCommandRequest {
+                command_id: command_id.to_string(),
+                package_prefix: "markdown".to_string(),
+                mode_id: "markdown".to_string(),
+            }
+        }
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            12,
+            1,
+            "foo bar foo\nfoo".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        widget.editor.set_caret_for_test(0);
+
+        assert!(
+            widget.apply_editor_command_request(request(
+                "clay.editor.clientMoveCursor.nextWordStart"
+            ))
+        );
+        assert_eq!(widget.editor.caret_for_test(), 4);
+
+        // Multi-cursor IDs dispatch too.
+        assert!(widget.apply_editor_command_request(request("clay.editor.clientSelectNextMatch")));
+        assert_eq!(widget.editor.selection_for_test(), Some((4, 7)));
+
+        // Unknown editor command IDs drop silently.
+        assert!(
+            !widget
+                .apply_editor_command_request(request("clay.editor.clientMoveCursor.intoTheVoid"))
+        );
+        assert!(!widget.apply_editor_command_request(request("clay.application.quit")));
+        // Wire-invalid requests (unbounded provenance) drop before parsing.
+        let mut invalid = request("clay.editor.clientMoveCursor.nextWordStart");
+        invalid.command_id = String::new();
+        assert!(!widget.apply_editor_command_request(invalid));
+    }
+
+    #[test]
+    fn selection_query_result_applies_ranges_keeps_unmatched_and_drops_stale() {
+        // Plan 071 task 10: read-only text-object/smart-select ranges arrive
+        // as selections — matched carets take their range (input direction
+        // preserved), unmatched carets stay put, stale results drop.
+        let mut widget = EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            12,
+        ));
+        widget.editor.load_snapshot(
+            12,
+            3,
+            "fn main() { call(1); }".to_string(),
+            DocumentAccess::Editable { lease_id: 99 },
+        );
+        widget.editor.set_caret_for_test(4);
+
+        // Backward input selection keeps its direction when a range arrives.
+        widget.pending_selection_query = Some((
+            7,
+            vec![
+                crate::protocol::SelectionQueryCursor {
+                    anchor: 9,
+                    focus: 4,
+                },
+                crate::protocol::SelectionQueryCursor {
+                    anchor: 19,
+                    focus: 19,
+                },
+            ],
+        ));
+        let applied = widget.apply_connection_event(ClientConnectionEvent::SelectionQueryResult(
+            crate::protocol::SelectionQueryResult {
+                request_id: 7,
+                client_id: 0,
+                document_id: 12,
+                document_version: 3,
+                behavior_version: 1,
+                ranges: vec![
+                    Some(crate::protocol::SelectionQueryRange { start: 0, end: 12 }),
+                    None,
+                ],
+            },
+        ));
+        assert!(applied);
+        assert_eq!(widget.editor.selection_count_for_test(), 2);
+        // Primary (index 0) took the range with backward direction kept.
+        assert_eq!(widget.editor.selection_for_test(), Some((12, 0)));
+
+        // Stale document version: consumed but the selection set is untouched.
+        widget.pending_selection_query = Some((
+            8,
+            vec![crate::protocol::SelectionQueryCursor {
+                anchor: 4,
+                focus: 4,
+            }],
+        ));
+        let stale = widget.apply_connection_event(ClientConnectionEvent::SelectionQueryResult(
+            crate::protocol::SelectionQueryResult {
+                request_id: 8,
+                client_id: 0,
+                document_id: 12,
+                document_version: 2,
+                behavior_version: 1,
+                ranges: vec![Some(crate::protocol::SelectionQueryRange {
+                    start: 0,
+                    end: 5,
+                })],
+            },
+        ));
+        assert!(stale);
+        assert_eq!(widget.editor.selection_count_for_test(), 2);
+        assert_eq!(widget.editor.selection_for_test(), Some((12, 0)));
+
+        // Result without a pending request is ignored.
+        let orphan = widget.apply_connection_event(ClientConnectionEvent::SelectionQueryResult(
+            crate::protocol::SelectionQueryResult {
+                request_id: 9,
+                client_id: 0,
+                document_id: 12,
+                document_version: 3,
+                behavior_version: 1,
+                ranges: vec![],
+            },
+        ));
+        assert!(!orphan);
     }
 
     #[test]

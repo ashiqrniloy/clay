@@ -70,6 +70,11 @@ pub(crate) struct ClayJsRuntimeService {
     workers_started: Arc<AtomicU64>,
     trusted: DomainRuntime,
     third_party: DomainRuntime,
+    /// Follow-up round (`editor-control`): bounded publisher for gated
+    /// programmatic editor-command execution requests. Shared by both domain
+    /// workers (each op state holds a sender clone) and subscribed by every
+    /// connection loop. Survives `production_reload`.
+    editor_commands: tokio::sync::broadcast::Sender<crate::protocol::EditorCommandRequest>,
 }
 
 impl std::fmt::Debug for ClayJsRuntimeService {
@@ -134,6 +139,12 @@ impl ClayJsRuntimeService {
                     .sender
                     .clone(),
             );
+        trusted
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned")
+            .op_state
+            .set_editor_command_publisher(current.editor_commands.clone());
         Self {
             evaluations: Arc::new(AtomicU64::new(0)),
             timeout: current.timeout,
@@ -147,6 +158,7 @@ impl ClayJsRuntimeService {
             workers_started,
             trusted,
             third_party: current.third_party.clone(),
+            editor_commands: current.editor_commands.clone(),
         }
     }
 
@@ -204,6 +216,7 @@ impl ClayJsRuntimeService {
         // Wire the cross-domain bridge: trusted config `loadPackage` of an
         // approved third-party package dispatches its load evaluation to the
         // third-party worker (Plan 061 task 12).
+        let (editor_commands, _) = tokio::sync::broadcast::channel(16);
         trusted
             .worker
             .lock()
@@ -217,6 +230,18 @@ impl ClayJsRuntimeService {
                     .sender
                     .clone(),
             );
+        trusted
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned")
+            .op_state
+            .set_editor_command_publisher(editor_commands.clone());
+        third_party
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned")
+            .op_state
+            .set_editor_command_publisher(editor_commands.clone());
         Self {
             evaluations: Arc::new(AtomicU64::new(0)),
             timeout,
@@ -230,6 +255,7 @@ impl ClayJsRuntimeService {
             workers_started,
             trusted,
             third_party,
+            editor_commands,
         }
     }
 
@@ -254,6 +280,15 @@ impl ClayJsRuntimeService {
                 Arc::clone(load_entry_allowlist),
             ))),
         }
+    }
+
+    /// Follow-up round (`editor-control`): subscribe to gated programmatic
+    /// editor-command execution requests. Connection loops forward each
+    /// request as `ServerMessage::EditorCommandRequest`.
+    pub(crate) fn subscribe_editor_commands(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<crate::protocol::EditorCommandRequest> {
+        self.editor_commands.subscribe()
     }
 
     fn domain(&self, domain: crate::packages::bundled::RuntimeDomain) -> &DomainRuntime {
@@ -282,6 +317,11 @@ impl ClayJsRuntimeService {
                 .op_state
                 .set_third_party_commands(replacement.sender.clone());
         }
+        // Replacement workers start unwired: restore the editor-command
+        // publisher so the `editor-control` execution channel survives.
+        replacement
+            .op_state
+            .set_editor_command_publisher(self.editor_commands.clone());
         *self
             .domain(domain)
             .worker
@@ -1511,6 +1551,10 @@ pub(crate) enum RuntimeCommand {
             oneshot::Sender<Result<crate::protocol::LanguageIntelligenceResult, ClayRuntimeError>>,
     },
     Shutdown,
+    /// Follow-up round (`editor-control`): host-replicated active editor mode
+    /// snapshot pushed by the trusted worker after behavior-manifest
+    /// replacements. The third-party worker stores it for its editor-op gate.
+    UpdateActiveEditorMode(Option<String>),
 }
 
 fn start_runtime_worker(
@@ -1783,6 +1827,9 @@ fn run_runtime_worker(
                 }
             }
             RuntimeCommand::Shutdown => break,
+            RuntimeCommand::UpdateActiveEditorMode(mode_id) => {
+                op_state.set_replicated_active_editor_mode(mode_id);
+            }
         }
     }
 }
@@ -4449,7 +4496,10 @@ mod tests {
         let service = ClayJsRuntimeService::default();
 
         // Trusted-only/admin op names are not even enumerable in the
-        // third-party isolate; public contribution ops exist in both.
+        // third-party isolate; public contribution ops exist in both. The
+        // seven editor ops are shared (follow-up round `editor-control`) but
+        // gated per call by permission + declared mode; visibility alone
+        // grants nothing.
         let probe = service
             .evaluate_third_party_module(
                 r#"
@@ -4462,6 +4512,13 @@ mod tests {
                     authorizeLs: typeof ops.op_clay_language_server_authorize,
                     classify: typeof ops.op_clay_modes_classify_document,
                     setTheme: typeof ops.op_clay_theme_set_theme,
+                    editorMove: typeof ops.op_clay_editor_move_cursor,
+                    editorSelect: typeof ops.op_clay_editor_set_selection,
+                    editorCaret: typeof ops.op_clay_editor_set_cursor_style,
+                    editorAddCursor: typeof ops.op_clay_editor_add_cursor,
+                    editorColumnSelect: typeof ops.op_clay_editor_column_select,
+                    editorTextobject: typeof ops.op_clay_editor_select_textobject,
+                    editorSmartSelect: typeof ops.op_clay_editor_smart_select,
                     publicRegister: typeof ops.op_clay_commands_register_command,
                     publicPublish: typeof ops.op_clay_decorations_publish_decorations,
                 }));
@@ -4472,7 +4529,7 @@ mod tests {
         assert_eq!(
             probe.op_records,
             vec![
-                r#"{"ping":"undefined","configGet":"undefined","openDocument":"undefined","loadPackage":"undefined","authorizeLs":"undefined","classify":"undefined","setTheme":"undefined","publicRegister":"function","publicPublish":"function"}"#
+                r#"{"ping":"undefined","configGet":"undefined","openDocument":"undefined","loadPackage":"undefined","authorizeLs":"undefined","classify":"undefined","setTheme":"undefined","editorMove":"function","editorSelect":"function","editorCaret":"function","editorAddCursor":"function","editorColumnSelect":"function","editorTextobject":"function","editorSmartSelect":"function","publicRegister":"function","publicPublish":"function"}"#
             ]
         );
 
@@ -4485,6 +4542,8 @@ mod tests {
                     ping: typeof ops.op_clay_runtime_ping,
                     configGet: typeof ops.op_clay_configuration_get_state,
                     loadPackage: typeof ops.op_clay_packages_load_package,
+                    editorMove: typeof ops.op_clay_editor_move_cursor,
+                    editorTextobject: typeof ops.op_clay_editor_select_textobject,
                 }));
                 "#,
             )
@@ -4492,7 +4551,9 @@ mod tests {
             .expect("trusted op probe evaluation");
         assert_eq!(
             trusted_probe.op_records,
-            vec![r#"{"ping":"function","configGet":"function","loadPackage":"function"}"#]
+            vec![
+                r#"{"ping":"function","configGet":"function","loadPackage":"function","editorMove":"function","editorTextobject":"function"}"#
+            ]
         );
 
         // Admin/internal facade modules do not resolve in the third-party
@@ -8175,10 +8236,47 @@ mod tests {
                         exit_on_empty_item: true,
                     } if markers == &["-", "*", "+", "ordered-dot"]
                 ));
+                // Plan 071 task 11: markdown ships prose movement via its
+                // manifest — underscore and camelCase carry no meaning in
+                // prose. Caret defers to the editor default bar.
+                assert_eq!(
+                    rules.movement.word_separators,
+                    crate::protocol::WordSeparatorPolicy::Prose,
+                    "{specifier} prose word separators"
+                );
+                assert!(
+                    !rules.movement.treat_underscore_as_word,
+                    "{specifier} prose underscore policy"
+                );
+                assert!(
+                    !rules.movement.camel_case_sub_word,
+                    "{specifier} prose camelCase policy"
+                );
             } else {
                 assert!(matches!(rules.enter, EnterRule::PreserveLeadingWhitespace));
                 assert_eq!(rules.comments[0].line_prefix, "//");
+                // Plan 071 task 11: code packages declare the code movement
+                // policy explicitly (identical to the built-in default).
+                assert_eq!(
+                    rules.movement.word_separators,
+                    crate::protocol::WordSeparatorPolicy::Code,
+                    "{specifier} code word separators"
+                );
+                assert!(
+                    rules.movement.treat_underscore_as_word,
+                    "{specifier} code underscore policy"
+                );
+                assert!(
+                    rules.movement.camel_case_sub_word,
+                    "{specifier} code camelCase policy"
+                );
             }
+            // No package ships a caret override today: the reduced-motion-safe
+            // editor default bar applies to every mode (customization is opt-in).
+            assert_eq!(
+                rules.caret_style, None,
+                "{specifier} caret defers to default"
+            );
             let payload = rkyv::to_bytes::<rkyv::rancor::Error>(&manifest)
                 .expect("behavior manifest serializes")
                 .len();
@@ -8188,6 +8286,478 @@ mod tests {
             );
             assert!(payload <= BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES);
         }
+    }
+
+    /// Plan 071 task 11: `loadPackage("@clay/markdown")` yields prose movement
+    /// for Markdown documents (asserted in
+    /// `each_language_mode_registers_indent_electric_pairs_comment_triggers`)
+    /// and leaves unrelated document types on the built-in fallback defaults —
+    /// no silent behaviour change. The built-in `core.code`/`core.text` modes
+    /// ship movement/caret/ligature defaults with no owning package.
+    #[tokio::test]
+    async fn markdown_load_yields_prose_movement_without_touching_code_defaults() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { loadPackage } from "clay:packages";
+                import { serverClassifyDocument } from "clay:modes";
+                await loadPackage("@clay/markdown");
+                const markdown = serverClassifyDocument({ documentId: 1, path: "README.md" });
+                const code = serverClassifyDocument({ documentId: 2, path: "src/main.rs" });
+                const text = serverClassifyDocument({ documentId: 3, path: "notes" });
+                Deno.core.ops.op_clay_runtime_record(JSON.stringify({
+                    markdown: markdown.modeId, code: code.modeId, text: text.modeId
+                }));
+                "#,
+            )
+            .await
+            .unwrap();
+
+        let record = result.op_records.into_iter().next().expect("one record");
+        let parsed: serde_json::Value = serde_json::from_str(&record).expect("valid JSON record");
+        assert_eq!(parsed["markdown"], "markdown");
+        // Markdown must not claim unrelated document types: with no language
+        // package loaded, code-like and plain files still resolve to the
+        // built-in core.code/core.text fallbacks.
+        assert_eq!(parsed["code"], "core.code");
+        assert_eq!(parsed["text"], "core.text");
+
+        // Built-in fallback manifests ship the defaults without any package:
+        // code movement for core.code, caret deferred to the editor default
+        // bar, and role-selected typography ligatures from the baseline.
+        let code = crate::protocol::BehaviorManifest::core_code_editing(1);
+        assert_eq!(code.manifest_id, "clay.default.code");
+        assert_eq!(
+            code.editor_rules.movement.word_separators,
+            crate::protocol::WordSeparatorPolicy::Code
+        );
+        assert!(code.editor_rules.movement.treat_underscore_as_word);
+        assert!(code.editor_rules.movement.camel_case_sub_word);
+        assert_eq!(code.editor_rules.caret_style, None);
+        assert_eq!(
+            code.document_font_role,
+            crate::protocol::DocumentFontRole::Monospace
+        );
+
+        let text = crate::protocol::BehaviorManifest::minimal_text_editing(1);
+        assert_eq!(text.manifest_id, "clay.default.text");
+        assert_eq!(text.editor_rules.caret_style, None);
+        assert_eq!(
+            text.document_font_role,
+            crate::protocol::DocumentFontRole::Proportional
+        );
+
+        // Ligature baseline ships with every font role (standard + contextual
+        // on), so both fallback roles resolve ligatures at install time.
+        let typography = crate::protocol::ActiveTypography::default();
+        for profile in [&typography.monospace, &typography.proportional] {
+            assert!(profile.ligatures.enable_standard);
+            assert!(profile.ligatures.enable_contextual);
+        }
+    }
+
+    /// Plan 071 task 11: a package may customize its mode's movement and caret
+    /// through documented `editorRules` manifest data (validated server-side);
+    /// absent fields keep the defaults.
+    #[tokio::test]
+    async fn package_manifest_can_customize_movement_and_caret_style() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let result = evaluate_as_trusted_package(
+            &service,
+            test_package_json(
+                "@clay/fixture-prose",
+                "fixtureprose",
+                &["mode-registration", "mode-activation"],
+                serde_json::json!({}),
+            ),
+            vec![
+                crate::packages::permissions::PackagePermission::ModeRegistration,
+                crate::packages::permissions::PackagePermission::ModeActivation,
+            ],
+            r#"
+            import { serverRegisterModePattern, serverClassifyDocument, serverActivateClassifiedMode } from "clay:modes";
+            serverRegisterModePattern({
+                modeId: "fixtureprose",
+                displayName: "Fixture Prose",
+                defaultFontRole: "proportional",
+                extensions: ["fxp"],
+                editorRules: {
+                    movement: {
+                        wordSeparators: "prose",
+                        treatUnderscoreAsWord: false,
+                        camelCaseSubWord: false,
+                        stickyColumn: false
+                    },
+                    caretStyle: { shape: "block", blink: "blink", stopBlinkOnTyping: false }
+                }
+            });
+            const classification = serverClassifyDocument({ documentId: 7, path: "notes.fxp" });
+            serverActivateClassifiedMode(classification, { path: "notes.fxp" });
+            "#,
+        )
+        .await
+        .unwrap();
+
+        let manifest = result
+            .behavior_manifest
+            .expect("custom mode activation publishes a manifest");
+        let rules = &manifest.editor_rules;
+        assert_eq!(
+            rules.movement.word_separators,
+            crate::protocol::WordSeparatorPolicy::Prose
+        );
+        assert!(!rules.movement.treat_underscore_as_word);
+        assert!(!rules.movement.camel_case_sub_word);
+        assert!(!rules.movement.sticky_column);
+        // Absent movement fields keep the defaults.
+        assert_eq!(
+            rules.movement.paragraph_style,
+            crate::protocol::ParagraphStyle::BlankLineOrWhitespace
+        );
+        let caret = rules.caret_style.expect("caret override applies");
+        assert_eq!(caret.shape, crate::protocol::CaretShape::Block);
+        assert!(matches!(
+            caret.blink,
+            crate::protocol::BlinkStyle::Blink { .. }
+        ));
+        assert!(!caret.stop_blink_on_typing);
+        // Absent caret fields keep the defaults.
+        assert_eq!(
+            caret.width_px,
+            crate::protocol::CaretStyle::default().width_px
+        );
+    }
+
+    /// Follow-up round (`editor-control`): package callers may use the editor
+    /// ops only with approved `editor-control` AND an active major mode named
+    /// in their `clay.editorControl.modes` declaration. Deny-by-default.
+    #[tokio::test]
+    async fn editor_control_gate_enforces_permission_and_declared_mode() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let editor_control = crate::packages::permissions::PackagePermission::EditorControl;
+        let register = crate::packages::permissions::PackagePermission::ModeRegistration;
+        let activate = crate::packages::permissions::PackagePermission::ModeActivation;
+
+        // (a) Approved editor-control + declared active mode: allowed.
+        let mut package_json = test_package_json(
+            "@clay/fixture-editor-ok",
+            "fixtureeditorok",
+            &["mode-registration", "mode-activation", "editor-control"],
+            serde_json::json!({}),
+        );
+        package_json["clay"]["editorControl"] = serde_json::json!({ "modes": ["fixtureeditorok"] });
+        let evaluation = evaluate_as_trusted_package(
+            &service,
+            package_json,
+            vec![register, activate, editor_control],
+            r#"
+            import { serverRegisterModePattern, serverClassifyDocument, serverActivateClassifiedMode } from "clay:modes";
+            serverRegisterModePattern({
+                modeId: "fixtureeditorok",
+                displayName: "Fixture Editor OK",
+                defaultFontRole: "proportional",
+                extensions: ["feo"],
+                editorRules: { tabSpaces: 4 }
+            });
+            const classification = serverClassifyDocument({ documentId: 71, path: "a.feo" });
+            serverActivateClassifiedMode(classification, { path: "a.feo" });
+            const moved = JSON.parse(Deno.core.ops.op_clay_editor_move_cursor(
+                JSON.stringify({ direction: "nextWordStart" })));
+            if (moved.commandId !== "clay.editor.clientMoveCursor" || moved.direction !== "nextWordStart") {
+                throw new Error("unexpected descriptor: " + moved.commandId + "/" + moved.direction);
+            }
+            "#,
+        )
+        .await;
+        assert!(
+            evaluation.is_ok(),
+            "declared mode + approved editor-control must pass the gate: {evaluation:?}"
+        );
+
+        // (b) Missing `editor-control` permission: denied.
+        let package_json = test_package_json(
+            "@clay/fixture-editor-noperm",
+            "fixtureeditornoperm",
+            &["mode-registration", "mode-activation"],
+            serde_json::json!({}),
+        );
+        let evaluation = evaluate_as_trusted_package(
+            &service,
+            package_json,
+            vec![register, activate],
+            r#"
+            import { serverRegisterModePattern, serverClassifyDocument, serverActivateClassifiedMode } from "clay:modes";
+            serverRegisterModePattern({
+                modeId: "fixtureeditornoperm",
+                displayName: "Fixture Editor NoPerm",
+                defaultFontRole: "proportional",
+                extensions: ["fen"],
+                editorRules: { tabSpaces: 4 }
+            });
+            const classification = serverClassifyDocument({ documentId: 72, path: "a.fen" });
+            serverActivateClassifiedMode(classification, { path: "a.fen" });
+            let error = "";
+            try {
+                Deno.core.ops.op_clay_editor_move_cursor(JSON.stringify({ direction: "nextWordStart" }));
+            } catch (e) {
+                error = String(e && e.message ? e.message : e);
+            }
+            if (!error.includes("editor-control")) {
+                throw new Error("expected editor-control denial, got: " + (error || "allowed"));
+            }
+            "#,
+        )
+        .await;
+        assert!(
+            evaluation.is_ok(),
+            "missing-permission case must deny inside JS: {evaluation:?}"
+        );
+
+        // (c) Approved editor-control but the active mode is not declared:
+        // denied deny-by-default.
+        let mut package_json = test_package_json(
+            "@clay/fixture-editor-wrongmode",
+            "fixtureeditorwrongmode",
+            &["mode-registration", "mode-activation", "editor-control"],
+            serde_json::json!({}),
+        );
+        package_json["clay"]["editorControl"] = serde_json::json!({ "modes": ["some.other.mode"] });
+        let evaluation = evaluate_as_trusted_package(
+            &service,
+            package_json,
+            vec![register, activate, editor_control],
+            r#"
+            import { serverRegisterModePattern, serverClassifyDocument, serverActivateClassifiedMode } from "clay:modes";
+            serverRegisterModePattern({
+                modeId: "fixtureeditorwrongmode",
+                displayName: "Fixture Editor WrongMode",
+                defaultFontRole: "proportional",
+                extensions: ["few"],
+                editorRules: { tabSpaces: 4 }
+            });
+            const classification = serverClassifyDocument({ documentId: 73, path: "a.few" });
+            serverActivateClassifiedMode(classification, { path: "a.few" });
+            let error = "";
+            try {
+                Deno.core.ops.op_clay_editor_move_cursor(JSON.stringify({ direction: "nextWordStart" }));
+            } catch (e) {
+                error = String(e && e.message ? e.message : e);
+            }
+            if (!error.includes("mode_not_declared")) {
+                throw new Error("expected mode_not_declared denial, got: " + (error || "allowed"));
+            }
+            "#,
+        )
+        .await;
+        assert!(
+            evaluation.is_ok(),
+            "undeclared-mode case must deny inside JS: {evaluation:?}"
+        );
+    }
+
+    /// Follow-up round (`editor-control`): the programmatic execution op
+    /// publishes gated known editor command IDs to the connection lane
+    /// with host-stamped provenance, and denies unknown IDs deny-by-default.
+    #[tokio::test]
+    async fn editor_control_execute_publishes_gated_known_commands_only() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let mut receiver = service.subscribe_editor_commands();
+        let editor_control = crate::packages::permissions::PackagePermission::EditorControl;
+        let register = crate::packages::permissions::PackagePermission::ModeRegistration;
+        let activate = crate::packages::permissions::PackagePermission::ModeActivation;
+
+        let mut package_json = test_package_json(
+            "@clay/fixture-editor-exec",
+            "fixtureeditorexec",
+            &["mode-registration", "mode-activation", "editor-control"],
+            serde_json::json!({}),
+        );
+        package_json["clay"]["editorControl"] =
+            serde_json::json!({ "modes": ["fixtureeditorexec"] });
+        let evaluation = evaluate_as_trusted_package(
+            &service,
+            package_json,
+            vec![register, activate, editor_control],
+            r#"
+            import { serverRegisterModePattern, serverClassifyDocument, serverActivateClassifiedMode } from "clay:modes";
+            serverRegisterModePattern({
+                modeId: "fixtureeditorexec",
+                displayName: "Fixture Editor Exec",
+                defaultFontRole: "proportional",
+                extensions: ["fex"],
+                editorRules: { tabSpaces: 4 }
+            });
+            const classification = serverClassifyDocument({ documentId: 75, path: "a.fex" });
+            serverActivateClassifiedMode(classification, { path: "a.fex" });
+            const executed = JSON.parse(Deno.core.ops.op_clay_editor_execute_command(
+                JSON.stringify({ commandId: "clay.editor.clientMoveCursor.nextWordStart" })));
+            if (!executed.requested) {
+                throw new Error("expected requested=true");
+            }
+            let error = "";
+            try {
+                Deno.core.ops.op_clay_editor_execute_command(
+                    JSON.stringify({ commandId: "clay.application.quit" }));
+            } catch (e) {
+                error = String(e && e.message ? e.message : e);
+            }
+            if (!error.includes("not a known editor command")) {
+                throw new Error("expected unknown-ID denial, got: " + (error || "allowed"));
+            }
+            "#,
+        )
+        .await;
+        assert!(
+            evaluation.is_ok(),
+            "execute op must publish known IDs and deny unknown ones: {evaluation:?}"
+        );
+
+        let request = tokio::time::timeout(std::time::Duration::from_millis(500), receiver.recv())
+            .await
+            .expect("execution request reaches the connection lane")
+            .expect("editor command channel stays open");
+        assert_eq!(
+            request.command_id,
+            "clay.editor.clientMoveCursor.nextWordStart"
+        );
+        assert_eq!(request.package_prefix, "fixtureeditorexec");
+        assert_eq!(request.mode_id, "fixtureeditorexec");
+    }
+
+    /// Follow-up round (`editor-control`): third-party packages pass the same
+    /// gate (shared op state, mode-scoped); callers without any package
+    /// context are denied in the third-party domain.
+    #[tokio::test]
+    async fn third_party_editor_control_gate_requires_declared_mode() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let mut receiver = service.subscribe_editor_commands();
+        let editor_control = crate::packages::permissions::PackagePermission::EditorControl;
+        let register = crate::packages::permissions::PackagePermission::ModeRegistration;
+        let activate = crate::packages::permissions::PackagePermission::ModeActivation;
+
+        // A trusted package owns and activates the mode first.
+        let owner = test_package_json(
+            "@clay/fixture-tp-owner",
+            "fixturetpowner",
+            &["mode-registration", "mode-activation"],
+            serde_json::json!({}),
+        );
+        evaluate_as_trusted_package(
+            &service,
+            owner,
+            vec![register, activate],
+            r#"
+            import { serverRegisterModePattern, serverClassifyDocument, serverActivateClassifiedMode } from "clay:modes";
+            serverRegisterModePattern({
+                modeId: "fixturetpowner",
+                displayName: "Fixture TP",
+                defaultFontRole: "proportional",
+                extensions: ["ftp"],
+                editorRules: { tabSpaces: 4 }
+            });
+            const classification = serverClassifyDocument({ documentId: 74, path: "a.ftp" });
+            serverActivateClassifiedMode(classification, { path: "a.ftp" });
+            "#,
+        )
+        .await
+        .expect("trusted owner activates the fixture mode");
+
+        // Third-party package declaring the active mode: allowed.
+        let mut user = test_package_json(
+            "@tp/editor-user",
+            "editoruser",
+            &["editor-control"],
+            serde_json::json!({}),
+        );
+        user["clay"]["editorControl"] = serde_json::json!({ "modes": ["fixturetpowner"] });
+        let evaluation = evaluate_as_package(
+            &service,
+            user,
+            vec![editor_control],
+            r#"
+            const moved = JSON.parse(Deno.core.ops.op_clay_editor_move_cursor(
+                JSON.stringify({ direction: "prevWordStart" })));
+            if (moved.commandId !== "clay.editor.clientMoveCursor" || moved.direction !== "prevWordStart") {
+                throw new Error("unexpected descriptor: " + moved.commandId + "/" + moved.direction);
+            }
+            const executed = JSON.parse(Deno.core.ops.op_clay_editor_execute_command(
+                JSON.stringify({ commandId: "clay.editor.clientSetSelection.selectLine" })));
+            if (!executed.requested) {
+                throw new Error("expected requested=true");
+            }
+            "#,
+        )
+        .await;
+        assert!(
+            evaluation.is_ok(),
+            "third-party caller in declared mode must pass the gate: {evaluation:?}"
+        );
+        let request = tokio::time::timeout(std::time::Duration::from_millis(500), receiver.recv())
+            .await
+            .expect("third-party execution request reaches the connection lane")
+            .expect("editor command channel stays open");
+        assert_eq!(
+            request.command_id,
+            "clay.editor.clientSetSelection.selectLine"
+        );
+        assert_eq!(request.package_prefix, "editoruser");
+        assert_eq!(request.mode_id, "fixturetpowner");
+
+        // Third-party package declaring a different mode: denied.
+        let mut other = test_package_json(
+            "@tp/editor-other",
+            "editorother",
+            &["editor-control"],
+            serde_json::json!({}),
+        );
+        other["clay"]["editorControl"] = serde_json::json!({ "modes": ["other.mode"] });
+        let evaluation = evaluate_as_package(
+            &service,
+            other,
+            vec![editor_control],
+            r#"
+            let error = "";
+            try {
+                Deno.core.ops.op_clay_editor_move_cursor(JSON.stringify({ direction: "nextWordStart" }));
+            } catch (e) {
+                error = String(e && e.message ? e.message : e);
+            }
+            if (!error.includes("mode_not_declared")) {
+                throw new Error("expected mode_not_declared denial, got: " + (error || "allowed"));
+            }
+            "#,
+        )
+        .await;
+        assert!(
+            evaluation.is_ok(),
+            "undeclared-mode third-party case must deny inside JS: {evaluation:?}"
+        );
+
+        // Third-party evaluation without any package context: denied.
+        let evaluation = service
+            .evaluate_third_party_module(
+                r#"
+                let error = "";
+                try {
+                    Deno.core.ops.op_clay_editor_move_cursor(JSON.stringify({ direction: "nextWordStart" }));
+                } catch (e) {
+                    error = String(e && e.message ? e.message : e);
+                }
+                if (!error.includes("package context")) {
+                    throw new Error("expected package-context denial, got: " + (error || "allowed"));
+                }
+                "#,
+            )
+            .await;
+        assert!(
+            evaluation.is_ok(),
+            "package-less third-party call must deny inside JS: {evaluation:?}"
+        );
     }
 
     #[tokio::test]

@@ -306,6 +306,15 @@ impl RuntimeGenerationStore {
         self.runtime_state.subscribe()
     }
 
+    /// Follow-up round (`editor-control`): subscribe to gated programmatic
+    /// editor-command execution requests. The channel is shared across
+    /// runtime generations, so one subscription covers reloads.
+    pub(crate) async fn subscribe_editor_commands(
+        &self,
+    ) -> broadcast::Receiver<crate::protocol::EditorCommandRequest> {
+        self.current_service().await.subscribe_editor_commands()
+    }
+
     pub(crate) fn behavior_grace(&self) -> &BehaviorGraceState {
         &self.behavior_grace
     }
@@ -2276,14 +2285,17 @@ mod runtime_generation_tests {
             monospace: FontProfile {
                 families: vec!["monospace".to_string()],
                 size: 17.0,
+                ..FontProfile::default()
             },
             proportional: FontProfile {
                 families: vec!["sans-serif".to_string()],
                 size: 18.0,
+                ..FontProfile::default()
             },
             ui: FontProfile {
                 families: vec!["system-ui".to_string()],
                 size: 14.0,
+                ..FontProfile::default()
             },
             ..crate::protocol::ActiveTypography::default()
         });

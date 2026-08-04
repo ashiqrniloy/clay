@@ -40,10 +40,10 @@ use clay::perf::budgets::{
 use clay::protocol::{
     BehaviorManifest, BehaviorScope, DecorationKind, DecorationProvenance, DecorationSet,
     DecorationSpan, DocumentAccess, DocumentFontRole, EditorBehaviorRules, EnterRule,
-    IncrementalParseUpdate, PairRule, PairRuleContext, ParseByteRange, ParseUnit, SduiActionIntent,
-    SduiActionSource, SduiEditorBinding, SduiFlexDirection, SduiListItem, SduiNode, SduiNodeId,
-    SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate, ServerMessage, TabMode, TabRule,
-    TextEditCapability, codec::Codec,
+    IncrementalParseUpdate, MovementRules, PairRule, PairRuleContext, ParseByteRange, ParseUnit,
+    SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiFlexDirection, SduiListItem,
+    SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate, ServerMessage,
+    TabMode, TabRule, TextEditCapability, codec::Codec,
 };
 use clay::server::parse_coordinator::{ParseCoordinator, ParseScheduleRequest};
 use serde_json::json;
@@ -190,6 +190,8 @@ fn markdown_editor_rules() -> EditorBehaviorRules {
         comments: vec![],
         electric_characters: vec![],
         autocomplete_triggers: vec![],
+        movement: MovementRules::default(),
+        caret_style: None,
     }
 }
 
@@ -1366,7 +1368,9 @@ fn markdown_behavior_manifest_fits_budget() {
     let codec = Codec::default();
     let payload = protocol_payload_len(
         &codec
-            .encode_server_message(&ServerMessage::BehaviorManifest(selection.manifest.clone()))
+            .encode_server_message(&ServerMessage::BehaviorManifest(Box::new(
+                selection.manifest.clone(),
+            )))
             .expect("Markdown behavior manifest must encode"),
     );
     assert!(
@@ -1481,6 +1485,8 @@ fn markdown_editor_rules_parse_preserve_fence_body_indent() {
         comments: vec![],
         electric_characters: vec![],
         autocomplete_triggers: vec![],
+        movement: MovementRules::default(),
+        caret_style: None,
     };
     let EnterRule::PreserveFenceBodyIndent { fence_markers } = &rules.enter else {
         panic!("expected PreserveFenceBodyIndent");

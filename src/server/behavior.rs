@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ActiveBehaviorManifest {
     manifest: BehaviorManifest,
 }
@@ -41,7 +41,7 @@ impl ActiveBehaviorManifest {
     }
 
     pub(crate) fn manifest_message(&self) -> ServerMessage {
-        ServerMessage::BehaviorManifest(self.manifest.clone())
+        ServerMessage::BehaviorManifest(Box::new(self.manifest.clone()))
     }
 
     #[cfg_attr(not(test), allow(dead_code))]

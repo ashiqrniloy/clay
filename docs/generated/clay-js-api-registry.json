@@ -95,6 +95,18 @@
           "type": "string[]",
           "default": "[]",
           "description": "Up to 32 unique single-character autocomplete triggers, e.g. [\".\", \":\"]."
+        },
+        {
+          "name": "movement",
+          "type": "object | undefined",
+          "default": "code-editing defaults",
+          "description": "Optional movement policy (Plan 071 task 4/11), validated by the server. Fields — wordSeparators ('code', 'prose', or { custom: string[] }), treatUnderscoreAsWord, camelCaseSubWord, paragraphStyle ('blankLine' | 'blankLineOrWhitespace'), stopAtEolWordEnd, lineMovement ('character' | 'screenLine'), stickyColumn. Absent fields fall back to the code-editing defaults."
+        },
+        {
+          "name": "caretStyle",
+          "type": "object | undefined",
+          "default": "editor default bar",
+          "description": "Optional caret appearance override (Plan 071 task 6/11), validated by the server. Fields — shape ('bar' | 'line' | 'block' | 'underline'), widthPx, heightPct, hollow, blink ('solid' | 'blink' | 'phase' | 'smooth'), smoothAnimationMs, stopBlinkOnTyping. Absent means the reduced-motion-safe editor default bar; clientSetCursorStyle overrides it at runtime."
         }
       ],
       "security": "Pure helper emitting inert declarative editor rules. Does not produce executable callbacks, client JavaScript, native handles, or raw authority fields, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
@@ -1050,6 +1062,101 @@
       "async": true
     },
     {
+      "id": "clay.editor.clientAddCursor",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-add-cursor.md",
+      "js_module": "clay:editor",
+      "js_export": "clientAddCursor",
+      "js_facade": "runtime/js/editor.js::clientAddCursor",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::add_cursor_line",
+      "deno_op": "op_clay_editor_add_cursor",
+      "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_add_cursor",
+      "name": "clientAddCursor",
+      "user_facing_name": "Add Cursor",
+      "summary": "Add a collapsed caret one line below or above the primary caret at the same column.",
+      "owner": "client",
+      "phase": "Phase 21",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": ["Ctrl+Alt+Down", "Ctrl+Alt+Up"],
+      "custom_properties": [
+        {
+          "name": "direction",
+          "type": "enum",
+          "default": "none",
+          "description": "Where the new caret is added relative to the primary (below, above)."
+        }
+      ],
+      "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientAddCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.editor.clientCancelMultipleSelections",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-cancel-multiple-selections.md",
+      "js_module": "clay:editor",
+      "js_export": "clientCancelMultipleSelections",
+      "js_facade": "runtime/js/editor.js::clientCancelMultipleSelections",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::cancel_multiple_selections",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "clientCancelMultipleSelections",
+      "user_facing_name": "Cancel Multiple Selections",
+      "summary": "Collapse the selection set to the primary caret.",
+      "owner": "client",
+      "phase": "Phase 21",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": ["Escape"],
+      "custom_properties": [],
+      "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientCancelMultipleSelections` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
+      "id": "clay.editor.clientColumnSelect",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-column-select.md",
+      "js_module": "clay:editor",
+      "js_export": "clientColumnSelect",
+      "js_facade": "runtime/js/editor.js::clientColumnSelect",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::add_cursor_line",
+      "deno_op": "op_clay_editor_column_select",
+      "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_column_select",
+      "name": "clientColumnSelect",
+      "user_facing_name": "Column Select",
+      "summary": "Grow a column/box selection one line (down/up) or move every caret one scalar (left/right).",
+      "owner": "client",
+      "phase": "Phase 21",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": ["Shift+Alt+Down", "Shift+Alt+Up", "Shift+Alt+Left", "Shift+Alt+Right"],
+      "custom_properties": [
+        {
+          "name": "direction",
+          "type": "enum",
+          "default": "none",
+          "description": "Column-select direction (down, up, left, right)."
+        }
+      ],
+      "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientColumnSelect` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["editor", "js-api", "multi-cursor", "column-select", "selection"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "clay.editor.clientCopySelection",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-copy-selection.md",
@@ -1131,35 +1238,108 @@
       "async": false
     },
     {
+      "id": "clay.editor.clientExecuteEditorCommand",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-execute-editor-command.md",
+      "js_module": "clay:editor",
+      "js_export": "clientExecuteEditorCommand",
+      "js_facade": "runtime/js/editor.js::clientExecuteEditorCommand",
+      "backing_rust": "src/server/ops/editor.rs::op_clay_editor_execute_command; src/masonry_editor.rs::EditorWidget::apply_editor_command_request",
+      "deno_op": "op_clay_editor_execute_command",
+      "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_execute_command",
+      "name": "clientExecuteEditorCommand",
+      "user_facing_name": "Execute Editor Command",
+      "summary": "Programmatically trigger one known editor command ID through the gated `editor-control` execution channel.",
+      "owner": "client",
+      "phase": "Phase 23",
+      "visibility": "public",
+      "permissions": ["editor-control"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "commandId",
+          "type": "string",
+          "default": "none",
+          "description": "Known direction-specific argless editor command ID to execute (e.g. `clay.editor.clientMoveCursor.nextWordStart`)."
+        }
+      ],
+      "security": "Changes only transient client cursor/selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientExecuteEditorCommand` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["editor", "js-api", "editor-control", "execution-channel"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "clay.editor.clientKeepSelection",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-keep-selection.md",
+      "js_module": "clay:editor",
+      "js_export": "clientKeepSelection",
+      "js_facade": "runtime/js/editor.js::clientKeepSelection",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::keep_selection",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "clientKeepSelection",
+      "user_facing_name": "Keep Selection",
+      "summary": "Keep only the primary selection, dropping every other caret.",
+      "owner": "client",
+      "phase": "Phase 21",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [],
+      "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientKeepSelection` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
       "id": "clay.editor.clientMoveCursor",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-move-cursor.md",
       "js_module": "clay:editor",
       "js_export": "clientMoveCursor",
       "js_facade": "runtime/js/editor.js::clientMoveCursor",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::move_left",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::move_word_start",
       "deno_op": "op_clay_editor_move_cursor",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_move_cursor",
       "name": "clientMoveCursor",
       "user_facing_name": "Move Cursor",
-      "summary": "Move Cursor through the planned `clay:editor` Clay JavaScript facade.",
+      "summary": "Move the caret through the `clay:editor` Clay JavaScript facade.",
       "owner": "client",
       "phase": "Phase 7",
       "visibility": "public",
       "permissions": [],
-      "key_bindings": ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Ctrl+Home", "Ctrl+End"],
+      "key_bindings": ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Ctrl+Home", "Ctrl+End", "Ctrl+Left", "Ctrl+Right", "Ctrl+Up", "Ctrl+Down"],
       "custom_properties": [
         {
           "name": "direction",
           "type": "enum",
           "default": "none",
-          "description": "Behavior-changing setting `direction` for this API."
+          "description": "Movement direction (nextWordStart, prevWordStart, nextWordEnd, prevWordEnd, nextParagraph, prevParagraph, firstNonWhitespace, lastNonWhitespace, matchingPair, left, right, up, down, start, end)."
         },
         {
-          "name": "extendSelection",
+          "name": "granularity",
+          "type": "enum",
+          "default": "none",
+          "description": "Optional motion granularity (word, subword, paragraph, line, character)."
+        },
+        {
+          "name": "extend",
           "type": "boolean",
           "default": "false",
-          "description": "Behavior-changing setting `extendSelection` for this API."
+          "description": "Whether movement extends the current selection."
+        },
+        {
+          "name": "count",
+          "type": "number",
+          "default": "1",
+          "description": "Repeat count for the motion (clamped to >= 1)."
         }
       ],
       "security": "Changes only client-local caret/selection/viewport state and grants no document mutation or external authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -1167,7 +1347,7 @@
       "lookup_tags": ["cursormovement", "editor", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": false
     },
     {
@@ -1219,6 +1399,33 @@
       "security": "Bindable client UI command ID only; after explicit user routing it reapplies a client-local ordinary inverse edit under the editable lease through the ordinary local edit path, and this API does not grant filesystem/workspace authority, package/configuration/AI history mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
       "agent_guidance": "Use `clay.editor.clientRedo` only as a documented command ID for `bindKey`; do not expose raw history stacks, server undo protocols, raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "redo", "history", "keybindings", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
+      "id": "clay.editor.clientRemoveSelection",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-remove-selection.md",
+      "js_module": "clay:editor",
+      "js_export": "clientRemoveSelection",
+      "js_facade": "runtime/js/editor.js::clientRemoveSelection",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::remove_selection",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "clientRemoveSelection",
+      "user_facing_name": "Remove Selection",
+      "summary": "Remove the primary selection, keeping the rest.",
+      "owner": "client",
+      "phase": "Phase 21",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [],
+      "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientRemoveSelection` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
       "app_visible": true,
       "help_visible": true,
       "stability": "runtime-backed-command",
@@ -1298,18 +1505,145 @@
       "async": false
     },
     {
+      "id": "clay.editor.clientSelectAllMatches",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-select-all-matches.md",
+      "js_module": "clay:editor",
+      "js_export": "clientSelectAllMatches",
+      "js_facade": "runtime/js/editor.js::clientSelectAllMatches",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::select_all_matches",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "clientSelectAllMatches",
+      "user_facing_name": "Select All Matches",
+      "summary": "Replace the selection set with every occurrence of the current selection or word.",
+      "owner": "client",
+      "phase": "Phase 21",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": ["Ctrl+Shift+L"],
+      "custom_properties": [],
+      "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientSelectAllMatches` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
+      "id": "clay.editor.clientSelectNextMatch",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-select-next-match.md",
+      "js_module": "clay:editor",
+      "js_export": "clientSelectNextMatch",
+      "js_facade": "runtime/js/editor.js::clientSelectNextMatch",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::select_next_match",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "clientSelectNextMatch",
+      "user_facing_name": "Select Next Match",
+      "summary": "Select the next occurrence of the current selection or word as a new primary caret.",
+      "owner": "client",
+      "phase": "Phase 21",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": ["Ctrl+D"],
+      "custom_properties": [],
+      "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientSelectNextMatch` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
+      "id": "clay.editor.clientSelectPrevMatch",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-select-prev-match.md",
+      "js_module": "clay:editor",
+      "js_export": "clientSelectPrevMatch",
+      "js_facade": "runtime/js/editor.js::clientSelectPrevMatch",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::select_next_match",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "clientSelectPrevMatch",
+      "user_facing_name": "Select Previous Match",
+      "summary": "Select the previous occurrence of the current selection or word as a new primary caret.",
+      "owner": "client",
+      "phase": "Phase 21",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [],
+      "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientSelectPrevMatch` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
+      "id": "clay.editor.clientSelectTextobject",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-select-textobject.md",
+      "js_module": "clay:editor",
+      "js_export": "clientSelectTextobject",
+      "js_facade": "runtime/js/editor.js::clientSelectTextobject",
+      "backing_rust": "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/masonry_editor.rs::EditorWidget::apply_selection_query_result",
+      "deno_op": "op_clay_editor_select_textobject",
+      "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_select_textobject",
+      "name": "clientSelectTextobject",
+      "user_facing_name": "Select Textobject",
+      "summary": "Select the tree-sitter text object (function, class, argument, comment, ...) around, after, or before each caret.",
+      "owner": "client",
+      "phase": "Phase 22",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "object",
+          "type": "enum",
+          "default": "none",
+          "description": "Which text object to select (function, class, argument, comment, loop, conditional, call, statement)."
+        },
+        {
+          "name": "around",
+          "type": "boolean",
+          "default": "false",
+          "description": "true selects the around capture (whole node); false selects the inner capture (falling back to around when the grammar defines no inner)."
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "default": "current",
+          "description": "current selects the innermost object at the caret; next/previous walk to the nearest object after/before the caret (no wrap)."
+        }
+      ],
+      "security": "Changes only transient client selection state from a read-only server grammar query; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientSelectTextobject` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["editor", "js-api", "textobjects", "tree-sitter", "selection"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "clay.editor.clientSetCursorStyle",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-set-cursor-style.md",
       "js_module": "clay:editor",
       "js_export": "clientSetCursorStyle",
       "js_facade": "runtime/js/editor.js::clientSetCursorStyle",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::paint_caret",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::set_caret_style_override",
       "deno_op": "op_clay_editor_set_cursor_style",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_set_cursor_style",
       "name": "clientSetCursorStyle",
       "user_facing_name": "Set Cursor Style",
-      "summary": "Set Cursor Style through the planned `clay:editor` Clay JavaScript facade.",
+      "summary": "Set the caret shape and blink through the `clay:editor` Clay JavaScript facade.",
       "owner": "client",
       "phase": "Phase 8",
       "visibility": "public",
@@ -1317,22 +1651,40 @@
       "key_bindings": [],
       "custom_properties": [
         {
-          "name": "color",
-          "type": "string",
-          "default": "inherited",
-          "description": "Cursor color as an inherited theme value or CSS-like color string such as #ffcc00; defaults to inherited."
-        },
-        {
-          "name": "blinking",
-          "type": "boolean",
-          "default": "true",
-          "description": "Whether the caret blinks; defaults to true and remains client-local UI metadata."
-        },
-        {
-          "name": "type",
+          "name": "shape",
           "type": "enum",
           "default": "bar",
-          "description": "Caret shape; allowed values are block, bar, and underline, and the default is bar."
+          "description": "Caret glyph shape; allowed values are bar, line, block, and underline; the default is bar. Colour stays theme-owned (base.caret)."
+        },
+        {
+          "name": "blink",
+          "type": "enum",
+          "default": "solid",
+          "description": "Blink behaviour; allowed values are solid, blink, phase, and smooth; the default is solid (never hides, reduced-motion friendly)."
+        },
+        {
+          "name": "widthPx",
+          "type": "number",
+          "default": "1.5",
+          "description": "Stroke thickness for bar/line/underline in pixels; defaults to 1.5."
+        },
+        {
+          "name": "heightPct",
+          "type": "number",
+          "default": "1",
+          "description": "Caret height as a fraction of the line height; defaults to 1 (full line)."
+        },
+        {
+          "name": "hollow",
+          "type": "boolean",
+          "default": "false",
+          "description": "Render the block caret as an outline; defaults to false."
+        },
+        {
+          "name": "stopBlinkOnTyping",
+          "type": "boolean",
+          "default": "true",
+          "description": "Restart the blink to visible on typing; defaults to true."
         }
       ],
       "security": "Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.",
@@ -1340,7 +1692,7 @@
       "lookup_tags": ["cursorstylecustomization", "editor", "js-api"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": false
     },
     {
@@ -1350,24 +1702,43 @@
       "js_module": "clay:editor",
       "js_export": "clientSetSelection",
       "js_facade": "runtime/js/editor.js::clientSetSelection",
-      "backing_rust": "src/editor/selection.rs::SelectionState",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::select_word",
       "deno_op": "op_clay_editor_set_selection",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_set_selection",
       "name": "clientSetSelection",
       "user_facing_name": "Set Selection",
-      "summary": "Set Selection through the planned `clay:editor` Clay JavaScript facade.",
+      "summary": "Set the selection through the `clay:editor` Clay JavaScript facade.",
       "owner": "client",
       "phase": "Phase 7",
       "visibility": "public",
       "permissions": [],
-      "key_bindings": ["Shift+ArrowLeft", "Shift+ArrowRight", "PrimaryPointerDrag"],
-      "custom_properties": [],
+      "key_bindings": ["Shift+ArrowLeft", "Shift+ArrowRight", "PrimaryPointerDrag", "Ctrl+L", "Ctrl+D"],
+      "custom_properties": [
+        {
+          "name": "action",
+          "type": "enum",
+          "default": "none",
+          "description": "Selection action (selectWord, selectLine, selectParagraph)."
+        },
+        {
+          "name": "extend",
+          "type": "boolean",
+          "default": "false",
+          "description": "Whether the action extends the current selection."
+        },
+        {
+          "name": "direction",
+          "type": "enum",
+          "default": "current",
+          "description": "Selection direction (current, next, prev)."
+        }
+      ],
       "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `clay.editor.clientSetSelection` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "selection"],
       "app_visible": true,
       "help_visible": true,
-      "stability": "planned",
+      "stability": "runtime-backed",
       "async": false
     },
     {
@@ -1438,6 +1809,40 @@
       "async": false
     },
     {
+      "id": "clay.editor.clientSmartSelect",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-smart-select.md",
+      "js_module": "clay:editor",
+      "js_export": "clientSmartSelect",
+      "js_facade": "runtime/js/editor.js::clientSmartSelect",
+      "backing_rust": "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/masonry_editor.rs::EditorWidget::apply_selection_query_result",
+      "deno_op": "op_clay_editor_smart_select",
+      "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_smart_select",
+      "name": "clientSmartSelect",
+      "user_facing_name": "Smart Select",
+      "summary": "Expand or shrink the selection along the document's syntax tree (AST-aware grow/shrink).",
+      "owner": "client",
+      "phase": "Phase 22",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "action",
+          "type": "enum",
+          "default": "none",
+          "description": "expand grows each selection to the smallest enclosing syntax-node range; shrink returns to the largest node range strictly inside the current selection."
+        }
+      ],
+      "security": "Changes only transient client selection state from a read-only server tree walk; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientSmartSelect` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["editor", "js-api", "smart-select", "tree-sitter", "selection"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "clay.editor.clientUndo",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-undo.md",
@@ -1459,6 +1864,33 @@
       "security": "Bindable client UI command ID only; after explicit user routing it applies a client-local ordinary inverse edit under the editable lease through the ordinary local edit path, and this API does not grant filesystem/workspace authority, package/configuration/AI history mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
       "agent_guidance": "Use `clay.editor.clientUndo` only as a documented command ID for `bindKey`; do not expose raw history stacks, server undo protocols, raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "undo", "history", "keybindings", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
+      "id": "clay.editor.clientUndoCursorMove",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-undo-cursor-move.md",
+      "js_module": "clay:editor",
+      "js_export": "clientUndoCursorMove",
+      "js_facade": "runtime/js/editor.js::clientUndoCursorMove",
+      "backing_rust": "src/editor/surface.rs::EditorSurface::undo_cursor_move",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "clientUndoCursorMove",
+      "user_facing_name": "Undo Cursor Move",
+      "summary": "Restore the previous selection set from the cursor-undo stack.",
+      "owner": "client",
+      "phase": "Phase 21",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": ["Ctrl+U"],
+      "custom_properties": [],
+      "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `clay.editor.clientUndoCursorMove` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "lookup_tags": ["editor", "js-api", "multi-cursor", "selection", "undo"],
       "app_visible": true,
       "help_visible": true,
       "stability": "runtime-backed-command",
@@ -2046,6 +2478,12 @@
           "description": "Behavior-changing setting `mimeType` for this primitive gate API."
         },
         {
+          "name": "editorRules",
+          "type": "object | undefined",
+          "default": "registered-mode defaults",
+          "description": "Optional declarative editor rules applied to the published behavior manifest for this activation (validated server-side, deny-by-default). Carries the generic rule fields plus per-mode movement and caretStyle settings (Plan 071 tasks 4/6/11); the registration-time editorRules from serverRegisterModePattern is the usual source."
+        },
+        {
           "name": "behaviorVersion",
           "type": "number",
           "default": "generated",
@@ -2160,6 +2598,12 @@
           "type": "string",
           "default": "required",
           "description": "Behavior-changing setting `apiPrefix` for this primitive gate API."
+        },
+        {
+          "name": "editorRules",
+          "type": "object | undefined",
+          "default": "built-in code-editing defaults",
+          "description": "Optional declarative editor rules stored with the mode declaration and applied at activation. Generic rule fields (enter, tab, pairs, comments, electricCharacters, autocompleteTriggers) plus per-mode movement and caretStyle (Plan 071 tasks 4/6/11). Optional movement policy (Plan 071 task 4/11), validated by the server. Fields — wordSeparators ('code', 'prose', or { custom: string[] }), treatUnderscoreAsWord, camelCaseSubWord, paragraphStyle ('blankLine' | 'blankLineOrWhitespace'), stopAtEolWordEnd, lineMovement ('character' | 'screenLine'), stickyColumn. Absent fields fall back to the code-editing defaults. Optional caret appearance override (Plan 071 task 6/11), validated by the server. Fields — shape ('bar' | 'line' | 'block' | 'underline'), widthPx, heightPct, hollow, blink ('solid' | 'blink' | 'phase' | 'smooth'), smoothAnimationMs, stopBlinkOnTyping. Absent means the reduced-motion-safe editor default bar; clientSetCursorStyle overrides it at runtime. Every field is validated server-side; unknown keys and values are rejected deny-by-default. Build the object with clay.behavior.buildCodeEditingManifest."
         }
       ],
       "security": "Requires mode-registration permission and server validation of package prefix, static pattern schema, duplicate modes, and bounded open-document metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority.",
@@ -2982,7 +3426,7 @@
       "deno_op_path": "src/server/ops/typography.rs::op_clay_theme_set_typography",
       "name": "setTypography",
       "user_facing_name": "Set Typography",
-      "summary": "Atomically configure Clay's monospace, proportional, and UI font-family fallback stacks, logical-pixel sizes, and optional UI text-variant hierarchy.",
+      "summary": "Atomically configure Clay's monospace, proportional, and UI font-family fallback stacks, logical-pixel sizes, optional per-role ligature/feature policies, and optional UI text-variant hierarchy.",
       "owner": "server",
       "phase": "Phase 18.16.5",
       "visibility": "public",
@@ -3002,6 +3446,12 @@
           "description": "Monospace base size in logical pixels, from 6 through 96 inclusive."
         },
         {
+          "name": "monospace.ligatures",
+          "type": "object | undefined",
+          "default": "{ enableStandard: true, enableContextual: true }",
+          "description": "Optional OpenType ligature/feature policy for code text. Fields — enableStandard (liga+clig, default true), enableContextual (calt, default true), discretionaryFeatures (up to 32 feature tags to enable), rawFeatures (CSS-font-features-format string, at most 256 bytes), disableFeatures (up to 32 feature tags forced off). Omission keeps standard and contextual ligatures enabled."
+        },
+        {
           "name": "proportional.families",
           "type": "string[]",
           "default": "[\"sans-serif\"]",
@@ -3014,6 +3464,12 @@
           "description": "Proportional base size in logical pixels, from 6 through 96 inclusive."
         },
         {
+          "name": "proportional.ligatures",
+          "type": "object | undefined",
+          "default": "{ enableStandard: true, enableContextual: true }",
+          "description": "Optional OpenType ligature/feature policy for prose text; same schema as monospace.ligatures."
+        },
+        {
           "name": "ui.families",
           "type": "string[]",
           "default": "[\"system-ui\"]",
@@ -3024,6 +3480,12 @@
           "type": "number",
           "default": "12",
           "description": "UI base size in logical pixels, from 6 through 96 inclusive."
+        },
+        {
+          "name": "ui.ligatures",
+          "type": "object | undefined",
+          "default": "{ enableStandard: true, enableContextual: true }",
+          "description": "Optional OpenType ligature/feature policy for Clay UI text; same schema as monospace.ligatures."
         },
         {
           "name": "hierarchy",

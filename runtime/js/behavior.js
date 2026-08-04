@@ -61,6 +61,16 @@ export function buildCodeEditingManifest(options) {
         comments,
         tabSpaces: options.indentSize,
         electricCharacters,
-        autocompleteTriggers
+        autocompleteTriggers,
+        // Plan 071 task 11: optional movement/caret appearance overrides.
+        // Packages pass plain declarative objects; the server-side validator
+        // (modes.rs) owns field-by-field parsing and fallback, so unknown or
+        // malformed values never reach the client.
+        ...(isPlainObject(options.movement) ? { movement: options.movement } : {}),
+        ...(isPlainObject(options.caretStyle) ? { caretStyle: options.caretStyle } : {})
     };
+}
+
+function isPlainObject(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

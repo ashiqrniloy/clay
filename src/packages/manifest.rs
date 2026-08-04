@@ -19,6 +19,11 @@ pub struct ClayPackageMetadata {
     pub api_prefix: String,
     pub permissions: Vec<PackagePermission>,
     pub modes: Vec<String>,
+    /// Mode IDs declared under `clay.editorControl.modes`: the exact major
+    /// modes in which this package may exercise `editor-control` authority
+    /// (movement/selection/caret ops and the programmatic execution channel).
+    /// May reference foreign modes (e.g. `core.code`); enforced per call.
+    pub editor_control_modes: Vec<String>,
     pub entry: String,
     pub load_entry: Option<String>,
     pub graph: PackageGraphRelations,
@@ -140,6 +145,8 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
 
     let permissions = parse_requested_capabilities(clay, &context)?;
     let modes = parse_modes(clay.get("modes"), &api_prefix, &context)?;
+    let editor_control_modes =
+        parse_editor_control(clay.get("editorControl"), &permissions, &context)?;
     let graph = parse_graph_relations(clay, &api_prefix, &context)?;
     let extension_points = crate::packages::extension_points::parse_extension_points(
         clay.get("extensionPoints"),
@@ -154,6 +161,7 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
             api_prefix,
             permissions,
             modes,
+            editor_control_modes,
             entry,
             load_entry,
             graph,
@@ -421,6 +429,88 @@ fn parse_relation_array(
         relations.push(trimmed.to_string());
     }
     Ok(relations)
+}
+
+/// Maximum number of mode IDs a package may declare under
+/// `clay.editorControl.modes`.
+pub const MAX_EDITOR_CONTROL_MODES: usize = 32;
+/// Maximum byte length of one declared editor-control mode ID.
+pub const MAX_EDITOR_CONTROL_MODE_ID_BYTES: usize = 128;
+
+/// Parse `clay.editorControl` (optional). Shape is closed: only `modes` is
+/// accepted, deny-by-default. Mode IDs are exact (no wildcards) and may
+/// reference modes the package does not own; declaring the block requires the
+/// approved-requested `editor-control` permission.
+fn parse_editor_control(
+    value: Option<&Value>,
+    permissions: &[PackagePermission],
+    context: &DiagnosticContext,
+) -> Result<Vec<String>, PackageDiagnostic> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    if !permissions.contains(&PackagePermission::EditorControl) {
+        return Err(context.diagnostic(
+            PackageValidationRule::InvalidPermission,
+            "clay.editorControl requires the `editor-control` permission declaration",
+        ));
+    }
+    let Some(object) = value.as_object() else {
+        return Err(context.diagnostic(
+            PackageValidationRule::MissingField,
+            "clay.editorControl must be an object when present",
+        ));
+    };
+    for key in object.keys() {
+        if key != "modes" {
+            return Err(context.diagnostic(
+                PackageValidationRule::InvalidModeId,
+                format!("unknown clay.editorControl key `{key}`; allowed keys are: modes"),
+            ));
+        }
+    }
+    let Some(Value::Array(values)) = object.get("modes") else {
+        return Err(context.diagnostic(
+            PackageValidationRule::MissingField,
+            "clay.editorControl.modes must be an array of exact mode IDs",
+        ));
+    };
+    if values.len() > MAX_EDITOR_CONTROL_MODES {
+        return Err(context.diagnostic(
+            PackageValidationRule::InvalidModeId,
+            format!(
+                "clay.editorControl.modes must contain at most {MAX_EDITOR_CONTROL_MODES} entries"
+            ),
+        ));
+    }
+    let mut seen = HashSet::new();
+    let mut modes = Vec::new();
+    for value in values {
+        let Some(mode) = value.as_str() else {
+            return Err(context.diagnostic(
+                PackageValidationRule::InvalidModeId,
+                "clay.editorControl.modes entries must be strings",
+            ));
+        };
+        if mode.is_empty()
+            || mode.len() > MAX_EDITOR_CONTROL_MODE_ID_BYTES
+            || mode.chars().any(char::is_control)
+            || mode.contains('*')
+        {
+            return Err(context.diagnostic(
+                PackageValidationRule::InvalidModeId,
+                "clay.editorControl.modes entries must be bounded exact mode IDs (no wildcards)",
+            ));
+        }
+        if !seen.insert(mode.to_string()) {
+            return Err(context.diagnostic(
+                PackageValidationRule::DuplicateModeId,
+                "clay.editorControl.modes entries must be unique within a package",
+            ));
+        }
+        modes.push(mode.to_string());
+    }
+    Ok(modes)
 }
 
 fn parse_modes(

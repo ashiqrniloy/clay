@@ -8,7 +8,7 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     perf::budgets::TYPOGRAPHY_PAYLOAD_BUDGET_BYTES,
-    protocol::{ActiveTypography, FontProfile, UiTypographyHierarchy},
+    protocol::{ActiveTypography, FontProfile, LigaturePolicy, UiTypographyHierarchy},
 };
 
 use super::ClayOpState;
@@ -50,10 +50,8 @@ fn parse_typography(value: &Value) -> Result<ActiveTypography, JsErrorBox> {
     let object = value.as_object().ok_or_else(invalid_typography)?;
     // The three profiles are always required; `hierarchy` is optional. Reject any
     // other key so a future field never silently round-trips as typography.
-    require_only_keys(object, &["monospace", "proportional", "ui"])?;
-    if object.contains_key("hierarchy") && object.len() != 4 {
-        return Err(invalid_typography());
-    }
+    require_keys(object, &["monospace", "proportional", "ui"])?;
+    reject_unknown_keys(object, &["monospace", "proportional", "ui", "hierarchy"])?;
     Ok(ActiveTypography {
         revision: 0,
         monospace: parse_profile(object, "monospace")?,
@@ -106,7 +104,8 @@ fn parse_profile(object: &Map<String, Value>, name: &str) -> Result<FontProfile,
         .get(name)
         .and_then(Value::as_object)
         .ok_or_else(invalid_typography)?;
-    require_only_keys(profile, &["families", "size"])?;
+    require_keys(profile, &["families", "size"])?;
+    reject_unknown_keys(profile, &["families", "size", "ligatures"])?;
     let families = profile
         .get("families")
         .and_then(Value::as_array)
@@ -122,11 +121,77 @@ fn parse_profile(object: &Map<String, Value>, name: &str) -> Result<FontProfile,
         .get("size")
         .and_then(Value::as_f64)
         .ok_or_else(invalid_typography)? as f32;
-    Ok(FontProfile { families, size })
+    let ligatures = profile
+        .get("ligatures")
+        .map(parse_ligature_policy)
+        .transpose()?;
+    Ok(FontProfile {
+        families,
+        size,
+        ligatures: Box::new(ligatures.unwrap_or_default()),
+    })
 }
 
-fn require_only_keys(object: &Map<String, Value>, keys: &[&str]) -> Result<(), JsErrorBox> {
-    if object.len() == keys.len() && object.keys().all(|key| keys.contains(&key.as_str())) {
+/// Parse an optional `ligatures` policy object. Fields default when absent so a
+/// `setTypography` call without `ligatures` keeps the historical ligature-on
+/// shaping; deny-by-default rejects unknown ligature keys.
+fn parse_ligature_policy(value: &Value) -> Result<LigaturePolicy, JsErrorBox> {
+    let object = value.as_object().ok_or_else(invalid_typography)?;
+    reject_unknown_keys(
+        object,
+        &[
+            "enableStandard",
+            "enableContextual",
+            "discretionaryFeatures",
+            "rawFeatures",
+            "disableFeatures",
+        ],
+    )?;
+    let enable_standard = object
+        .get("enableStandard")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let enable_contextual = object
+        .get("enableContextual")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let discretionary_features = parse_feature_list(object, "discretionaryFeatures")?;
+    let raw_features = object
+        .get("rawFeatures")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let disable_features = parse_feature_list(object, "disableFeatures")?;
+    Ok(LigaturePolicy {
+        enable_standard,
+        enable_contextual,
+        discretionary_features,
+        raw_features,
+        disable_features,
+    })
+}
+
+fn parse_feature_list(object: &Map<String, Value>, key: &str) -> Result<Vec<String>, JsErrorBox> {
+    match object.get(key).and_then(Value::as_array) {
+        Some(array) => array
+            .iter()
+            .map(Value::as_str)
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(invalid_typography)
+            .map(|items| items.into_iter().map(str::to_string).collect()),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn require_keys(object: &Map<String, Value>, keys: &[&str]) -> Result<(), JsErrorBox> {
+    if keys.iter().all(|key| object.contains_key(*key)) {
+        Ok(())
+    } else {
+        Err(invalid_typography())
+    }
+}
+
+fn reject_unknown_keys(object: &Map<String, Value>, allowed: &[&str]) -> Result<(), JsErrorBox> {
+    if object.keys().all(|key| allowed.contains(&key.as_str())) {
         Ok(())
     } else {
         Err(invalid_typography())
@@ -137,4 +202,77 @@ fn invalid_typography() -> JsErrorBox {
     JsErrorBox::generic(
         "clay.theme.invalid_typography: setTypography requires complete monospace, proportional, and ui profiles with only families and size",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn base_profile() -> serde_json::Value {
+        json!({ "families": ["monospace"], "size": 16.0 })
+    }
+
+    #[test]
+    fn parse_typography_accepts_profile_without_ligatures() {
+        let value = json!({
+            "monospace": base_profile(),
+            "proportional": { "families": ["sans-serif"], "size": 16.0 },
+            "ui": { "families": ["system-ui"], "size": 12.0 },
+        });
+        let typography = parse_typography(&value).expect("ligatures optional");
+        assert!(typography.monospace.ligatures.enable_standard);
+        assert!(typography.monospace.ligatures.enable_contextual);
+    }
+
+    #[test]
+    fn parse_typography_parses_ligature_policy_fields() {
+        let value = json!({
+            "monospace": {
+                "families": ["monospace"],
+                "size": 16.0,
+                "ligatures": {
+                    "enableStandard": false,
+                    "enableContextual": true,
+                    "discretionaryFeatures": ["ss01"],
+                    "rawFeatures": "'calt' 1, 'liga' 0",
+                    "disableFeatures": ["liga"],
+                },
+            },
+            "proportional": { "families": ["sans-serif"], "size": 16.0 },
+            "ui": { "families": ["system-ui"], "size": 12.0 },
+        });
+        let typography = parse_typography(&value).expect("valid ligatures");
+        let policy = &typography.monospace.ligatures;
+        assert!(!policy.enable_standard);
+        assert!(policy.enable_contextual);
+        assert_eq!(policy.discretionary_features, vec!["ss01".to_string()]);
+        assert_eq!(policy.disable_features, vec!["liga".to_string()]);
+        assert_eq!(policy.raw_features.as_deref(), Some("'calt' 1, 'liga' 0"));
+    }
+
+    #[test]
+    fn parse_typography_rejects_unknown_ligature_key() {
+        let value = json!({
+            "monospace": {
+                "families": ["monospace"],
+                "size": 16.0,
+                "ligatures": { "enableStandard": true, "futureField": 1 },
+            },
+            "proportional": { "families": ["sans-serif"], "size": 16.0 },
+            "ui": { "families": ["system-ui"], "size": 12.0 },
+        });
+        assert!(parse_typography(&value).is_err());
+    }
+
+    #[test]
+    fn parse_typography_rejects_unknown_top_level_key() {
+        let value = json!({
+            "monospace": base_profile(),
+            "proportional": { "families": ["sans-serif"], "size": 16.0 },
+            "ui": { "families": ["system-ui"], "size": 12.0 },
+            "futureTopLevel": 1,
+        });
+        assert!(parse_typography(&value).is_err());
+    }
 }

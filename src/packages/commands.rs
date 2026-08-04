@@ -22,7 +22,7 @@ pub struct PackageCommandDeclaration {
     pub permissions: Vec<PackagePermission>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PackageBehaviorContribution {
     pub package_name: String,
     pub package_version: String,

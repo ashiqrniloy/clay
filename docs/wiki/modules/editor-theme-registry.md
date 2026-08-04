@@ -237,6 +237,10 @@ Commands: `cargo test --lib shell::theme`, `cargo test --test editor editor_perf
 
 Phase 20.6 segregates the canonical default themes into dedicated first-party packages `@clay/theme-modus-operandi` (canonical light default) and `@clay/theme-modus-vivendi` (canonical dark default), shipped alongside the existing Gruvbox packages using the same inert `textStyles` + no-op ESM structure. A bounded `light` | `dark` | `system` appearance preference (`src/protocol/mod.rs::Appearance`) resolves these canonical defaults without any `loadPackage` call: `src/server/ops/theme.rs::canonical_default_specifier` + `resolve_canonical_default_theme` build the `ActiveTheme` snapshot from the bundled inventory, injected into the evaluation harvest in `src/server/js_runtime.rs` when no explicit theme was set. `System` falls back to dark (Modus Vivendi) when no OS signal is present. An explicit `setTheme` sets `explicit_theme_active = true` and always wins over the appearance-derived default. The new `clay.theme.setAppearance` facade (`op_clay_theme_set_appearance`) exposes the preference; `settings.setTheme`/`settings.setAppearance` from the `@clay/settings` panel persist to `~/.config/clay/preferences.json` and reload the runtime so changes apply live via the existing `ServerMessage::ActiveTheme` / `RuntimeStateSnapshot` fanout. Full implementation, persistence/precedence, and settings surface details: [Phase 20.6 Theme Package Segregation and Settings UI](phase20.6-theme-segregation-settings-ui.md).
 
+## Plan 071 caret styling
+
+Plan 071 (task 6) adds caret **shape and blink** as editor chrome resolved through this registry's theme default. `StyleRegistry` carries a `caret_style` default (Bar in `StyleRegistry::clay_default()`); `EditorSurface::effective_caret_style` layers runtime override (`clientSetCursorStyle`) → per-mode manifest `caret_style` → this theme default. Caret **color** remains `theme.base.caret` — `CaretStyle` controls geometry/blink only, so theme packages still own caret color through the existing `caret` key without any new token. See [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md).
+
 ## Related
 
 - [Phase 20.1 UI Design Language Primitive Review](phase20.1-ui-design-language-primitive-review.md)
@@ -249,4 +253,5 @@ Phase 20.6 segregates the canonical default themes into dedicated first-party pa
 - [Text Vocabulary and Two-Axis Decoration Contract](../../reference/primitives/syntax-vocabulary.md)
 - [Package styleMap authoring (vocabulary captures)](../../reference/primitives/syntax-vocabulary.md#package-stylemap-authoring)
 - [Theme authoring guide](../../reference/packages/creating-packages.md#phase-1815-theme-authoring-textstyles-and-settheme)
+- [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md)
 - [`clay.theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md)

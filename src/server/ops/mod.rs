@@ -6,6 +6,7 @@ mod decorations;
 mod diagnostics;
 mod document_analysis;
 mod documents;
+mod editor;
 mod git;
 mod keybindings;
 mod language_intelligence;
@@ -63,6 +64,11 @@ use self::{
         op_clay_documents_get_document_status, op_clay_documents_list_documents,
         op_clay_documents_open_document, op_clay_documents_reload_document,
         op_clay_documents_save_document,
+    },
+    editor::{
+        op_clay_editor_add_cursor, op_clay_editor_column_select, op_clay_editor_execute_command,
+        op_clay_editor_move_cursor, op_clay_editor_select_textobject,
+        op_clay_editor_set_cursor_style, op_clay_editor_set_selection, op_clay_editor_smart_select,
     },
     git::{op_clay_git_list_statuses, op_clay_git_refresh_status},
     keybindings::{
@@ -155,6 +161,18 @@ pub(crate) struct ClayOpState {
     /// on the third-party worker itself.
     third_party_commands:
         Mutex<Option<std::sync::mpsc::Sender<crate::server::js_runtime::RuntimeCommand>>>,
+    /// Host-replicated active editor mode snapshot for the THIRD-PARTY
+    /// worker (follow-up round `editor-control`). The trusted worker pushes
+    /// it after every behavior-manifest replacement; the third-party gate
+    /// reads it because the third-party worker holds no mode registry or
+    /// document-scoped manifest of its own. Always `None`-irrelevant on the
+    /// trusted worker.
+    replicated_active_editor_mode: Mutex<Option<String>>,
+    /// Follow-up round (`editor-control`): bounded publisher for gated
+    /// programmatic editor-command execution requests. Wired by the JS
+    /// runtime service for both domains; `None` in unit-test states.
+    editor_command_publisher:
+        Mutex<Option<tokio::sync::broadcast::Sender<crate::protocol::EditorCommandRequest>>>,
     runtime_records: Mutex<Vec<String>>,
     published_sdui_tree: Mutex<Option<crate::protocol::SduiTree>>,
     published_decoration_set: Mutex<Option<DecorationSet>>,
@@ -298,6 +316,8 @@ impl ClayOpState {
                 configuration_evaluation: false,
             }),
             current_package: Mutex::new(None),
+            replicated_active_editor_mode: Mutex::new(None),
+            editor_command_publisher: Mutex::new(None),
             third_party_commands: Mutex::new(None),
             package_service,
             language_server_authority_sealed: AtomicBool::new(
@@ -337,6 +357,9 @@ impl ClayOpState {
             .third_party_commands
             .lock()
             .expect("third-party bridge mutex poisoned") = Some(sender);
+        // A fresh third-party worker starts with no snapshot: re-push the
+        // current active editor mode so its gate is immediately correct.
+        self.replicate_active_editor_mode();
     }
 
     /// Current third-party worker command channel for the cross-domain
@@ -468,6 +491,107 @@ impl ClayOpState {
             )));
         }
         Ok(record)
+    }
+
+    /// Whether an executing-package context is present (without requiring the
+    /// package to be enabled). Used by gates that distinguish package callers
+    /// from trusted user-configuration callers.
+    pub(crate) fn has_current_package(&self) -> bool {
+        self.current_package
+            .lock()
+            .expect("current package mutex poisoned")
+            .is_some()
+    }
+
+    /// Mode ID of the active major mode for the active document, when the
+    /// active behavior manifest is document-scoped and a major mode is
+    /// activated for it. Trusted-worker source of truth for the
+    /// `editor-control` gate.
+    pub(crate) fn active_major_mode_id(&self) -> Option<String> {
+        let manifest = self.behavior_manifest();
+        let crate::protocol::BehaviorScope::Document { document_id } = manifest.scope else {
+            return None;
+        };
+        self.modes
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .active_major_mode(document_id)
+            .map(|activation| activation.mode_id.clone())
+    }
+
+    pub(crate) fn set_replicated_active_editor_mode(&self, mode_id: Option<String>) {
+        *self
+            .replicated_active_editor_mode
+            .lock()
+            .expect("replicated active editor mode mutex poisoned") = mode_id;
+    }
+
+    pub(crate) fn set_editor_command_publisher(
+        &self,
+        sender: tokio::sync::broadcast::Sender<crate::protocol::EditorCommandRequest>,
+    ) {
+        *self
+            .editor_command_publisher
+            .lock()
+            .expect("editor command publisher mutex poisoned") = Some(sender);
+    }
+
+    /// Publish a gated editor-command execution request to connected clients.
+    /// Returns `true` when a publisher is wired (send failures only mean no
+    /// live subscribers — advisory degrade).
+    pub(crate) fn publish_editor_command(
+        &self,
+        request: crate::protocol::EditorCommandRequest,
+    ) -> bool {
+        let Some(sender) = self
+            .editor_command_publisher
+            .lock()
+            .expect("editor command publisher mutex poisoned")
+            .clone()
+        else {
+            return false;
+        };
+        let _ = sender.send(request);
+        true
+    }
+
+    /// Mode ID the `editor-control` gate treats as active: trusted workers
+    /// derive it from manifest scope + mode registry; the third-party worker
+    /// reads the host-replicated snapshot.
+    pub(crate) fn active_editor_mode_id(&self) -> Option<String> {
+        if matches!(
+            self.domain,
+            crate::packages::bundled::RuntimeDomain::ThirdParty
+        ) {
+            return self
+                .replicated_active_editor_mode
+                .lock()
+                .expect("replicated active editor mode mutex poisoned")
+                .clone();
+        }
+        self.active_major_mode_id()
+    }
+
+    /// Push the current active editor mode to the third-party worker so its
+    /// `editor-control` gate sees the same mode state. Trusted-only; silently
+    /// skipped when no third-party worker is wired.
+    pub(crate) fn replicate_active_editor_mode(&self) {
+        if !matches!(
+            self.domain,
+            crate::packages::bundled::RuntimeDomain::Trusted
+        ) {
+            return;
+        }
+        let mode_id = self.active_major_mode_id();
+        if let Some(sender) = self
+            .third_party_commands
+            .lock()
+            .expect("third-party command channel mutex poisoned")
+            .as_ref()
+        {
+            let _ = sender
+                .send(crate::server::js_runtime::RuntimeCommand::UpdateActiveEditorMode(mode_id));
+        }
     }
 
     pub(crate) fn workspace(
@@ -689,6 +813,7 @@ impl ClayOpState {
         replacement.manifest_id = "clay.runtime.configuration".to_string();
         let manifest = behavior.publish_replacement(replacement)?;
         drop(behavior);
+        self.replicate_active_editor_mode();
         if self
             .runtime_context
             .lock()
@@ -723,6 +848,7 @@ impl ClayOpState {
         replacement.manifest_id = "clay.runtime.configuration".to_string();
         let manifest = behavior.publish_replacement(replacement)?;
         drop(behavior);
+        self.replicate_active_editor_mode();
         if self
             .runtime_context
             .lock()
@@ -918,10 +1044,13 @@ impl ClayOpState {
             }
             manifest.keymaps.push(rule);
         }
-        self.behavior
+        let published = self
+            .behavior
             .lock()
             .expect("Clay runtime op state mutex poisoned")
-            .publish_replacement(manifest)
+            .publish_replacement(manifest)?;
+        self.replicate_active_editor_mode();
+        Ok(published)
     }
 
     pub(super) fn register_command(
@@ -1559,6 +1688,14 @@ extension!(
         op_clay_language_register_intelligence_provider,
         op_clay_language_register_document_analyzer,
         op_clay_language_store_intelligence_result,
+        op_clay_editor_move_cursor,
+        op_clay_editor_set_selection,
+        op_clay_editor_set_cursor_style,
+        op_clay_editor_add_cursor,
+        op_clay_editor_column_select,
+        op_clay_editor_select_textobject,
+        op_clay_editor_smart_select,
+        op_clay_editor_execute_command,
         op_clay_runtime_unavailable,
     ],
 );
@@ -1605,9 +1742,17 @@ extension!(
         op_clay_completion_register_completion_provider,
         op_clay_completion_store_result,
         op_clay_completion_disable,
+        op_clay_editor_move_cursor,
+        op_clay_editor_set_selection,
+        op_clay_editor_set_cursor_style,
+        op_clay_editor_add_cursor,
+        op_clay_editor_column_select,
+        op_clay_editor_select_textobject,
+        op_clay_editor_smart_select,
         op_clay_language_register_intelligence_provider,
         op_clay_language_register_document_analyzer,
         op_clay_language_store_intelligence_result,
+        op_clay_editor_execute_command,
     ],
 );
 
@@ -1669,8 +1814,12 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 69);
-        assert_eq!(package.len(), 36);
+        assert_eq!(trusted.len(), 77);
+        // 44 = 36 public contribution ops + the seven shared `editor-control`
+        // gated editor ops + the gated programmatic execution op (follow-up
+        // round); visibility grants nothing without approved permission +
+        // declared active mode.
+        assert_eq!(package.len(), 44);
         assert!(
             package.is_subset(&trusted),
             "every third-party op must also exist in the trusted extension"

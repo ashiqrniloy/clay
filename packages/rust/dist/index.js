@@ -38,7 +38,10 @@ export const rustEditorRules = Object.freeze(
     indentSize: 4,
     lineComment: "//",
     electricOutdentCharacters: ["}"],
-    autocompleteTriggers: [".", ":"]
+    autocompleteTriggers: [".", ":"],
+    // Plan 071 task 11: explicit code movement (word/underscore/camelCase
+    // policy identical to the built-in default; declared for discoverability).
+    movement: { wordSeparators: "code" }
   })
 );
 

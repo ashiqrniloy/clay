@@ -1,4 +1,5 @@
 use super::buffer::EditorBuffer;
+use crate::protocol::{ParagraphStyle, WordSeparatorPolicy};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CursorState {
@@ -90,6 +91,111 @@ impl CursorState {
             return false;
         }
         self.move_to_line_preserving_scalar_column(target_line, buffer)
+    }
+
+    pub fn move_to_next_word_start(
+        &mut self,
+        buffer: &EditorBuffer,
+        policy: &WordSeparatorPolicy,
+        underscore: bool,
+        long: bool,
+    ) -> bool {
+        match buffer.next_word_start(self.caret, policy, underscore, long) {
+            Some(caret) => self.move_to(caret, buffer),
+            None => self.move_to_document_end(buffer),
+        }
+    }
+
+    pub fn move_to_prev_word_start(
+        &mut self,
+        buffer: &EditorBuffer,
+        policy: &WordSeparatorPolicy,
+        underscore: bool,
+        long: bool,
+    ) -> bool {
+        match buffer.prev_word_start(self.caret, policy, underscore, long) {
+            Some(caret) => self.move_to(caret, buffer),
+            None => self.move_to_document_start(buffer),
+        }
+    }
+
+    pub fn move_to_next_word_end(
+        &mut self,
+        buffer: &EditorBuffer,
+        policy: &WordSeparatorPolicy,
+        underscore: bool,
+        long: bool,
+        stop_at_eol: bool,
+    ) -> bool {
+        match buffer.next_word_end(self.caret, policy, underscore, long, stop_at_eol) {
+            Some(caret) => self.move_to(caret, buffer),
+            None => self.move_to_document_end(buffer),
+        }
+    }
+
+    pub fn move_to_prev_word_end(
+        &mut self,
+        buffer: &EditorBuffer,
+        policy: &WordSeparatorPolicy,
+        underscore: bool,
+        long: bool,
+    ) -> bool {
+        match buffer.prev_word_end(self.caret, policy, underscore, long) {
+            Some(caret) => self.move_to(caret, buffer),
+            None => self.move_to_document_start(buffer),
+        }
+    }
+
+    pub fn move_to_next_sub_word_start(&mut self, buffer: &EditorBuffer, camel: bool) -> bool {
+        match buffer.next_sub_word_start(self.caret, camel) {
+            Some(caret) => self.move_to(caret, buffer),
+            None => self.move_to_document_end(buffer),
+        }
+    }
+
+    pub fn move_to_prev_sub_word_start(&mut self, buffer: &EditorBuffer, camel: bool) -> bool {
+        match buffer.prev_sub_word_start(self.caret, camel) {
+            Some(caret) => self.move_to(caret, buffer),
+            None => self.move_to_document_start(buffer),
+        }
+    }
+
+    pub fn move_to_next_paragraph(&mut self, buffer: &EditorBuffer, style: ParagraphStyle) -> bool {
+        match buffer.next_paragraph(self.caret, style) {
+            Some(caret) => self.move_to(caret, buffer),
+            None => self.move_to_document_end(buffer),
+        }
+    }
+
+    pub fn move_to_prev_paragraph(&mut self, buffer: &EditorBuffer, style: ParagraphStyle) -> bool {
+        match buffer.prev_paragraph(self.caret, style) {
+            Some(caret) => self.move_to(caret, buffer),
+            None => self.move_to_document_start(buffer),
+        }
+    }
+
+    pub fn move_to_paragraph_end(&mut self, buffer: &EditorBuffer, style: ParagraphStyle) -> bool {
+        self.move_to(buffer.paragraph_end_byte(self.caret, style), buffer)
+    }
+
+    pub fn move_to_first_non_blank(&mut self, buffer: &EditorBuffer) -> bool {
+        self.move_to(buffer.first_non_blank_byte(self.caret), buffer)
+    }
+
+    pub fn move_to_last_non_blank(&mut self, buffer: &EditorBuffer) -> bool {
+        self.move_to(buffer.last_non_blank_byte(self.caret), buffer)
+    }
+
+    pub fn move_to_matching_pair(
+        &mut self,
+        buffer: &EditorBuffer,
+        open: char,
+        close: char,
+    ) -> bool {
+        match buffer.matching_pair_byte(self.caret, open, close) {
+            Some(caret) => self.move_to(caret, buffer),
+            None => false,
+        }
     }
 
     fn move_to_line_preserving_scalar_column(

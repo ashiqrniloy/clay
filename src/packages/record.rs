@@ -1825,6 +1825,22 @@ fn parse_syntax_grammar_contributions(
         let locals_query_path = optional_asset_path(queries.get("locals"), "queries.locals", ctx)?;
         let injections_query_path =
             optional_asset_path(queries.get("injections"), "queries.injections", ctx)?;
+        // Deny-by-default: only the known query roles are accepted. Plan 071
+        // task 15 keeps text-object queries out of package-declared grammar
+        // metadata entirely — they are first-party native-descriptor
+        // contributions compiled into the binary, so an unknown key such as
+        // `textobjects` must fail validation instead of being silently dropped.
+        for key in queries.keys() {
+            if !matches!(key.as_str(), "highlights" | "locals" | "injections") {
+                return Err(ctx.error(
+                    PackageRecordRule::InvalidContributionDescriptor,
+                    Some(&id),
+                    format!(
+                        "unknown syntax grammar query kind `queries.{key}`; allowed keys are highlights, locals, injections"
+                    ),
+                ));
+            }
+        }
         let style_map = parse_syntax_style_map(obj.get("styleMap"), &id, ctx)?;
 
         let budgets = obj.get("budgets").and_then(Value::as_object);
@@ -5314,5 +5330,83 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
         assert!(err.message.contains("raw colors or CSS"));
+    }
+
+    fn minimal_manifest_value(clay_extras: Value) -> Value {
+        let mut clay = json!({
+            "apiPrefix": "demo",
+            "entry": "./dist/index.js",
+            "permissions": [],
+            "modes": []
+        });
+        if let (Some(object), Some(extras)) = (clay.as_object_mut(), clay_extras.as_object()) {
+            for (key, value) in extras {
+                object.insert(key.clone(), value.clone());
+            }
+        }
+        json!({
+            "name": "@demo/pkg",
+            "version": "0.1.0",
+            "clay": clay
+        })
+    }
+
+    #[test]
+    fn editor_control_modes_parse_exact_foreign_modes_and_default_empty() {
+        use crate::packages::manifest::validate_manifest_value;
+
+        // Absent block yields an empty declaration.
+        let manifest = validate_manifest_value(&minimal_manifest_value(json!({}))).unwrap();
+        assert!(manifest.clay.editor_control_modes.is_empty());
+
+        // With `editor-control` permission, exact foreign modes parse.
+        let value = minimal_manifest_value(json!({
+            "permissions": ["editor-control"],
+            "editorControl": { "modes": ["core.code", "markdown"] }
+        }));
+        let manifest = validate_manifest_value(&value).unwrap();
+        assert_eq!(
+            manifest.clay.editor_control_modes,
+            vec!["core.code".to_string(), "markdown".to_string()]
+        );
+        assert!(
+            manifest
+                .clay
+                .permissions
+                .contains(&crate::packages::permissions::PackagePermission::EditorControl)
+        );
+    }
+
+    #[test]
+    fn editor_control_requires_permission_deny_by_default() {
+        use crate::packages::manifest::validate_manifest_value;
+        let value = minimal_manifest_value(json!({
+            "editorControl": { "modes": ["core.code"] }
+        }));
+        let err = validate_manifest_value(&value).unwrap_err();
+        assert!(err.message.contains("editor-control"), "{}", err.message);
+    }
+
+    #[test]
+    fn editor_control_rejects_unknown_key_and_wildcard_deny_by_default() {
+        use crate::packages::manifest::validate_manifest_value;
+
+        let value = minimal_manifest_value(json!({
+            "permissions": ["editor-control"],
+            "editorControl": { "modes": [], "everything": true }
+        }));
+        let err = validate_manifest_value(&value).unwrap_err();
+        assert!(
+            err.message.contains("unknown clay.editorControl key"),
+            "{}",
+            err.message
+        );
+
+        let value = minimal_manifest_value(json!({
+            "permissions": ["editor-control"],
+            "editorControl": { "modes": ["core.*"] }
+        }));
+        let err = validate_manifest_value(&value).unwrap_err();
+        assert!(err.message.contains("no wildcards"), "{}", err.message);
     }
 }

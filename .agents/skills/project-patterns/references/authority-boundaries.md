@@ -78,6 +78,15 @@ Clay uses server-authoritative documents with optimistic client shadows.
 - Worker module/op confinement does not sandbox the approved same-user child; retain trusted-subprocess disclosure.
 - Decision log source: `decision-logs/2026-07-15-1750-lsp-document-sync-and-package-worker-authority.md`.
 
+## Package Editor Control (`editor-control`)
+
+- Package access to client-local editor state (caret/selection) requires BOTH an approved permission (`editor-control`) AND an exact-mode declaration (`clay.editorControl.modes`); enforce per call, deny-by-default. Never grant "editor access" as a whole — only named modes.
+- Gate in the shared op path (`require_current_package_capability` provenance + active-major-mode membership), not per-caller branches: same gate for first- and third-party. Trusted callers without a package context (user configuration) are the only gate-free path.
+- The third-party worker holds no mode registry/document scope: replicate the active mode snapshot across the existing worker bridge (push on state change + on worker rewire) instead of synchronous cross-domain queries.
+- Server→client programmatic triggers use an advisory bounded push (`EditorCommandRequest`, boxed wire variant); the client re-parses command IDs deny-by-default through the keybinding dispatch path and drops unknown/non-editor IDs. Advisory channels never block editing (lagged/stale → drop).
+- Conflicts between packages in one mode: coexist, no automatic arbitration — the user deactivates packages. Revocation takes effect on runtime generation replacement.
+- Decision log source: `decision-logs/2026-08-03-1859-editor-control-trust-boundary-for-editor-ops.md`.
+
 ## Planning Guidance
 
 - Do not describe the server as a stateless behavior service.

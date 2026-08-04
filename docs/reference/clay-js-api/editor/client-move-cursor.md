@@ -4,32 +4,40 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientMoveCursor
 js_facade: runtime/js/editor.js::clientMoveCursor
-backing_rust: src/editor/surface.rs::EditorSurface::move_left
+backing_rust: src/editor/surface.rs::EditorSurface::move_word_start
 deno_op: op_clay_editor_move_cursor
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_move_cursor
 name: clientMoveCursor
 user_facing_name: Move Cursor
-summary: Move Cursor through the planned `clay:editor` Clay JavaScript facade.
+summary: Move the caret through the `clay:editor` Clay JavaScript facade.
 owner: client
 phase: Phase 7
 visibility: public
 permissions: []
-key_bindings: [ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Home, End, Ctrl+Home, Ctrl+End]
+key_bindings: [ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Home, End, Ctrl+Home, Ctrl+End, Ctrl+Left, Ctrl+Right, Ctrl+Up, Ctrl+Down]
 custom_properties:
   - name: direction
     type: enum
     default: none
-    description: Behavior-changing setting `direction` for this API.
-  - name: extendSelection
+    description: Movement direction (nextWordStart, prevWordStart, nextWordEnd, prevWordEnd, nextParagraph, prevParagraph, firstNonWhitespace, lastNonWhitespace, matchingPair, left, right, up, down, start, end).
+  - name: granularity
+    type: enum
+    default: none
+    description: Optional motion granularity (word, subword, paragraph, line, character).
+  - name: extend
     type: boolean
     default: false
-    description: Behavior-changing setting `extendSelection` for this API.
+    description: Whether movement extends the current selection.
+  - name: count
+    type: number
+    default: 1
+    description: Repeat count for the motion (clamped to >= 1).
 security: Changes only client-local caret/selection/viewport state and grants no document mutation or external authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `clay.editor.clientMoveCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [cursormovement, editor, js-api]
 app_visible: true
 help_visible: true
-stability: planned
+stability: runtime-backed
 async: false
 ---
 
@@ -37,13 +45,13 @@ async: false
 
 ## Summary
 
-Move Cursor through the planned `clay:editor` Clay JavaScript facade.
+Move the caret through the `clay:editor` Clay JavaScript facade.
 
 ## Description
 
-`clientMoveCursor` is the planned public API for **Move Cursor**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
+`clientMoveCursor` is the public API for **Move Cursor**. The `op_clay_editor_move_cursor` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. Key-driven movement is served client-local by the direction-specific `clay.editor.clientMoveCursor.*` command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`).
 
-Authority: `client-local-ui-state`. Runtime path: `client-local-hot-path`. Arrow/Home/End movement updates local caret/viewport state without IPC, server work, or JavaScript.
+Authority: `client-local-ui-state`. Runtime path: `client-local-hot-path`. Arrow/Home/End and Ctrl+arrow word/paragraph movement update local caret/viewport state without IPC, server work, or JavaScript.
 
 ## When to use
 
@@ -54,50 +62,49 @@ Use this API when JavaScript configuration, extensions, or future Clay automatio
 ```ts
 import { clientMoveCursor } from "clay:editor";
 
-clientMoveCursor({ documentId: "current", direction: "right" });
+clientMoveCursor({ direction: "nextWordStart", extend: false, count: 1 });
 ```
 
 ## Example
 
 ```ts
-clientMoveCursor({ documentId: "current", direction: "right" });
+clientMoveCursor({ direction: "nextParagraph", extend: true });
 ```
 
 ## Options
 
-- `documentId` (`string`): Target editor/document surface.
-- `direction` (`"left" | "right" | "up" | "down" | "start" | "end"`): Movement direction.
-- `extendSelection` (`boolean`): Whether movement extends the current selection; defaults to `false`.
+- `documentId` (`string`, optional): Target editor/document surface.
+- `direction` (`enum`): `nextWordStart` | `prevWordStart` | `nextWordEnd` | `prevWordEnd` | `nextParagraph` | `prevParagraph` | `firstNonWhitespace` | `lastNonWhitespace` | `matchingPair` | `left` | `right` | `up` | `down` | `start` | `end`.
+- `granularity` (`enum`, optional): `word` | `subword` | `paragraph` | `line` | `character`.
+- `extend` (`boolean`): Whether movement extends the current selection; defaults to `false`.
+- `count` (`number`): Repeat count for the motion; defaults to `1` (clamped to >= 1).
 
 ## Key bindings
 
 Default key bindings:
 
-- `ArrowLeft`
-- `ArrowRight`
-- `ArrowUp`
-- `ArrowDown`
-- `Home`
-- `End`
-- `Ctrl+Home`
-- `Ctrl+End`
+- `ArrowLeft`, `ArrowRight`, `ArrowUp`, `ArrowDown`
+- `Home`, `End`, `Ctrl+Home`, `Ctrl+End`
+- `Ctrl+Left` (previous word start), `Ctrl+Right` (next word start)
+- `Ctrl+Up` (previous paragraph), `Ctrl+Down` (next paragraph)
+- Add `Shift` to any of the above to extend the selection.
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js`.
+Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs (e.g. `clay.editor.clientMoveCursor.nextParagraph`).
 
 ## Custom properties
 
-- `direction` (`enum`, default `none`): Behavior-changing setting `direction` for this API.
-- `extendSelection` (`boolean`, default `false`): Behavior-changing setting `extendSelection` for this API.
+- `direction` (`enum`): Movement direction (see Options).
+- `granularity` (`enum`, optional): Motion granularity.
+- `extend` (`boolean`, default `false`): Extend the current selection.
+- `count` (`number`, default `1`): Repeat count.
 
 ## Return and async behavior
 
-Returns client-local cursor state when runtime wiring exists; the planned facade is synchronous and local.
-
-Current Phase 7 facade/runtime status is `planned`; this page defines the public contract before executable `deno_core` op wiring exists.
+Returns the validated command descriptor (`{ commandId, direction, granularity, extend, count }`) synchronously. The facade is synchronous and local.
 
 ## Errors
 
-The planned runtime should fail if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. Current Phase 7 stubs throw a planned-runtime error rather than performing the operation.
+The op fails (deny-by-default) if `direction` is missing or not one of the documented values, if `granularity` is present but unknown, or if the options are not valid JSON.
 
 ## Permissions and security
 
@@ -109,14 +116,14 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientMoveCursor` when the user asks for move cursor through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `clay.editor.clientMoveCursor` when the user asks to move cursor through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientMoveCursor`
-- Future Deno op: `src/server/ops/editor.rs::op_clay_editor_move_cursor` (`op_clay_editor_move_cursor`)
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::move_left`
-- Current implementation audit path: `src/editor/cursor.rs::CursorState; src/editor/surface.rs::EditorSurface::command_with_event`
+- Deno op: `src/server/ops/editor.rs::op_clay_editor_move_cursor` (`op_clay_editor_move_cursor`)
+- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::move_word_start` (and `move_paragraph`, `move_first_non_blank`, `move_last_non_blank`, `move_matching_pair`)
+- Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
 
 ## Lookup metadata
 
@@ -124,6 +131,6 @@ Use `clay.editor.clientMoveCursor` when the user asks for move cursor through th
 - User-facing name: Move Cursor
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientMoveCursor`
-- Default key bindings: `ArrowLeft`, `ArrowRight`, `ArrowUp`, `ArrowDown`, `Home`, `End`, `Ctrl+Home`, `Ctrl+End`
-- Custom properties: `direction`, `extendSelection`
+- Default key bindings: `ArrowLeft`, `ArrowRight`, `ArrowUp`, `ArrowDown`, `Home`, `End`, `Ctrl+Home`, `Ctrl+End`, `Ctrl+Left`, `Ctrl+Right`, `Ctrl+Up`, `Ctrl+Down`
+- Custom properties: `direction`, `granularity`, `extend`, `count`
 - Tags: `cursormovement`, `editor`, `js-api`

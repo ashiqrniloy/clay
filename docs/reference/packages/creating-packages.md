@@ -274,10 +274,33 @@ Common permission scopes:
 | `render-folding` | Publish folding ranges when implemented |
 | `completion-provider` | Provide completions when implemented |
 | `package-configuration` | Behavior-changing package options when implemented |
+| `editor-control` | Programmatic cursor/selection control in declared modes (see below) |
 
 Phase 18.3 `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, and `PackageThemeTokenDeclaration` declarations require no new permission when they are inert metadata. Their embedded action targets inherit the target command's registration/permission requirements, and future user overrides require documented configuration APIs and `package-configuration` where behavior-changing.
 
 A permission declaration does not grant broad authority. Packages still cannot access arbitrary filesystem paths, network, shell, AI mutation, WASM, native widget handles, raw Deno ops, or client-side JavaScript by default.
+
+## Editor Control (`editor-control`)
+
+Packages that need to move the caret or change selection programmatically (AI-assisted symbol selection, snippet flows, macro replay) declare the `editor-control` permission **and** the exact modes they operate in:
+
+```jsonc
+"clay": {
+    "permissions": ["editor-control"],
+    "editorControl": {
+        "modes": ["markdown", "core.code"] // exact mode IDs; no wildcards
+    }
+}
+```
+
+Boundary rules (enforced per call, deny-by-default):
+
+- Every editor op requires approved `editor-control`; visibility of the ops grants nothing.
+- The active document's major mode must be one of the declared `editorControl.modes`. Modes may be foreign (e.g. `core.code`) — a package does not need to own a mode to operate in it, but it must name it.
+- Execution is triggered with `clientExecuteEditorCommand({ commandId })` (Plan 071 follow-up round). Only known editor command IDs are accepted; the request is pushed to the client as an advisory `EditorCommandRequest` and dispatched through the same path as keybinding-routed command IDs. Unknown IDs are dropped on both sides.
+- Keybinding-driven behavior needs no push channel: a package that owns a mode contributes `keymaps` and `editorRules` through its mode declaration, and manifest routing takes precedence over built-in defaults once the package is activated.
+- Conflicts: multiple packages may hold `editor-control` for the same mode; Clay does not arbitrate. If two packages fight over behavior in a mode, deactivate one (package disable/adoption revoke applies live via runtime reload).
+- Revocation is immediate: disabling or unadopting the package removes the capability on the next runtime generation.
 
 ## Loading Packages from init.js
 
@@ -318,6 +341,8 @@ bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 Phase 18.6 shipped the generic one-line loader. Phase 18.7 extends it through selected-file open-time activation: startup `~/.config/clay/init.js` evaluates on the persistent server runtime, `await loadPackage("@clay/markdown")` validates/enables the package once, imports its declared `loadEntry`, registers mode metadata and parse handlers, and leaves those registrations resident for later opens. Opening `note.md` then classifies the path through the generic `clay:modes` registry, activates the matching mode for that document, and schedules the package parse handler through `ParseCoordinator`; user config does not copy package manifests, call raw ops, perform manual primitive registration, publish representative decoration publication payloads, or build per-open runtime roots. Plan 035 generalizes the resolver so `src/server/js_runtime.rs::ClayModuleLoader` accepts resolver-validated package `loadEntry` modules through a shared `PackageLoadEntryAllowlist` gate for bundled and installed source-aware packages. `loadPackage` is idempotent per runtime generation, so repeated startup/open-time calls reuse the first validated load; Phase 19 reload replaces the runtime generation, reruns `init.js`, rebuilds the package `loadEntry` allowlist, and starts the `globalThis.__clayLoadedPackages` cache empty. The `PackageService` resolve/enable/execute path (`src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`) is implemented and wired into the `clay:packages` facade. The `clay.packages.loadPackage` inventory entry is `status = "runtime-backed"` and `registry_public = true` with full Markdown documentation. The generic loader/API boundary is a package-root allowlist that does not grant filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, or package-manager authority without separate user-approved capabilities. See `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` for the unified authority model. The package-owned `markdownLoadMode()` fallback remains a documented convenience alias for per-load options, but `loadPackage("@clay/markdown")` is the preferred end-user path.
 
 If a package supports one-line loading, that is the preferred path. The lower-level setup should be documented as a fallback for advanced use or per-load customization.
+
+What the one-line default yields (Plan 071 task 11): after `await loadPackage("@clay/markdown")`, a `.md` document classifies to the Markdown mode and activates with the package-declared `editorRules` — prose word movement (`wordSeparators: "prose"`, no underscore or camelCase sub-words), the editor default bar caret, and ligatures from the mode's proportional font-role typography profile. The built-in `core.code`/`core.text` fallback modes ship the same defaults (code movement, default caret, role ligatures) with no package loaded, and a package load never changes unrelated modes. Customization is optional and declarative (`movement`/`caretStyle` in `editorRules`, ligatures via `setTypography` per font role); see the Behavior manifest bullets below.
 
 A single `loadPackage("@clay/<lang>")` activates every contribution the package's `loadEntry` registers — modes, commands, parse handlers, decorations, UI components, and any number of completion providers. A package declares multiple providers in its `completionProviders` array (for example `rust.keywords` plus `rust.snippets`) and submits that package manifest once to `serverRegisterCompletionProvider`; generic `completion_provider_metas` maps the full array and `register_completion_provider_metadata` registers all distinct IDs together while rejecting duplicates. End-user config stays one line — `await loadPackage("@clay/rust")` — with no copied manifest, manual primitive registration, or low-level facade plumbing. Phase 18.19 snippets ride this same path: `textFormat: "snippet"` is inert item data, not a separate loader, op, permission, or subsystem.
 
@@ -634,6 +659,7 @@ The UI/layout authoring contract is identical for `@clay/*` packages and user-in
 - Native UI and client runtime are explicit capability/API work. A package does not get native widget handles, Masonry mutation, raw CSS, client-side JavaScript, or renderer callbacks merely because it was installed from npm or GitHub — those surfaces appear only when a documented `native-ui` / `client-runtime` capability is granted and a matching Clay API exists, is validated, and is revocable.
 - UI/layout declarations remain validated load/reload/configuration work. Panel, component, overlay, input, state-scope, layout-override, theme-token, and option contributions are validated at package load/enable time and applied through documented Clay JS APIs at configuration/package-update time; no package JavaScript runs in Masonry paint, layout, pointer, scroll, keypress, text-event, or edit-ack handlers.
 - UI/layout primitives stay generic and reusable. No UI/layout primitive branches on package source (no `if github_package` / `if npm_package` / `if third_party` Rust paths). Every package consumes the same shell/slot/component/theme primitives; Markdown and future modes consume these generic primitives rather than adding mode-specific Rust layout branches.
+- Editor chrome is not SDUI (Plan 071 task 12). Caret shape/blink and the font-ligature baseline are editor/typography chrome, never `ComponentKind` components or theme tokens. Packages contribute them only as inert manifest/configuration data: `editorRules.caretStyle` in the mode's behavior manifest (shape/blink/dimensions; omitted means the editor default bar) and the mode's `defaultFontRole` selecting the typography profile whose user-owned `ligatures` policy applies. Caret color remains the theme-owned `caret` token. No package capability grants caret-shape or ligature-policy override authority; omitted fields always fall back to the built-in defaults, so customization is strictly opt-in. See [UI Chrome Primitives](../primitives/ui-chrome-primitives.md#package-authoring-contract) and [Semantic Typography Roles](../primitives/typography.md#ligature-policy).
 
 ```text
 WorkingArea
@@ -2074,7 +2100,12 @@ serverRegisterModePattern({
   editorRules: {
     tab: { mode: "insert-spaces", width: 4 },
     pairs: [ { opener: "{", close: "}" } /* ... */ ],
-    electricCharacters: [ { trigger: "}", effect: "outdent-one-level" } ]
+    electricCharacters: [ { trigger: "}", effect: "outdent-one-level" } ],
+    // Optional (Plan 071 task 11): movement and caret appearance overrides.
+    // Absent fields fall back to the code-editing / editor defaults, so
+    // customization is strictly opt-in and never changes other modes.
+    movement: { wordSeparators: "code", camelCaseSubWord: true },
+    caretStyle: { shape: "bar", blink: "solid" }
   }
 });
 
@@ -2177,6 +2208,33 @@ Declare grammar assets under `clay.contributions.syntaxGrammars`:
 ```
 
 Validation is load-time only and reuses the package metadata budget. Grammar contributions remain first-party-only here; arbitrary third-party native artifact loading is out of scope. Tier 1 native entries require a compiled source ID and reject an artifact path; Tier 2 WASM entries require a package-root-confined `.wasm` path. Query files must be confined `.scm` assets. Vocabulary styleMaps accept closed `TokenType` variant names and closed `Modifiers` names; known legacy style tokens remain compatible. Packages must declare both `parse-document` and `render-decorations`. Clay rejects non-`@clay/*` grammar packages, absolute paths, parent traversal, URLs/downloads, native libraries, package-manager/shell fields, raw ops, client JavaScript, CSS/raw colors, duplicate language IDs, and duplicate file-pattern claims. Parse/highlight work runs as `Background`, cancellable, viewport-prioritized server work bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`; it never runs in keypress, paint, layout, scroll, pointer, or text-event hot paths. First-party grammar packages are loaded explicitly from `~/.config/clay/init.js`; they are not auto-loaded.
+
+### Text-object grammar contributions (`queries/textobjects.scm`, Plan 071 task 10)
+
+Alongside `highlights.scm`, first-party native grammars ship a `queries/textobjects.scm` query file (`@clay/rust`, `@clay/typescript`/TSX, and `@clay/javascript` today). The contribution lives in the compiled-in native descriptor — the same route as `highlights.scm` — not in package `package.json` metadata: the `queries` object in grammar contributions accepts only `highlights`, `locals`, and `injections` and rejects any other key deny-by-default, so text-object queries cannot be declared in package metadata at all. Text-object queries carry the same `parse-document` permission and package-root path confinement. They grant no file, network, shell, AI, WASM, or client-side JavaScript authority.
+
+Capture schema (mirrors the Helix/Nvim convention, Clay-prefixed):
+
+```scheme
+(function_item) @textobject.function.around
+(function_item body: (block) @textobject.function.inner)
+```
+
+- **Kinds**: `function`, `class`, `argument`, `comment`, `loop`, `conditional`, `call`, `statement` (8 closed kinds; unknown kinds are rejected by the op validators).
+- **Scopes**: `around` covers the whole node; `inner` covers the meaningful interior (typically the body/list). Kinds without an `inner` capture fall back to `around` at query time.
+- **Directions** (`current`/`next`/`previous`) are runtime concerns selected by the command ID, not query captures: e.g. `clay.editor.clientSelectTextobject.function.inner.next`.
+
+Runtime behavior is advisory: `clientSelectTextobject`/`clientSmartSelect` send the document's selection set to the server, which answers with one optional range per caret (multi-cursor-aware); grammars without a textobjects query (Markdown, Tier 2/3 handlers) answer no ranges and the carets stay put. Selection queries never block editing — any miss (no grammar, parse timeout, no handler) degrades to empty ranges. The 50 command IDs (48 textobject + 2 smart-select) are not enumerated in the built-in command table; they are auto-declared the first time a package binds a key to one via `bindKey`, and validated by prefix parse rather than string lists. Smart-select (`expand` walks the syntax tree up, `shrink` walks down) works for any parsed grammar even without a textobjects query.
+
+```js
+// In a package loadEntry: bind a text-object command (single-stroke chords
+// only; multi-stroke chords like "]f" are not runtime-backed yet).
+import { bindKey } from "clay:keybindings";
+
+bindKey("Ctrl+Shift+F", "clay.editor.clientSelectTextobject.function.around.current", { scope: "editor" });
+```
+
+Testing guidance: query files must compile against their grammar (`tests/syntax_grammar.rs` covers compilation plus inner/around/direction semantics for the shipped languages); new first-party grammars add their `textobjects.scm` next to `highlights.scm` and extend the descriptor. Limitations: third-party grammar contributions cannot declare textobjects through metadata today (native descriptors only); selection ranges are byte-offset based and recomputed per request rather than cached.
 
 For each accepted consecutive document version and stable parse window, Clay supplies one exact `ParseInputEdit`. A matching Tree-sitter tree is edited with `Tree::edit`, parsed once, and queried over the UTF-8-safe envelope of Tree-sitter changed ranges plus explicit invalidations intersected with the visible range. `QueryCursor::set_byte_range` returns intersecting complete captures; package grammar boundaries define whole-token, comment, string, prose, and code correction rather than whitespace or idle timing. One parse/capture pass fans out complete spans into stable 128-byte `DecorationSet` outputs. Changed/visible output is published first, all members are validated atomically, and output chunk count never creates sibling parser jobs or multiplies parse work. Open, resync, and viewport-only work use bounded full/visible fallback without fabricated edit metadata.
 
@@ -2401,7 +2459,10 @@ Optional customization is exposed through documented Clay/package JS APIs, not b
 Keep the `syntaxGrammars` block exactly as shipped in Phase 18.10. The same metadata is the Tier 2 package contribution in Phase 18.16; Tier 1 native selection and Tier 3 JavaScript fallback are host/runtime decisions. Add the following full-language surfaces through generic primitives:
 
 - **Major mode**: declare `clay.modes` and register a mode pattern with `clay.modes.serverRegisterModePattern`. The pattern uses generic file-extension, MIME-type, and bounded shebang/leading-content probes; do not add language-specific Rust classification branches.
-- **Behavior manifest**: declare editor rules (indentation, tab, generic Enter rule, delimiter pairs, comment continuation, electric characters) through the behavior manifest API. Use `clay.behavior.buildCodeEditingManifest({ indentSize, enter, lineComment, pairs, electricOutdentCharacters, autocompleteTriggers })` to produce validated inert rules for code or prose modes; do not add language-specific behavior branches in core.
+- **Behavior manifest**: declare editor rules (indentation, tab, generic Enter rule, delimiter pairs, comment continuation, electric characters, movement, caret appearance) through the behavior manifest API. Use `clay.behavior.buildCodeEditingManifest({ indentSize, enter, lineComment, pairs, electricOutdentCharacters, autocompleteTriggers, movement, caretStyle })` to produce validated inert rules for code or prose modes; do not add language-specific behavior branches in core.
+  - `movement` (optional, Plan 071 task 11): word/paragraph motion policy. Prose modes (e.g. Markdown) declare `{ wordSeparators: "prose", treatUnderscoreAsWord: false, camelCaseSubWord: false }`; code modes declare `{ wordSeparators: "code" }` (identical to the built-in default; declaring it is optional and documents intent). Absent fields fall back to the code-editing defaults.
+  - `caretStyle` (optional): caret shape/blink override (`shape: "bar" | "line" | "block" | "underline"`, `blink: "solid" | "blink" | "phase" | "smooth"`, `widthPx`, `heightPct`, `hollow`, `stopBlinkOnTyping`). Absent means the reduced-motion-safe editor default bar; `clientSetCursorStyle` overrides per-mode values at runtime.
+  - Ligatures are typography-owned, not mode-owned: a mode's font role (`defaultFontRole`) selects the `FontProfile` whose `ligatures` policy applies. Users customize ligatures per role with `clay.theme.setTypography` (`ligatures: { enableStandard, enableContextual, discretionaryFeatures, rawFeatures, disableFeatures }`); packages never set ligatures directly and loading a package grants no ligature authority.
 - **Commands**: register package-prefixed commands with `clay.commands.serverRegisterCommand`. Commands must route through the server-owned `CommandExecution` path, declare permissions, and avoid shell/network/filesystem authority unless explicitly approved.
 - **Completion providers**: register keyword/snippet providers with `clay.completion.serverRegisterCompletionProvider`. Completion providers remain metadata-only and never ship executable handlers, raw callbacks, or client JavaScript. Derive `triggerCharacters` from the major-mode behavior manifest with `clay.completion.completionTriggerCharactersFromEditorRules(editorRules)` so the editor's autocomplete triggers and the completion framework's provider selection stay aligned.
 - **Parse handlers**: register a mode-scoped parse handler with `clay.parse.serverRegisterParseHandler` to derive decorations, folding ranges, diagnostics, or outline data. The handler runs as `Background`, cancellable, viewport-prioritized server work and never in paint/typing hot paths.

@@ -2,26 +2,34 @@ pub mod codec;
 pub mod completion;
 pub mod decorations;
 pub mod diagnostics;
+pub mod editor_control;
 pub mod language_intelligence;
 pub mod parse;
 pub mod runtime;
 pub mod sdui;
+pub mod textobjects;
 
 pub use completion::*;
 pub use decorations::*;
 pub use diagnostics::*;
+pub use editor_control::*;
 pub use language_intelligence::*;
 pub use parse::*;
 pub use runtime::*;
 pub use sdui::*;
+pub use textobjects::*;
 
 /// Current wire protocol version for the local Clay IPC boundary.
 ///
 /// Version 2 added `DecorationViewportRequest`; version 3 adds grouped native
 /// decoration chunks and removes grammar-recovery diagnostics. Version 5 adds
 /// `DecorationBatch` so one parse update's chunks ship in a single frame.
+/// Version 7 adds `SelectionQueryRequest`/`SelectionQueryResult` for
+/// tree-sitter text objects and smart select (Plan 071 task 10).
+/// Version 8 adds `EditorCommandRequest` for the gated `editor-control`
+/// programmatic execution channel (Plan 071 follow-up round).
 /// Older server processes must not retain the previous wire semantics.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;
@@ -137,7 +145,7 @@ pub enum EditorIntent {
     DeleteRange { start: u64, end: u64 },
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
 pub struct BehaviorManifest {
     pub manifest_id: String,
     pub behavior_version: BehaviorVersion,
@@ -368,7 +376,214 @@ pub enum LockScope {
     Workspace,
 }
 
+/// Word-boundary policy consumed by movement, selection, and completion so
+/// they share one classifier. `Code` with `treat_underscore_as_word = true`
+/// reproduces the historical `is_completion_word_character` classifier
+/// (`_` || Unicode alphanumeric) exactly.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum WordSeparatorPolicy {
+    /// Word characters are Unicode alphanumeric; underscore is a word
+    /// character iff `treat_underscore_as_word` is true. Punctuation and
+    /// whitespace are separators. The code-editing default.
+    Code,
+    /// Word characters are Unicode alphanumeric; underscore and all punctuation
+    /// are separators. Use `Custom` for prose-specific boundaries (e.g.
+    /// contractions).
+    Prose,
+    /// Explicit separator set; a character is a word character iff it is not in
+    /// `separators` and not Unicode whitespace. `treat_underscore_as_word` is
+    /// ignored.
+    Custom(Vec<char>),
+}
+
+impl WordSeparatorPolicy {
+    /// Classify a character as a word character (true) or separator (false).
+    pub fn is_word_char(&self, character: char, treat_underscore_as_word: bool) -> bool {
+        match self {
+            WordSeparatorPolicy::Code => {
+                character.is_alphanumeric() || (treat_underscore_as_word && character == '_')
+            }
+            WordSeparatorPolicy::Prose => character.is_alphanumeric(),
+            WordSeparatorPolicy::Custom(separators) => {
+                !character.is_whitespace() && !separators.contains(&character)
+            }
+        }
+    }
+}
+
+/// Paragraph boundary style for vertical paragraph motion.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParagraphStyle {
+    /// Paragraphs are separated by a truly empty line.
+    BlankLine,
+    /// Paragraphs are separated by any line that is empty or whitespace-only.
+    BlankLineOrWhitespace,
+}
+
+/// Logical-line vs wrapped-visual-line vertical motion. `ScreenLine` falls
+/// back to `Character` behaviour today; full wrapped-line motion is a future
+/// phase that consults the laid-out text. Kept as a named variant so the
+/// configuration vocabulary is complete.
+/// `ponytail:` ScreenLine behaves as Character until visual-line data is wired.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineMovementStyle {
+    Character,
+    ScreenLine,
+}
+
+/// Movement configuration shipped in [`EditorBehaviorRules`]. Language-
+/// agnostic; packages override via manifest data, never per-language Rust.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct MovementRules {
+    pub word_separators: WordSeparatorPolicy,
+    pub treat_underscore_as_word: bool,
+    pub camel_case_sub_word: bool,
+    pub paragraph_style: ParagraphStyle,
+    /// When true, forward word-end motion stops at end of line (no cross-line).
+    pub stop_at_eol_word_end: bool,
+    pub line_movement: LineMovementStyle,
+    /// When false, vertical motion moves to the start of the target line instead
+    /// of preserving the caret column.
+    pub sticky_column: bool,
+}
+
+impl MovementRules {
+    /// Code-editing default: underscore is a word character, camelCase
+    /// sub-word motion is on, whitespace-blank-line paragraphs, sticky column.
+    pub fn default_code() -> Self {
+        Self {
+            word_separators: WordSeparatorPolicy::Code,
+            treat_underscore_as_word: true,
+            camel_case_sub_word: true,
+            paragraph_style: ParagraphStyle::BlankLineOrWhitespace,
+            stop_at_eol_word_end: false,
+            line_movement: LineMovementStyle::Character,
+            sticky_column: true,
+        }
+    }
+
+    /// Plain-text default: movement is language-agnostic, so the code default
+    /// keeps word-jump behaviour predictable across modes.
+    pub fn default_text() -> Self {
+        Self::default_code()
+    }
+}
+
+impl Default for MovementRules {
+    fn default() -> Self {
+        Self::default_code()
+    }
+}
+
+/// Caret glyph shape. `Bar`/`Line` are a thin vertical stroke, `Block` covers
+/// the character cell, `Underline` is a horizontal stroke at the line baseline.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaretShape {
+    Bar,
+    Line,
+    Block,
+    Underline,
+}
+
+/// Caret blink behaviour. `Solid` never hides (the reduced-motion-friendly
+/// default). `Blink` is discrete on/off with an initial `wait_ms` idle delay.
+/// `Phase`/`Smooth` are named for a future alpha-ramp; today they render with
+/// discrete on/off timing derived from `period_ms`.
+/// `ponytail:` Phase/Smooth use discrete timing until per-frame alpha is wired.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlinkStyle {
+    Solid,
+    Blink {
+        on_ms: u32,
+        off_ms: u32,
+        wait_ms: u32,
+    },
+    Phase {
+        period_ms: u32,
+    },
+    Smooth {
+        period_ms: u32,
+    },
+}
+
+impl BlinkStyle {
+    /// True when the caret should animate (anything but `Solid`).
+    pub fn animates(&self) -> bool {
+        !matches!(self, BlinkStyle::Solid)
+    }
+
+    /// The idle delay before the first off-phase, in milliseconds.
+    pub fn wait_ms(&self) -> u32 {
+        match self {
+            BlinkStyle::Solid => 0,
+            BlinkStyle::Blink { wait_ms, .. } => *wait_ms,
+            BlinkStyle::Phase { .. } | BlinkStyle::Smooth { .. } => 0,
+        }
+    }
+
+    /// The visible (on) phase duration, in milliseconds.
+    pub fn on_ms(&self) -> u32 {
+        match self {
+            BlinkStyle::Solid => 0,
+            BlinkStyle::Blink { on_ms, .. } => *on_ms,
+            BlinkStyle::Phase { period_ms } | BlinkStyle::Smooth { period_ms } => period_ms / 2,
+        }
+    }
+
+    /// The hidden (off) phase duration, in milliseconds.
+    pub fn off_ms(&self) -> u32 {
+        match self {
+            BlinkStyle::Solid => 0,
+            BlinkStyle::Blink { off_ms, .. } => *off_ms,
+            BlinkStyle::Phase { period_ms } | BlinkStyle::Smooth { period_ms } => period_ms / 2,
+        }
+    }
+}
+
+/// Caret appearance + blink policy shipped in [`EditorBehaviorRules`] and held
+/// as the editor-chrome default in the editor `StyleRegistry`. Colour stays
+/// theme-owned (`BaseUiColors::caret`); this struct owns shape + blink only so
+/// it never carries raw colour. Language-agnostic; packages override via
+/// manifest data, never per-language Rust.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct CaretStyle {
+    pub shape: CaretShape,
+    /// Stroke thickness for Bar/Line/Underline, in pixels.
+    pub width_px: f32,
+    /// Caret height as a fraction of the line height (1.0 = full line).
+    pub height_pct: f32,
+    /// When true, `Block` renders an outline instead of a solid fill.
+    pub hollow: bool,
+    pub blink: BlinkStyle,
+    /// Reserved smooth-caret travel time; 0 disables (no travel animation).
+    pub smooth_animation_ms: u32,
+    /// When true, typing resets the blink to visible and restarts the wait.
+    pub stop_blink_on_typing: bool,
+}
+
+impl CaretStyle {
+    /// Clay default: a solid (non-blinking) 1.5px bar at full line height —
+    /// reproduces the historical caret and is the reduced-motion-safe default.
+    pub const fn default_bar() -> Self {
+        Self {
+            shape: CaretShape::Bar,
+            width_px: 1.5,
+            height_pct: 1.0,
+            hollow: false,
+            blink: BlinkStyle::Solid,
+            smooth_animation_ms: 0,
+            stop_blink_on_typing: true,
+        }
+    }
+}
+
+impl Default for CaretStyle {
+    fn default() -> Self {
+        Self::default_bar()
+    }
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
 pub struct EditorBehaviorRules {
     pub text_edits: Vec<TextEditCapability>,
     pub enter: EnterRule,
@@ -382,6 +597,13 @@ pub struct EditorBehaviorRules {
     /// branch is consulted.
     pub electric_characters: Vec<ElectricCharacterRule>,
     pub autocomplete_triggers: Vec<AutocompleteTrigger>,
+    /// Movement policy (word/paragraph/sub-word/non-blank/matching-pair motion).
+    /// Defaults reproduce the historical code-editing classifier; existing modes
+    /// gain new motion primitives with no behaviour change.
+    pub movement: MovementRules,
+    /// Per-mode caret appearance/blink override. `None` defers to the editor
+    /// `StyleRegistry` default; `clientSetCursorStyle` overrides both at runtime.
+    pub caret_style: Option<CaretStyle>,
 }
 
 impl EditorBehaviorRules {
@@ -416,6 +638,8 @@ impl EditorBehaviorRules {
                 trigger: ".".to_string(),
                 routing_policy: RoutingPolicy::UiReactivePriority,
             }],
+            movement: MovementRules::default_text(),
+            caret_style: None,
         }
     }
 
@@ -704,6 +928,13 @@ pub enum ClientMessage {
     LanguageIntelligenceRequest {
         request: LanguageIntelligenceRequest,
     },
+    /// Plan 071 task 10: UI-reactive tree-sitter text-object/smart-select
+    /// request. The client captures its selection set + document/behavior
+    /// versions locally; the server runs the active grammar's read-only query
+    /// and answers with `ServerMessage::SelectionQueryResult`.
+    SelectionQueryRequest {
+        request: SelectionQueryRequest,
+    },
     /// Phase 19 acknowledgement that the client validated and atomically
     /// installed `RuntimeStateSnapshot` for the named runtime generation.
     /// Controls stale-edit grace eligibility only; the server never waits on
@@ -783,11 +1014,63 @@ pub const MAX_FONT_FAMILY_BYTES: usize = 128;
 pub const MIN_FONT_SIZE: f32 = 6.0;
 pub const MAX_FONT_SIZE: f32 = 96.0;
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct FontProfile {
     pub families: Vec<String>,
     pub size: f32,
+    /// Semantic OpenType feature policy for this profile. Boxed so growth of
+    /// `LigaturePolicy` (it carries `Vec<String>` feature lists) does not
+    /// inflate the `ServerMessage` union floor that small payloads like
+    /// `EditAck` pay. User-owned typography data; packages declare semantic
+    /// policy via behavior manifests, never concrete families/sizes.
+    pub ligatures: Box<LigaturePolicy>,
 }
+
+/// Bounded, semantic OpenType feature policy. Carries no concrete family or
+/// size data (those stay user-owned per `typography-role-ownership`), only
+/// feature toggles a package or user may declare. Resolved client-side into a
+/// `parley` `FontSettings<FontFeature>` list at typography install time.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+pub struct LigaturePolicy {
+    /// Enable standard ligatures (`liga`, `clig`). Default `true` keeps the
+    /// historical ligature-on shaping Clay relied on implicitly.
+    pub enable_standard: bool,
+    /// Enable contextual ligatures (`calt`). Default `true`.
+    pub enable_contextual: bool,
+    /// Additional discretionary feature tags to enable (value 1), e.g. `ss01`.
+    pub discretionary_features: Vec<String>,
+    /// Raw CSS feature-settings source passthrough, e.g. `"'calt' 1, 'liga' 0"`.
+    /// Parsed by `swash` `Setting::parse_list`; applied before `disable_features`.
+    pub raw_features: Option<String>,
+    /// Feature tags to force off (value 0), applied last so they override the
+    /// semantic toggles and `raw_features`.
+    pub disable_features: Vec<String>,
+}
+
+impl Default for LigaturePolicy {
+    /// Ligatures on by default reproduces the implicit shaping Clay relied on
+    /// before feature control was exposed; users or packages opt out by setting
+    /// `enable_standard`/`enable_contextual` false or listing `disable_features`.
+    fn default() -> Self {
+        Self {
+            enable_standard: true,
+            enable_contextual: true,
+            discretionary_features: Vec::new(),
+            raw_features: None,
+            disable_features: Vec::new(),
+        }
+    }
+}
+
+/// Upper bound on the number of feature tags per kind (`discretionary_features`
+/// and `disable_features`). OpenType fonts expose a handful of named features;
+/// 32 is generous and keeps the archived payload bounded.
+pub const MAX_LIGATURE_FEATURES_PER_KIND: usize = 32;
+/// Upper bound on the raw CSS feature-settings source string length.
+pub const MAX_LIGATURE_RAW_FEATURE_BYTES: usize = 256;
+/// OpenType feature tags are exactly four ASCII bytes; shorter tags are
+/// space-padded by `swash::tag_from_str_lossy`.
+pub const MAX_LIGATURE_FEATURE_NAME_BYTES: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FontProfileValidationError {
@@ -798,6 +1081,10 @@ pub enum FontProfileValidationError {
     ControlCharacter,
     MissingGenericFallback,
     InvalidSize,
+    TooManyDiscretionaryFeatures,
+    TooManyDisabledFeatures,
+    RawFeaturesTooLong,
+    InvalidFeatureName,
 }
 
 impl FontProfile {
@@ -828,6 +1115,41 @@ impl FontProfile {
         }
         if !self.size.is_finite() || !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&self.size) {
             return Err(FontProfileValidationError::InvalidSize);
+        }
+        self.ligatures.validate()
+    }
+}
+
+impl LigaturePolicy {
+    /// Validate bounds and feature-tag shape. Packages supply these strings, so
+    /// they are a trust boundary: counts and lengths are capped and each tag
+    /// must be 1..=4 ASCII bytes (no control characters) so it maps to a real
+    /// OpenType tag without carrying arbitrary payload.
+    pub fn validate(&self) -> Result<(), FontProfileValidationError> {
+        if self.discretionary_features.len() > MAX_LIGATURE_FEATURES_PER_KIND {
+            return Err(FontProfileValidationError::TooManyDiscretionaryFeatures);
+        }
+        if self.disable_features.len() > MAX_LIGATURE_FEATURES_PER_KIND {
+            return Err(FontProfileValidationError::TooManyDisabledFeatures);
+        }
+        if let Some(raw) = &self.raw_features
+            && raw.len() > MAX_LIGATURE_RAW_FEATURE_BYTES
+        {
+            return Err(FontProfileValidationError::RawFeaturesTooLong);
+        }
+        for feature in self
+            .discretionary_features
+            .iter()
+            .chain(&self.disable_features)
+        {
+            if feature.is_empty()
+                || feature.len() > MAX_LIGATURE_FEATURE_NAME_BYTES
+                || !feature
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b' ' || byte == b'-')
+            {
+                return Err(FontProfileValidationError::InvalidFeatureName);
+            }
         }
         Ok(())
     }
@@ -958,14 +1280,17 @@ impl Default for ActiveTypography {
             monospace: FontProfile {
                 families: vec!["monospace".to_string()],
                 size: 20.0,
+                ligatures: Box::new(LigaturePolicy::default()),
             },
             proportional: FontProfile {
                 families: vec!["sans-serif".to_string()],
                 size: 20.0,
+                ligatures: Box::new(LigaturePolicy::default()),
             },
             ui: FontProfile {
                 families: vec!["system-ui".to_string()],
                 size: 12.0,
+                ligatures: Box::new(LigaturePolicy::default()),
             },
             hierarchy: UiTypographyHierarchy::DEFAULT,
         }
@@ -1093,7 +1418,7 @@ pub enum ServerMessage {
         access: DocumentAccess,
         lease_id: Option<LeaseId>,
     },
-    BehaviorManifest(BehaviorManifest),
+    BehaviorManifest(Box<BehaviorManifest>),
     SduiSnapshot {
         client_id: ClientId,
         tree: SduiTree,
@@ -1194,6 +1519,17 @@ pub enum ServerMessage {
         request_id: LanguageIntelligenceRequestId,
         reason: LanguageIntelligenceRejection,
     },
+    /// Plan 071 task 10: read-only tree-sitter text-object/smart-select byte
+    /// ranges aligned index-for-index with the request's selections. Inert
+    /// data only; the client applies ranges as selections.
+    SelectionQueryResult {
+        result: SelectionQueryResult,
+    },
+    /// Plan 071 follow-up round (`editor-control`): gated programmatic
+    /// execution of one known editor command ID. Boxed so the variant's
+    /// inline size never inflates small payloads. Advisory: the client
+    /// re-parses the command ID deny-by-default and drops unknown IDs.
+    EditorCommandRequest(Box<EditorCommandRequest>),
     /// Phase 18.15 (Plan 046) resolved active theme snapshot. Sent once after
     /// the welcome `BehaviorManifest` when `setTheme("...")` ran in `init.js`;
     /// absent when no theme is selected (Clay default theme applies). The

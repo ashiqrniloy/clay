@@ -28,6 +28,10 @@ custom_properties:
     type: string
     default: optional
     description: Behavior-changing setting `mimeType` for this primitive gate API.
+  - name: editorRules
+    type: 'object | undefined'
+    default: registered-mode defaults
+    description: Optional declarative editor rules applied to the published behavior manifest for this activation (validated server-side, deny-by-default). Carries the generic rule fields plus per-mode movement and caretStyle settings (Plan 071 tasks 4/6/11); the registration-time editorRules from serverRegisterModePattern is the usual source.
   - name: behaviorVersion
     type: number
     default: generated

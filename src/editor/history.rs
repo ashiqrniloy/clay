@@ -30,17 +30,52 @@ impl HistorySelection {
 }
 
 /// One coherent local edit and its inverse, with caret/selection restore points.
+///
+/// Single-caret edits use `forward`/`inverse` + `selection_before`/`selection_after`.
+/// Multi-cursor edits (Plan 071 task 9) additionally fill the `*_ops` vectors
+/// (one operation per caret, stored right-to-left so applying them in order
+/// keeps byte offsets valid) and the `selection_set_*` snapshots; undo/redo
+/// reverse every operation and restore the whole set. The single fields hold
+/// the primary caret's values so the legacy single-caret consumers keep working.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryEntry {
     pub forward: EditOperation,
     pub inverse: EditOperation,
     pub selection_before: HistorySelection,
     pub selection_after: HistorySelection,
+    /// Multi-cursor forward operations, right-to-left. Empty for single-caret edits.
+    pub forward_ops: Vec<EditOperation>,
+    /// Multi-cursor inverse operations, right-to-left (same order as forward).
+    pub inverse_ops: Vec<EditOperation>,
+    /// Full selection set before the edit, one entry per caret (multi only).
+    pub selection_set_before: Vec<HistorySelection>,
+    /// Full selection set after the edit, one entry per caret (multi only).
+    pub selection_set_after: Vec<HistorySelection>,
+    /// Primary index within the multi-cursor set (0 for single-caret edits).
+    pub primary_index: usize,
 }
 
 impl HistoryEntry {
     pub fn entry_payload_bytes(&self) -> usize {
-        operation_text_bytes(&self.forward).saturating_add(operation_text_bytes(&self.inverse))
+        operation_text_bytes(&self.forward)
+            .saturating_add(operation_text_bytes(&self.inverse))
+            .saturating_add(
+                self.forward_ops
+                    .iter()
+                    .map(operation_text_bytes)
+                    .sum::<usize>(),
+            )
+            .saturating_add(
+                self.inverse_ops
+                    .iter()
+                    .map(operation_text_bytes)
+                    .sum::<usize>(),
+            )
+    }
+
+    /// True for combined multi-cursor edits (one undo step reverses every caret).
+    pub fn is_multi(&self) -> bool {
+        !self.forward_ops.is_empty()
     }
 }
 
@@ -161,6 +196,11 @@ mod tests {
             inverse,
             selection_before: HistorySelection::collapsed(offset as usize),
             selection_after: HistorySelection::collapsed(offset as usize + text.len()),
+            forward_ops: Vec::new(),
+            inverse_ops: Vec::new(),
+            selection_set_before: Vec::new(),
+            selection_set_after: Vec::new(),
+            primary_index: 0,
         }
     }
 

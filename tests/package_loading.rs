@@ -704,10 +704,12 @@ fn package_manifest_rejects_invalid_slot_ui_contribution_metadata() {
     assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
     assert!(err.message.contains("raw CSS") || err.message.contains("raw colors"));
 
+    // Phase 20.5 promoted `modal` to a supported component kind; `table` is
+    // the only remaining deferred kind (src/shell/components.rs).
     let mut unsupported_component =
         phase18_3_slot_ui_fixture("@clay/markdown", "markdown", "right");
     unsupported_component["clay"]["contributions"]["ui"]["panels"][0]["component"]["children"][0]
-        ["kind"] = json!("modal");
+        ["kind"] = json!("table");
     let err = assemble_package_record(&unsupported_component).unwrap_err();
     assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
     assert!(err.message.contains("reserved for a later"));

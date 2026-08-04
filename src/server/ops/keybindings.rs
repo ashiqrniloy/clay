@@ -188,6 +188,11 @@ fn validate_command_id(command_id: &str) -> Result<String, JsErrorBox> {
 }
 
 fn is_runtime_bindable_command(command_id: &str) -> bool {
+    // Plan 071 task 10: the text-object/smart-select command-ID surface is
+    // generated (kind x scope x direction), so parse instead of enumerating.
+    if crate::protocol::SelectionQuery::from_command_id(command_id).is_some() {
+        return true;
+    }
     matches!(
         command_id,
         "text.insert_newline"
@@ -209,6 +214,25 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "clay.editor.clientShowOpenDocuments"
             | "clay.editor.clientRequestResync"
             | "clay.editor.clientDismissRecovery"
+            | "clay.editor.clientMoveCursor.nextWordStart"
+            | "clay.editor.clientMoveCursor.prevWordStart"
+            | "clay.editor.clientMoveCursor.nextParagraph"
+            | "clay.editor.clientMoveCursor.prevParagraph"
+            | "clay.editor.clientSetSelection.selectWord"
+            | "clay.editor.clientSetSelection.selectLine"
+            | "clay.editor.clientAddCursor.below"
+            | "clay.editor.clientAddCursor.above"
+            | "clay.editor.clientColumnSelect.down"
+            | "clay.editor.clientColumnSelect.up"
+            | "clay.editor.clientColumnSelect.left"
+            | "clay.editor.clientColumnSelect.right"
+            | "clay.editor.clientSelectNextMatch"
+            | "clay.editor.clientSelectPrevMatch"
+            | "clay.editor.clientSelectAllMatches"
+            | "clay.editor.clientCancelMultipleSelections"
+            | "clay.editor.clientKeepSelection"
+            | "clay.editor.clientRemoveSelection"
+            | "clay.editor.clientUndoCursorMove"
             | "clay.language.hover"
             | "clay.language.goToDefinition"
             | "clay.language.codeActions"
@@ -233,6 +257,10 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
         || crate::client::behavior::language_intelligence_feature_for_command(command_id).is_some()
     {
         Ok(crate::protocol::RoutingPolicy::UiReactivePriority)
+    } else if crate::protocol::SelectionQuery::from_command_id(command_id).is_some() {
+        // Text-object/smart-select: UI-reactive read-only server query; the
+        // client captures its selection set and applies returned ranges.
+        Ok(crate::protocol::RoutingPolicy::UiReactivePriority)
     } else if matches!(
         command_id,
         "clay.documents.clientOpenFileDialog"
@@ -245,6 +273,25 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
             | "clay.editor.clientShowOpenDocuments"
             | "clay.editor.clientRequestResync"
             | "clay.editor.clientDismissRecovery"
+            | "clay.editor.clientMoveCursor.nextWordStart"
+            | "clay.editor.clientMoveCursor.prevWordStart"
+            | "clay.editor.clientMoveCursor.nextParagraph"
+            | "clay.editor.clientMoveCursor.prevParagraph"
+            | "clay.editor.clientSetSelection.selectWord"
+            | "clay.editor.clientSetSelection.selectLine"
+            | "clay.editor.clientAddCursor.below"
+            | "clay.editor.clientAddCursor.above"
+            | "clay.editor.clientColumnSelect.down"
+            | "clay.editor.clientColumnSelect.up"
+            | "clay.editor.clientColumnSelect.left"
+            | "clay.editor.clientColumnSelect.right"
+            | "clay.editor.clientSelectNextMatch"
+            | "clay.editor.clientSelectPrevMatch"
+            | "clay.editor.clientSelectAllMatches"
+            | "clay.editor.clientCancelMultipleSelections"
+            | "clay.editor.clientKeepSelection"
+            | "clay.editor.clientRemoveSelection"
+            | "clay.editor.clientUndoCursorMove"
     ) {
         Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
     } else {
@@ -361,6 +408,33 @@ mod tests {
                 command_routing_policy(command).unwrap(),
                 RoutingPolicy::ClientUiCommand
             );
+        }
+    }
+
+    #[test]
+    fn textobject_and_smart_select_commands_are_bindable_ui_reactive() {
+        // Plan 071 task 10: the generated command-ID surface is bindable and
+        // routes UI-reactive; unknown kinds/scopes/directions stay unbindable
+        // (deny-by-default).
+        for command in [
+            "clay.editor.clientSelectTextobject.function.inner",
+            "clay.editor.clientSelectTextobject.function.around.next",
+            "clay.editor.clientSelectTextobject.comment.around.previous",
+            "clay.editor.clientSmartSelect.expand",
+            "clay.editor.clientSmartSelect.shrink",
+        ] {
+            assert!(is_runtime_bindable_command(command));
+            assert_eq!(
+                command_routing_policy(command).unwrap(),
+                RoutingPolicy::UiReactivePriority
+            );
+        }
+        for command in [
+            "clay.editor.clientSelectTextobject.widget.inner",
+            "clay.editor.clientSelectTextobject.function.side",
+            "clay.editor.clientSmartSelect.grow",
+        ] {
+            assert!(!is_runtime_bindable_command(command));
         }
     }
 }

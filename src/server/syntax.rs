@@ -1,11 +1,12 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
+    ops::Range,
     sync::{Arc, Mutex},
 };
 
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{InputEdit, Language, Parser, Point, Query, QueryCursor, Tree};
+use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree};
 
 const SYNTAX_DECORATION_CHUNK_BYTES: usize = 128;
 
@@ -27,7 +28,8 @@ use crate::{
     protocol::{
         DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentId,
         IncrementalParseUpdate, Modifiers, ParseByteRange, ParseEditNotification, ParseUnit,
-        TokenType,
+        SelectionQuery, SelectionQueryCursor, SelectionQueryRange, SmartSelectAction,
+        TextobjectDirection, TextobjectKind, TokenType,
     },
     server::{
         decorations::{DecorationValidationError, SyntaxChunkCache, validate_decoration_set},
@@ -226,6 +228,11 @@ pub struct NativeGrammarDescriptor {
     /// language name (see `FIRST_PARTY_EMBEDDED_GRAMMARS`).
     injections_query_path: Option<&'static str>,
     injections_query: Option<&'static str>,
+    /// Optional text-object query (`queries/textobjects.scm`, Plan 071 task
+    /// 10). Captures follow `textobject.<kind>.<inner|around>` naming and back
+    /// read-only `clientSelectTextobject`/`clientSmartSelect` ranges.
+    textobjects_query_path: Option<&'static str>,
+    textobjects_query: Option<&'static str>,
 }
 
 /// First-party embedded grammar resolvable by injection language name. The
@@ -266,6 +273,7 @@ impl fmt::Debug for NativeGrammarDescriptor {
             .field("file_names", &self.file_names)
             .field("grammar_source", &self.grammar_source)
             .field("highlights_query_path", &self.highlights_query_path)
+            .field("textobjects_query_path", &self.textobjects_query_path)
             .field("max_window_bytes", &self.max_window_bytes)
             .finish_non_exhaustive()
     }
@@ -294,6 +302,8 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         max_window_bytes: MAX_OPENABLE_FILE_BYTES,
         injections_query_path: None,
         injections_query: None,
+        textobjects_query_path: Some("packages/rust/queries/textobjects.scm"),
+        textobjects_query: Some(include_str!("../../packages/rust/queries/textobjects.scm")),
     },
     NativeGrammarDescriptor {
         package_name: "@clay/typescript",
@@ -312,6 +322,10 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         max_window_bytes: MAX_OPENABLE_FILE_BYTES,
         injections_query_path: None,
         injections_query: None,
+        textobjects_query_path: Some("packages/typescript/queries/textobjects.scm"),
+        textobjects_query: Some(include_str!(
+            "../../packages/typescript/queries/textobjects.scm"
+        )),
     },
     NativeGrammarDescriptor {
         package_name: "@clay/typescript",
@@ -330,6 +344,10 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         max_window_bytes: MAX_OPENABLE_FILE_BYTES,
         injections_query_path: None,
         injections_query: None,
+        textobjects_query_path: Some("packages/typescript/queries/textobjects.scm"),
+        textobjects_query: Some(include_str!(
+            "../../packages/typescript/queries/textobjects.scm"
+        )),
     },
     NativeGrammarDescriptor {
         package_name: "@clay/javascript",
@@ -348,6 +366,10 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         max_window_bytes: MAX_OPENABLE_FILE_BYTES,
         injections_query_path: None,
         injections_query: None,
+        textobjects_query_path: Some("packages/javascript/queries/textobjects.scm"),
+        textobjects_query: Some(include_str!(
+            "../../packages/javascript/queries/textobjects.scm"
+        )),
     },
     NativeGrammarDescriptor {
         package_name: "@clay/markdown",
@@ -370,6 +392,10 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         injections_query: Some(include_str!(
             "../../packages/markdown/queries/injections.scm"
         )),
+        // Markdown has no function/class/argument text objects worth shipping;
+        // smart select still works off the parsed block tree.
+        textobjects_query_path: None,
+        textobjects_query: None,
     },
 ];
 
@@ -938,7 +964,118 @@ pub(crate) fn native_handler(
     if let Some(injections_query) = descriptor.injections_query {
         handler.enable_injections(injections_query)?;
     }
+    if let Some(textobjects_query) = descriptor.textobjects_query {
+        handler.enable_textobjects(textobjects_query)?;
+    }
     Ok(Some(handler))
+}
+
+/// Picks one candidate text-object range for a caret `focus` and `direction`.
+///
+/// `Current` returns the innermost candidate containing the caret, `Next` the
+/// earliest candidate strictly after it, `Previous` the latest candidate ending
+/// at or before it. No wrapping: a miss yields `None` so the client leaves the
+/// selection unchanged.
+fn pick_textobject_range(
+    candidates: &[Range<usize>],
+    focus: usize,
+    direction: TextobjectDirection,
+) -> Option<Range<usize>> {
+    match direction {
+        TextobjectDirection::Current => candidates
+            .iter()
+            .filter(|range| range.start <= focus && focus <= range.end)
+            .min_by_key(|range| range.end - range.start)
+            .cloned(),
+        TextobjectDirection::Next => candidates
+            .iter()
+            .filter(|range| range.start > focus)
+            .min_by(|left, right| left.start.cmp(&right.start).then(left.end.cmp(&right.end)))
+            .cloned(),
+        TextobjectDirection::Previous => candidates
+            .iter()
+            .filter(|range| range.end <= focus)
+            .max_by(|left, right| left.end.cmp(&right.end).then(left.start.cmp(&right.start)))
+            .cloned(),
+    }
+}
+
+/// Smart-select ranges for every selection cursor, walking the parsed tree.
+///
+/// `Expand` grows each selection to the smallest node range strictly larger
+/// than it (the parent chain), `Shrink` returns to the largest node range
+/// strictly contained in the current selection. Reads only; bounded by tree
+/// size; never mutates.
+fn smart_select_ranges(
+    tree: &Tree,
+    text: &str,
+    action: SmartSelectAction,
+    selections: &[SelectionQueryCursor],
+) -> Vec<Option<SelectionQueryRange>> {
+    let text_len = text.len();
+    selections
+        .iter()
+        .map(|selection| {
+            let anchor = usize::try_from(selection.anchor.min(text_len as u64)).unwrap_or(text_len);
+            let focus = usize::try_from(selection.focus.min(text_len as u64)).unwrap_or(text_len);
+            let (start, end) = if anchor <= focus {
+                (anchor, focus)
+            } else {
+                (focus, anchor)
+            };
+            let range = match action {
+                SmartSelectAction::Expand => expand_smart_select(tree.root_node(), start, end),
+                SmartSelectAction::Shrink => shrink_smart_select(tree.root_node(), start, end),
+            };
+            range.map(|range| SelectionQueryRange {
+                start: range.start as u64,
+                end: range.end as u64,
+            })
+        })
+        .collect()
+}
+
+/// Walks up the tree from the node covering `[start, end]` to the first
+/// ancestor whose range strictly contains the selection.
+fn expand_smart_select(root: Node<'_>, start: usize, end: usize) -> Option<Range<usize>> {
+    let mut node = root.descendant_for_byte_range(start, end)?;
+    loop {
+        let range = node.byte_range();
+        if range.start <= start && range.end >= end && (range.start < start || range.end > end) {
+            return Some(range);
+        }
+        node = node.parent()?;
+    }
+}
+
+/// Finds the largest node range strictly contained in `[start, end]`, the
+/// inverse of one expand step. Collapsed selections and leaf-only bodies have
+/// nothing to shrink to.
+fn shrink_smart_select(root: Node<'_>, start: usize, end: usize) -> Option<Range<usize>> {
+    if start >= end {
+        return None;
+    }
+    let container = root.descendant_for_byte_range(start, end)?;
+    let mut best: Option<Range<usize>> = None;
+    let mut stack = vec![container];
+    while let Some(node) = stack.pop() {
+        let range = node.byte_range();
+        let strictly_inside =
+            range.start >= start && range.end <= end && (range.start > start || range.end < end);
+        if strictly_inside
+            && best
+                .as_ref()
+                .is_none_or(|current| (range.end - range.start) > (current.end - current.start))
+        {
+            best = Some(range);
+        }
+        for index in 0..node.child_count() {
+            if let Some(child) = node.child(index) {
+                stack.push(child);
+            }
+        }
+    }
+    best
 }
 
 fn contribution_from_native_descriptor(
@@ -1127,6 +1264,10 @@ pub struct TreeSitterSyntaxHandler {
     language: Language,
     parser: Arc<Mutex<Parser>>,
     highlights_query: Arc<Query>,
+    /// Optional compiled text-object query (Plan 071 task 10). Absent for
+    /// grammars without a `textobjects.scm`; selection queries then return no
+    /// ranges and smart select keeps working off the parsed tree.
+    textobjects_query: Option<Arc<Query>>,
     injections: Option<Arc<InjectionState>>,
     trees: Arc<Mutex<HashMap<DocumentId, CachedSyntaxTree>>>,
     decoration_cache: Arc<Mutex<SyntaxChunkCache>>,
@@ -1199,6 +1340,7 @@ impl TreeSitterSyntaxHandler {
             language,
             parser: Arc::new(Mutex::new(parser)),
             highlights_query: Arc::new(query),
+            textobjects_query: None,
             injections: None,
             trees: Arc::new(Mutex::new(HashMap::new())),
             decoration_cache: Arc::new(Mutex::new(SyntaxChunkCache::default())),
@@ -1240,6 +1382,134 @@ impl TreeSitterSyntaxHandler {
             layers: Mutex::new(BTreeMap::new()),
         }));
         Ok(())
+    }
+
+    /// Compiles the grammar's text-object query (Plan 071 task 10). Capture
+    /// names must follow `textobject.<kind>.<inner|around>`; anything else is
+    /// inert. A compile failure rejects the whole contribution fail-closed,
+    /// matching the highlights/injection query contract.
+    pub fn enable_textobjects(
+        &mut self,
+        textobjects_query: &str,
+    ) -> Result<(), TreeSitterSyntaxError> {
+        let query = Query::new(&self.language, textobjects_query).map_err(|error| {
+            TreeSitterSyntaxError::QueryCompileFailed {
+                message: error.to_string(),
+            }
+        })?;
+        self.textobjects_query = Some(Arc::new(query));
+        Ok(())
+    }
+
+    /// Read-only tree-sitter text-object/smart-select ranges for one request.
+    /// Reuses the cached full-document tree at the same version when present
+    /// (native descriptors parse full-file context); otherwise runs one
+    /// bounded fresh parse with the contribution timeout. Smart select walks
+    /// the tree even when no text-object query exists.
+    pub fn selection_query_ranges(
+        &self,
+        document_id: DocumentId,
+        document_version: u64,
+        text: &str,
+        query: SelectionQuery,
+        selections: &[SelectionQueryCursor],
+    ) -> Result<Vec<Option<SelectionQueryRange>>, TreeSitterSyntaxError> {
+        let tree = self.tree_for_selection_query(document_id, document_version, text)?;
+        Ok(match query {
+            SelectionQuery::Textobject {
+                kind,
+                around,
+                direction,
+            } => self.textobject_ranges(&tree, text, kind, around, direction, selections),
+            SelectionQuery::SmartSelect { action } => {
+                smart_select_ranges(&tree, text, action, selections)
+            }
+        })
+    }
+
+    fn tree_for_selection_query(
+        &self,
+        document_id: DocumentId,
+        document_version: u64,
+        text: &str,
+    ) -> Result<Tree, TreeSitterSyntaxError> {
+        let cached = self
+            .trees
+            .lock()
+            .expect("syntax tree cache lock poisoned")
+            .get(&document_id)
+            .filter(|cached| {
+                cached.document_version == document_version
+                    && cached.tree.root_node().end_byte() == text.len()
+            })
+            .map(|cached| cached.tree.clone());
+        if let Some(tree) = cached {
+            return Ok(tree);
+        }
+        let mut parser = self.parser.lock().expect("syntax parser lock poisoned");
+        #[allow(deprecated)]
+        parser.set_timeout_micros(self.contribution.timeout_micros());
+        parser
+            .parse(text, None)
+            .ok_or(TreeSitterSyntaxError::ParseTimedOut)
+    }
+
+    fn textobject_ranges(
+        &self,
+        tree: &Tree,
+        text: &str,
+        kind: TextobjectKind,
+        around: bool,
+        direction: TextobjectDirection,
+        selections: &[SelectionQueryCursor],
+    ) -> Vec<Option<SelectionQueryRange>> {
+        let Some(query) = self.textobjects_query.as_ref() else {
+            return vec![None; selections.len()];
+        };
+        let around_name = format!("textobject.{kind}.around", kind = kind.as_str());
+        let inner_name = format!("textobject.{kind}.inner", kind = kind.as_str());
+        let capture_names = query.capture_names();
+        let mut around_ranges: Vec<Range<usize>> = Vec::new();
+        let mut inner_ranges: Vec<Range<usize>> = Vec::new();
+        let mut cursor = QueryCursor::new();
+        let mut query_matches = cursor.matches(query, tree.root_node(), text.as_bytes());
+        loop {
+            query_matches.advance();
+            let Some(query_match) = query_matches.get() else {
+                break;
+            };
+            for capture in query_match.captures {
+                match capture_names.get(capture.index as usize) {
+                    Some(name) if *name == around_name => {
+                        around_ranges.push(capture.node.byte_range())
+                    }
+                    Some(name) if *name == inner_name => {
+                        inner_ranges.push(capture.node.byte_range())
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // Inner falls back to around when the grammar defines no inner capture
+        // for this kind (comments, argument lists, ...).
+        let candidates: &[Range<usize>] = if !around && !inner_ranges.is_empty() {
+            &inner_ranges
+        } else {
+            &around_ranges
+        };
+        selections
+            .iter()
+            .map(|selection| {
+                let focus =
+                    usize::try_from(selection.focus.min(text.len() as u64)).unwrap_or(text.len());
+                pick_textobject_range(candidates, focus, direction).map(|range| {
+                    SelectionQueryRange {
+                        start: range.start as u64,
+                        end: range.end as u64,
+                    }
+                })
+            })
+            .collect()
     }
 
     pub fn parse_sync(
@@ -1915,6 +2185,20 @@ impl crate::server::parse_coordinator::ParseHandler for TreeSitterSyntaxHandler 
                 .map_err(|error| ParseCoordinatorError::HandlerFailed(error.to_string()))
         })
     }
+
+    fn selection_query_ranges(
+        &self,
+        document_id: crate::protocol::DocumentId,
+        document_version: u64,
+        text: &str,
+        query: crate::protocol::SelectionQuery,
+        selections: &[crate::protocol::SelectionQueryCursor],
+    ) -> Option<Vec<Option<crate::protocol::SelectionQueryRange>>> {
+        // A timed-out/failed parse degrades to "no ranges" instead of an
+        // error: selection queries are advisory view state.
+        self.selection_query_ranges(document_id, document_version, text, query, selections)
+            .ok()
+    }
 }
 
 fn empty_update(notification: ParseEditNotification) -> IncrementalParseUpdate {
@@ -2469,5 +2753,233 @@ mod tests {
                 && snapshot.metadata.version.is_some()
                 && snapshot.metadata.sanitized_path.is_none()
         }));
+    }
+
+    fn textobjects_rust_handler() -> TreeSitterSyntaxHandler {
+        let descriptor = FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .find(|descriptor| descriptor.id == "rust.rust")
+            .expect("Rust descriptor");
+        let mut handler = TreeSitterSyntaxHandler::new(
+            contribution_from_native_descriptor(descriptor),
+            (descriptor.language)(),
+            descriptor.highlights_query,
+        )
+        .expect("Rust handler");
+        handler
+            .enable_textobjects(
+                descriptor
+                    .textobjects_query
+                    .expect("rust ships textobjects"),
+            )
+            .expect("rust textobjects compile");
+        handler
+    }
+
+    fn query_cursor(anchor: u64, focus: u64) -> SelectionQueryCursor {
+        SelectionQueryCursor { anchor, focus }
+    }
+
+    #[test]
+    fn first_party_textobject_queries_compile() {
+        // Plan 071 task 10: every shipped textobjects.scm must compile against
+        // its grammar fail-closed, or the handler construction test fails here.
+        for descriptor in FIRST_PARTY_NATIVE_GRAMMARS {
+            let mut handler = TreeSitterSyntaxHandler::new(
+                contribution_from_native_descriptor(descriptor),
+                (descriptor.language)(),
+                descriptor.highlights_query,
+            )
+            .unwrap_or_else(|error| panic!("{} handler failed: {error:?}", descriptor.id));
+            if let Some(textobjects) = descriptor.textobjects_query {
+                handler
+                    .enable_textobjects(textobjects)
+                    .unwrap_or_else(|error| {
+                        panic!("{} textobjects failed: {error:?}", descriptor.id)
+                    });
+            }
+        }
+    }
+
+    #[test]
+    fn rust_textobject_function_inner_around_and_directions() {
+        let handler = textobjects_rust_handler();
+        let text = "fn add(a: u32) -> u32 {\n    a + 1\n}\n\nfn sub() {}\n";
+        let body_open = text.find('{').expect("body brace");
+        let first_end = text.find("\n\n").expect("first function end");
+        let second_start = text.find("fn sub").expect("second function");
+        let caret = text.find("a + 1").expect("body expression") as u64;
+
+        let run = |around: bool, direction: TextobjectDirection, focus: u64| {
+            handler
+                .selection_query_ranges(
+                    7,
+                    1,
+                    text,
+                    SelectionQuery::Textobject {
+                        kind: TextobjectKind::Function,
+                        around,
+                        direction,
+                    },
+                    &[query_cursor(focus, focus)],
+                )
+                .expect("query runs")
+        };
+
+        // Inner at a caret inside the body: the block without the signature.
+        let inner = run(false, TextobjectDirection::Current, caret);
+        assert_eq!(
+            inner[0],
+            Some(SelectionQueryRange {
+                start: body_open as u64,
+                end: first_end as u64,
+            })
+        );
+        // Around at the same caret covers the whole function.
+        let around = run(true, TextobjectDirection::Current, caret);
+        assert_eq!(
+            around[0],
+            Some(SelectionQueryRange {
+                start: 0,
+                end: first_end as u64,
+            })
+        );
+        // Next from inside the first function jumps to the second.
+        let next = run(true, TextobjectDirection::Next, caret);
+        assert_eq!(
+            next[0],
+            Some(SelectionQueryRange {
+                start: second_start as u64,
+                end: text.len() as u64 - 1,
+            })
+        );
+        // Previous from inside the second function returns the first.
+        let inside_second = (second_start + 10) as u64;
+        let previous = run(true, TextobjectDirection::Previous, inside_second);
+        assert_eq!(
+            previous[0],
+            Some(SelectionQueryRange {
+                start: 0,
+                end: first_end as u64,
+            })
+        );
+        // Misses stay None (no wrap, deny-by-default absence).
+        let none = run(true, TextobjectDirection::Next, inside_second);
+        assert_eq!(none[0], None);
+    }
+
+    #[test]
+    fn rust_textobject_comment_inner_falls_back_to_around() {
+        let handler = textobjects_rust_handler();
+        let text = "// note\nfn main() {}\n";
+        let caret = 3u64;
+        let ranges = handler
+            .selection_query_ranges(
+                7,
+                1,
+                text,
+                SelectionQuery::Textobject {
+                    kind: TextobjectKind::Comment,
+                    around: false,
+                    direction: TextobjectDirection::Current,
+                },
+                &[query_cursor(caret, caret)],
+            )
+            .expect("query runs");
+        assert_eq!(
+            ranges[0],
+            Some(SelectionQueryRange {
+                start: 0,
+                end: text.find('\n').expect("comment line end") as u64,
+            })
+        );
+    }
+
+    #[test]
+    fn smart_select_expand_walks_up_and_shrink_walks_down() {
+        let handler = textobjects_rust_handler();
+        let text = "fn add(a: u32) -> u32 {\n    a + 1\n}\n";
+        let caret = text.find("a + 1").expect("body expression") as u64;
+        let run = |action: SmartSelectAction, anchor: u64, focus: u64| {
+            handler
+                .selection_query_ranges(
+                    7,
+                    1,
+                    text,
+                    SelectionQuery::SmartSelect { action },
+                    &[query_cursor(anchor, focus)],
+                )
+                .expect("query runs")[0]
+        };
+
+        // Expand from a collapsed caret: strictly growing node ranges until
+        // the whole document, then None.
+        let mut anchor = caret;
+        let mut focus = caret;
+        let mut previous_len = 0usize;
+        let mut steps = 0;
+        while let Some(range) = run(SmartSelectAction::Expand, anchor, focus) {
+            let len = (range.end - range.start) as usize;
+            assert!(range.start <= anchor && focus <= range.end);
+            assert!(len > previous_len, "expand must strictly grow");
+            previous_len = len;
+            anchor = range.start;
+            focus = range.end;
+            steps += 1;
+            assert!(steps < 64, "expand must terminate");
+        }
+        assert_eq!(previous_len, text.len(), "last expand covers the document");
+
+        // Shrink from the full document: a strict subrange; shrink again from
+        // a collapsed selection is a no-op.
+        let full = text.len() as u64;
+        let shrunk = run(SmartSelectAction::Shrink, 0, full);
+        let shrunk = shrunk.expect("full-document selection can shrink");
+        assert!((shrunk.start, shrunk.end) != (0, full));
+        assert!(shrunk.end - shrunk.start < full);
+        assert_eq!(run(SmartSelectAction::Shrink, caret, caret), None);
+    }
+
+    #[test]
+    fn markdown_handler_without_textobjects_degrades_to_no_ranges() {
+        let descriptor = FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .find(|descriptor| descriptor.id == "markdown.markdown")
+            .expect("Markdown descriptor");
+        assert!(descriptor.textobjects_query.is_none());
+        let handler = TreeSitterSyntaxHandler::new(
+            contribution_from_native_descriptor(descriptor),
+            (descriptor.language)(),
+            descriptor.highlights_query,
+        )
+        .expect("Markdown handler");
+        let text = "# Title\n\npara\n";
+        let ranges = handler
+            .selection_query_ranges(
+                7,
+                1,
+                text,
+                SelectionQuery::Textobject {
+                    kind: TextobjectKind::Function,
+                    around: true,
+                    direction: TextobjectDirection::Current,
+                },
+                &[query_cursor(2, 2)],
+            )
+            .expect("query runs");
+        assert_eq!(ranges, vec![None]);
+        // Smart select still works off the block tree.
+        let expanded = handler
+            .selection_query_ranges(
+                7,
+                1,
+                text,
+                SelectionQuery::SmartSelect {
+                    action: SmartSelectAction::Expand,
+                },
+                &[query_cursor(2, 2)],
+            )
+            .expect("query runs");
+        assert!(expanded[0].is_some());
     }
 }

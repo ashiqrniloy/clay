@@ -6,9 +6,27 @@ export type ActiveThemeSummary = {
     overrideCount: number;
     designTokenCount: number;
 };
+/**
+ * OpenType ligature/feature policy for one font role (Plan 071 task 7).
+ * All fields are optional; absent fields keep the ligature-on defaults.
+ */
+export type LigaturePolicy = {
+    /** Standard ligatures (`liga` + `clig`). Default: true. */
+    enableStandard?: boolean;
+    /** Contextual alternates/ligatures (`calt`). Default: true. */
+    enableContextual?: boolean;
+    /** Extra OpenType feature tags to enable, e.g. ["ss01", "zero"]. Max 32. */
+    discretionaryFeatures?: string[];
+    /** CSS-font-features-format string escape hatch, e.g. "liga off, dlig". Max 256 bytes. */
+    rawFeatures?: string;
+    /** OpenType feature tags to force off, e.g. ["calt"]. Max 32. */
+    disableFeatures?: string[];
+};
 export type FontProfile = {
     families: string[];
     size: number;
+    /** Optional ligature/feature policy. Omission keeps standard+contextual ligatures enabled. */
+    ligatures?: LigaturePolicy;
 };
 export type UiTypographyHierarchy = {
     display: number;

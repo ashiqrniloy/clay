@@ -41,6 +41,17 @@ pub struct CaretGeometry {
     pub rect: Rect,
 }
 
+/// Shape-aware caret metrics: the caret stroke's left edge + line extent plus
+/// the character-cell advance at the caret (for Block/Underline shapes). The
+/// advance falls back to a line-height-derived estimate at end-of-line/text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CaretCell {
+    pub x: f64,
+    pub line_top: f64,
+    pub line_bottom: f64,
+    pub advance: f64,
+}
+
 const CARET_WIDTH: f32 = 1.5;
 
 // Clay-owned squiggle geometry — themes supply color only.
@@ -56,6 +67,13 @@ pub struct LayoutCacheKey {
     typography_revision: u64,
     layout_style_revision: u64,
     document_font_role: FontRole,
+    /// Hash of the document role's resolved OpenType feature list. A ligature
+    /// policy change invalidates cached glyphs even when the layout style
+    /// revision is unchanged. Currently always driven by the user-owned
+    /// `FontProfile.ligatures`, so it co-varies with `typography_revision`; kept
+    /// explicit so the cache invariant is self-documenting and a future per-mode
+    /// override would not need to re-architect the key.
+    ligature_hash: u64,
 }
 
 impl LayoutCacheKey {
@@ -67,6 +85,7 @@ impl LayoutCacheKey {
             typography_revision: 0,
             layout_style_revision: 0,
             document_font_role: FontRole::Proportional,
+            ligature_hash: 0,
         }
     }
 
@@ -79,6 +98,13 @@ impl LayoutCacheKey {
         self.typography_revision = typography_revision;
         self.layout_style_revision = layout_style_revision;
         self.document_font_role = document_font_role;
+        self
+    }
+
+    /// Set the document role's resolved feature-list hash so a ligature policy
+    /// change invalidates the layout cache. Chain after `with_presentation`.
+    pub fn with_ligatures(mut self, ligature_hash: u64) -> Self {
+        self.ligature_hash = ligature_hash;
         self
     }
 }
@@ -126,7 +152,7 @@ impl LayoutState {
         available_height: f64,
         key: LayoutCacheKey,
         caret_visible_byte_offset: Option<usize>,
-        selection_visible_byte_range: Option<Range<usize>>,
+        selection_visible_byte_ranges: &[Range<usize>],
         selection_color: Color,
         diagnostic_visible_byte_ranges: &[(Range<usize>, Color)],
         origin: (f64, f64),
@@ -183,8 +209,10 @@ impl LayoutState {
             origin.1 + TEXT_INSET + available_height,
         );
         scene.push_clip_layer(Affine::IDENTITY, &clip);
-        if let Some(range) = selection_visible_byte_range {
-            for rect in Self::selection_rects_in_layout(&cached.layout, cached.text_len, range) {
+        for range in selection_visible_byte_ranges {
+            for rect in
+                Self::selection_rects_in_layout(&cached.layout, cached.text_len, range.clone())
+            {
                 let rect = Rect::new(
                     origin.0 + rect.x0 + TEXT_INSET,
                     origin.1 + rect.y0 + TEXT_INSET - *scroll_y,
@@ -250,6 +278,33 @@ impl LayoutState {
                     rect: Rect::new(x0, caret.rect.y0, x0 + width as f64, caret.rect.y1),
                 }
             }
+        })
+    }
+
+    /// Shape-aware caret metrics for a visible byte offset: the caret stroke's
+    /// left edge and line extent, plus the character-cell advance (measured to
+    /// the next visual cluster when it shares the line, else a line-height
+    /// estimate) used to size Block/Underline carets.
+    pub fn caret_cell_for_visible_byte_offset(&self, byte_offset: usize) -> Option<CaretCell> {
+        let cached = self.cached.as_ref()?;
+        let layout = &cached.layout;
+        let offset = byte_offset.min(cached.text_len);
+        let cursor = Cursor::from_byte_index(layout, offset, Affinity::Downstream);
+        let here = cursor.geometry(layout, CARET_WIDTH);
+        let line_height = (here.y1 - here.y0).max(1.0);
+        let next = cursor.next_visual(layout);
+        let next_box = next.geometry(layout, CARET_WIDTH);
+        let advance = if (next_box.y0 - here.y0).abs() < 0.5 && next_box.x0 > here.x0 {
+            next_box.x0 - here.x0
+        } else {
+            // End of line/text: no same-line successor. Estimate a cell width.
+            line_height * 0.6
+        };
+        Some(CaretCell {
+            x: here.x0,
+            line_top: here.y0,
+            line_bottom: here.y1,
+            advance,
         })
     }
 
@@ -386,6 +441,7 @@ impl LayoutState {
         let default_profile = typography.profile(document_font_role);
         builder.push_default(StyleProperty::FontStack(default_profile.font_stack()));
         builder.push_default(StyleProperty::FontSize(default_profile.size()));
+        builder.push_default(StyleProperty::FontFeatures(default_profile.font_features()));
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             DOCUMENT_LINE_HEIGHT_MULTIPLIER as f32,
         )));
@@ -398,6 +454,10 @@ impl LayoutState {
                 run.range.clone(),
             );
             builder.push(StyleProperty::FontSize(profile.size()), run.range.clone());
+            builder.push(
+                StyleProperty::FontFeatures(profile.font_features()),
+                run.range.clone(),
+            );
             if run.attributes.bold {
                 builder.push(
                     StyleProperty::FontWeight(FontWeight::BOLD),
@@ -473,6 +533,7 @@ impl LayoutState {
         let profile = typography.profile(document_font_role);
         builder.push_default(StyleProperty::FontStack(profile.font_stack()));
         builder.push_default(StyleProperty::FontSize(profile.size()));
+        builder.push_default(StyleProperty::FontFeatures(profile.font_features()));
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             DOCUMENT_LINE_HEIGHT_MULTIPLIER as f32,
         )));
@@ -484,6 +545,10 @@ impl LayoutState {
                 run.range.clone(),
             );
             builder.push(StyleProperty::FontSize(profile.size()), run.range.clone());
+            builder.push(
+                StyleProperty::FontFeatures(profile.font_features()),
+                run.range.clone(),
+            );
             if run.color.is_some() {
                 builder.push(
                     StyleProperty::Brush(BrushIndex(index + 1)),
@@ -609,6 +674,34 @@ mod tests {
             LayoutCacheKey::new(1, 2, 300.0).with_presentation(4, 7, FontRole::Monospace),
             false,
         ));
+    }
+
+    #[test]
+    fn layout_cache_invalidates_on_ligature_hash_change() {
+        let key = LayoutCacheKey::new(1, 2, 300.0)
+            .with_presentation(4, 7, FontRole::Monospace)
+            .with_ligatures(111);
+        let mut cache = LayoutState::default();
+        cache.set_cached_key_for_test(key);
+
+        // Same everything except the ligature hash: glyphs must rebuild.
+        assert!(
+            cache.should_rebuild(
+                LayoutCacheKey::new(1, 2, 300.0)
+                    .with_presentation(4, 7, FontRole::Monospace)
+                    .with_ligatures(222),
+                false,
+            )
+        );
+        // Same ligature hash: cache stays valid.
+        assert!(
+            !cache.should_rebuild(
+                LayoutCacheKey::new(1, 2, 300.0)
+                    .with_presentation(4, 7, FontRole::Monospace)
+                    .with_ligatures(111),
+                false,
+            )
+        );
     }
 
     #[test]

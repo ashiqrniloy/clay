@@ -2,7 +2,7 @@ use clay::perf::budgets::TYPOGRAPHY_PAYLOAD_BUDGET_BYTES;
 use clay::protocol::{
     ActiveTypography, ActiveTypographyValidationError, DecorationKind, DecorationProvenance,
     DecorationSet, DecorationSpan, DocumentFontRole, FontProfile, FontProfileValidationError,
-    FontRole, ServerMessage, codec::Codec,
+    FontRole, LigaturePolicy, ServerMessage, codec::Codec,
 };
 use clay::server::decorations::{DecorationValidationError, validate_decoration_set};
 
@@ -28,14 +28,17 @@ fn active_typography_round_trips_all_profiles_and_revision() {
         monospace: FontProfile {
             families: vec!["JetBrains Mono".to_string(), "monospace".to_string()],
             size: 16.0,
+            ..FontProfile::default()
         },
         proportional: FontProfile {
             families: vec!["Inter".to_string(), "sans-serif".to_string()],
             size: 17.0,
+            ..FontProfile::default()
         },
         ui: FontProfile {
             families: vec!["system-ui".to_string()],
             size: 13.0,
+            ..FontProfile::default()
         },
         ..ActiveTypography::default()
     };
@@ -68,6 +71,7 @@ fn active_typography_rejects_invalid_sizes_and_family_stacks() {
         FontProfile {
             families: vec![oversized_family, "monospace".to_string()],
             size: 16.0,
+            ..FontProfile::default()
         }
         .validate(),
         Err(FontProfileValidationError::FamilyTooLong)
@@ -131,6 +135,7 @@ fn typography_payload_limits_reject_oversized_family_data_before_publication() {
     let profile = FontProfile {
         families: vec!["named".to_string(); 9],
         size: 16.0,
+        ..FontProfile::default()
     };
 
     assert_eq!(
@@ -143,4 +148,79 @@ fn typography_payload_limits_reject_oversized_family_data_before_publication() {
             .len()
             <= TYPOGRAPHY_PAYLOAD_BUDGET_BYTES
     );
+}
+
+fn profile_with_ligatures(ligatures: LigaturePolicy) -> FontProfile {
+    FontProfile {
+        families: vec!["monospace".to_string()],
+        size: 16.0,
+        ligatures: Box::new(ligatures),
+    }
+}
+
+#[test]
+fn ligature_policy_default_enables_standard_and_contextual() {
+    let policy = LigaturePolicy::default();
+    assert!(policy.enable_standard);
+    assert!(policy.enable_contextual);
+    assert!(profile_with_ligatures(policy).validate().is_ok());
+}
+
+#[test]
+fn ligature_policy_rejects_too_many_discretionary_features() {
+    let policy = LigaturePolicy {
+        discretionary_features: vec!["ss01".to_string(); 33],
+        ..LigaturePolicy::default()
+    };
+    assert_eq!(
+        profile_with_ligatures(policy).validate(),
+        Err(FontProfileValidationError::TooManyDiscretionaryFeatures)
+    );
+}
+
+#[test]
+fn ligature_policy_rejects_too_many_disabled_features() {
+    let policy = LigaturePolicy {
+        disable_features: vec!["liga".to_string(); 33],
+        ..LigaturePolicy::default()
+    };
+    assert_eq!(
+        profile_with_ligatures(policy).validate(),
+        Err(FontProfileValidationError::TooManyDisabledFeatures)
+    );
+}
+
+#[test]
+fn ligature_policy_rejects_oversized_raw_features_source() {
+    let policy = LigaturePolicy {
+        raw_features: Some("x".repeat(257)),
+        ..LigaturePolicy::default()
+    };
+    assert_eq!(
+        profile_with_ligatures(policy).validate(),
+        Err(FontProfileValidationError::RawFeaturesTooLong)
+    );
+}
+
+#[test]
+fn ligature_policy_rejects_invalid_feature_name() {
+    // Five characters exceeds the four-byte OpenType tag limit.
+    let policy = LigaturePolicy {
+        discretionary_features: vec!["ss001".to_string()],
+        ..LigaturePolicy::default()
+    };
+    assert_eq!(
+        profile_with_ligatures(policy).validate(),
+        Err(FontProfileValidationError::InvalidFeatureName)
+    );
+}
+
+#[test]
+fn ligature_policy_accepts_disable_overriding_enable() {
+    // A valid policy that disables liga despite the default enable toggle.
+    let policy = LigaturePolicy {
+        disable_features: vec!["liga".to_string()],
+        ..LigaturePolicy::default()
+    };
+    assert!(profile_with_ligatures(policy).validate().is_ok());
 }

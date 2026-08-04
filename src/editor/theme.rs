@@ -16,7 +16,7 @@
 
 use masonry::peniko::Color;
 
-use crate::protocol::{DecorationKind, DiagnosticSeverity, Modifiers, TokenType};
+use crate::protocol::{CaretStyle, DecorationKind, DiagnosticSeverity, Modifiers, TokenType};
 
 /// Public SDUI contrast guardrail surface (Phase 20.7 task 3): the WCAG AA
 /// contrast checker over resolved theme design-token pairs. The engine lives
@@ -119,6 +119,11 @@ pub struct StyleRegistry {
     // [`TokenType::index`]; bits per the `ATTR_*` constants above. A span's own
     // `Modifiers` upgrade over these defaults (OR).
     attr_defaults: [u16; 35],
+    /// Editor-chrome caret appearance/blink default (shape + blink only; colour
+    /// stays in `base.caret`). Overridden per-mode by
+    /// [`crate::protocol::EditorBehaviorRules::caret_style`] and at runtime by
+    /// `clientSetCursorStyle`.
+    pub caret_style: CaretStyle,
 }
 
 impl Default for StyleRegistry {
@@ -231,6 +236,7 @@ impl StyleRegistry {
                 ATTR_UNDERLINE, // Link
                 0,              // Paragraph
             ],
+            caret_style: CaretStyle::default_bar(),
         }
     }
 

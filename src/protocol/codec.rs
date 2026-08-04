@@ -324,7 +324,8 @@ mod tests {
     #[test]
     fn protocol_round_trips_behavior_manifest_schema() {
         let codec = Codec::default();
-        let message = ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(3));
+        let message =
+            ServerMessage::BehaviorManifest(Box::new(BehaviorManifest::minimal_text_editing(3)));
 
         let frame = codec.encode_server_message(&message).unwrap();
         let decoded = codec.decode_server_message(&frame).unwrap();
@@ -337,7 +338,7 @@ mod tests {
         let codec = Codec::default();
         let mut manifest = BehaviorManifest::minimal_text_editing(8);
         manifest.manifest_id = "clay.default.text.hot-reload".to_string();
-        let message = ServerMessage::BehaviorManifest(manifest);
+        let message = ServerMessage::BehaviorManifest(Box::new(manifest));
 
         let frame = codec.encode_server_message(&message).unwrap();
         let decoded = codec.decode_server_message(&frame).unwrap();
@@ -672,7 +673,8 @@ mod tests {
     #[test]
     fn codec_rejects_oversized_manifest_frame() {
         let codec = Codec::new(8);
-        let message = ServerMessage::BehaviorManifest(BehaviorManifest::minimal_text_editing(1));
+        let message =
+            ServerMessage::BehaviorManifest(Box::new(BehaviorManifest::minimal_text_editing(1)));
 
         let error = codec.encode_server_message(&message).unwrap_err();
 
