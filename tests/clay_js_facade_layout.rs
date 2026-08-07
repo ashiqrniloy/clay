@@ -164,6 +164,32 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         ],
     ),
     ("runtime/js/theme.js", &["setTheme", "setTypography"]),
+    (
+        "runtime/js/shell.js",
+        &[
+            "clientSplitPaneVertical",
+            "clientSplitPaneHorizontal",
+            "clientAddEqualPane",
+            "clientClosePane",
+            "clientFocusPaneNext",
+            "clientFocusPanePrev",
+            "clientResizePaneLeft",
+            "clientResizePaneRight",
+            "clientResizePaneUp",
+            "clientResizePaneDown",
+            "clientMovePaneNext",
+            "clientMovePanePrev",
+            "clientTabNext",
+            "clientTabPrev",
+            "clientTabNew",
+            "clientTabClose",
+            "clientTabMoveLeft",
+            "clientTabMoveRight",
+            "clientTabActivate",
+            "clientTabMoveTo",
+            "setPaneFocusPolicy",
+        ],
+    ),
 ];
 
 #[test]
@@ -269,4 +295,30 @@ fn load_package_does_not_expose_raw_op_names() {
             "runtime/js/packages.js must not expose an implementation-shaped export: {line}"
         );
     }
+}
+
+#[test]
+fn shell_tab_facade_helpers_lock_stable_command_ids() {
+    // The tab helpers return the same dotted IDs the client maps
+    // (masonry_shell ShellClientCommand::from_command_id): flat IDs are
+    // string constants, numbered families are a template over 1..9. Lock the
+    // exact strings so the facade and the client cannot drift.
+    let source = fs::read_to_string("runtime/js/shell.js").unwrap();
+    for id in [
+        "clay.shell.clientTabNext",
+        "clay.shell.clientTabPrev",
+        "clay.shell.clientTabNew",
+        "clay.shell.clientTabClose",
+        "clay.shell.clientTabMoveLeft",
+        "clay.shell.clientTabMoveRight",
+    ] {
+        assert!(source.contains(id), "shell.js must reference {id}");
+    }
+    assert!(source.contains("`${family}.${n}`"));
+    assert!(source.contains("clay.shell.clientTabActivate"));
+    assert!(source.contains("clay.shell.clientTabMoveTo"));
+    assert!(
+        source.contains("n > 9"),
+        "the facade must cap positions at 9"
+    );
 }

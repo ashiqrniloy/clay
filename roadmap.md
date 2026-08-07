@@ -1,35 +1,119 @@
 # Clay Implementation Roadmap
 
-## Window management with splits and tabs
+## Phase 22: Window Management with Splits and Tabs
 
-## Command Centre
+Give Clay real multi-view window management, delivered incrementally: first
+equal-area window splits, then keyboard-driven tabs where each tab behaves as
+an independent client (own workspace, files, and modes), then composition of
+tabs with splits. Confirmed architecture decisions: each tab owns its split
+tree (one workspace per tab, panes inside a tab view files of that tab's
+workspace); each tab is a real separate client connection with
+server-authoritative tab state; panes are generic workspace-bound content
+hosts (editor file views first, later workspace apps such as a terminal
+emulator), never tied to files in the split model. Reuses the existing shell
+layout machinery (`PaneSplitTree`/`PaneSlotLayout` in `src/shell/layout.rs`,
+divider chrome in `src/shell/primitives.rs`, `layout.json` persistence, and
+the JS keybinding system) instead of introducing a new layout stack.
 
-## Handling config, key binding, theme, font from UI with config file override
+### Phase 22.1: Equal-Area Window Splits
 
-## File browser with dynamic root selection
+Focus areas:
+
+- Split commands act only on the working area (the main zone, excluding the left/right/top/bottom fixed panel slots) and come in two families: (a) split the focused pane 50/50, with one horizontal and one vertical command (`SplitRatio` 0.5 on the existing `PaneSplitTree`); (b) an add-pane command that redivides the whole working area into N+1 equal areas, keeping the previously opened panes in reading order and leaving the new pane empty and free to load content.
+- Maximum 4 panes per tab (up to 4 divisions along any single axis; 4 leaves total); equal-area geometry invariants and structural tests enforce the cap.
+- Extend `ClayShellWidget` beyond `single_editor` so each pane leaf hosts a pane content widget with stable identity; retain Masonry reconciliation semantics for pane children. The pane host is content-type agnostic and workspace-bound — the first content type is the editor file view, but the split model must already accommodate later workspace apps (e.g. a terminal emulator package) in a pane.
+- Clear visible pane boundaries using the existing `paint_divider` chrome with theme tokens; active pane indicated with existing focus-ring primitives.
+- Pane resize on the focused split: mouse/trackpad divider drag (existing Phase 20.3 behavior) plus new keyboard resize commands.
+- Pane movement: move/reorder the focused pane to a different position within the same tab.
+- Pane focus behavior configurable with two options — focus follows cursor, or click-to-focus — with a defined default.
+- Commands plus default key bindings for: split focused pane horizontally/vertically, add equal pane, close active pane, focus next/previous pane (building on `next_pane`/`prev_pane`), pane resize, pane move.
+
+Expected outcome:
+
+- Users can split the editor zone into up to 4 equal panes with visible boundaries, add panes that redivide the whole working area equally, resize and reposition panes, and move focus between panes entirely from the keyboard, while side/top/bottom panels stay untouched.
+
+### Phase 22.2: Pane Document Views Within One Workspace
+
+Focus areas:
+
+- Each tab loads exactly one workspace; each pane is an independent view that can open and edit a file from that tab's workspace, so multiple files are edited simultaneously.
+- Per-pane major mode activation: panes in the same tab showing different file types (e.g. `.rs` and `.md`) each activate their own major mode concurrently.
+- Per-pane caret, selection, viewport, and shadow-sync state via the existing session/edit-queue machinery; pane focus decides keyboard routing and status context.
+- Duplicate file opens are blocked within one workspace: opening a file already open in another pane of the tab focuses the existing pane instead of opening a second view.
+- File-open flows (file browser, open-selected-file) target the focused pane.
+
+Expected outcome:
+
+- Panes behave as simultaneous file views of a single workspace with correct optimistic-editing sync and no cross-pane state bleed.
+
+### Phase 22.3: Tabs as Independent Client Views with Tab Bar
+
+Focus areas:
+
+- Tab model where each tab is a real separate client: opening a tab establishes its own client connection to the server (within existing connection caps), with independent workspace roots, open documents, active modes, and retained sessions, isolated from other tabs.
+- Tab state is server-authoritative: the server holds the tab registry (tab order, active tab, per-tab workspace and client binding) so tab structure survives client restarts and reconnects, consistent with the client-authority model, lease accounting, and connection caps.
+- Tab bar chrome at the top of the window (below the top fixed panel slot, above the working area) shown whenever multiple tabs are open; each tab card shows the workspace name loaded in that tab and carries a close button; click switches tabs.
+- With one tab open, behavior and chrome match today's layout.
+
+Expected outcome:
+
+- Multiple tabs run different workspaces and modes simultaneously, and the tab bar always shows which workspace each tab holds.
+
+### Phase 22.4: Keyboard Tab Management
+
+Focus areas:
+
+- Default key bindings: view specific tab by number (1..9), next/previous tab, new tab, close tab, move tab left/right, move tab to a specific position.
+- Every Phase 22 key binding (tab and split commands alike) is user-editable through `init.js` via the existing keybinding system.
+- Commands registered with correct routing policies and listed in the command/help surfaces; tab-count bounds, numbered switch beyond 9, and wraparound policy for next/previous defined explicitly.
+- Close-tab safety for dirty documents (confirm/save flow consistent with existing document-close behavior).
+
+Expected outcome:
+
+- Every tab operation is reachable from the keyboard and user-rebindable.
+
+### Phase 22.5: Tab × Split Composition and Persistence
+
+Focus areas:
+
+- Each tab owns its split tree and per-pane state (one workspace per tab); split/close/focus-pane commands operate within the active tab only.
+- Persist and restore tab order, active tab, per-tab workspace, per-tab split tree, and per-pane open documents across restarts and reconnects (extends `layout.json` persistence).
+- Tab move/reorder keeps each tab's internal state intact.
+
+Expected outcome:
+
+- Tabs and splits compose cleanly, and a full window state survives restart.
+
+### Phase 22.6: Hardening, Accessibility, and Documentation
+
+Focus areas:
+
+- Accessibility roles/names for tab bar, tab cards, panes, and focus movement; screen-reader announcements for tab switch and split changes.
+- Performance budgets for per-pane paint, tab switch latency, and multi-pane decoration traffic; CI-guarded like existing Phase 14/16 budgets.
+- Authority review: per-tab workspace grants and package scopes cannot leak across tabs.
+- Protocol compatibility, tests, primitive reference docs, generated registry entries, and wiki updates.
+
+Expected outcome:
+
+- Window management is production-safe, documented, and performance-bounded.
+
+
 
 ## User Package and Config segregation with defined ~/.config/clay structure
 
-## Agentic AI with Prism
-- Prism upgrade with Web agent for search with Exa, Firecrawl, Brave search
-- Agentic web action
-- Web bridge
+## Command Centre
 
-## JSON
+## File browser with dynamic root selection
 
-## YAML
+## Coding agent
 
-## TOML
+### ACP
 
-## Terminal Emulator package
+### Evaluation of Prism capability against requirements
 
-## Python
+#### Requirements list
 
-## Jupyter and IPYNB
-
-## Latex
-
-## Phase 22: AI-Safe Mutation and Region Locks
+## AI-Safe Mutation and Region Locks
 
 Support AI-generated edits without corrupting user state.
 
@@ -49,9 +133,29 @@ Expected outcome:
 - User edits and agent edits have explicit conflict boundaries.
 - AI-visible tools and mutation capabilities are documented and inspectable.
 
-## Coding agent
 
 ## Markdown mode preview implementation with capabilities required for personal and work agent
+
+## Handling config, key binding, theme, font from UI with config file override
+
+## Agentic AI with Prism
+- Prism upgrade with Web agent for search with Exa, Firecrawl, Brave search
+- Agentic web action
+- Web bridge
+
+## JSON
+
+## YAML
+
+## TOML
+
+## Terminal Emulator package
+
+## Python
+
+## Jupyter and IPYNB
+
+## Latex
 
 ## PDF mode with links to md files
 

@@ -3,28 +3,21 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use masonry::accesskit::{Node, NodeId, Role};
-use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
-    AccessCtx, AccessEvent, BoxConstraints, BrushIndex, ChildrenIds, EventCtx, KeyboardEvent,
-    LayoutCtx, MutateCtx, NewWidget, PaintCtx, PointerButton, PointerEvent, PointerScrollEvent,
-    PropertiesMut, PropertiesRef, RegisterCtx, ScrollDelta, TextEvent, Update, UpdateCtx, Widget,
-    WidgetMut, WidgetPod, render_text,
+    AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, MutateCtx, NewWidget,
+    PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, TextEvent, Update,
+    UpdateCtx, Widget, WidgetMut, WidgetPod,
 };
-use masonry::kurbo::{Affine, Point, Rect, Size};
-use masonry::parley::style::{LineHeight, StyleProperty};
-use masonry::peniko::Fill;
+use masonry::kurbo::{Point, Rect, Size};
 use masonry::vello::Scene;
 
 use crate::client::{
     ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientRuntimeStateCandidate,
-    ClientRuntimeStateInstallError, ClientUiCommandRoute, ClipboardSink, SystemClipboard,
+    ClientRuntimeStateInstallError, ClientUiCommandRoute,
 };
-use crate::editor::{
-    CursorSelectDirection, EditorCommand, EditorCommandOutcome, EditorSurface,
-    document_session::{DocumentSessionStore, RetainedDocumentSession},
-    typography::{UiTextMetrics, UiTextVariant},
-};
+use crate::editor::typography::UiTextVariant;
 use crate::masonry_package_region::{PackageOverlayHost, PackagePanelHost};
+use crate::masonry_pane_document::PaneDocumentView;
 use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
 use crate::masonry_sdui_region::SduiRegionWidget;
 // Re-exported so the native app driver (`main.rs`) can downcast the reconciled
@@ -34,13 +27,11 @@ pub use crate::masonry_sdui_region::{SduiButtonPress, SduiListRowPress};
 pub use crate::masonry_package_region::{
     PackageButtonPress, PackageDropdownSelect, PackageListRowPress,
 };
-use crate::perf::metrics::global_recorder;
 use crate::protocol::{
-    BehaviorManifest, CompletionRequestId, CompletionResultSet, DocumentAccess, DocumentId,
-    DocumentMetadata, DocumentVersion, EditRejection, EditorCommandRequest, FileErrorCode,
-    FontRole, KeyCode, KeyModifiers, KeyStroke, LanguageIntelligenceRequestId,
-    LanguageIntelligenceResult, ProtocolErrorCode, RuntimeDiagnostic, RuntimeGenerationId,
+    ClientId, DocumentAccess, DocumentId, DocumentVersion, FontRole, RuntimeDiagnostic,
+    RuntimeGenerationId,
 };
+use crate::shell::{PaneId, TransientMenuSession};
 
 #[derive(Debug, Default, PartialEq)]
 pub struct ClipboardCommandOutcome {
@@ -49,14 +40,14 @@ pub struct ClipboardCommandOutcome {
 }
 
 impl ClipboardCommandOutcome {
-    fn unchanged() -> Self {
+    pub(crate) fn unchanged() -> Self {
         Self {
             changed: false,
             diagnostic: None,
         }
     }
 
-    fn diagnostic(diagnostic: ClientConnectionEvent) -> Self {
+    pub(crate) fn diagnostic(diagnostic: ClientConnectionEvent) -> Self {
         Self {
             changed: false,
             diagnostic: Some(diagnostic),
@@ -68,6 +59,21 @@ impl ClipboardCommandOutcome {
     clippy::large_enum_variant,
     reason = "editor event channel is low-volume; boxing would add churn without measured benefit"
 )]
+/// Phase 22.3: a fresh client session carried to the driver (reconnect or
+/// new tab). `ClientSession` is not `PartialEq` (its queue sender and event
+/// receiver are unique handles), so equality compares only the connection
+/// identity — enough for action assertions in tests.
+#[derive(Debug)]
+pub struct DriverSession {
+    pub session: crate::client::ClientSession,
+}
+
+impl PartialEq for DriverSession {
+    fn eq(&self, other: &Self) -> bool {
+        self.session.initial_state.client_id == other.session.initial_state.client_id
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum EditorAction {
     ClientConnection(ClientConnectionEvent),
@@ -83,11 +89,82 @@ pub enum EditorAction {
         generation: u64,
         result: crate::client::FileDialogResult,
     },
+    /// Phase 22.3: the new-tab folder picker finished; the driver spawns the
+    /// tab's connection with the picked folder as its workspace root.
+    NewTabFolderDialogCompleted {
+        generation: u64,
+        result: crate::client::FileDialogResult,
+    },
+    /// Phase 22.3: a tab's reconnect or new-tab connection succeeded. The
+    /// driver re-keys the tab (reconnect) or mounts it (new tab).
+    ReconnectTabConnected {
+        client_id: ClientId,
+        session: DriverSession,
+    },
+    /// Phase 22.3: a new tab's connection was established; the picked folder
+    /// becomes the tab's workspace root (`TabCommand::New`).
+    OpenTabConnected {
+        session: DriverSession,
+        workspace_root: std::path::PathBuf,
+    },
+    /// Phase 22.3: a new tab's connection failed (refused at the connection
+    /// cap, server down, …): the tab is not opened and a diagnostic surfaces.
+    OpenTabFailed {
+        message: String,
+    },
     /// A transient menu's local state (selection/query/cancel) changed via the
     /// keyboard outside any server connection event. Re-syncs the hosted
     /// overlay — the reconcile needs a `MutateCtx`, which only the action loop
     /// provides (`EventCtx` can't reach one), plan 070 step 13e.
     MenuStateChanged,
+    /// Phase 22.2: a pane's content gained Masonry focus. The driver syncs the
+    /// shell's active pane and moves keyboard routing to the pane's view.
+    PaneFocused(PaneId),
+    /// Phase 22.2: the open-documents menu selected a document owned by
+    /// another pane. The driver switches that pane to the document and
+    /// focuses it (duplicate opens stay blocked).
+    ActivateDocumentInPane {
+        document_id: DocumentId,
+        pane_id: PaneId,
+    },
+    /// Phase 22.4: the tab-close confirm menu selected an item. The session
+    /// is driver-owned (it orchestrates saving every dirty pane of the tab
+    /// before `TabCommand::Close`, or the discard/cancel choice), so the
+    /// pane view hands the selection here instead of routing it locally or
+    /// to the server. `command_id` is one of the driver-local
+    /// `clay.shell.clientTabClose*` family; `client_id` identifies the tab.
+    TabCloseMenuAction {
+        client_id: u64,
+        command_id: String,
+    },
+    /// Phase 22.2: a pane view is about to dispatch a workspace open intent
+    /// (definition navigation) that bypasses `route_sdui_intent`; the driver
+    /// records the active pane as the open target so the answering
+    /// `DocumentOpened` lands in the requesting pane.
+    RecordPendingOpenIntent {
+        root_id: u64,
+        relative_path: String,
+    },
+    /// Phase 22.3: a tab bar card was clicked. `Activate` switches
+    /// optimistically (the server registry is the reconciling authority);
+    /// `Close` closes the tab's connection (the registry snapshot drives the
+    /// removal).
+    TabBar(TabBarAction),
+}
+
+/// Phase 22.3: tab bar card actions. The client id identifies the mounted
+/// tab; the driver resolves the server `TabId` from its registry state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabBarAction {
+    Activate {
+        client_id: ClientId,
+    },
+    Close {
+        client_id: ClientId,
+    },
+    /// Phase 22.3: the tab bar's "new tab" affordance (folder picker → new
+    /// connection → `TabCommand::New`). Keybindings are the 22.4 task.
+    NewTab,
 }
 
 /// Argless, direction-specific editor client commands reachable from the
@@ -160,15 +237,15 @@ pub enum EditorConnectionStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorStatus {
-    connection: EditorConnectionStatus,
-    document_id: Option<DocumentId>,
-    version: Option<DocumentVersion>,
-    access: Option<DocumentAccess>,
-    runtime_diagnostic: Option<RuntimeDiagnostic>,
+    pub(crate) connection: EditorConnectionStatus,
+    pub(crate) document_id: Option<DocumentId>,
+    pub(crate) version: Option<DocumentVersion>,
+    pub(crate) access: Option<DocumentAccess>,
+    pub(crate) runtime_diagnostic: Option<RuntimeDiagnostic>,
     /// Server/client dirty bit for the active document (optimistic after local edits).
-    dirty: bool,
+    pub(crate) dirty: bool,
     /// Sanitized basename-only title for status/accessibility (never an absolute path).
-    document_display_name: Option<String>,
+    pub(crate) document_display_name: Option<String>,
 }
 
 // Internal GUI observability surface for headless tests and future agent inspection.
@@ -250,7 +327,7 @@ impl EditorStatus {
         }
     }
 
-    fn with_document_values(
+    pub(crate) fn with_document_values(
         mut self,
         document_id: DocumentId,
         version: DocumentVersion,
@@ -324,14 +401,14 @@ impl EditorStatus {
         text
     }
 
-    fn observation(&self) -> SduiStatusObservation {
+    pub(crate) fn observation(&self) -> SduiStatusObservation {
         SduiStatusObservation {
             status_text: self.text(),
             connection_label: self.connection_label().to_string(),
             access_label: self.access_label().to_string(),
             sync_version: self.version,
             diagnostic_text: self.diagnostic_text(),
-            // Filled by EditorWidget::status_observation from the active theme / chrome.
+            // Filled by the pane view's status_observation from the active theme / chrome.
             theme_label: String::new(),
             dirty: self.dirty,
             document_display_name: self.document_display_name.clone(),
@@ -348,28 +425,25 @@ impl Default for EditorStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PendingDefinitionNavigation {
-    relative_path: String,
-    byte_start: u64,
-}
+// Re-exported key-stroke helpers for the native driver/tests (implemented in
+// the pane-document module alongside the view that uses them).
 
+/// Connection owner widget (Phase 22.2 "chrome").
+///
+/// Owns everything connection-wide: the master `ClientEditQueue` handle, the
+/// SDUI sidebar region, package fixed-panel and transient-overlay hosts, the
+/// runtime-generation install, and the shared menu-session-id / ui-version
+/// cells. Its per-document editing surface lives in the embedded
+/// [`PaneDocumentView`] (pane 1), which the widget handlers delegate to;
+/// other panes host `PaneDocumentView` widgets directly and share the same
+/// queue (per-document sync states).
 pub struct EditorWidget {
-    editor: EditorSurface,
+    /// Phase 22.2: the pane-1 document view. Not a pod — the chrome itself is
+    /// pane 1's focusable content, so widget handlers delegate to the view.
+    view: PaneDocumentView,
+    /// The pane hosting this chrome (set by the shell at construction).
+    pane_id: PaneId,
     edit_queue: Option<ClientEditQueue>,
-    next_transaction_id: u64,
-    next_completion_request_id: u64,
-    active_completion_request_id: Option<CompletionRequestId>,
-    next_language_intelligence_request_id: u64,
-    active_language_intelligence_request_id: Option<LanguageIntelligenceRequestId>,
-    /// Plan 071 task 10: request-id allocator + outstanding selection query.
-    /// The snapshot of requested cursors lets a result restore input direction
-    /// and keep unmatched carets in place.
-    next_selection_query_request_id: u64,
-    pending_selection_query: Option<(u64, Vec<crate::protocol::SelectionQueryCursor>)>,
-    pending_definition_navigation: Option<PendingDefinitionNavigation>,
-    last_decoration_viewport: Option<(DocumentId, DocumentVersion, u64, u64)>,
-    status: EditorStatus,
     sdui: SduiNativeState,
     /// Plan 070 step 8: the reconciled SDUI sidebar, hosted as a real child so
     /// window events route through Masonry. Created once and reconciled in place
@@ -390,36 +464,23 @@ pub struct EditorWidget {
     layout_invalidated: bool,
     /// Last successfully installed runtime generation (0 before any live snapshot).
     runtime_generation_id: RuntimeGenerationId,
-    /// Inactive document sessions retained for multi-document switching (Phase 20).
-    sessions: DocumentSessionStore,
-    /// True after the first real document snapshot/open replaces the empty bootstrap buffer.
-    has_opened_document: bool,
-    next_document_menu_session_id: u64,
+    /// Connection-shared transient-menu session-id allocator (views clone it).
+    menu_session_ids: Rc<Cell<u64>>,
+    /// Connection-shared SDUI ui_version mirror (views clone it).
+    sdui_ui_version: Rc<Cell<u64>>,
 }
 
 impl Default for EditorWidget {
     fn default() -> Self {
-        let mut editor = EditorSurface::default();
-        editor.install_behavior_manifest(BehaviorManifest::minimal_text_editing(0));
-        let status = EditorStatus::local_fallback().with_document_values(
-            editor.document_state().document_id,
-            editor.document_state().document_version,
-            editor.document_state().access.clone(),
-        );
+        let menu_session_ids = Rc::new(Cell::new(1));
+        let sdui_ui_version = Rc::new(Cell::new(0));
+        let view =
+            PaneDocumentView::new(PaneId(1), menu_session_ids.clone(), sdui_ui_version.clone());
         let overlay_main_rect = Rc::new(Cell::new(Rect::ZERO));
         Self {
-            editor,
+            view,
+            pane_id: PaneId(1),
             edit_queue: None,
-            next_transaction_id: 1,
-            next_completion_request_id: 1,
-            active_completion_request_id: None,
-            next_language_intelligence_request_id: 1,
-            active_language_intelligence_request_id: None,
-            next_selection_query_request_id: 1,
-            pending_selection_query: None,
-            pending_definition_navigation: None,
-            last_decoration_viewport: None,
-            status,
             sdui: SduiNativeState::empty(),
             region: Self::new_region_pod(),
             panel_host: Self::new_panel_host_pod(),
@@ -427,49 +488,29 @@ impl Default for EditorWidget {
             overlay_main_rect,
             layout_invalidated: false,
             runtime_generation_id: 0,
-            sessions: DocumentSessionStore::default(),
-            has_opened_document: false,
-            next_document_menu_session_id: 1,
+            menu_session_ids,
+            sdui_ui_version,
         }
     }
 }
 
 impl EditorWidget {
     pub fn with_initial_state(initial_state: ClientInitialState) -> Self {
-        let mut editor = EditorSurface::default();
-        editor.load_snapshot(
-            initial_state.document_id,
-            initial_state.document_version,
-            initial_state.text,
-            initial_state.access.clone(),
-        );
-        editor.install_behavior_manifest(initial_state.behavior_manifest);
-        editor.set_active_theme(&initial_state.active_theme);
-        let _ = editor.set_typography(initial_state.active_typography.clone());
-        let status = EditorStatus::connected(
-            initial_state.document_id,
-            initial_state.document_version,
-            initial_state.access,
-        );
+        let menu_session_ids = Rc::new(Cell::new(1));
+        let sdui_ui_version = Rc::new(Cell::new(0));
+        let view =
+            PaneDocumentView::new(PaneId(1), menu_session_ids.clone(), sdui_ui_version.clone())
+                .with_initial_state(initial_state);
         let mut sdui = SduiNativeState::empty();
-        sdui.set_typography(editor.typography().clone());
         // Mirror the editor's resolved theme (base palette + design tokens) so
         // the SDUI chrome can never diverge from the editor text theme.
-        sdui.set_ui_theme(editor.ui_theme().clone());
+        sdui.set_ui_theme(view.ui_theme().clone());
+        sdui.set_typography(view.typography().clone());
         let overlay_main_rect = Rc::new(Cell::new(Rect::ZERO));
         Self {
-            editor,
+            view,
+            pane_id: PaneId(1),
             edit_queue: None,
-            next_transaction_id: 1,
-            next_completion_request_id: 1,
-            active_completion_request_id: None,
-            next_language_intelligence_request_id: 1,
-            active_language_intelligence_request_id: None,
-            next_selection_query_request_id: 1,
-            pending_selection_query: None,
-            pending_definition_navigation: None,
-            last_decoration_viewport: None,
-            status,
             sdui,
             region: Self::new_region_pod(),
             panel_host: Self::new_panel_host_pod(),
@@ -477,16 +518,20 @@ impl EditorWidget {
             overlay_main_rect,
             layout_invalidated: false,
             runtime_generation_id: 0,
-            sessions: DocumentSessionStore::default(),
-            has_opened_document: true,
-            next_document_menu_session_id: 1,
+            menu_session_ids,
+            sdui_ui_version,
         }
     }
 
-    /// Return and clear a layout request caused by a typography profile change.
-    /// Other connection events retain the existing render-only behavior.
-    pub fn take_layout_invalidation(&mut self) -> bool {
-        std::mem::take(&mut self.layout_invalidated)
+    /// Phase 22.2: record the pane hosting this chrome (the shell calls this
+    /// at construction; pane activation actions carry the pane id).
+    pub fn set_pane_id(&mut self, pane_id: PaneId) {
+        self.pane_id = pane_id;
+        self.view.set_pane_id(pane_id);
+    }
+
+    pub fn pane_id(&self) -> PaneId {
+        self.pane_id
     }
 
     /// Create the inert region child pod (reconciled later by `sync_region`).
@@ -528,10 +573,7 @@ impl EditorWidget {
     }
 
     /// Route a reconciled package `textInput` commit (Enter) to its server
-    /// intent, appending the committed `value` (plan 070 step 13c). `area_id` is
-    /// the inner `TextArea`'s widget id — the source id Masonry reports on
-    /// `TextAction::Entered`. Static so the app driver can call it on a live
-    /// `WidgetMut<EditorWidget>` and then enqueue the resulting intent.
+    /// intent, appending the committed `value` (plan 070 step 13c).
     pub fn package_text_input_commit(
         this: &mut WidgetMut<'_, Self>,
         area_id: masonry::core::WidgetId,
@@ -544,18 +586,13 @@ impl EditorWidget {
     }
 
     /// Plan 071 caret-transport fix: whether the effective caret style
-    /// animates. The event loop uses it to kick the blink loop the moment a
-    /// runtime caret override lands (`update` only self-kicks on focus change).
+    /// animates (pane-1 view).
     pub fn caret_animates(&self) -> bool {
-        self.editor.caret_animates()
+        self.view.caret_animates()
     }
 
     /// Reconcile the persistent `SduiRegionWidget` child in place from the
-    /// current SDUI state when it changed (plan 070 step 11c). Called from the
-    /// event loop with a live `MutateCtx`; surviving widgets keep their
-    /// `WidgetId` (and thus Masonry-managed focus/capture state) across updates
-    /// instead of being rebuilt wholesale. The region pod itself is created once
-    /// in [`Self::new_region_pod`] and never replaced.
+    /// current SDUI state when it changed (plan 070 step 11c).
     pub fn sync_region(&mut self, ctx: &mut MutateCtx<'_>) {
         if !self.sdui.take_region_dirty() {
             return;
@@ -579,18 +616,22 @@ impl EditorWidget {
     }
 
     pub fn with_status(mut self, status: EditorStatus) -> Self {
-        self.status = status;
+        self.view = std::mem::take(&mut self.view).with_status(status);
         self
     }
 
     pub fn with_edit_queue(mut self, edit_queue: ClientEditQueue) -> Self {
-        self.edit_queue = Some(edit_queue);
+        self.edit_queue = Some(edit_queue.clone());
+        self.view = std::mem::take(&mut self.view).with_edit_queue(edit_queue);
         self
     }
 
-    /// Route a reconciled SDUI button activation (plan 070 step 9) through the
-    /// existing server-first command path. The intent is carried in the Masonry
-    /// button's action, identical to what the retired legacy hit-test enqueued.
+    /// A clone of the master queue handle for mounting new pane views (all
+    /// clones share the per-document sync state and the IPC channel).
+    pub fn edit_queue_shared(&self) -> Option<ClientEditQueue> {
+        self.edit_queue.clone()
+    }
+
     /// Route a reconciled SDUI widget activation (button or list row) through
     /// the existing server-first command path. The intent is inert (registered
     /// command id + bounded args); the server validates and applies it.
@@ -600,188 +641,185 @@ impl EditorWidget {
         }
     }
 
+    /// Phase 22.2: show/clear the shared transient menu in the chrome overlay
+    /// (pushed by pane views through the app driver).
+    pub fn set_active_menu(&mut self, menu: Option<TransientMenuSession>) {
+        match menu {
+            Some(menu) => self.sdui.set_active_menu(menu),
+            None => self.sdui.clear_active_menu(),
+        }
+    }
+
+    /// Phase 22.2: drain the pane-1 view's pending menu push.
+    pub fn take_pending_menu(&mut self) -> Option<Option<TransientMenuSession>> {
+        self.view.take_pending_menu()
+    }
+
+    /// Phase 22.2: whether the pane-1 view (active or retained) owns a document.
+    pub fn contains_document(&self, document_id: DocumentId) -> bool {
+        self.view.contains_document(document_id)
+    }
+
+    /// Phase 22.2: the pane-1 view's active document id.
+    pub fn document_id(&self) -> DocumentId {
+        self.view.document_id()
+    }
+
+    /// Phase 22.2: dirty bit of the pane-1 view's active document (pane-close gate).
+    pub fn is_dirty(&self) -> bool {
+        self.view.is_dirty()
+    }
+
+    /// Phase 22.2: pane-close gate for the pane-1 view (dirty → conflict menu).
+    pub fn guard_pane_close(&mut self) -> bool {
+        self.view.guard_pane_close()
+    }
+
+    /// Phase 22.4: enqueue a save of the pane-1 view's active document,
+    /// returning its `DocumentId` (or the diagnostic to surface on failure).
+    /// The driver uses this to save a tab's dirty panes before closing it.
+    pub fn request_save_active_document(
+        &mut self,
+    ) -> Result<u64, crate::protocol::RuntimeDiagnostic> {
+        self.view.request_save_active_document()
+    }
+
+    /// Phase 22.4: the pane-1 view's active document display name (tab-close
+    /// confirm prompt naming), or `None` for a blank view.
+    pub fn document_display_name(&self) -> Option<String> {
+        self.view.document_display_name()
+    }
+
+    /// Phase 22.4: push a driver-owned menu session into the pane-1 view's
+    /// interactive menu slot (the tab-close confirm flow; the chrome overlay
+    /// render follows via the usual `take_pending_menu` → `apply_menu_sync`).
+    pub fn push_menu(&mut self, menu: Option<TransientMenuSession>) {
+        self.view.push_menu(menu);
+    }
+
+    /// Phase 22.3: reconnect the pane-1 view to a fresh connection for the
+    /// same tab (queue swap; the next `DocumentOpened` reinstalls).
+    pub fn reconnect(&mut self, edit_queue: ClientEditQueue) {
+        self.view.reconnect(edit_queue);
+    }
+
+    /// Phase 22.3: the pane-1 view's documents to re-open after a reconnect.
+    pub fn documents_for_reopen(&self) -> Vec<(crate::protocol::WorkspaceRootId, String)> {
+        self.view.documents_for_reopen()
+    }
+
+    /// Phase 22.2: pane close cleanup for the pane-1 view.
+    pub fn close_pane_view(&mut self) {
+        self.view.close_pane();
+    }
+
+    /// Phase 22.2: the pane-1 view's opened-document flag.
+    pub fn has_opened_document_view(&self) -> bool {
+        self.view.has_opened_document()
+    }
+
+    /// Phase 22.2: runtime baseline freshly mounted pane views are seeded with.
+    pub fn runtime_baseline(&self) -> crate::masonry_pane_document::RuntimeBaseline {
+        self.view.runtime_baseline()
+    }
+
+    /// Phase 22.2: shared menu session-id allocator (for mounting new views).
+    pub fn menu_session_ids_shared(&self) -> Rc<Cell<u64>> {
+        self.menu_session_ids.clone()
+    }
+
+    /// Phase 22.2: shared SDUI ui_version mirror (for mounting new views).
+    pub fn sdui_ui_version_shared(&self) -> Rc<Cell<u64>> {
+        self.sdui_ui_version.clone()
+    }
+
+    /// Return and clear a layout request caused by a typography profile change.
+    pub fn take_layout_invalidation(&mut self) -> bool {
+        // Drain BOTH flags: the chrome's and the pane-1 view's (short-circuit
+        // must not skip the view's flag or the next take would re-report).
+        let chrome = std::mem::take(&mut self.layout_invalidated);
+        let view = self.view.take_layout_invalidation();
+        chrome || view
+    }
+
+    #[cfg(test)]
+    #[cfg(test)]
+    pub(crate) fn editor_state_for_test(&self) -> &crate::editor::surface::EditorDocumentState {
+        self.view.editor_state_for_test()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_behavior_manifest(&mut self, manifest: &crate::protocol::BehaviorManifest) {
+        self.view.apply_behavior_manifest(manifest);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn view_mut(&mut self) -> &mut PaneDocumentView {
+        &mut self.view
+    }
+
     pub fn apply_connection_event(&mut self, event: ClientConnectionEvent) -> bool {
-        match event {
-            ClientConnectionEvent::EditAck {
-                document_id,
-                version,
-                ..
-            } => {
-                if document_id != self.editor.document_state().document_id {
-                    if let Some(session) = self.sessions.get_mut(document_id) {
-                        let _ = session.surface.note_confirmed_version(document_id, version);
-                        session.confirmed_version = version;
-                        session.pending.retain(|pending| {
-                            // Keep unmatched pending; specific transaction removal happens when
-                            // the connection layer tracks the active document only.
-                            pending.document_id == document_id
-                        });
-                    }
-                    return false;
-                }
-                let version_changed = self.editor.note_confirmed_version(document_id, version);
-                let mut next_status = EditorStatus::connected(
-                    document_id,
-                    version,
-                    self.editor.document_state().access.clone(),
-                );
-                next_status.dirty = self.status.dirty;
-                next_status.document_display_name = self.status.document_display_name.clone();
-                let status_changed = self.set_status(next_status);
-                version_changed || status_changed
-            }
-            ClientConnectionEvent::EditRejected {
-                document_id,
-                reason,
-                ..
-            } => self.apply_edit_rejected(document_id, reason),
-            ClientConnectionEvent::ResyncSnapshot(snapshot) => {
-                if self.has_opened_document
-                    && snapshot.document_id != self.editor.document_state().document_id
-                {
-                    if let Some(session) = self.sessions.get_mut(snapshot.document_id) {
-                        session.surface.load_resync_snapshot(
-                            snapshot.document_id,
-                            snapshot.version,
-                            snapshot.text,
-                            snapshot.access.clone(),
-                        );
-                        session.confirmed_version = snapshot.version;
-                        session.pending.clear();
-                        session.dirty = false;
-                    }
-                    return false;
-                }
-                self.editor.load_resync_snapshot(
-                    snapshot.document_id,
-                    snapshot.version,
-                    snapshot.text,
-                    snapshot.access.clone(),
-                );
-                if let Some(queue) = self.edit_queue.as_mut() {
-                    queue.update_opened_document_authority(
-                        snapshot.document_id,
-                        &snapshot.access,
-                        snapshot.version,
-                    );
-                }
-                self.clear_sync_recovery_menu();
-                let mut next_status = EditorStatus::connected(
-                    snapshot.document_id,
-                    snapshot.version,
-                    snapshot.access,
-                );
-                next_status.document_display_name = self.status.document_display_name.clone();
-                next_status.dirty = false;
-                next_status.runtime_diagnostic = None;
-                self.set_status(next_status);
-                true
-            }
-            ClientConnectionEvent::DocumentOpened { metadata, text } => {
-                self.open_document_session(metadata, text)
-            }
-            ClientConnectionEvent::DocumentSaved {
-                document_id,
-                version,
-                dirty,
-            } => self.apply_document_saved(document_id, version, dirty),
-            ClientConnectionEvent::DocumentReloaded { metadata, text } => {
-                self.apply_document_reloaded(metadata, text)
-            }
-            ClientConnectionEvent::FileOperationFailed {
-                code,
-                message,
-                document_id,
-                ..
-            } => self.apply_file_operation_failed(code, message, document_id),
-            ClientConnectionEvent::BehaviorManifestInstalled { manifest, .. } => {
-                self.editor.install_behavior_manifest(manifest);
+        // Phase 22.2: document-scoped events route to the pane view that owns
+        // the document (the app driver routes other panes directly; this chrome
+        // covers pane 1's active/retained documents). `DocumentOpened` for a
+        // brand-new document must reach the view unconditionally — the view's
+        // own same-document no-op protects live views from redundant snapshots.
+        if let Some(document_id) = event.document_id() {
+            let is_open = matches!(event, ClientConnectionEvent::DocumentOpened { .. });
+            return if is_open || self.view.contains_document(document_id) {
+                self.view.apply_connection_event(event)
+            } else {
                 false
-            }
+            };
+        }
+        match event {
             ClientConnectionEvent::ActiveTheme(theme) => {
-                self.editor.set_active_theme(&theme);
-                self.sdui.set_ui_theme(self.editor.ui_theme().clone());
-                true
+                let changed = self
+                    .view
+                    .apply_connection_event(ClientConnectionEvent::ActiveTheme(theme));
+                self.sdui.set_ui_theme(self.view.ui_theme().clone());
+                changed
             }
             ClientConnectionEvent::ActiveTypography(typography) => {
-                let changed = self.editor.set_typography(typography);
+                let changed = self
+                    .view
+                    .apply_connection_event(ClientConnectionEvent::ActiveTypography(typography));
                 if changed {
-                    self.sdui.set_typography(self.editor.typography().clone());
+                    self.sdui.set_typography(self.view.typography().clone());
+                    self.layout_invalidated = true;
                 }
-                self.layout_invalidated |= changed;
                 changed
             }
             ClientConnectionEvent::SduiSnapshot { tree, .. } => {
                 self.sdui.apply_snapshot(tree);
+                self.sdui_ui_version.set(self.sdui.ui_version());
                 true
             }
-            ClientConnectionEvent::SduiUpdate(update) => self.sdui.apply_update(update),
-            ClientConnectionEvent::DecorationSet(set) => self.editor.apply_decoration_set(set),
-            ClientConnectionEvent::DecorationBatch(sets) => {
-                // Every chunk applies even when an earlier chunk changed state.
-                let mut changed = false;
-                for set in sets {
-                    changed |= self.editor.apply_decoration_set(set);
-                }
+            ClientConnectionEvent::SduiUpdate(update) => {
+                let changed = self.sdui.apply_update(update);
+                self.sdui_ui_version.set(self.sdui.ui_version());
                 changed
-            }
-            ClientConnectionEvent::DiagnosticSet(set) => self.editor.apply_diagnostic_set(set),
-            ClientConnectionEvent::CompletionResult(result) => self.apply_completion_result(result),
-            ClientConnectionEvent::LanguageIntelligenceResult(result) => {
-                self.apply_language_intelligence_result(result)
-            }
-            ClientConnectionEvent::LanguageIntelligenceRejected { request_id, .. } => {
-                if self.active_language_intelligence_request_id == Some(request_id) {
-                    self.active_language_intelligence_request_id = None;
-                    self.sdui.clear_active_menu();
-                    true
-                } else {
-                    false
-                }
-            }
-            ClientConnectionEvent::SelectionQueryResult(result) => {
-                self.apply_selection_query_result(result)
-            }
-            ClientConnectionEvent::EditorCommandRequest(request) => {
-                self.apply_editor_command_request(request)
-            }
-            ClientConnectionEvent::CaretStyleOverride(style) => {
-                self.editor.set_caret_style_override(style)
-            }
-            ClientConnectionEvent::CompletionRejected { request_id, .. } => {
-                if self.active_completion_request_id == Some(request_id) {
-                    self.active_completion_request_id = None;
-                    self.sdui.clear_active_menu();
-                    true
-                } else {
-                    false
-                }
-            }
-            ClientConnectionEvent::RuntimeDiagnostic(diagnostic) => {
-                let mut next_status = self.status.clone();
-                next_status.runtime_diagnostic = Some(diagnostic);
-                self.set_status(next_status)
-            }
-            ClientConnectionEvent::ServerError { code, message } => {
-                self.apply_server_error(code, message)
             }
             ClientConnectionEvent::RuntimeStateSnapshot(snapshot) => {
                 self.install_runtime_state_snapshot(*snapshot)
             }
-            ClientConnectionEvent::Disconnected => self.apply_disconnect(None),
-            ClientConnectionEvent::ConnectionError(message) => {
-                self.apply_disconnect(Some(message.as_str()))
-            }
-            _ => false,
+            ClientConnectionEvent::ShellPreferences(_)
+            | ClientConnectionEvent::EditTransaction(_)
+            | ClientConnectionEvent::BehaviorManifestRejected { .. } => false,
+            // Behavior manifests, caret style, diagnostics, disconnect and
+            // server-error handling are per-view concerns in Phase 22.2.
+            _ => self.view.apply_connection_event(event),
         }
     }
 
     /// Validate and atomically install one complete runtime-generation snapshot.
     ///
-    /// On success the widget acknowledges the generation through the edit queue.
-    /// On validation failure no partial state remains, no acknowledgement is
-    /// sent, and the connection status becomes disconnected so the shell can
-    /// rebootstrap into the latest authoritative state.
+    /// On success the widget acknowledges the generation through the edit queue
+    /// exactly once (other pane views receive the per-document parts via the
+    /// app driver's fan-out). On validation failure no partial state remains,
+    /// no acknowledgement is sent, and the connection status becomes
+    /// disconnected so the shell can rebootstrap into the latest authoritative
+    /// state.
     fn install_runtime_state_snapshot(
         &mut self,
         snapshot: crate::protocol::RuntimeStateSnapshot,
@@ -802,64 +840,33 @@ impl EditorWidget {
                 return false;
             }
             Err(_) => {
-                let next_status = EditorStatus {
-                    connection: EditorConnectionStatus::Disconnected,
-                    runtime_diagnostic: Some(RuntimeDiagnostic::error(
-                        "clay.runtime.invalid_snapshot",
-                        "Runtime state snapshot failed client validation and was rejected.",
-                    )),
-                    ..self.status.clone().with_document_values(
-                        self.editor.document_state().document_id,
-                        self.editor.document_state().document_version,
-                        self.editor.document_state().access.clone(),
-                    )
-                };
-                self.set_status(next_status);
+                let _ = self
+                    .view
+                    .apply_connection_event(ClientConnectionEvent::Disconnected);
                 return true;
             }
         };
 
-        self.editor
-            .install_behavior_manifest(candidate.behavior.clone());
-        self.editor.set_active_theme(&candidate.active_theme);
-        self.sdui.set_ui_theme(self.editor.ui_theme().clone());
-        let typography_changed = self
-            .editor
-            .install_runtime_typography(candidate.active_typography.clone());
+        let typography_changed = self.view.install_runtime_baseline(
+            &candidate.behavior,
+            &candidate.active_theme,
+            &candidate.active_typography,
+        );
         if typography_changed {
-            self.sdui.set_typography(self.editor.typography().clone());
+            self.sdui.set_typography(self.view.typography().clone());
         }
+        self.sdui.set_ui_theme(self.view.ui_theme().clone());
         self.sdui.apply_snapshot(candidate.sdui_tree.clone());
         self.sdui.install_package_ui_snapshot(&candidate.package_ui);
+        self.sdui_ui_version.set(self.sdui.ui_version());
 
-        let open_document_id = self.editor.document_state().document_id;
-        let open_document_version = self.editor.document_state().document_version;
+        // Per-document decorations/diagnostics apply to the pane-1 view only
+        // here; the driver fans the other panes' documents out.
         for document in &candidate.documents {
-            if document.document_id != open_document_id {
-                continue;
-            }
-            if document.reset_decorations {
-                self.editor.clear_decorations();
-            }
-            if document.reset_diagnostics {
-                self.editor.clear_diagnostics();
-            }
-            if let Some(set) = document.initial_decorations.clone()
-                && set.document_version == open_document_version
-            {
-                let _ = self.editor.apply_decoration_set(set);
-            }
-            if let Some(set) = document.initial_diagnostics.clone()
-                && set.document_version == open_document_version
-            {
-                let _ = self.editor.apply_diagnostic_set(set);
-            }
+            let _ = self.view.apply_runtime_document_state(document);
         }
-
-        if let Some(diagnostic) = candidate.diagnostics.last().cloned() {
-            let mut next_status = self.status.clone();
-            next_status.runtime_diagnostic = Some(diagnostic);
-            let _ = self.set_status(next_status);
+        if let Some(diagnostic) = candidate.diagnostics.last() {
+            let _ = self.view.apply_runtime_status_diagnostic(diagnostic);
         }
 
         self.runtime_generation_id = candidate.runtime_generation_id;
@@ -871,793 +878,12 @@ impl EditorWidget {
         true
     }
 
-    fn open_document_session(
-        &mut self,
-        metadata: crate::protocol::DocumentMetadata,
-        text: String,
-    ) -> bool {
-        let incoming_id = metadata.document_id;
-        let active_id = self.editor.document_state().document_id;
-        let mut eviction_notice = None;
-
-        if self.has_opened_document && incoming_id != active_id {
-            eviction_notice = self.stash_active_session();
-            // Server-authored open replaces any stale retained copy for this id.
-            let _ = self.sessions.remove(incoming_id);
-        } else if self.has_opened_document && incoming_id == active_id {
-            // Same-document hard open/replace: keep session map, replace active buffer.
-            self.editor.cancel_composition();
-        }
-
-        // Preserve shared theme/typography/behavior across document switches.
-        let theme = self.editor.theme();
-        let theme_specifier = self.editor.theme_specifier().to_string();
-        let typography = self.editor.typography().clone();
-        let behavior = self.editor.document_state().behavior_manifest.clone();
-
-        self.editor.load_snapshot(
-            metadata.document_id,
-            metadata.version,
-            text,
-            metadata.access.clone(),
-        );
-        self.editor.set_theme(theme);
-        self.editor.set_theme_specifier(theme_specifier);
-        self.editor.set_typography_registry(typography);
-        if let Some(manifest) = behavior {
-            self.editor.install_behavior_manifest(manifest);
-        }
-        self.has_opened_document = true;
-
-        if let Some(queue) = self.edit_queue.as_mut() {
-            queue.update_opened_document_authority(
-                metadata.document_id,
-                &metadata.access,
-                metadata.version,
-            );
-        }
-        let jumped = self
-            .take_pending_definition_navigation_for_path(&metadata.path)
-            .map(|pending| self.editor.navigate_to_byte_offset(pending.byte_start))
-            .unwrap_or(false);
-        let display_name =
-            crate::editor::accessibility::sanitize_document_display_name(&metadata.path);
-        let mut status = EditorStatus::connected_with_metadata(
-            metadata.document_id,
-            metadata.version,
-            metadata.access,
-            metadata.dirty,
-            Some(display_name),
-        );
-        if let Some(message) = eviction_notice {
-            status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
-                "clay.editor.document_session.evicted",
-                message,
-            ));
-        }
-        let status_changed = self.set_status(status);
-        let _ = (jumped, status_changed);
-        true
-    }
-
-    fn stash_active_session(&mut self) -> Option<String> {
-        self.editor.cancel_composition();
-        let document_id = self.editor.document_state().document_id;
-        let access = self.editor.document_state().access.clone();
-        let sync = self
-            .edit_queue
-            .as_ref()
-            .map(|queue| queue.sync_snapshot())
-            .unwrap_or_else(|| crate::client::ClientSyncSnapshot {
-                confirmed_version: self.editor.document_state().document_version,
-                optimistic_version: self.editor.document_state().document_version,
-                pending: Vec::new(),
-                last_resync: None,
-            });
-        let pending: Vec<_> = sync
-            .pending
-            .into_iter()
-            .filter(|pending| pending.document_id == document_id)
-            .collect();
-
-        let theme = self.editor.theme();
-        let theme_specifier = self.editor.theme_specifier().to_string();
-        let typography = self.editor.typography().clone();
-        let behavior = self.editor.document_state().behavior_manifest.clone();
-        let ui_theme = self.editor.ui_theme().clone();
-        let caret_override = self.editor.caret_style_override();
-        let outgoing = std::mem::take(&mut self.editor);
-        // Leave a blank surface with shared theme/typography/behavior until caller loads.
-        self.editor = EditorSurface::default();
-        self.editor.set_theme(theme);
-        self.editor.set_theme_specifier(theme_specifier);
-        self.editor.set_typography_registry(typography);
-        self.editor.set_ui_theme(ui_theme);
-        self.editor.set_caret_style_override(caret_override);
-        if let Some(manifest) = behavior {
-            self.editor.install_behavior_manifest(manifest);
-        }
-        let _ = access;
-
-        let session = RetainedDocumentSession {
-            surface: outgoing,
-            dirty: self.status.dirty,
-            document_display_name: self.status.document_display_name.clone(),
-            confirmed_version: sync.confirmed_version,
-            pending,
-            last_activated_order: 0,
-        };
-        let eviction = self.sessions.insert(document_id, session);
-        // LRU eviction closes the server-side document too (force: the
-        // evicted session's unsaved edits are discarded with the session), so
-        // document state does not accumulate past the retention budget
-        // (Plan 060 T6, P1-4).
-        if let Some(queue) = self.edit_queue.as_mut() {
-            for evicted_id in &eviction.evicted {
-                let _ = queue.enqueue_close_document(*evicted_id, true);
-            }
-        }
-        eviction.notice
-    }
-
-    /// Activate a retained session by document id without re-downloading text.
-    pub fn activate_document(&mut self, document_id: DocumentId) -> bool {
-        if !self.has_opened_document {
-            return false;
-        }
-        if document_id == self.editor.document_state().document_id {
-            return false;
-        }
-        let Some(retained) = self.sessions.remove(document_id) else {
-            let mut next_status = self.status.clone();
-            next_status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
-                "clay.editor.document_session.missing",
-                format!("No retained client session for document {document_id}."),
-            ));
-            return self.set_status(next_status);
-        };
-
-        let eviction_notice = self.stash_active_session();
-        let theme = self.editor.theme();
-        let theme_specifier = self.editor.theme_specifier().to_string();
-        let typography = self.editor.typography().clone();
-        let ui_theme = self.editor.ui_theme().clone();
-        let caret_override = self.editor.caret_style_override();
-        self.editor = retained.surface;
-        self.editor.set_theme(theme);
-        self.editor.set_theme_specifier(theme_specifier);
-        self.editor.set_typography_registry(typography);
-        self.editor.set_ui_theme(ui_theme);
-        self.editor.set_caret_style_override(caret_override);
-        self.editor.cancel_composition();
-
-        if let Some(queue) = self.edit_queue.as_mut() {
-            queue.install_document_sync_state(
-                document_id,
-                &self.editor.document_state().access,
-                retained.confirmed_version,
-                retained.pending,
-            );
-        }
-
-        let mut status = EditorStatus::connected_with_metadata(
-            self.editor.document_state().document_id,
-            self.editor.document_state().document_version,
-            self.editor.document_state().access.clone(),
-            retained.dirty,
-            retained.document_display_name,
-        );
-        if let Some(message) = eviction_notice {
-            status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
-                "clay.editor.document_session.evicted",
-                message,
-            ));
-        }
-        let _ = self.set_status(status);
-        true
-    }
-
-    pub fn show_open_documents_menu(&mut self) -> bool {
-        if !self.has_opened_document {
-            return false;
-        }
-        let entries = self.sessions.list_with_active(
-            self.editor.document_state().document_id,
-            self.status.document_display_name.as_deref(),
-            self.status.dirty,
-        );
-        let session_id = self.next_document_menu_session_id;
-        self.next_document_menu_session_id = self.next_document_menu_session_id.saturating_add(1);
-        let items = entries
-            .into_iter()
-            .map(|entry| {
-                let mut label = entry.display_name.clone();
-                if entry.dirty {
-                    label.push_str(" •");
-                }
-                if entry.active {
-                    label.push_str(" (active)");
-                }
-                let action =
-                    crate::shell::TransientMenuAction::new("clay.editor.clientActivateDocument")
-                        .with_arguments(serde_json::json!({ "documentId": entry.document_id }));
-                crate::shell::TransientMenuItem::new(
-                    format!("doc.{}", entry.document_id),
-                    label,
-                    action,
-                )
-                .with_accessibility_label(format!(
-                    "{}{}{}",
-                    entry.display_name,
-                    if entry.dirty { ", dirty" } else { "" },
-                    if entry.active { ", active" } else { "" }
-                ))
-            })
-            .collect::<Vec<_>>();
-        let menu = crate::shell::TransientMenuSession::new(
-            crate::shell::TransientMenuSessionId(session_id),
-            "Open documents",
-        )
-        .with_items(items);
-        self.sdui.set_active_menu(menu);
-        true
-    }
-
-    fn apply_document_saved(
-        &mut self,
-        document_id: DocumentId,
-        version: DocumentVersion,
-        dirty: bool,
-    ) -> bool {
-        if document_id != self.editor.document_state().document_id {
-            if let Some(session) = self.sessions.get_mut(document_id) {
-                let _ = session.surface.note_confirmed_version(document_id, version);
-                session.confirmed_version = version;
-                session.dirty = dirty;
-            }
-            return false;
-        }
-        let version_changed = self.editor.note_confirmed_version(document_id, version);
-        let mut next_status = self.status.clone();
-        next_status.version = Some(version);
-        next_status.dirty = dirty;
-        if !dirty {
-            // Successful clean save clears stale conflict diagnostics.
-            if next_status
-                .runtime_diagnostic
-                .as_ref()
-                .is_some_and(|diagnostic| {
-                    diagnostic.code.contains("StaleFileMetadata")
-                        || diagnostic.code.contains("DirtyDocument")
-                        || diagnostic.code.contains("file.")
-                })
-            {
-                next_status.runtime_diagnostic = None;
-            }
-            if self.sdui.active_menu().is_some_and(|menu| {
-                let prompt = menu.prompt();
-                prompt.contains("conflict")
-                    || prompt.contains("unsaved edits")
-                    || prompt.contains("Reload")
-                    || prompt.contains("reload")
-            }) {
-                self.sdui.clear_active_menu();
-            }
-        }
-        version_changed || self.set_status(next_status)
-    }
-
-    fn apply_document_reloaded(&mut self, metadata: DocumentMetadata, text: String) -> bool {
-        if metadata.document_id != self.editor.document_state().document_id {
-            if let Some(session) = self.sessions.get_mut(metadata.document_id) {
-                session.surface.load_resync_snapshot(
-                    metadata.document_id,
-                    metadata.version,
-                    text,
-                    metadata.access.clone(),
-                );
-                session.confirmed_version = metadata.version;
-                session.pending.clear();
-                session.dirty = metadata.dirty;
-                session.document_display_name = Some(
-                    crate::editor::accessibility::sanitize_document_display_name(&metadata.path),
-                );
-            }
-            return false;
-        }
-        self.editor.load_resync_snapshot(
-            metadata.document_id,
-            metadata.version,
-            text,
-            metadata.access.clone(),
-        );
-        if let Some(queue) = self.edit_queue.as_mut() {
-            queue.update_opened_document_authority(
-                metadata.document_id,
-                &metadata.access,
-                metadata.version,
-            );
-        }
-        self.sdui.clear_active_menu();
-        let display_name =
-            crate::editor::accessibility::sanitize_document_display_name(&metadata.path);
-        let mut next_status = EditorStatus::connected_with_metadata(
-            metadata.document_id,
-            metadata.version,
-            metadata.access,
-            metadata.dirty,
-            Some(display_name),
-        );
-        next_status.runtime_diagnostic = None;
-        self.set_status(next_status);
-        true
-    }
-
-    fn apply_file_operation_failed(
-        &mut self,
-        code: FileErrorCode,
-        message: String,
-        document_id: Option<DocumentId>,
-    ) -> bool {
-        let mut next_status = self.status.clone();
-        next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
-            format!("clay.file.{code:?}"),
-            message.clone(),
-        ));
-        // Save/reload failures must never clear dirty; keep local edits.
-        let status_changed = self.set_status(next_status);
-        let targets_active =
-            document_id.is_none_or(|id| id == self.editor.document_state().document_id);
-        let opened_conflict_menu = targets_active
-            && matches!(
-                code,
-                FileErrorCode::StaleFileMetadata | FileErrorCode::DirtyDocument
-            )
-            && self.show_save_conflict_menu(code, &message);
-        status_changed || opened_conflict_menu
-    }
-
-    fn show_save_conflict_menu(&mut self, code: FileErrorCode, message: &str) -> bool {
-        if !self.has_opened_document {
-            return false;
-        }
-        let session_id = self.next_document_menu_session_id;
-        self.next_document_menu_session_id = self.next_document_menu_session_id.saturating_add(1);
-        let (prompt, items) = match code {
-            FileErrorCode::StaleFileMetadata => {
-                let prompt = "File changed on disk — resolve save conflict".to_string();
-                let items = vec![
-                    crate::shell::TransientMenuItem::new(
-                        "conflict.reload",
-                        "Reload from disk (discard local edits)",
-                        crate::shell::TransientMenuAction::new(
-                            "clay.documents.serverReloadDocument",
-                        )
-                        .with_arguments(serde_json::json!({ "force": true })),
-                    )
-                    .with_accessibility_label("Reload from disk and discard unsaved local edits"),
-                    crate::shell::TransientMenuItem::new(
-                        "conflict.keep",
-                        "Keep unsaved edits",
-                        crate::shell::TransientMenuAction::new(
-                            "clay.editor.clientKeepUnsavedEdits",
-                        ),
-                    )
-                    .with_accessibility_label("Keep unsaved edits and dismiss conflict menu"),
-                    crate::shell::TransientMenuItem::new(
-                        "conflict.defer",
-                        "Compare later",
-                        crate::shell::TransientMenuAction::new(
-                            "clay.editor.clientDeferConflictCompare",
-                        ),
-                    )
-                    .with_accessibility_label("Defer conflict comparison and keep unsaved edits"),
-                ];
-                (prompt, items)
-            }
-            FileErrorCode::DirtyDocument => {
-                let prompt = "Document has unsaved edits — resolve reload".to_string();
-                let items = vec![
-                    crate::shell::TransientMenuItem::new(
-                        "conflict.save",
-                        "Save first",
-                        crate::shell::TransientMenuAction::new("clay.documents.serverSaveDocument"),
-                    )
-                    .with_accessibility_label("Save the document before reloading"),
-                    crate::shell::TransientMenuItem::new(
-                        "conflict.reload",
-                        "Discard edits and reload",
-                        crate::shell::TransientMenuAction::new(
-                            "clay.documents.serverReloadDocument",
-                        )
-                        .with_arguments(serde_json::json!({ "force": true })),
-                    )
-                    .with_accessibility_label("Discard unsaved edits and reload from disk"),
-                    crate::shell::TransientMenuItem::new(
-                        "conflict.keep",
-                        "Keep unsaved edits",
-                        crate::shell::TransientMenuAction::new(
-                            "clay.editor.clientKeepUnsavedEdits",
-                        ),
-                    )
-                    .with_accessibility_label("Keep unsaved edits and dismiss reload prompt"),
-                ];
-                (prompt, items)
-            }
-            _ => return false,
-        };
-        let _ = message;
-        let menu = crate::shell::TransientMenuSession::new(
-            crate::shell::TransientMenuSessionId(session_id),
-            prompt,
-        )
-        .with_items(items);
-        self.sdui.set_active_menu(menu);
-        true
-    }
-
-    fn request_save_active_document(&self) -> Option<ClientConnectionEvent> {
-        let Some(queue) = &self.edit_queue else {
-            return Some(ClientConnectionEvent::RuntimeDiagnostic(
-                RuntimeDiagnostic::error(
-                    "clay.client.save.unavailable",
-                    "Cannot save because this editor is not connected to a Clay server.",
-                ),
-            ));
-        };
-        if !self.has_opened_document {
-            return Some(ClientConnectionEvent::RuntimeDiagnostic(
-                RuntimeDiagnostic::error(
-                    "clay.client.save.no_document",
-                    "Cannot save because no document is open.",
-                ),
-            ));
-        }
-        let document = self.editor.document_state();
-        queue
-            .enqueue_save_document(document.document_id, document.document_version)
-            .err()
-            .map(|error| {
-                ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                    "clay.client.save.queue_failed",
-                    format!("Failed to send save request to the Clay server: {error}"),
-                ))
-            })
-    }
-
-    fn request_reload_active_document(&self, force: bool) -> Option<ClientConnectionEvent> {
-        let Some(queue) = &self.edit_queue else {
-            return Some(ClientConnectionEvent::RuntimeDiagnostic(
-                RuntimeDiagnostic::error(
-                    "clay.client.reload.unavailable",
-                    "Cannot reload because this editor is not connected to a Clay server.",
-                ),
-            ));
-        };
-        if !self.has_opened_document {
-            return Some(ClientConnectionEvent::RuntimeDiagnostic(
-                RuntimeDiagnostic::error(
-                    "clay.client.reload.no_document",
-                    "Cannot reload because no document is open.",
-                ),
-            ));
-        }
-        let document = self.editor.document_state();
-        queue
-            .enqueue_reload_document(document.document_id, document.document_version, force)
-            .err()
-            .map(|error| {
-                ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                    "clay.client.reload.queue_failed",
-                    format!("Failed to send reload request to the Clay server: {error}"),
-                ))
-            })
-    }
-
-    fn handle_save_conflict_menu_action(
-        &mut self,
-        action: &crate::shell::TransientMenuAction,
-    ) -> bool {
-        match action.command_id.as_str() {
-            "clay.documents.serverSaveDocument" => {
-                if let Some(diagnostic) = self.request_save_active_document() {
-                    let _ = self.apply_connection_event(diagnostic);
-                }
-                true
-            }
-            "clay.documents.serverReloadDocument" => {
-                let force = action
-                    .arguments
-                    .get("force")
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(false);
-                if let Some(diagnostic) = self.request_reload_active_document(force) {
-                    let _ = self.apply_connection_event(diagnostic);
-                }
-                true
-            }
-            "clay.editor.clientKeepUnsavedEdits" => true,
-            "clay.editor.clientDeferConflictCompare" => {
-                let mut next_status = self.status.clone();
-                next_status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
-                    "clay.file.conflict_deferred",
-                    "Save conflict deferred — unsaved edits kept; compare later.",
-                ));
-                let _ = self.set_status(next_status);
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn apply_edit_rejected(&mut self, document_id: DocumentId, reason: EditRejection) -> bool {
-        if document_id != self.editor.document_state().document_id {
-            return false;
-        }
-        let code = edit_rejection_diagnostic_code(&reason);
-        let auto_resync = edit_rejection_requests_resync(&reason);
-        let message = if auto_resync {
-            format!("{} — requesting resync", edit_rejection_summary(&reason))
-        } else {
-            format!(
-                "{} — choose Resync or Dismiss",
-                edit_rejection_summary(&reason)
-            )
-        };
-        let mut next_status = self.status.clone();
-        next_status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(code, message));
-        let status_changed = self.set_status(next_status);
-        let opened_menu = !auto_resync && self.show_edit_rejection_recovery_menu(&reason);
-        status_changed || opened_menu
-    }
-
-    fn apply_disconnect(&mut self, error_message: Option<&str>) -> bool {
-        // Omit raw transport strings from chrome — they may include host paths/endpoints.
-        let _ = error_message;
-        let mut next_status = EditorStatus {
-            connection: EditorConnectionStatus::Disconnected,
-            ..self.status.clone().with_document_values(
-                self.editor.document_state().document_id,
-                self.editor.document_state().document_version,
-                self.editor.document_state().access.clone(),
-            )
-        };
-        next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
-            "clay.client.disconnect",
-            "Disconnected (connection lost). Restart Clay to reconnect; local unsaved edits stay in this window until then.",
-        ));
-        let status_changed = self.set_status(next_status);
-        let opened_menu = self.show_disconnect_recovery_menu();
-        status_changed || opened_menu
-    }
-
-    fn apply_server_error(&mut self, code: ProtocolErrorCode, message: String) -> bool {
-        let sanitized = crate::editor::accessibility::sanitize_recovery_summary(&message)
-            .unwrap_or_else(|| "server error".to_string());
-        let mut next_status = self.status.clone();
-        next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
-            format!("clay.server.error.{code:?}"),
-            format!("{sanitized}. Use Resync or Dismiss."),
-        ));
-        let status_changed = self.set_status(next_status);
-        let opened_menu = self.show_sync_recovery_menu(
-            "Server error — recover sync",
-            "Server reported an error. Request a resync or dismiss this prompt.",
-        );
-        status_changed || opened_menu
-    }
-
-    fn show_edit_rejection_recovery_menu(&mut self, reason: &EditRejection) -> bool {
-        let prompt = format!(
-            "Edit rejected ({}) — recover sync",
-            edit_rejection_label(reason)
-        );
-        self.show_sync_recovery_menu(
-            &prompt,
-            "Request a canonical resync or dismiss this recovery prompt.",
-        )
-    }
-
-    fn show_disconnect_recovery_menu(&mut self) -> bool {
-        if !self.has_opened_document && self.sessions.is_empty() {
-            return false;
-        }
-        let session_id = self.next_document_menu_session_id;
-        self.next_document_menu_session_id = self.next_document_menu_session_id.saturating_add(1);
-        let items = vec![
-            crate::shell::TransientMenuItem::new(
-                "recovery.dismiss",
-                "Dismiss",
-                crate::shell::TransientMenuAction::new("clay.editor.clientDismissRecovery"),
-            )
-            .with_accessibility_label("Dismiss disconnect recovery guidance"),
-        ];
-        let menu = crate::shell::TransientMenuSession::new(
-            crate::shell::TransientMenuSessionId(session_id),
-            "Disconnected — reconnect guidance",
-        )
-        .with_items(items);
-        self.sdui.set_active_menu(menu);
-        true
-    }
-
-    fn show_sync_recovery_menu(&mut self, prompt: &str, accessibility_hint: &str) -> bool {
-        if !self.has_opened_document {
-            return false;
-        }
-        let session_id = self.next_document_menu_session_id;
-        self.next_document_menu_session_id = self.next_document_menu_session_id.saturating_add(1);
-        let items = vec![
-            crate::shell::TransientMenuItem::new(
-                "recovery.resync",
-                "Request resync",
-                crate::shell::TransientMenuAction::new("clay.editor.clientRequestResync"),
-            )
-            .with_accessibility_label(format!("{accessibility_hint} Request resync")),
-            crate::shell::TransientMenuItem::new(
-                "recovery.dismiss",
-                "Dismiss",
-                crate::shell::TransientMenuAction::new("clay.editor.clientDismissRecovery"),
-            )
-            .with_accessibility_label("Dismiss recovery prompt"),
-        ];
-        let menu = crate::shell::TransientMenuSession::new(
-            crate::shell::TransientMenuSessionId(session_id),
-            prompt,
-        )
-        .with_items(items);
-        self.sdui.set_active_menu(menu);
-        true
-    }
-
-    fn clear_sync_recovery_menu(&mut self) {
-        if let Some(menu) = self.sdui.active_menu()
-            && menu.is_active()
-        {
-            let prompt = menu.prompt().to_ascii_lowercase();
-            if prompt.contains("recover")
-                || prompt.contains("rejected")
-                || prompt.contains("disconnected")
-                || prompt.contains("server error")
-            {
-                self.sdui.clear_active_menu();
-            }
-        }
-    }
-
-    pub fn request_resync_active_document(&mut self) -> Option<ClientConnectionEvent> {
-        let Some(queue) = &self.edit_queue else {
-            return Some(ClientConnectionEvent::RuntimeDiagnostic(
-                RuntimeDiagnostic::error(
-                    "clay.editor.resync_unavailable",
-                    "Resync requires an active server connection.",
-                ),
-            ));
-        };
-        if matches!(
-            self.status.connection,
-            EditorConnectionStatus::Disconnected | EditorConnectionStatus::LocalFallback
-        ) {
-            return Some(ClientConnectionEvent::RuntimeDiagnostic(
-                RuntimeDiagnostic::error(
-                    "clay.editor.resync_unavailable",
-                    "Resync requires an active server connection. Restart Clay to reconnect.",
-                ),
-            ));
-        }
-        let document = self.editor.document_state();
-        if let Err(error) =
-            queue.enqueue_request_resync(document.document_id, document.document_version)
-        {
-            return Some(ClientConnectionEvent::RuntimeDiagnostic(
-                RuntimeDiagnostic::error(
-                    "clay.editor.resync_enqueue_failed",
-                    format!("Failed to request resync: {error}"),
-                ),
-            ));
-        }
-        let mut next_status = self.status.clone();
-        next_status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
-            "clay.editor.resync_requested",
-            "Resync requested — waiting for canonical snapshot.",
-        ));
-        let _ = self.set_status(next_status);
-        None
-    }
-
-    pub fn dismiss_recovery(&mut self) -> bool {
-        let cleared_menu = self.sdui.active_menu().is_some_and(|menu| menu.is_active());
-        self.sdui.clear_active_menu();
-        let mut next_status = self.status.clone();
-        let cleared_diagnostic = next_status.runtime_diagnostic.take().is_some();
-        let status_changed = self.set_status(next_status);
-        cleared_menu || status_changed || cleared_diagnostic
-    }
-
-    fn handle_sync_recovery_menu_action(
-        &mut self,
-        action: &crate::shell::TransientMenuAction,
-    ) -> bool {
-        match action.command_id.as_str() {
-            "clay.editor.clientRequestResync" => {
-                if let Some(diagnostic) = self.request_resync_active_document() {
-                    let _ = self.apply_connection_event(diagnostic);
-                }
-                true
-            }
-            "clay.editor.clientDismissRecovery" => self.dismiss_recovery(),
-            _ => false,
-        }
-    }
-
-    pub fn retained_session_count(&self) -> usize {
-        self.sessions.len()
-    }
-
     pub fn status_text(&self) -> String {
-        self.status_observation().status_text
+        self.view.status_text()
     }
 
     pub(crate) fn status_observation(&self) -> SduiStatusObservation {
-        let mut observation = self.status.observation();
-        observation.theme_label = self.editor.theme_label();
-        observation.composing = self.editor.is_composing();
-        observation.pending_edit_count = self
-            .edit_queue
-            .as_ref()
-            .map(|queue| queue.sync_snapshot().pending.len())
-            .unwrap_or(0);
-        observation.recovery_summary = self.recovery_summary();
-        let open_count = self
-            .sessions
-            .len()
-            .saturating_add(usize::from(self.has_opened_document));
-        if open_count > 1 && !observation.status_text.contains("Open docs:") {
-            observation
-                .status_text
-                .push_str(&format!(" — Open docs: {open_count}"));
-        }
-        if let Some(pending) =
-            crate::editor::accessibility::pending_edits_summary(observation.pending_edit_count)
-            && !observation.status_text.contains("Pending edits:")
-        {
-            observation.status_text.push_str(&format!(" — {pending}"));
-        }
-        if let Some(recovery) = observation.recovery_summary.as_deref()
-            && !observation.status_text.contains("Recovery:")
-        {
-            observation
-                .status_text
-                .push_str(&format!(" — Recovery: {recovery}"));
-        }
-        observation
-    }
-
-    fn recovery_summary(&self) -> Option<String> {
-        if let Some(menu) = self.sdui.active_menu()
-            && menu.is_active()
-            && let Some(summary) =
-                crate::editor::accessibility::sanitize_recovery_summary(menu.prompt())
-        {
-            return Some(summary);
-        }
-        if let Some(diagnostic) = self.status.runtime_diagnostic.as_ref() {
-            let code = diagnostic.code.as_str();
-            if code.contains("DirtyDocument")
-                || code.contains("StaleFileMetadata")
-                || code.contains("file.")
-                || code.contains("clipboard")
-                || code.contains("resync")
-                || code.contains("disconnect")
-                || code.contains("edit.rejected")
-                || code.contains("server.error")
-            {
-                return crate::editor::accessibility::sanitize_recovery_summary(
-                    &diagnostic.message,
-                );
-            }
-        }
-        None
+        self.view.status_observation()
     }
 
     pub fn sdui_visible_texts(&self) -> Vec<String> {
@@ -1670,15 +896,15 @@ impl EditorWidget {
 
     #[cfg(test)]
     pub(crate) fn visible_text_for_test(&self) -> String {
-        self.editor.visible_text()
+        self.view.visible_text_for_test()
     }
 
     pub fn decoration_span_count(&self) -> usize {
-        self.editor.decoration_span_count()
+        self.view.decoration_span_count()
     }
 
     pub fn diagnostic_span_count(&self) -> usize {
-        self.editor.diagnostic_span_count()
+        self.view.diagnostic_span_count()
     }
 
     pub fn request_selected_file_open(&self, path: PathBuf) -> Option<ClientConnectionEvent> {
@@ -1719,848 +945,82 @@ impl EditorWidget {
     }
 
     pub fn copy_selection_to_system_clipboard(&self) -> Option<ClientConnectionEvent> {
-        let mut clipboard = SystemClipboard;
-        self.copy_selection_to_clipboard_with(&mut clipboard)
-    }
-
-    fn copy_selection_to_clipboard_with(
-        &self,
-        clipboard: &mut impl ClipboardSink,
-    ) -> Option<ClientConnectionEvent> {
-        let text = self.editor.selected_text()?;
-        clipboard.set_text(text).err().map(|error| {
-            ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                "clay.client.clipboard.write_failed",
-                format!("Failed to copy selection to the system clipboard: {error}"),
-            ))
-        })
+        self.view.copy_selection_to_system_clipboard()
     }
 
     pub fn cut_selection_to_system_clipboard(&mut self) -> ClipboardCommandOutcome {
-        let _ = self.editor.cancel_composition();
-        let mut clipboard = SystemClipboard;
-        self.cut_selection_to_clipboard_with(&mut clipboard)
-    }
-
-    fn cut_selection_to_clipboard_with(
-        &mut self,
-        clipboard: &mut impl ClipboardSink,
-    ) -> ClipboardCommandOutcome {
-        let _ = self.editor.cancel_composition();
-        let Some(text) = self.editor.selected_text() else {
-            return ClipboardCommandOutcome::unchanged();
-        };
-        if let Err(error) = clipboard.set_text(text) {
-            return ClipboardCommandOutcome::diagnostic(ClientConnectionEvent::RuntimeDiagnostic(
-                RuntimeDiagnostic::error(
-                    "clay.client.clipboard.write_failed",
-                    format!("Failed to cut selection to the system clipboard: {error}"),
-                ),
-            ));
-        }
-        let outcome = self.editor.command_with_event(EditorCommand::DeleteForward);
-        ClipboardCommandOutcome {
-            changed: self.apply_local_edit_outcome(outcome),
-            diagnostic: None,
-        }
+        self.view.cut_selection_to_system_clipboard()
     }
 
     pub fn paste_from_system_clipboard(&mut self) -> ClipboardCommandOutcome {
-        let _ = self.editor.cancel_composition();
-        let mut clipboard = SystemClipboard;
-        self.paste_from_clipboard_with(&mut clipboard)
-    }
-
-    /// Paste already-fetched clipboard text (Masonry `TextEvent::ClipboardPaste`).
-    ///
-    /// `masonry_winit` intercepts Ctrl/Cmd+V and delivers `ClipboardPaste` instead of a
-    /// keyboard event, so this path is the production native-paste entry point.
-    fn paste_provided_clipboard_text(&mut self, text: &str) -> ClipboardCommandOutcome {
-        let _ = self.editor.cancel_composition();
-        let outcome = self.editor.paste_text_with_event(text);
-        ClipboardCommandOutcome {
-            changed: self.apply_local_edit_outcome(outcome),
-            diagnostic: None,
-        }
-    }
-
-    fn paste_from_clipboard_with(
-        &mut self,
-        clipboard: &mut impl ClipboardSink,
-    ) -> ClipboardCommandOutcome {
-        let _ = self.editor.cancel_composition();
-        let text = match clipboard.get_text() {
-            Ok(text) => text,
-            Err(error) => {
-                return ClipboardCommandOutcome::diagnostic(
-                    ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                        "clay.client.clipboard.read_failed",
-                        format!("Failed to read text from the system clipboard: {error}"),
-                    )),
-                );
-            }
-        };
-        self.paste_provided_clipboard_text(&text)
+        self.view.paste_from_system_clipboard()
     }
 
     pub fn undo(&mut self) -> bool {
-        // Surface undo/redo also clears composition; track it for render.
-        let cancelled = self.editor.is_composing();
-        let outcome = self.editor.undo_with_event();
-        self.apply_local_edit_outcome(outcome) || cancelled
+        self.view.undo()
     }
 
     pub fn redo(&mut self) -> bool {
-        let cancelled = self.editor.is_composing();
-        let outcome = self.editor.redo_with_event();
-        self.apply_local_edit_outcome(outcome) || cancelled
-    }
-
-    /// Dispatch a direction-specific editor client command (Plan 071 task 5)
-    /// from the `ClientUiCommand` route to the underlying `EditorSurface`.
-    /// Returns whether the caret/selection changed.
-    /// Plan 071 follow-up round (`editor-control`): dispatch a gated
-    /// programmatic editor command pushed by the server. Deny-by-default:
-    /// wire-invalid or unknown command IDs drop silently. Known IDs reuse the
-    /// exact dispatch paths of keybinding-routed commands (text-object/
-    /// smart-select queries via the advisory selection-query round trip,
-    /// everything else via [`Self::apply_editor_client_command`]).
-    fn apply_editor_command_request(&mut self, request: EditorCommandRequest) -> bool {
-        if !request.validate() {
-            return false;
-        }
-        if let Some(query) = crate::protocol::SelectionQuery::from_command_id(&request.command_id) {
-            if let Some(event) = self.editor.selection_query_request_for(query) {
-                self.enqueue_selection_query_request(event);
-                return true;
-            }
-            return false;
-        }
-        let Some(command) = EditorClientCommand::from_command_id(&request.command_id) else {
-            return false;
-        };
-        self.apply_editor_client_command(command)
+        self.view.redo()
     }
 
     pub fn apply_editor_client_command(&mut self, command: EditorClientCommand) -> bool {
-        let editor_command = match command {
-            EditorClientCommand::MoveWordStartForward => EditorCommand::MoveWordStart {
-                forward: true,
-                long: false,
-                extend: false,
-            },
-            EditorClientCommand::MoveWordStartBackward => EditorCommand::MoveWordStart {
-                forward: false,
-                long: false,
-                extend: false,
-            },
-            EditorClientCommand::MoveParagraphForward => EditorCommand::MoveParagraph {
-                forward: true,
-                to_end: false,
-                extend: false,
-            },
-            EditorClientCommand::MoveParagraphBackward => EditorCommand::MoveParagraph {
-                forward: false,
-                to_end: false,
-                extend: false,
-            },
-            EditorClientCommand::SelectWord => EditorCommand::SelectWord,
-            EditorClientCommand::SelectLine => EditorCommand::SelectLine,
-            EditorClientCommand::AddCursorBelow => EditorCommand::AddCursor {
-                direction: crate::editor::CursorSelectDirection::Down,
-            },
-            EditorClientCommand::AddCursorAbove => EditorCommand::AddCursor {
-                direction: crate::editor::CursorSelectDirection::Up,
-            },
-            EditorClientCommand::ColumnSelectDown => EditorCommand::ColumnSelect {
-                direction: crate::editor::CursorSelectDirection::Down,
-            },
-            EditorClientCommand::ColumnSelectUp => EditorCommand::ColumnSelect {
-                direction: crate::editor::CursorSelectDirection::Up,
-            },
-            EditorClientCommand::ColumnSelectLeft => EditorCommand::ColumnSelect {
-                direction: crate::editor::CursorSelectDirection::Left,
-            },
-            EditorClientCommand::ColumnSelectRight => EditorCommand::ColumnSelect {
-                direction: crate::editor::CursorSelectDirection::Right,
-            },
-            EditorClientCommand::SelectNextMatch => EditorCommand::SelectNextMatch,
-            EditorClientCommand::SelectPrevMatch => EditorCommand::SelectPrevMatch,
-            EditorClientCommand::SelectAllMatches => EditorCommand::SelectAllMatches,
-            EditorClientCommand::CancelMultipleSelections => {
-                EditorCommand::CancelMultipleSelections
-            }
-            EditorClientCommand::KeepSelection => EditorCommand::KeepSelection,
-            EditorClientCommand::RemoveSelection => EditorCommand::RemoveSelection,
-            EditorClientCommand::UndoCursorMove => EditorCommand::UndoCursorMove,
-        };
-        self.editor.command(editor_command)
+        self.view.apply_editor_client_command(command)
     }
 
-    /// Discard unfinished IME preedit without committing.
     pub fn cancel_composition(&mut self) -> bool {
-        self.editor.cancel_composition()
+        self.view.cancel_composition()
     }
 
-    fn sync_ime_area(&self, ctx: &mut EventCtx<'_>, size: Size) {
-        let editor_rect = self.editor_main_rect(size);
-        let local = self
-            .editor
-            .ime_cursor_area(editor_rect.width(), editor_rect.height());
-        let area = Rect::new(
-            editor_rect.x0 + local.x0,
-            editor_rect.y0 + local.y0,
-            editor_rect.x0 + local.x1,
-            editor_rect.y0 + local.y1,
-        );
-        ctx.set_ime_area(area);
-    }
-
-    fn apply_local_edit_outcome(&mut self, outcome: EditorCommandOutcome) -> bool {
-        if let Some(edit_queue) = &self.edit_queue {
-            for event in outcome.edit_events {
-                let transaction_id = self.next_transaction_id;
-                self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
-                let _ = edit_queue.enqueue_edit_event(event, transaction_id);
-            }
-        }
-        if outcome.changed {
-            if !self.status.dirty {
-                self.status.dirty = true;
-            }
-            self.active_completion_request_id = None;
-            self.active_language_intelligence_request_id = None;
-            self.sdui.clear_active_menu();
-            self.enqueue_decoration_viewport_request();
-        }
-        outcome.changed
-    }
-
-    fn set_status(&mut self, status: EditorStatus) -> bool {
-        if self.status == status {
-            return false;
-        }
-        self.status = status;
-        true
-    }
-
-    fn apply_completion_result(&mut self, result: CompletionResultSet) -> bool {
-        if self.active_completion_request_id != Some(result.request_id) {
-            return false;
-        }
-        let document = self.editor.document_state();
-        if result.document_id != document.document_id
-            || result.document_version != document.document_version
-            || result.behavior_version != document.behavior_version
-        {
-            return false;
-        }
-        self.sdui
-            .set_active_menu(crate::shell::completion_result_to_menu_session(&result));
-        true
-    }
-
-    fn apply_language_intelligence_result(&mut self, result: LanguageIntelligenceResult) -> bool {
-        if self.active_language_intelligence_request_id != Some(result.request_id) {
-            return false;
-        }
-        let document = self.editor.document_state();
-        if result.document_id != document.document_id
-            || result.document_version != document.document_version
-            || result.behavior_version != document.behavior_version
-        {
-            return false;
-        }
-        self.sdui
-            .set_active_menu(crate::shell::language_intelligence_result_to_menu_session(
-                &result,
-            ));
-        true
-    }
-
-    fn take_pending_definition_navigation_for_path(
+    pub fn show_open_documents_menu(
         &mut self,
-        path: &str,
-    ) -> Option<PendingDefinitionNavigation> {
-        let pending = self.pending_definition_navigation.as_ref()?;
-        let matches = path == pending.relative_path
-            || path.ends_with(&pending.relative_path)
-            || path
-                .replace('\\', "/")
-                .ends_with(&pending.relative_path.replace('\\', "/"));
-        if matches {
-            self.pending_definition_navigation.take()
-        } else {
-            None
-        }
-    }
-
-    fn local_command(&mut self, ctx: &mut EventCtx<'_>, command: EditorCommand<'_>) {
-        let _ = self.editor.cancel_composition();
-        let outcome = self.editor.command_with_event(command);
-        if let Some(edit_queue) = &self.edit_queue {
-            for event in outcome.edit_events {
-                let transaction_id = self.next_transaction_id;
-                self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
-                let _ = edit_queue.enqueue_edit_event(event, transaction_id);
-            }
-        }
-        if outcome.changed {
-            self.active_completion_request_id = None;
-            self.active_language_intelligence_request_id = None;
-            self.sdui.clear_active_menu();
-            self.enqueue_decoration_viewport_request();
-            ctx.request_render();
-            ctx.request_accessibility_update();
-        }
-        ctx.set_handled();
-    }
-
-    fn local_key(&mut self, ctx: &mut EventCtx<'_>, key: KeyStroke) {
-        if self.route_menu_key(ctx, &key) {
-            // The menu's local state (selection/query/cancel) may have changed
-            // via the keyboard; re-sync the hosted overlay through the action
-            // loop (the reconcile needs a `MutateCtx` `EventCtx` can't reach).
-            ctx.submit_action::<EditorAction>(EditorAction::MenuStateChanged);
-            return;
-        }
-        let outcome = self.editor.route_key_with_event(&key);
-        let changed = outcome.command_outcome.changed;
-        self.finish_local_outcome(ctx, outcome.command_outcome);
-        if let Some(completion) = outcome.completion_request {
-            self.enqueue_completion_request(completion);
-            ctx.set_handled();
-        } else if let Some(language_intelligence) = outcome.language_intelligence_request {
-            self.enqueue_language_intelligence_request(language_intelligence);
-            ctx.set_handled();
-        } else if changed {
-            self.active_completion_request_id = None;
-            self.active_language_intelligence_request_id = None;
-            self.sdui.clear_active_menu();
-        }
-        if let Some(command) = outcome.client_ui_command {
-            ctx.submit_action::<EditorAction>(EditorAction::ClientUiCommand(command));
-            ctx.set_handled();
-        } else if let Some(intent) = outcome.server_intent {
-            if let Some(feature) =
-                crate::client::behavior::language_intelligence_feature_for_command(
-                    &intent.command_id,
-                )
-            {
-                if let Some(event) = self
-                    .editor
-                    .language_intelligence_request_for_feature(feature)
-                {
-                    self.enqueue_language_intelligence_request(event);
-                }
-            } else if intent.command_id == "clay.documents.serverSaveDocument" {
-                if let Some(diagnostic) = self.request_save_active_document() {
-                    let _ = self.apply_connection_event(diagnostic);
-                    ctx.request_render();
-                }
-            } else if intent.command_id == "clay.documents.serverReloadDocument" {
-                if let Some(diagnostic) = self.request_reload_active_document(false) {
-                    let _ = self.apply_connection_event(diagnostic);
-                    ctx.request_render();
-                }
-            } else if let Some(query) =
-                crate::protocol::SelectionQuery::from_command_id(&intent.command_id)
-            {
-                // Plan 071 task 10: text-object/smart-select commands capture
-                // the selection set locally and query the server read-only.
-                if let Some(event) = self.editor.selection_query_request_for(query) {
-                    self.enqueue_selection_query_request(event);
-                }
-            } else if let Some(edit_queue) = &self.edit_queue {
-                let document = self.editor.document_state();
-                let _ = edit_queue.enqueue_command_intent(
-                    document.document_id,
-                    document.behavior_version,
-                    intent.command_id,
-                );
-            }
-            ctx.set_handled();
-        }
-    }
-
-    /// Routes keys to the active transient menu when one exists. Returns `true`
-    /// if the key was consumed by the menu, keeping editor hot paths free of
-    /// command execution or IPC work.
-    fn route_menu_key(&mut self, ctx: &mut EventCtx<'_>, key: &KeyStroke) -> bool {
-        if self.sdui.active_menu().is_none() {
-            return false;
-        }
-        match key.key {
-            KeyCode::ArrowUp => {
-                self.sdui.menu_select_previous();
-                ctx.request_render();
-                ctx.set_handled();
-                true
-            }
-            KeyCode::ArrowDown => {
-                self.sdui.menu_select_next();
-                ctx.request_render();
-                ctx.set_handled();
-                true
-            }
-            KeyCode::Enter | KeyCode::Tab => {
-                self.activate_menu_selection(ctx, None);
-                true
-            }
-            KeyCode::Escape => {
-                self.sdui.menu_cancel();
-                self.sdui.clear_active_menu();
-                self.active_completion_request_id = None;
-                self.active_language_intelligence_request_id = None;
-                ctx.request_render();
-                ctx.set_handled();
-                true
-            }
-            KeyCode::Character(ref text) => {
-                let Some(completion) = self.sdui.menu_activate_completion() else {
-                    return false;
-                };
-                if completion.commit_characters.contains(text) {
-                    self.activate_menu_selection(ctx, Some(text));
-                    true
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        }
-    }
-
-    fn activate_menu_selection(&mut self, ctx: &mut EventCtx<'_>, commit_character: Option<&str>) {
-        if let Some(completion) = self.sdui.menu_activate_completion() {
-            let outcome = self
-                .editor
-                .accept_completion_with_event(&completion, commit_character);
-            self.finish_local_outcome(ctx, outcome);
-            self.active_completion_request_id = None;
-        } else if let Some(local_action) = self.sdui.menu_selected_action() {
-            if local_action.command_id == "clay.editor.clientActivateDocument" {
-                let document_id = local_action
-                    .arguments
-                    .get("documentId")
-                    .and_then(|value| value.as_u64());
-                let _ = self.sdui.menu_activate_selected();
-                if let Some(document_id) = document_id {
-                    let _ = self.activate_document(document_id);
-                }
-            } else if self.handle_save_conflict_menu_action(&local_action)
-                || self.handle_sync_recovery_menu_action(&local_action)
-            {
-                let _ = self.sdui.menu_activate_selected();
-                ctx.request_render();
-            } else if self.handle_language_intelligence_menu_action(&local_action) {
-                let _ = self.sdui.menu_activate_selected();
-            } else if let Some(feature) =
-                crate::client::behavior::language_intelligence_feature_for_command(
-                    &local_action.command_id,
-                )
-            {
-                let _ = self.sdui.menu_activate_selected();
-                if let Some(event) = self
-                    .editor
-                    .language_intelligence_request_for_feature(feature)
-                {
-                    self.enqueue_language_intelligence_request(event);
-                }
-            } else if let Some(intent) = self.sdui.menu_activate_selected()
-                && let Some(edit_queue) = &self.edit_queue
-            {
-                if intent.command_id == "clay.workspace.openFile"
-                    && intent.arguments.iter().any(|arg| {
-                        arg.name == "languageIntelligenceNavigation"
-                            && matches!(arg.value, crate::protocol::SduiActionValue::Bool(true))
-                    })
-                {
-                    let relative_path =
-                        intent
-                            .arguments
-                            .iter()
-                            .find_map(|arg| match (&arg.name, &arg.value) {
-                                (name, crate::protocol::SduiActionValue::String(value))
-                                    if name == "relativePath" =>
-                                {
-                                    Some(value.clone())
-                                }
-                                _ => None,
-                            });
-                    let byte_start =
-                        intent
-                            .arguments
-                            .iter()
-                            .find_map(|arg| match (&arg.name, &arg.value) {
-                                (name, crate::protocol::SduiActionValue::U64(value))
-                                    if name == "byteStart" =>
-                                {
-                                    Some(*value)
-                                }
-                                _ => None,
-                            });
-                    if let (Some(relative_path), Some(byte_start)) = (relative_path, byte_start) {
-                        self.pending_definition_navigation = Some(PendingDefinitionNavigation {
-                            relative_path,
-                            byte_start,
-                        });
-                    }
-                }
-                let _ = edit_queue.enqueue_sdui_action(self.sdui.ui_version(), intent);
-            }
-        }
-        self.sdui.clear_active_menu();
-        self.active_language_intelligence_request_id = None;
-        ctx.request_render();
-        ctx.set_handled();
-    }
-
-    fn handle_language_intelligence_menu_action(
-        &mut self,
-        intent: &crate::shell::transient_menu::TransientMenuAction,
+        other_panes: &[crate::masonry_pane_document::CrossPaneDocumentEntry],
     ) -> bool {
-        match intent.command_id.as_str() {
-            "clay.language.dismissResult" => true,
-            "clay.language.previewEdit" => {
-                let title = intent
-                    .arguments
-                    .get("title")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("edit preview");
-                let mut next_status = self.status.clone();
-                next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
-                    "clay.language.preview_only",
-                    format!("Code action edit preview is display-only in Phase 18.20: {title}"),
-                ));
-                let _ = self.set_status(next_status);
-                true
-            }
-            "clay.language.navigateDefinition" => {
-                let kind = intent
-                    .arguments
-                    .get("kind")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or_default();
-                if kind != "openDocument" {
-                    return true;
-                }
-                let Some(document_id) = intent
-                    .arguments
-                    .get("documentId")
-                    .and_then(|value| value.as_u64())
-                else {
-                    return true;
-                };
-                let Some(byte_start) = intent
-                    .arguments
-                    .get("byteStart")
-                    .and_then(|value| value.as_u64())
-                else {
-                    return true;
-                };
-                if self.editor.document_state().document_id != document_id {
-                    // Other open documents are not focus-switched in Phase 18.20;
-                    // external/unknown targets stay non-navigable from this path.
-                    return true;
-                }
-                let _ = self.editor.navigate_to_byte_offset(byte_start);
-                true
-            }
-            _ => false,
-        }
+        self.view.show_open_documents_menu(other_panes)
     }
 
-    fn finish_local_outcome(&mut self, ctx: &mut EventCtx<'_>, outcome: EditorCommandOutcome) {
-        if let Some(edit_queue) = &self.edit_queue {
-            for event in outcome.edit_events {
-                let transaction_id = self.next_transaction_id;
-                self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
-                let _ = edit_queue.enqueue_edit_event(event, transaction_id);
-            }
-        }
-        if outcome.changed {
-            self.enqueue_decoration_viewport_request();
-            ctx.request_render();
-            ctx.request_accessibility_update();
-            ctx.set_handled();
-        }
+    /// Phase 22.2: active document summary for cross-pane menu aggregation.
+    pub fn active_document_info(&self) -> Option<(DocumentId, String, bool)> {
+        self.view.active_document_info()
     }
 
-    fn enqueue_completion_request(&mut self, event: crate::editor::EditorCompletionRequestEvent) {
-        let Some(edit_queue) = &self.edit_queue else {
-            return;
-        };
-        let request_id = self.next_completion_request_id;
-        self.next_completion_request_id = self.next_completion_request_id.saturating_add(1).max(1);
-        self.active_completion_request_id = Some(request_id);
-        let _ = edit_queue.enqueue_completion_request(event, request_id);
+    /// Phase 22.2: retained sessions for cross-pane menu aggregation.
+    pub fn retained_documents(&self) -> Vec<(DocumentId, String, bool)> {
+        self.view.retained_documents()
     }
 
-    fn enqueue_language_intelligence_request(
-        &mut self,
-        event: crate::editor::EditorLanguageIntelligenceRequestEvent,
-    ) {
-        let Some(edit_queue) = &self.edit_queue else {
-            return;
-        };
-        let request_id = self.next_language_intelligence_request_id;
-        self.next_language_intelligence_request_id = self
-            .next_language_intelligence_request_id
-            .saturating_add(1)
-            .max(1);
-        self.active_language_intelligence_request_id = Some(request_id);
-        let _ = edit_queue.enqueue_language_intelligence_request(event, request_id);
+    pub fn activate_document(&mut self, document_id: DocumentId) -> bool {
+        self.view.activate_document(document_id)
     }
 
-    fn enqueue_selection_query_request(
-        &mut self,
-        event: crate::editor::EditorSelectionQueryRequestEvent,
-    ) {
-        let Some(edit_queue) = &self.edit_queue else {
-            return;
-        };
-        let request_id = self.next_selection_query_request_id;
-        self.next_selection_query_request_id = self
-            .next_selection_query_request_id
-            .saturating_add(1)
-            .max(1);
-        self.pending_selection_query = Some((request_id, event.selections.clone()));
-        let _ = edit_queue.enqueue_selection_query_request(event, request_id);
+    pub fn request_resync_active_document(&mut self) -> Option<ClientConnectionEvent> {
+        self.view.request_resync_active_document()
     }
 
-    /// Plan 071 task 10: applies read-only text-object/smart-select ranges as
-    /// selections (multi-cursor aware). Stale results — a replaced request or
-    /// a document that moved on — drop without touching the selection set.
-    fn apply_selection_query_result(
-        &mut self,
-        result: crate::protocol::SelectionQueryResult,
-    ) -> bool {
-        let Some((request_id, requested_cursors)) = self.pending_selection_query.take() else {
-            return false;
-        };
-        if request_id != result.request_id {
-            return false;
-        }
-        let document = self.editor.document_state();
-        if document.document_id != result.document_id
-            || document.document_version != result.document_version
-        {
-            return true;
-        }
-        let mut selections: Vec<crate::editor::selection::Selection> = Vec::new();
-        for (index, cursor) in requested_cursors.iter().enumerate() {
-            match result.ranges.get(index) {
-                Some(Some(range)) => {
-                    let start = usize::try_from(range.start.min(range.end)).unwrap_or(0);
-                    let end = usize::try_from(range.end.max(range.start)).unwrap_or(0);
-                    selections.push(if cursor.anchor > cursor.focus {
-                        crate::editor::selection::Selection::new(end, start)
-                    } else {
-                        crate::editor::selection::Selection::new(start, end)
-                    });
-                }
-                // No object for this caret: keep the requested selection.
-                _ => selections.push(crate::editor::selection::Selection::new(
-                    usize::try_from(cursor.anchor).unwrap_or(0),
-                    usize::try_from(cursor.focus).unwrap_or(0),
-                )),
-            }
-        }
-        self.editor.apply_selection_query_result(selections);
-        true
+    pub fn dismiss_recovery(&mut self) -> bool {
+        self.view.dismiss_recovery()
     }
 
-    fn enqueue_decoration_viewport_request(&mut self) {
-        let Some(edit_queue) = &self.edit_queue else {
-            return;
-        };
-        let document = self.editor.document_state();
-        let range = self.editor.visible_byte_range();
-        let viewport = (
-            document.document_id,
-            document.document_version,
-            range.start,
-            range.end,
-        );
-        if self.last_decoration_viewport == Some(viewport) {
-            return;
-        }
-        if edit_queue
-            .enqueue_decoration_viewport_request(
-                document.document_id,
-                document.document_version,
-                range.start,
-                range.end,
-            )
-            .is_ok()
-        {
-            self.last_decoration_viewport = Some(viewport);
-        }
+    pub fn retained_session_count(&self) -> usize {
+        self.view.retained_session_count()
     }
 
-    fn accessibility_label(&self) -> String {
-        let observation = self.status_observation();
-        // Recovery/pending markers already live in status_text for chrome consistency.
-        crate::editor::accessibility::compose_editor_accessibility_label(
-            crate::editor::accessibility::EditorAccessibilityLabelParts {
-                status_text: &observation.status_text,
-                theme_label: &observation.theme_label,
-                composing: observation.composing,
-                recovery_summary: None,
-                visible_text: &self.editor.visible_text(),
-                empty_placeholder: "Clay native text canvas.",
-            },
-        )
-    }
+    // -- test-facing forwards (private; the test module drives the pane-1 view) --
 
     fn editor_main_rect(&self, size: Size) -> Rect {
-        let document_id = self.editor.document_state().document_id;
+        let document_id = self.view.document_id();
         editor_region_for_document(size, &self.sdui, document_id)
     }
 
+    #[cfg(test)]
     fn editor_local_point(&self, size: Size, point: Point) -> Option<Point> {
         let rect = self.editor_main_rect(size);
         rect.contains(point)
             .then(|| Point::new(point.x - rect.x0, point.y - rect.y0))
     }
 
-    fn paint_status_line(&self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
-        let size = ctx.size();
-        let metrics = self
-            .editor
-            .typography()
-            .ui_text_metrics(FontRole::Ui, UiTextVariant::Status);
-        let y0 = (size.height - metrics.status_height()).max(0.0);
-        let rect = masonry::kurbo::Rect::new(0.0, y0, size.width.max(0.0), size.height.max(y0));
-        scene.fill(
-            Fill::NonZero,
-            Affine::IDENTITY,
-            self.editor.theme().base.status_bg,
-            None,
-            &rect,
-        );
-
-        // Phase 20.4 task 6: token-driven status insets (spacing.sm scaled by
-        // the active density) replace the hardcoded 12.0/24.0. A top hairline
-        // divider separates the status bar from the editor above.
-        let ui_theme = self.editor.ui_theme();
-        let inset =
-            ui_theme.scalar_f64("spacing.sm").unwrap_or(12.0) * ui_theme.spacing_scale() as f64;
-        crate::shell::primitives::paint_divider(
-            scene,
-            rect,
-            crate::shell::primitives::Axis::Horizontal,
-            ui_theme,
-        );
-
-        let status = self.status_text();
-        let max_width = (size.width - inset * 2.0).max(1.0) as f32;
-        let (font_context, layout_context) = ctx.text_contexts();
-        let mut builder = layout_context.ranged_builder(font_context, &status, 1.0, true);
-        builder.push_default(StyleProperty::FontStack(
-            self.editor.typography().profile(FontRole::Ui).font_stack(),
-        ));
-        builder.push_default(StyleProperty::FontSize(metrics.font_size));
-        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
-            UiTextMetrics::LINE_HEIGHT_MULTIPLIER as f32,
-        )));
-        builder.push_default(StyleProperty::Brush(BrushIndex(0)));
-        let mut layout = builder.build(&status);
-        layout.break_all_lines(Some(max_width));
-        render_text(
-            scene,
-            Affine::translate((
-                inset,
-                y0 + (metrics.status_height() - metrics.line_height) / 2.0,
-            )),
-            &layout,
-            &[self.editor.theme().base.status_text.into()],
-            true,
-        );
-    }
-}
-
-fn is_copy_shortcut(key_event: &KeyboardEvent) -> bool {
-    is_primary_character_shortcut(key_event, "c")
-}
-
-fn is_cut_shortcut(key_event: &KeyboardEvent) -> bool {
-    is_primary_character_shortcut(key_event, "x")
-}
-
-fn is_paste_shortcut(key_event: &KeyboardEvent) -> bool {
-    is_primary_character_shortcut(key_event, "v")
-}
-
-fn is_undo_shortcut(key_event: &KeyboardEvent) -> bool {
-    is_primary_character_shortcut(key_event, "z") && !key_event.modifiers.shift()
-}
-
-fn is_redo_shortcut(key_event: &KeyboardEvent) -> bool {
-    if is_primary_character_shortcut(key_event, "z") && key_event.modifiers.shift() {
-        return true;
-    }
-    // Common Windows/Linux redo chord; macOS keeps Cmd+Shift+Z.
-    !cfg!(target_os = "macos")
-        && is_primary_character_shortcut(key_event, "y")
-        && !key_event.modifiers.shift()
-}
-
-/// Ctrl/Cmd+L selects the current line (VSCode `expandLineSelection`).
-fn is_select_line_shortcut(key_event: &KeyboardEvent) -> bool {
-    is_primary_character_shortcut(key_event, "l") && !key_event.modifiers.shift()
-}
-
-/// Ctrl/Cmd+Shift+L selects every occurrence of the current selection/word
-/// (VSCode `selectHighlights`).
-fn is_select_all_matches_shortcut(key_event: &KeyboardEvent) -> bool {
-    is_primary_character_shortcut(key_event, "l") && key_event.modifiers.shift()
-}
-
-/// Ctrl/Cmd+D selects the next occurrence of the current selection/word as a
-/// new caret (VSCode `addSelectionToNextFindMatch`). First press on a collapsed
-/// caret selects the word under it.
-fn is_select_next_match_shortcut(key_event: &KeyboardEvent) -> bool {
-    is_primary_character_shortcut(key_event, "d") && !key_event.modifiers.shift()
-}
-
-/// Ctrl/Cmd+U restores the previous selection set (VSCode `cursorUndo`).
-fn is_undo_cursor_move_shortcut(key_event: &KeyboardEvent) -> bool {
-    is_primary_character_shortcut(key_event, "u") && !key_event.modifiers.shift()
-}
-
-fn is_primary_character_shortcut(key_event: &KeyboardEvent, character: &str) -> bool {
-    let Key::Character(text) = &key_event.key else {
-        return false;
-    };
-    if !text.eq_ignore_ascii_case(character) {
-        return false;
-    }
-
-    if cfg!(target_os = "macos") {
-        key_event.modifiers.meta() && !key_event.modifiers.ctrl() && !key_event.modifiers.alt()
-    } else {
-        key_event.modifiers.ctrl() && !key_event.modifiers.meta() && !key_event.modifiers.alt()
-    }
-}
-
-fn key_stroke(key: KeyCode, key_event: &KeyboardEvent) -> KeyStroke {
-    KeyStroke {
-        key,
-        modifiers: KeyModifiers {
-            shift: key_event.modifiers.shift(),
-            control: key_event.modifiers.ctrl(),
-            alt: key_event.modifiers.alt(),
-            super_key: key_event.modifiers.meta(),
-        },
-    }
-}
-
-fn character_key_stroke(key_event: &KeyboardEvent) -> Option<KeyStroke> {
-    match &key_event.key {
-        Key::Character(text) => Some(key_stroke(KeyCode::Character(text.to_string()), key_event)),
-        _ => None,
+    fn accessibility_label(&self) -> String {
+        self.view.accessibility_label()
     }
 }
 
@@ -2570,413 +1030,28 @@ impl Widget for EditorWidget {
     fn on_pointer_event(
         &mut self,
         ctx: &mut EventCtx<'_>,
-        _props: &mut PropertiesMut<'_>,
+        props: &mut PropertiesMut<'_>,
         event: &PointerEvent,
     ) {
-        ctx.request_focus();
-
-        let (changed, handled) = match event {
-            PointerEvent::Down(button_event)
-                if button_event.button == Some(PointerButton::Primary) =>
-            {
-                let point = ctx.local_position(button_event.state.position);
-                // Phase 20.4 task 5: feed the editor chrome the pointer state so
-                // the scrollbar derives Active on thumb press. (Package/SDUI
-                // component pointer state is tracked by the retained host
-                // widgets themselves, plan 070 step 13e.)
-                self.editor.set_pointer_pos(Some(point));
-                self.editor.set_pointer_pressed(true);
-                // Package/overlay component clicks are handled by the retained
-                // host widgets (`PackageButton`/`PackageListRow`/...), not a
-                // legacy hit-test rect walk (plan 070 step 13e).
+        // Sidebar scroll is handled by the reconciled region's
+        // `SduiScrollViewport` as the event bubbles through it. Everything else
+        // (including main-rect pointer interaction) is the pane-1 view's.
+        match event {
+            PointerEvent::Scroll(scroll)
                 if self
-                    .editor
-                    .scrollbar_thumb_rect(self.editor_main_rect(ctx.size()))
-                    .is_some_and(|thumb| thumb.contains(point))
-                {
-                    // Phase 20.4 task 5: pressing the scrollbar thumb enters
-                    // the Active state; the editor does not place a caret or
-                    // capture the pointer for text selection.
-                    // ponytail: thumb-drag scrolling is deferred; the press
-                    // only sets the Active visual state for now.
-                    ctx.request_render();
-                    (false, true)
-                } else if let Some(local_point) = self.editor_local_point(ctx.size(), point) {
-                    ctx.capture_pointer();
-                    let composition_cancelled = self.editor.cancel_composition();
-                    (
-                        self.editor.place_caret_at_point(local_point) || composition_cancelled,
-                        true,
-                    )
-                } else {
-                    (false, true)
-                }
-            }
-            PointerEvent::Move(pointer_update) => {
-                let point = ctx.local_position(pointer_update.current.position);
-                // Phase 20.4 task 5: feed the editor chrome hover position so
-                // the scrollbar derives Hover over the track.
-                self.editor.set_pointer_pos(Some(point));
-                ctx.request_render();
-                if ctx.is_active() {
-                    if let Some(local_point) = self.editor_local_point(ctx.size(), point) {
-                        (self.editor.extend_selection_to_point(local_point), true)
-                    } else {
-                        (false, true)
-                    }
-                } else {
-                    (false, false)
-                }
-            }
-            PointerEvent::Up(_) => {
-                // Phase 20.4 task 5: release the editor chrome press state;
-                // keep the pointer position so hover persists after release.
-                self.editor.set_pointer_pressed(false);
-                ctx.request_render();
-                if ctx.is_active() {
-                    (false, true)
-                } else {
-                    (false, false)
-                }
-            }
-            PointerEvent::Cancel(_) => {
-                // Phase 20.4 task 5: clear editor chrome pointer state too.
-                self.editor.clear_pointer_chrome_state();
-                ctx.request_render();
-                if ctx.is_active() {
-                    (false, true)
-                } else {
-                    (false, false)
-                }
-            }
-            PointerEvent::Leave(_) => {
-                // Phase 20.4 task 5: clear editor chrome pointer state too.
-                self.editor.clear_pointer_chrome_state();
-                ctx.request_render();
-                (false, false)
-            }
-            PointerEvent::Scroll(PointerScrollEvent { delta, state, .. }) => {
-                let point = ctx.local_position(state.position);
-                if self.sdui.scrolls_point(ctx.size(), point) {
-                    // Sidebar scroll is handled by the reconciled region's
-                    // `SduiScrollViewport` as the event bubbles through it (it
-                    // updates its own scroll position and requests a compose
-                    // pass). Nothing for `EditorWidget` to do here — no state
-                    // changed, no repaint, and no editor scroll (plan 070 step 12).
-                    (false, false)
-                } else {
-                    let changed = match delta {
-                        ScrollDelta::LineDelta(_, y) => {
-                            self.editor.scroll_lines((-*y).round() as isize)
-                        }
-                        ScrollDelta::PixelDelta(position) => {
-                            let logical = position.to_logical::<f64>(ctx.get_scale_factor());
-                            self.editor.scroll_vertical_pixels(-logical.y)
-                        }
-                        ScrollDelta::PageDelta(_, y) => {
-                            self.editor.scroll_lines((-*y).round() as isize)
-                        }
-                    };
-                    if changed {
-                        self.enqueue_decoration_viewport_request();
-                    }
-                    (changed, changed)
-                }
-            }
-            _ => (false, false),
-        };
-
-        if changed {
-            ctx.request_render();
-            ctx.request_accessibility_update();
-        }
-        if handled {
-            ctx.set_handled();
+                    .sdui
+                    .scrolls_point(ctx.size(), ctx.local_position(scroll.state.position)) => {}
+            _ => self.view.handle_pointer_event(ctx, props, event),
         }
     }
 
     fn on_text_event(
         &mut self,
         ctx: &mut EventCtx<'_>,
-        _props: &mut PropertiesMut<'_>,
+        props: &mut PropertiesMut<'_>,
         event: &TextEvent,
     ) {
-        match event {
-            TextEvent::Keyboard(key_event)
-                if key_event.state == KeyState::Down && !key_event.is_composing =>
-            {
-                match &key_event.key {
-                    Key::Named(NamedKey::Escape) => {
-                        // Esc cancels the active package component / menu /
-                        // snippet via `local_key`; a bare Esc is a no-op. It must
-                        // never exit the app \u2014 submitting `ExitRequested` here
-                        // dropped the IPC connection on every Esc press.
-                        self.local_key(ctx, key_stroke(KeyCode::Escape, key_event));
-                    }
-                    Key::Named(NamedKey::Backspace) => {
-                        self.local_command(ctx, EditorCommand::Backspace);
-                    }
-                    Key::Named(NamedKey::Delete) => {
-                        self.local_command(ctx, EditorCommand::DeleteForward);
-                    }
-                    Key::Named(NamedKey::Enter) => {
-                        self.local_key(ctx, key_stroke(KeyCode::Enter, key_event));
-                    }
-                    Key::Named(NamedKey::Tab) => {
-                        self.local_key(ctx, key_stroke(KeyCode::Tab, key_event));
-                    }
-                    Key::Named(NamedKey::ArrowLeft) => {
-                        let command = if key_event.modifiers.alt() && key_event.modifiers.shift() {
-                            // Shift+Alt+Left = column-select left (move all carets).
-                            EditorCommand::ColumnSelect {
-                                direction: CursorSelectDirection::Left,
-                            }
-                        } else if key_event.modifiers.ctrl() {
-                            // Ctrl+Left = previous word start; Shift extends.
-                            EditorCommand::MoveWordStart {
-                                forward: false,
-                                long: false,
-                                extend: key_event.modifiers.shift(),
-                            }
-                        } else if key_event.modifiers.shift() {
-                            EditorCommand::SelectLeft
-                        } else {
-                            EditorCommand::MoveLeft
-                        };
-                        self.local_command(ctx, command);
-                    }
-                    Key::Named(NamedKey::ArrowRight) => {
-                        let command = if key_event.modifiers.alt() && key_event.modifiers.shift() {
-                            // Shift+Alt+Right = column-select right (move all carets).
-                            EditorCommand::ColumnSelect {
-                                direction: CursorSelectDirection::Right,
-                            }
-                        } else if key_event.modifiers.ctrl() {
-                            // Ctrl+Right = next word start; Shift extends.
-                            EditorCommand::MoveWordStart {
-                                forward: true,
-                                long: false,
-                                extend: key_event.modifiers.shift(),
-                            }
-                        } else if key_event.modifiers.shift() {
-                            EditorCommand::SelectRight
-                        } else {
-                            EditorCommand::MoveRight
-                        };
-                        self.local_command(ctx, command);
-                    }
-                    Key::Named(NamedKey::ArrowUp) => {
-                        let command = if key_event.modifiers.alt() && key_event.modifiers.shift() {
-                            // Shift+Alt+Up = column-select up (grow box upward).
-                            EditorCommand::ColumnSelect {
-                                direction: CursorSelectDirection::Up,
-                            }
-                        } else if key_event.modifiers.alt() {
-                            // Ctrl/Cmd+Alt+Up = add cursor above.
-                            EditorCommand::AddCursor {
-                                direction: CursorSelectDirection::Up,
-                            }
-                        } else if key_event.modifiers.ctrl() {
-                            // Ctrl+Up = previous paragraph; Shift extends.
-                            EditorCommand::MoveParagraph {
-                                forward: false,
-                                to_end: false,
-                                extend: key_event.modifiers.shift(),
-                            }
-                        } else {
-                            EditorCommand::MoveUp
-                        };
-                        self.local_command(ctx, command);
-                    }
-                    Key::Named(NamedKey::ArrowDown) => {
-                        let command = if key_event.modifiers.alt() && key_event.modifiers.shift() {
-                            // Shift+Alt+Down = column-select down (grow box downward).
-                            EditorCommand::ColumnSelect {
-                                direction: CursorSelectDirection::Down,
-                            }
-                        } else if key_event.modifiers.alt() {
-                            // Ctrl/Cmd+Alt+Down = add cursor below.
-                            EditorCommand::AddCursor {
-                                direction: CursorSelectDirection::Down,
-                            }
-                        } else if key_event.modifiers.ctrl() {
-                            // Ctrl+Down = next paragraph; Shift extends.
-                            EditorCommand::MoveParagraph {
-                                forward: true,
-                                to_end: false,
-                                extend: key_event.modifiers.shift(),
-                            }
-                        } else {
-                            EditorCommand::MoveDown
-                        };
-                        self.local_command(ctx, command);
-                    }
-                    Key::Named(NamedKey::Home) => {
-                        let command = if key_event.modifiers.ctrl() || key_event.modifiers.meta() {
-                            EditorCommand::DocumentStart
-                        } else {
-                            EditorCommand::LineStart
-                        };
-                        self.local_command(ctx, command);
-                    }
-                    Key::Named(NamedKey::End) => {
-                        let command = if key_event.modifiers.ctrl() || key_event.modifiers.meta() {
-                            EditorCommand::DocumentEnd
-                        } else {
-                            EditorCommand::LineEnd
-                        };
-                        self.local_command(ctx, command);
-                    }
-                    Key::Character(_) if is_select_all_matches_shortcut(key_event) => {
-                        if self.editor.command(EditorCommand::SelectAllMatches) {
-                            ctx.request_render();
-                            ctx.request_accessibility_update();
-                        }
-                        ctx.set_handled();
-                    }
-                    Key::Character(_) if is_select_line_shortcut(key_event) => {
-                        if self.editor.command(EditorCommand::SelectLine) {
-                            ctx.request_render();
-                            ctx.request_accessibility_update();
-                        }
-                        ctx.set_handled();
-                    }
-                    Key::Character(_) if is_select_next_match_shortcut(key_event) => {
-                        if self.editor.command(EditorCommand::SelectNextMatch) {
-                            ctx.request_render();
-                            ctx.request_accessibility_update();
-                        }
-                        ctx.set_handled();
-                    }
-                    Key::Character(_) if is_undo_cursor_move_shortcut(key_event) => {
-                        if self.editor.command(EditorCommand::UndoCursorMove) {
-                            ctx.request_render();
-                            ctx.request_accessibility_update();
-                        }
-                        ctx.set_handled();
-                    }
-                    Key::Character(_) if is_copy_shortcut(key_event) => {
-                        if let Some(event) = self.copy_selection_to_system_clipboard() {
-                            ctx.submit_action::<Self::Action>(EditorAction::ClientConnection(
-                                event,
-                            ));
-                        }
-                        ctx.set_handled();
-                    }
-                    Key::Character(_) if is_cut_shortcut(key_event) => {
-                        let outcome = self.cut_selection_to_system_clipboard();
-                        if let Some(event) = outcome.diagnostic {
-                            ctx.submit_action::<Self::Action>(EditorAction::ClientConnection(
-                                event,
-                            ));
-                        }
-                        if outcome.changed {
-                            ctx.request_render();
-                            ctx.request_accessibility_update();
-                        }
-                        ctx.set_handled();
-                    }
-                    Key::Character(_) if is_paste_shortcut(key_event) => {
-                        // Alternate path for tests / non-winit hosts. Production
-                        // masonry_winit converts Ctrl/Cmd+V into ClipboardPaste.
-                        let outcome = self.paste_from_system_clipboard();
-                        if let Some(event) = outcome.diagnostic {
-                            ctx.submit_action::<Self::Action>(EditorAction::ClientConnection(
-                                event,
-                            ));
-                        }
-                        if outcome.changed {
-                            ctx.request_render();
-                            ctx.request_accessibility_update();
-                        }
-                        ctx.set_handled();
-                    }
-                    Key::Character(_) if is_redo_shortcut(key_event) => {
-                        if self.redo() {
-                            ctx.request_render();
-                            ctx.request_accessibility_update();
-                        }
-                        ctx.set_handled();
-                    }
-                    Key::Character(_) if is_undo_shortcut(key_event) => {
-                        if self.undo() {
-                            ctx.request_render();
-                            ctx.request_accessibility_update();
-                        }
-                        ctx.set_handled();
-                    }
-                    Key::Character(_) => {
-                        if let Some(stroke) = character_key_stroke(key_event) {
-                            self.local_key(ctx, stroke);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            // masonry_winit intercepts Ctrl/Cmd+V and emits ClipboardPaste with the
-            // clipboard contents instead of forwarding a Keyboard event.
-            TextEvent::ClipboardPaste(text) => {
-                let outcome = self.paste_provided_clipboard_text(text);
-                if let Some(event) = outcome.diagnostic {
-                    ctx.submit_action::<Self::Action>(EditorAction::ClientConnection(event));
-                }
-                if outcome.changed {
-                    ctx.request_render();
-                    ctx.request_accessibility_update();
-                }
-                ctx.set_handled();
-            }
-            TextEvent::Ime(ime) => {
-                use masonry::core::Ime;
-                match ime {
-                    Ime::Enabled => {
-                        // Ready for composition; publish candidate-window geometry.
-                        self.sync_ime_area(ctx, ctx.size());
-                        ctx.set_handled();
-                    }
-                    Ime::Preedit(text, cursor) => {
-                        let changed = if text.is_empty() {
-                            self.editor.cancel_composition()
-                        } else {
-                            self.editor.set_preedit(text.clone(), *cursor)
-                        };
-                        if changed {
-                            ctx.request_render();
-                            ctx.request_accessibility_update();
-                        }
-                        self.sync_ime_area(ctx, ctx.size());
-                        ctx.set_handled();
-                    }
-                    Ime::Commit(text) => {
-                        let _ = self.editor.cancel_composition();
-                        if !text.is_empty() {
-                            self.local_command(ctx, EditorCommand::Insert(text));
-                        } else {
-                            ctx.request_render();
-                            ctx.request_accessibility_update();
-                        }
-                        self.sync_ime_area(ctx, ctx.size());
-                        ctx.set_handled();
-                    }
-                    Ime::Disabled => {
-                        if self.editor.cancel_composition() {
-                            ctx.request_render();
-                            ctx.request_accessibility_update();
-                        }
-                        ctx.clear_ime_area();
-                        ctx.set_handled();
-                    }
-                }
-            }
-            TextEvent::WindowFocusChange(false) => {
-                if self.editor.cancel_composition() {
-                    ctx.request_render();
-                    ctx.request_accessibility_update();
-                }
-                ctx.clear_ime_area();
-            }
-            _ => {}
-        }
+        self.view.handle_text_event(ctx, props, event);
     }
 
     fn on_access_event(
@@ -2987,33 +1062,24 @@ impl Widget for EditorWidget {
     ) {
     }
 
-    fn update(&mut self, ctx: &mut UpdateCtx<'_>, _props: &mut PropertiesMut<'_>, event: &Update) {
-        // Kick off the caret-blink animation loop when the editor gains focus
-        // and the effective caret style animates. The loop self-perpetuates in
-        // `on_anim_frame` and stops when focus is lost or the style is Solid.
-        if let Update::FocusChanged(true) = event
-            && self.editor.caret_animates()
-        {
-            ctx.request_anim_frame();
+    fn update(&mut self, ctx: &mut UpdateCtx<'_>, props: &mut PropertiesMut<'_>, event: &Update) {
+        // Phase 22.2: a sidebar/panel/overlay child inside this chrome gained
+        // focus → pane 1 is active. (The view submits `PaneFocused` for the
+        // chrome's own focus via `handle_update`.)
+        if let Update::ChildFocusChanged(true) = event {
+            ctx.submit_action::<EditorAction>(EditorAction::PaneFocused(self.pane_id));
+            return;
         }
+        self.view.handle_update(ctx, props, event);
     }
 
     fn on_anim_frame(
         &mut self,
         ctx: &mut UpdateCtx<'_>,
-        _props: &mut PropertiesMut<'_>,
+        props: &mut PropertiesMut<'_>,
         interval: u64,
     ) {
-        // `interval` is nanoseconds (0 on the first frame after idle).
-        let delta_ms = interval / 1_000_000;
-        if self.editor.advance_blink(delta_ms) {
-            ctx.request_paint_only();
-        }
-        // Keep blinking only while focused and animating; otherwise the loop
-        // ends by not re-requesting a frame.
-        if ctx.is_focus_target() && self.editor.caret_animates() {
-            ctx.request_anim_frame();
-        }
+        self.view.handle_anim_frame(ctx, props, interval);
     }
 
     fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
@@ -3037,31 +1103,18 @@ impl Widget for EditorWidget {
         // Share the main rect with the overlay host so main-pane-anchored
         // overlays resolve before its children are laid out below (step 13e).
         self.overlay_main_rect.set(editor_rect);
-        let local = self
-            .editor
-            .ime_cursor_area(editor_rect.width(), editor_rect.height());
-        ctx.set_ime_area(Rect::new(
-            editor_rect.x0 + local.x0,
-            editor_rect.y0 + local.y0,
-            editor_rect.x0 + local.x1,
-            editor_rect.y0 + local.y1,
-        ));
+        // The pane-1 view fills the main rect (its status line paints at the
+        // rect's bottom; its IME area is window-anchored by `layout_in`).
+        let view_constraints =
+            BoxConstraints::tight(Size::new(editor_rect.width(), editor_rect.height()));
+        self.view.layout_in(ctx, &view_constraints, editor_rect);
         // Place the reconciled SDUI region child (plan 070 step 8). The sidebar
-        // geometry (rect, content height, scroll) comes from the same legacy
-        // walk that produces the hit-test action rects, so the painted region
-        // and the click rects stay pixel-aligned. Scroll is baked into the
-        // placement origin (the compositor's translation).
-        //
-        // The reconciled region is placed as a fixed scroll viewport: sidebar
-        // width × (sidebar height below the top padding), at the sidebar origin
-        // below the padding. Its `SduiScrollViewport` child owns the scroll
-        // position and clips content to the viewport, so no clip path or
-        // scroll-offset placement math lives here (plan 070 step 12).
+        // geometry comes from the same legacy walk that produces the hit-test
+        // action rects, so the painted region and the click rects stay
+        // pixel-aligned. The region is placed as a fixed scroll viewport:
+        // sidebar width × (sidebar height below the top padding), at the
+        // sidebar origin below the padding.
         if let Some(geo) = self.sdui.sidebar_geometry(size) {
-            // The region is the fixed sidebar frame: it paints the panel chrome
-            // across the full sidebar rect and places its scroll viewport below
-            // the top `panel_padding` internally (plan 070 step 14 — chrome moved
-            // out of `EditorWidget`/`SduiNativeState::paint_chrome`).
             let region_size = Size::new(geo.rect.width(), geo.rect.height());
             let _ = ctx.run_layout(
                 &mut self.region,
@@ -3087,28 +1140,12 @@ impl Widget for EditorWidget {
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
-        // SDUI chrome (sidebar panel bg/border) paints BELOW the reconciled
-        // region child (which paints the sidebar tree). The editor canvas also
-        // paints here in `paint()` so it lands BELOW the `overlay_host` child
-        // (transient overlays/menus): Masonry order is parent.paint() ->
-        // children -> parent.post_paint(), and overlays are a child, so editor
-        // content must be in `paint()` to sit beneath them. The status line
-        // stays in `post_paint` so it remains above the overlays (plan 070 step
-        // 13e). The editor sits right of the sidebar so the region child and
-        // editor canvas never overlap; the sidebar clip that used to force
-        // editor content into `post_paint` was removed in step 8. The sidebar
-        // panel chrome is painted by the `region` child itself (plan 070 step
-        // 14 — moved out of `SduiNativeState::paint_chrome`), so `EditorWidget`
-        // no longer paints any SDUI chrome.
-        let editor_main_rect = self.editor_main_rect(ctx.size());
-        scene.fill(
-            Fill::NonZero,
-            masonry::kurbo::Affine::IDENTITY,
-            self.editor.theme().base.shell_bg,
-            None,
-            &editor_main_rect,
-        );
-        self.editor.paint_in_rect(ctx, scene, editor_main_rect);
+        // The editor canvas paints in `paint()` so it lands BELOW the
+        // `overlay_host` child (transient overlays/menus): Masonry order is
+        // parent.paint() -> children -> parent.post_paint(), and the status
+        // line stays in `post_paint` so it remains above the overlays (plan 070
+        // step 13e). The pane-1 view paints its background + surface + status.
+        self.view.paint_in(ctx, scene);
     }
 
     fn post_paint(
@@ -3118,13 +1155,8 @@ impl Widget for EditorWidget {
         scene: &mut Scene,
     ) {
         // Runs AFTER the children pass, so the status line paints above the
-        // `overlay_host` child (transient overlays/menus). The editor bg +
-        // canvas moved to `paint()` so overlays render above them (plan 070
-        // step 13e z-order fix). Do NOT fill the full window here — that would
-        // paint over the sidebar tree.
-        let recorder = global_recorder();
-        let _scope = recorder.scope("masonry.render_prepare.post_paint");
-        self.paint_status_line(ctx, scene);
+        // `overlay_host` child (transient overlays/menus).
+        self.view.post_paint_in(ctx, scene);
     }
 
     fn accessibility_role(&self) -> Role {
@@ -3139,12 +1171,11 @@ impl Widget for EditorWidget {
     ) {
         node.set_label(self.accessibility_label());
         // The reconciled SDUI tree's accessibility flows through the region
-        // child's scroll-viewport subtree (scroll-aware bounds, plan 070 step 12).
-        // Include it only when a sidebar tree is present so an empty region
-        // doesn't contribute an empty group; package fixed panels flow through
-        // the `panel_host` child (step 13b), and transient overlays/menus flow
-        // through the `overlay_host` child (step 13f — the hosted
-        // `PackageRegionWidget` reports `Menu`/`MenuItem`/`Status` for menus).
+        // child's scroll-viewport subtree. Include it only when a sidebar tree
+        // is present so an empty region doesn't contribute an empty group;
+        // package fixed panels flow through the `panel_host` child (step 13b),
+        // and transient overlays/menus flow through the `overlay_host` child
+        // (step 13f).
         let mut children = Vec::new();
         if self.sdui.sidebar_geometry(ctx.size()).is_some() {
             children.push(self.region.id().into());
@@ -3152,7 +1183,7 @@ impl Widget for EditorWidget {
         children.push(self.panel_host.id().into());
         children.push(self.overlay_host.id().into());
         let metrics = self
-            .editor
+            .view
             .typography()
             .ui_text_metrics(FontRole::Ui, UiTextVariant::Status);
         let size = ctx.size();
@@ -3197,107 +1228,20 @@ impl Widget for EditorWidget {
     }
 }
 
-fn edit_rejection_requests_resync(reason: &EditRejection) -> bool {
-    matches!(
-        reason,
-        EditRejection::StaleVersion { .. }
-            | EditRejection::FutureVersion { .. }
-            | EditRejection::LeaseRequired
-            | EditRejection::LeaseExpired { .. }
-            | EditRejection::ReadOnlyDocument
-            | EditRejection::RegionLocked { .. }
-            | EditRejection::InvalidBehaviorVersion { .. }
-    )
-}
-
-fn edit_rejection_label(reason: &EditRejection) -> &'static str {
-    match reason {
-        EditRejection::StaleVersion { .. } => "stale",
-        EditRejection::FutureVersion { .. } => "future version",
-        EditRejection::LeaseRequired => "lease required",
-        EditRejection::LeaseExpired { .. } => "lease expired",
-        EditRejection::ReadOnlyDocument => "read-only",
-        EditRejection::RegionLocked { .. } => "region locked",
-        EditRejection::InvalidDocument { .. } => "invalid document",
-        EditRejection::InvalidRange { .. } => "invalid range",
-        EditRejection::InvalidBehaviorVersion { .. } => "stale behavior",
-    }
-}
-
-fn edit_rejection_diagnostic_code(reason: &EditRejection) -> String {
-    let kind = match reason {
-        EditRejection::StaleVersion { .. } => "StaleVersion",
-        EditRejection::FutureVersion { .. } => "FutureVersion",
-        EditRejection::LeaseRequired => "LeaseRequired",
-        EditRejection::LeaseExpired { .. } => "LeaseExpired",
-        EditRejection::ReadOnlyDocument => "ReadOnlyDocument",
-        EditRejection::RegionLocked { .. } => "RegionLocked",
-        EditRejection::InvalidDocument { .. } => "InvalidDocument",
-        EditRejection::InvalidRange { .. } => "InvalidRange",
-        EditRejection::InvalidBehaviorVersion { .. } => "InvalidBehaviorVersion",
-    };
-    format!("clay.edit.rejected.{kind}")
-}
-
-fn edit_rejection_summary(reason: &EditRejection) -> String {
-    match reason {
-        EditRejection::StaleVersion {
-            client_base_version,
-            server_version,
-        } => format!(
-            "Edit rejected (stale): local base v{client_base_version}, server v{server_version}"
-        ),
-        EditRejection::FutureVersion {
-            client_base_version,
-            server_version,
-        } => format!(
-            "Edit rejected (future version): local base v{client_base_version}, server v{server_version}"
-        ),
-        EditRejection::LeaseRequired => "Edit rejected (lease required)".to_string(),
-        EditRejection::LeaseExpired { .. } => "Edit rejected (lease expired)".to_string(),
-        EditRejection::ReadOnlyDocument => "Edit rejected (read-only document)".to_string(),
-        EditRejection::RegionLocked { .. } => "Edit rejected (region locked)".to_string(),
-        EditRejection::InvalidDocument { document_id } => {
-            format!("Edit rejected (invalid document {document_id})")
-        }
-        EditRejection::InvalidRange { message } => {
-            let sanitized = crate::editor::accessibility::sanitize_recovery_summary(message)
-                .unwrap_or_else(|| "invalid range".to_string());
-            format!("Edit rejected (invalid range): {sanitized}")
-        }
-        EditRejection::InvalidBehaviorVersion {
-            behavior_version,
-            server_behavior_version,
-        } => format!(
-            "Edit rejected (stale behavior): local bv{behavior_version}, server bv{server_behavior_version}"
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        ClipboardCommandOutcome, EditorClientCommand, EditorStatus, EditorWidget,
-        SduiStatusObservation, character_key_stroke,
-    };
-    use crate::client::{
-        ClientConnectionEvent, ClientEditQueue, ClientInitialState, ClientResyncSnapshot,
-        ClipboardError, ClipboardSink,
-    };
+    use super::{EditorClientCommand, EditorWidget};
+    use crate::client::{ClientConnectionEvent, ClientEditQueue, ClientInitialState};
     use crate::editor::EditorCommand;
     use crate::protocol::{
-        BehaviorManifest, ClientMessage, CompletionItem, CompletionItemTextFormat,
-        CompletionProvenance, CompletionReplacementRange, CompletionResultSet, CompletionStatus,
-        DocumentAccess, DocumentMetadata, EditOperation, EditRejection, EditorCommandRequest,
-        FileErrorCode, FontRole, KeyCode, KeyModifiers, LanguageIntelligenceResult,
-        RuntimeDiagnostic, SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId,
-        SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
+        BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, FontRole,
+        SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
+        SduiTreeOperation, SduiTreeUpdate,
     };
     use crate::shell::{
         FixedPackagePanel, FixedSlotId, FixedSlotState, PackagePanelVisibility,
         PackageUiComponentTree, PackageUiRuntimeUpdate, PaneSlotLayout,
     };
-    use masonry::core::keyboard::{Code, Key, KeyState, KeyboardEvent, Modifiers};
 
     fn sdui_tree(label_text: &str) -> SduiTree {
         SduiTree {
@@ -3344,51 +1288,7 @@ mod tests {
                 design_tokens: Vec::new(),
             },
             active_typography: crate::protocol::ActiveTypography::default(),
-        }
-    }
-
-    #[derive(Default)]
-    struct FakeClipboard {
-        text: Option<String>,
-        fail: bool,
-    }
-
-    impl ClipboardSink for FakeClipboard {
-        fn set_text(&mut self, text: String) -> Result<(), ClipboardError> {
-            if self.fail {
-                return Err(ClipboardError::new("no display"));
-            }
-            self.text = Some(text);
-            Ok(())
-        }
-
-        fn get_text(&mut self) -> Result<String, ClipboardError> {
-            if self.fail {
-                return Err(ClipboardError::new("no display"));
-            }
-            Ok(self.text.clone().unwrap_or_default())
-        }
-    }
-
-    fn completion_result(request_id: u64) -> CompletionResultSet {
-        CompletionResultSet {
-            request_id,
-            client_id: 11,
-            document_id: 7,
-            document_version: 12,
-            behavior_version: 3,
-            provider_generation: 1,
-            replacement_range: CompletionReplacementRange::new(0, 3),
-            status: CompletionStatus::Ok,
-            items: vec![CompletionItem {
-                label: "println".to_string(),
-                insert_text: "println!".to_string(),
-                detail: "macro".to_string(),
-                commit_characters: ";".to_string(),
-                text_format: CompletionItemTextFormat::PlainText,
-                provenance: CompletionProvenance::builtin_core(),
-            }],
-            provenance: CompletionProvenance::builtin_core(),
+            workspace_root: "/tmp/root".to_string(),
         }
     }
 
@@ -3495,2034 +1395,26 @@ mod tests {
             Some(EditorClientCommand::UndoCursorMove)
         );
 
-        // Dispatch moves the caret/selection on the underlying EditorSurface.
+        // Dispatch moves the caret/selection on the underlying pane-1 view.
         // Text: "server text" ("server" 0..6, space 6, "text" 7..11).
         let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
+            DocumentAccess::Editable { lease_id: 1 },
+            3,
         ));
-        widget.editor.set_caret_for_test(0);
-        assert!(widget.apply_editor_client_command(EditorClientCommand::MoveWordStartForward));
-        assert_eq!(widget.editor.caret_for_test(), 7);
+        widget.view_mut().editor_mut().set_caret_for_test(0);
         assert!(widget.apply_editor_client_command(EditorClientCommand::SelectWord));
-        assert_eq!(widget.editor.selection_for_test(), Some((7, 11)));
-    }
-
-    #[test]
-    fn editor_client_command_dispatches_multi_cursor_commands() {
-        // Plan 071 task 9: the allowlisted multi-cursor command IDs dispatch
-        // through the same client-local path as the task-5 movement IDs.
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            12,
-            1,
-            "foo bar foo\nfoo".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        widget.editor.set_caret_for_test(1);
-
-        assert!(widget.apply_editor_client_command(EditorClientCommand::SelectNextMatch));
-        assert_eq!(widget.editor.selection_for_test(), Some((0, 3)));
-        assert!(widget.apply_editor_client_command(EditorClientCommand::SelectNextMatch));
-        assert_eq!(widget.editor.selection_count_for_test(), 2);
-
-        assert!(widget.apply_editor_client_command(EditorClientCommand::AddCursorBelow));
-        assert_eq!(widget.editor.selection_count_for_test(), 3);
-
-        assert!(widget.apply_editor_client_command(EditorClientCommand::KeepSelection));
-        assert_eq!(widget.editor.selection_count_for_test(), 1);
-
-        assert!(widget.apply_editor_client_command(EditorClientCommand::UndoCursorMove));
-        assert!(widget.apply_editor_client_command(EditorClientCommand::CancelMultipleSelections));
-        assert_eq!(widget.editor.selection_count_for_test(), 1);
-        assert_eq!(widget.editor.selection_for_test(), None);
-    }
-
-    #[test]
-    fn editor_command_request_applies_known_ids_and_drops_unknown() {
-        // Plan 071 follow-up round: server-pushed `EditorCommandRequest`s
-        // dispatch through the same client-local path as keybinding-routed
-        // command IDs; unknown or wire-invalid requests drop silently.
-        fn request(command_id: &str) -> EditorCommandRequest {
-            EditorCommandRequest {
-                command_id: command_id.to_string(),
-                package_prefix: "markdown".to_string(),
-                mode_id: "markdown".to_string(),
-            }
-        }
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            12,
-            1,
-            "foo bar foo\nfoo".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        widget.editor.set_caret_for_test(0);
-
-        assert!(
-            widget.apply_editor_command_request(request(
-                "clay.editor.clientMoveCursor.nextWordStart"
-            ))
-        );
-        assert_eq!(widget.editor.caret_for_test(), 4);
-
-        // Multi-cursor IDs dispatch too.
-        assert!(widget.apply_editor_command_request(request("clay.editor.clientSelectNextMatch")));
-        assert_eq!(widget.editor.selection_for_test(), Some((4, 7)));
-
-        // Unknown editor command IDs drop silently.
-        assert!(
-            !widget
-                .apply_editor_command_request(request("clay.editor.clientMoveCursor.intoTheVoid"))
-        );
-        assert!(!widget.apply_editor_command_request(request("clay.application.quit")));
-        // Wire-invalid requests (unbounded provenance) drop before parsing.
-        let mut invalid = request("clay.editor.clientMoveCursor.nextWordStart");
-        invalid.command_id = String::new();
-        assert!(!widget.apply_editor_command_request(invalid));
-    }
-
-    #[test]
-    fn selection_query_result_applies_ranges_keeps_unmatched_and_drops_stale() {
-        // Plan 071 task 10: read-only text-object/smart-select ranges arrive
-        // as selections — matched carets take their range (input direction
-        // preserved), unmatched carets stay put, stale results drop.
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            12,
-            3,
-            "fn main() { call(1); }".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        widget.editor.set_caret_for_test(4);
-
-        // Backward input selection keeps its direction when a range arrives.
-        widget.pending_selection_query = Some((
-            7,
-            vec![
-                crate::protocol::SelectionQueryCursor {
-                    anchor: 9,
-                    focus: 4,
-                },
-                crate::protocol::SelectionQueryCursor {
-                    anchor: 19,
-                    focus: 19,
-                },
-            ],
-        ));
-        let applied = widget.apply_connection_event(ClientConnectionEvent::SelectionQueryResult(
-            crate::protocol::SelectionQueryResult {
-                request_id: 7,
-                client_id: 0,
-                document_id: 12,
-                document_version: 3,
-                behavior_version: 1,
-                ranges: vec![
-                    Some(crate::protocol::SelectionQueryRange { start: 0, end: 12 }),
-                    None,
-                ],
-            },
-        ));
-        assert!(applied);
-        assert_eq!(widget.editor.selection_count_for_test(), 2);
-        // Primary (index 0) took the range with backward direction kept.
-        assert_eq!(widget.editor.selection_for_test(), Some((12, 0)));
-
-        // Stale document version: consumed but the selection set is untouched.
-        widget.pending_selection_query = Some((
-            8,
-            vec![crate::protocol::SelectionQueryCursor {
-                anchor: 4,
-                focus: 4,
-            }],
-        ));
-        let stale = widget.apply_connection_event(ClientConnectionEvent::SelectionQueryResult(
-            crate::protocol::SelectionQueryResult {
-                request_id: 8,
-                client_id: 0,
-                document_id: 12,
-                document_version: 2,
-                behavior_version: 1,
-                ranges: vec![Some(crate::protocol::SelectionQueryRange {
-                    start: 0,
-                    end: 5,
-                })],
-            },
-        ));
-        assert!(stale);
-        assert_eq!(widget.editor.selection_count_for_test(), 2);
-        assert_eq!(widget.editor.selection_for_test(), Some((12, 0)));
-
-        // Result without a pending request is ignored.
-        let orphan = widget.apply_connection_event(ClientConnectionEvent::SelectionQueryResult(
-            crate::protocol::SelectionQueryResult {
-                request_id: 9,
-                client_id: 0,
-                document_id: 12,
-                document_version: 3,
-                behavior_version: 1,
-                ranges: vec![],
-            },
-        ));
-        assert!(!orphan);
-    }
-
-    #[test]
-    fn decoration_batch_applies_chunks_atomically_and_rejects_stale_versions() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        let provenance = crate::protocol::DecorationProvenance {
-            package_name: "@clay/markdown".to_string(),
-            package_version: "builtin".to_string(),
-            package_prefix: "markdown".to_string(),
-        };
-        let chunk = |version: u64, start: u64| crate::protocol::DecorationSet {
-            document_id: 7,
-            document_version: version,
-            package_prefix: "markdown".to_string(),
-            kind: crate::protocol::DecorationKind::Syntax,
-            viewport_byte_start: start,
-            viewport_byte_end: start + 6,
-            spans: vec![crate::protocol::DecorationSpan::from_vocabulary(
-                start,
-                start + 4,
-                crate::protocol::DecorationKind::Syntax,
-                crate::protocol::TokenType::Paragraph,
-                crate::protocol::Modifiers::NONE,
-                70,
-                provenance.clone(),
-            )],
-        };
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DecorationBatch(vec![
-                chunk(12, 0),
-                chunk(12, 6)
-            ]))
-        );
-        // Stale-version batch is rejected chunk-by-chunk like single sets.
-        assert!(
-            !widget.apply_connection_event(ClientConnectionEvent::DecorationBatch(vec![
-                chunk(11, 0),
-                chunk(11, 6)
-            ]))
-        );
-    }
-
-    #[test]
-    fn completion_result_installs_bottom_transient_menu_for_active_request() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.active_completion_request_id = Some(4);
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::CompletionResult(
-                completion_result(4)
-            ))
-        );
-
-        let menu = widget
-            .sdui
-            .active_menu()
-            .expect("completion menu installed");
-        assert_eq!(menu.prompt(), "Completion");
-        assert_eq!(menu.items()[0].label, "println");
-        assert_eq!(menu.selected_index(), 0);
-    }
-
-    #[test]
-    fn stale_completion_result_is_ignored_after_newer_request() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.active_completion_request_id = Some(5);
-
-        assert!(
-            !widget.apply_connection_event(ClientConnectionEvent::CompletionResult(
-                completion_result(4)
-            ))
-        );
-        assert!(widget.sdui.active_menu().is_none());
-    }
-
-    fn language_intelligence_hover_result(request_id: u64) -> LanguageIntelligenceResult {
-        use crate::protocol::{
-            CompletionProvenance, HoverResult, LanguageIntelligenceFeature,
-            LanguageIntelligencePayload, LanguageIntelligenceStatus,
-        };
-        LanguageIntelligenceResult {
-            request_id,
-            client_id: 1,
-            document_id: 7,
-            document_version: 12,
-            behavior_version: 3,
-            provider_generation: 0,
-            feature: LanguageIntelligenceFeature::Hover,
-            status: LanguageIntelligenceStatus::Ok,
-            payload: LanguageIntelligencePayload::Hover(HoverResult {
-                range: None,
-                markdown: "**symbol** <em>docs</em>".to_string(),
-            }),
-            provenance: CompletionProvenance::builtin_core(),
-        }
-    }
-
-    #[test]
-    fn language_intelligence_result_installs_bottom_transient_menu_for_active_request() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.active_language_intelligence_request_id = Some(4);
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::LanguageIntelligenceResult(
-                language_intelligence_hover_result(4)
-            ))
-        );
-
-        let menu = widget
-            .sdui
-            .active_menu()
-            .expect("language intelligence menu installed");
-        assert_eq!(menu.prompt(), "Hover");
-        assert!(!menu.items()[0].label.contains("<"));
-    }
-
-    #[test]
-    fn stale_language_intelligence_result_is_ignored_after_newer_request() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.active_language_intelligence_request_id = Some(5);
-
-        assert!(
-            !widget.apply_connection_event(ClientConnectionEvent::LanguageIntelligenceResult(
-                language_intelligence_hover_result(4)
-            ))
-        );
-        assert!(widget.sdui.active_menu().is_none());
-    }
-
-    #[test]
-    fn definition_menu_navigation_jumps_current_document_and_rejects_foreign_document() {
-        use crate::protocol::{
-            CompletionProvenance, GoToDefinitionResult, LanguageIntelligenceFeature,
-            LanguageIntelligencePayload, LanguageIntelligenceStatus, TextByteRange, TextLocation,
-        };
-        use crate::shell::transient_menu::TransientMenuAction;
-
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "abcdefghij".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        widget.editor.set_caret_for_test(0);
-
-        let result = LanguageIntelligenceResult {
-            request_id: 8,
-            client_id: 1,
-            document_id: 7,
-            document_version: 12,
-            behavior_version: 3,
-            provider_generation: 0,
-            feature: LanguageIntelligenceFeature::GoToDefinition,
-            status: LanguageIntelligenceStatus::Ok,
-            payload: LanguageIntelligencePayload::GoToDefinition(GoToDefinitionResult {
-                locations: vec![TextLocation::OpenDocument {
-                    document_id: 7,
-                    range: TextByteRange {
-                        byte_start: 4,
-                        byte_end: 6,
-                    },
-                }],
-            }),
-            provenance: CompletionProvenance::builtin_core(),
-        };
-        widget.active_language_intelligence_request_id = Some(8);
-        assert!(
-            widget
-                .apply_connection_event(ClientConnectionEvent::LanguageIntelligenceResult(result))
-        );
-
-        let action = widget
-            .sdui
-            .menu_selected_action()
-            .expect("definition action");
-        assert!(widget.handle_language_intelligence_menu_action(&action));
-        assert_eq!(widget.editor.caret_for_test(), 4);
-
-        // Foreign document targets are accepted as handled but do not move the caret.
-        let foreign = TransientMenuAction::new("clay.language.navigateDefinition").with_arguments(
-            serde_json::json!({
-                "kind": "openDocument",
-                "documentId": 99,
-                "byteStart": 1,
-                "byteEnd": 2,
-            }),
-        );
-        assert!(widget.handle_language_intelligence_menu_action(&foreign));
-        assert_eq!(widget.editor.caret_for_test(), 4);
-    }
-
-    #[test]
-    fn code_action_edit_preview_does_not_mutate_document_text() {
-        use crate::shell::transient_menu::TransientMenuAction;
-
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "hello".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        let before = widget.editor.document_state().document_version;
-        let action = TransientMenuAction::new("clay.language.previewEdit").with_arguments(
-            serde_json::json!({
-                "title": "Inline preview",
-                "previewOnly": true,
-            }),
-        );
-        assert!(widget.handle_language_intelligence_menu_action(&action));
-        assert_eq!(widget.editor.document_state().document_version, before);
-        assert!(widget.status.runtime_diagnostic.is_some());
-    }
-
-    #[test]
-    fn copy_selection_writes_selected_text_without_edit_event() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "alpha 🦀 beta".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        widget.editor.command_with_event(EditorCommand::SelectRight);
-        widget.editor.command_with_event(EditorCommand::SelectRight);
-        let mut clipboard = FakeClipboard::default();
-
-        let event = widget.copy_selection_to_clipboard_with(&mut clipboard);
-
-        assert_eq!(event, None);
-        assert_eq!(clipboard.text.as_deref(), Some("al"));
-        assert_eq!(widget.editor.visible_text(), "alpha 🦀 beta");
-        assert_eq!(widget.next_transaction_id, 1);
-    }
-
-    #[test]
-    fn copy_selection_is_noop_when_selection_is_collapsed() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "alpha".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        let mut clipboard = FakeClipboard::default();
-
-        let event = widget.copy_selection_to_clipboard_with(&mut clipboard);
-
-        assert_eq!(event, None);
-        assert_eq!(clipboard.text, None);
-        assert_eq!(widget.editor.visible_text(), "alpha");
-    }
-
-    #[test]
-    fn copy_selection_failure_reports_runtime_diagnostic() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "alpha".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        widget.editor.command_with_event(EditorCommand::SelectRight);
-        let mut clipboard = FakeClipboard {
-            fail: true,
-            ..FakeClipboard::default()
-        };
-
-        let event = widget.copy_selection_to_clipboard_with(&mut clipboard);
-
-        match event {
-            Some(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)) => {
-                assert_eq!(diagnostic.code, "clay.client.clipboard.write_failed");
-                assert!(diagnostic.message.contains("Failed to copy selection"));
-            }
-            message => panic!("expected clipboard runtime diagnostic, got {message:?}"),
-        }
-        assert_eq!(widget.editor.visible_text(), "alpha");
-    }
-
-    #[test]
-    fn cut_selection_copies_and_deletes_selection() {
-        let (queue, mut receiver) = ClientEditQueue::bounded(4);
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ))
-        .with_edit_queue(
-            queue
-                .with_authority(11, &DocumentAccess::Editable { lease_id: 99 })
-                .with_confirmed_version(12),
-        );
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "alpha 🦀 beta".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        widget.editor.command_with_event(EditorCommand::SelectRight);
-        widget.editor.command_with_event(EditorCommand::SelectRight);
-        let mut clipboard = FakeClipboard::default();
-
-        let outcome = widget.cut_selection_to_clipboard_with(&mut clipboard);
-
-        assert_eq!(outcome.diagnostic, None);
-        assert!(outcome.changed);
-        assert_eq!(clipboard.text.as_deref(), Some("al"));
-        assert_eq!(widget.editor.visible_text(), "pha 🦀 beta");
-        assert_eq!(widget.next_transaction_id, 2);
-        let message = receiver.try_recv().expect("cut should enqueue delete edit");
-        match message {
-            crate::protocol::ClientMessage::Edit {
-                operation: crate::protocol::EditOperation::Delete { start, end },
-                ..
-            } => {
-                assert_eq!((start, end), (0, 2));
-            }
-            other => panic!("expected delete edit, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn cut_selection_is_noop_when_selection_is_collapsed() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "alpha".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        let mut clipboard = FakeClipboard::default();
-
-        let outcome = widget.cut_selection_to_clipboard_with(&mut clipboard);
-
-        assert_eq!(outcome, ClipboardCommandOutcome::unchanged());
-        assert_eq!(clipboard.text, None);
-        assert_eq!(widget.editor.visible_text(), "alpha");
-    }
-
-    #[test]
-    fn cut_selection_failure_reports_runtime_diagnostic_without_deleting() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "alpha".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        widget.editor.command_with_event(EditorCommand::SelectRight);
-        let mut clipboard = FakeClipboard {
-            fail: true,
-            ..FakeClipboard::default()
-        };
-
-        let outcome = widget.cut_selection_to_clipboard_with(&mut clipboard);
-
-        match outcome.diagnostic {
-            Some(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)) => {
-                assert_eq!(diagnostic.code, "clay.client.clipboard.write_failed");
-                assert!(diagnostic.message.contains("Failed to cut selection"));
-            }
-            message => panic!("expected clipboard runtime diagnostic, got {message:?}"),
-        }
-        assert!(!outcome.changed);
-        assert_eq!(widget.editor.visible_text(), "alpha");
-    }
-
-    #[test]
-    fn paste_clipboard_inserts_and_replaces_selection() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "alpha".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        let mut clipboard = FakeClipboard {
-            text: Some("XY".to_string()),
-            fail: false,
-        };
-
-        let inserted = widget.paste_from_clipboard_with(&mut clipboard);
-        assert!(inserted.changed);
-        assert_eq!(inserted.diagnostic, None);
-        assert_eq!(widget.editor.visible_text(), "XYalpha");
-
-        widget.editor.set_selection_for_test(0, 2);
-        clipboard.text = Some("Z".to_string());
-        let replaced = widget.paste_from_clipboard_with(&mut clipboard);
-        assert!(replaced.changed);
-        assert_eq!(widget.editor.visible_text(), "Zalpha");
-    }
-
-    #[test]
-    fn paste_clipboard_empty_text_is_noop() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "alpha".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        let mut clipboard = FakeClipboard::default();
-
-        let outcome = widget.paste_from_clipboard_with(&mut clipboard);
-
-        assert_eq!(outcome, ClipboardCommandOutcome::unchanged());
-        assert_eq!(widget.editor.visible_text(), "alpha");
-    }
-
-    #[test]
-    fn paste_provided_clipboard_text_inserts_without_rereading_system_clipboard() {
-        // masonry_winit delivers Ctrl/Cmd+V as TextEvent::ClipboardPaste(text).
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "alpha".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-
-        let inserted = widget.paste_provided_clipboard_text("XY\nZ");
-        assert!(inserted.changed);
-        assert_eq!(inserted.diagnostic, None);
-        assert_eq!(widget.editor.visible_text(), "XY\nZalpha");
-
-        widget.editor.set_selection_for_test(0, 2);
-        let replaced = widget.paste_provided_clipboard_text("Q");
-        assert!(replaced.changed);
-        assert_eq!(widget.editor.visible_text(), "Q\nZalpha");
-    }
-
-    #[test]
-    fn paste_clipboard_failure_reports_runtime_diagnostic() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "alpha".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        let mut clipboard = FakeClipboard {
-            fail: true,
-            ..FakeClipboard::default()
-        };
-
-        let outcome = widget.paste_from_clipboard_with(&mut clipboard);
-
-        match outcome.diagnostic {
-            Some(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)) => {
-                assert_eq!(diagnostic.code, "clay.client.clipboard.read_failed");
-                assert!(diagnostic.message.contains("Failed to read text"));
-            }
-            message => panic!("expected clipboard runtime diagnostic, got {message:?}"),
-        }
-        assert!(!outcome.changed);
-        assert_eq!(widget.editor.visible_text(), "alpha");
-    }
-
-    #[test]
-    fn undo_and_redo_enqueue_ordinary_inverse_edits() {
-        let (queue, mut receiver) = ClientEditQueue::bounded(8);
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ))
-        .with_edit_queue(
-            queue
-                .with_authority(11, &DocumentAccess::Editable { lease_id: 99 })
-                .with_confirmed_version(12),
-        );
-        widget.editor.load_snapshot(
-            7,
-            12,
-            "ab".to_string(),
-            DocumentAccess::Editable { lease_id: 99 },
-        );
-        widget
-            .editor
-            .install_behavior_manifest(BehaviorManifest::minimal_text_editing(3));
-        widget.editor.set_caret_for_test(2);
-        let insert_outcome = widget.editor.insert_text_with_event("x");
-        assert!(widget.apply_local_edit_outcome(insert_outcome));
-        loop {
-            match receiver.try_recv() {
-                Ok(crate::protocol::ClientMessage::Edit { .. }) => break,
-                Ok(_) => continue,
-                Err(_) => panic!("insert should enqueue edit"),
-            }
-        }
-
-        assert!(widget.undo());
-        assert_eq!(widget.editor.visible_text(), "ab");
-        let undo_message = loop {
-            match receiver.try_recv() {
-                Ok(message @ crate::protocol::ClientMessage::Edit { .. }) => break message,
-                Ok(_) => continue,
-                Err(_) => panic!("undo should enqueue delete edit"),
-            }
-        };
-        match undo_message {
-            crate::protocol::ClientMessage::Edit {
-                operation: EditOperation::Delete { start, end },
-                ..
-            } => assert_eq!((start, end), (2, 3)),
-            other => panic!("expected undo delete, got {other:?}"),
-        }
-
-        assert!(widget.redo());
-        assert_eq!(widget.editor.visible_text(), "abx");
-        let redo_message = loop {
-            match receiver.try_recv() {
-                Ok(message @ crate::protocol::ClientMessage::Edit { .. }) => break message,
-                Ok(_) => continue,
-                Err(_) => panic!("redo should enqueue insert edit"),
-            }
-        };
-        match redo_message {
-            crate::protocol::ClientMessage::Edit {
-                operation: EditOperation::Insert { byte_offset, text },
-                ..
-            } => {
-                assert_eq!(byte_offset, 2);
-                assert_eq!(text, "x");
-            }
-            other => panic!("expected redo insert, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn read_only_observer_undo_is_noop() {
-        let mut widget =
-            EditorWidget::with_initial_state(initial_state(DocumentAccess::ReadOnly, 12));
-        widget
-            .editor
-            .load_snapshot(7, 12, "ab".to_string(), DocumentAccess::ReadOnly);
-        assert!(!widget.undo());
-        assert!(!widget.redo());
-        assert_eq!(widget.editor.visible_text(), "ab");
-    }
-
-    #[test]
-    fn control_character_key_is_available_for_manifest_routing() {
-        let event = KeyboardEvent {
-            state: KeyState::Down,
-            key: Key::Character("o".into()),
-            code: Code::KeyO,
-            modifiers: Modifiers::CONTROL,
-            ..KeyboardEvent::default()
-        };
-
-        let stroke = character_key_stroke(&event)
-            .expect("control-modified character should produce a routeable stroke");
-
-        assert_eq!(stroke.key, KeyCode::Character("o".to_string()));
+        assert_eq!(widget.view_mut().editor_mut().caret_for_test(), 6);
         assert_eq!(
-            stroke.modifiers,
-            KeyModifiers {
-                control: true,
-                ..KeyModifiers::NONE
-            }
+            widget.view_mut().editor_mut().selection_for_test(),
+            Some((0, 6))
         );
-    }
 
-    #[test]
-    fn accessibility_label_uses_placeholder_for_empty_editor() {
-        let widget = EditorWidget::default();
-
-        let label = widget.accessibility_label();
-        assert!(label.starts_with("Clay native text canvas. Theme default. Clay — Local Fallback"));
-        assert!(label.contains("Theme default."));
-    }
-
-    #[test]
-    fn accessibility_label_updates_after_caret_edit() {
-        let mut widget = EditorWidget::default();
-        widget.editor.command(EditorCommand::Insert("abc"));
-        widget.editor.command(EditorCommand::MoveLeft);
-        widget.editor.command(EditorCommand::Insert("X"));
-
-        assert!(widget.accessibility_label().ends_with(". abXc"));
-    }
-
-    #[test]
-    fn accessibility_label_marks_composing_without_preedit_text() {
-        let mut widget = EditorWidget::default();
-        widget.editor.command(EditorCommand::Insert("hi"));
-        assert!(widget.editor.set_preedit("漢".into(), Some((0, 3))));
-        let label = widget.accessibility_label();
-        assert!(label.contains("Composing."));
-        assert!(!label.contains("漢"));
-        assert!(widget.editor.cancel_composition());
-        assert!(!widget.accessibility_label().contains("Composing."));
-    }
-
-    #[test]
-    fn accessibility_label_includes_dirty_and_sanitized_display_name() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 7,
-                    version: 12,
-                    access: DocumentAccess::Editable { lease_id: 99 },
-                    lease_id: Some(99),
-                    dirty: true,
-                    workspace_root_id: 77,
-                    path: "/home/alice/secret/note.md".to_string(),
-                },
-                text: "hello".to_string(),
-            })
-        );
-        let observation = widget.status_observation();
+        assert!(widget.apply_editor_client_command(EditorClientCommand::MoveWordStartForward));
+        assert_eq!(widget.view_mut().editor_mut().caret_for_test(), 7);
+        assert!(widget.apply_editor_client_command(EditorClientCommand::SelectLine));
         assert_eq!(
-            observation.document_display_name.as_deref(),
-            Some("note.md")
-        );
-        assert!(observation.dirty);
-        assert!(observation.status_text.contains("note.md"));
-        assert!(observation.status_text.contains("Dirty"));
-        let label = widget.accessibility_label();
-        assert!(label.contains("note.md"));
-        assert!(label.contains("Dirty"));
-        assert!(!label.contains("/home/alice"));
-        assert!(label.contains(&observation.status_text));
-    }
-
-    #[test]
-    fn accessibility_recovery_summary_uses_active_menu_prompt() {
-        use crate::shell::transient_menu::{
-            TransientMenuAction, TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
-        };
-
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        let menu = TransientMenuSession::new(TransientMenuSessionId(42), "Reload dirty document?")
-            .with_items(vec![
-                TransientMenuItem::new(
-                    "reload",
-                    "Reload",
-                    TransientMenuAction::new("clay.documents.serverReloadDocument"),
-                )
-                .with_accessibility_label("Reload from disk"),
-            ]);
-        widget.sdui.set_active_menu(menu);
-        let observation = widget.status_observation();
-        assert_eq!(
-            observation.recovery_summary.as_deref(),
-            Some("Reload dirty document?")
-        );
-        assert!(
-            observation
-                .status_text
-                .contains("Recovery: Reload dirty document?")
-        );
-        assert!(
-            widget
-                .accessibility_label()
-                .contains("Recovery: Reload dirty document?")
-        );
-    }
-
-    #[test]
-    fn local_edit_marks_status_dirty_for_accessibility() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 7,
-                    version: 12,
-                    access: DocumentAccess::Editable { lease_id: 99 },
-                    lease_id: Some(99),
-                    dirty: false,
-                    workspace_root_id: 77,
-                    path: "note.md".to_string(),
-                },
-                text: String::new(),
-            })
-        );
-        assert!(!widget.status_observation().dirty);
-        let outcome = widget.editor.insert_text_with_event("y");
-        assert!(widget.apply_local_edit_outcome(outcome));
-        assert!(widget.status_observation().dirty);
-        assert!(widget.accessibility_label().contains("Dirty"));
-    }
-
-    #[test]
-    fn commit_after_preedit_inserts_once_and_clears_overlay() {
-        let mut widget = EditorWidget::default();
-        assert!(widget.editor.set_preedit("ni".into(), Some((0, 2))));
-        assert!(widget.editor.is_composing());
-        // Simulate Ime::Commit semantics used by on_text_event.
-        assert!(widget.editor.cancel_composition());
-        assert!(widget.editor.command(EditorCommand::Insert("你")));
-        assert!(!widget.editor.is_composing());
-        assert_eq!(widget.editor.visible_text(), "你");
-    }
-
-    #[test]
-    fn undo_cancels_unfinished_composition() {
-        let mut widget = EditorWidget::default();
-        assert!(widget.editor.command(EditorCommand::Insert("ab")));
-        assert!(widget.editor.set_preedit("x".into(), None));
-        assert!(widget.undo());
-        assert!(!widget.editor.is_composing());
-        assert_eq!(widget.editor.visible_text(), "");
-    }
-
-    #[test]
-    fn status_reflects_connecting_state() {
-        let widget = EditorWidget::default().with_status(EditorStatus::connecting());
-
-        assert_eq!(
-            widget.status_text(),
-            "Clay — Connecting — No Server — local document — version unknown"
-        );
-    }
-
-    #[test]
-    fn status_reflects_connected_editable_initial_state() {
-        let widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-
-        assert_eq!(
-            widget.status_text(),
-            "Clay — Connected — Editable — doc 7 — v12"
-        );
-    }
-
-    #[test]
-    fn status_reflects_read_only_observer() {
-        let widget = EditorWidget::with_initial_state(initial_state(DocumentAccess::ReadOnly, 12));
-
-        assert_eq!(
-            widget.status_text(),
-            "Clay — Connected — Read-only Observer — doc 7 — v12"
-        );
-    }
-
-    #[test]
-    fn status_reflects_local_fallback_when_no_server() {
-        let widget = EditorWidget::default().with_status(EditorStatus::local_fallback());
-
-        assert_eq!(
-            widget.status_text(),
-            "Clay — Local Fallback — No Server — local document — version unknown"
-        );
-    }
-
-    #[test]
-    fn status_updates_after_edit_ack_or_resync() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::EditAck {
-                document_id: 7,
-                version: 13,
-                transaction_id: 1,
-            })
-        );
-
-        assert_eq!(
-            widget.status_text(),
-            "Clay — Connected — Editable — doc 7 — v13"
-        );
-        assert_eq!(widget.editor.document_state().document_version, 13);
-    }
-
-    #[test]
-    fn runtime_diagnostic_updates_status_text() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        let diagnostic = RuntimeDiagnostic::error(
-            "clay.runtime.syntax_error",
-            "JavaScript syntax error while evaluating server-side configuration.",
-        );
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
-        );
-
-        assert_eq!(
-            widget.status_text(),
-            "Clay — Connected — Editable — doc 7 — v12 — Runtime clay.runtime.syntax_error: JavaScript syntax error while evaluating server-side configuration."
-        );
-    }
-
-    #[test]
-    fn status_observation_local_fallback_state() {
-        let widget = EditorWidget::default().with_status(EditorStatus::local_fallback());
-
-        assert_eq!(
-            widget.status_observation(),
-            SduiStatusObservation {
-                status_text: "Clay — Local Fallback — No Server — local document — version unknown"
-                    .to_string(),
-                connection_label: "Local Fallback".to_string(),
-                access_label: "No Server".to_string(),
-                sync_version: None,
-                diagnostic_text: None,
-                theme_label: "default".to_string(),
-                dirty: false,
-                document_display_name: None,
-                composing: false,
-                pending_edit_count: 0,
-                recovery_summary: None,
-            }
-        );
-    }
-
-    #[test]
-    fn status_observation_connected_editable_with_version() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            4,
-        ));
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::EditAck {
-                document_id: 7,
-                version: 5,
-                transaction_id: 1,
-            })
-        );
-
-        assert_eq!(widget.status_observation().connection_label, "Connected");
-        assert_eq!(widget.status_observation().access_label, "Editable");
-        assert_eq!(widget.status_observation().sync_version, Some(5));
-    }
-
-    #[test]
-    fn status_observation_diagnostic_present_after_runtime_diagnostic_event() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        let diagnostic = RuntimeDiagnostic::error(
-            "clay.runtime.syntax_error",
-            "JavaScript syntax error while evaluating server-side configuration.",
-        );
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
-        );
-
-        assert_eq!(
-            widget.status_observation().diagnostic_text,
-            Some(
-                "Runtime clay.runtime.syntax_error: JavaScript syntax error while evaluating server-side configuration."
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn status_observation_does_not_regress_accessibility_label() {
-        let widget = EditorWidget::with_initial_state(initial_state(DocumentAccess::ReadOnly, 12));
-        let observation = widget.status_observation();
-
-        assert!(
-            widget
-                .accessibility_label()
-                .contains(&observation.status_text)
-        );
-        assert!(
-            observation
-                .status_text
-                .contains(&observation.connection_label)
-        );
-        assert!(observation.status_text.contains(&observation.access_label));
-    }
-
-    #[test]
-    fn status_observation_exposes_active_theme_label() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 99 },
-            12,
-        ));
-        assert_eq!(widget.status_observation().theme_label, "default");
-        assert!(widget.accessibility_label().contains("Theme default."));
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::ActiveTheme(
-                crate::protocol::ActiveTheme {
-                    specifier: "@clay/theme-gruvbox-material-dark".to_string(),
-                    overrides: Vec::new(),
-                    design_tokens: Vec::new(),
-                },
-            ))
-        );
-        assert_eq!(
-            widget.status_observation().theme_label,
-            "theme-gruvbox-material-dark"
-        );
-        assert!(
-            widget
-                .accessibility_label()
-                .contains("Theme theme-gruvbox-material-dark.")
-        );
-        assert!(crate::editor::theme::status_chrome_meets_contrast(
-            &widget.editor.theme()
-        ));
-    }
-
-    #[test]
-    fn resync_event_replaces_editor_snapshot() {
-        let mut widget = EditorWidget::default();
-        widget.editor.command(EditorCommand::Insert("local"));
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::ResyncSnapshot(
-                ClientResyncSnapshot {
-                    document_id: 7,
-                    version: 12,
-                    text: "server 🦀".to_string(),
-                    access: DocumentAccess::ReadOnly,
-                    lease_id: None,
-                },
-            ))
-        );
-
-        assert_eq!(widget.editor.visible_text(), "server 🦀");
-        assert_eq!(widget.editor.document_state().document_id, 7);
-        assert_eq!(widget.editor.document_state().document_version, 12);
-        assert_eq!(
-            widget.editor.document_state().access,
-            DocumentAccess::ReadOnly
-        );
-    }
-
-    #[test]
-    fn same_document_resync_preserves_caret_and_updates_edit_authority() {
-        let (queue, _receiver) = ClientEditQueue::bounded(2);
-        let queue = queue
-            .with_authority(11, &DocumentAccess::Editable { lease_id: 1 })
-            .with_confirmed_version(3);
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 1 },
-            3,
-        ))
-        .with_edit_queue(queue);
-        widget.editor.set_caret_for_test(7);
-
-        widget.apply_connection_event(ClientConnectionEvent::ResyncSnapshot(
-            ClientResyncSnapshot {
-                document_id: 7,
-                version: 9,
-                text: "server text updated".to_string(),
-                access: DocumentAccess::Editable { lease_id: 4 },
-                lease_id: Some(4),
-            },
-        ));
-
-        assert_eq!(widget.editor.caret_for_test(), 7);
-        assert_eq!(
-            widget
-                .edit_queue
-                .as_ref()
-                .expect("edit queue")
-                .sync_snapshot()
-                .confirmed_version,
-            9
-        );
-    }
-
-    #[test]
-    fn document_opened_event_replaces_editor_snapshot() {
-        let mut widget = EditorWidget::default();
-        widget.editor.command(EditorCommand::Insert("local"));
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 42,
-                    version: 5,
-                    access: DocumentAccess::Editable { lease_id: 8 },
-                    lease_id: Some(8),
-                    dirty: false,
-                    workspace_root_id: 77,
-                    path: "note.md".to_string(),
-                },
-                text: "# opened\n".to_string(),
-            })
-        );
-
-        assert_eq!(widget.editor.visible_text(), "# opened\n");
-        assert_eq!(widget.editor.document_state().document_id, 42);
-        assert_eq!(widget.editor.document_state().document_version, 5);
-        assert_eq!(
-            widget.editor.document_state().access,
-            DocumentAccess::Editable { lease_id: 8 }
-        );
-        assert_eq!(
-            widget.status_text(),
-            "Clay — Connected — Editable — note.md — doc 42 — v5"
-        );
-    }
-
-    #[test]
-    fn opening_second_file_retains_prior_session_and_switches_active_document() {
-        let mut widget = EditorWidget::default();
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 42,
-                    version: 5,
-                    access: DocumentAccess::Editable { lease_id: 8 },
-                    lease_id: Some(8),
-                    dirty: false,
-                    workspace_root_id: 77,
-                    path: "first.md".to_string(),
-                },
-                text: "# first\n".to_string(),
-            })
-        );
-        widget.status.dirty = true;
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 43,
-                    version: 1,
-                    access: DocumentAccess::Editable { lease_id: 9 },
-                    lease_id: Some(9),
-                    dirty: false,
-                    workspace_root_id: 77,
-                    path: "src/main.rs".to_string(),
-                },
-                text: "fn main() {}\n".to_string(),
-            })
-        );
-
-        assert_eq!(widget.editor.visible_text(), "fn main() {}\n");
-        assert_eq!(widget.editor.document_state().document_id, 43);
-        assert_eq!(widget.retained_session_count(), 1);
-        assert!(
-            widget.status_text().contains("main.rs — doc 43 — v1"),
-            "{}",
-            widget.status_text()
-        );
-        assert!(
-            widget.status_text().contains("Open docs: 2"),
-            "{}",
-            widget.status_text()
-        );
-
-        assert!(widget.activate_document(42));
-        assert_eq!(widget.editor.document_state().document_id, 42);
-        assert!(
-            widget.editor.visible_text().contains("# first"),
-            "{}",
-            widget.editor.visible_text()
-        );
-        assert_eq!(widget.retained_session_count(), 1);
-        assert_eq!(
-            widget.status.document_display_name.as_deref(),
-            Some("first.md")
-        );
-    }
-
-    #[test]
-    fn activate_document_restores_caret_and_history() {
-        let mut widget = EditorWidget::default();
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 1,
-                    version: 1,
-                    access: DocumentAccess::Editable { lease_id: 1 },
-                    lease_id: Some(1),
-                    dirty: false,
-                    workspace_root_id: 1,
-                    path: "a.txt".to_string(),
-                },
-                text: "abc".to_string(),
-            })
-        );
-        assert!(widget.editor.insert_text_with_event("X").changed);
-        let edited = widget.editor.visible_text();
-        assert!(edited.contains('X') && edited.contains("abc"), "{edited}");
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 2,
-                    version: 1,
-                    access: DocumentAccess::Editable { lease_id: 2 },
-                    lease_id: Some(2),
-                    dirty: false,
-                    workspace_root_id: 1,
-                    path: "b.txt".to_string(),
-                },
-                text: "zzz".to_string(),
-            })
-        );
-        assert_eq!(widget.editor.visible_text(), "zzz");
-
-        assert!(widget.activate_document(1));
-        assert_eq!(widget.editor.visible_text(), edited);
-        assert!(widget.editor.undo_with_event().changed);
-        assert_eq!(widget.editor.visible_text(), "abc");
-    }
-
-    /// Plan 071 caret-transport fix: the server-pushed caret override event
-    /// must land in the editor surface (before the fix no such transport
-    /// existed, so blink/phase configuration never changed the caret).
-    #[test]
-    fn caret_style_override_event_applies_and_reports_change() {
-        let mut widget = EditorWidget::default();
-        let style = crate::protocol::CaretStyle {
-            shape: crate::protocol::CaretShape::Underline,
-            blink: crate::protocol::BlinkStyle::Phase { period_ms: 1000 },
-            ..crate::protocol::CaretStyle::default_bar()
-        };
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::CaretStyleOverride(Some(style)))
-        );
-        assert_eq!(widget.editor.caret_style_override(), Some(style));
-        assert!(widget.caret_animates(), "phase blink must animate");
-        // Same value again: no change, no repaint churn.
-        assert!(
-            !widget.apply_connection_event(ClientConnectionEvent::CaretStyleOverride(Some(style)))
-        );
-        // Clearing falls back to the manifest/theme layers (solid default).
-        assert!(widget.apply_connection_event(ClientConnectionEvent::CaretStyleOverride(None)));
-        assert_eq!(widget.editor.caret_style_override(), None);
-        assert!(!widget.caret_animates(), "Clay default caret is solid");
-    }
-
-    #[test]
-    fn document_switch_preserves_ui_theme_scrollbar_track_and_caret_override() {
-        let mut widget = EditorWidget::default();
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::ActiveTheme(
-                crate::protocol::ActiveTheme {
-                    specifier: "@clay/theme-modus-operandi".to_string(),
-                    overrides: vec![crate::protocol::TextThemeOverride {
-                        token: "scrollbarTrack".to_string(),
-                        color: Some([0x11, 0x22, 0x33, 0x80]),
-                        bold: None,
-                        italic: None,
-                        underline: None,
-                        strike: None,
-                        provenance: "theme-modus-operandi".to_string(),
-                    }],
-                    design_tokens: Vec::new(),
-                },
-            ))
-        );
-        let track_before = widget.editor.ui_theme().color("surface.scrollbar.track");
-        assert_ne!(
-            track_before,
-            crate::shell::theme::ResolvedUiTheme::default().color("surface.scrollbar.track"),
-            "themed track must resolve through the base palette, not the dark core fallback"
-        );
-        let caret_override = crate::protocol::CaretStyle {
-            shape: crate::protocol::CaretShape::Block,
-            ..crate::protocol::CaretStyle::default_bar()
-        };
-        widget.editor.set_caret_style_override(Some(caret_override));
-
-        let open = |document_id: u64, path: &str| ClientConnectionEvent::DocumentOpened {
-            metadata: DocumentMetadata {
-                document_id,
-                version: 1,
-                access: DocumentAccess::Editable {
-                    lease_id: document_id,
-                },
-                lease_id: Some(document_id),
-                dirty: false,
-                workspace_root_id: 1,
-                path: path.to_string(),
-            },
-            text: format!("text-{document_id}"),
-        };
-
-        // First open keeps the themed ui_theme.
-        assert!(widget.apply_connection_event(open(1, "a.txt")));
-        assert_eq!(
-            widget.editor.ui_theme().color("surface.scrollbar.track"),
-            track_before
-        );
-
-        // Opening a second document stashes the active session behind a fresh
-        // surface; the themed ui_theme (scrollbar track) and the runtime caret
-        // override must survive the replacement.
-        assert!(widget.apply_connection_event(open(2, "b.txt")));
-        assert_eq!(
-            widget.editor.ui_theme().color("surface.scrollbar.track"),
-            track_before,
-            "stashed replacement surface lost the themed ui_theme"
-        );
-        assert_eq!(widget.editor.caret_style_override(), Some(caret_override));
-
-        // Switching back restores the retained surface, refreshed with the
-        // current shared presentation state.
-        assert!(widget.activate_document(1));
-        assert_eq!(
-            widget.editor.ui_theme().color("surface.scrollbar.track"),
-            track_before,
-            "retained surface lost the themed ui_theme"
-        );
-        assert_eq!(widget.editor.caret_style_override(), Some(caret_override));
-    }
-
-    #[test]
-    fn show_open_documents_menu_lists_active_and_retained() {
-        let mut widget = EditorWidget::default();
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 10,
-                    version: 1,
-                    access: DocumentAccess::Editable { lease_id: 1 },
-                    lease_id: Some(1),
-                    dirty: false,
-                    workspace_root_id: 1,
-                    path: "one.md".to_string(),
-                },
-                text: "one".to_string(),
-            })
-        );
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 11,
-                    version: 1,
-                    access: DocumentAccess::ReadOnly,
-                    lease_id: None,
-                    dirty: false,
-                    workspace_root_id: 1,
-                    path: "two.md".to_string(),
-                },
-                text: "two".to_string(),
-            })
-        );
-        assert!(widget.show_open_documents_menu());
-        let menu = widget.sdui.active_menu().expect("menu");
-        assert_eq!(menu.prompt(), "Open documents");
-        assert_eq!(menu.items().len(), 2);
-        let labels: Vec<_> = menu.items().iter().map(|item| item.label.clone()).collect();
-        assert!(
-            labels
-                .iter()
-                .any(|label| label.contains("two.md") && label.contains("active"))
-        );
-        assert!(labels.iter().any(|label| label.contains("one.md")));
-    }
-
-    #[test]
-    fn document_saved_clears_dirty_and_keeps_status_chrome_clean() {
-        let mut widget = EditorWidget::default();
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 42,
-                    version: 5,
-                    access: DocumentAccess::Editable { lease_id: 8 },
-                    lease_id: Some(8),
-                    dirty: false,
-                    workspace_root_id: 77,
-                    path: "note.md".to_string(),
-                },
-                text: "hello".to_string(),
-            })
-        );
-        widget.status.dirty = true;
-        assert!(widget.status_observation().dirty);
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentSaved {
-                document_id: 42,
-                version: 5,
-                dirty: false,
-            })
-        );
-
-        let observation = widget.status_observation();
-        assert!(!observation.dirty);
-        assert!(!observation.status_text.contains("Dirty"));
-        assert_eq!(observation.sync_version, Some(5));
-    }
-
-    #[test]
-    fn stale_save_conflict_keeps_dirty_and_opens_recovery_menu() {
-        let mut widget = EditorWidget::default();
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 42,
-                    version: 5,
-                    access: DocumentAccess::Editable { lease_id: 8 },
-                    lease_id: Some(8),
-                    dirty: false,
-                    workspace_root_id: 77,
-                    path: "note.md".to_string(),
-                },
-                text: "local edits".to_string(),
-            })
-        );
-        widget.status.dirty = true;
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::FileOperationFailed {
-                code: FileErrorCode::StaleFileMetadata,
-                message: "workspace file note.md changed on disk since it was loaded".to_string(),
-                workspace_root_id: Some(77),
-                document_id: Some(42),
-            })
-        );
-
-        let observation = widget.status_observation();
-        assert!(observation.dirty);
-        assert!(observation.status_text.contains("Dirty"));
-        assert!(observation.diagnostic_text.as_deref().is_some_and(|text| {
-            text.contains("StaleFileMetadata") && text.contains("changed on disk")
-        }));
-        let menu = widget.sdui.active_menu().expect("conflict menu");
-        assert!(menu.prompt().contains("save conflict"));
-        let labels: Vec<_> = menu.items().iter().map(|item| item.label.clone()).collect();
-        assert!(
-            labels
-                .iter()
-                .any(|label| label.contains("Reload from disk"))
-        );
-        assert!(
-            labels
-                .iter()
-                .any(|label| label.contains("Keep unsaved edits"))
-        );
-        assert!(labels.iter().any(|label| label.contains("Compare later")));
-        assert_eq!(
-            observation.recovery_summary.as_deref(),
-            Some("File changed on disk — resolve save conflict")
-        );
-        assert_eq!(widget.editor.visible_text(), "local edits");
-    }
-
-    #[test]
-    fn dirty_reload_conflict_offers_save_first_and_keeps_local_text() {
-        let mut widget = EditorWidget::default();
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 9,
-                    version: 2,
-                    access: DocumentAccess::Editable { lease_id: 1 },
-                    lease_id: Some(1),
-                    dirty: true,
-                    workspace_root_id: 3,
-                    path: "selected.md".to_string(),
-                },
-                text: "unsaved".to_string(),
-            })
-        );
-        assert!(widget.status_observation().dirty);
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::FileOperationFailed {
-                code: FileErrorCode::DirtyDocument,
-                message: "workspace document 9 has unsaved edits".to_string(),
-                workspace_root_id: None,
-                document_id: Some(9),
-            })
-        );
-
-        assert!(widget.status_observation().dirty);
-        assert_eq!(widget.editor.visible_text(), "unsaved");
-        let menu = widget.sdui.active_menu().expect("dirty reload menu");
-        assert!(menu.prompt().contains("unsaved edits"));
-        let labels: Vec<_> = menu.items().iter().map(|item| item.label.clone()).collect();
-        assert!(labels.iter().any(|label| label.contains("Save first")));
-        assert!(
-            labels
-                .iter()
-                .any(|label| label.contains("Discard edits and reload"))
-        );
-    }
-
-    #[test]
-    fn document_reloaded_replaces_text_and_clears_dirty() {
-        let mut widget = EditorWidget::default();
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 42,
-                    version: 5,
-                    access: DocumentAccess::Editable { lease_id: 8 },
-                    lease_id: Some(8),
-                    dirty: false,
-                    workspace_root_id: 77,
-                    path: "note.md".to_string(),
-                },
-                text: "old".to_string(),
-            })
-        );
-        widget.status.dirty = true;
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentReloaded {
-                metadata: DocumentMetadata {
-                    document_id: 42,
-                    version: 6,
-                    access: DocumentAccess::Editable { lease_id: 8 },
-                    lease_id: Some(8),
-                    dirty: false,
-                    workspace_root_id: 77,
-                    path: "note.md".to_string(),
-                },
-                text: "from disk".to_string(),
-            })
-        );
-
-        assert_eq!(widget.editor.visible_text(), "from disk");
-        assert!(!widget.status_observation().dirty);
-        assert_eq!(widget.status_observation().sync_version, Some(6));
-        assert!(widget.sdui.active_menu().is_none());
-    }
-
-    #[tokio::test]
-    async fn save_and_reload_command_intents_enqueue_protocol_file_messages() {
-        let (queue, mut receiver) = ClientEditQueue::bounded(4);
-        let queue = queue
-            .with_authority(8, &DocumentAccess::Editable { lease_id: 8 })
-            .with_confirmed_version(5);
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 8 },
-            5,
-        ))
-        .with_edit_queue(queue);
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 42,
-                    version: 5,
-                    access: DocumentAccess::Editable { lease_id: 8 },
-                    lease_id: Some(8),
-                    dirty: false,
-                    workspace_root_id: 77,
-                    path: "note.md".to_string(),
-                },
-                text: "hello".to_string(),
-            })
-        );
-
-        assert!(widget.request_save_active_document().is_none());
-        assert!(widget.request_reload_active_document(true).is_none());
-
-        let save = receiver.recv().await.expect("save message");
-        assert!(matches!(
-            save,
-            ClientMessage::SaveDocument {
-                document_id: 42,
-                known_version: 5,
-                ..
-            }
-        ));
-        let reload = receiver.recv().await.expect("reload message");
-        assert!(matches!(
-            reload,
-            ClientMessage::ReloadDocument {
-                document_id: 42,
-                known_version: 5,
-                force: true,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn pending_edit_count_increments_on_enqueue_and_decrements_on_ack() {
-        let (queue, _receiver) = ClientEditQueue::bounded(4);
-        let queue = queue
-            .with_authority(8, &DocumentAccess::Editable { lease_id: 8 })
-            .with_confirmed_version(5);
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 8 },
-            5,
-        ))
-        .with_edit_queue(queue);
-
-        assert_eq!(widget.status_observation().pending_edit_count, 0);
-        assert!(!widget.status_text().contains("Pending edits:"));
-
-        let outcome = widget.editor.insert_text_with_event("x");
-        assert!(widget.apply_local_edit_outcome(outcome));
-        assert_eq!(widget.status_observation().pending_edit_count, 1);
-        assert!(widget.status_text().contains("Pending edits: 1"));
-
-        // Connection task acknowledges before forwarding EditAck; unit-test the same order.
-        widget
-            .edit_queue
-            .as_ref()
-            .expect("queue")
-            .acknowledge_for_test(7, 6, 1);
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::EditAck {
-                document_id: 7,
-                version: 6,
-                transaction_id: 1,
-            })
-        );
-        assert_eq!(widget.status_observation().pending_edit_count, 0);
-        assert!(!widget.status_text().contains("Pending edits:"));
-    }
-
-    #[test]
-    fn disconnect_updates_status_accessibility_and_opens_recovery_prompt() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 8 },
-            5,
-        ));
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 42,
-                    version: 5,
-                    access: DocumentAccess::Editable { lease_id: 8 },
-                    lease_id: Some(8),
-                    dirty: true,
-                    workspace_root_id: 77,
-                    path: "note.md".to_string(),
-                },
-                text: "local".to_string(),
-            })
-        );
-        widget.status.dirty = true;
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::ConnectionError(
-                "/home/secret/path pipe broken".to_string()
-            ))
-        );
-
-        let observation = widget.status_observation();
-        assert_eq!(observation.connection_label, "Disconnected");
-        assert!(observation.status_text.contains("Disconnected"));
-        assert!(
-            observation
-                .status_text
-                .contains("Restart Clay to reconnect")
-        );
-        assert!(observation.recovery_summary.is_some());
-        assert!(
-            observation
-                .diagnostic_text
-                .as_deref()
-                .is_some_and(|text| text.contains("clay.client.disconnect"))
-        );
-        // Path sanitization: host path fragments must not leak.
-        assert!(!observation.status_text.contains("/home/secret"));
-        let menu = widget.sdui.active_menu().expect("disconnect recovery menu");
-        assert!(menu.prompt().contains("reconnect"));
-        assert!(
-            menu.items()
-                .iter()
-                .any(|item| item.label.contains("Dismiss"))
-        );
-        assert!(widget.dismiss_recovery());
-        assert!(widget.sdui.active_menu().is_none());
-        assert!(widget.status.runtime_diagnostic.is_none());
-    }
-
-    #[test]
-    fn stale_edit_rejection_shows_status_without_blocking_menu_while_auto_resync_runs() {
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 8 },
-            5,
-        ));
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 42,
-                    version: 5,
-                    access: DocumentAccess::Editable { lease_id: 8 },
-                    lease_id: Some(8),
-                    dirty: false,
-                    workspace_root_id: 77,
-                    path: "note.md".to_string(),
-                },
-                text: "hello".to_string(),
-            })
-        );
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::EditRejected {
-                document_id: 42,
-                transaction_id: 9,
-                reason: EditRejection::StaleVersion {
-                    client_base_version: 5,
-                    server_version: 8,
-                },
-            })
-        );
-
-        let observation = widget.status_observation();
-        assert!(observation.diagnostic_text.as_deref().is_some_and(|text| {
-            text.contains("StaleVersion") && text.contains("requesting resync")
-        }));
-        assert!(observation.recovery_summary.is_some());
-        assert!(widget.sdui.active_menu().is_none());
-    }
-
-    #[test]
-    fn actionable_invalid_range_rejection_opens_resync_dismiss_recovery_menu() {
-        let (queue, mut receiver) = ClientEditQueue::bounded(4);
-        let queue = queue
-            .with_authority(8, &DocumentAccess::Editable { lease_id: 8 })
-            .with_confirmed_version(5);
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 8 },
-            5,
-        ))
-        .with_edit_queue(queue);
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-                metadata: DocumentMetadata {
-                    document_id: 42,
-                    version: 5,
-                    access: DocumentAccess::Editable { lease_id: 8 },
-                    lease_id: Some(8),
-                    dirty: false,
-                    workspace_root_id: 77,
-                    path: "note.md".to_string(),
-                },
-                text: "hello".to_string(),
-            })
-        );
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::EditRejected {
-                document_id: 42,
-                transaction_id: 3,
-                reason: EditRejection::InvalidRange {
-                    message: "byte range is not UTF-8 aligned".to_string(),
-                },
-            })
-        );
-
-        let observation = widget.status_observation();
-        assert!(
-            observation
-                .diagnostic_text
-                .as_deref()
-                .is_some_and(|text| text.contains("InvalidRange"))
-        );
-        let menu = widget.sdui.active_menu().expect("recovery menu");
-        assert!(menu.prompt().contains("invalid range"));
-        let labels: Vec<_> = menu.items().iter().map(|item| item.label.clone()).collect();
-        assert!(labels.iter().any(|label| label.contains("Request resync")));
-        assert!(labels.iter().any(|label| label.contains("Dismiss")));
-
-        assert!(widget.request_resync_active_document().is_none());
-        let message = receiver.try_recv().expect("resync request");
-        assert!(matches!(
-            message,
-            ClientMessage::RequestResync {
-                document_id: 42,
-                known_version: 5,
-                ..
-            }
-        ));
-        assert!(
-            widget
-                .status
-                .runtime_diagnostic
-                .as_ref()
-                .is_some_and(|diagnostic| diagnostic.code == "clay.editor.resync_requested")
-        );
-
-        assert!(
-            widget.apply_connection_event(ClientConnectionEvent::ResyncSnapshot(
-                ClientResyncSnapshot {
-                    document_id: 42,
-                    version: 9,
-                    text: "canonical".to_string(),
-                    access: DocumentAccess::Editable { lease_id: 8 },
-                    lease_id: Some(8),
-                }
-            ))
-        );
-        assert_eq!(widget.editor.visible_text(), "canonical");
-        assert!(widget.status.runtime_diagnostic.is_none());
-        assert!(widget.sdui.active_menu().is_none());
-    }
-
-    #[test]
-    fn local_commands_request_decorations_for_keyboard_driven_viewport_changes() {
-        let source = include_str!("masonry_editor.rs");
-        let local_command = source
-            .split("fn local_command")
-            .nth(1)
-            .and_then(|source| source.split("fn local_key").next())
-            .expect("local_command body");
-
-        assert!(local_command.contains("self.enqueue_decoration_viewport_request();"));
-    }
-
-    #[tokio::test]
-    async fn scrolling_enqueues_new_decoration_viewport_once() {
-        let (queue, mut receiver) = ClientEditQueue::bounded(4);
-        let queue = queue.with_authority(11, &DocumentAccess::ReadOnly);
-        let mut widget = EditorWidget::default().with_edit_queue(queue);
-        let text = (0..200)
-            .map(|line| format!("const value{line} = {line};\n"))
-            .collect::<String>();
-        widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-            metadata: DocumentMetadata {
-                document_id: 42,
-                version: 5,
-                access: DocumentAccess::ReadOnly,
-                lease_id: None,
-                dirty: false,
-                workspace_root_id: 77,
-                path: "main.ts".to_string(),
-            },
-            text,
-        });
-
-        assert!(widget.editor.scroll_lines(80));
-        widget.enqueue_decoration_viewport_request();
-        widget.enqueue_decoration_viewport_request();
-
-        assert!(matches!(
-            receiver.recv().await.unwrap(),
-            ClientMessage::DecorationViewportRequest {
-                client_id: 11,
-                document_id: 42,
-                document_version: 5,
-                byte_start,
-                byte_end,
-            } if byte_start > 0 && byte_end > byte_start
-        ));
-        assert!(receiver.try_recv().is_err());
-    }
-
-    #[tokio::test]
-    async fn opened_file_edits_continue_as_deltas() {
-        let (queue, mut receiver) = ClientEditQueue::bounded(4);
-        let queue = queue
-            .with_authority(11, &DocumentAccess::Editable { lease_id: 1 })
-            .with_confirmed_version(3);
-        let mut widget = EditorWidget::with_initial_state(initial_state(
-            DocumentAccess::Editable { lease_id: 1 },
-            3,
-        ))
-        .with_edit_queue(queue);
-
-        widget.apply_connection_event(ClientConnectionEvent::DocumentOpened {
-            metadata: DocumentMetadata {
-                document_id: 42,
-                version: 5,
-                access: DocumentAccess::Editable { lease_id: 8 },
-                lease_id: Some(8),
-                dirty: false,
-                workspace_root_id: 77,
-                path: "note.md".to_string(),
-            },
-            text: "# opened\n".to_string(),
-        });
-        let outcome = widget.editor.command_with_event(EditorCommand::Insert("!"));
-        let edit_event = outcome.edit_event.expect("insert emits an edit event");
-        widget
-            .edit_queue
-            .as_ref()
-            .unwrap()
-            .enqueue_edit_event(edit_event, 99)
-            .unwrap();
-
-        assert_eq!(
-            receiver.recv().await.unwrap(),
-            ClientMessage::Edit {
-                document_id: 42,
-                client_id: 11,
-                lease_id: Some(8),
-                base_version: 5,
-                behavior_version: 3,
-                transaction_id: 99,
-                operation: EditOperation::Insert {
-                    byte_offset: 0,
-                    text: "!".to_string(),
-                },
-            }
+            widget.view_mut().editor_mut().selection_for_test(),
+            Some((0, 11))
         );
     }
 
@@ -5554,8 +1446,12 @@ mod tests {
             client_id: 11,
             tree: sdui_tree("Ready"),
         });
-        let before_text = widget.editor.visible_text();
-        let before_version = widget.editor.document_state().document_version;
+        let before_text = widget.view_mut().editor_mut().visible_text();
+        let before_version = widget
+            .view_mut()
+            .editor_mut()
+            .document_state()
+            .document_version;
 
         assert!(
             widget.apply_connection_event(ClientConnectionEvent::SduiUpdate(SduiTreeUpdate {
@@ -5572,9 +1468,13 @@ mod tests {
             },))
         );
 
-        assert_eq!(widget.editor.visible_text(), before_text);
+        assert_eq!(widget.view_mut().editor_mut().visible_text(), before_text);
         assert_eq!(
-            widget.editor.document_state().document_version,
+            widget
+                .view_mut()
+                .editor_mut()
+                .document_state()
+                .document_version,
             before_version
         );
         assert!(widget.sdui_visible_texts().contains(&"Updated".to_string()));
@@ -5586,13 +1486,16 @@ mod tests {
             DocumentAccess::Editable { lease_id: 99 },
             12,
         ));
-        widget.editor.command(EditorCommand::Insert(" local"));
+        widget
+            .view_mut()
+            .editor_mut()
+            .command(EditorCommand::Insert(" local"));
         widget.apply_connection_event(ClientConnectionEvent::SduiSnapshot {
             client_id: 11,
             tree: sdui_tree("Ready"),
         });
-        let before_text = widget.editor.visible_text();
-        let before_document = widget.editor.document_state().clone();
+        let before_text = widget.view_mut().editor_mut().visible_text();
+        let before_document = widget.view_mut().editor_mut().document_state().clone();
 
         assert!(
             widget.apply_connection_event(ClientConnectionEvent::SduiUpdate(SduiTreeUpdate {
@@ -5609,8 +1512,11 @@ mod tests {
             },))
         );
 
-        assert_eq!(widget.editor.visible_text(), before_text);
-        assert_eq!(widget.editor.document_state(), &before_document);
+        assert_eq!(widget.view_mut().editor_mut().visible_text(), before_text);
+        assert_eq!(
+            widget.view_mut().editor_mut().document_state(),
+            &before_document
+        );
         assert!(
             widget
                 .sdui_visible_texts()
@@ -5720,14 +1626,18 @@ mod tests {
             12,
         ));
         widget
-            .editor
+            .view_mut()
+            .editor_mut()
             .command(EditorCommand::Insert("\nsecond line\nthird line"));
-        widget.editor.set_caret_for_test(6);
-        widget.editor.set_visual_scroll_bounds_for_test(120.0);
-        assert!(widget.editor.scroll_vertical_pixels(40.0));
-        let before_text = widget.editor.visible_text();
-        let before_caret = widget.editor.caret_for_test();
-        let before_scroll_y = widget.editor.visual_scroll_y();
+        widget.view_mut().editor_mut().set_caret_for_test(6);
+        widget
+            .view_mut()
+            .editor_mut()
+            .set_visual_scroll_bounds_for_test(120.0);
+        assert!(widget.view_mut().editor_mut().scroll_vertical_pixels(40.0));
+        let before_text = widget.view_mut().editor_mut().visible_text();
+        let before_caret = widget.view_mut().editor_mut().caret_for_test();
+        let before_scroll_y = widget.view_mut().editor_mut().visual_scroll_y();
         let before_status = widget.status_observation();
         let narrow_slot = PaneSlotLayout::main_only()
             .with_fixed_slot(FixedSlotState::new(FixedSlotId::Left, 320.0, 120.0, 360.0).unwrap());
@@ -5742,9 +1652,15 @@ mod tests {
             .main_rect;
 
         assert_ne!(narrow_main, wide_main);
-        assert_eq!(widget.editor.visible_text(), before_text);
-        assert_eq!(widget.editor.caret_for_test(), before_caret);
-        assert_eq!(widget.editor.visual_scroll_y(), before_scroll_y);
+        assert_eq!(widget.view_mut().editor_mut().visible_text(), before_text);
+        assert_eq!(
+            widget.view_mut().editor_mut().caret_for_test(),
+            before_caret
+        );
+        assert_eq!(
+            widget.view_mut().editor_mut().visual_scroll_y(),
+            before_scroll_y
+        );
         assert_eq!(widget.status_observation(), before_status);
     }
 
@@ -5792,6 +1708,7 @@ mod tests {
                 reset_diagnostics: true,
                 initial_decorations: None,
                 initial_diagnostics: None,
+                behavior_manifest: None,
             }],
             diagnostics: Vec::new(),
         };
@@ -5840,7 +1757,11 @@ mod tests {
             .expect("seed package ui");
         assert_eq!(widget.sdui.package_ui_version(), 1);
 
-        let g1_behavior = widget.editor.document_state().behavior_version;
+        let g1_behavior = widget
+            .view_mut()
+            .editor_mut()
+            .document_state()
+            .behavior_version;
         assert_eq!(widget.runtime_generation_id, 0);
 
         assert!(
@@ -5850,9 +1771,23 @@ mod tests {
         );
 
         assert_eq!(widget.runtime_generation_id, 2);
-        assert_eq!(widget.editor.document_state().behavior_version, 2);
-        assert_ne!(widget.editor.document_state().behavior_version, g1_behavior);
-        assert_eq!(widget.editor.typography().revision(), 2);
+        assert_eq!(
+            widget
+                .view_mut()
+                .editor_mut()
+                .document_state()
+                .behavior_version,
+            2
+        );
+        assert_ne!(
+            widget
+                .view_mut()
+                .editor_mut()
+                .document_state()
+                .behavior_version,
+            g1_behavior
+        );
+        assert_eq!(widget.view_mut().editor_mut().typography().revision(), 2);
         assert_eq!(widget.sdui.ui_version(), 2);
         assert_eq!(widget.sdui.package_ui_version(), 2);
         assert!(
@@ -5887,9 +1822,14 @@ mod tests {
         ))
         .with_edit_queue(queue);
 
-        let before_behavior = widget.editor.document_state().behavior_manifest.clone();
-        let before_theme = widget.editor.theme();
-        let before_typography = widget.editor.typography().revision();
+        let before_behavior = widget
+            .view_mut()
+            .editor_mut()
+            .document_state()
+            .behavior_manifest
+            .clone();
+        let before_theme = widget.view_mut().editor_mut().theme();
+        let before_typography = widget.view_mut().editor_mut().typography().revision();
         let before_ui = widget.sdui.ui_version();
         let before_package_ui = widget.sdui.package_ui_version();
         let before_generation = widget.runtime_generation_id;
@@ -5906,11 +1846,18 @@ mod tests {
         assert_eq!(widget.status_observation().connection_label, "Disconnected");
         assert_eq!(widget.runtime_generation_id, before_generation);
         assert_eq!(
-            widget.editor.document_state().behavior_manifest,
+            widget
+                .view_mut()
+                .editor_mut()
+                .document_state()
+                .behavior_manifest,
             before_behavior
         );
-        assert_eq!(widget.editor.theme(), before_theme);
-        assert_eq!(widget.editor.typography().revision(), before_typography);
+        assert_eq!(widget.view_mut().editor_mut().theme(), before_theme);
+        assert_eq!(
+            widget.view_mut().editor_mut().typography().revision(),
+            before_typography
+        );
         assert_eq!(widget.sdui.ui_version(), before_ui);
         assert_eq!(widget.sdui.package_ui_version(), before_package_ui);
         assert!(outgoing.try_recv().is_err());
@@ -5923,15 +1870,19 @@ mod tests {
             12,
         ));
         widget
-            .editor
+            .view_mut()
+            .editor_mut()
             .command(EditorCommand::Insert("alpha beta gamma"));
-        widget.editor.set_selection_for_test(6, 10);
-        widget.editor.set_visual_scroll_bounds_for_test(80.0);
-        assert!(widget.editor.scroll_vertical_pixels(24.0));
+        widget.view_mut().editor_mut().set_selection_for_test(6, 10);
+        widget
+            .view_mut()
+            .editor_mut()
+            .set_visual_scroll_bounds_for_test(80.0);
+        assert!(widget.view_mut().editor_mut().scroll_vertical_pixels(24.0));
 
-        let before_caret = widget.editor.caret_for_test();
-        let before_selection = widget.editor.selection_for_test();
-        let before_scroll = widget.editor.visual_scroll_y();
+        let before_caret = widget.view_mut().editor_mut().caret_for_test();
+        let before_selection = widget.view_mut().editor_mut().selection_for_test();
+        let before_scroll = widget.view_mut().editor_mut().visual_scroll_y();
         let before_connection = widget.status_observation().connection_label.clone();
 
         assert!(
@@ -5941,9 +1892,18 @@ mod tests {
         );
 
         assert_eq!(widget.runtime_generation_id, 4);
-        assert_eq!(widget.editor.caret_for_test(), before_caret);
-        assert_eq!(widget.editor.selection_for_test(), before_selection);
-        assert_eq!(widget.editor.visual_scroll_y(), before_scroll);
+        assert_eq!(
+            widget.view_mut().editor_mut().caret_for_test(),
+            before_caret
+        );
+        assert_eq!(
+            widget.view_mut().editor_mut().selection_for_test(),
+            before_selection
+        );
+        assert_eq!(
+            widget.view_mut().editor_mut().visual_scroll_y(),
+            before_scroll
+        );
         assert_eq!(
             widget.status_observation().connection_label,
             before_connection

@@ -146,7 +146,11 @@ impl DocumentState {
         client_id == 0 || self.access_holders.contains(&client_id)
     }
 
-    pub(crate) fn initial_document_message(&self, access: DocumentAccess) -> ServerMessage {
+    pub(crate) fn initial_document_message(
+        &self,
+        access: DocumentAccess,
+        workspace_root: String,
+    ) -> ServerMessage {
         let (document_id, version, text, lease_id) = self.snapshot_parts(&access);
         ServerMessage::InitialDocument {
             document_id,
@@ -154,6 +158,7 @@ impl DocumentState {
             text,
             access,
             lease_id,
+            workspace_root,
         }
     }
 
@@ -1095,13 +1100,17 @@ mod tests {
         );
 
         assert_eq!(
-            document.initial_document_message(DocumentAccess::Editable { lease_id: 1 }),
+            document.initial_document_message(
+                DocumentAccess::Editable { lease_id: 1 },
+                "/tmp/root".to_string(),
+            ),
             ServerMessage::InitialDocument {
                 document_id: 7,
                 version: 1,
                 text: "Hi 🪐\n再見".to_string(),
                 access: DocumentAccess::Editable { lease_id: 1 },
                 lease_id: Some(1),
+                workspace_root: "/tmp/root".to_string(),
             }
         );
     }

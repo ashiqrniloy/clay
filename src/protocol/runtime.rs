@@ -44,7 +44,12 @@ pub struct PackageUiSnapshot {
 /// Reset flags tell the client to drop previous-generation render caches before
 /// installing any initial sets. Absent initial sets leave the document empty
 /// until later generation-tagged async render chunks arrive.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+///
+/// Phase 22.2: `behavior_manifest` carries the document's own mode layer (its
+/// per-document behavior manifest) when one is published, so recovery installs
+/// each pane's mode content without cross-pane bleed. Absent means the
+/// document is governed by the snapshot's connection-wide manifest.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
 pub struct DocumentRuntimeRenderState {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -52,6 +57,7 @@ pub struct DocumentRuntimeRenderState {
     pub reset_diagnostics: bool,
     pub initial_decorations: Option<DecorationSet>,
     pub initial_diagnostics: Option<DiagnosticSet>,
+    pub behavior_manifest: Option<BehaviorManifest>,
 }
 
 /// Complete connection-scoped runtime state for one atomic client install.
@@ -77,6 +83,7 @@ pub enum RuntimeStateSnapshotValidationError {
     DuplicateDocumentId { document_id: DocumentId },
     DecorationDocumentMismatch { document_id: DocumentId },
     DiagnosticsDocumentMismatch { document_id: DocumentId },
+    BehaviorManifestDocumentMismatch { document_id: DocumentId },
     TooManyRuntimeDiagnostics { count: usize, max: usize },
 }
 
@@ -117,6 +124,20 @@ impl RuntimeStateSnapshot {
             {
                 return Err(
                     RuntimeStateSnapshotValidationError::DecorationDocumentMismatch {
+                        document_id: document.document_id,
+                    },
+                );
+            }
+            if let Some(manifest) = &document.behavior_manifest
+                && !matches!(
+                    manifest.scope,
+                    crate::protocol::BehaviorScope::Document {
+                        document_id: scope_document_id
+                    } if scope_document_id == document.document_id
+                )
+            {
+                return Err(
+                    RuntimeStateSnapshotValidationError::BehaviorManifestDocumentMismatch {
                         document_id: document.document_id,
                     },
                 );

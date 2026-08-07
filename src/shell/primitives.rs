@@ -108,6 +108,52 @@ pub(crate) fn disabled_text_color(theme: &ResolvedUiTheme) -> Color {
     )
 }
 
+/// Phase 22.3: resolved tab card chrome (fills/text/ring) for one
+/// `InteractionState` + selected flag. State-complete: `Rest`/`Hover`/
+/// `Active`/`Focus`/`Disabled` all resolve from the Phase 20.4 state tokens;
+/// the keyboard focus path that drives `Focus` is the 22.4 keybinding task.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TabCardChrome {
+    pub(crate) fill: Color,
+    pub(crate) text: Color,
+    pub(crate) close: Color,
+    pub(crate) focus_ring: bool,
+}
+
+pub(crate) fn tab_card_chrome(
+    theme: &ResolvedUiTheme,
+    state: InteractionState,
+    selected: bool,
+) -> TabCardChrome {
+    let fill = list_row_fill_color(theme, state, selected);
+    let text = match state {
+        InteractionState::Disabled => disabled_text_color(theme),
+        InteractionState::Rest | InteractionState::Focus => {
+            if selected {
+                theme.color("text.primary").unwrap_or(Color::BLACK)
+            } else {
+                theme.color("text.muted").unwrap_or(Color::BLACK)
+            }
+        }
+        InteractionState::Hover | InteractionState::Active => {
+            theme.color("text.primary").unwrap_or(Color::BLACK)
+        }
+    };
+    let close = match state {
+        InteractionState::Disabled => theme.color("text.disabled").unwrap_or(Color::BLACK),
+        InteractionState::Rest => theme.color("text.muted").unwrap_or(Color::BLACK),
+        InteractionState::Hover | InteractionState::Active | InteractionState::Focus => {
+            theme.color("text.primary").unwrap_or(Color::BLACK)
+        }
+    };
+    TabCardChrome {
+        fill,
+        text,
+        close,
+        focus_ring: state == InteractionState::Focus,
+    }
+}
+
 /// Panel chrome state for title row, collapse affordance, and resize handle.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PanelChrome {
@@ -490,6 +536,46 @@ mod tests {
 
     fn test_theme() -> ResolvedUiTheme {
         ResolvedUiTheme::from_active_theme(&[]).unwrap()
+    }
+
+    #[test]
+    fn tab_card_chrome_resolves_state_complete_tokens() {
+        let theme = test_theme();
+
+        // Rest: selected card reads surface.selected, unselected surface.list.
+        let selected = tab_card_chrome(&theme, InteractionState::Rest, true);
+        let unselected = tab_card_chrome(&theme, InteractionState::Rest, false);
+        assert_eq!(selected.fill, theme.color("surface.selected").unwrap());
+        assert_eq!(unselected.fill, theme.color("surface.list").unwrap());
+        assert_eq!(selected.text, theme.color("text.primary").unwrap());
+        assert_eq!(unselected.text, theme.color("text.muted").unwrap());
+        assert!(!selected.focus_ring && !unselected.focus_ring);
+
+        // Hover / Active override with the shared state tokens.
+        let hover = tab_card_chrome(&theme, InteractionState::Hover, false);
+        let active = tab_card_chrome(&theme, InteractionState::Active, false);
+        assert_eq!(hover.fill, theme.color("surface.hover").unwrap());
+        assert_eq!(active.fill, theme.color("surface.active").unwrap());
+        assert_eq!(hover.text, theme.color("text.primary").unwrap());
+        assert_eq!(active.text, theme.color("text.primary").unwrap());
+
+        // Focus: fill mirrors Rest (ring carries focus) + ring enabled.
+        let focus = tab_card_chrome(&theme, InteractionState::Focus, false);
+        assert_eq!(focus.fill, unselected.fill);
+        assert!(focus.focus_ring);
+
+        // Disabled: dimmed surface + text.disabled close.
+        let disabled = tab_card_chrome(&theme, InteractionState::Disabled, false);
+        assert_ne!(disabled.fill, unselected.fill);
+        assert_ne!(disabled.text, unselected.text);
+        assert_eq!(disabled.close, theme.color("text.disabled").unwrap());
+        assert!(!disabled.focus_ring);
+
+        // Close colors: muted at rest, primary on hover/active/focus.
+        assert_eq!(unselected.close, theme.color("text.muted").unwrap());
+        assert_eq!(hover.close, theme.color("text.primary").unwrap());
+        assert_eq!(active.close, theme.color("text.primary").unwrap());
+        assert_eq!(focus.close, theme.color("text.primary").unwrap());
     }
 
     #[test]

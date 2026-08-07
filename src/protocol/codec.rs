@@ -313,6 +313,7 @@ mod tests {
             text: "Hello, Clay 🦀\nSecond line".to_string(),
             access: DocumentAccess::Editable { lease_id: 1 },
             lease_id: Some(1),
+            workspace_root: "/tmp/root".to_string(),
         };
 
         let frame = codec.encode_server_message(&message).unwrap();
@@ -986,6 +987,7 @@ mod tests {
                 reset_diagnostics: true,
                 initial_decorations: None,
                 initial_diagnostics: None,
+                behavior_manifest: None,
             }],
             diagnostics: vec![RuntimeDiagnostic::error(
                 "clay.runtime.reload_succeeded",
@@ -1087,6 +1089,7 @@ mod tests {
             text: oversized_text,
             access: DocumentAccess::Editable { lease_id: 1 },
             lease_id: Some(1),
+            workspace_root: "/tmp/root".to_string(),
         };
 
         let error = codec.encode_server_message(&message).unwrap_err();

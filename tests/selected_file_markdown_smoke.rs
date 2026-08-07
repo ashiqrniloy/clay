@@ -132,6 +132,12 @@ async fn run_smoke(endpoint: &IpcEndpoint, selected: &Path) {
         }
         message => panic!("expected Markdown BehaviorManifest, got {message:?}"),
     }
+    // Phase 22.2: the follow-up also carries the connection-wide manifest
+    // after the document's mode layer.
+    match read_message(&codec, &mut stream).await {
+        ServerMessage::BehaviorManifest(_) => {}
+        message => panic!("expected trailing global manifest, got {message:?}"),
+    }
     let _next_token = expect_capability(read_message(&codec, &mut stream).await);
 }
 
@@ -149,13 +155,16 @@ async fn read_until_capability<S>(codec: &Codec, stream: &mut S) -> String
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    for _ in 0..8 {
+    for _ in 0..9 {
         match read_message(codec, stream).await {
             ServerMessage::FileOpenCapabilityIssued { token } => return token,
             ServerMessage::ActiveTheme(_)
             | ServerMessage::ActiveTypography(_)
             | ServerMessage::SduiSnapshot { .. }
-            | ServerMessage::RuntimeDiagnostic(_) => continue,
+            | ServerMessage::ShellPreferences(_)
+            | ServerMessage::RuntimeDiagnostic(_)
+            | ServerMessage::BehaviorManifest(_)
+            | ServerMessage::TabRegistry(_) => continue,
             message => panic!("expected FileOpenCapabilityIssued, got {message:?}"),
         }
     }

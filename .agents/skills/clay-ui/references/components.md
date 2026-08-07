@@ -10,7 +10,7 @@ Declared in `src/shell/components.rs` (`ComponentKind`). Packages compose these;
 
 | Kind | Status | Purpose | Notes |
 |------|--------|---------|-------|
-| `editorView` | implemented | Editor surface placed in a pane `main` slot | One editor component binding per working area; chrome editor-`StyleRegistry`-driven (task 5) |
+| `editorView` | implemented | Editor surface placed in a pane `main` slot | One content host per pane leaf; Phase 22.1: panes are generic content hosts, not just editor views; Phase 22.2: content hosts serve live per-pane document views (`PaneDocumentView` — independent `EditorSurface`, caret/selection/viewport, status line; pane↔document mapping is client-local, duplicate opens focus the existing pane); chrome editor-`StyleRegistry`-driven |
 | `panel` | implemented | Container for slot content (`left`/`right`/`top`/`bottom`) | Fixed or transient; chrome via `paint_panel_chrome`; size user-configurable via slot state |
 | `label` | implemented | Static text | Supports text font role; disabled → `text.disabled` × `opacity.disabled` |
 | `button` | implemented | Action trigger | Variants: `default`, `muted`, `primary`, `danger`; fill via `component_state_color("surface.control", state)`; focus ring on `Focus`; disabled gates action |
@@ -157,7 +157,7 @@ Reuse-first: before adding any of these, confirm no implemented kind composes to
 | Completion pop-up (uplift) | implemented | Inline completion restyle | Phase 20.5: routes through shared `paint_package_overlays` + `paint_tooltip_shell`; cursor inset from `ui_theme` |
 | Command palette | implemented | Command Centre surface | Phase 20.5: `TransientMenuOrigin::CommandPalette` (default); `Modal` focus policy + `Bottom` anchor |
 | Tooltip | planned | Hover hint | `overlay` anchored, `detail` typography |
-| Tabs | planned | Pane/panel tab strip | Shell-level, not package-facing initially |
+| Tabs | implemented | Tab strip (window tab bar) | Phase 22.3: shell-owned tab bar row above the working area; token-state cards (idle/hover/active/focus/disabled) via `tab_card_chrome`; the close glyph, switch-on-click, and server-registry reconciliation. Generic paint contract (cards with labels + close affordance) so later phases can reuse it for panel/pane tabs; shell-level, not package-facing |
 | Split divider | implemented | Draggable pane/slot separator | Phase 20.3: `paint_divider` + drag interaction on `PaneSplitTree`; resize handles via `paint_panel_chrome` |
 | Badge / tag | planned | Status/count marker | `label` + muted pastel tokens |
 | Toast / notification | planned | Transient feedback | `overlay` + portal, auto-dismiss |

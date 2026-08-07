@@ -18,13 +18,13 @@ use crate::{
         INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
     },
     protocol::{
-        ClientId, ClientMessage, CompletionProvenance, CompletionRequest, CompletionResultSet,
-        CompletionStatus, CompletionTrigger, DocumentId, DocumentMetadata,
+        BehaviorManifest, ClientId, ClientMessage, CompletionProvenance, CompletionRequest,
+        CompletionResultSet, CompletionStatus, CompletionTrigger, DocumentId, DocumentMetadata,
         LanguageIntelligenceFeature, LanguageIntelligencePayload, LanguageIntelligenceResult,
         LanguageIntelligenceStatus, PROTOCOL_VERSION, ParseByteRange, ParseInputEdit, ParsePolicy,
         ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, SduiActionArgument,
         SduiActionIntent, SduiActionSource, SduiActionValue, SelectionQueryRange,
-        SelectionQueryResult, ServerMessage, WorkspaceRootId,
+        SelectionQueryResult, ServerMessage, TabCommand, TabRegistrySnapshot, WorkspaceRootId,
         codec::{Codec, CodecError},
         completion::estimated_result_payload_bytes,
     },
@@ -43,6 +43,7 @@ use super::{
     },
     parse_coordinator::{ParseCoordinator, ParseCoordinatorError, ParseScheduleRequest},
     sdui::{StaticSduiState, sdui_action_response},
+    tab_registry::TabRegistry,
     workspace::{
         WorkspaceError, WorkspaceState, open_existing_file_unlocked, open_selected_file_unlocked,
         reload_document_unlocked, save_document_unlocked,
@@ -120,7 +121,8 @@ fn client_message_identity(message: &ClientMessage) -> Option<ClientId> {
         | ClientMessage::SduiAction { client_id, .. }
         | ClientMessage::CommandIntent { client_id, .. }
         | ClientMessage::RuntimeGenerationInstalled { client_id, .. }
-        | ClientMessage::CloseDocument { client_id, .. } => Some(*client_id),
+        | ClientMessage::CloseDocument { client_id, .. }
+        | ClientMessage::TabCommand { client_id, .. } => Some(*client_id),
         ClientMessage::CompletionRequest { request } => Some(request.client_id),
         ClientMessage::LanguageIntelligenceRequest { request } => Some(request.client_id),
         ClientMessage::SelectionQueryRequest { request } => Some(request.client_id),
@@ -161,6 +163,8 @@ where
         crate::server::document_analysis::DocumentAnalysisCoordinator::default(),
         language_intelligence,
         None,
+        Arc::new(Mutex::new(crate::server::tab_registry::TabRegistry::new())),
+        tokio::sync::broadcast::channel(16).0,
         codec,
     )
     .await
@@ -185,6 +189,8 @@ pub(crate) async fn handle_connection_with_analysis<S>(
     document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
     language_intelligence: LanguageIntelligenceCoordinator,
     reload_server: Option<super::IpcServer>,
+    tab_registry: Arc<Mutex<TabRegistry>>,
+    tab_registry_tx: tokio::sync::broadcast::Sender<TabRegistrySnapshot>,
     codec: Codec,
 ) -> Result<(), CodecError>
 where
@@ -211,6 +217,8 @@ where
         document_analysis,
         language_intelligence,
         reload_server,
+        tab_registry,
+        tab_registry_tx,
         codec,
     )
     .await;
@@ -265,6 +273,8 @@ async fn handle_connection_loop<S>(
     document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
     language_intelligence: LanguageIntelligenceCoordinator,
     reload_server: Option<super::IpcServer>,
+    tab_registry: Arc<Mutex<TabRegistry>>,
+    tab_registry_tx: tokio::sync::broadcast::Sender<TabRegistrySnapshot>,
     codec: Codec,
 ) -> Result<(), CodecError>
 where
@@ -282,6 +292,13 @@ where
     // replacement, so one subscription covers the connection; lag replays
     // the current value instead of dropping state.
     let mut caret_style_updates = runtime_generation.subscribe_caret_styles().await;
+    // Phase 22.1: shell-preferences lane. Same lifetime semantics: survives
+    // generation replacement, lag replays the current value.
+    let mut shell_preferences_updates = runtime_generation.subscribe_shell_preferences().await;
+    // Phase 22.3: tab-registry lane. Subscribed before the handshake replay so
+    // a mutation between subscribe and replay is both buffered and replayed
+    // (idempotent); lag replays the current snapshot from the mutex.
+    let mut tab_registry_updates = tab_registry_tx.subscribe();
     // Plan 060 T6 (P1-8): bounded per-connection result lanes. A saturated
     // lane means the client is not reading; results drop with a counter and
     // log line instead of growing memory without bound.
@@ -326,6 +343,12 @@ where
                 codec,
             )
             .await?;
+            // Phase 22.3: handshake replay of the current tab registry so a
+            // fresh/reconnecting connection learns the existing tabs.
+            let snapshot = tab_registry.lock().await.snapshot();
+            codec
+                .write_server_message(&mut stream, &ServerMessage::TabRegistry(snapshot))
+                .await?;
             // ponytail: per-connection capability token. Structural authority
             // gate for single-file opens; not a hard boundary against a
             // malicious same-user client that can also complete Hello. Full
@@ -444,6 +467,44 @@ where
                             &mut stream,
                             &ServerMessage::CaretStyleOverride(style),
                         )
+                        .await?;
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
+            },
+            prefs = shell_preferences_updates.recv() => match prefs {
+                Ok(preferences) => {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::ShellPreferences(preferences),
+                        )
+                        .await?;
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let preferences = runtime_generation.shell_preferences().await;
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::ShellPreferences(preferences),
+                        )
+                        .await?;
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
+            },
+            tab_registry_update = tab_registry_updates.recv() => match tab_registry_update {
+                Ok(snapshot) => {
+                    codec
+                        .write_server_message(&mut stream, &ServerMessage::TabRegistry(snapshot))
+                        .await?;
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let snapshot = tab_registry.lock().await.snapshot();
+                    codec
+                        .write_server_message(&mut stream, &ServerMessage::TabRegistry(snapshot))
                         .await?;
                     continue;
                 }
@@ -901,6 +962,121 @@ where
                 let response = document_list_response(&workspace, client_id).await;
                 codec.write_server_message(&mut stream, &response).await?;
             }
+            // Phase 22.3: server-authoritative tab lifecycle. The registry
+            // grants nothing — it binds already-authorized connections to
+            // stable tab identities; `client_id` was validated against the
+            // handshake identity above. Every mutation broadcasts a fresh
+            // snapshot to all connections.
+            ClientMessage::TabCommand { client_id, command } => match command {
+                TabCommand::New { workspace_root } => {
+                    let root_id = {
+                        let mut workspace = workspace.lock().await;
+                        match workspace.add_root(std::path::PathBuf::from(workspace_root.clone())) {
+                            Ok(root_id) => root_id,
+                            Err(error) => {
+                                let response = file_operation_failed(error, None, None);
+                                codec.write_server_message(&mut stream, &response).await?;
+                                continue;
+                            }
+                        }
+                    };
+                    let snapshot = {
+                        let mut registry = tab_registry.lock().await;
+                        registry.create_tab(client_id, root_id, workspace_root);
+                        registry.snapshot()
+                    };
+                    let _ = tab_registry_tx.send(snapshot);
+                }
+                TabCommand::OpenWorkspace { tab_id, root } => {
+                    let root_id = {
+                        let mut workspace = workspace.lock().await;
+                        match workspace.add_root(std::path::PathBuf::from(root.clone())) {
+                            Ok(root_id) => root_id,
+                            Err(error) => {
+                                let response = file_operation_failed(error, None, None);
+                                codec.write_server_message(&mut stream, &response).await?;
+                                continue;
+                            }
+                        }
+                    };
+                    let snapshot = {
+                        let mut registry = tab_registry.lock().await;
+                        registry.open_workspace(tab_id, client_id, root_id, root);
+                        registry.snapshot()
+                    };
+                    let _ = tab_registry_tx.send(snapshot);
+                }
+                TabCommand::Close { tab_id } => {
+                    let snapshot = {
+                        let mut registry = tab_registry.lock().await;
+                        registry.close_tab(tab_id, client_id);
+                        registry.snapshot()
+                    };
+                    let _ = tab_registry_tx.send(snapshot);
+                    // The tab's connection is this connection (only the bound
+                    // client may close it): end the connection so the permit +
+                    // leases release via the existing disconnect cleanup path.
+                    // A rejected close (unknown/foreign tab) also pushes a
+                    // snapshot so the optimistic client reconciles.
+                    return Ok(());
+                }
+                TabCommand::Activate { tab_id } => {
+                    // Always push a snapshot, accepted or not: the client
+                    // switches optimistically on click and the server registry
+                    // is the reconciling authority — a rejected activate must
+                    // revert the client's active tab.
+                    let snapshot = {
+                        let mut registry = tab_registry.lock().await;
+                        registry.activate(tab_id, client_id);
+                        registry.snapshot()
+                    };
+                    let _ = tab_registry_tx.send(snapshot);
+                }
+                TabCommand::Reclaim { tab_id } => {
+                    let snapshot = {
+                        let mut registry = tab_registry.lock().await;
+                        if registry.reclaim(tab_id, client_id) {
+                            Some(registry.snapshot())
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(snapshot) = snapshot {
+                        let _ = tab_registry_tx.send(snapshot);
+                    }
+                }
+                // Phase 22.4: server-authoritative tab reorder. The registry
+                // validates the bound client, existing tab, and (for `MoveTo`)
+                // the 1-based position bounds; boundary moves are no-ops with
+                // no wraparound. Always push a snapshot, accepted or not, so
+                // every connection reconciles its card order — moves are
+                // server-confirmed (no optimistic client reorder), but the
+                // uniform broadcast keeps the Activate/Close reconcile pattern.
+                TabCommand::MoveLeft { tab_id } => {
+                    let snapshot = {
+                        let mut registry = tab_registry.lock().await;
+                        registry.move_left(tab_id, client_id);
+                        registry.snapshot()
+                    };
+                    let _ = tab_registry_tx.send(snapshot);
+                }
+                TabCommand::MoveRight { tab_id } => {
+                    let snapshot = {
+                        let mut registry = tab_registry.lock().await;
+                        registry.move_right(tab_id, client_id);
+                        registry.snapshot()
+                    };
+                    let _ = tab_registry_tx.send(snapshot);
+                }
+                TabCommand::MoveTo { tab_id, position } => {
+                    let snapshot = {
+                        let mut registry = tab_registry.lock().await;
+                        registry.move_to(tab_id, client_id, position);
+                        registry.snapshot()
+                    };
+                    let _ = tab_registry_tx.send(snapshot);
+                }
+            },
             ClientMessage::SduiAction {
                 client_id: _,
                 ui_version: _,
@@ -991,7 +1167,12 @@ where
                         .await?;
                     continue;
                 }
-                let manifest_id = behavior.lock().await.manifest().manifest_id.clone();
+                let manifest_id = behavior
+                    .lock()
+                    .await
+                    .manifest_for(request.document_id)
+                    .manifest_id
+                    .clone();
                 let package_prefix = manifest_id.split('.').next().unwrap_or("");
                 let target_document =
                     document_for_message(request.document_id, &document, &workspace).await;
@@ -1102,11 +1283,15 @@ where
                 let target_document =
                     document_for_message(request.document_id, &document, &workspace).await;
                 let document_text = target_document.lock().await.text();
-                let window = language_intelligence_document_window_for_behavior(
-                    &request,
-                    &document_text,
-                    &*behavior.lock().await,
-                );
+                let window = {
+                    let behavior = behavior.lock().await;
+                    let manifest = behavior.manifest_for(request.document_id).clone();
+                    language_intelligence_document_window_for_behavior(
+                        &request,
+                        &document_text,
+                        &manifest,
+                    )
+                };
                 match language_intelligence.schedule(None, request.clone(), window) {
                     Ok(reply_rx) => {
                         let tx = language_intelligence_tx.clone();
@@ -1762,16 +1947,26 @@ where
     let initial_document = {
         let mut document = document.lock().await;
         let access = document.acquire_access(client_id);
-        document.initial_document_message(access)
+        let workspace_root = workspace
+            .lock()
+            .await
+            .list_root_metadata()
+            .first()
+            .map(|root| root.display_path.clone())
+            .unwrap_or_default();
+        document.initial_document_message(access, workspace_root)
     };
     codec
         .write_server_message(stream, &initial_document)
         .await?;
 
-    let manifest_message = behavior.lock().await.manifest_message();
-    codec
-        .write_server_message(stream, &manifest_message)
-        .await?;
+    let behavior_guard = behavior.lock().await;
+    let mut manifest_messages = behavior_guard.document_manifest_messages();
+    manifest_messages.push(behavior_guard.manifest_message());
+    drop(behavior_guard);
+    for message in manifest_messages {
+        codec.write_server_message(stream, &message).await?;
+    }
 
     let theme = active_theme
         .lock()
@@ -1797,6 +1992,14 @@ where
     if let Some(style) = runtime_generation.caret_style_override().await {
         codec
             .write_server_message(stream, &ServerMessage::CaretStyleOverride(Some(style)))
+            .await?;
+    }
+    // Phase 22.1: deliver the current shell preferences so reconnecting/late
+    // clients see the active pane-focus policy.
+    {
+        let preferences = runtime_generation.shell_preferences().await;
+        codec
+            .write_server_message(stream, &ServerMessage::ShellPreferences(preferences))
             .await?;
     }
 
@@ -1937,7 +2140,12 @@ async fn start_document_analysis(
     let Some(canonical_root) = canonical_root else {
         return Vec::new();
     };
-    let manifest_id = behavior.lock().await.manifest().manifest_id.clone();
+    let manifest_id = behavior
+        .lock()
+        .await
+        .manifest_for(metadata.document_id)
+        .manifest_id
+        .clone();
     let active_mode = manifest_id.rsplit('.').next().unwrap_or(&manifest_id);
     coordinator
         .open_document(
@@ -2267,9 +2475,9 @@ fn completion_document_window(
 fn language_intelligence_document_window_for_behavior(
     request: &crate::protocol::LanguageIntelligenceRequest,
     text: &str,
-    behavior: &ActiveBehaviorManifest,
+    behavior: &BehaviorManifest,
 ) -> LanguageIntelligenceDocumentWindow {
-    let manifest_id = &behavior.manifest().manifest_id;
+    let manifest_id = &behavior.manifest_id;
     language_intelligence_document_window(
         request,
         text,
@@ -2449,7 +2657,17 @@ pub(crate) async fn open_document_followup_messages(
         return vec![behavior.lock().await.manifest_message()];
     };
 
-    let mut messages = vec![behavior.lock().await.manifest_message()];
+    let behavior_guard = behavior.lock().await;
+    // Phase 22.2: the just-classified document's own mode layer (when the
+    // open published one) precedes the connection-wide manifest. Other
+    // documents' layers were already delivered when they opened; re-sending
+    // them here is redundant chatter.
+    let mut messages = Vec::new();
+    if let Some(layer) = behavior_guard.document_layer(metadata.document_id).cloned() {
+        messages.push(ServerMessage::BehaviorManifest(Box::new(layer)));
+    }
+    messages.push(behavior_guard.manifest_message());
+    drop(behavior_guard);
     match schedule_open_parse(parse_coordinator, metadata, text, behavior, &activation).await {
         Ok(Some(set)) => messages.push(ServerMessage::DecorationSet(set)),
         Ok(None) => {}
@@ -2530,7 +2748,10 @@ Deno.core.ops.op_clay_runtime_record(JSON.stringify(classification));
         shebang_json,
         leading_json,
     );
-    let evaluation = js_runtime.evaluate_controlled_module(source).await.ok()?;
+    let evaluation = js_runtime
+        .evaluate_controlled_module_for_document(source, metadata.document_id)
+        .await
+        .ok()?;
     super::apply_runtime_outputs_without_sdui(&evaluation, behavior).await;
     let record = evaluation.op_records.last()?;
     let value: serde_json::Value = serde_json::from_str(record).ok()?;
@@ -2848,10 +3069,54 @@ mod tests {
             provider_generation: 0,
         };
 
-        let window =
-            language_intelligence_document_window_for_behavior(&request, "fn main() {}", &behavior);
+        let window = language_intelligence_document_window_for_behavior(
+            &request,
+            "fn main() {}",
+            behavior.manifest(),
+        );
 
         assert_eq!(window.active_mode, "rust");
+    }
+
+    #[test]
+    fn language_intelligence_window_resolves_per_document_mode_layer() {
+        // Phase 22.2: two documents in different modes; the window builder
+        // must use each document's OWN layer's mode, not a connection-wide
+        // latest.
+        let mut state = ActiveBehaviorManifest::default();
+        let mut markdown = BehaviorManifest::minimal_text_editing(1);
+        markdown.manifest_id = "markdown.markdown".to_string();
+        markdown.scope = crate::protocol::BehaviorScope::Document { document_id: 7 };
+        let mut rust = BehaviorManifest::minimal_text_editing(1);
+        rust.manifest_id = "rust.rust".to_string();
+        rust.scope = crate::protocol::BehaviorScope::Document { document_id: 9 };
+        state.publish_replacement(markdown).unwrap();
+        state.publish_replacement(rust).unwrap();
+
+        let request = |document_id| crate::protocol::LanguageIntelligenceRequest {
+            request_id: 1,
+            client_id: 2,
+            document_id,
+            document_version: 4,
+            behavior_version: 3,
+            cursor_byte_offset: 1,
+            feature: crate::protocol::LanguageIntelligenceFeature::Hover,
+            provider_generation: 0,
+        };
+
+        let markdown_window = language_intelligence_document_window_for_behavior(
+            &request(7),
+            "## Heading",
+            state.manifest_for(7),
+        );
+        assert_eq!(markdown_window.active_mode, "markdown");
+
+        let rust_window = language_intelligence_document_window_for_behavior(
+            &request(9),
+            "fn main() {}",
+            state.manifest_for(9),
+        );
+        assert_eq!(rust_window.active_mode, "rust");
     }
 
     #[test]
@@ -3371,7 +3636,7 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn server_accepts_hello_and_sends_snapshot() {
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -3421,6 +3686,7 @@ await loadPackage("@clay/markdown");"#,
                 text: "Hello from server".to_string(),
                 access: DocumentAccess::Editable { lease_id: 1 },
                 lease_id: Some(1),
+                workspace_root: String::new(),
             }
         );
 
@@ -3462,7 +3728,7 @@ await loadPackage("@clay/markdown");"#,
             document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
             language_intelligence: LanguageIntelligenceCoordinator,
         ) -> Self {
-            let (client, server) = duplex(4096);
+            let (client, server) = duplex(65536);
             let codec = Codec::default();
             let server_task = tokio::spawn(super::handle_connection_with_analysis(
                 server,
@@ -3479,6 +3745,8 @@ await loadPackage("@clay/markdown");"#,
                 document_analysis,
                 language_intelligence,
                 None,
+                Arc::new(Mutex::new(crate::server::tab_registry::TabRegistry::new())),
+                tokio::sync::broadcast::channel(16).0,
                 codec,
             ));
             let mut client = client;
@@ -4083,7 +4351,7 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn stale_client_is_rejected_after_native_decoration_semantics_change() {
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let server_task = tokio::spawn(handle_connection(
             server,
@@ -4124,7 +4392,7 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn live_typography_update_reaches_connection_once() {
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let runtime_generation = runtime_generation();
         let server_task = tokio::spawn(handle_connection(
@@ -4189,7 +4457,7 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn server_sends_minimal_behavior_manifest() {
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::default()));
         let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
@@ -4233,7 +4501,7 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn server_does_not_send_default_workspace_sdui_snapshot_after_bootstrap() {
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -4273,6 +4541,8 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
         // Post-handshake file-open capability is always issued once.
         assert!(matches!(
             codec.read_server_message(&mut client).await.unwrap(),
@@ -4291,7 +4561,7 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn client_receives_js_generated_sdui_snapshot() {
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             1,
@@ -4370,6 +4640,7 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::SduiSnapshot { tree, .. } => {
                 assert!(tree.nodes.iter().any(|node| matches!(
@@ -4386,7 +4657,7 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn server_sends_runtime_diagnostics_after_bootstrap() {
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::default()));
         let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
@@ -4427,6 +4698,7 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
         assert_eq!(
             codec.read_server_message(&mut client).await.unwrap(),
@@ -4435,6 +4707,7 @@ await loadPackage("@clay/markdown");"#,
                 "Only clay:* facades and relative local configuration modules are allowed.",
             ))
         );
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
 
         drop(client);
         server_task.await.unwrap().unwrap();
@@ -4442,7 +4715,7 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn server_acknowledges_insert_edit() {
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -4481,7 +4754,9 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
         codec
@@ -4518,7 +4793,7 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn server_rejects_edit_with_stale_behavior_version_without_mutating_document() {
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -4557,7 +4832,9 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
         codec
@@ -4625,7 +4902,7 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn server_sends_resync_snapshot_after_request() {
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -4664,7 +4941,9 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
         codec
@@ -4704,7 +4983,7 @@ await loadPackage("@clay/markdown");"#,
         let root_id = workspace_state_value.add_root(&root).unwrap();
         let workspace = Arc::new(Mutex::new(workspace_state_value));
 
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -4743,7 +5022,9 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
         codec
@@ -4823,7 +5104,8 @@ await loadPackage("@clay/markdown");"#,
                 } => break,
                 ServerMessage::DecorationSet(_)
                 | ServerMessage::DiagnosticSet(_)
-                | ServerMessage::RuntimeDiagnostic(_) => {}
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::BehaviorManifest(_) => {}
                 other => panic!("expected edit acknowledgement, got {other:?}"),
             }
         }
@@ -4836,7 +5118,9 @@ await loadPackage("@clay/markdown");"#,
                     assert!(!set.spans.is_empty());
                     break;
                 }
-                ServerMessage::DiagnosticSet(_) | ServerMessage::RuntimeDiagnostic(_) => {}
+                ServerMessage::DiagnosticSet(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::BehaviorManifest(_) => {}
                 other => panic!("expected refreshed syntax decorations, got {other:?}"),
             }
         }
@@ -4926,10 +5210,12 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         let tree = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::SduiSnapshot { tree, .. } => tree,
             message => panic!("expected file browser SduiSnapshot, got {message:?}"),
         };
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
         let action = tree
             .nodes
@@ -5018,7 +5304,8 @@ await loadPackage("@clay/markdown");"#,
                 }
                 ServerMessage::DecorationSet(_)
                 | ServerMessage::DiagnosticSet(_)
-                | ServerMessage::RuntimeDiagnostic(_) => {}
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::BehaviorManifest(_) => {}
                 message => panic!("expected opened-file EditAck, got {message:?}"),
             }
         }
@@ -5074,7 +5361,7 @@ await loadPackage("@clay/markdown");"#,
             )
             .await
             .unwrap();
-        for _ in 0..6 {
+        for _ in 0..8 {
             let _ = codec.read_server_message(&mut client).await.unwrap();
         }
         let _capability = codec.read_server_message(&mut client).await.unwrap();
@@ -5264,7 +5551,9 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
         let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::FileOpenCapabilityIssued { token } => token,
             message => panic!("expected FileOpenCapabilityIssued, got {message:?}"),
@@ -5311,6 +5600,12 @@ await loadPackage("@clay/markdown");"#,
         }
         // Server re-issues one pending capability after the open attempt; parse
         // decorations are scheduled in the background instead of blocking open.
+        // Phase 22.2: the follow-up also carries the connection-wide manifest
+        // after the document's mode layer; consume it before the capability.
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::BehaviorManifest(_) => {}
+            message => panic!("expected trailing global manifest, got {message:?}"),
+        }
         assert!(matches!(
             codec.read_server_message(&mut client).await.unwrap(),
             ServerMessage::FileOpenCapabilityIssued { .. }
@@ -5378,12 +5673,12 @@ await loadPackage("@clay/markdown");"#,
             2,
             "open should classify/activate on the persistent runtime without a fresh per-open runtime"
         );
-        assert!(matches!(
-            &messages[0],
+        assert!(messages.iter().any(|message| matches!(
+            message,
             ServerMessage::BehaviorManifest(manifest)
                 if manifest.manifest_id == "markdown.markdown"
                     && matches!(manifest.scope, BehaviorScope::Document { document_id: 2 })
-        ));
+        )));
         assert!(messages.iter().all(|message| {
             !matches!(message, ServerMessage::DecorationSet(set) if set.document_id == 2)
         }));
@@ -5681,7 +5976,7 @@ await loadPackage("@clay/markdown");"#,
         fs::write(&sibling, "# sibling\n").unwrap();
         let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
 
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -5720,7 +6015,9 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
         let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::FileOpenCapabilityIssued { token } => token,
             message => panic!("expected FileOpenCapabilityIssued, got {message:?}"),
@@ -5801,7 +6098,7 @@ await loadPackage("@clay/markdown");"#,
         fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
         let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
 
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,
@@ -5840,7 +6137,9 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
         let capability_token = match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::FileOpenCapabilityIssued { token } => token,
             message => panic!("expected FileOpenCapabilityIssued, got {message:?}"),
@@ -5879,7 +6178,7 @@ await loadPackage("@clay/markdown");"#,
         let root = temp_workspace("selected-folder-stale");
         let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
 
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::default()));
         let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
@@ -5914,7 +6213,9 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
         codec
@@ -5952,7 +6253,7 @@ await loadPackage("@clay/markdown");"#,
         let root_id = workspace_state_value.add_root(&root).unwrap();
         let workspace = Arc::new(Mutex::new(workspace_state_value));
 
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::default()));
         let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
@@ -5987,7 +6288,9 @@ await loadPackage("@clay/markdown");"#,
         let _manifest = codec.read_server_message(&mut client).await.unwrap();
         let _active_theme = codec.read_server_message(&mut client).await.unwrap();
         let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
         let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
         let _capability = codec.read_server_message(&mut client).await.unwrap();
 
         codec
@@ -6103,7 +6406,7 @@ await loadPackage("@clay/markdown");"#,
             )
             .await
             .unwrap();
-        for _ in 0..7 {
+        for _ in 0..9 {
             let _ = codec.read_server_message(&mut client).await.unwrap();
         }
 
@@ -6160,7 +6463,7 @@ await loadPackage("@clay/markdown");"#,
         fs::write(&target, "# secret\n").unwrap();
         let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
 
-        let (client, server) = duplex(4096);
+        let (client, server) = duplex(65536);
         let codec = Codec::default();
         let document = Arc::new(Mutex::new(DocumentState::new(
             7,

@@ -1,6 +1,8 @@
 # 03 — Files and Workspace
 
-Open/save/reload, dirty state, conflict recovery, workspace browser.
+Open/save/reload, dirty state, conflict recovery, workspace browser,
+multi-document switching across panes (Phase 22.2: each pane hosts one
+document of the workspace; the open-documents switcher follows pane focus).
 Authoritative detail: `docs/development/file-open-save-reload-workflow.md`
 (read it for capability tokens, platform matrix, and authority boundaries).
 
@@ -29,6 +31,9 @@ Open `/tmp/clay-manual` as the workspace.
 | F1 | `Ctrl+O`, select `b.md` | File replaces buffer; markdown mode/decorations activate; native dialog on your platform |
 | F2 | Cancel the dialog | No-op, not an error |
 | F3 | Open a second file via workspace browser/fuzzy open | Multi-document session; switcher (`clientShowOpenDocuments`) lists both |
+| F3a | With the window split into 2 panes, open a second file from the OTHER pane (browser/fuzzy open while that pane is focused) | The new document opens in the pane that requested it (Phase 22.2 focused-pane targeting); the switcher on either pane lists BOTH documents (`pane 1: ...`, `pane 2: ...`). Phase 22.3: the request targets the ACTIVE TAB's focused pane — each tab is an independent client view with its own pane tree and documents (see module 14, T12) |
+| F3b | From the switcher, select the OTHER pane's entry | That pane switches to its listed document and receives focus; the requesting pane keeps its own document |
+| F3c | From a pane, open a file that is already open in the other pane | No second view — the owning pane is focused instead (duplicate-open rule); the file's caret/content stay untouched |
 
 ## Save and dirty state
 
@@ -53,11 +58,16 @@ Open `/tmp/clay-manual` as the workspace.
 |---|--------|----------|
 | F11 | Toggle the workspace file browser (documented workspace command) | Browser shows `a.txt`, `b.md`, `sub/`; fixed panel resizes the editor main rect (does not cover text) |
 | F12 | Fuzzy-open `sub/c.txt` from browser | Opens in editor |
+| F12a | Fuzzy-open `sub/c.txt` from a split pane while it is already open in another pane | Focuses the owning pane; no duplicate view (see F3c) |
 
 ## Negative checks
 
 - Opening files grants access to the selected file + workspace roots only —
-  no broadened filesystem authority.
+  no broadened filesystem authority (holds per pane — Phase 22.2 opens are
+  capability-gated through the same server path as before; Phase 22.3: each
+  tab's connection carries its own grants, so opens are also per tab).
+- A file cannot be opened twice across panes (F3c, F12a); the pane-scoped
+  switcher never creates a second view of a document.
 - Save/conflict paths never run package JavaScript or parser work in the
   keystroke/paint path.
 

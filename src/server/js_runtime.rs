@@ -81,6 +81,11 @@ pub(crate) struct ClayJsRuntimeService {
     /// feeds connection initial sync and lag replay.
     caret_styles: tokio::sync::broadcast::Sender<Option<crate::protocol::CaretStyle>>,
     caret_style_state: std::sync::Arc<std::sync::Mutex<Option<crate::protocol::CaretStyle>>>,
+    /// Phase 22.1: shell-preferences channel plus the current-value store.
+    /// Same lifetime semantics as `caret_styles`: survives reloads, feeds
+    /// connection initial sync and lag replay.
+    shell_preferences: tokio::sync::broadcast::Sender<crate::protocol::ShellPreferences>,
+    shell_preferences_state: std::sync::Arc<std::sync::Mutex<crate::protocol::ShellPreferences>>,
 }
 
 impl std::fmt::Debug for ClayJsRuntimeService {
@@ -176,6 +181,8 @@ impl ClayJsRuntimeService {
             editor_commands: current.editor_commands.clone(),
             caret_styles: current.caret_styles.clone(),
             caret_style_state: std::sync::Arc::clone(&current.caret_style_state),
+            shell_preferences: current.shell_preferences.clone(),
+            shell_preferences_state: std::sync::Arc::clone(&current.shell_preferences_state),
         }
     }
 
@@ -238,6 +245,12 @@ impl ClayJsRuntimeService {
         let (caret_styles, _) = tokio::sync::broadcast::channel(4);
         let caret_style_state =
             std::sync::Arc::new(std::sync::Mutex::new(None::<crate::protocol::CaretStyle>));
+        // Phase 22.1: shell-preferences lane.
+        let (shell_preferences, _) = tokio::sync::broadcast::channel(4);
+        let shell_preferences_state =
+            std::sync::Arc::new(std::sync::Mutex::new(crate::protocol::ShellPreferences {
+                pane_focus_policy: "click".to_string(),
+            }));
         trusted
             .worker
             .lock()
@@ -266,6 +279,15 @@ impl ClayJsRuntimeService {
                 caret_styles.clone(),
                 std::sync::Arc::clone(&caret_style_state),
             );
+        trusted
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned")
+            .op_state
+            .set_shell_preferences_publisher(
+                shell_preferences.clone(),
+                std::sync::Arc::clone(&shell_preferences_state),
+            );
         third_party
             .worker
             .lock()
@@ -280,6 +302,15 @@ impl ClayJsRuntimeService {
             .set_caret_style_publisher(
                 caret_styles.clone(),
                 std::sync::Arc::clone(&caret_style_state),
+            );
+        third_party
+            .worker
+            .lock()
+            .expect("Clay runtime service worker mutex poisoned")
+            .op_state
+            .set_shell_preferences_publisher(
+                shell_preferences.clone(),
+                std::sync::Arc::clone(&shell_preferences_state),
             );
         Self {
             evaluations: Arc::new(AtomicU64::new(0)),
@@ -297,6 +328,8 @@ impl ClayJsRuntimeService {
             editor_commands,
             caret_styles,
             caret_style_state,
+            shell_preferences,
+            shell_preferences_state,
         }
     }
 
@@ -349,6 +382,20 @@ impl ClayJsRuntimeService {
             .expect("caret style state mutex poisoned")
     }
 
+    /// Phase 22.1: subscribe to shell-preferences updates.
+    pub(crate) fn subscribe_shell_preferences(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<crate::protocol::ShellPreferences> {
+        self.shell_preferences.subscribe()
+    }
+
+    /// Current shell preferences for connection initial sync and lag replay.
+    pub(crate) fn shell_preferences(&self) -> crate::protocol::ShellPreferences {
+        self.shell_preferences_state
+            .lock()
+            .expect("shell preferences state mutex poisoned")
+            .clone()
+    }
     fn domain(&self, domain: crate::packages::bundled::RuntimeDomain) -> &DomainRuntime {
         match domain {
             crate::packages::bundled::RuntimeDomain::Trusted => &self.trusted,
@@ -383,6 +430,10 @@ impl ClayJsRuntimeService {
         replacement.op_state.set_caret_style_publisher(
             self.caret_styles.clone(),
             std::sync::Arc::clone(&self.caret_style_state),
+        );
+        replacement.op_state.set_shell_preferences_publisher(
+            self.shell_preferences.clone(),
+            std::sync::Arc::clone(&self.shell_preferences_state),
         );
         *self
             .domain(domain)
@@ -434,10 +485,23 @@ impl ClayJsRuntimeService {
         &self,
         source: impl Into<String> + Send + 'static,
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
+        self.evaluate_controlled_module_for_document(source, 1)
+            .await
+    }
+
+    /// Controlled-source evaluation stamped with the runtime document the
+    /// evaluation serves. Classification/open-path evaluations use the opened
+    /// document's id so harvested per-document mode manifests resolve to the
+    /// right layer (Phase 22.2).
+    pub(crate) async fn evaluate_controlled_module_for_document(
+        &self,
+        source: impl Into<String> + Send + 'static,
+        runtime_document_id: crate::protocol::DocumentId,
+    ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
         self.evaluate_entry(
             RuntimeEntry::ControlledSource(source.into()),
             None,
-            1,
+            runtime_document_id,
             "runtime.evaluate_controlled_module",
         )
         .await
@@ -4634,6 +4698,7 @@ mod tests {
             "clay:theme",
             "clay:application",
             "clay:editor",
+            "clay:shell",
         ] {
             let result = service
                 .evaluate_third_party_module(format!(r#"import "{specifier}";"#))
@@ -5618,7 +5683,7 @@ mod tests {
             "#,
         ] {
             let error = service
-                .evaluate_controlled_module(source)
+                .evaluate_controlled_module_for_document(source, 88)
                 .await
                 .unwrap_err();
             assert!(
@@ -5776,7 +5841,7 @@ mod tests {
             "#,
         ] {
             let error = service
-                .evaluate_controlled_module(source)
+                .evaluate_controlled_module_for_document(source, 88)
                 .await
                 .unwrap_err();
             assert!(
@@ -7920,7 +7985,7 @@ mod tests {
                 "#
             );
             let error = ClayJsRuntimeService::default()
-                .evaluate_controlled_module(source)
+                .evaluate_controlled_module_for_document(source, 88)
                 .await
                 .unwrap_err();
 
@@ -8207,7 +8272,7 @@ mod tests {
                 vec!["}"],
                 vec![".", ":"],
                 false,
-                1700,
+                6400,
             ),
             (
                 "@clay/typescript",
@@ -8218,7 +8283,7 @@ mod tests {
                 vec!["}", ")", "]"],
                 vec!["."],
                 false,
-                1900,
+                6400,
             ),
             (
                 "@clay/javascript",
@@ -8229,7 +8294,7 @@ mod tests {
                 vec!["}", ")", "]"],
                 vec!["."],
                 false,
-                1900,
+                6400,
             ),
             (
                 "@clay/markdown",
@@ -8240,7 +8305,7 @@ mod tests {
                 vec![],
                 vec!["#", "[", "`"],
                 true,
-                1900,
+                6400,
             ),
         ];
 
@@ -8266,7 +8331,7 @@ mod tests {
                 "#,
             );
             let result = ClayJsRuntimeService::default()
-                .evaluate_controlled_module(source)
+                .evaluate_controlled_module_for_document(source, 88)
                 .await
                 .unwrap_or_else(|error| panic!("{specifier} should activate: {error}"));
             let manifest = result
@@ -8731,6 +8796,75 @@ mod tests {
         assert_eq!(service.caret_style_override(), Some(style));
     }
 
+    /// Phase 22.1 task 10: `setPaneFocusPolicy` from user configuration
+    /// publishes the validated preference on the shell-preferences lane.
+    #[tokio::test]
+    async fn set_pane_focus_policy_publishes_shell_preferences() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let mut receiver = service.subscribe_shell_preferences();
+        let root = config_fixture("set-pane-focus-policy");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { setPaneFocusPolicy } from "clay:shell";
+            const summary = setPaneFocusPolicy({ paneFocusPolicy: "cursor" });
+            if (summary.paneFocusPolicy !== "cursor") {
+                throw new Error("expected cursor summary");
+            }
+            "#,
+        )
+        .unwrap();
+        service
+            .load_configuration_from_root(root)
+            .await
+            .expect("pane focus policy configuration loads");
+        let preferences = receiver
+            .recv()
+            .await
+            .expect("shell preferences lane delivers");
+        assert_eq!(preferences.pane_focus_policy, "cursor");
+        // Current-value store feeds connection initial sync / lag replay.
+        assert_eq!(service.shell_preferences().pane_focus_policy, "cursor");
+    }
+
+    /// Phase 22.1 task 10: unknown pane-focus values are rejected at the
+    /// configuration boundary with an actionable diagnostic.
+    #[tokio::test]
+    async fn set_pane_focus_policy_rejects_unknown_values() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let root = config_fixture("set-pane-focus-policy-invalid");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { setPaneFocusPolicy } from "clay:shell";
+            setPaneFocusPolicy({ paneFocusPolicy: "hover" });
+            "#,
+        )
+        .unwrap();
+        let result = service.load_configuration_from_root(root).await;
+        assert!(
+            result.is_err(),
+            "unknown pane focus value must not silently evaluate, got {result:?}"
+        );
+    }
+
+    /// Phase 22.1 task 10: with no `setPaneFocusPolicy` call the store keeps
+    /// the `click` default for connection initial sync.
+    #[tokio::test]
+    async fn shell_preferences_default_to_click_when_unset() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = ClayJsRuntimeService::default();
+        let root = config_fixture("shell-preferences-default");
+        fs::write(root.join("init.js"), "// no shell configuration\n").unwrap();
+        service
+            .load_configuration_from_root(root)
+            .await
+            .expect("empty configuration loads");
+        assert_eq!(service.shell_preferences().pane_focus_policy, "click");
+    }
+
     /// Follow-up round (`editor-control`): third-party packages pass the same
     /// gate (shared op state, mode-scoped); callers without any package
     /// context are denied in the third-party domain.
@@ -9141,7 +9275,7 @@ mod tests {
                 first, second, third
             );
             let result = ClayJsRuntimeService::default()
-                .evaluate_controlled_module(source)
+                .evaluate_controlled_module_for_document(source, 88)
                 .await
                 .unwrap();
 

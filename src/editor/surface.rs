@@ -1431,6 +1431,17 @@ impl EditorSurface {
         }
     }
 
+    /// Phase 22.2: advance the connection-wide behavior version without
+    /// swapping this document's mode content. Keeps outbound edit/completion
+    /// stamps current when another document's mode activation bumps the global
+    /// version, without cross-pane manifest content bleed.
+    pub fn update_behavior_version(&mut self, behavior_version: BehaviorVersion) {
+        if let Some(manifest) = &mut self.document.behavior_manifest {
+            manifest.behavior_version = behavior_version;
+        }
+        self.document.behavior_version = behavior_version;
+    }
+
     pub fn apply_decoration_set(&mut self, set: DecorationSet) -> bool {
         if set.document_id != self.document.document_id
             || set.document_version != self.document.document_version

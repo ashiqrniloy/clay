@@ -4,21 +4,21 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientShowOpenDocuments
 js_facade: runtime/js/editor.js::clientShowOpenDocuments
-backing_rust: src/masonry_editor.rs::EditorWidget::show_open_documents_menu; src/editor/document_session.rs::DocumentSessionStore; src/masonry_editor.rs::EditorWidget::activate_document
+backing_rust: src/masonry_pane_document.rs::PaneDocumentView::show_open_documents_menu; src/editor/document_session.rs::DocumentSessionStore; src/masonry_pane_document.rs::PaneDocumentView::activate_document; src/main.rs::Driver (cross-pane aggregation and ActivateDocumentInPane routing)
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientShowOpenDocuments
 user_facing_name: Show Open Documents
-summary: Return the stable bindable command ID for listing retained open-document sessions and activating one without re-downloading text.
+summary: Return the stable bindable command ID for the focused pane's open-documents switcher, listing every pane's open document plus retained sessions and activating one without re-downloading text.
 owner: client
-phase: Phase 20
+phase: Phase 22.2
 visibility: public
 permissions: []
 key_bindings: []
 custom_properties: []
-security: Bindable client UI command ID only; after explicit user routing it opens a transient menu over already-retained client sessions and activates a chosen DocumentId locally, and this API does not grant filesystem/workspace expansion, package/configuration/AI document mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
+security: Bindable client UI command ID only; after explicit user routing it opens a transient menu over already-retained client sessions on the focused pane (plus other panes' sessions for focus-and-switch activation) and activates a chosen DocumentId locally, and this API does not grant filesystem/workspace expansion, package/configuration/AI document mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority. Cross-pane activation stays capability/workspace-grant gated: it only focuses a pane the server already authorized for that document.
 agent_guidance: Use `clay.editor.clientShowOpenDocuments` only as a documented command ID for `bindKey`; do not invent client filesystem authority, tab hosts with package-owned native widgets, or raw Deno ops. Prefer `serverListDocuments` for server-authoritative open-registry metadata.
-lookup_tags: [editor, multi-document, sessions, documents, keybindings, js-api]
+lookup_tags: [editor, multi-document, sessions, documents, panes, keybindings, js-api]
 app_visible: true
 help_visible: true
 stability: runtime-backed-command
@@ -29,15 +29,17 @@ async: false
 
 ## Summary
 
-Return the stable bindable command ID for listing retained open-document sessions and activating one without re-downloading text.
+Return the stable bindable command ID for the focused pane's open-documents switcher, listing every pane's open document plus retained sessions and activating one without re-downloading text.
 
 ## Description
 
 `clientShowOpenDocuments` is the public Clay JS API descriptor for **Show Open Documents**. It returns the stable command ID `clay.editor.clientShowOpenDocuments` so configuration, help, and agents can name the multi-document switcher without hard-coding Rust UI.
 
-Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. The menu opens later only after an explicit user key/command route reaches the native editor widget. Selecting an item activates `clay.editor.clientActivateDocument` with a `documentId` argument, restoring that retained client session's shadow text, caret/selection, viewport, history, and dirty chrome locally. The server remains open-registry/lease/dirty authority; this command does not expand workspace grants or re-download text for sessions the client already retains.
+Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. The menu opens later only after an explicit user key/command route reaches the **focused pane's** document view (Phase 22.2: each pane hosts at most one open document of the active tab's workspace; Phase 22.3: each tab is a separate client view with its own connection, split tree, and documents — the switcher follows pane focus inside the active tab, not a window-global editor).
 
-Opening a second file through the normal `DocumentOpened` path retains the previous session automatically (bound at 64 total sessions including the active document).
+Selecting an item activates `clay.editor.clientActivateDocument` with a `documentId` argument. Entries owned by the focused pane restore that retained client session's shadow text, caret/selection, viewport, history, and dirty chrome locally, exactly as before. Since Phase 22.2 the menu also lists every other pane's open document and retained sessions (`pane N: <name>` entries with active/dirty markers); activating a cross-pane entry carries a `paneId` argument, switches the **owning** pane to that document (stashing its prior session), and focuses it — consistent with the one-view-per-document rule. The server remains open-registry/lease/dirty authority; this command does not expand workspace grants, focus a pane the server has not authorized, or re-download text for sessions the client already retains.
+
+Opening a second file through the normal `DocumentOpened` path retains the previous session automatically (bound at 64 total sessions including the active document). Opening a file that is already open in another pane focuses that pane instead of creating a second view; the redundant server snapshot is a no-op on the live surface.
 
 ## When to use
 
@@ -84,7 +86,7 @@ Returns the string `"clay.editor.clientShowOpenDocuments"`. Synchronous. No IPC.
 
 ## Errors
 
-This helper does not throw. If no document has been opened yet, the editor command is a no-op. Missing retained sessions selected from a stale menu produce a sanitized runtime diagnostic.
+This helper does not throw. If no document has been opened yet, the command is a no-op on the focused pane. Missing retained sessions selected from a stale menu (including a cross-pane entry whose pane closed since the menu opened) produce a sanitized runtime diagnostic.
 
 ## Permissions and security
 
@@ -97,14 +99,14 @@ Use `clay.editor.clientShowOpenDocuments` only as a documented command ID for `b
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientShowOpenDocuments`
-- Editor menu: `src/masonry_editor.rs::EditorWidget::show_open_documents_menu`
-- Activate path: `src/masonry_editor.rs::EditorWidget::activate_document`
+- Pane menu: `src/masonry_pane_document.rs::PaneDocumentView::show_open_documents_menu`
+- Activate path: `src/masonry_pane_document.rs::PaneDocumentView::activate_document` (own pane); `src/main.rs::Driver` cross-pane aggregation and `ActivateDocumentInPane` routing
 - Session store: `src/editor/document_session.rs::DocumentSessionStore`
 - Keybinding allowlist: `src/server/ops/keybindings.rs`
 
 ## Stability notes
 
-Runtime-backed Phase 20 client UI command. Activate-by-id remains an internal menu argument (`documentId`) rather than a separate options-taking Clay JS helper in this phase.
+Runtime-backed Phase 22.2 client UI command. Activate-by-id remains an internal menu argument (`documentId`, plus `paneId` for cross-pane entries) rather than a separate options-taking Clay JS helper in this phase.
 
 ## Lookup metadata
 
@@ -114,4 +116,4 @@ Runtime-backed Phase 20 client UI command. Activate-by-id remains an internal me
 - Module/export: `clay:editor` / `clientShowOpenDocuments`
 - Default key bindings: none
 - Custom properties: none
-- Tags: `[editor, multi-document, sessions, documents, keybindings, js-api]`
+- Tags: `[editor, multi-document, sessions, documents, panes, keybindings, js-api]`

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -9,14 +10,27 @@ use crate::{
     behavior::manifest::{ManifestValidationError, validate_manifest},
     perf::budgets::{PREVIOUS_BEHAVIOR_GRACE_MAX_TRANSACTIONS, PREVIOUS_BEHAVIOR_GRACE_MS},
     protocol::{
-        BehaviorManifest, BehaviorVersion, ClientId, DocumentId, EditRejection,
+        BehaviorManifest, BehaviorScope, BehaviorVersion, ClientId, DocumentId, EditRejection,
         RuntimeGenerationId, ServerMessage, TransactionId,
     },
 };
 
+/// The connection's active behavior manifests.
+///
+/// Phase 22.2: one global-scope manifest (also the version authority) plus
+/// one per-document layer per open document. Mode activations publish
+/// `BehaviorScope::Document` manifests keyed by document id, so concurrent
+/// panes in different major modes each resolve their own mode's content
+/// (keymaps, editor rules, font role) while edits stay stamped with the
+/// single connection-wide behavior version.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ActiveBehaviorManifest {
-    manifest: BehaviorManifest,
+    global: BehaviorManifest,
+    documents: HashMap<DocumentId, BehaviorManifest>,
+    /// Connection-wide behavior version: every publish (global or per-document
+    /// layer) advances this single counter, and edits/completions are stamped
+    /// against it regardless of which document's layer governs the request.
+    version: BehaviorVersion,
 }
 
 impl Default for ActiveBehaviorManifest {
@@ -29,19 +43,50 @@ impl Default for ActiveBehaviorManifest {
 impl ActiveBehaviorManifest {
     pub(crate) fn new(manifest: BehaviorManifest) -> Result<Self, ManifestValidationError> {
         validate_manifest(&manifest)?;
-        Ok(Self { manifest })
+        let version = manifest.behavior_version;
+        Ok(Self {
+            global: manifest,
+            documents: HashMap::new(),
+            version,
+        })
     }
 
+    /// The global-scope manifest; also the connection's version authority.
     pub(crate) fn manifest(&self) -> &BehaviorManifest {
-        &self.manifest
+        &self.global
+    }
+
+    /// Resolve the manifest governing `document_id`: its per-document mode
+    /// layer when one was published, else the global manifest.
+    pub(crate) fn manifest_for(&self, document_id: DocumentId) -> &BehaviorManifest {
+        self.documents.get(&document_id).unwrap_or(&self.global)
     }
 
     pub(crate) fn version(&self) -> BehaviorVersion {
-        self.manifest.behavior_version
+        self.version
     }
 
     pub(crate) fn manifest_message(&self) -> ServerMessage {
-        ServerMessage::BehaviorManifest(Box::new(self.manifest.clone()))
+        ServerMessage::BehaviorManifest(Box::new(self.global.clone()))
+    }
+
+    /// The per-document mode layer for `document_id`, when one is published.
+    pub(crate) fn document_layer(&self, document_id: DocumentId) -> Option<&BehaviorManifest> {
+        self.documents.get(&document_id)
+    }
+
+    /// Every per-document mode manifest, for startup/reconnect delivery so
+    /// clients can rebuild per-document layers.
+    pub(crate) fn document_manifest_messages(&self) -> Vec<ServerMessage> {
+        let mut manifests: Vec<_> = self.documents.values().cloned().collect();
+        manifests.sort_by_key(|manifest| match manifest.scope {
+            BehaviorScope::Document { document_id } => document_id,
+            _ => 0,
+        });
+        manifests
+            .into_iter()
+            .map(|manifest| ServerMessage::BehaviorManifest(Box::new(manifest)))
+            .collect()
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -77,11 +122,18 @@ impl ActiveBehaviorManifest {
     }
 
     pub(crate) fn install_staged(&mut self, replacement: BehaviorManifest) {
-        debug_assert_eq!(
-            replacement.behavior_version,
-            self.version().saturating_add(1)
-        );
-        self.manifest = replacement;
+        debug_assert_eq!(replacement.behavior_version, self.version.saturating_add(1));
+        self.version = replacement.behavior_version;
+        match replacement.scope {
+            BehaviorScope::Document { document_id } => {
+                // Keep the global manifest's version stamp current too, so
+                // snapshot/reconnect delivery of the global manifest always
+                // carries the connection-wide version.
+                self.global.behavior_version = replacement.behavior_version;
+                self.documents.insert(document_id, replacement);
+            }
+            _ => self.global = replacement,
+        }
     }
 
     pub(crate) fn publish_replacement(
@@ -89,8 +141,8 @@ impl ActiveBehaviorManifest {
         replacement: BehaviorManifest,
     ) -> Result<BehaviorManifest, ManifestValidationError> {
         let replacement = self.stage_replacement(replacement)?;
-        self.install_staged(replacement);
-        Ok(self.manifest.clone())
+        self.install_staged(replacement.clone());
+        Ok(replacement)
     }
 }
 
@@ -425,5 +477,96 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[test]
+    fn document_scoped_publishes_resolve_per_document_layers_with_shared_version() {
+        let mut state = ActiveBehaviorManifest::default();
+        let mut global = BehaviorManifest::minimal_text_editing(1);
+        global.manifest_id = "clay.runtime.configuration".to_string();
+        let mut markdown = BehaviorManifest::minimal_text_editing(1);
+        markdown.manifest_id = "markdown.markdown".to_string();
+        markdown.scope = BehaviorScope::Document { document_id: 7 };
+        let mut rust = BehaviorManifest::minimal_text_editing(1);
+        rust.manifest_id = "rust.rust".to_string();
+        rust.scope = BehaviorScope::Document { document_id: 9 };
+
+        let published = state.publish_replacement(global.clone()).unwrap();
+        assert_eq!(published.behavior_version, 2);
+        let published = state.publish_replacement(markdown.clone()).unwrap();
+        assert_eq!(published.behavior_version, 3);
+        let published = state.publish_replacement(rust.clone()).unwrap();
+        assert_eq!(published.behavior_version, 4);
+
+        // The version counter advances on every publish (layer or global).
+        assert_eq!(state.version(), 4);
+        // Each document resolves its own mode layer.
+        assert_eq!(state.manifest_for(7).manifest_id, "markdown.markdown");
+        assert_eq!(state.manifest_for(9).manifest_id, "rust.rust");
+        // Documents without a layer fall back to the global manifest.
+        assert_eq!(
+            state.manifest_for(3).manifest_id,
+            "clay.runtime.configuration"
+        );
+        assert_eq!(state.manifest().manifest_id, "clay.runtime.configuration");
+        // The global slot keeps the global scope publish.
+        assert_eq!(
+            state.manifest().scope,
+            crate::protocol::BehaviorScope::GlobalDefault
+        );
+    }
+
+    #[test]
+    fn document_layer_and_manifest_messages_carry_each_published_layer() {
+        let mut state = ActiveBehaviorManifest::default();
+        let mut markdown = BehaviorManifest::minimal_text_editing(1);
+        markdown.manifest_id = "markdown.markdown".to_string();
+        markdown.scope = BehaviorScope::Document { document_id: 7 };
+        let mut rust = BehaviorManifest::minimal_text_editing(1);
+        rust.manifest_id = "rust.rust".to_string();
+        rust.scope = BehaviorScope::Document { document_id: 9 };
+        state.publish_replacement(markdown.clone()).unwrap();
+        state.publish_replacement(rust.clone()).unwrap();
+
+        assert_eq!(
+            state.document_layer(7).unwrap().manifest_id,
+            "markdown.markdown"
+        );
+        assert_eq!(state.document_layer(9).unwrap().manifest_id, "rust.rust");
+        assert!(state.document_layer(4).is_none());
+
+        let messages = state.document_manifest_messages();
+        let ids: Vec<_> = messages
+            .iter()
+            .map(|message| match message {
+                ServerMessage::BehaviorManifest(manifest) => manifest.manifest_id.as_str(),
+                other => panic!("unexpected message {other:?}"),
+            })
+            .collect();
+        assert_eq!(ids, vec!["markdown.markdown", "rust.rust"]);
+    }
+
+    #[test]
+    fn layer_publish_keeps_global_content_but_advances_stamped_version() {
+        let mut state = ActiveBehaviorManifest::default();
+        let mut global = BehaviorManifest::minimal_text_editing(1);
+        global.manifest_id = "clay.runtime.configuration".to_string();
+        global.commands.push(CommandDeclaration::client_edit(
+            "text.insert",
+            "Duplicate Insert",
+        ));
+        assert!(state.publish_replacement(global.clone()).is_err());
+        let mut clean = BehaviorManifest::minimal_text_editing(1);
+        clean.manifest_id = "clay.runtime.configuration".to_string();
+        state.publish_replacement(clean.clone()).unwrap();
+        let mut layer = BehaviorManifest::minimal_text_editing(1);
+        layer.manifest_id = "markdown.markdown".to_string();
+        layer.scope = BehaviorScope::Document { document_id: 2 };
+        state.publish_replacement(layer.clone()).unwrap();
+
+        // Global content untouched by the layer publish; version advanced.
+        assert_eq!(state.manifest().manifest_id, "clay.runtime.configuration");
+        assert_eq!(state.version(), 3);
+        assert_eq!(state.manifest_for(2).manifest_id, "markdown.markdown");
     }
 }

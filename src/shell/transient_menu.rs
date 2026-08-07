@@ -33,10 +33,11 @@ const MAX_DETAIL_CHARS: usize = TRANSIENT_MENU_MAX_DETAIL_CHARS;
 const MAX_ACCESSIBILITY_LABEL_CHARS: usize = TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct TransientMenuSessionId(pub(crate) u64);
+pub struct TransientMenuSessionId(pub u64);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TransientMenuSession {
+#[doc(hidden)]
+pub struct TransientMenuSession {
     session_id: TransientMenuSessionId,
     prompt: String,
     query: String,
@@ -124,11 +125,11 @@ impl TransientMenuSession {
         }
     }
 
-    pub(crate) fn session_id(&self) -> TransientMenuSessionId {
+    pub fn session_id(&self) -> TransientMenuSessionId {
         self.session_id
     }
 
-    pub(crate) fn prompt(&self) -> &str {
+    pub fn prompt(&self) -> &str {
         &self.prompt
     }
 
@@ -663,6 +664,60 @@ mod tests {
 
     fn sample_item(id: &str, label: &str) -> TransientMenuItem {
         TransientMenuItem::new(id, label, TransientMenuAction::new("clay.builtIn.test"))
+    }
+
+    #[test]
+    fn tab_close_confirm_session_lists_three_choices_with_client_id_arguments() {
+        // Phase 22.4: the driver-owned tab-close confirm menu. Every action
+        // carries the tab's client id (the pane view hands the selection back
+        // to the driver via `EditorAction::TabCloseMenuAction`); the action
+        // ids are driver-local and never collide with the per-view
+        // save-conflict family.
+        let session = super::super::tab_close_confirm_session(
+            9,
+            "Close tab 'work' with 2 unsaved documents (a.md, b.md)?".to_string(),
+            42,
+        );
+        assert_eq!(
+            session.prompt(),
+            "Close tab 'work' with 2 unsaved documents (a.md, b.md)?"
+        );
+        let items = session.items();
+        assert_eq!(items.len(), 3);
+        let labels = items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            labels,
+            vec!["Save all and close", "Discard and close", "Cancel"]
+        );
+        for item in items {
+            assert_eq!(
+                item.action
+                    .arguments
+                    .get("clientId")
+                    .and_then(|v| v.as_u64()),
+                Some(42),
+                "every choice carries the tab's client id"
+            );
+            assert!(
+                !item.accessibility_label.is_empty(),
+                "every choice has an accessibility label"
+            );
+        }
+        assert_eq!(
+            items[0].action.command_id,
+            "clay.shell.clientTabCloseSaveAll"
+        );
+        assert_eq!(
+            items[1].action.command_id,
+            "clay.shell.clientTabCloseDiscard"
+        );
+        assert_eq!(
+            items[2].action.command_id,
+            "clay.shell.clientTabCloseCancel"
+        );
     }
 
     #[test]

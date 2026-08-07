@@ -318,7 +318,8 @@ fn sdui_paint_wires_focus_ring_and_state_colors_for_interactive_components() {
 fn status_bar_insets_are_token_driven() {
     // Plan 065 task 6: paint_status_line must source the status insets from
     // spacing.sm scaled by spacing_scale(), not the hardcoded 12.0/24.0.
-    let src = fs::read_to_string("src/masonry_editor.rs").expect("src/masonry_editor.rs readable");
+    // Phase 22.2: per-pane status lines live in the pane document view.
+    let src = fs::read_to_string("src/masonry_pane_document.rs").expect("pane view readable");
     let body = non_test_body(&src);
     let paint_status = body
         .split("fn paint_status_line")
@@ -341,8 +342,9 @@ fn status_bar_insets_are_token_driven() {
 #[test]
 fn status_bar_paints_top_hairline_divider() {
     // Plan 065 task 6: a paint_divider hairline separates the status bar from
-    // the editor above.
-    let src = fs::read_to_string("src/masonry_editor.rs").expect("src/masonry_editor.rs readable");
+    // the editor above. Phase 22.2: per-pane status lines live in the pane
+    // document view.
+    let src = fs::read_to_string("src/masonry_pane_document.rs").expect("pane view readable");
     let body = non_test_body(&src);
     let paint_status = body
         .split("fn paint_status_line")

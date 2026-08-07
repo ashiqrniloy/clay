@@ -20,7 +20,7 @@
 // Import map (modules available to init.js):
 //   clay:configuration  clay:keybindings  clay:theme       clay:syntax
 //   clay:packages       clay:editor       clay:modes       clay:documents
-//   clay:workspace      clay:language-server                clay:commands
+//   clay:workspace      clay:language-server  clay:shell   clay:commands
 
 // ----------------------------------------------------------------------------
 // 1. Modular configuration — clay:configuration
@@ -238,6 +238,53 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 //   App:           clay.documents.clientOpenFileDialog,
 //                  clay.editor.clientShowOpenDocuments,
 //                  clay.editor.clientRequestResync, ...
+//                  (clientShowOpenDocuments opens on the focused pane and
+//                  lists every pane's open documents since Phase 22.2)
+//
+// Bindable shell command IDs (Phase 22.1 window splits + Phase 22.4 tabs; all
+// ship with default chords, so no bindKey is needed unless you want different
+// ones. Overrides use { scope: "global" } to match the shipped default context):
+//   Splits:        clay.shell.clientSplitPaneVertical    Ctrl+\        side by side
+//                  clay.shell.clientSplitPaneHorizontal  Ctrl+-        stacked
+//                  clay.shell.clientAddEqualPane         Ctrl+Shift+\  redivide equal
+//                  clay.shell.clientClosePane            Ctrl+Alt+W
+//                  (close is document-aware since Phase 22.2: a pane with a
+//                  dirty document is protected until its save-conflict menu
+//                  resolves; closing a clean pane releases its document lease)
+//   Pane focus:    clay.shell.clientFocusPaneNext        Ctrl+Alt+Right
+//                  clay.shell.clientFocusPanePrev        Ctrl+Alt+Left
+//   Resize:        clay.shell.clientResizePaneLeft       Ctrl+Alt+Shift+Left
+//                  clay.shell.clientResizePaneRight      Ctrl+Alt+Shift+Right
+//                  clay.shell.clientResizePaneUp         Ctrl+Alt+Shift+Up
+//                  clay.shell.clientResizePaneDown       Ctrl+Alt+Shift+Down
+//   Move pane:     clay.shell.clientMovePaneNext         Ctrl+Alt+]
+//                  clay.shell.clientMovePanePrev         Ctrl+Alt+[
+//
+// Tab management (Phase 22.4; same bindKey story as the splits above):
+//   Next/prev:    clay.shell.clientTabNext            Ctrl+Tab        wraps around
+//                 clay.shell.clientTabPrev            Ctrl+Shift+Tab  wraps around
+//   New:          clay.shell.clientTabNew             Ctrl+T          same flow as "+"
+//   Close:        clay.shell.clientTabClose           Ctrl+Shift+W    last tab protected;
+//                                                                    dirty tabs confirm
+//   Activate:     clay.shell.clientTabActivate.<N>    Ctrl+<N>        1-based, N in 1..=9;
+//                                                                    beyond count = no-op
+//   Move:         clay.shell.clientTabMoveLeft        Ctrl+Shift+[    boundary = no-op
+//                 clay.shell.clientTabMoveRight       Ctrl+Shift+]    boundary = no-op
+//                 clay.shell.clientTabMoveTo.<N>      Ctrl+Shift+<N>  1-based, N in 1..=9;
+//                                                                    beyond count = no-op
+// Policies: numbering follows the card order (registry order, entry-less
+// mounted tabs appended). Next/prev wrap at both ends; moves never wrap; the
+// active-tab status survives moves. Close protects the last tab, and a tab
+// with unsaved documents gets the save-all/discard/cancel confirm menu.
+// Numbered families are capped at 9 by design — reach tab 10+ with
+// Ctrl+Tab / Ctrl+Shift+Tab or a card click. Tab-bar keyboard focus
+// traversal arrives in Phase 22.6.
+//
+// Rebinding tab commands (Phase 22.4; example chords, commented out — one
+// per family kind: scalar, numbered activate, numbered move-to):
+// bindKey("Ctrl+PageDown", "clay.shell.clientTabNext", { scope: "global" });
+// bindKey("Alt+1", "clay.shell.clientTabActivate.1", { scope: "global" });
+// bindKey("Ctrl+Alt+Shift+9", "clay.shell.clientTabMoveTo.9", { scope: "global" });
 
 import { bindKey, unbindKey } from "clay:keybindings";
 
@@ -256,8 +303,31 @@ bindKey("Alt+R", "clay.editor.clientSmartSelect.shrink", { scope: "editor" });
 bindKey("Ctrl+B", "clay.editor.clientMoveCursor.prevWordStart", { scope: "editor" });
 // unbindKey("Ctrl+B", { scope: "editor" });
 
+// Rebinding a Phase 22.1 split command (example: "add equal pane" on a
+// different chord; scope "global" matches the shipped default context):
+// bindKey("Ctrl+Shift+P", "clay.shell.clientAddEqualPane", { scope: "global" });
+
 // ----------------------------------------------------------------------------
-// 8. Syntax engine preference — clay:syntax
+// 8. Window split pane focus — clay:shell
+// ----------------------------------------------------------------------------
+// Pane focus policy for split panes (Phase 22.1). One option:
+// Since Phase 22.3 the policy applies per active tab (each tab carries its
+// own pane-focus policy; switching tabs preserves each tab's policy).
+//   paneFocusPolicy  "click" | "cursor"
+//     "click"   (default) pointer-down inside a pane activates it
+//     "cursor"  focus follows the pointer across panes; focus changes are
+//               skipped while dragging a divider or panel resize handle
+// Tab/Shift+Tab pane cycling works under both policies. The split commands
+// themselves and their default chords are listed in the key bindings
+// section above; unknown paneFocusPolicy values fail evaluation with a
+// clay.shell.invalid_pane_focus_policy diagnostic.
+import { setPaneFocusPolicy } from "clay:shell";
+
+// setPaneFocusPolicy({ paneFocusPolicy: "click" });   // default
+// setPaneFocusPolicy({ paneFocusPolicy: "cursor" });
+
+// ----------------------------------------------------------------------------
+// 9. Syntax engine preference — clay:syntax
 // ----------------------------------------------------------------------------
 // Force the parser tier for a language or first-party package.
 //   target: language/package name (e.g. "rust")
@@ -270,7 +340,7 @@ import { setSyntaxEnginePreference } from "clay:syntax";
 // setSyntaxEnginePreference("rust", "wasm");
 
 // ----------------------------------------------------------------------------
-// 9. Programmatic editor control — clay:editor
+// 10. Programmatic editor control — clay:editor
 // ----------------------------------------------------------------------------
 // These run through the `editor-control` trust boundary. init.js is trusted
 // user configuration (no package context), so it passes the gate without a
@@ -308,7 +378,7 @@ import { clientExecuteEditorCommand } from "clay:editor";
 //   clientRemoveSelection() clientUndoCursorMove()
 
 // ----------------------------------------------------------------------------
-// 10. Planned — NOT callable yet (documented placeholders)
+// 11. Planned — NOT callable yet (documented placeholders)
 // ----------------------------------------------------------------------------
 // These clay:configuration exports exist as facade stubs and inventory
 // entries but have no server-side validators yet. Calling them throws.

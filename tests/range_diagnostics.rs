@@ -248,6 +248,7 @@ fn diagnostic_set_routes_server_to_client_and_applies_to_matching_document() {
             design_tokens: Vec::new(),
         },
         active_typography: clay::protocol::ActiveTypography::default(),
+        workspace_root: "/tmp/root".to_string(),
     };
     let mut widget = EditorWidget::with_initial_state(initial_state);
 
@@ -501,6 +502,7 @@ fn runtime_diagnostics_remain_status_level_and_range_diagnostics_remain_inline()
             design_tokens: Vec::new(),
         },
         active_typography: clay::protocol::ActiveTypography::default(),
+        workspace_root: "/tmp/root".to_string(),
     };
     let mut widget = EditorWidget::with_initial_state(initial_state);
     let status_before = widget.status_text();

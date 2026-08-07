@@ -30,6 +30,7 @@ pub mod parse_coordinator;
 pub mod runtime_sandbox;
 mod sdui;
 pub mod syntax;
+mod tab_registry;
 mod ui;
 pub(crate) mod workspace;
 
@@ -77,7 +78,7 @@ use crate::{
     perf::budgets::RUNTIME_STATE_BROADCAST_CAPACITY,
     protocol::{
         DocumentId, LockOwner, RuntimeDiagnostic, RuntimeGenerationId, RuntimeStateSnapshot,
-        ServerMessage, codec::Codec,
+        ServerMessage, TabRegistrySnapshot, codec::Codec,
     },
     server::command_execution::{
         CommandExecutionDiagnostic, CommandExecutionRequest, CommandExecutionRule,
@@ -328,6 +329,18 @@ impl RuntimeGenerationStore {
         self.current_service().await.caret_style_override()
     }
 
+    /// Phase 22.1: subscribe to shell-preferences updates.
+    pub(crate) async fn subscribe_shell_preferences(
+        &self,
+    ) -> broadcast::Receiver<crate::protocol::ShellPreferences> {
+        self.current_service().await.subscribe_shell_preferences()
+    }
+
+    /// Current shell preferences (connection initial sync / lag replay).
+    pub(crate) async fn shell_preferences(&self) -> crate::protocol::ShellPreferences {
+        self.current_service().await.shell_preferences()
+    }
+
     pub(crate) fn behavior_grace(&self) -> &BehaviorGraceState {
         &self.behavior_grace
     }
@@ -451,6 +464,12 @@ pub struct IpcServer {
     scoped_locks: ScopedLockManager,
     reload_attempt: Arc<Mutex<()>>,
     next_client_id: Arc<AtomicU64>,
+    /// Phase 22.3: server-authoritative in-memory tab registry (order, active
+    /// tab, per-tab workspace + client binding) plus its broadcast lane. Every
+    /// connection subscribes at spawn and forwards `ServerMessage::TabRegistry`
+    /// snapshots to its stream; lagged receivers resync from the mutex.
+    tab_registry: Arc<Mutex<tab_registry::TabRegistry>>,
+    tab_registry_tx: broadcast::Sender<TabRegistrySnapshot>,
     /// Test-only barrier that parks candidate evaluation until the test releases
     /// it. Production builds omit this field entirely.
     #[cfg(test)]
@@ -548,6 +567,11 @@ impl IpcServer {
             scoped_locks: ScopedLockManager::default(),
             reload_attempt: Arc::new(Mutex::new(())),
             next_client_id: Arc::new(AtomicU64::new(1)),
+            tab_registry: Arc::new(Mutex::new(tab_registry::TabRegistry::new())),
+            tab_registry_tx: broadcast::channel(
+                crate::perf::budgets::RUNTIME_STATE_BROADCAST_CAPACITY,
+            )
+            .0,
             #[cfg(test)]
             reload_barrier: ReloadCandidateBarrier::default(),
         })
@@ -927,7 +951,7 @@ impl IpcServer {
         let runtime_diagnostics = self.runtime_diagnostics.lock().await.snapshot();
         let runtime_snapshot = build_runtime_state_snapshot(
             generation_id,
-            behavior.manifest().clone(),
+            &behavior,
             active_theme.clone(),
             active_typography.clone(),
             sdui.cloned_tree_or_default(),
@@ -1193,6 +1217,8 @@ impl IpcServer {
         let document_analysis = self.document_analysis.clone();
         let language_intelligence = self.language_intelligence.clone();
         let reload_server = IpcServer::clone(self);
+        let tab_registry = Arc::clone(&self.tab_registry);
+        let tab_registry_tx = self.tab_registry_tx.clone();
         let codec = self.codec;
         connections.spawn(async move {
             // The permit lives exactly as long as the connection task.
@@ -1212,6 +1238,8 @@ impl IpcServer {
                 document_analysis,
                 language_intelligence,
                 Some(reload_server),
+                tab_registry,
+                tab_registry_tx,
                 codec,
             )
             .await
@@ -1348,7 +1376,7 @@ fn stage_typography(
 )]
 fn build_runtime_state_snapshot(
     runtime_generation_id: RuntimeGenerationId,
-    behavior: crate::protocol::BehaviorManifest,
+    behavior: &ActiveBehaviorManifest,
     active_theme: crate::protocol::ActiveTheme,
     active_typography: crate::protocol::ActiveTypography,
     sdui_tree: crate::protocol::SduiTree,
@@ -1378,13 +1406,23 @@ fn build_runtime_state_snapshot(
                 initial_diagnostics: published_diagnostics
                     .clone()
                     .filter(|set| set.document_id == document_id),
+                behavior_manifest: Some(behavior.manifest_for(document_id).clone()).filter(
+                    |manifest| {
+                        matches!(
+                            manifest.scope,
+                            crate::protocol::BehaviorScope::Document {
+                                document_id: scope_document_id
+                            } if scope_document_id == document_id
+                        )
+                    },
+                ),
             }
         })
         .collect();
     let snapshot = RuntimeStateSnapshot {
         runtime_generation_id,
         client_id: 0,
-        behavior,
+        behavior: behavior.manifest().clone(),
         active_theme,
         active_typography,
         sdui_tree,
@@ -2492,6 +2530,55 @@ mod runtime_generation_tests {
     }
 
     #[tokio::test]
+    async fn tab_command_bindings_work_and_survive_configuration_reload() {
+        let root = temp_config_root(
+            "tab-bindings",
+            r#"
+            import { clientTabNew } from "clay:shell";
+            import { bindKey } from "clay:keybindings";
+            bindKey("Ctrl+Alt+T", clientTabNew(), { scope: "global" });
+            "#,
+        );
+        let server = server_with_config(root);
+        let first = server.reload_runtime_generation().await;
+        assert!(first.reloaded);
+
+        async fn bound_tab_records(server: &IpcServer) -> String {
+            let service = server.runtime_generation.current_service().await;
+            let evaluation = service
+                .evaluate_controlled_module(
+                    r#"
+                    import { listKeyBindings } from "clay:keybindings";
+                    const matches = listKeyBindings("global")
+                        .filter((candidate) => candidate.command === "clay.shell.clientTabNew")
+                        .map((candidate) => `${candidate.key}:${candidate.command}`)
+                        .join(",");
+                    Deno.core.ops.op_clay_runtime_record(matches);
+                    "#,
+                )
+                .await
+                .unwrap();
+            evaluation.op_records.last().unwrap().clone()
+        }
+
+        assert!(
+            bound_tab_records(&server)
+                .await
+                .contains("Ctrl+Alt+T:clay.shell.clientTabNew"),
+            "init.js tab binding must be live after configuration load"
+        );
+
+        let second = server.reload_runtime_generation().await;
+        assert!(second.reloaded);
+        assert!(
+            bound_tab_records(&server)
+                .await
+                .contains("Ctrl+Alt+T:clay.shell.clientTabNew"),
+            "init.js tab binding must survive a configuration reload"
+        );
+    }
+
+    #[tokio::test]
     async fn successful_reload_refreshes_open_documents_without_full_snapshots() {
         let root = temp_config_root(
             "open-refresh",
@@ -3260,6 +3347,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
         ) {
             let (client, server_stream) = duplex(64 * 1024);
             let connection_server = server.clone();
+            let tab_registry = Arc::clone(&connection_server.tab_registry);
+            let tab_registry_tx = connection_server.tab_registry_tx.clone();
             let handle = tokio::spawn(async move {
                 crate::server::connection::handle_connection_with_analysis(
                     server_stream,
@@ -3276,6 +3365,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                     connection_server.document_analysis.clone(),
                     connection_server.language_intelligence.clone(),
                     Some(connection_server),
+                    tab_registry,
+                    tab_registry_tx,
                     codec,
                 )
                 .await
@@ -3433,6 +3524,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
         let (client, server_stream) = duplex(64 * 1024);
         let codec = crate::protocol::codec::Codec::default();
         let connection_server = server.clone();
+        let tab_registry = Arc::clone(&connection_server.tab_registry);
+        let tab_registry_tx = connection_server.tab_registry_tx.clone();
         let server_task = tokio::spawn(async move {
             crate::server::connection::handle_connection_with_analysis(
                 server_stream,
@@ -3449,6 +3542,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 connection_server.document_analysis.clone(),
                 connection_server.language_intelligence.clone(),
                 Some(connection_server),
+                tab_registry,
+                tab_registry_tx,
                 codec,
             )
             .await
@@ -3465,7 +3560,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             )
             .await
             .unwrap();
-        for _ in 0..7 {
+        for _ in 0..9 {
             let _ = codec.read_server_message(&mut client).await.unwrap();
         }
 
@@ -3535,6 +3630,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
         let (client, server_stream) = duplex(64 * 1024);
         let codec = crate::protocol::codec::Codec::default();
         let connection_server = server.clone();
+        let tab_registry = Arc::clone(&connection_server.tab_registry);
+        let tab_registry_tx = connection_server.tab_registry_tx.clone();
         let server_task = tokio::spawn(async move {
             crate::server::connection::handle_connection_with_analysis(
                 server_stream,
@@ -3551,6 +3648,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 connection_server.document_analysis.clone(),
                 connection_server.language_intelligence.clone(),
                 Some(connection_server),
+                tab_registry,
+                tab_registry_tx,
                 codec,
             )
             .await
@@ -3567,7 +3666,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             )
             .await
             .unwrap();
-        for _ in 0..7 {
+        for _ in 0..9 {
             let _ = codec.read_server_message(&mut client).await.unwrap();
         }
 
@@ -3683,6 +3782,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
         let (client, server_stream) = duplex(64 * 1024);
         let codec = crate::protocol::codec::Codec::default();
         let connection_server = server.clone();
+        let tab_registry = Arc::clone(&connection_server.tab_registry);
+        let tab_registry_tx = connection_server.tab_registry_tx.clone();
         let server_task = tokio::spawn(async move {
             crate::server::connection::handle_connection_with_analysis(
                 server_stream,
@@ -3699,6 +3800,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 connection_server.document_analysis.clone(),
                 connection_server.language_intelligence.clone(),
                 Some(connection_server),
+                tab_registry,
+                tab_registry_tx,
                 codec,
             )
             .await
@@ -3715,7 +3818,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             )
             .await
             .unwrap();
-        for _ in 0..7 {
+        for _ in 0..9 {
             let _ = codec.read_server_message(&mut client).await.unwrap();
         }
 
@@ -3775,6 +3878,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
         let (client, server_stream) = duplex(64 * 1024);
         let codec = crate::protocol::codec::Codec::default();
         let connection_server = server.clone();
+        let tab_registry = Arc::clone(&connection_server.tab_registry);
+        let tab_registry_tx = connection_server.tab_registry_tx.clone();
         let server_task = tokio::spawn(async move {
             crate::server::connection::handle_connection_with_analysis(
                 server_stream,
@@ -3791,6 +3896,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 connection_server.document_analysis.clone(),
                 connection_server.language_intelligence.clone(),
                 Some(connection_server),
+                tab_registry,
+                tab_registry_tx,
                 codec,
             )
             .await
@@ -3807,7 +3914,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             )
             .await
             .unwrap();
-        for _ in 0..7 {
+        for _ in 0..9 {
             let _ = codec.read_server_message(&mut client).await.unwrap();
         }
 
@@ -3897,6 +4004,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
         let (client, server_stream) = duplex(64 * 1024);
         let codec = crate::protocol::codec::Codec::default();
         let connection_server = server.clone();
+        let tab_registry = Arc::clone(&connection_server.tab_registry);
+        let tab_registry_tx = connection_server.tab_registry_tx.clone();
         let server_task = tokio::spawn(async move {
             crate::server::connection::handle_connection_with_analysis(
                 server_stream,
@@ -3913,6 +4022,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 connection_server.document_analysis.clone(),
                 connection_server.language_intelligence.clone(),
                 Some(connection_server),
+                tab_registry,
+                tab_registry_tx,
                 codec,
             )
             .await
@@ -3929,7 +4040,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             )
             .await
             .unwrap();
-        for _ in 0..7 {
+        for _ in 0..9 {
             let _ = codec.read_server_message(&mut client).await.unwrap();
         }
 
@@ -4018,6 +4129,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
         ) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<()>) {
             let (client, server_stream) = duplex(64 * 1024);
             let connection_server = server.clone();
+            let tab_registry = Arc::clone(&connection_server.tab_registry);
+            let tab_registry_tx = connection_server.tab_registry_tx.clone();
             let handle = tokio::spawn(async move {
                 let _ = crate::server::connection::handle_connection_with_analysis(
                     server_stream,
@@ -4034,6 +4147,8 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                     connection_server.document_analysis.clone(),
                     connection_server.language_intelligence.clone(),
                     Some(connection_server),
+                    tab_registry,
+                    tab_registry_tx,
                     codec,
                 )
                 .await;
@@ -4286,6 +4401,8 @@ mod tests {
             scoped_locks: ScopedLockManager::default(),
             reload_attempt: Arc::new(Mutex::new(())),
             next_client_id: Arc::new(AtomicU64::new(1)),
+            tab_registry: Arc::new(Mutex::new(crate::server::tab_registry::TabRegistry::new())),
+            tab_registry_tx: tokio::sync::broadcast::channel(16).0,
             #[cfg(test)]
             reload_barrier: super::ReloadCandidateBarrier::default(),
         }
@@ -4341,7 +4458,10 @@ mod tests {
         loop {
             match codec.read_server_message(&mut stream).await.unwrap() {
                 ServerMessage::FileOpenCapabilityIssued { .. } => break,
-                ServerMessage::SduiSnapshot { .. } | ServerMessage::RuntimeDiagnostic(_) => {}
+                ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::TabRegistry(_) => {}
                 message => panic!("expected file-open capability, got {message:?}"),
             }
         }

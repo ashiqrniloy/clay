@@ -128,6 +128,10 @@ cargo test --lib editor
 - [Mode Registry](mode-registry.md)
 - [Package Input, State, and Configuration Integration](package-input-state-configuration.md)
 - [Language Intelligence](language-intelligence.md)
+- The Phase 22.4 bindable tab command surface (24 `client_ui` IDs, default
+  Global chords, numbering/wraparound/no-op policies, deny-by-default
+  numbered bounds 1..=9) is documented in [Tabs and Independent Client
+  Views](tabs-and-clients.md) (Keyboard Management section).
 - `docs/reference/primitives/registry.md#CommandDeclaration`
 - `docs/reference/primitives/registry.md#KeyRoutingOverride`
 - `docs/reference/primitives/registry.md#TextTransform`

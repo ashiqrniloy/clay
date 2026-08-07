@@ -15,6 +15,13 @@ const MAX_SPLIT_RATIO: f64 = 0.95;
 const MAX_PANE_SPLIT_TREE_NODES: usize = 64;
 const MAX_PANE_SLOT_LAYOUTS: usize = MAX_PANE_SPLIT_TREE_NODES;
 
+/// Phase 22.1 product cap: at most 4 panes per tab (roadmap Phase 22). The tree
+/// model itself stays generic (`MAX_PANE_SPLIT_TREE_NODES`); user-facing pane
+/// operations enforce this cap.
+pub(crate) const MAX_PANES_PER_TAB: usize = 4;
+/// Default keyboard resize step for split ratios (fraction of the parent area).
+pub(crate) const KEYBOARD_RESIZE_STEP: f64 = 0.05;
+
 /// Extra pointer hit-test slop on each side of the 1px divider line.
 /// Visual width comes from `dimension.border.hairline`; this is interaction-only.
 const DIVIDER_HIT_SLOP: f64 = 4.0;
@@ -34,7 +41,11 @@ impl ShellLayoutVersion {
 pub(crate) struct WorkingAreaId(pub(crate) u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct PaneId(pub(crate) u64);
+/// Pane leaf identity in a working-area split tree. Doc-hidden: reachable by
+/// the native `clay` binary for pane routing; not a Clay JS API.
+#[doc(hidden)]
+#[derive(Default)]
+pub struct PaneId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ShellComponentId(pub(crate) u64);
@@ -469,10 +480,7 @@ impl PaneSplitTree {
     }
 
     fn first_leaf_pane_id(&self, node: &PaneSplitNode) -> PaneId {
-        match node {
-            PaneSplitNode::Leaf { pane_id } => *pane_id,
-            PaneSplitNode::Split { first, .. } => self.first_leaf_pane_id(first),
-        }
+        first_leaf_pane_id(node)
     }
 
     fn collect_geometry(&self, node: &PaneSplitNode, area: Rect, geometry: &mut Vec<PaneGeometry>) {
@@ -530,7 +538,8 @@ impl PaneSplitTree {
     ///
     /// Returns a new tree with `target_pane` split into two panes. The new pane
     /// gets `new_pane_id`. `position` controls whether the new pane is `First` or `Second`.
-    /// Returns `None` if `target_pane` is not found or `new_pane_id` already exists.
+    /// Returns `None` if `target_pane` is not found, `new_pane_id` already exists,
+    /// or the tree is already at [`MAX_PANES_PER_TAB`] panes (Phase 22.1 cap).
     pub(crate) fn split_pane(
         &self,
         target_pane: PaneId,
@@ -539,7 +548,10 @@ impl PaneSplitTree {
         ratio: SplitRatio,
         position: SplitChild,
     ) -> Option<PaneSplitTree> {
-        if self.contains_pane(new_pane_id) || !self.contains_pane(target_pane) {
+        if self.pane_count >= MAX_PANES_PER_TAB
+            || self.contains_pane(new_pane_id)
+            || !self.contains_pane(target_pane)
+        {
             return None;
         }
         let new_root = split_node_pane(
@@ -558,6 +570,123 @@ impl PaneSplitTree {
         let max = self.pane_ids().iter().map(|p| p.0).max().unwrap_or(0);
         PaneId(max + 1)
     }
+
+    // -- Phase 22.1: pane lifecycle operations --
+
+    /// Phase 22.1: Close a pane, merging its area with its sibling subtree.
+    ///
+    /// The leaf for `pane_id` is replaced by its sibling subtree, so surviving
+    /// panes keep reading order and fill the vacated area. Returns `None` when
+    /// `pane_id` is missing or is the last pane. If the closed pane was active,
+    /// focus moves to the first leaf of the promoted sibling subtree.
+    pub(crate) fn close_pane(&self, pane_id: PaneId) -> Option<PaneSplitTree> {
+        if self.pane_count <= 1 || !self.contains_pane(pane_id) {
+            return None;
+        }
+        let (new_root, sibling_first_leaf) = close_node_pane(&self.root, pane_id)?;
+        let active = if self.active_pane_id == pane_id {
+            sibling_first_leaf
+        } else {
+            self.active_pane_id
+        };
+        PaneSplitTree::new(new_root, active).ok()
+    }
+
+    /// Phase 22.1: Redivide the whole tree into `pane_count + 1` equal-area leaves.
+    ///
+    /// Existing panes keep their IDs and reading order; the new empty pane is
+    /// appended last with [`Self::next_pane_id`]. The redivision follows the root
+    /// split orientation; a single leaf becomes two side-by-side panes
+    /// (`SplitOrientation::Horizontal`). Equal areas are expressed as a
+    /// right-leaning comb with ratios `1/(N+1), 1/N, ..., 1/2`. Returns `None`
+    /// at [`MAX_PANES_PER_TAB`].
+    pub(crate) fn add_equal_pane(&self) -> Option<PaneSplitTree> {
+        if self.pane_count >= MAX_PANES_PER_TAB {
+            return None;
+        }
+        let orientation = match &self.root {
+            PaneSplitNode::Split { orientation, .. } => *orientation,
+            PaneSplitNode::Leaf { .. } => SplitOrientation::Horizontal,
+        };
+        let mut leaves = self.pane_ids();
+        leaves.push(self.next_pane_id());
+        let root = equal_comb_tree(&leaves, orientation);
+        PaneSplitTree::new(root, self.active_pane_id).ok()
+    }
+
+    /// Phase 22.1: Swap a pane with its neighbor in reading order.
+    ///
+    /// Tree shape and ratios are unchanged; only the two leaf IDs swap places.
+    /// The moved pane keeps focus if it was active. Returns `None` when
+    /// `pane_id` is missing or already at the reading-order end for `direction`
+    /// (`First` = toward the start, `Second` = toward the end).
+    pub(crate) fn move_pane(
+        &self,
+        pane_id: PaneId,
+        direction: SplitChild,
+    ) -> Option<PaneSplitTree> {
+        let ids = self.pane_ids();
+        let idx = ids.iter().position(|p| *p == pane_id)?;
+        let neighbor_idx = match direction {
+            SplitChild::First => idx.checked_sub(1)?,
+            SplitChild::Second => idx.checked_add(1).filter(|i| *i < ids.len())?,
+        };
+        let new_root = swap_leaf_pane_ids(&self.root, pane_id, ids[neighbor_idx]);
+        PaneSplitTree::new(new_root, self.active_pane_id).ok()
+    }
+
+    /// Phase 22.1: Compute one keyboard resize step for the divider bordering
+    /// `pane_id` in `direction`.
+    ///
+    /// Finds the deepest ancestor split whose divider directly borders the pane
+    /// on the requested side and returns its path plus the new clamped ratio for
+    /// [`Self::update_split_ratio`]. Returns `None` when the pane is missing,
+    /// `step` is not positive/finite, no divider borders the pane in that
+    /// direction, or the clamped step cannot move the ratio (already at
+    /// `MIN_SPLIT_RATIO`/`MAX_SPLIT_RATIO`).
+    pub(crate) fn keyboard_resize(
+        &self,
+        pane_id: PaneId,
+        direction: PaneResizeDirection,
+        step: f64,
+    ) -> Option<(SplitPath, SplitRatio)> {
+        if !self.contains_pane(pane_id) || !step.is_finite() || step <= 0.0 {
+            return None;
+        }
+        let leaf_path = leaf_path_in_node(&self.root, pane_id)?;
+        let (axis, required_side) = match direction {
+            PaneResizeDirection::Left => (SplitOrientation::Horizontal, SplitChild::Second),
+            PaneResizeDirection::Right => (SplitOrientation::Horizontal, SplitChild::First),
+            PaneResizeDirection::Up => (SplitOrientation::Vertical, SplitChild::Second),
+            PaneResizeDirection::Down => (SplitOrientation::Vertical, SplitChild::First),
+        };
+        for depth in (0..leaf_path.len()).rev() {
+            let child_side = leaf_path[depth];
+            if child_side != required_side {
+                continue;
+            }
+            let split_path = leaf_path[..depth].to_vec();
+            let PaneSplitNode::Split {
+                orientation, ratio, ..
+            } = split_node_at_path(&self.root, &split_path)?
+            else {
+                continue;
+            };
+            if *orientation != axis {
+                continue;
+            }
+            let delta = match child_side {
+                SplitChild::First => step,
+                SplitChild::Second => -step,
+            };
+            let new_value = (ratio.value() + delta).clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO);
+            if (new_value - ratio.value()).abs() < f64::EPSILON {
+                return None;
+            }
+            return Some((split_path, SplitRatio::new(new_value).ok()?));
+        }
+        None
+    }
 }
 
 impl Default for PaneSplitTree {
@@ -575,6 +704,15 @@ impl Default for PaneSplitTree {
 pub(crate) enum SplitChild {
     First,
     Second,
+}
+
+/// Phase 22.1: Keyboard resize direction for the divider bordering a pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PaneResizeDirection {
+    Left,
+    Right,
+    Up,
+    Down,
 }
 
 /// Path from the tree root to a specific split node.
@@ -1164,6 +1302,13 @@ impl WorkingAreaLayout {
         &mut self.pane_tree
     }
 
+    /// Phase 22.1: replace the pane tree with a new topology (split/close/move
+    /// commands). Bumps the layout version so observers see the change.
+    pub(crate) fn replace_pane_tree(&mut self, new_tree: PaneSplitTree) {
+        self.pane_tree = new_tree;
+        self.version = self.version.next();
+    }
+
     /// Commit a split divider drag: set the ratio at `path` and bump the layout version.
     /// Returns `false` if the path is invalid.
     pub(crate) fn commit_split_drag(&mut self, path: &[SplitChild], ratio: SplitRatio) -> bool {
@@ -1393,6 +1538,108 @@ fn split_node_pane(
                 (None, Some(s)) => Some(PaneSplitNode::split(*o, *r, *first.clone(), s)),
                 _ => None,
             }
+        }
+    }
+}
+
+/// Phase 22.1: Remove the leaf for `pane_id`, promoting its sibling subtree.
+///
+/// Returns the rebuilt root and the first leaf pane ID of the promoted sibling
+/// subtree (focus handoff when the closed pane was active).
+fn close_node_pane(node: &PaneSplitNode, pane_id: PaneId) -> Option<(PaneSplitNode, PaneId)> {
+    let PaneSplitNode::Split {
+        orientation,
+        ratio,
+        first,
+        second,
+    } = node
+    else {
+        return None;
+    };
+    if let PaneSplitNode::Leaf { pane_id: child } = first.as_ref()
+        && *child == pane_id
+    {
+        return Some((*second.clone(), first_leaf_pane_id(second)));
+    }
+    if let PaneSplitNode::Leaf { pane_id: child } = second.as_ref()
+        && *child == pane_id
+    {
+        return Some((*first.clone(), first_leaf_pane_id(first)));
+    }
+    if let Some((rebuilt, handoff)) = close_node_pane(first, pane_id) {
+        return Some((
+            PaneSplitNode::split(*orientation, *ratio, rebuilt, *second.clone()),
+            handoff,
+        ));
+    }
+    let (rebuilt, handoff) = close_node_pane(second, pane_id)?;
+    Some((
+        PaneSplitNode::split(*orientation, *ratio, *first.clone(), rebuilt),
+        handoff,
+    ))
+}
+
+/// First (reading-order) leaf pane ID under `node`.
+fn first_leaf_pane_id(node: &PaneSplitNode) -> PaneId {
+    match node {
+        PaneSplitNode::Leaf { pane_id } => *pane_id,
+        PaneSplitNode::Split { first, .. } => first_leaf_pane_id(first),
+    }
+}
+
+/// Phase 22.1: Right-leaning comb giving every leaf equal area along `orientation`.
+///
+/// Ratios are `1/(N+1), 1/N, ..., 1/2` from root toward the tail, so each leaf
+/// receives exactly `1/(N+1)` of the parent area (within f64 tolerance).
+fn equal_comb_tree(leaves: &[PaneId], orientation: SplitOrientation) -> PaneSplitNode {
+    debug_assert!(leaves.len() >= 2, "equal comb needs at least two leaves");
+    let ratio = SplitRatio::new(1.0 / leaves.len() as f64)
+        .expect("equal comb ratios stay in bounds for capped pane counts");
+    let first = PaneSplitNode::leaf(leaves[0]);
+    let second = if leaves.len() == 2 {
+        PaneSplitNode::leaf(leaves[1])
+    } else {
+        equal_comb_tree(&leaves[1..], orientation)
+    };
+    PaneSplitNode::split(orientation, ratio, first, second)
+}
+
+/// Phase 22.1: Swap two leaf pane IDs within the tree shape (shape/ratios unchanged).
+fn swap_leaf_pane_ids(node: &PaneSplitNode, a: PaneId, b: PaneId) -> PaneSplitNode {
+    match node {
+        PaneSplitNode::Leaf { pane_id } => PaneSplitNode::leaf(if *pane_id == a {
+            b
+        } else if *pane_id == b {
+            a
+        } else {
+            *pane_id
+        }),
+        PaneSplitNode::Split {
+            orientation,
+            ratio,
+            first,
+            second,
+        } => PaneSplitNode::split(
+            *orientation,
+            *ratio,
+            swap_leaf_pane_ids(first, a, b),
+            swap_leaf_pane_ids(second, a, b),
+        ),
+    }
+}
+
+/// Child-step path from `node` to the leaf for `pane_id` (empty when `node` is the leaf).
+fn leaf_path_in_node(node: &PaneSplitNode, pane_id: PaneId) -> Option<SplitPath> {
+    match node {
+        PaneSplitNode::Leaf { pane_id: id } => (*id == pane_id).then(Vec::new),
+        PaneSplitNode::Split { first, second, .. } => {
+            if let Some(mut path) = leaf_path_in_node(first, pane_id) {
+                path.insert(0, SplitChild::First);
+                return Some(path);
+            }
+            let mut path = leaf_path_in_node(second, pane_id)?;
+            path.insert(0, SplitChild::Second);
+            Some(path)
         }
     }
 }
@@ -2759,5 +3006,371 @@ mod tests {
             layout.clone().apply_update(missing_slot_pane),
             Err(WorkingAreaLayoutUpdateError::SlotPaneMissing(_))
         ));
+    }
+
+    // -- Phase 22.1: pane lifecycle operations --
+
+    fn three_pane_tree() -> PaneSplitTree {
+        PaneSplitTree::single_leaf(PaneId(1))
+            .split_pane(
+                PaneId(1),
+                PaneId(2),
+                SplitOrientation::Horizontal,
+                SplitRatio::balanced(),
+                SplitChild::Second,
+            )
+            .unwrap()
+            .split_pane(
+                PaneId(2),
+                PaneId(3),
+                SplitOrientation::Horizontal,
+                SplitRatio::balanced(),
+                SplitChild::Second,
+            )
+            .unwrap()
+    }
+
+    fn four_pane_tree() -> PaneSplitTree {
+        three_pane_tree()
+            .split_pane(
+                PaneId(3),
+                PaneId(4),
+                SplitOrientation::Horizontal,
+                SplitRatio::balanced(),
+                SplitChild::Second,
+            )
+            .expect("fourth pane fits under the cap")
+    }
+
+    fn assert_areas_equal(geometry: &[PaneGeometry]) {
+        let expected = geometry[0].rect.area();
+        for pane in geometry {
+            assert!(
+                (pane.rect.area() - expected).abs() < 1.0,
+                "pane {:?} area {} deviates from {}",
+                pane.pane_id,
+                pane.rect.area(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn split_pane_rejects_fifth_pane_at_cap() {
+        let tree = four_pane_tree();
+        assert_eq!(tree.pane_count(), MAX_PANES_PER_TAB);
+        assert!(
+            tree.split_pane(
+                PaneId(4),
+                PaneId(5),
+                SplitOrientation::Horizontal,
+                SplitRatio::balanced(),
+                SplitChild::Second,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn add_equal_pane_from_single_leaf_creates_two_equal_side_by_side_panes() {
+        let tree = PaneSplitTree::single_leaf(PaneId(1));
+
+        let updated = tree.add_equal_pane().expect("single leaf can add a pane");
+
+        assert_eq!(updated.pane_ids(), vec![PaneId(1), PaneId(2)]);
+        assert_eq!(updated.active_pane_id(), PaneId(1));
+        assert_eq!(updated.next_pane_id(), PaneId(3));
+        match updated.root_node() {
+            PaneSplitNode::Split { orientation, .. } => {
+                assert_eq!(*orientation, SplitOrientation::Horizontal)
+            }
+            _ => panic!("expected root split"),
+        }
+        let geometry = updated.compute_geometry(Rect::new(0.0, 0.0, 900.0, 600.0));
+        assert_rect_eq(geometry[0].rect, Rect::new(0.0, 0.0, 450.0, 600.0));
+        assert_rect_eq(geometry[1].rect, Rect::new(450.0, 0.0, 900.0, 600.0));
+    }
+
+    #[test]
+    fn add_equal_pane_redivides_two_panes_into_three_equal_areas() {
+        let tree = PaneSplitTree::single_leaf(PaneId(1))
+            .split_pane(
+                PaneId(1),
+                PaneId(2),
+                SplitOrientation::Horizontal,
+                SplitRatio::new(0.3).unwrap(),
+                SplitChild::Second,
+            )
+            .unwrap();
+
+        let updated = tree.add_equal_pane().unwrap();
+
+        assert_eq!(updated.pane_ids(), vec![PaneId(1), PaneId(2), PaneId(3)]);
+        match updated.root_node() {
+            PaneSplitNode::Split { orientation, .. } => {
+                assert_eq!(*orientation, SplitOrientation::Horizontal)
+            }
+            _ => panic!("expected root split"),
+        }
+        assert_areas_equal(&updated.compute_geometry(Rect::new(0.0, 0.0, 900.0, 600.0)));
+    }
+
+    #[test]
+    fn add_equal_pane_from_vertical_root_keeps_vertical_orientation() {
+        let tree = PaneSplitTree::single_leaf(PaneId(1))
+            .split_pane(
+                PaneId(1),
+                PaneId(2),
+                SplitOrientation::Vertical,
+                SplitRatio::balanced(),
+                SplitChild::Second,
+            )
+            .unwrap();
+
+        let updated = tree.add_equal_pane().unwrap();
+        let geometry = updated.compute_geometry(Rect::new(0.0, 0.0, 900.0, 600.0));
+
+        assert_eq!(updated.pane_ids(), vec![PaneId(1), PaneId(2), PaneId(3)]);
+        assert_areas_equal(&geometry);
+        assert_rect_eq(geometry[0].rect, Rect::new(0.0, 0.0, 900.0, 200.0));
+    }
+
+    #[test]
+    fn add_equal_pane_four_panes_have_equal_areas() {
+        let updated = three_pane_tree().add_equal_pane().unwrap();
+
+        assert_eq!(updated.pane_count(), MAX_PANES_PER_TAB);
+        assert_areas_equal(&updated.compute_geometry(Rect::new(0.0, 0.0, 800.0, 600.0)));
+    }
+
+    #[test]
+    fn add_equal_pane_at_cap_returns_none() {
+        assert!(four_pane_tree().add_equal_pane().is_none());
+    }
+
+    #[test]
+    fn close_pane_merges_two_panes_and_hands_off_focus() {
+        let mut tree = PaneSplitTree::single_leaf(PaneId(1))
+            .split_pane(
+                PaneId(1),
+                PaneId(2),
+                SplitOrientation::Horizontal,
+                SplitRatio::balanced(),
+                SplitChild::Second,
+            )
+            .unwrap();
+        tree.set_active_pane(PaneId(2)).unwrap();
+
+        // Closing the active pane hands focus to the surviving leaf.
+        let closed_active = tree.close_pane(PaneId(2)).unwrap();
+        assert_eq!(closed_active.pane_ids(), vec![PaneId(1)]);
+        assert_eq!(closed_active.active_pane_id(), PaneId(1));
+
+        // Closing a non-active pane preserves focus.
+        let closed_inactive = tree.close_pane(PaneId(1)).unwrap();
+        assert_eq!(closed_inactive.pane_ids(), vec![PaneId(2)]);
+        assert_eq!(closed_inactive.active_pane_id(), PaneId(2));
+    }
+
+    #[test]
+    fn close_pane_on_comb_preserves_reading_order_and_fills_area() {
+        let tree = four_pane_tree(); // comb [1 | [2 | [3 | 4]]]
+
+        let closed = tree.close_pane(PaneId(2)).unwrap();
+        assert_eq!(closed.pane_ids(), vec![PaneId(1), PaneId(3), PaneId(4)]);
+        let total: f64 = closed
+            .compute_geometry(Rect::new(0.0, 0.0, 800.0, 600.0))
+            .iter()
+            .map(|p| p.rect.area())
+            .sum();
+        assert!((total - 800.0 * 600.0).abs() < 1.0);
+
+        // Closing the first pane promotes the sibling subtree and hands off focus.
+        let closed_first = tree.close_pane(PaneId(1)).unwrap();
+        assert_eq!(
+            closed_first.pane_ids(),
+            vec![PaneId(2), PaneId(3), PaneId(4)]
+        );
+        assert_eq!(closed_first.active_pane_id(), PaneId(2));
+    }
+
+    #[test]
+    fn close_pane_single_leaf_and_missing_pane_return_none() {
+        let tree = PaneSplitTree::single_leaf(PaneId(1));
+        assert!(tree.close_pane(PaneId(1)).is_none());
+
+        let two = tree
+            .split_pane(
+                PaneId(1),
+                PaneId(2),
+                SplitOrientation::Horizontal,
+                SplitRatio::balanced(),
+                SplitChild::Second,
+            )
+            .unwrap();
+        assert!(two.close_pane(PaneId(99)).is_none());
+    }
+
+    #[test]
+    fn move_pane_swaps_with_neighbors_in_reading_order() {
+        let tree = three_pane_tree();
+
+        let moved = tree.move_pane(PaneId(1), SplitChild::Second).unwrap();
+        assert_eq!(moved.pane_ids(), vec![PaneId(2), PaneId(1), PaneId(3)]);
+
+        let moved_back = tree.move_pane(PaneId(3), SplitChild::First).unwrap();
+        assert_eq!(moved_back.pane_ids(), vec![PaneId(1), PaneId(3), PaneId(2)]);
+
+        // Tree shape and ratios are unchanged by a move.
+        assert_eq!(
+            moved.split_ratio_at_path(&[]),
+            tree.split_ratio_at_path(&[])
+        );
+        assert_eq!(
+            moved.split_ratio_at_path(&[SplitChild::Second]),
+            tree.split_ratio_at_path(&[SplitChild::Second])
+        );
+    }
+
+    #[test]
+    fn move_pane_at_reading_order_ends_returns_none() {
+        let tree = three_pane_tree();
+        assert!(tree.move_pane(PaneId(1), SplitChild::First).is_none());
+        assert!(tree.move_pane(PaneId(3), SplitChild::Second).is_none());
+        assert!(tree.move_pane(PaneId(99), SplitChild::First).is_none());
+        assert!(
+            PaneSplitTree::single_leaf(PaneId(1))
+                .move_pane(PaneId(1), SplitChild::Second)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn move_pane_keeps_focus_on_moved_pane() {
+        let tree = three_pane_tree();
+
+        let moved = tree.move_pane(PaneId(1), SplitChild::Second).unwrap();
+
+        assert_eq!(moved.active_pane_id(), PaneId(1));
+    }
+
+    #[test]
+    fn keyboard_resize_moves_bordering_divider() {
+        let tree = PaneSplitTree::single_leaf(PaneId(1))
+            .split_pane(
+                PaneId(1),
+                PaneId(2),
+                SplitOrientation::Horizontal,
+                SplitRatio::balanced(),
+                SplitChild::Second,
+            )
+            .unwrap();
+
+        // Pane 1 (left side): only a divider to its right; Right grows it.
+        let (path, ratio) = tree
+            .keyboard_resize(PaneId(1), PaneResizeDirection::Right, KEYBOARD_RESIZE_STEP)
+            .unwrap();
+        assert_eq!(path, Vec::new());
+        assert!((ratio.value() - 0.55).abs() < 1e-9);
+        assert!(
+            tree.keyboard_resize(PaneId(1), PaneResizeDirection::Left, KEYBOARD_RESIZE_STEP)
+                .is_none()
+        );
+
+        // Pane 2 (right side): only a divider to its left; Left shrinks pane 1.
+        let (path, ratio) = tree
+            .keyboard_resize(PaneId(2), PaneResizeDirection::Left, KEYBOARD_RESIZE_STEP)
+            .unwrap();
+        assert_eq!(path, Vec::new());
+        assert!((ratio.value() - 0.45).abs() < 1e-9);
+        assert!(
+            tree.keyboard_resize(PaneId(2), PaneResizeDirection::Right, KEYBOARD_RESIZE_STEP)
+                .is_none()
+        );
+
+        // No vertical divider anywhere in the tree.
+        assert!(
+            tree.keyboard_resize(PaneId(1), PaneResizeDirection::Down, KEYBOARD_RESIZE_STEP)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn keyboard_resize_targets_deepest_bordering_split() {
+        let tree = three_pane_tree(); // comb [1 | [2 | 3]]
+
+        // Pane 3's bordering divider on the left belongs to the 2|3 split, not root.
+        let (path, _) = tree
+            .keyboard_resize(PaneId(3), PaneResizeDirection::Left, KEYBOARD_RESIZE_STEP)
+            .unwrap();
+        assert_eq!(path, vec![SplitChild::Second]);
+
+        // Pane 2 borders the root divider on its left, the 2|3 divider on its right.
+        let (path, _) = tree
+            .keyboard_resize(PaneId(2), PaneResizeDirection::Left, KEYBOARD_RESIZE_STEP)
+            .unwrap();
+        assert_eq!(path, Vec::new());
+        let (path, _) = tree
+            .keyboard_resize(PaneId(2), PaneResizeDirection::Right, KEYBOARD_RESIZE_STEP)
+            .unwrap();
+        assert_eq!(path, vec![SplitChild::Second]);
+    }
+
+    #[test]
+    fn keyboard_resize_clamps_at_ratio_bounds() {
+        let near_max = PaneSplitTree::single_leaf(PaneId(1))
+            .split_pane(
+                PaneId(1),
+                PaneId(2),
+                SplitOrientation::Horizontal,
+                SplitRatio::new(0.93).unwrap(),
+                SplitChild::Second,
+            )
+            .unwrap();
+
+        let (_, ratio) = near_max
+            .keyboard_resize(PaneId(1), PaneResizeDirection::Right, KEYBOARD_RESIZE_STEP)
+            .unwrap();
+        assert!((ratio.value() - MAX_SPLIT_RATIO).abs() < 1e-9);
+
+        // Already at the bound: the step cannot move the ratio.
+        let mut at_max = near_max.clone();
+        assert!(at_max.update_split_ratio(&[], SplitRatio::new(MAX_SPLIT_RATIO).unwrap()));
+        assert!(
+            at_max
+                .keyboard_resize(PaneId(1), PaneResizeDirection::Right, KEYBOARD_RESIZE_STEP)
+                .is_none()
+        );
+
+        let near_min = PaneSplitTree::single_leaf(PaneId(1))
+            .split_pane(
+                PaneId(1),
+                PaneId(2),
+                SplitOrientation::Horizontal,
+                SplitRatio::new(0.07).unwrap(),
+                SplitChild::Second,
+            )
+            .unwrap();
+        let (_, ratio) = near_min
+            .keyboard_resize(PaneId(2), PaneResizeDirection::Left, KEYBOARD_RESIZE_STEP)
+            .unwrap();
+        assert!((ratio.value() - MIN_SPLIT_RATIO).abs() < 1e-9);
+
+        // Invalid steps and missing panes are rejected.
+        assert!(
+            near_max
+                .keyboard_resize(PaneId(1), PaneResizeDirection::Right, 0.0)
+                .is_none()
+        );
+        assert!(
+            near_max
+                .keyboard_resize(PaneId(1), PaneResizeDirection::Right, f64::NAN)
+                .is_none()
+        );
+        assert!(
+            near_max
+                .keyboard_resize(PaneId(99), PaneResizeDirection::Right, KEYBOARD_RESIZE_STEP)
+                .is_none()
+        );
     }
 }

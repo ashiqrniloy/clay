@@ -306,6 +306,7 @@ fn markdown_representative_decoration_payload_fits_budget_and_client_applies() {
             design_tokens: Vec::new(),
         },
         active_typography: clay::protocol::ActiveTypography::default(),
+        workspace_root: "/tmp/root".to_string(),
     };
     let mut widget = EditorWidget::with_initial_state(initial_state);
     assert!(widget.apply_connection_event(ClientConnectionEvent::DecorationSet(validated)));
@@ -856,6 +857,7 @@ fn decoration_render_hook_applies_validated_spans_without_package_js() {
             design_tokens: Vec::new(),
         },
         active_typography: clay::protocol::ActiveTypography::default(),
+        workspace_root: "/tmp/root".to_string(),
     };
     let mut widget = EditorWidget::with_initial_state(initial_state);
 

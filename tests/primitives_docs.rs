@@ -344,14 +344,14 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 78);
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 79);
 
     let facades = read("src/server/facades.rs")
         .lines()
         .filter_map(|line| line.split_once("\"clay:").map(|(_, rest)| rest))
         .filter_map(|rest| rest.split_once('"').map(|(name, _)| format!("clay:{name}")))
         .collect::<BTreeSet<_>>();
-    assert_exact_inventory(marked_section(&plan, "facade-inventory"), &facades, 21);
+    assert_exact_inventory(marked_section(&plan, "facade-inventory"), &facades, 22);
 
     let mut packages = BTreeSet::new();
     for entry in fs::read_dir(root().join("packages")).expect("read packages directory") {
@@ -530,7 +530,6 @@ fn component_catalog_status_partition_is_current() {
     // Composition-only planned surfaces stay planned (no premature promotion).
     for component in [
         "Tooltip",
-        "Tabs",
         "Badge / tag",
         "Toast / notification",
         "`kbd` hint",
@@ -542,6 +541,12 @@ fn component_catalog_status_partition_is_current() {
             "planned composition surface {component} must remain planned, not implemented"
         );
     }
+
+    // Phase 22.3 promoted Tabs from planned to implemented (shell-owned tab bar).
+    assert!(
+        components.contains("| Tabs | implemented |"),
+        "Tabs must be marked implemented after Phase 22.3"
+    );
 
     // Phase 20.3 Split divider and Phase 20.5 promoted composition surfaces are implemented.
     assert!(

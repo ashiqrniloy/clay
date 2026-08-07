@@ -1,0 +1,103 @@
+# Pane Document Views (Phase 22.2)
+
+## Source
+
+- `src/masonry_pane_document.rs` — `PaneDocumentView` (per-pane editor view)
+- `src/masonry_editor.rs` — `EditorWidget` (connection chrome, owns pane 1's view)
+- `src/masonry_shell.rs` — `ClayShellWidget` (pane hosts, `pane_targets`, focus actions)
+- `src/masonry_pane_host.rs` — `PaneContentHost` / `PaneContent::Document`
+- `src/client/mod.rs` — `ClientSyncState` per-document map, `ClientConnectionEvent::document_id()`
+- `src/main.rs` — `Driver` event routing, pending-open attribution, close arm
+- `src/editor/document_session.rs` — `DocumentSessionStore` per pane
+- `src/server/behavior.rs`, `src/server/ops/mod.rs` — per-document behavior manifest layers (see [Behavior Manifests](behavior-manifests.md))
+- `src/protocol/runtime.rs` — `DocumentRuntimeRenderState::behavior_manifest`
+
+## Overview
+
+Phase 22.2 (2026-08-05) turns pane leaves from placeholders into live document views: each tab hosts one workspace, each pane is an independent view that can open a document from that tab's workspace, per-pane major modes activate concurrently, and every pane keeps its own caret, selection, viewport, dirty state, and shadow-session stash. A file can be open in at most ONE pane of the workspace (duplicate opens focus the owner), and all open flows target the focused pane.
+
+The architecture keeps ONE `EditorWidget` per connection as **connection chrome** (SDUI sidebar, package panels, overlays, shell preferences, runtime-snapshot validation) and extracts a lightweight `PaneDocumentView` per pane that owns the per-document editing state. A single `ClientEditQueue` is shared by all panes; its `ClientSyncState` was refactored from single-document to a per-document map so edits for different documents can be in flight concurrently.
+
+## How It Works
+
+### Per-document sync state (`src/client/mod.rs`)
+
+`ClientSyncState` now holds `HashMap<DocumentId, DocumentSyncState>` where each entry records `confirmed_version`, `optimistic_version`, pending edit reservations, `last_resync`, and the document's `lease_id`. `ClientEditQueue::enqueue_edit_event(document_id, ...)` reserves a pending edit and attaches the right lease per document; `snapshot_for(document_id)` exposes one document's state to pane views; `total_pending_len()` and `confirmed_version_for(document_id)` keep the connection loop's ack/reject logic per-document. `enqueue_completion_request` and `sync_snapshot_for` follow the same per-document resolution. Server lease validation remains per-document (`validate_lease`), so each outbound edit must carry that document's lease — the map makes that automatic. `DocumentReloaded` and `ResyncSnapshot` events update the specific document's state regardless of which pane is active.
+
+### `PaneDocumentView` (`src/masonry_pane_document.rs`)
+
+The per-pane view encapsulates what used to be `EditorWidget`'s document state:
+
+- One `EditorSurface` (buffer, caret/selection, viewport, decorations, diagnostics, history, typography, theme) — the pane's live document, or a `blank_surface()` placeholder when no document is open.
+- One `DocumentSessionStore` (Phase 20 shadow sessions, LRU-capped at 64 per pane) with `stash_active_session` / `activate_document` preserving the existing stash semantics locally.
+- One `EditorStatus` painted as the pane's own status line at the bottom of its rect (`paint_status_line`).
+- Local transient menus (completion, save-conflict, sync-recovery) mirrored to the chrome's overlay via `pending_menu_sync` (the chrome drains them on `MenuStateChanged`).
+- Request-id allocators and the `last_decoration_viewport` dedup for decoration requests.
+
+`RuntimeBaseline` (behavior manifest, active theme, active typography) seeds freshly mounted views from the chrome's current runtime state. The view's Widget trait methods are invoked through inherent `handle_*`/`on_*` methods delegated by the chrome or the driver, avoiding Widget-trait resolution across widget boundaries.
+
+`close_pane()` sends capability-gated close requests for the active document AND every retained session in the store (`DocumentSessionStore::document_ids()` + `clear()`), then resets to a blank surface. `guard_pane_close()` returns true when the active document is dirty — the driver blocks the close and shows the save-conflict menu instead (no topology change, no lease release until resolved).
+
+### Event routing (`src/main.rs` Driver + `src/masonry_editor.rs` chrome)
+
+`ClientConnectionEvent::document_id()` classifies events. The `Driver` routes:
+
+- **Document-scoped events** (DocumentOpened/Saved/Reloaded, EditAck/Rejected, ResyncSnapshot, decorations, diagnostics, completions, intelligence): `route_document_event` walks panes focused-first and applies the event to the pane owning the document.
+- **DocumentOpened**: `route_document_opened` decides Owner > Pending > Active — (1) if a pane already owns the document, apply there and focus it (duplicate open); (2) else if the requesting pane has a pending open matching this result, mount there (focused-pane-targeted open); (3) else fall back to the active pane. Mounting a view on a placeholder pane uses the chrome's `RuntimeBaseline` + a clone of the master `ClientEditQueue` (`edit_queue_shared`).
+- **Connection-wide baseline events** (Theme, Typography, BehaviorManifest, CaretStyle, Disconnected, ConnectionError, RuntimeDiagnostic, ServerError): `fan_out_event` applies to the chrome AND every mounted `PaneDocumentView`.
+- **PaneFocused(PaneId)** (submitted by `ClayShellWidget` on Tab cycling and pointer activation): the driver synchronizes Masonry focus to that pane's routing target.
+
+The chrome's own `apply_connection_event` handles SDUI/panels/overlays/shell-preferences/runtime-snapshot validation and forwards document-scoped events to its embedded pane-1 view (also via the focused-first routing in the driver, which owns the pane→view map).
+
+### Pending-open attribution
+
+`route_document_opened` cannot pre-map a path to a document_id (path canonicalization is server authority), so the driver records pending opens at the three interception points (`ClientUiCommandResult::SelectedFile` native dialogs, `apply_native_dialog_completion`, `route_sdui_intent` for `clay.workspace.openFile`/`openFuzzyFile`, and server-side keybindings via `RecordPendingOpenIntent`). `PendingOpenRequest` matches in-root browser/fuzzy opens by `(workspace_root_id, relative_path)` and native-dialog opens by absolute canonical path; `take_pending_open_for` consumes the match when `DocumentOpened` arrives. Pending entries are removed when their pane closes. The pure decision function `decide_open_route` (Owner > Pending > Active) is unit-tested without a window harness.
+
+### Duplicate-open no-op and cross-pane switcher
+
+Because the server returns the existing lease with full metadata on a duplicate open, the client's pane registry (pane→document map in the driver) detects "already owned" and focuses the owner; `PaneDocumentView::apply_connection_event` additionally no-ops redundant `DocumentOpened` frames for its live document so caret/content are never reinstalled over a live buffer.
+
+`show_open_documents_menu(other_panes: &[CrossPaneDocumentEntry])` lists the focused pane's active + retained sessions plus every other pane's sessions (`pane N: <name>` labels, active/dirty markers). Activating a cross-pane entry emits `EditorAction::ActivateDocumentInPane(pane_id, document_id)`; the driver switches the OWNING pane's document (stashing its prior session) and focuses it — consistent with one-view-per-document.
+
+### Shell integration (`src/masonry_shell.rs`)
+
+`PaneContent` gained `Document(PaneDocumentView)`; `set_document_view` / `clear_content` (via `std::mem::replace`) mount/unmount views on hosts. `ClayShellWidget` tracks `pane_targets: BTreeMap<PaneId, WidgetId>` for routing, submits `EditorAction::PaneFocused(pane_id)` on Tab/pointer focus changes, and `focus_fallback_widget_id()` returns the active pane's target. Pane close removes the routing target first, then reconciles hosts.
+
+### Per-document behavior manifest layers
+
+Major-mode manifests are now scoped: the server keeps a global manifest plus per-document layers (see [Behavior Manifests](behavior-manifests.md)); the client's `PaneDocumentView::apply_behavior_manifest` installs content only when the manifest's scope is global or matches the view's document, and otherwise bumps only the behavior version (`EditorSurface::update_behavior_version`) so outbound stamps stay current without cross-pane keymap/autocomplete bleed.
+
+## Invariants and Constraints
+
+- 1:1 client-local pane↔document mapping per workspace; a document never has two views.
+- Keystrokes, menus, status, and IME follow pane focus; document-scoped events follow `document_id`.
+- No cross-pane state bleed: surfaces, session stores, and behavior layers are per-pane; the shared edit queue tracks sync state per document.
+- Closing a dirty pane is blocked until the save-conflict menu resolves; clean closes release active + retained leases through the server's capability-gated close path.
+- Opens never grant authority client-side; the server's canonical-path duplicate detection and per-(client, document) leases remain authoritative.
+- Hot path: keystroke handling in a 4-pane shell touches only the focused pane, no IPC (guarded by `pane_document_typing_requires_no_server_or_js`).
+
+## Known Ceilings
+
+- SDUI sidebars and package panels/overlays are window-scoped chrome (per-client), not per-pane; packages cannot contribute per-pane chrome yet.
+- No per-pane tab strips or document chrome beyond the status line until Phase 22.3.
+- Completion/transient menus anchor to the window's main rect, not the pane's rect.
+- No topology or per-pane document persistence until Phase 22.5.
+
+## Tests
+
+- `src/masonry_pane_document.rs`: event isolation, session stash/activate, close-pane release + blank reset, dirty-close gate with conflict menu, per-document edit queueing, duplicate-open no-op, cross-pane menu aggregation + routing, failed-opens leave state unchanged, runtime-snapshot baseline restore, scope-aware manifest install. Command: `cargo test --lib masonry_pane_document --quiet`.
+- `src/masonry_shell.rs`: panes host independent document views with document-scoped routing, typing isolation hot-path guard, routing-target cleanup on pane close, concurrent per-pane major modes isolated across behavior manifests. Command: `cargo test --lib masonry_shell --quiet`.
+- `src/client/mod.rs`: per-document sync state, stale-ack filtering by document, per-document reload updates. Command: `cargo test --lib client --quiet`.
+- `src/main.rs`: `decide_open_route` pure-function tests (owner > pending > active, path matching).
+- Guard suites scanning the new module: `tests/editor_performance_invariants.rs`, `tests/ui_primitive_conformance.rs`.
+- Full suite: `cargo test --all-targets` (1916 passing).
+
+## Related
+
+- [Multi-Document Sessions](multi-document-sessions.md) — session store mechanics per pane
+- [Behavior Manifests](behavior-manifests.md) — per-document manifest layers
+- [Masonry Shell Runtime](masonry-shell.md) — pane hosts, focus actions, routing targets
+- [Masonry Editor Widget Status Observability](masonry-editor.md) — connection chrome responsibilities
+- [Server Document State](server-document-state.md) — server lease/duplicate authority
+- `docs/reference/primitives/shell-layout-strategy.md` (Phase 22.2 section), `docs/reference/clay-js-api/editor/client-show-open-documents.md`, `docs/reference/clay-js-api/shell/client-close-pane.md`
+- `test-plan/13-window-splits.md` (D1–D15), `test-plan/03-files-and-workspace.md` (F3a–F3c, F12a)

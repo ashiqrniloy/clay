@@ -132,6 +132,7 @@ pub fn encode_decode_initial_document(size_bytes: usize) -> usize {
         text: fixture_text(FixtureKind::MixedUnicode, size_bytes),
         access: DocumentAccess::Editable { lease_id: 1 },
         lease_id: Some(1),
+        workspace_root: "/tmp/root".to_string(),
     };
     let frame = codec
         .encode_server_message(&message)

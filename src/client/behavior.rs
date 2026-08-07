@@ -1,7 +1,7 @@
 use crate::behavior::manifest::{ManifestValidationError, validate_manifest};
 use crate::protocol::{
-    BehaviorManifest, CommandAuthority, CompletionTrigger, KeyBindingContext, KeyCode,
-    KeyModifiers, KeyStroke, RoutingPolicy,
+    BehaviorManifest, CommandAuthority, CompletionTrigger, KeyBindingContext, KeyBindingRule,
+    KeyCode, KeyModifiers, KeyStroke, RoutingPolicy,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,14 +58,28 @@ impl ClientBehaviorState {
     }
 
     pub(crate) fn route_key(&self, key: &KeyStroke) -> RoutedBehavior {
-        let Some(rule) = self.active.keymaps.iter().find(|rule| {
-            rule.context == KeyBindingContext::EditorTextFocus
-                && rule.sequence.len() == 1
-                && key_matches_binding(&rule.sequence[0], key)
-        }) else {
-            return self.route_unbound_key(key);
-        };
+        // Phase 22.1: EditorTextFocus rules take precedence over Global rules
+        // (more specific context first). Shell pane commands use Global scope so
+        // they fire even without editor text focus, but an EditorTextFocus
+        // binding for the same chord wins.
+        let contexts = [
+            KeyBindingContext::EditorTextFocus,
+            KeyBindingContext::Global,
+        ];
+        for context in contexts {
+            if let Some(rule) = self.active.keymaps.iter().find(|rule| {
+                rule.context == context
+                    && rule.sequence.len() == 1
+                    && key_matches_binding(&rule.sequence[0], key)
+            }) {
+                return self.dispatch_rule(rule);
+            }
+        }
+        self.route_unbound_key(key)
+    }
 
+    /// Dispatch a matched keymap rule to its routed behavior.
+    fn dispatch_rule(&self, rule: &KeyBindingRule) -> RoutedBehavior {
         match &rule.routing_policy {
             RoutingPolicy::ClientFirstPredictable | RoutingPolicy::ClientFirstRequiresAck => {
                 match rule.command_id.as_str() {

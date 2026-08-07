@@ -30,12 +30,26 @@ pub use textobjects::*;
 /// programmatic execution channel (Plan 071 follow-up round).
 /// Version 9 adds `CaretStyleOverride` so the gated `clientSetCursorStyle`
 /// runtime override reaches the client (Plan 071 caret-transport fix).
+/// Version 10 adds `ShellPreferences` so the `setPaneFocusPolicy` configuration
+/// option reaches the client shell widget (Phase 22.1).
+/// Version 11 adds the server-authoritative tab registry: `TabCommand`
+/// (new/open-workspace/close/activate/reclaim) and the `TabRegistry` snapshot
+/// broadcast so each tab's connection sees the same tab order/active tab
+/// (Phase 22.3).
+/// Version 13 adds tab reorder commands (`MoveLeft`/`MoveRight`/`MoveTo`)
+/// so registry order becomes server-authoritative and reorderable via the
+/// Phase 22.4 keyboard tab commands.
 /// Older server processes must not retain the previous wire semantics.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;
 pub type DocumentVersion = u64;
+/// Phase 22.3: stable server-assigned tab identity. Tabs are real separate
+/// client connections; the registry binds a `TabId` to a `ClientId` and a
+/// workspace root. Survives client reconnects (the binding is re-pointed at the
+/// reconnecting connection's `ClientId`).
+pub type TabId = u64;
 pub type BehaviorVersion = u64;
 pub type TransactionId = u64;
 pub type LeaseId = u64;
@@ -203,14 +217,151 @@ impl BehaviorManifest {
 }
 
 fn default_keymaps() -> Vec<KeyBindingRule> {
-    vec![
+    let mut rules = vec![
         KeyBindingRule::single("text.insert_newline", KeyCode::Enter),
         KeyBindingRule::single("text.insert_tab", KeyCode::Tab),
-    ]
+        // Phase 22.1: shell pane-management defaults (all overridable via bindKey
+        // in init.js with { scope: "global" }). "vertical" = side by side,
+        // "horizontal" = stacked (vim-style vsplit / split).
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientSplitPaneVertical",
+            ctrl_key(KeyCode::Character("\\".to_string())),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientSplitPaneHorizontal",
+            ctrl_key(KeyCode::Character("-".to_string())),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientAddEqualPane",
+            ctrl_shift_key(KeyCode::Character("\\".to_string())),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientClosePane",
+            ctrl_alt_key(KeyCode::Character("w".to_string())),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientFocusPanePrev",
+            ctrl_alt_key(KeyCode::ArrowLeft),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientFocusPaneNext",
+            ctrl_alt_key(KeyCode::ArrowRight),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientResizePaneLeft",
+            ctrl_alt_shift_key(KeyCode::ArrowLeft),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientResizePaneRight",
+            ctrl_alt_shift_key(KeyCode::ArrowRight),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientResizePaneUp",
+            ctrl_alt_shift_key(KeyCode::ArrowUp),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientResizePaneDown",
+            ctrl_alt_shift_key(KeyCode::ArrowDown),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientMovePanePrev",
+            ctrl_alt_key(KeyCode::Character("[".to_string())),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientMovePaneNext",
+            ctrl_alt_key(KeyCode::Character("]".to_string())),
+        ),
+        // Phase 22.4: shell tab-management defaults (all overridable via
+        // bindKey in init.js with { scope: "global" }). Policies: next/prev
+        // wrap around the tab order; activation by number is 1-based
+        // (Ctrl+<N>); move left/right are boundary no-ops (no wraparound) and
+        // use the bracket family (Ctrl+Shift+[ / ] — Ctrl+Alt+[ / ] are the
+        // pane moves); move-to-position uses Ctrl+Shift+<N>; numbered families
+        // exist for 1..=9 only — "beyond 9" is not a command ID. Chords are
+        // the parseable set (single characters + Tab + arrows; the chord
+        // parser has no PageUp/PageDown/F-keys).
+        KeyBindingRule::global_client_ui("clay.shell.clientTabNext", ctrl_key(KeyCode::Tab)),
+        KeyBindingRule::global_client_ui("clay.shell.clientTabPrev", ctrl_shift_key(KeyCode::Tab)),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientTabNew",
+            ctrl_key(KeyCode::Character("t".to_string())),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientTabClose",
+            ctrl_shift_key(KeyCode::Character("w".to_string())),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientTabMoveLeft",
+            ctrl_shift_key(KeyCode::Character("[".to_string())),
+        ),
+        KeyBindingRule::global_client_ui(
+            "clay.shell.clientTabMoveRight",
+            ctrl_shift_key(KeyCode::Character("]".to_string())),
+        ),
+    ];
+    for n in 1..=9 {
+        rules.push(KeyBindingRule::global_client_ui(
+            format!("clay.shell.clientTabActivate.{n}"),
+            ctrl_key(KeyCode::Character(n.to_string())),
+        ));
+        rules.push(KeyBindingRule::global_client_ui(
+            format!("clay.shell.clientTabMoveTo.{n}"),
+            ctrl_shift_key(KeyCode::Character(n.to_string())),
+        ));
+    }
+    rules
+}
+
+/// `Ctrl+<key>` stroke for default keymaps.
+fn ctrl_key(key: KeyCode) -> KeyStroke {
+    KeyStroke {
+        key,
+        modifiers: KeyModifiers {
+            control: true,
+            ..KeyModifiers::NONE
+        },
+    }
+}
+
+/// `Ctrl+Shift+<key>` stroke for default keymaps.
+fn ctrl_shift_key(key: KeyCode) -> KeyStroke {
+    KeyStroke {
+        key,
+        modifiers: KeyModifiers {
+            control: true,
+            shift: true,
+            ..KeyModifiers::NONE
+        },
+    }
+}
+
+/// `Ctrl+Alt+<key>` stroke for default keymaps.
+fn ctrl_alt_key(key: KeyCode) -> KeyStroke {
+    KeyStroke {
+        key,
+        modifiers: KeyModifiers {
+            control: true,
+            alt: true,
+            ..KeyModifiers::NONE
+        },
+    }
+}
+
+/// `Ctrl+Alt+Shift+<key>` stroke for default keymaps.
+fn ctrl_alt_shift_key(key: KeyCode) -> KeyStroke {
+    KeyStroke {
+        key,
+        modifiers: KeyModifiers {
+            control: true,
+            alt: true,
+            shift: true,
+            ..KeyModifiers::NONE
+        },
+    }
 }
 
 fn default_commands() -> Vec<CommandDeclaration> {
-    vec![
+    let mut commands = vec![
         CommandDeclaration::client_edit("text.insert", "Insert Text"),
         CommandDeclaration::client_edit("text.delete", "Delete Text"),
         CommandDeclaration::client_edit("text.replace", "Replace Text"),
@@ -224,7 +375,43 @@ fn default_commands() -> Vec<CommandDeclaration> {
         CommandDeclaration::ui_reactive("clay.language.goToDefinition", "Go to Definition"),
         CommandDeclaration::ui_reactive("clay.language.codeActions", "Code Actions"),
         CommandDeclaration::ui_reactive("clay.language.signatureHelp", "Signature Help"),
-    ]
+        // Phase 22.1: shell pane-management commands (ClientUi authority).
+        CommandDeclaration::client_ui("clay.shell.clientSplitPaneVertical", "Split Pane Vertical"),
+        CommandDeclaration::client_ui(
+            "clay.shell.clientSplitPaneHorizontal",
+            "Split Pane Horizontal",
+        ),
+        CommandDeclaration::client_ui("clay.shell.clientAddEqualPane", "Add Equal Pane"),
+        CommandDeclaration::client_ui("clay.shell.clientClosePane", "Close Pane"),
+        CommandDeclaration::client_ui("clay.shell.clientFocusPaneNext", "Focus Next Pane"),
+        CommandDeclaration::client_ui("clay.shell.clientFocusPanePrev", "Focus Previous Pane"),
+        CommandDeclaration::client_ui("clay.shell.clientResizePaneLeft", "Resize Pane Left"),
+        CommandDeclaration::client_ui("clay.shell.clientResizePaneRight", "Resize Pane Right"),
+        CommandDeclaration::client_ui("clay.shell.clientResizePaneUp", "Resize Pane Up"),
+        CommandDeclaration::client_ui("clay.shell.clientResizePaneDown", "Resize Pane Down"),
+        CommandDeclaration::client_ui("clay.shell.clientMovePaneNext", "Move Pane Next"),
+        CommandDeclaration::client_ui("clay.shell.clientMovePanePrev", "Move Pane Previous"),
+        // Phase 22.4: shell tab-management commands (ClientUi authority; Global
+        // keybindings in default_keymaps). Numbered families are 1-based
+        // positions in the current tab order; only 1..=9 exist.
+        CommandDeclaration::client_ui("clay.shell.clientTabNext", "Next Tab"),
+        CommandDeclaration::client_ui("clay.shell.clientTabPrev", "Previous Tab"),
+        CommandDeclaration::client_ui("clay.shell.clientTabNew", "New Tab"),
+        CommandDeclaration::client_ui("clay.shell.clientTabClose", "Close Tab"),
+        CommandDeclaration::client_ui("clay.shell.clientTabMoveLeft", "Move Tab Left"),
+        CommandDeclaration::client_ui("clay.shell.clientTabMoveRight", "Move Tab Right"),
+    ];
+    for n in 1..=9 {
+        commands.push(CommandDeclaration::client_ui(
+            format!("clay.shell.clientTabActivate.{n}"),
+            format!("Activate Tab {n}"),
+        ));
+        commands.push(CommandDeclaration::client_ui(
+            format!("clay.shell.clientTabMoveTo.{n}"),
+            format!("Move Tab to Position {n}"),
+        ));
+    }
+    commands
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -249,6 +436,17 @@ impl KeyBindingRule {
             sequence: vec![KeyStroke::new(key)],
             context: KeyBindingContext::EditorTextFocus,
             routing_policy: RoutingPolicy::ClientFirstPredictable,
+        }
+    }
+
+    /// Phase 22.1: a Global-scope, ClientUiCommand-routed binding (shell pane
+    /// commands). Fires even outside editor text focus; overridable via `bindKey`.
+    pub fn global_client_ui(command_id: impl Into<String>, stroke: KeyStroke) -> Self {
+        Self {
+            command_id: command_id.into(),
+            sequence: vec![stroke],
+            context: KeyBindingContext::Global,
+            routing_policy: RoutingPolicy::ClientUiCommand,
         }
     }
 }
@@ -999,6 +1197,15 @@ pub enum ClientMessage {
         document_id: DocumentId,
         force: bool,
     },
+    /// Phase 22.3: server-authoritative tab lifecycle. Each tab is a real
+    /// separate client connection; the server holds the tab registry (order,
+    /// active tab, per-tab workspace + client binding) so tab structure
+    /// survives client reconnects. `client_id` is validated against the
+    /// connection's handshake identity like every other client message.
+    TabCommand {
+        client_id: ClientId,
+        command: TabCommand,
+    },
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1370,6 +1577,68 @@ pub struct UiDesignTokenOverride {
     pub provenance: String,
 }
 
+/// Phase 22.1 shell-level user preferences transported from the server (which
+/// evaluates `init.js`) to the client (which owns the `ClayShellWidget`).
+/// Currently carries only the pane-focus policy (`"click"` or `"cursor"`).
+/// Pure inert data: no callbacks, no JS execution, no native handles.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ShellPreferences {
+    /// Pane-focus policy: `"click"` (default) or `"cursor"` (focus follows
+    /// pointer hover). Validated server-side; the client maps the string to
+    /// its `PaneFocusPolicy` enum.
+    pub pane_focus_policy: String,
+}
+
+/// Phase 22.3: one tab in the server-authoritative tab registry. A tab is a
+/// real separate client connection bound to a workspace root; the registry
+/// holds order, the active tab, and the per-tab workspace + client binding so
+/// tab structure survives client reconnects.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct TabEntry {
+    pub tab_id: TabId,
+    pub workspace_root_id: WorkspaceRootId,
+    pub client_id: ClientId,
+    /// Workspace root path for this tab (validated by `add_root` at
+    /// `TabCommand::New`/`OpenWorkspace` time). The client displays the path's
+    /// final segment as the tab card label. Phase 22.3.
+    pub workspace_root: String,
+}
+
+/// Phase 22.3: full tab registry snapshot. Broadcast to every connection on
+/// any mutation and replayed on handshake; the client applies it to its tab
+/// bar and per-tab connection map. Inert data only.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct TabRegistrySnapshot {
+    /// Tab order (server-authoritative; reorderable since Phase 22.4 via
+    /// `TabCommand::MoveLeft`/`MoveRight`/`MoveTo`).
+    pub tabs: Vec<TabEntry>,
+    pub active: Option<TabId>,
+}
+
+/// Phase 22.3: server-authoritative tab lifecycle command. `New` opens a tab
+/// bound to the connection's `ClientId` and the given workspace root (resolved
+/// through the validated `WorkspaceState::add_root` path); `OpenWorkspace`
+/// rebinds a tab's workspace; `Close` removes the tab and triggers the bound
+/// connection's close; `Activate` sets the active tab; `Reclaim` re-points a
+/// tab's `ClientId` binding at the reconnecting connection (local single-client
+/// reclaim in 22.3; multi-client reclaim needs client-instance identity, Phase
+/// 21).
+/// Phase 22.4: `MoveLeft`/`MoveRight` move a tab one position toward the
+/// front/back (boundary no-ops — no wraparound); `MoveTo` moves a tab to a
+/// 1-based position (`position` outside `1..=tab_count` is rejected). Moves
+/// preserve the active tab's status (the registry tracks `active` by `TabId`).
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum TabCommand {
+    New { workspace_root: String },
+    OpenWorkspace { tab_id: TabId, root: String },
+    Close { tab_id: TabId },
+    Activate { tab_id: TabId },
+    Reclaim { tab_id: TabId },
+    MoveLeft { tab_id: TabId },
+    MoveRight { tab_id: TabId },
+    MoveTo { tab_id: TabId, position: u32 },
+}
+
 /// Resolved active theme snapshot shipped from the server (which owns package
 /// records) to the client (which owns the editor `StyleRegistry`). Sent once
 /// during the welcome handshake when `setTheme("...")` ran in `init.js`; the
@@ -1463,6 +1732,10 @@ pub enum ServerMessage {
         text: String,
         access: DocumentAccess,
         lease_id: Option<LeaseId>,
+        /// The workspace root path the initial document belongs to (server
+        /// truth; the client uses it to register its initial tab with
+        /// `TabCommand::New`). Phase 22.3.
+        workspace_root: String,
     },
     BehaviorManifest(Box<BehaviorManifest>),
     SduiSnapshot {
@@ -1580,6 +1853,15 @@ pub enum ServerMessage {
     /// (editor-control gated). `None` clears the override so the effective
     /// style falls back to the per-mode manifest then the theme default.
     CaretStyleOverride(Option<CaretStyle>),
+    /// Phase 22.1 shell-level user preferences from `setPaneFocusPolicy`
+    /// (configuration-time). Sent on initial connect and whenever the
+    /// preference changes during `init.js` evaluation/reload.
+    ShellPreferences(ShellPreferences),
+    /// Phase 22.3: server-authoritative tab registry snapshot. Broadcast to
+    /// every connection on any registry mutation and replayed on handshake so
+    /// each tab's `Driver` sees the same tab order/active tab. Inert data only;
+    /// the client applies it to its tab bar and per-tab connection map.
+    TabRegistry(TabRegistrySnapshot),
     /// Phase 18.15 (Plan 046) resolved active theme snapshot. Sent once after
     /// the welcome `BehaviorManifest` when `setTheme("...")` ran in `init.js`;
     /// absent when no theme is selected (Clay default theme applies). The
@@ -1613,4 +1895,174 @@ pub enum ProtocolErrorCode {
     InvalidMessage,
     AccessDenied,
     InternalError,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_keymaps_contain_phase_22_1_shell_defaults() {
+        let keymaps = default_keymaps();
+        // Each shell command has a Global-scope, ClientUiCommand-routed default.
+        let shell_ids = [
+            "clay.shell.clientSplitPaneVertical",
+            "clay.shell.clientSplitPaneHorizontal",
+            "clay.shell.clientAddEqualPane",
+            "clay.shell.clientClosePane",
+            "clay.shell.clientFocusPaneNext",
+            "clay.shell.clientFocusPanePrev",
+            "clay.shell.clientResizePaneLeft",
+            "clay.shell.clientResizePaneRight",
+            "clay.shell.clientResizePaneUp",
+            "clay.shell.clientResizePaneDown",
+            "clay.shell.clientMovePaneNext",
+            "clay.shell.clientMovePanePrev",
+        ];
+        for id in shell_ids {
+            let rule = keymaps
+                .iter()
+                .find(|r| r.command_id == id)
+                .unwrap_or_else(|| panic!("default keymap missing {id}"));
+            assert_eq!(
+                rule.context,
+                KeyBindingContext::Global,
+                "{id} should be Global"
+            );
+            assert_eq!(
+                rule.routing_policy,
+                RoutingPolicy::ClientUiCommand,
+                "{id} should be ClientUiCommand"
+            );
+        }
+    }
+
+    #[test]
+    fn default_commands_contain_phase_22_1_shell_commands() {
+        let commands = default_commands();
+        let shell_ids = [
+            "clay.shell.clientSplitPaneVertical",
+            "clay.shell.clientSplitPaneHorizontal",
+            "clay.shell.clientAddEqualPane",
+            "clay.shell.clientClosePane",
+            "clay.shell.clientFocusPaneNext",
+            "clay.shell.clientFocusPanePrev",
+            "clay.shell.clientResizePaneLeft",
+            "clay.shell.clientResizePaneRight",
+            "clay.shell.clientResizePaneUp",
+            "clay.shell.clientResizePaneDown",
+            "clay.shell.clientMovePaneNext",
+            "clay.shell.clientMovePanePrev",
+        ];
+        for id in shell_ids {
+            let cmd = commands
+                .iter()
+                .find(|c| c.command_id == id)
+                .unwrap_or_else(|| panic!("default commands missing {id}"));
+            assert_eq!(
+                cmd.authority,
+                CommandAuthority::ClientUi,
+                "{id} should be ClientUi"
+            );
+        }
+    }
+
+    #[test]
+    fn default_keymaps_contain_phase_22_4_tab_defaults() {
+        let keymaps = default_keymaps();
+        let mut tab_ids: Vec<String> = [
+            "clay.shell.clientTabNext",
+            "clay.shell.clientTabPrev",
+            "clay.shell.clientTabNew",
+            "clay.shell.clientTabClose",
+            "clay.shell.clientTabMoveLeft",
+            "clay.shell.clientTabMoveRight",
+        ]
+        .iter()
+        .map(|id| id.to_string())
+        .collect();
+        for n in 1..=9 {
+            tab_ids.push(format!("clay.shell.clientTabActivate.{n}"));
+            tab_ids.push(format!("clay.shell.clientTabMoveTo.{n}"));
+        }
+        for id in tab_ids {
+            let rule = keymaps
+                .iter()
+                .find(|r| r.command_id == id)
+                .unwrap_or_else(|| panic!("default keymap missing {id}"));
+            assert_eq!(
+                rule.context,
+                KeyBindingContext::Global,
+                "{id} should be Global"
+            );
+            assert_eq!(
+                rule.routing_policy,
+                RoutingPolicy::ClientUiCommand,
+                "{id} should be ClientUiCommand"
+            );
+        }
+        // Numbered families use the declared chords: Ctrl+<N> activates,
+        // Ctrl+Shift+<N> moves to position.
+        for n in 1..=9 {
+            let activate = keymaps
+                .iter()
+                .find(|r| r.command_id == format!("clay.shell.clientTabActivate.{n}"))
+                .unwrap();
+            assert!(activate.sequence[0].modifiers.control);
+            assert!(!activate.sequence[0].modifiers.shift);
+            let move_to = keymaps
+                .iter()
+                .find(|r| r.command_id == format!("clay.shell.clientTabMoveTo.{n}"))
+                .unwrap();
+            assert!(move_to.sequence[0].modifiers.control);
+            assert!(move_to.sequence[0].modifiers.shift);
+            assert_eq!(
+                activate.sequence[0].key,
+                KeyCode::Character(n.to_string()),
+                "Ctrl+{n} activates tab {n}"
+            );
+        }
+        // All default chords are mutually distinct (no chord binds two
+        // commands); the manifest ambiguity guard rejects collisions.
+        for (i, a) in keymaps.iter().enumerate() {
+            for b in keymaps.iter().skip(i + 1) {
+                assert_ne!(
+                    a.sequence, b.sequence,
+                    "default chord collision between {} and {}",
+                    a.command_id, b.command_id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn default_commands_contain_phase_22_4_tab_commands() {
+        let commands = default_commands();
+        let mut tab_ids: Vec<String> = [
+            "clay.shell.clientTabNext",
+            "clay.shell.clientTabPrev",
+            "clay.shell.clientTabNew",
+            "clay.shell.clientTabClose",
+            "clay.shell.clientTabMoveLeft",
+            "clay.shell.clientTabMoveRight",
+        ]
+        .iter()
+        .map(|id| id.to_string())
+        .collect();
+        for n in 1..=9 {
+            tab_ids.push(format!("clay.shell.clientTabActivate.{n}"));
+            tab_ids.push(format!("clay.shell.clientTabMoveTo.{n}"));
+        }
+        for id in tab_ids {
+            let cmd = commands
+                .iter()
+                .find(|c| c.command_id == id)
+                .unwrap_or_else(|| panic!("default commands missing {id}"));
+            assert_eq!(
+                cmd.authority,
+                CommandAuthority::ClientUi,
+                "{id} should be ClientUi"
+            );
+        }
+    }
 }

@@ -3,6 +3,7 @@
 ## Source
 
 - `src/masonry_editor.rs`
+- `src/masonry_pane_document.rs` (Phase 22.2 per-pane view)
 - `src/masonry_shell.rs`
 - `src/client/mod.rs`
 - `src/client/runtime_state.rs`
@@ -172,9 +173,36 @@ Plan 071 extends the widget and surface with first-class editing primitives; see
 - The selection set replaced the old single cursor+selection pair (`EditorSurface.selections: SelectionState`); copy/cut/paste, undo/redo, IME commit, and paint all iterate the set (edits apply right-to-left by byte offset).
 - Escape priority chain: completion menu > snippet session > multi-selection cancel.
 
+## Phase 22.2: EditorWidget as Connection Chrome
+
+Phase 22.2 (2026-08-05) splits the widget: `EditorWidget` keeps everything that is **per-connection** — SDUI native state, `PackagePanelHost`/`PackageOverlayHost` children, shell-preferences, `RuntimeStateSnapshot` validation, the master `ClientEditQueue` (`edit_queue_shared()` hands out clones) — and delegates all **per-document** editing state to a `PaneDocumentView` child for pane 1 (other panes host their own views). See [Pane Document Views](pane-document-views.md) for the full model; widget-level facts:
+
+- `EditorWidget` embeds its pane-1 view as a child pod (three-child z-order unchanged: panel_host, region, overlay_host; the view paints above region, below overlay_host — `paint_status_line` remains in `post_paint`).
+- `apply_connection_event` keeps chrome-only events (SduiSnapshot/Update, ActiveTheme mirroring, shell prefs, runtime snapshots) and forwards document-scoped events to the view (unconditionally for `DocumentOpened`, so new documents reach the pane before it owns them).
+- Widget trait entry points (`on_pointer_event`, `on_text_event`, `layout`, `paint`, focus handling) delegate to the view; `update` submits `EditorAction::PaneFocused(self.pane_id)` on child focus gain. `take_layout_invalidation` drains both the chrome's and the view's layout flags (short-circuit OR fixed to avoid dropped invalidations).
+- `RuntimeBaseline` (behavior manifest + active theme + typography) is exposed to the driver so newly mounted pane views start from current runtime state.
+- Test-facing shims: `view_mut()`/`editor_state_for_test()` accessors; the surviving unit tests reach the pane surface via `widget.view_mut().editor_mut()`.
+
+## Phase 22.3: per-tab chrome and action surface
+
+Phase 22.3 (2026-08-06) makes the widget one tab's connection chrome: each
+`EditorWidget` instance is owned by one tab's `TabChrome` in
+`ClayShellWidget` (the active tab's editor is the previous single-tab
+widget; inactive tabs keep their chrome registered at zero size). The
+action surface gained `EditorAction::TabBar(TabBarAction)` — `Activate {
+client_id }`, `Close { client_id }`, `NewTab` — submitted by the shell's
+pointer handling and handled by the driver (optimistic switch,
+dirty-guarded close, folder-picker new-tab flow; see [Tabs and Independent
+Client Views](tabs-and-clients.md)). `EditorAction` carries `DriverSession`
+(a `PartialEq` wrapper over the client session comparing `client_id`) so
+reconnect and open-tab events stay testable. Reconnect delegates
+(`reconnect`, `documents_for_reopen`) proxy to the pane views.
+
 ## Related
 
 - [Masonry Shell Runtime](masonry-shell.md)
+- [Tabs and Independent Client Views](tabs-and-clients.md)
+- [Pane Document Views](pane-document-views.md)
 - [Client Snapshot Bootstrap](client-snapshot-bootstrap.md)
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [End-to-End File Browser Workflow Primitive Review](end-to-end-file-browser-workflow-primitive-review.md)

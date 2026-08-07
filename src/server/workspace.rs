@@ -2786,13 +2786,14 @@ mod tests {
         assert_eq!(opened.access, DocumentAccess::Editable { lease_id: 1 });
         let document = opened.document.lock().await;
         assert_eq!(
-            document.initial_document_message(opened.access.clone()),
+            document.initial_document_message(opened.access.clone(), "/tmp/root".to_string()),
             ServerMessage::InitialDocument {
                 document_id: 1,
                 version: 1,
                 text: "hello 🌎\n".to_string(),
                 access: DocumentAccess::Editable { lease_id: 1 },
                 lease_id: Some(1),
+                workspace_root: "/tmp/root".to_string(),
             }
         );
         assert!(!document.is_dirty());
@@ -2828,13 +2829,14 @@ mod tests {
                 .document
                 .lock()
                 .await
-                .initial_document_message(second.access.clone()),
+                .initial_document_message(second.access.clone(), "/tmp/root".to_string()),
             ServerMessage::InitialDocument {
                 document_id: first.document_id,
                 version: 1,
                 text: "fn main() {}\n".to_string(),
                 access: DocumentAccess::ReadOnly,
                 lease_id: None,
+                workspace_root: "/tmp/root".to_string(),
             }
         );
 

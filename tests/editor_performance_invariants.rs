@@ -293,12 +293,15 @@ fn completion_hot_paths_use_inert_state_and_nonblocking_enqueue_only() {
     let surface_source = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
     let widget_source =
         fs::read_to_string("src/masonry_editor.rs").expect("editor widget readable");
+    // Phase 22.2: the per-document completion plumbing lives in the pane view.
+    let view_source =
+        fs::read_to_string("src/masonry_pane_document.rs").expect("pane view readable");
     let client_queue_source =
         fs::read_to_string("src/client/mod.rs").expect("client queue readable");
-    let combined = format!("{surface_source}\n{widget_source}");
+    let combined = format!("{surface_source}\n{widget_source}\n{view_source}");
 
     assert!(surface_source.contains("completion_request_event"));
-    assert!(widget_source.contains("enqueue_completion_request"));
+    assert!(view_source.contains("enqueue_completion_request"));
     assert!(client_queue_source.contains("ClientMessage::CompletionRequest"));
     assert!(client_queue_source.contains("try_send"));
     for forbidden in [

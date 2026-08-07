@@ -22,8 +22,7 @@ use crate::{
         SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate, SduiVersion,
     },
     shell::{
-        CompletionMenuAcceptAction, FixedSlotId, FixedSlotState, PackageUiRuntimeState,
-        PaneSlotLayout, TransientMenuSession,
+        FixedSlotId, FixedSlotState, PackageUiRuntimeState, PaneSlotLayout, TransientMenuSession,
         layout::PaneSlotId,
         theme::{PanelDefaults, SduiThemeStyle},
     },
@@ -118,10 +117,6 @@ impl SduiNativeState {
         }
     }
 
-    pub(crate) fn active_menu(&self) -> Option<&TransientMenuSession> {
-        self.active_menu.as_ref()
-    }
-
     pub(crate) fn set_typography(&mut self, typography: TypographyRegistry) {
         if self.typography == typography {
             return;
@@ -201,59 +196,6 @@ impl SduiNativeState {
     pub(crate) fn clear_active_menu(&mut self) {
         self.active_menu = None;
         self.overlays_dirty = true;
-    }
-
-    pub(crate) fn menu_select_next(&mut self) {
-        if let Some(menu) = &mut self.active_menu {
-            menu.select_next();
-            self.overlays_dirty = true;
-        }
-    }
-
-    pub(crate) fn menu_select_previous(&mut self) {
-        if let Some(menu) = &mut self.active_menu {
-            menu.select_previous();
-            self.overlays_dirty = true;
-        }
-    }
-
-    pub(crate) fn menu_activate_selected(&mut self) -> Option<crate::protocol::SduiActionIntent> {
-        let menu = self.active_menu.as_ref()?;
-        let action = menu.activate_selected()?;
-        if action.completion_accept.is_some() {
-            return None;
-        }
-        Some(crate::protocol::SduiActionIntent {
-            command_id: action.command_id.clone(),
-            source: crate::protocol::SduiActionSource::ListItem {
-                node_id: crate::protocol::SduiNodeId(menu.session_id().0),
-                item_id: menu.selected_index().to_string(),
-            },
-            arguments: json_object_to_sdui_arguments(&action.arguments),
-        })
-    }
-
-    /// Returns the selected transient-menu action without converting to SDUI,
-    /// so local language-intelligence handlers can inspect typed arguments.
-    pub(crate) fn menu_selected_action(
-        &self,
-    ) -> Option<crate::shell::transient_menu::TransientMenuAction> {
-        self.active_menu
-            .as_ref()
-            .and_then(crate::shell::TransientMenuSession::activate_selected)
-            .cloned()
-    }
-
-    pub(crate) fn menu_activate_completion(&mut self) -> Option<CompletionMenuAcceptAction> {
-        let menu = self.active_menu.as_ref()?;
-        menu.activate_selected()?.completion_accept.clone()
-    }
-
-    pub(crate) fn menu_cancel(&mut self) {
-        if let Some(menu) = &mut self.active_menu {
-            menu.cancel();
-            self.overlays_dirty = true;
-        }
     }
 
     pub fn apply_snapshot(&mut self, tree: SduiTree) {
@@ -774,7 +716,7 @@ pub(crate) fn package_action_intent(command_id: &str, source_id: &str) -> SduiAc
     )
 }
 
-fn json_object_to_sdui_arguments(
+pub(crate) fn json_object_to_sdui_arguments(
     value: &serde_json::Value,
 ) -> Vec<crate::protocol::SduiActionArgument> {
     let Some(object) = value.as_object() else {
@@ -848,9 +790,7 @@ mod tests {
         SduiActionSource, SduiEditorBinding, SduiFlexDirection, SduiListItem, SduiNodeKind,
         representative_panel_update, representative_sdui_tree,
     };
-    use crate::shell::transient_menu::{
-        TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
-    };
+    use crate::shell::transient_menu::{TransientMenuSession, TransientMenuSessionId};
     use serde_json::json;
 
     fn package_component(id: &str) -> PackageUiComponentTree {
@@ -1936,48 +1876,5 @@ mod tests {
         let region_without_menu = editor_region(Size::new(900.0, 600.0), &SduiNativeState::empty());
         assert_eq!(region_with_menu, region_without_menu);
         assert_eq!(region_with_menu, Rect::new(0.0, 0.0, 900.0, 600.0));
-    }
-
-    #[test]
-    fn menu_navigation_updates_selection() {
-        use crate::shell::transient_menu::TransientMenuAction;
-
-        let mut state = SduiNativeState::empty();
-        let menu =
-            TransientMenuSession::new(TransientMenuSessionId(6), "Commands").with_items(vec![
-                TransientMenuItem::new("a", "Alpha", TransientMenuAction::new("clay.alpha")),
-                TransientMenuItem::new("b", "Beta", TransientMenuAction::new("clay.beta")),
-                TransientMenuItem::new("c", "Gamma", TransientMenuAction::new("clay.gamma")),
-            ]);
-        state.set_active_menu(menu);
-        assert_eq!(state.active_menu().unwrap().selected_index(), 0);
-
-        state.menu_select_next();
-        assert_eq!(state.active_menu().unwrap().selected_index(), 1);
-
-        state.menu_select_previous();
-        assert_eq!(state.active_menu().unwrap().selected_index(), 0);
-
-        state.menu_select_previous();
-        assert_eq!(state.active_menu().unwrap().selected_index(), 2);
-    }
-
-    #[test]
-    fn menu_activate_selected_returns_inert_action_intent() {
-        use crate::shell::transient_menu::TransientMenuAction;
-
-        let mut state = SduiNativeState::empty();
-        let menu =
-            TransientMenuSession::new(TransientMenuSessionId(7), "Commands").with_items(vec![
-                TransientMenuItem::new("a", "Alpha", TransientMenuAction::new("clay.alpha")),
-                TransientMenuItem::new("b", "Beta", TransientMenuAction::new("clay.beta")),
-            ]);
-        state.set_active_menu(menu);
-        state.menu_select_next();
-
-        let intent = state
-            .menu_activate_selected()
-            .expect("selected item action");
-        assert_eq!(intent.command_id, "clay.beta");
     }
 }

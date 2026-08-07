@@ -2001,7 +2001,12 @@ fn keypress_routing_uses_manifest_without_javascript() {
                 );
             }
             RoutingPolicy::ClientUiCommand => {
-                panic!(
+                // Phase 22.1: Clay-owned client UI commands (shell pane
+                // management, editor client commands) are allowed in the base
+                // manifest; packages must not declare their own.
+                assert!(
+                    cmd.command_id.starts_with("clay.shell.client")
+                        || cmd.command_id.starts_with("clay.editor.client"),
                     "package manifest command `{}` must not request native client UI authority",
                     cmd.command_id
                 );

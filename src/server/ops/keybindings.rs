@@ -193,6 +193,10 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
     if crate::protocol::SelectionQuery::from_command_id(command_id).is_some() {
         return true;
     }
+    // Phase 22.4: the numbered tab families parse the same way (1..=9 only).
+    if tab_family_variant(command_id).is_some() {
+        return true;
+    }
     matches!(
         command_id,
         "text.insert_newline"
@@ -243,7 +247,41 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "clay.documents.serverGetDocumentStatus"
             | "clay.documents.serverListDocuments"
             | "clay.workspace.serverListWorkspaceRoots"
+            | "clay.shell.clientSplitPaneVertical"
+            | "clay.shell.clientSplitPaneHorizontal"
+            | "clay.shell.clientAddEqualPane"
+            | "clay.shell.clientClosePane"
+            | "clay.shell.clientFocusPaneNext"
+            | "clay.shell.clientFocusPanePrev"
+            | "clay.shell.clientResizePaneLeft"
+            | "clay.shell.clientResizePaneRight"
+            | "clay.shell.clientResizePaneUp"
+            | "clay.shell.clientResizePaneDown"
+            | "clay.shell.clientMovePaneNext"
+            | "clay.shell.clientMovePanePrev"
+            | "clay.shell.clientTabNext"
+            | "clay.shell.clientTabPrev"
+            | "clay.shell.clientTabNew"
+            | "clay.shell.clientTabClose"
+            | "clay.shell.clientTabMoveLeft"
+            | "clay.shell.clientTabMoveRight"
     )
+}
+
+/// Phase 22.4: numbered tab command families. `clay.shell.clientTabActivate.N`
+/// and `clay.shell.clientTabMoveTo.N` exist for N in 1..=9 only — "numbered
+/// switch beyond 9" is the policy that no such command ID exists (the dotted
+/// family rides the Plan 071 `SelectionQuery` parse precedent).
+fn tab_family_variant(command_id: &str) -> Option<u32> {
+    let (family, suffix) = command_id.rsplit_once('.')?;
+    if !matches!(
+        family,
+        "clay.shell.clientTabActivate" | "clay.shell.clientTabMoveTo"
+    ) {
+        return None;
+    }
+    let n: u32 = suffix.parse().ok()?;
+    (1..=9).contains(&n).then_some(n)
 }
 
 fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPolicy, JsErrorBox> {
@@ -261,6 +299,10 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
         // Text-object/smart-select: UI-reactive read-only server query; the
         // client captures its selection set and applies returned ranges.
         Ok(crate::protocol::RoutingPolicy::UiReactivePriority)
+    } else if tab_family_variant(command_id).is_some() {
+        // Phase 22.4: numbered tab commands are client-routed like the flat
+        // tab IDs (driver executes the tab operation locally).
+        Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
     } else if matches!(
         command_id,
         "clay.documents.clientOpenFileDialog"
@@ -292,6 +334,24 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
             | "clay.editor.clientKeepSelection"
             | "clay.editor.clientRemoveSelection"
             | "clay.editor.clientUndoCursorMove"
+            | "clay.shell.clientSplitPaneVertical"
+            | "clay.shell.clientSplitPaneHorizontal"
+            | "clay.shell.clientAddEqualPane"
+            | "clay.shell.clientClosePane"
+            | "clay.shell.clientFocusPaneNext"
+            | "clay.shell.clientFocusPanePrev"
+            | "clay.shell.clientResizePaneLeft"
+            | "clay.shell.clientResizePaneRight"
+            | "clay.shell.clientResizePaneUp"
+            | "clay.shell.clientResizePaneDown"
+            | "clay.shell.clientMovePaneNext"
+            | "clay.shell.clientMovePanePrev"
+            | "clay.shell.clientTabNext"
+            | "clay.shell.clientTabPrev"
+            | "clay.shell.clientTabNew"
+            | "clay.shell.clientTabClose"
+            | "clay.shell.clientTabMoveLeft"
+            | "clay.shell.clientTabMoveRight"
     ) {
         Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
     } else {
@@ -361,7 +421,7 @@ fn manifest_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{command_routing_policy, is_runtime_bindable_command};
+    use super::{command_routing_policy, is_runtime_bindable_command, validate_command_id};
     use crate::protocol::RoutingPolicy;
 
     #[test]
@@ -435,6 +495,115 @@ mod tests {
             "clay.editor.clientSmartSelect.grow",
         ] {
             assert!(!is_runtime_bindable_command(command));
+        }
+    }
+
+    #[test]
+    fn phase_22_1_shell_commands_are_bindable_and_client_ui_routed() {
+        let shell_commands = [
+            "clay.shell.clientSplitPaneVertical",
+            "clay.shell.clientSplitPaneHorizontal",
+            "clay.shell.clientAddEqualPane",
+            "clay.shell.clientClosePane",
+            "clay.shell.clientFocusPaneNext",
+            "clay.shell.clientFocusPanePrev",
+            "clay.shell.clientResizePaneLeft",
+            "clay.shell.clientResizePaneRight",
+            "clay.shell.clientResizePaneUp",
+            "clay.shell.clientResizePaneDown",
+            "clay.shell.clientMovePaneNext",
+            "clay.shell.clientMovePanePrev",
+        ];
+        for command in shell_commands {
+            assert!(
+                is_runtime_bindable_command(command),
+                "{} should be bindable",
+                command
+            );
+            assert_eq!(
+                command_routing_policy(command).unwrap(),
+                RoutingPolicy::ClientUiCommand,
+                "{} should be ClientUiCommand-routed",
+                command
+            );
+        }
+        // Unknown clay.shell.* IDs are rejected.
+        assert!(!is_runtime_bindable_command("clay.shell.clientUnknown"));
+        assert!(!is_runtime_bindable_command(
+            "clay.shell.clientSplitPane.diagonal"
+        ));
+    }
+
+    #[test]
+    fn phase_22_4_tab_commands_are_bindable_and_client_ui_routed() {
+        for command in [
+            "clay.shell.clientTabNext",
+            "clay.shell.clientTabPrev",
+            "clay.shell.clientTabNew",
+            "clay.shell.clientTabClose",
+            "clay.shell.clientTabMoveLeft",
+            "clay.shell.clientTabMoveRight",
+        ] {
+            assert!(
+                is_runtime_bindable_command(command),
+                "{command} should be bindable"
+            );
+            assert_eq!(
+                command_routing_policy(command).unwrap(),
+                RoutingPolicy::ClientUiCommand,
+                "{command} should be ClientUiCommand-routed"
+            );
+        }
+        // Numbered families: every 1..=9 variant is bindable and client-routed.
+        for n in 1..=9 {
+            for command in [
+                format!("clay.shell.clientTabActivate.{n}"),
+                format!("clay.shell.clientTabMoveTo.{n}"),
+            ] {
+                assert!(
+                    is_runtime_bindable_command(&command),
+                    "{command} should be bindable"
+                );
+                assert_eq!(
+                    command_routing_policy(&command).unwrap(),
+                    RoutingPolicy::ClientUiCommand,
+                    "{command} should be ClientUiCommand-routed"
+                );
+            }
+        }
+        // Deny-by-default: only 1..=9 exist. 0, 10, non-numeric suffixes, and
+        // unknown tab-ish IDs reject; the "beyond 9" policy is that no such
+        // command ID is declared.
+        for command in [
+            "clay.shell.clientTabActivate.0",
+            "clay.shell.clientTabActivate.10",
+            "clay.shell.clientTabMoveTo.0",
+            "clay.shell.clientTabMoveTo.10",
+            "clay.shell.clientTabActivate.1a",
+            "clay.shell.clientTabBogus",
+        ] {
+            assert!(
+                !is_runtime_bindable_command(command),
+                "{command} must not be bindable"
+            );
+            assert!(
+                validate_command_id(command).is_err(),
+                "{command} must reject through the bindKey validation gate"
+            );
+        }
+        // Representative IDs pass the full bindKey validation gate (the op
+        // calls validate_command_id, which allow-lists + routes + rejects
+        // when-clauses).
+        for command in [
+            "clay.shell.clientTabClose",
+            "clay.shell.clientTabActivate.5",
+            "clay.shell.clientTabMoveTo.9",
+        ] {
+            assert_eq!(
+                validate_command_id(command).unwrap(),
+                command,
+                "{command} must pass the bindKey validation gate"
+            );
         }
     }
 }

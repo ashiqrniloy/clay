@@ -9,7 +9,7 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::client::PendingEdit;
 use crate::perf::budgets::CLIENT_DOCUMENT_SESSION_MAX;
-use crate::protocol::{DocumentId, DocumentVersion};
+use crate::protocol::{DocumentId, DocumentVersion, WorkspaceRootId};
 
 use super::surface::EditorSurface;
 
@@ -23,6 +23,12 @@ pub(crate) struct RetainedDocumentSession {
     pub(crate) pending: Vec<PendingEdit>,
     /// Monotonic activation stamp for LRU eviction among inactive sessions.
     pub(crate) last_activated_order: u64,
+    /// Phase 22.3: the document's open identity (workspace root id + relative
+    /// path), retained so a reconnected tab can re-open this document through
+    /// the plain `OpenDocument` path (fresh connections hold no selected-file
+    /// capability for previously open documents).
+    pub(crate) workspace_root_id: WorkspaceRootId,
+    pub(crate) path: String,
 }
 
 #[derive(Debug, Default)]
@@ -50,9 +56,19 @@ impl DocumentSessionStore {
         self.sessions.is_empty()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn contains(&self, document_id: DocumentId) -> bool {
         self.sessions.contains_key(&document_id)
+    }
+
+    /// All retained document ids (used by pane-close cleanup).
+    pub(crate) fn document_ids(&self) -> Vec<DocumentId> {
+        self.sessions.keys().copied().collect()
+    }
+
+    /// Drop every retained session (pane close).
+    pub(crate) fn clear(&mut self) {
+        self.sessions.clear();
+        self.lru.clear();
     }
 
     pub(crate) fn get_mut(
@@ -76,6 +92,15 @@ impl DocumentSessionStore {
         self.touch_lru(document_id);
         self.sessions.insert(document_id, session);
         self.evict_if_needed()
+    }
+
+    /// Phase 22.3: the open identities of every retained session, for a
+    /// reconnecting tab to re-open (root id + relative path).
+    pub(crate) fn reopen_documents(&self) -> Vec<(WorkspaceRootId, String)> {
+        self.sessions
+            .values()
+            .map(|session| (session.workspace_root_id, session.path.clone()))
+            .collect()
     }
 
     pub(crate) fn remove(&mut self, document_id: DocumentId) -> Option<RetainedDocumentSession> {
@@ -133,6 +158,30 @@ impl DocumentSessionStore {
         entries
     }
 
+    /// Phase 22.2: retained sessions only (no active-document entry), for
+    /// cross-pane open-documents menu aggregation. Sorted by display name.
+    pub(crate) fn list_retained(&self) -> Vec<SessionListEntry> {
+        let mut inactive: Vec<_> = self
+            .sessions
+            .iter()
+            .map(|(&document_id, session)| SessionListEntry {
+                document_id,
+                display_name: session
+                    .document_display_name
+                    .clone()
+                    .unwrap_or_else(|| format!("doc {document_id}")),
+                dirty: session.dirty,
+                active: false,
+            })
+            .collect();
+        inactive.sort_by(|a, b| {
+            a.display_name
+                .cmp(&b.display_name)
+                .then(a.document_id.cmp(&b.document_id))
+        });
+        inactive
+    }
+
     fn touch_lru(&mut self, document_id: DocumentId) {
         self.lru.retain(|id| *id != document_id);
         self.lru.push_back(document_id);
@@ -187,6 +236,8 @@ mod tests {
             confirmed_version: 1,
             pending: Vec::new(),
             last_activated_order: 0,
+            workspace_root_id: 77,
+            path: format!("doc-{document_id}.md"),
         }
     }
 

@@ -1,9 +1,11 @@
 use std::{
+    collections::BTreeMap,
     error::Error,
     ffi::OsString,
     fmt,
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
+    sync::Arc,
     time::Duration,
 };
 
@@ -17,31 +19,168 @@ use masonry_winit::winit::dpi::LogicalSize;
 use masonry_winit::winit::window::Window;
 use tokio::sync::mpsc;
 
-use clay::client::{self, ClientConnectionEvent};
+use clay::client::{self, ClientConnectionEvent, ClientEditQueue};
 use clay::ipc::{IpcEndpoint, default_endpoint, smoke_endpoint};
 use clay::masonry_editor::{
     EditorAction, EditorStatus, EditorWidget, PackageButtonPress, PackageDropdownSelect,
     PackageListRowPress, SduiButtonPress, SduiListRowPress,
 };
+use clay::masonry_pane_document::{CrossPaneDocumentEntry, PaneDocumentView};
+use clay::masonry_pane_host::PaneContentHost;
 use clay::masonry_shell::ClayShellWidget;
 use clay::perf::fixtures::{FixtureKind, FixtureSpec, default_fixture_path, generate_fixture_file};
 use clay::perf::metrics::{PERF_PROFILE_FLAG, PerfConfig, install_global_recorder};
-use clay::protocol::SduiActionIntent;
+use clay::protocol::{
+    ClientId, DocumentMetadata, SduiActionIntent, SduiActionValue, TabId, TabRegistrySnapshot,
+    WorkspaceRootId,
+};
 #[cfg(any(unix, windows))]
 use clay::server::{IpcServer, ServerConfig};
+use clay::shell::{PaneId, TransientMenuSession};
 
 const WINDOW_TITLE: &str = "Clay";
 const WINDOW_WIDTH: f64 = 900.0;
 const WINDOW_HEIGHT: f64 = 600.0;
 
 struct Driver {
+    /// Phase 22.3: the active tab's chrome widget id (mirror of the shell's
+    /// active tab; updated on switch). Active-tab operations (SDUI intents,
+    /// native dialog completions, keybinding commands) route through it.
     editor_widget_id: WidgetId,
+    /// Phase 22.1: the ClayShellWidget's id (root widget) for shell command dispatch.
+    shell_widget_id: WidgetId,
     window_id: WindowId,
+    /// Phase 22.3: one tab state per connection, keyed by the connection's
+    /// `ClientId` (the client-known identity at mount time; the server-assigned
+    /// `TabId` arrives asynchronously via the registry snapshot).
+    tabs: BTreeMap<ClientId, TabState>,
+    /// Phase 22.3: the mounted (active) tab.
+    active_tab: ClientId,
+    /// Phase 22.3: the latest server-authoritative tab registry snapshot.
+    registry: TabRegistrySnapshot,
+    /// Phase 22.3: runtime handle for per-tab event bridges and reconnect /
+    /// new-tab connect tasks.
+    runtime: tokio::runtime::Handle,
+    /// Phase 22.3: the IPC endpoint used for per-tab reconnects and new-tab
+    /// connections.
+    endpoint: IpcEndpoint,
+    /// Phase 22.3: cancellation flags for in-flight per-tab reconnect tasks
+    /// (set when the tab is removed so a retrying task exits instead of
+    /// connecting forever for a closed tab).
+    reconnect_cancel: BTreeMap<ClientId, Arc<std::sync::atomic::AtomicBool>>,
     /// Present in the live app; unit tests that only check action targeting may omit it.
     proxy: Option<EventLoopProxy>,
     dialog_generation: u64,
     file_dialog_in_flight: Option<u64>,
     folder_dialog_in_flight: Option<u64>,
+    /// Phase 22.4: a "Save all and close" tab-close flow awaiting save
+    /// completions. `Some((client_id, pending_document_ids))` while the tab's
+    /// dirty documents save; each `DocumentSaved` for the tab removes its
+    /// document id, and at zero the driver enqueues `TabCommand::Close`. A
+    /// failed save (or a disconnect) cancels the flow — the close never
+    /// happens until every save acked.
+    pending_close_after_saves: Option<(u64, std::collections::BTreeSet<u64>)>,
+    /// Phase 22.4: session-id counter for driver-owned tab-close confirm
+    /// menus (the views use their own counters for their own sessions).
+    tab_menu_session_id: u64,
+}
+
+/// Phase 22.3: the driver-side state of one tab: its connection's command
+/// channel, pending-open attribution, and the server-assigned `TabId` once the
+/// registry snapshot confirms it. The tab's chrome, split tree, pane targets,
+/// and focus policy live in the shell's `TabChrome` (keyed by the same
+/// `ClientId`); the session itself is consumed at mount (initial state → chrome,
+/// events → bridge, edit queue → chrome + this state).
+struct TabState {
+    edit_queue: Option<ClientEditQueue>,
+    /// Phase 22.2: pending file-open attribution. One entry per requesting
+    /// pane (bounded by pane count; replaced on a new request from the same
+    /// pane), consumed when the server's `DocumentOpened` for that request
+    /// arrives so an unmapped open loads into exactly the pane that asked.
+    pending_opens: BTreeMap<PaneId, PendingOpenRequest>,
+    tab_id: Option<TabId>,
+    /// Phase 22.3: the workspace root this tab was mounted with (tab bar card
+    /// name fallback while the tab awaits its server registry entry).
+    workspace_root: String,
+}
+
+/// Phase 22.3: the server registry diff applied to the shell: tabs to
+/// uninstall, the tab to activate (switch + focus), and the tab bar cards
+/// (registry order/names; mounted tabs awaiting their entry are appended with
+/// close disabled).
+struct TabRegistryReconcile {
+    removed: Vec<ClientId>,
+    new_active: Option<ClientId>,
+    cards: Vec<clay::masonry_shell::TabCard>,
+}
+
+/// Phase 22.2: the client-known identity of one in-flight open request.
+/// Exactly one of [`Self::path`] (native dialog / selected-file flows, where
+/// the client knows the absolute path) or [`Self::root_id`] +
+/// [`Self::relative_path`] (file-browser / fuzzy / definition-navigation
+/// intents, where the server answers with a workspace-relative path) is set.
+struct PendingOpenRequest {
+    path: Option<PathBuf>,
+    root_id: Option<WorkspaceRootId>,
+    relative_path: Option<String>,
+}
+
+/// Resolve a pending-open request to its requesting pane (and consume it).
+fn take_pending_open_for(
+    pending: &mut BTreeMap<PaneId, PendingOpenRequest>,
+    metadata: &DocumentMetadata,
+) -> Option<PaneId> {
+    let pane = pending.iter().find_map(|(pane, request)| {
+        let matched = match (
+            request.path.as_ref(),
+            request.root_id,
+            request.relative_path.as_deref(),
+        ) {
+            (Some(path), _, _) => path.as_path() == Path::new(metadata.path.as_str()),
+            (None, Some(root_id), Some(relative_path)) => {
+                root_id == metadata.workspace_root_id && relative_path == metadata.path.as_str()
+            }
+            _ => false,
+        };
+        matched.then_some(*pane)
+    });
+    if let Some(pane) = pane {
+        pending.remove(&pane);
+    }
+    pane
+}
+
+/// Extract the pending-open identity from a file-browser / fuzzy-open /
+/// definition-navigation intent, when it is a workspace open command with the
+/// standard `(workspaceRootId, relativePath)` arguments.
+fn open_intent_pending_request(intent: &SduiActionIntent) -> Option<PendingOpenRequest> {
+    if !matches!(
+        intent.command_id.as_str(),
+        "clay.workspace.openFile" | "clay.workspace.openFuzzyFile"
+    ) {
+        return None;
+    }
+    let root_id = intent.arguments.iter().find_map(|argument| {
+        if argument.name == "workspaceRootId"
+            && let SduiActionValue::U64(root_id) = argument.value
+        {
+            return Some(root_id);
+        }
+        None
+    })?;
+    let relative_path = intent.arguments.iter().find_map(|argument| {
+        if argument.name == "relativePath"
+            && let SduiActionValue::String(path) = &argument.value
+        {
+            return Some(path.clone());
+        }
+        None
+    })?;
+    Some(PendingOpenRequest {
+        path: None,
+        root_id: Some(root_id),
+        relative_path: Some(relative_path),
+    })
 }
 
 impl Driver {
@@ -50,6 +189,11 @@ impl Driver {
         // editor-specific actions aimed at that child even if Masonry reports a
         // shell/root source while the container boundary is settling.
         self.editor_widget_id
+    }
+
+    /// Phase 22.1: the shell widget id for shell-pane command dispatch.
+    fn shell_action_target(&self) -> WidgetId {
+        self.shell_widget_id
     }
 
     /// Route a reconciled SDUI widget's inert intent (button step 9 / list row
@@ -62,6 +206,13 @@ impl Driver {
         widget_id: WidgetId,
         intent: SduiActionIntent,
     ) {
+        // Phase 22.2: workspace open intents (file browser, fuzzy open,
+        // definition navigation) record the active pane as the open target so
+        // the answering DocumentOpened loads into exactly that pane even if
+        // focus moves before the server responds.
+        if let Some(request) = open_intent_pending_request(&intent) {
+            self.record_pending_open(ctx, window_id, request);
+        }
         let editor_widget_id = self.editor_action_target(widget_id);
         ctx.render_root(window_id)
             .edit_widget(editor_widget_id, |mut widget| {
@@ -69,6 +220,28 @@ impl Driver {
                     editor.widget.enqueue_sdui_intent(intent);
                 }
             });
+    }
+
+    /// Phase 22.2: record which pane requested a file open. One entry per
+    /// pane (replaced on re-request), so pending-open state is bounded by the
+    /// pane count. Phase 22.3: attribution is per-tab (the active tab's panes).
+    fn record_pending_open(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        request: PendingOpenRequest,
+    ) {
+        let active = ctx
+            .render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                widget
+                    .try_downcast::<ClayShellWidget>()
+                    .map(|shell| shell.widget.active_pane_id())
+                    .unwrap_or(PaneId(1))
+            });
+        if let Some(tab) = self.tabs.get_mut(&self.active_tab) {
+            tab.pending_opens.insert(active, request);
+        }
     }
 
     fn next_dialog_generation(&mut self) -> Option<u64> {
@@ -166,6 +339,1195 @@ impl Driver {
             }
         }
     }
+
+    // -- Phase 22.2: pane document-view routing --
+
+    /// Apply one connection event to the chrome (pane-1 view + connection
+    /// chrome) with the usual post-apply sync, and drain its pending menu push.
+    fn apply_connection_to_chrome(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        chrome_id: WidgetId,
+        event: ClientConnectionEvent,
+    ) {
+        let menu = ctx
+            .render_root(window_id)
+            .edit_widget(chrome_id, |mut widget| {
+                let mut editor = widget.try_downcast::<EditorWidget>()?;
+                let caret_override = matches!(&event, ClientConnectionEvent::CaretStyleOverride(_));
+                let changed = editor.widget.apply_connection_event(event);
+                editor.widget.sync_region(&mut editor.ctx);
+                editor.widget.sync_panels(&mut editor.ctx);
+                editor.widget.sync_overlays(&mut editor.ctx);
+                if editor.widget.take_layout_invalidation() {
+                    editor.ctx.request_layout();
+                }
+                if changed {
+                    editor.ctx.request_render();
+                    editor.ctx.request_accessibility_update();
+                }
+                // Plan 071 caret-transport fix: a newly installed animating caret
+                // style must start its blink loop immediately.
+                if caret_override && editor.widget.caret_animates() {
+                    editor.ctx.request_anim_frame();
+                }
+                editor.widget.take_pending_menu()
+            });
+        if let Some(menu) = menu {
+            self.apply_menu_sync(ctx, window_id, chrome_id, menu);
+        }
+    }
+
+    /// Show/clear the shared transient menu in the chrome overlay of the tab
+    /// that produced it (Phase 22.3: menus are per-tab chrome state).
+    fn apply_menu_sync(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        chrome_id: WidgetId,
+        menu: Option<TransientMenuSession>,
+    ) {
+        ctx.render_root(window_id)
+            .edit_widget(chrome_id, |mut widget| {
+                if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                    editor.widget.set_active_menu(menu);
+                    editor.widget.sync_overlays(&mut editor.ctx);
+                    editor.ctx.request_render();
+                    editor.ctx.request_accessibility_update();
+                }
+            });
+    }
+
+    /// Apply one connection event to a pane content target (chrome or a
+    /// `PaneDocumentView`) with post-apply sync, and forward the target's
+    /// pending menu push to the chrome overlay.
+    fn apply_event_to_target(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        chrome_id: WidgetId,
+        target: WidgetId,
+        event: ClientConnectionEvent,
+    ) -> bool {
+        let menu = ctx
+            .render_root(window_id)
+            .edit_widget(target, |mut widget| {
+                if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
+                    let changed = editor.widget.apply_connection_event(event);
+                    editor.widget.sync_region(&mut editor.ctx);
+                    editor.widget.sync_panels(&mut editor.ctx);
+                    editor.widget.sync_overlays(&mut editor.ctx);
+                    if editor.widget.take_layout_invalidation() {
+                        editor.ctx.request_layout();
+                    }
+                    if changed {
+                        editor.ctx.request_render();
+                        editor.ctx.request_accessibility_update();
+                    }
+                    editor.widget.take_pending_menu()
+                } else if let Some(mut view) = widget.try_downcast::<PaneDocumentView>() {
+                    let changed = view.widget.apply_connection_event(event);
+                    if view.widget.take_layout_invalidation() {
+                        view.ctx.request_layout();
+                    }
+                    if changed {
+                        view.ctx.request_render();
+                        view.ctx.request_accessibility_update();
+                    }
+                    view.widget.take_pending_menu()
+                } else {
+                    None
+                }
+            });
+        let changed = menu.is_some();
+        if let Some(menu) = menu {
+            self.apply_menu_sync(ctx, window_id, chrome_id, menu);
+        }
+        changed
+    }
+
+    /// Apply one connection event to the event's tab active pane content
+    /// target only (server-pushed editor commands; never fan out).
+    fn apply_event_to_active_pane(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: ClientId,
+        chrome_id: WidgetId,
+        event: ClientConnectionEvent,
+    ) {
+        let target = ctx
+            .render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                widget
+                    .try_downcast::<ClayShellWidget>()
+                    .and_then(|shell| shell.widget.active_pane_target_for(client_id))
+            });
+        if let Some(target) = target {
+            let _ = self.apply_event_to_target(ctx, window_id, chrome_id, target, event);
+        }
+    }
+
+    /// Route a document-scoped event to the pane view owning the document:
+    /// try the focused pane's target first (the hot path), then the rest.
+    /// Non-owning views no-op on foreign documents.
+    fn route_document_event(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: ClientId,
+        chrome_id: WidgetId,
+        event: ClientConnectionEvent,
+    ) {
+        let (active, targets) =
+            ctx.render_root(window_id)
+                .edit_widget(self.shell_widget_id, |mut widget| {
+                    let Some(shell) = widget.try_downcast::<ClayShellWidget>() else {
+                        return (PaneId(1), Vec::new());
+                    };
+                    (
+                        shell.widget.active_pane_id_for(client_id),
+                        shell.widget.pane_targets_for(client_id),
+                    )
+                });
+        let mut ordered: Vec<WidgetId> = Vec::with_capacity(targets.len());
+        if let Some((_, target)) = targets.iter().find(|(pane, _)| *pane == active) {
+            ordered.push(*target);
+        }
+        for (_, target) in &targets {
+            if !ordered.contains(target) {
+                ordered.push(*target);
+            }
+        }
+        for target in ordered {
+            if self.apply_event_to_target(ctx, window_id, chrome_id, target, event.clone()) {
+                return;
+            }
+        }
+        // Unmapped documents (pane closed mid-flight): dropped.
+    }
+
+    /// Route a request-scoped event (no document id) to the focused pane's
+    /// view first, then the rest (request-id guards make non-owners no-op).
+    fn route_request_scoped_event(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: ClientId,
+        chrome_id: WidgetId,
+        event: ClientConnectionEvent,
+    ) {
+        self.route_document_event(ctx, window_id, client_id, chrome_id, event);
+    }
+
+    /// Route `DocumentOpened`: existing owners get the document applied in
+    /// place (duplicate-open: no second view, the existing pane is focused);
+    /// new documents open into the active pane (mounting a fresh view when the
+    /// pane is a placeholder).
+    fn route_document_opened(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: ClientId,
+        chrome_id: WidgetId,
+        event: ClientConnectionEvent,
+    ) {
+        let Some(document_id) = event.document_id() else {
+            return;
+        };
+        let metadata = match &event {
+            ClientConnectionEvent::DocumentOpened { metadata, .. } => Some(metadata),
+            _ => None,
+        };
+        let owner = self.find_pane_for_document(ctx, window_id, client_id, document_id);
+        let active = ctx
+            .render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                widget
+                    .try_downcast::<ClayShellWidget>()
+                    .map(|shell| shell.widget.active_pane_id_for(client_id))
+                    .unwrap_or(PaneId(1))
+            });
+        // Pending-open attribution: consume the requesting pane's entry now,
+        // whichever branch resolves (the request is answered either way).
+        let requesting = metadata.and_then(|metadata| {
+            self.tabs
+                .get_mut(&client_id)
+                .and_then(|tab| take_pending_open_for(&mut tab.pending_opens, metadata))
+        });
+        let target_pane = match owner {
+            Some(pane) => {
+                // Duplicate open (or re-open of a retained document): apply to
+                // the owning view (same-document opens no-op; retained copies
+                // reload) and focus that pane. The requesting pane keeps its
+                // previous content; no second view is ever created. Focus only
+                // follows for the active tab (an inactive tab's open must not
+                // steal focus from the mounted tab).
+                let target =
+                    ctx.render_root(window_id)
+                        .edit_widget(self.shell_widget_id, |mut widget| {
+                            widget
+                                .try_downcast::<ClayShellWidget>()
+                                .and_then(|shell| shell.widget.pane_target_for(client_id, pane))
+                        });
+                if let Some(target) = target {
+                    let _ = self.apply_event_to_target(ctx, window_id, chrome_id, target, event);
+                }
+                if client_id == self.active_tab && pane != active {
+                    self.focus_pane_target(ctx, window_id, pane);
+                }
+                return;
+            }
+            None => requesting.unwrap_or(active),
+        };
+        // New document: open into the requesting pane (falling back to the
+        // active pane for server-initiated opens); placeholder panes get a
+        // freshly mounted view.
+        let target = ctx
+            .render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                widget
+                    .try_downcast::<ClayShellWidget>()
+                    .and_then(|shell| shell.widget.pane_target_for(client_id, target_pane))
+            });
+        match target {
+            Some(target) => {
+                let _ = self.apply_event_to_target(ctx, window_id, chrome_id, target, event);
+            }
+            None => {
+                if let Some(view_id) =
+                    self.mount_document_view(ctx, window_id, client_id, target_pane)
+                {
+                    let _ = self.apply_event_to_target(ctx, window_id, chrome_id, view_id, event);
+                }
+            }
+        }
+    }
+
+    /// Find the pane whose view owns `document_id` (active or retained).
+    fn find_pane_for_document(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: ClientId,
+        document_id: clay::protocol::DocumentId,
+    ) -> Option<PaneId> {
+        let targets = ctx
+            .render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                widget
+                    .try_downcast::<ClayShellWidget>()
+                    .map(|shell| shell.widget.pane_targets_for(client_id))
+                    .unwrap_or_default()
+            });
+        for (pane, target) in targets {
+            let owns = ctx
+                .render_root(window_id)
+                .edit_widget(target, |mut widget| {
+                    if let Some(editor) = widget.try_downcast::<EditorWidget>() {
+                        editor.widget.contains_document(document_id)
+                    } else if let Some(view) = widget.try_downcast::<PaneDocumentView>() {
+                        view.widget.contains_document(document_id)
+                    } else {
+                        false
+                    }
+                });
+            if owns {
+                return Some(pane);
+            }
+        }
+        None
+    }
+
+    /// Mount a fresh `PaneDocumentView` into a placeholder pane and register
+    /// its routing target. Returns the new view's widget id.
+    fn mount_document_view(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: ClientId,
+        pane: PaneId,
+    ) -> Option<WidgetId> {
+        let queue = self.tabs.get(&client_id)?.edit_queue.clone()?;
+        let chrome_id =
+            ctx.render_root(window_id)
+                .edit_widget(self.shell_widget_id, |mut widget| {
+                    widget
+                        .try_downcast::<ClayShellWidget>()
+                        .and_then(|shell| shell.widget.editor_widget_id_for(client_id))
+                })?;
+        let (baseline, menu_ids, ui_version) =
+            ctx.render_root(window_id)
+                .edit_widget(chrome_id, |mut widget| {
+                    widget.try_downcast::<EditorWidget>().map(|editor| {
+                        (
+                            editor.widget.runtime_baseline(),
+                            editor.widget.menu_session_ids_shared(),
+                            editor.widget.sdui_ui_version_shared(),
+                        )
+                    })
+                })?;
+        let host_id =
+            ctx.render_root(window_id)
+                .edit_widget(self.shell_widget_id, |mut widget| {
+                    widget
+                        .try_downcast::<ClayShellWidget>()
+                        .and_then(|shell| shell.widget.pane_host_id_for(client_id, pane))
+                })?;
+        let view = PaneDocumentView::new(pane, menu_ids, ui_version)
+            .with_edit_queue(queue)
+            .with_runtime_baseline(&baseline);
+        let view_new = NewWidget::new(view);
+        let view_id = view_new.id();
+        ctx.render_root(window_id)
+            .edit_widget(host_id, |mut widget| {
+                if let Some(mut host) = widget.try_downcast::<PaneContentHost>() {
+                    host.widget.set_document_view(&mut host.ctx, view_new);
+                }
+            });
+        ctx.render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                if let Some(shell) = widget.try_downcast::<ClayShellWidget>() {
+                    shell.widget.set_pane_target_for(client_id, pane, view_id);
+                }
+            });
+        Some(view_id)
+    }
+
+    /// Activate `pane` and move Masonry focus to its content widget.
+    fn focus_pane_target(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        pane: PaneId,
+    ) {
+        let target = ctx
+            .render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                let mut shell = widget.try_downcast::<ClayShellWidget>()?;
+                shell.widget.set_active_pane(pane);
+                shell.ctx.request_render();
+                shell.widget.pane_target(pane)
+            });
+        if let Some(target) = target {
+            let _ = ctx.render_root(window_id).focus_on(Some(target));
+        }
+    }
+
+    /// Fan one connection-wide event out to every pane view (panes 2+; the
+    /// chrome already applied it to pane 1).
+    fn fan_out_event(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: ClientId,
+        chrome_id: WidgetId,
+        event: ClientConnectionEvent,
+    ) {
+        let targets = ctx
+            .render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                widget
+                    .try_downcast::<ClayShellWidget>()
+                    .map(|shell| shell.widget.pane_targets_for(client_id))
+                    .unwrap_or_default()
+            });
+        for (_, target) in targets {
+            if target == chrome_id {
+                continue;
+            }
+            let _ = self.apply_event_to_target(ctx, window_id, chrome_id, target, event.clone());
+        }
+    }
+
+    /// Fan the per-document render parts of a runtime snapshot out to every
+    /// pane view (panes 2+; the chrome installed pane 1).
+    fn fan_out_runtime_snapshot(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: ClientId,
+        chrome_id: WidgetId,
+        snapshot: clay::protocol::RuntimeStateSnapshot,
+    ) {
+        let targets = ctx
+            .render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                widget
+                    .try_downcast::<ClayShellWidget>()
+                    .map(|shell| shell.widget.pane_targets_for(client_id))
+                    .unwrap_or_default()
+            });
+        for (_, target) in targets {
+            if target == chrome_id {
+                continue;
+            }
+            ctx.render_root(window_id)
+                .edit_widget(target, |mut widget| {
+                    if let Some(mut view) = widget.try_downcast::<PaneDocumentView>() {
+                        let changed = view.widget.apply_runtime_snapshot(&snapshot);
+                        if view.widget.take_layout_invalidation() {
+                            view.ctx.request_layout();
+                        }
+                        if changed {
+                            view.ctx.request_render();
+                            view.ctx.request_accessibility_update();
+                        }
+                    }
+                });
+        }
+    }
+
+    // -- Phase 22.3: tab lifecycle (multi-connection model) --
+
+    /// Phase 22.3: reconcile the server-authoritative registry snapshot into
+    /// driver state (pure; no shell access): fill each tab's server-assigned
+    /// `TabId`, compute tabs whose entries vanished (close), the tab to
+    /// activate (a rejected optimistic `Activate` reverts via the pushed
+    /// snapshot's `active`), and the tab bar cards (registry order/names,
+    /// mounted tabs awaiting their entry appended with close disabled).
+    ///
+    /// Removals are only reconciled against a non-empty registry: an empty
+    /// registry means the server restarted (the in-memory registry is lost)
+    /// and the lifecycle task re-registers tabs via `Reclaim`/`New`.
+    fn apply_tab_registry(&mut self, snapshot: TabRegistrySnapshot) -> TabRegistryReconcile {
+        for (client_id, state) in &mut self.tabs {
+            if let Some(entry) = snapshot
+                .tabs
+                .iter()
+                .find(|entry| entry.client_id == *client_id)
+            {
+                state.tab_id = Some(entry.tab_id);
+            }
+        }
+        let mut removed = Vec::new();
+        if !snapshot.tabs.is_empty() {
+            removed = self
+                .tabs
+                .keys()
+                .copied()
+                .filter(|client_id| {
+                    !snapshot
+                        .tabs
+                        .iter()
+                        .any(|entry| entry.client_id == *client_id)
+                })
+                .collect();
+        }
+        let mut new_active = None;
+        if let Some(active_tab_id) = snapshot.active
+            && let Some(entry) = snapshot
+                .tabs
+                .iter()
+                .find(|entry| entry.tab_id == active_tab_id)
+            && self.tabs.contains_key(&entry.client_id)
+            && entry.client_id != self.active_tab
+        {
+            new_active = Some(entry.client_id);
+        }
+        if removed.contains(&self.active_tab) {
+            new_active = self
+                .tabs
+                .keys()
+                .copied()
+                .find(|client_id| !removed.contains(client_id));
+        }
+        let mut cards: Vec<clay::masonry_shell::TabCard> = snapshot
+            .tabs
+            .iter()
+            .filter(|entry| self.tabs.contains_key(&entry.client_id))
+            .map(|entry| clay::masonry_shell::TabCard {
+                client_id: entry.client_id,
+                name: tab_card_display_name(&entry.workspace_root),
+                closable: true,
+            })
+            .collect();
+        // Phase 22.4: entry-less mounted tabs append after the registry
+        // entries, matching `tab_order` (the shared card order commands
+        // resolve against; the registry mirror is updated below, so the two
+        // orders agree once the reconcile lands).
+        for (client_id, state) in &self.tabs {
+            if !snapshot
+                .tabs
+                .iter()
+                .any(|entry| entry.client_id == *client_id)
+                && !removed.contains(client_id)
+            {
+                cards.push(clay::masonry_shell::TabCard {
+                    client_id: *client_id,
+                    name: tab_card_display_name(&state.workspace_root),
+                    closable: false,
+                });
+            }
+        }
+        self.registry = snapshot;
+        TabRegistryReconcile {
+            removed,
+            new_active,
+            cards,
+        }
+    }
+
+    /// Apply a registry reconciliation to the shell: uninstall removed tabs,
+    /// switch + focus the reconciled active tab, and push the tab bar cards.
+    fn apply_registry_reconcile(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        reconcile: TabRegistryReconcile,
+    ) {
+        let active_removed = reconcile.removed.contains(&self.active_tab);
+        if !reconcile.removed.is_empty() {
+            ctx.render_root(window_id)
+                .edit_widget(self.shell_widget_id, |mut widget| {
+                    if let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() {
+                        for client_id in &reconcile.removed {
+                            shell.widget.remove_tab(&mut shell.ctx, *client_id);
+                        }
+                    }
+                });
+            for client_id in &reconcile.removed {
+                // A retrying reconnect task must stop trying for a closed tab.
+                if let Some(cancel) = self.reconnect_cancel.remove(client_id) {
+                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                self.tabs.remove(client_id);
+            }
+        }
+        // A rejected optimistic activate (or a close of the active tab)
+        // switches the mounted tab; `switch_tab` updates the mirrors + focus.
+        if let Some(new_active) = reconcile.new_active {
+            self.switch_tab(ctx, window_id, new_active);
+        } else if active_removed && self.tabs.len() == 1 {
+            // The last remaining tab is now active: refresh the mirror.
+            let (client_id, _) = self.tabs.iter().next().expect("one tab remains");
+            self.active_tab = *client_id;
+            if let Some(chrome_id) =
+                ctx.render_root(window_id)
+                    .edit_widget(self.shell_widget_id, |mut widget| {
+                        widget
+                            .try_downcast::<ClayShellWidget>()
+                            .and_then(|shell| shell.widget.editor_widget_id_for(*client_id))
+                    })
+            {
+                self.editor_widget_id = chrome_id;
+            }
+        }
+        let cards = reconcile.cards;
+        ctx.render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                if let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() {
+                    shell.widget.set_tab_cards(&mut shell.ctx, cards);
+                }
+            });
+    }
+
+    /// Mount an already-connected session as a new tab. Sends
+    /// `TabCommand::New` so the server registry learns the tab, mounts the
+    /// tab's chrome + default split tree, spawns its event bridge, and
+    /// switches to it. Returns `None` when the connection is already mounted
+    /// (duplicate) — the caller keeps the previous tab.
+    fn mount_tab(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        session: client::ClientSession,
+        workspace_root: PathBuf,
+    ) -> Option<ClientId> {
+        let client_id = session.initial_state.client_id;
+        if self.tabs.contains_key(&client_id) {
+            return None;
+        }
+        let chrome = EditorWidget::with_initial_state(session.initial_state)
+            .with_edit_queue(session.edit_queue.clone());
+        let edit_queue = session.edit_queue.clone();
+        let events = session.events;
+        let tab_chrome = clay::masonry_shell::TabChrome::single_editor(chrome, false);
+        let chrome_id = tab_chrome.editor_widget_id();
+        let _ = edit_queue.enqueue_tab_command(clay::protocol::TabCommand::New {
+            workspace_root: workspace_root.to_string_lossy().into_owned(),
+        });
+        ctx.render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                if let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() {
+                    shell
+                        .widget
+                        .install_tab(&mut shell.ctx, client_id, tab_chrome);
+                    shell.widget.set_active_tab(&mut shell.ctx, client_id);
+                    shell.ctx.request_render();
+                }
+            });
+        if let Some(proxy) = self.proxy.clone() {
+            spawn_client_connection_event_bridge(
+                &self.runtime,
+                events,
+                proxy,
+                window_id,
+                chrome_id,
+            );
+        }
+        self.tabs.insert(
+            client_id,
+            TabState {
+                edit_queue: Some(edit_queue),
+                pending_opens: BTreeMap::new(),
+                tab_id: None,
+                workspace_root: workspace_root.to_string_lossy().into_owned(),
+            },
+        );
+        self.active_tab = client_id;
+        self.editor_widget_id = chrome_id;
+        Some(client_id)
+    }
+
+    /// Switch the mounted tab: the shell mounts the target tab's chrome/tree
+    /// (retaining the previous tab's state), the driver's active-tab mirror
+    /// follows, and keyboard focus moves to the new tab's active pane.
+    fn switch_tab(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: ClientId,
+    ) {
+        if client_id == self.active_tab || !self.tabs.contains_key(&client_id) {
+            return;
+        }
+        let (chrome_id, target) =
+            ctx.render_root(window_id)
+                .edit_widget(self.shell_widget_id, |mut widget| {
+                    let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() else {
+                        return (None, None);
+                    };
+                    if !shell.widget.set_active_tab(&mut shell.ctx, client_id) {
+                        return (None, None);
+                    }
+                    shell.ctx.request_render();
+                    (
+                        shell.widget.editor_widget_id_for(client_id),
+                        shell.widget.active_pane_target_for(client_id),
+                    )
+                });
+        self.active_tab = client_id;
+        if let Some(chrome_id) = chrome_id {
+            self.editor_widget_id = chrome_id;
+        }
+        if let Some(target) = target {
+            let _ = ctx.render_root(window_id).focus_on(Some(target));
+        }
+    }
+
+    /// Phase 22.3: structural close gate — the window never goes to zero
+    /// tabs, and only mounted tabs can close.
+    fn tab_close_allowed(&self, client_id: ClientId) -> bool {
+        self.tabs.len() >= 2 && self.tabs.contains_key(&client_id)
+    }
+
+    /// Phase 22.4: the tab-close confirm menu session for one tab. Names the
+    /// tab's workspace and every dirty document, with the three choices. The
+    /// session is driver-owned (its action IDs are driver-local orchestration,
+    /// never declared, never server-routed) so tab-confirm and per-view
+    /// save-conflict sessions cannot cross-route.
+    fn tab_close_confirm_menu(&mut self, client_id: u64, dirty: &[String]) -> TransientMenuSession {
+        self.tab_menu_session_id = self.tab_menu_session_id.saturating_add(1).max(1);
+        let tab_name = self
+            .registry
+            .tabs
+            .iter()
+            .find(|entry| entry.client_id == client_id)
+            .map(|entry| {
+                std::path::Path::new(&entry.workspace_root)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| entry.workspace_root.clone())
+            })
+            .unwrap_or_else(|| "this tab".to_string());
+        let documents = dirty.join(", ");
+        let prompt = if dirty.len() == 1 {
+            format!("Close tab '{tab_name}' with 1 unsaved document ({documents})?")
+        } else {
+            format!(
+                "Close tab '{tab_name}' with {} unsaved documents ({documents})?",
+                dirty.len()
+            )
+        };
+        clay::shell::tab_close_confirm_session(self.tab_menu_session_id, prompt, client_id)
+    }
+
+    /// Phase 22.4: inventory the tab's dirty pane targets — the pane-1
+    /// chrome view first, then every document pane — with each document's
+    /// display name. Replaces the 22.3 `guard_tab_close` block: the walk
+    /// became the confirm menu's inventory (the block itself is the 22.4
+    /// replacement target).
+    fn dirty_documents_in_tab(
+        &self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: u64,
+    ) -> Vec<(String, WidgetId)> {
+        let targets = ctx
+            .render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                widget
+                    .try_downcast::<ClayShellWidget>()
+                    .map(|shell| shell.widget.pane_targets_for(client_id))
+                    .unwrap_or_default()
+            });
+        let mut dirty = Vec::new();
+        for (_, target) in targets {
+            let is_dirty = ctx
+                .render_root(window_id)
+                .edit_widget(target, |mut widget| {
+                    if let Some(editor) = widget.try_downcast::<EditorWidget>() {
+                        editor.widget.is_dirty()
+                    } else if let Some(view) = widget.try_downcast::<PaneDocumentView>() {
+                        view.widget.is_dirty()
+                    } else {
+                        false
+                    }
+                });
+            if is_dirty {
+                let name = ctx
+                    .render_root(window_id)
+                    .edit_widget(target, |mut widget| {
+                        if let Some(editor) = widget.try_downcast::<EditorWidget>() {
+                            editor.widget.document_display_name()
+                        } else if let Some(view) = widget.try_downcast::<PaneDocumentView>() {
+                            view.widget.document_display_name()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "unsaved document".to_string());
+                dirty.push((name, target));
+            }
+        }
+        dirty
+    }
+
+    /// Phase 22.4: show (or clear) the tab-close confirm menu on a tab's
+    /// active pane view — the interactive menu host that receives the
+    /// keyboard — and sync the chrome overlay through the usual pending-menu
+    /// path.
+    fn show_tab_close_confirm_menu(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: u64,
+        menu: Option<TransientMenuSession>,
+    ) {
+        let chrome_id =
+            ctx.render_root(window_id)
+                .edit_widget(self.shell_widget_id, |mut widget| {
+                    widget
+                        .try_downcast::<ClayShellWidget>()
+                        .and_then(|shell| shell.widget.editor_widget_id_for(client_id))
+                });
+        let active_target =
+            ctx.render_root(window_id)
+                .edit_widget(self.shell_widget_id, |mut widget| {
+                    widget
+                        .try_downcast::<ClayShellWidget>()
+                        .and_then(|shell| shell.widget.active_pane_target_for(client_id))
+                });
+        let target = active_target.or(chrome_id).unwrap_or(self.editor_widget_id);
+        let pending = ctx
+            .render_root(window_id)
+            .edit_widget(target, |mut widget| {
+                if let Some(editor) = widget.try_downcast::<EditorWidget>() {
+                    editor.widget.push_menu(menu.clone());
+                    editor.widget.take_pending_menu()
+                } else if let Some(view) = widget.try_downcast::<PaneDocumentView>() {
+                    view.widget.push_menu(menu);
+                    view.widget.take_pending_menu()
+                } else {
+                    None
+                }
+            });
+        if let (Some(chrome_id), Some(pending)) = (chrome_id, pending) {
+            self.apply_menu_sync(ctx, window_id, chrome_id, pending);
+        }
+    }
+
+    /// Phase 22.4: save every dirty pane of a tab, then close it once all
+    /// saves ack (a failed save cancels the close and surfaces the pane's
+    /// existing save diagnostic).
+    fn save_all_then_close_tab(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: u64,
+    ) {
+        let mut expected = std::collections::BTreeSet::new();
+        for (_, target) in self.dirty_documents_in_tab(ctx, window_id, client_id) {
+            let outcome = ctx
+                .render_root(window_id)
+                .edit_widget(target, |mut widget| {
+                    if let Some(editor) = widget.try_downcast::<EditorWidget>() {
+                        editor.widget.request_save_active_document()
+                    } else if let Some(view) = widget.try_downcast::<PaneDocumentView>() {
+                        view.widget.request_save_active_document()
+                    } else {
+                        Ok(0)
+                    }
+                });
+            match outcome {
+                Ok(document_id) => {
+                    if document_id != 0 {
+                        expected.insert(document_id);
+                    }
+                }
+                Err(diagnostic) => {
+                    // A save could not even be enqueued: cancel the close and
+                    // surface the diagnostic on the pane.
+                    self.pending_close_after_saves = None;
+                    let event = ClientConnectionEvent::RuntimeDiagnostic(diagnostic);
+                    ctx.render_root(window_id)
+                        .edit_widget(target, |mut widget| {
+                            if let Some(editor) = widget.try_downcast::<EditorWidget>() {
+                                let _ = editor.widget.apply_connection_event(event.clone());
+                            } else if let Some(view) = widget.try_downcast::<PaneDocumentView>() {
+                                let _ = view.widget.apply_connection_event(event);
+                            }
+                        });
+                    return;
+                }
+            }
+        }
+        if expected.is_empty() {
+            // Every document was saved while the menu was open: close now.
+            self.enqueue_close(client_id);
+        } else {
+            self.pending_close_after_saves = Some((client_id, expected));
+        }
+    }
+
+    // -- Phase 22.4: keyboard tab management (driver-routed commands) --
+
+    /// Phase 22.4: the tab bar's card order — the server registry's order
+    /// (mounted tabs only) with entry-less mounted tabs appended. Every
+    /// numbered tab command resolves against this order, so the number the
+    /// user sees on the bar is the number the command means.
+    fn tab_order(&self) -> Vec<ClientId> {
+        let mut order: Vec<ClientId> = self
+            .registry
+            .tabs
+            .iter()
+            .filter(|entry| self.tabs.contains_key(&entry.client_id))
+            .map(|entry| entry.client_id)
+            .collect();
+        for client_id in self.tabs.keys() {
+            if !order.contains(client_id) {
+                order.push(*client_id);
+            }
+        }
+        order
+    }
+
+    /// Phase 22.4: 1-based card-order position of a mounted tab.
+    fn tab_position_of(&self, client_id: ClientId) -> Option<u32> {
+        self.tab_order()
+            .iter()
+            .position(|id| *id == client_id)
+            .map(|index| index as u32 + 1)
+    }
+
+    /// Phase 22.4: the tab at a 1-based card-order position. Positions 0 and
+    /// beyond the tab count resolve to `None`: the numbered-activate policy
+    /// is a silent no-op there — never switch to a non-existent position.
+    fn tab_at_position(&self, position: u32) -> Option<ClientId> {
+        if position == 0 {
+            return None;
+        }
+        self.tab_order().get(position as usize - 1).copied()
+    }
+
+    /// Phase 22.4: the tab `offset` steps from the active tab in card order,
+    /// with wraparound — next from the last tab goes to the first, prev from
+    /// the first goes to the last. `None` when cycling is impossible (fewer
+    /// than two tabs, or the active tab is not in the order): the next/prev
+    /// policy is a silent no-op there (a single tab has nothing to cycle).
+    fn tab_at_offset(&self, offset: i64) -> Option<ClientId> {
+        let order = self.tab_order();
+        if order.len() < 2 {
+            return None;
+        }
+        let current = order.iter().position(|id| *id == self.active_tab)?;
+        let wrapped = (current as i64 + offset).rem_euclid(order.len() as i64) as usize;
+        Some(order[wrapped])
+    }
+
+    /// Phase 22.4: enqueue `TabCommand::Activate` on a tab's connection when
+    /// the server knows its `TabId` (entry-less tabs have no server entry to
+    /// activate). The server registry is the reconciling authority: a
+    /// rejected activate pushes a snapshot that reverts the switch.
+    fn enqueue_activate(&mut self, client_id: ClientId) {
+        let Some(tab_id) = self.tabs.get(&client_id).and_then(|tab| tab.tab_id) else {
+            return;
+        };
+        if let Some(queue) = self.tabs[&client_id].edit_queue.as_ref() {
+            let _ = queue.enqueue_tab_command(clay::protocol::TabCommand::Activate { tab_id });
+        }
+    }
+
+    /// Phase 22.4: switch to a mounted tab — enqueue the server activate and
+    /// switch optimistically (the server's pushed snapshot reconciles).
+    fn activate_tab(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: ClientId,
+    ) {
+        if !self.tabs.contains_key(&client_id) {
+            return;
+        }
+        self.enqueue_activate(client_id);
+        self.switch_tab(ctx, window_id, client_id);
+    }
+
+    /// Phase 22.4: enqueue `TabCommand::Close` once a tab passed the close
+    /// gates (last-tab protection + dirty guard). Server-confirmed removal
+    /// arrives via the pushed registry snapshot.
+    fn enqueue_close(&mut self, client_id: ClientId) {
+        let Some(tab_id) = self.tabs.get(&client_id).and_then(|tab| tab.tab_id) else {
+            return;
+        };
+        if let Some(queue) = self.tabs[&client_id].edit_queue.as_ref() {
+            let _ = queue.enqueue_tab_command(clay::protocol::TabCommand::Close { tab_id });
+        }
+    }
+
+    /// Phase 22.4: close a mounted tab through the shared close path. Last-tab
+    /// protection first (`tab_close_allowed`); a clean tab closes immediately
+    /// (server-confirmed `TabCommand::Close`), a tab holding any dirty
+    /// document shows the confirm menu — Save all and close / Discard and
+    /// close / Cancel — instead of the 22.3 plain block. Every affordance
+    /// (bar close, `clientTabClose`, any future surface) routes here.
+    fn close_tab(&mut self, ctx: &mut DriverCtx<'_, '_>, window_id: WindowId, client_id: ClientId) {
+        if !self.tab_close_allowed(client_id) {
+            return;
+        }
+        if self
+            .pending_close_after_saves
+            .as_ref()
+            .is_some_and(|(pending, _)| *pending == client_id)
+        {
+            // A save-all-and-close flow is already awaiting acks for this
+            // tab: ignore a second close request (the flow completes on its
+            // own, or cancels on a failed save).
+            return;
+        }
+        let dirty = self.dirty_documents_in_tab(ctx, window_id, client_id);
+        if dirty.is_empty() {
+            self.enqueue_close(client_id);
+            return;
+        }
+        let names = dirty.into_iter().map(|(name, _)| name).collect::<Vec<_>>();
+        let menu = self.tab_close_confirm_menu(client_id, &names);
+        self.show_tab_close_confirm_menu(ctx, window_id, client_id, Some(menu));
+    }
+
+    /// Phase 22.4: move the active tab one step in card order. No wraparound:
+    /// a move at a boundary is a no-op (the server agrees and no-ops too).
+    /// Server-confirmed: the pushed snapshot reorders the cards; there is no
+    /// optimistic reorder.
+    fn move_active_tab(&mut self, left: bool) {
+        let Some(position) = self.tab_position_of(self.active_tab) else {
+            return;
+        };
+        let count = self.tab_order().len() as u32;
+        if (left && position <= 1) || (!left && position >= count) {
+            return;
+        }
+        let Some(tab_id) = self.tabs.get(&self.active_tab).and_then(|tab| tab.tab_id) else {
+            return;
+        };
+        if let Some(queue) = self.tabs[&self.active_tab].edit_queue.as_ref() {
+            let command = if left {
+                clay::protocol::TabCommand::MoveLeft { tab_id }
+            } else {
+                clay::protocol::TabCommand::MoveRight { tab_id }
+            };
+            let _ = queue.enqueue_tab_command(command);
+        }
+    }
+
+    /// Phase 22.4: move the active tab to a 1-based card-order position.
+    /// Positions 0 or beyond the tab count are silent no-ops — the client
+    /// never enqueues a move the server would reject (the server rejects
+    /// out-of-range positions with a reconciling snapshot regardless).
+    fn move_active_tab_to(&mut self, position: u32) {
+        if position == 0 || position as usize > self.tab_order().len() {
+            return;
+        }
+        let Some(tab_id) = self.tabs.get(&self.active_tab).and_then(|tab| tab.tab_id) else {
+            return;
+        };
+        if let Some(queue) = self.tabs[&self.active_tab].edit_queue.as_ref() {
+            let _ =
+                queue.enqueue_tab_command(clay::protocol::TabCommand::MoveTo { tab_id, position });
+        }
+    }
+
+    /// Phase 22.4: open-tab affordance — the folder picker's selection
+    /// becomes the new tab's workspace root. Shared by the tab bar `+` and
+    /// the `clientTabNew` chord; the dialog runs on a background thread so
+    /// it never blocks the UI event loop (portal).
+    fn open_new_tab_dialog(&mut self) {
+        let Some(generation) = self.reserve_folder_dialog() else {
+            return;
+        };
+        let Some(proxy) = self.proxy.clone() else {
+            return;
+        };
+        let window_id = self.window_id;
+        let shell_widget_id = self.shell_widget_id;
+        let spawn = std::thread::Builder::new()
+            .name("clay-new-tab-dialog".into())
+            .spawn(move || {
+                let _ = proxy.send_event(MasonryUserEvent::Action(
+                    window_id,
+                    Box::new(EditorAction::NewTabFolderDialogCompleted {
+                        generation,
+                        result: clay::client::open_folder_dialog(),
+                    }),
+                    shell_widget_id,
+                ));
+            });
+        if spawn.is_err() {
+            self.finish_folder_dialog(generation);
+        }
+    }
+
+    /// Phase 22.4: driver-routed tab commands. Returns `true` when the
+    /// command is a tab operation (handled here, or a policy no-op); `false`
+    /// for pane commands, which the shell widget applies. Tab commands act on
+    /// the driver's tab state (active tab, connections, registry order), never
+    /// on the shell widget's pane tree (its tab arms stay inert).
+    fn apply_tab_command(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        command: clay::masonry_shell::ShellClientCommand,
+    ) -> bool {
+        match command {
+            clay::masonry_shell::ShellClientCommand::TabNext => {
+                if let Some(target) = self.tab_at_offset(1) {
+                    self.activate_tab(ctx, window_id, target);
+                }
+            }
+            clay::masonry_shell::ShellClientCommand::TabPrev => {
+                if let Some(target) = self.tab_at_offset(-1) {
+                    self.activate_tab(ctx, window_id, target);
+                }
+            }
+            clay::masonry_shell::ShellClientCommand::TabNew => self.open_new_tab_dialog(),
+            clay::masonry_shell::ShellClientCommand::TabClose => {
+                self.close_tab(ctx, window_id, self.active_tab);
+            }
+            clay::masonry_shell::ShellClientCommand::TabMoveLeft => self.move_active_tab(true),
+            clay::masonry_shell::ShellClientCommand::TabMoveRight => self.move_active_tab(false),
+            clay::masonry_shell::ShellClientCommand::TabActivate(position) => {
+                if let Some(target) = self.tab_at_position(position) {
+                    self.activate_tab(ctx, window_id, target);
+                }
+            }
+            clay::masonry_shell::ShellClientCommand::TabMoveTo(position) => {
+                self.move_active_tab_to(position);
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Phase 22.3: spawn a per-tab reconnect task after a connection drop.
+    /// The task retries `client::connect` with the existing
+    /// `connect_with_retry_while` backoff until it succeeds or the tab is
+    /// removed (cancellation flag); on success the fresh session returns as
+    /// [`EditorAction::ReconnectTabConnected`] and the driver re-keys the
+    /// tab, reclaims its `TabId`, and re-opens its documents.
+    fn start_tab_reconnect(&mut self, client_id: ClientId) {
+        if !self.tabs.contains_key(&client_id) || self.reconnect_cancel.contains_key(&client_id) {
+            return;
+        }
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.reconnect_cancel.insert(client_id, cancel.clone());
+        let endpoint = self.endpoint.clone();
+        let window_id = self.window_id;
+        let shell_widget_id = self.shell_widget_id;
+        let Some(proxy) = self.proxy.clone() else {
+            return;
+        };
+        self.runtime.spawn(async move {
+            loop {
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    return;
+                }
+                match connect_with_retry_while(&endpoint, || Ok(None)).await {
+                    Ok(session) => {
+                        let _ = proxy.send_event(MasonryUserEvent::Action(
+                            window_id,
+                            Box::new(EditorAction::ReconnectTabConnected {
+                                client_id,
+                                session: clay::masonry_editor::DriverSession { session },
+                            }),
+                            shell_widget_id,
+                        ));
+                        return;
+                    }
+                    Err(_) => {
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// Phase 22.4: advance a save-all-and-close tab flow on one connection
+/// event. `DocumentSaved` for an awaited document counts down (returning
+/// `true` when every save acked, so the caller enqueues `TabCommand::Close`);
+/// a failed save or a disconnect cancels the flow (the close never happens
+/// until every save acked). Events for other tabs leave the flow untouched.
+fn advance_pending_close_after_saves(
+    pending: &mut Option<(u64, std::collections::BTreeSet<u64>)>,
+    client_id: u64,
+    event: &ClientConnectionEvent,
+) -> bool {
+    let Some((pending_client, expected)) = pending.as_mut() else {
+        return false;
+    };
+    if *pending_client != client_id {
+        return false;
+    }
+    match event {
+        ClientConnectionEvent::DocumentSaved { document_id, .. } => {
+            expected.remove(document_id);
+            if expected.is_empty() {
+                *pending = None;
+                true
+            } else {
+                false
+            }
+        }
+        ClientConnectionEvent::FileOperationFailed { .. }
+        | ClientConnectionEvent::Disconnected
+        | ClientConnectionEvent::ConnectionError(_) => {
+            *pending = None;
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Phase 22.3: the tab card label for a workspace root path: the final path
+/// segment, or the full path when it has none.
+fn tab_card_display_name(workspace_root: &str) -> String {
+    std::path::Path::new(workspace_root)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| workspace_root.to_string())
 }
 
 fn is_linux_portal_dialog_command(command_id: &str) -> bool {
@@ -178,8 +1540,17 @@ fn is_linux_portal_dialog_command(command_id: &str) -> bool {
 
 impl AppDriver for Driver {
     fn on_start(&mut self, state: &mut masonry_winit::app::MasonryState<'_>) {
+        // Phase 22.2: the focus fallback follows pane focus — the active pane's
+        // content widget (or the chrome when no pane has a view yet).
         for root in state.roots() {
-            root.set_focus_fallback(Some(self.editor_widget_id));
+            let fallback = root
+                .edit_widget(self.shell_widget_id, |mut widget| {
+                    widget
+                        .try_downcast::<ClayShellWidget>()
+                        .and_then(|shell| shell.widget.active_pane_target())
+                })
+                .unwrap_or(self.editor_widget_id);
+            root.set_focus_fallback(Some(fallback));
         }
     }
 
@@ -269,45 +1640,463 @@ impl AppDriver for Driver {
 
         match *action {
             EditorAction::MenuStateChanged => {
-                // A transient menu's local state changed via the keyboard
-                // (selection/query/cancel); reconcile the hosted overlay.
-                let editor_widget_id = self.editor_action_target(widget_id);
-                ctx.render_root(window_id)
-                    .edit_widget(editor_widget_id, |mut widget| {
-                        if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
-                            editor.widget.sync_overlays(&mut editor.ctx);
+                // A transient menu's local state changed via the keyboard in a
+                // pane view; push the view's current session to the chrome
+                // overlay (Phase 22.2: menus are view-owned, displayed by the
+                // connection owner).
+                let menu = ctx
+                    .render_root(window_id)
+                    .edit_widget(widget_id, |mut widget| {
+                        if let Some(view) = widget.try_downcast::<PaneDocumentView>() {
+                            view.widget.take_pending_menu()
+                        } else if let Some(editor) = widget.try_downcast::<EditorWidget>() {
+                            editor.widget.take_pending_menu()
+                        } else {
+                            None
                         }
                     });
+                if let Some(menu) = menu {
+                    self.apply_menu_sync(ctx, window_id, self.editor_widget_id, menu);
+                }
             }
             EditorAction::ClientConnection(event) => {
-                let editor_widget_id = self.editor_action_target(widget_id);
-                ctx.render_root(window_id)
-                    .edit_widget(editor_widget_id, |mut widget| {
-                        if let Some(mut editor) = widget.try_downcast::<EditorWidget>() {
-                            let caret_override = matches!(
-                                &event,
-                                clay::client::ClientConnectionEvent::CaretStyleOverride(_)
+                // Phase 22.3: resolve the event's tab from the action's target
+                // chrome id (each tab's bridge tags its events with that tab's
+                // chrome). Events for a closed tab are dropped.
+                let Some(client_id) =
+                    ctx.render_root(window_id)
+                        .edit_widget(self.shell_widget_id, |mut widget| {
+                            widget
+                                .try_downcast::<ClayShellWidget>()
+                                .and_then(|shell| shell.widget.tab_for_chrome(widget_id))
+                        })
+                else {
+                    return;
+                };
+                let chrome_id = widget_id;
+                // Phase 22.4: a save-all-and-close flow awaiting acks for
+                // this tab — count down `DocumentSaved`, cancel on a failed
+                // save or a disconnect (the close never happens until every
+                // save acked; the event still routes normally below so the
+                // pane view updates its own state).
+                if advance_pending_close_after_saves(
+                    &mut self.pending_close_after_saves,
+                    client_id,
+                    &event,
+                ) {
+                    self.enqueue_close(client_id);
+                }
+                // Phase 22.3: the server-authoritative tab registry is
+                // driver-level state (tab ids, order, active); the chrome does
+                // not render it (the tab bar is the lifecycle task).
+                if let clay::client::ClientConnectionEvent::TabRegistry(snapshot) = &event {
+                    let reconcile = self.apply_tab_registry(snapshot.clone());
+                    self.apply_registry_reconcile(ctx, window_id, reconcile);
+                    return;
+                }
+                // Phase 22.1: shell-level preferences go to the shell widget,
+                // not the editor. Phase 22.3: each tab's connection carries
+                // its own pane-focus policy.
+                if let clay::client::ClientConnectionEvent::ShellPreferences(prefs) = &event {
+                    let shell_widget_id = self.shell_action_target();
+                    ctx.render_root(window_id)
+                        .edit_widget(shell_widget_id, |mut widget| {
+                            if let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() {
+                                shell.widget.set_pane_focus_policy_for(
+                                    client_id,
+                                    clay::masonry_shell::PaneFocusPolicy::from_config_str(
+                                        &prefs.pane_focus_policy,
+                                    ),
+                                );
+                                shell.ctx.request_render();
+                            }
+                        });
+                    return;
+                }
+                // Phase 22.2: route document-scoped events to the pane view
+                // owning the document; fan connection-wide events out to every
+                // pane view through the chrome. Phase 22.3: all routing is
+                // scoped to the event's tab.
+                if let Some(_document_id) = event.document_id() {
+                    if matches!(event, ClientConnectionEvent::DocumentOpened { .. }) {
+                        self.route_document_opened(ctx, window_id, client_id, chrome_id, event);
+                    } else {
+                        self.route_document_event(ctx, window_id, client_id, chrome_id, event);
+                    }
+                } else {
+                    match &event {
+                        ClientConnectionEvent::SduiSnapshot { .. }
+                        | ClientConnectionEvent::SduiUpdate(_)
+                        | ClientConnectionEvent::EditTransaction(_)
+                        | ClientConnectionEvent::BehaviorManifestRejected { .. } => {
+                            // Chrome-only connection state.
+                            self.apply_connection_to_chrome(ctx, window_id, chrome_id, event);
+                        }
+                        ClientConnectionEvent::RuntimeStateSnapshot(_) => {
+                            // Chrome installs fully (exactly one ack); other
+                            // panes get the per-document render parts.
+                            let snapshot = match &event {
+                                ClientConnectionEvent::RuntimeStateSnapshot(snapshot) => {
+                                    (**snapshot).clone()
+                                }
+                                _ => unreachable!("matched RuntimeStateSnapshot"),
+                            };
+                            self.apply_connection_to_chrome(ctx, window_id, chrome_id, event);
+                            self.fan_out_runtime_snapshot(
+                                ctx, window_id, client_id, chrome_id, snapshot,
                             );
-                            let changed = editor.widget.apply_connection_event(event);
-                            editor.widget.sync_region(&mut editor.ctx);
-                            editor.widget.sync_panels(&mut editor.ctx);
-                            editor.widget.sync_overlays(&mut editor.ctx);
-                            if editor.widget.take_layout_invalidation() {
-                                editor.ctx.request_layout();
-                            }
-                            if changed {
-                                editor.ctx.request_render();
-                                editor.ctx.request_accessibility_update();
-                            }
-                            // Plan 071 caret-transport fix: a newly installed
-                            // animating caret style must start its blink loop
-                            // immediately; the widget only self-kicks on focus
-                            // change.
-                            if caret_override && editor.widget.caret_animates() {
-                                editor.ctx.request_anim_frame();
-                            }
+                        }
+                        ClientConnectionEvent::Disconnected
+                        | ClientConnectionEvent::ConnectionError(_) => {
+                            self.apply_connection_to_chrome(
+                                ctx,
+                                window_id,
+                                chrome_id,
+                                event.clone(),
+                            );
+                            self.fan_out_event(ctx, window_id, client_id, chrome_id, event);
+                            // Phase 22.3: reconnect this tab's connection (the
+                            // server registry survives the drop; `Reclaim`
+                            // rebinds the `TabId` to the new connection).
+                            self.start_tab_reconnect(client_id);
+                        }
+                        ClientConnectionEvent::ActiveTheme(_)
+                        | ClientConnectionEvent::ActiveTypography(_)
+                        | ClientConnectionEvent::BehaviorManifestInstalled { .. }
+                        | ClientConnectionEvent::CaretStyleOverride(_)
+                        | ClientConnectionEvent::RuntimeDiagnostic(_)
+                        | ClientConnectionEvent::ServerError { .. } => {
+                            self.apply_connection_to_chrome(
+                                ctx,
+                                window_id,
+                                chrome_id,
+                                event.clone(),
+                            );
+                            self.fan_out_event(ctx, window_id, client_id, chrome_id, event);
+                        }
+                        ClientConnectionEvent::EditorCommandRequest(_) => {
+                            // Server-pushed editor commands execute on the
+                            // focused pane only (never fan out).
+                            self.apply_event_to_active_pane(
+                                ctx, window_id, client_id, chrome_id, event,
+                            );
+                        }
+                        _ => {
+                            // Request-scoped events (completion / language-
+                            // intelligence rejects): try the focused pane's
+                            // view first, then the rest (request ids gate).
+                            self.route_request_scoped_event(
+                                ctx, window_id, client_id, chrome_id, event,
+                            );
+                        }
+                    }
+                }
+            }
+            EditorAction::ReconnectTabConnected { client_id, session } => {
+                self.reconnect_cancel.remove(&client_id);
+                // The tab was closed while reconnecting: dropping the fresh
+                // session ends the connection and releases the server permit.
+                let Some(mut tab) = self.tabs.remove(&client_id) else {
+                    return;
+                };
+                let session = session.session;
+                let new_client_id = session.initial_state.client_id;
+                let edit_queue = session.edit_queue.clone();
+                let was_active = self.active_tab == client_id;
+                let chrome_id =
+                    ctx.render_root(window_id)
+                        .edit_widget(self.shell_widget_id, |mut widget| {
+                            widget
+                                .try_downcast::<ClayShellWidget>()
+                                .and_then(|shell| shell.widget.editor_widget_id_for(client_id))
+                        });
+                let Some(chrome_id) = chrome_id else {
+                    return;
+                };
+                // Swap the fresh connection's queue into the chrome and every
+                // pane view, and collect the documents to re-open (the
+                // retained sessions are the split-tree/per-pane restore
+                // source; re-opening replaces them with fresh server state).
+                let mut reopen = Vec::new();
+                ctx.render_root(window_id)
+                    .edit_widget(chrome_id, |mut widget| {
+                        if let Some(editor) = widget.try_downcast::<EditorWidget>() {
+                            editor.widget.reconnect(edit_queue.clone());
+                            reopen.extend(editor.widget.documents_for_reopen());
                         }
                     });
+                let pane_targets =
+                    ctx.render_root(window_id)
+                        .edit_widget(self.shell_widget_id, |mut widget| {
+                            widget
+                                .try_downcast::<ClayShellWidget>()
+                                .map(|shell| shell.widget.pane_targets_for(client_id))
+                                .unwrap_or_default()
+                        });
+                for (_, target) in pane_targets {
+                    if target == chrome_id {
+                        continue;
+                    }
+                    ctx.render_root(window_id)
+                        .edit_widget(target, |mut widget| {
+                            if let Some(view) = widget.try_downcast::<PaneDocumentView>() {
+                                view.widget.reconnect(edit_queue.clone());
+                                reopen.extend(view.widget.documents_for_reopen());
+                            }
+                        });
+                }
+                // Re-key the tab to the new connection's identity; widget ids
+                // are unchanged, so mirrors and bridges keep working.
+                ctx.render_root(window_id)
+                    .edit_widget(self.shell_widget_id, |mut widget| {
+                        if let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() {
+                            shell
+                                .widget
+                                .rekey_tab(&mut shell.ctx, client_id, new_client_id);
+                            shell.ctx.request_render();
+                        }
+                    });
+                if was_active {
+                    self.active_tab = new_client_id;
+                    self.editor_widget_id = chrome_id;
+                }
+                tab.edit_queue = Some(edit_queue.clone());
+                // In-flight open requests died with the old connection; clear
+                // them so a later open is never mis-attributed to a stale pane.
+                tab.pending_opens.clear();
+                // Rebind the registry entry to the new connection (or register
+                // when the tab never received its server `TabId`).
+                let command = match tab.tab_id {
+                    Some(tab_id) => clay::protocol::TabCommand::Reclaim { tab_id },
+                    None => clay::protocol::TabCommand::New {
+                        workspace_root: tab.workspace_root.clone(),
+                    },
+                };
+                let _ = edit_queue.enqueue_tab_command(command);
+                // Re-open the tab's documents through the plain `OpenDocument`
+                // path (a fresh connection holds no selected-file capability
+                // for documents it opened before the drop).
+                for (root_id, path) in reopen {
+                    let _ = edit_queue.enqueue_open_document(root_id, path);
+                }
+                if let Some(proxy) = self.proxy.clone() {
+                    spawn_client_connection_event_bridge(
+                        &self.runtime,
+                        session.events,
+                        proxy,
+                        window_id,
+                        chrome_id,
+                    );
+                }
+                self.tabs.insert(new_client_id, tab);
+                if was_active {
+                    let target = ctx.render_root(window_id).edit_widget(
+                        self.shell_widget_id,
+                        |mut widget| {
+                            widget.try_downcast::<ClayShellWidget>().and_then(|shell| {
+                                shell.widget.active_pane_target_for(new_client_id)
+                            })
+                        },
+                    );
+                    if let Some(target) = target {
+                        let _ = ctx.render_root(window_id).focus_on(Some(target));
+                    }
+                }
+            }
+            EditorAction::TabBar(action) => {
+                // Phase 22.3: tab bar clicks. Activate switches optimistically
+                // (the server registry is the reconciling authority — a
+                // rejected activate pushes a snapshot that reverts). Close
+                // enqueues `TabCommand::Close` on the tab's own connection;
+                // the server removes the registry entry and ends the
+                // connection, and the pushed snapshot drives the removal. The
+                // 22.3 dirty-guard (blocking close with dirty documents) is
+                // the lifecycle task; closing the last mounted tab is refused
+                // (the bar hides at one tab).
+                match action {
+                    clay::masonry_editor::TabBarAction::Activate { client_id } => {
+                        // Phase 22.4: shared activation path (also used by
+                        // the `clientTabActivate.N` / next / prev chords):
+                        // optimistic switch + server-registry reconcile.
+                        self.activate_tab(ctx, window_id, client_id);
+                    }
+                    clay::masonry_editor::TabBarAction::Close { client_id } => {
+                        // Phase 22.4: shared close path (also used by the
+                        // `clientTabClose` chord): last-tab protection +
+                        // dirty guard + server-confirmed `TabCommand::Close`.
+                        self.close_tab(ctx, window_id, client_id);
+                    }
+                    clay::masonry_editor::TabBarAction::NewTab => {
+                        // Phase 22.4: shared open-tab affordance (also used
+                        // by the `clientTabNew` chord): folder picker →
+                        // connect → mount + `TabCommand::New`.
+                        self.open_new_tab_dialog();
+                    }
+                }
+            }
+            EditorAction::NewTabFolderDialogCompleted { generation, result } => {
+                if !self.finish_folder_dialog(generation) {
+                    return;
+                }
+                let clay::client::FileDialogResult::Selected(workspace_root) = result else {
+                    return;
+                };
+                // Connect the new tab on the runtime (the handshake involves
+                // retries); on success the session returns here to mount.
+                let Some(proxy) = self.proxy.clone() else {
+                    return;
+                };
+                let endpoint = self.endpoint.clone();
+                let window_id = self.window_id;
+                let shell_widget_id = self.shell_widget_id;
+                self.runtime.spawn(async move {
+                    match client::connect(&endpoint).await {
+                        Ok(session) => {
+                            let _ = proxy.send_event(MasonryUserEvent::Action(
+                                window_id,
+                                Box::new(EditorAction::OpenTabConnected {
+                                    session: clay::masonry_editor::DriverSession { session },
+                                    workspace_root,
+                                }),
+                                shell_widget_id,
+                            ));
+                        }
+                        Err(error) => {
+                            let _ = proxy.send_event(MasonryUserEvent::Action(
+                                window_id,
+                                Box::new(EditorAction::OpenTabFailed {
+                                    message: format!("Could not open a new tab: {error}"),
+                                }),
+                                shell_widget_id,
+                            ));
+                        }
+                    }
+                });
+            }
+            EditorAction::OpenTabConnected {
+                session,
+                workspace_root,
+            } => {
+                // Mount the new tab (chrome + default split tree) and switch
+                // to it; `TabCommand::New` registers it server-side. A
+                // duplicate connection (already mounted) is dropped by
+                // `mount_tab` — the previous tab stays.
+                self.mount_tab(ctx, window_id, session.session, workspace_root);
+            }
+            EditorAction::OpenTabFailed { message } => {
+                // Refused gracefully (connection cap, server down): no tab is
+                // opened; the active tab's chrome surfaces the diagnostic.
+                self.apply_connection_to_chrome(
+                    ctx,
+                    window_id,
+                    self.editor_widget_id,
+                    ClientConnectionEvent::RuntimeDiagnostic(
+                        clay::protocol::RuntimeDiagnostic::error("clay.tabs.open_failed", message),
+                    ),
+                );
+            }
+            EditorAction::PaneFocused(pane_id) => {
+                // Phase 22.2: pane activation follows Masonry focus. Sync the
+                // shell's active pane and move focus to the pane's content
+                // widget only when the active pane changed (sidebar/panel
+                // focus changes inside the chrome keep their focus).
+                let (active, target) =
+                    ctx.render_root(window_id)
+                        .edit_widget(self.shell_widget_id, |mut widget| {
+                            let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() else {
+                                return (pane_id, None);
+                            };
+                            let active = shell.widget.active_pane_id();
+                            let target = shell.widget.pane_target(pane_id);
+                            if active != pane_id {
+                                shell.widget.set_active_pane(pane_id);
+                                shell.ctx.request_render();
+                            }
+                            (active, target)
+                        });
+                if active != pane_id
+                    && let Some(target) = target
+                {
+                    let _ = ctx.render_root(window_id).focus_on(Some(target));
+                }
+            }
+            EditorAction::RecordPendingOpenIntent {
+                root_id,
+                relative_path,
+            } => {
+                // Phase 22.2: a pane view dispatched a workspace open intent
+                // (definition navigation) directly; record the active pane as
+                // the open target.
+                self.record_pending_open(
+                    ctx,
+                    window_id,
+                    PendingOpenRequest {
+                        path: None,
+                        root_id: Some(root_id),
+                        relative_path: Some(relative_path),
+                    },
+                );
+            }
+            EditorAction::ActivateDocumentInPane {
+                document_id,
+                pane_id,
+            } => {
+                // Phase 22.2: cross-pane open-documents activation. The
+                // document lives in `pane_id`'s session store (duplicate
+                // opens stay blocked); switch that pane to it and focus it.
+                let target =
+                    ctx.render_root(window_id)
+                        .edit_widget(self.shell_widget_id, |mut widget| {
+                            widget
+                                .try_downcast::<ClayShellWidget>()
+                                .and_then(|shell| shell.widget.pane_target(pane_id))
+                        });
+                let changed = target.map(|target| {
+                    ctx.render_root(window_id)
+                        .edit_widget(target, |mut target_widget| {
+                            if let Some(editor) = target_widget.try_downcast::<EditorWidget>() {
+                                editor.widget.activate_document(document_id)
+                            } else if let Some(view) =
+                                target_widget.try_downcast::<PaneDocumentView>()
+                            {
+                                view.widget.activate_document(document_id)
+                            } else {
+                                false
+                            }
+                        })
+                });
+                if let (Some(target), Some(true)) = (target, changed) {
+                    let _: Result<(), Box<dyn std::error::Error>> =
+                        ctx.render_root(window_id).edit_widget(target, |mut w| {
+                            w.ctx.request_render();
+                            w.ctx.request_accessibility_update();
+                            Ok(())
+                        });
+                }
+                self.focus_pane_target(ctx, window_id, pane_id);
+            }
+            EditorAction::TabCloseMenuAction {
+                client_id,
+                command_id,
+            } => {
+                // Phase 22.4: the tab-close confirm menu's choice. The
+                // session is driver-owned; the pane view handed the selection
+                // here (tab-confirm actions never reach the server).
+                match command_id.as_str() {
+                    "clay.shell.clientTabCloseSaveAll" => {
+                        self.save_all_then_close_tab(ctx, window_id, client_id);
+                    }
+                    "clay.shell.clientTabCloseDiscard" => {
+                        // Explicit destructive choice: drop the unsaved edits
+                        // and close. The server's disconnect teardown releases
+                        // the tab's documents.
+                        self.enqueue_close(client_id);
+                    }
+                    "clay.shell.clientTabCloseCancel" => {
+                        self.show_tab_close_confirm_menu(ctx, window_id, client_id, None);
+                    }
+                    _ => {}
+                }
             }
             EditorAction::ClientUiCommand(command)
                 if is_linux_portal_dialog_command(&command.command_id) =>
@@ -317,7 +2106,7 @@ impl AppDriver for Driver {
             }
             EditorAction::FileDialogCompleted { generation, result } => {
                 if self.finish_file_dialog(generation) {
-                    apply_native_dialog_completion(
+                    self.apply_native_dialog_completion(
                         window_id,
                         ctx,
                         self.editor_action_target(widget_id),
@@ -328,7 +2117,7 @@ impl AppDriver for Driver {
             }
             EditorAction::FolderDialogCompleted { generation, result } => {
                 if self.finish_folder_dialog(generation) {
-                    apply_native_dialog_completion(
+                    self.apply_native_dialog_completion(
                         window_id,
                         ctx,
                         self.editor_action_target(widget_id),
@@ -358,6 +2147,17 @@ impl AppDriver for Driver {
                 ClientUiCommandResult::SelectedFile(path) => {
                     // Dialog commands are handled asynchronously above; keep this
                     // arm so non-dialog callers/tests still map cleanly if reused.
+                    // Phase 22.2: attribute the open to the active pane so the
+                    // answering DocumentOpened lands in the focused pane.
+                    self.record_pending_open(
+                        ctx,
+                        window_id,
+                        PendingOpenRequest {
+                            path: Some(path.clone()),
+                            root_id: None,
+                            relative_path: None,
+                        },
+                    );
                     let editor_widget_id = self.editor_action_target(widget_id);
                     ctx.render_root(window_id)
                         .edit_widget(editor_widget_id, |mut widget| {
@@ -468,16 +2268,85 @@ impl AppDriver for Driver {
                         });
                 }
                 ClientUiCommandResult::ShowOpenDocuments => {
-                    let editor_widget_id = self.editor_action_target(widget_id);
-                    ctx.render_root(window_id)
-                        .edit_widget(editor_widget_id, |mut widget| {
-                            if let Some(mut editor) = widget.try_downcast::<EditorWidget>()
-                                && editor.widget.show_open_documents_menu()
-                            {
-                                editor.ctx.request_render();
-                                editor.ctx.request_accessibility_update();
-                            }
-                        });
+                    // Phase 22.2: the menu belongs to the focused pane and
+                    // aggregates every pane's documents (own sessions plus
+                    // cross-pane entries labeled by pane).
+                    let (active, targets) = ctx.render_root(window_id).edit_widget(
+                        self.shell_widget_id,
+                        |mut widget| {
+                            let Some(shell) = widget.try_downcast::<ClayShellWidget>() else {
+                                return (PaneId(1), Vec::new());
+                            };
+                            (shell.widget.active_pane_id(), shell.widget.pane_targets())
+                        },
+                    );
+                    let mut other = Vec::new();
+                    for (pane, pane_target) in targets {
+                        if pane == active {
+                            continue;
+                        }
+                        let (active_info, retained) = ctx.render_root(window_id).edit_widget(
+                            pane_target,
+                            |mut pane_widget| {
+                                if let Some(editor) = pane_widget.try_downcast::<EditorWidget>() {
+                                    (
+                                        editor.widget.active_document_info(),
+                                        editor.widget.retained_documents(),
+                                    )
+                                } else if let Some(view) =
+                                    pane_widget.try_downcast::<PaneDocumentView>()
+                                {
+                                    (
+                                        view.widget.active_document_info(),
+                                        view.widget.retained_documents(),
+                                    )
+                                } else {
+                                    (None, Vec::new())
+                                }
+                            },
+                        );
+                        if let Some((document_id, display_name, dirty)) = active_info {
+                            other.push(CrossPaneDocumentEntry {
+                                pane,
+                                document_id,
+                                display_name,
+                                dirty,
+                                retained,
+                            });
+                        }
+                    }
+                    let target = ctx.render_root(window_id).edit_widget(
+                        self.shell_widget_id,
+                        |mut widget| {
+                            widget
+                                .try_downcast::<ClayShellWidget>()
+                                .and_then(|shell| shell.widget.pane_target(active))
+                        },
+                    );
+                    let Some(target) = target else {
+                        return;
+                    };
+                    let changed =
+                        ctx.render_root(window_id)
+                            .edit_widget(target, |mut target_widget| {
+                                if let Some(editor) = target_widget.try_downcast::<EditorWidget>() {
+                                    editor.widget.show_open_documents_menu(&other)
+                                } else if let Some(view) =
+                                    target_widget.try_downcast::<PaneDocumentView>()
+                                {
+                                    view.widget.show_open_documents_menu(&other)
+                                } else {
+                                    false
+                                }
+                            });
+                    if changed {
+                        let _: Result<(), Box<dyn std::error::Error>> =
+                            ctx.render_root(window_id).edit_widget(target, |mut w| {
+                                w.ctx.request_render();
+                                w.ctx.request_accessibility_update();
+                                Ok(())
+                            });
+                    }
                 }
                 ClientUiCommandResult::RequestResync => {
                     let editor_widget_id = self.editor_action_target(widget_id);
@@ -523,6 +2392,98 @@ impl AppDriver for Driver {
                             }
                         });
                 }
+                ClientUiCommandResult::ShellCommand(command) => {
+                    // Phase 22.4: tab commands are driver-routed (active-tab
+                    // resolution + bounds/wraparound policies + server-confirmed
+                    // ordering); the shell widget's tab arms stay inert.
+                    if self.apply_tab_command(ctx, window_id, command) {
+                        return;
+                    }
+                    // Phase 22.2: closing a pane with unsaved edits is blocked
+                    // (the view shows the save-conflict menu); clean panes
+                    // release their documents server-side before the tree op.
+                    if matches!(command, clay::masonry_shell::ShellClientCommand::ClosePane) {
+                        let (may_close, target) = ctx.render_root(window_id).edit_widget(
+                            self.shell_widget_id,
+                            |mut widget| {
+                                let Some(shell) = widget.try_downcast::<ClayShellWidget>() else {
+                                    return (false, None);
+                                };
+                                // Single-pane close is a no-op; skip the gate.
+                                if shell.widget.pane_targets().len() <= 1 {
+                                    return (true, None);
+                                }
+                                // Phase 22.2: a closed pane's pending open can
+                                // never be answered into it. Phase 22.3: the
+                                // active tab's attribution map.
+                                if let Some(tab) = self.tabs.get_mut(&self.active_tab) {
+                                    tab.pending_opens.remove(&shell.widget.active_pane_id());
+                                }
+                                (true, shell.widget.active_pane_target())
+                            },
+                        );
+                        let menu = if may_close {
+                            target.map(|target| {
+                                ctx.render_root(window_id)
+                                    .edit_widget(target, |mut widget| {
+                                        if let Some(editor) = widget.try_downcast::<EditorWidget>()
+                                        {
+                                            if !editor.widget.guard_pane_close() {
+                                                return (false, editor.widget.take_pending_menu());
+                                            }
+                                            editor.widget.close_pane_view();
+                                            (true, None)
+                                        } else if let Some(view) =
+                                            widget.try_downcast::<PaneDocumentView>()
+                                        {
+                                            if !view.widget.guard_pane_close() {
+                                                return (false, view.widget.take_pending_menu());
+                                            }
+                                            view.widget.close_pane();
+                                            (true, None)
+                                        } else {
+                                            (true, None)
+                                        }
+                                    })
+                            })
+                        } else {
+                            None
+                        };
+                        if let Some((may_close, menu)) = menu {
+                            if let Some(menu) = menu {
+                                self.apply_menu_sync(ctx, window_id, self.editor_widget_id, menu);
+                            }
+                            if !may_close {
+                                // Dirty pane: keep it open; the conflict menu
+                                // offers Save/Discard/Keep.
+                                return;
+                            }
+                        }
+                    }
+                    // Phase 22.1: dispatch pane-management commands to the shell.
+                    let shell_widget_id = self.shell_action_target();
+                    ctx.render_root(window_id)
+                        .edit_widget(shell_widget_id, |mut widget| {
+                            if let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() {
+                                shell
+                                    .widget
+                                    .apply_shell_client_command(&mut shell.ctx, command);
+                                shell.ctx.request_accessibility_update();
+                            }
+                        });
+                    // Phase 22.2: keyboard routing follows pane focus — move
+                    // Masonry focus to the (possibly new) active pane's content.
+                    let target =
+                        ctx.render_root(window_id)
+                            .edit_widget(shell_widget_id, |mut widget| {
+                                widget
+                                    .try_downcast::<ClayShellWidget>()
+                                    .and_then(|shell| shell.widget.active_pane_target())
+                            });
+                    if let Some(target) = target {
+                        let _ = ctx.render_root(window_id).focus_on(Some(target));
+                    }
+                }
             },
         }
     }
@@ -546,6 +2507,8 @@ enum ClientUiCommandResult {
     RequestResync,
     DismissRecovery,
     EditorCommand(clay::masonry_editor::EditorClientCommand),
+    /// Phase 22.1: shell pane-management command (split/close/focus/resize/move).
+    ShellCommand(clay::masonry_shell::ShellClientCommand),
 }
 
 fn handle_client_ui_command(command: &clay::client::ClientUiCommandRoute) -> ClientUiCommandResult {
@@ -571,6 +2534,12 @@ fn handle_client_ui_command(command: &clay::client::ClientUiCommandRoute) -> Cli
                 clay::masonry_editor::EditorClientCommand::from_command_id(command_id) =>
         {
             ClientUiCommandResult::EditorCommand(command)
+        }
+        command_id
+            if let Some(command) =
+                clay::masonry_shell::ShellClientCommand::from_command_id(command_id) =>
+        {
+            ClientUiCommandResult::ShellCommand(command)
         }
         _ => ClientUiCommandResult::None,
     }
@@ -608,50 +2577,67 @@ fn client_dialog_result_to_command_result(
     }
 }
 
-fn apply_native_dialog_completion(
-    window_id: WindowId,
-    ctx: &mut DriverCtx<'_, '_>,
-    editor_widget_id: WidgetId,
-    result: clay::client::FileDialogResult,
-    kind: SelectedPathKind,
-) {
-    let result = client_dialog_result_to_command_result(result, kind);
-    ctx.render_root(window_id)
-        .edit_widget(editor_widget_id, |mut widget| {
-            let Some(mut editor) = widget.try_downcast::<EditorWidget>() else {
-                return;
-            };
-            let changed = match result {
-                ClientUiCommandResult::None => false,
-                ClientUiCommandResult::SelectedFile(path) => editor
-                    .widget
-                    .request_selected_file_open(path)
-                    .is_some_and(|event| editor.widget.apply_connection_event(event)),
-                ClientUiCommandResult::SelectedFolder(path) => editor
-                    .widget
-                    .request_selected_workspace_root(path)
-                    .is_some_and(|event| editor.widget.apply_connection_event(event)),
-                ClientUiCommandResult::ConnectionEvent(event) => {
-                    editor.widget.apply_connection_event(event)
+impl Driver {
+    fn apply_native_dialog_completion(
+        &mut self,
+        window_id: WindowId,
+        ctx: &mut DriverCtx<'_, '_>,
+        editor_widget_id: WidgetId,
+        result: clay::client::FileDialogResult,
+        kind: SelectedPathKind,
+    ) {
+        let result = client_dialog_result_to_command_result(result, kind);
+        if let ClientUiCommandResult::SelectedFile(path) = &result {
+            // Phase 22.2: attribute the dialog open to the active pane so the
+            // answering DocumentOpened lands in the focused pane.
+            self.record_pending_open(
+                ctx,
+                window_id,
+                PendingOpenRequest {
+                    path: Some(path.clone()),
+                    root_id: None,
+                    relative_path: None,
+                },
+            );
+        }
+        ctx.render_root(window_id)
+            .edit_widget(editor_widget_id, |mut widget| {
+                let Some(mut editor) = widget.try_downcast::<EditorWidget>() else {
+                    return;
+                };
+                let changed = match result {
+                    ClientUiCommandResult::None => false,
+                    ClientUiCommandResult::SelectedFile(path) => editor
+                        .widget
+                        .request_selected_file_open(path)
+                        .is_some_and(|event| editor.widget.apply_connection_event(event)),
+                    ClientUiCommandResult::SelectedFolder(path) => editor
+                        .widget
+                        .request_selected_workspace_root(path)
+                        .is_some_and(|event| editor.widget.apply_connection_event(event)),
+                    ClientUiCommandResult::ConnectionEvent(event) => {
+                        editor.widget.apply_connection_event(event)
+                    }
+                    ClientUiCommandResult::CopySelection
+                    | ClientUiCommandResult::CutSelection
+                    | ClientUiCommandResult::PasteClipboard
+                    | ClientUiCommandResult::Undo
+                    | ClientUiCommandResult::Redo
+                    | ClientUiCommandResult::ShowOpenDocuments
+                    | ClientUiCommandResult::RequestResync
+                    | ClientUiCommandResult::DismissRecovery
+                    | ClientUiCommandResult::EditorCommand(_)
+                    | ClientUiCommandResult::ShellCommand(_) => false,
+                };
+                editor.widget.sync_region(&mut editor.ctx);
+                editor.widget.sync_panels(&mut editor.ctx);
+                editor.widget.sync_overlays(&mut editor.ctx);
+                if changed {
+                    editor.ctx.request_render();
+                    editor.ctx.request_accessibility_update();
                 }
-                ClientUiCommandResult::CopySelection
-                | ClientUiCommandResult::CutSelection
-                | ClientUiCommandResult::PasteClipboard
-                | ClientUiCommandResult::Undo
-                | ClientUiCommandResult::Redo
-                | ClientUiCommandResult::ShowOpenDocuments
-                | ClientUiCommandResult::RequestResync
-                | ClientUiCommandResult::DismissRecovery
-                | ClientUiCommandResult::EditorCommand(_) => false,
-            };
-            editor.widget.sync_region(&mut editor.ctx);
-            editor.widget.sync_panels(&mut editor.ctx);
-            editor.widget.sync_overlays(&mut editor.ctx);
-            if changed {
-                editor.ctx.request_render();
-                editor.ctx.request_accessibility_update();
-            }
-        });
+            });
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1454,16 +3440,30 @@ fn run_client(endpoint: IpcEndpoint, start_server_if_missing: bool) -> Result<()
         }
     };
 
-    let (editor_widget, events) = if let Some(session) = client_session {
-        editor_widget_from_session(session)
-    } else {
-        (
-            EditorWidget::default().with_status(EditorStatus::local_fallback()),
-            None,
-        )
-    };
+    let (client_id, editor_widget, events, initial_workspace_root) =
+        if let Some(session) = client_session {
+            let initial_workspace_root = session.initial_state.workspace_root.clone();
+            let (client_id, editor_widget, events) = editor_widget_from_session(session);
+            (client_id, editor_widget, events, initial_workspace_root)
+        } else {
+            (
+                // Phase 22.3: the local-fallback tab has no connection; key 0
+                // is never assigned by the server (ClientIds start at 1).
+                0,
+                EditorWidget::default().with_status(EditorStatus::local_fallback()),
+                None,
+                String::new(),
+            )
+        };
 
-    run_editor(editor_widget, events, &runtime)
+    run_editor(
+        endpoint,
+        client_id,
+        editor_widget,
+        events,
+        initial_workspace_root,
+        &runtime,
+    )
 }
 
 #[cfg(target_os = "linux")]
@@ -1597,8 +3597,15 @@ fn run_smoke_gui(
     eprintln!("{}", LaunchDiagnostic::smoke_server_starting(&endpoint));
     let session = runtime.block_on(connect_with_retry_while(&endpoint, || server.try_wait()))?;
     eprintln!("{}", LaunchDiagnostic::connected(&endpoint));
-    let (editor_widget, events) = editor_widget_from_session(session);
-    let result = run_editor(editor_widget, events, &runtime);
+    let (client_id, editor_widget, events) = editor_widget_from_session(session);
+    let result = run_editor(
+        endpoint,
+        client_id,
+        editor_widget,
+        events,
+        String::new(),
+        &runtime,
+    );
     server.shutdown();
     result
 }
@@ -1708,13 +3715,19 @@ fn server_command(executable: OsString, endpoint: &IpcEndpoint) -> Command {
 
 fn editor_widget_from_session(
     session: client::ClientSession,
-) -> (EditorWidget, Option<mpsc::Receiver<ClientConnectionEvent>>) {
+) -> (
+    ClientId,
+    EditorWidget,
+    Option<mpsc::Receiver<ClientConnectionEvent>>,
+) {
     let client::ClientSession {
         initial_state,
         edit_queue,
         events,
     } = session;
+    let client_id = initial_state.client_id;
     (
+        client_id,
         EditorWidget::with_initial_state(initial_state).with_edit_queue(edit_queue),
         Some(events),
     )
@@ -1763,13 +3776,30 @@ async fn connect_with_retry_while(
 }
 
 fn run_editor(
+    endpoint: IpcEndpoint,
+    client_id: ClientId,
     editor_widget: EditorWidget,
     events: Option<mpsc::Receiver<ClientConnectionEvent>>,
+    initial_workspace_root: String,
     runtime: &tokio::runtime::Runtime,
 ) -> Result<(), Box<dyn Error>> {
-    let shell_widget = ClayShellWidget::single_editor(editor_widget);
+    // Phase 22.2: a master queue clone for mounting pane document views.
+    // Phase 22.3: the initial tab's queue lives in its `TabState`.
+    let edit_queue = editor_widget.edit_queue_shared();
+    // Phase 22.3: register the initial tab with the server registry so the
+    // tab bar can name, activate, and close it. The registry entry (and the
+    // server-assigned `TabId`) arrives on the next `TabRegistry` snapshot.
+    if !initial_workspace_root.is_empty()
+        && let Some(queue) = edit_queue.clone()
+    {
+        let _ = queue.enqueue_tab_command(clay::protocol::TabCommand::New {
+            workspace_root: initial_workspace_root.clone(),
+        });
+    }
+    let shell_widget = ClayShellWidget::single_editor(client_id, editor_widget);
     let editor_widget_id = shell_widget.editor_widget_id();
     let root_widget = NewWidget::new(shell_widget);
+    let shell_widget_id = root_widget.id();
     let window_id = WindowId::next();
     let window_attributes = Window::default_attributes()
         .with_title(WINDOW_TITLE)
@@ -1779,7 +3809,7 @@ fn run_editor(
 
     if let Some(events) = events {
         spawn_client_connection_event_bridge(
-            runtime,
+            runtime.handle(),
             events,
             proxy.clone(),
             window_id,
@@ -1796,11 +3826,31 @@ fn run_editor(
         )],
         Driver {
             editor_widget_id,
+            shell_widget_id,
             window_id,
+            tabs: BTreeMap::from([(
+                client_id,
+                TabState {
+                    edit_queue,
+                    pending_opens: BTreeMap::new(),
+                    tab_id: None,
+                    workspace_root: initial_workspace_root.clone(),
+                },
+            )]),
+            active_tab: client_id,
+            registry: TabRegistrySnapshot {
+                tabs: Vec::new(),
+                active: None,
+            },
+            runtime: runtime.handle().clone(),
+            endpoint,
+            reconnect_cancel: BTreeMap::new(),
             proxy: Some(proxy),
             dialog_generation: 0,
             file_dialog_in_flight: None,
             folder_dialog_in_flight: None,
+            pending_close_after_saves: None,
+            tab_menu_session_id: 0,
         },
         default_property_set(),
     )?;
@@ -1809,7 +3859,7 @@ fn run_editor(
 }
 
 fn spawn_client_connection_event_bridge(
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     mut events: mpsc::Receiver<ClientConnectionEvent>,
     proxy: EventLoopProxy,
     window_id: WindowId,
@@ -1846,7 +3896,7 @@ fn connection_event_user_event(
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsString, path::PathBuf};
+    use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
     #[cfg(not(windows))]
     use super::handle_client_ui_command;
@@ -1854,17 +3904,23 @@ mod tests {
     use super::linux_command_line_is_default_server;
     use super::{
         ClayCommand, ClientUiCommandResult, Driver, FixtureKind, LaunchDiagnostic,
-        LaunchReadinessFailure, SelectedPathKind, background_server_command,
+        LaunchReadinessFailure, PendingOpenRequest, SelectedPathKind, TabState,
+        advance_pending_close_after_saves, background_server_command,
         client_dialog_result_to_command_result, connect_with_retry, connect_with_retry_while,
         connection_event_user_event, extract_profile_perf_flag, is_linux_portal_dialog_command,
-        managed_server_command, parse_command,
+        managed_server_command, open_intent_pending_request, parse_command, take_pending_open_for,
     };
-    use clay::client::{ClientBootstrapError, ClientConnectionEvent};
+    use clay::client::{ClientBootstrapError, ClientConnectionEvent, ClientEditQueue};
     use clay::editor::{EditorSurface, is_printable_text};
     use clay::ipc::default_endpoint;
+    use clay::protocol::ClientId;
+    use clay::protocol::SduiActionIntent;
+    use clay::protocol::TabRegistrySnapshot;
     use clay::protocol::codec::CodecError;
+    use clay::shell::PaneId;
     use masonry::core::WidgetId;
     use masonry_winit::app::{MasonryUserEvent, WindowId};
+    use std::collections::BTreeSet;
 
     #[test]
     fn parses_server_subcommand() {
@@ -2337,6 +4393,7 @@ mod tests {
     fn connection_event_action_is_dispatched_to_shell_editor_child() {
         let window_id = WindowId::next();
         let shell = clay::masonry_shell::ClayShellWidget::single_editor(
+            0,
             clay::masonry_editor::EditorWidget::default(),
         );
         let widget_id = shell.editor_widget_id();
@@ -2375,13 +4432,29 @@ mod tests {
 
     #[test]
     fn native_dialog_generations_limit_duplicates_and_reject_stale_results() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
         let mut driver = Driver {
             editor_widget_id: WidgetId::next(),
+            shell_widget_id: WidgetId::next(),
             window_id: WindowId::next(),
+            tabs: BTreeMap::new(),
+            active_tab: 0,
+            registry: TabRegistrySnapshot {
+                tabs: Vec::new(),
+                active: None,
+            },
+            runtime: runtime.handle().clone(),
+            endpoint: default_endpoint(),
+            reconnect_cancel: BTreeMap::new(),
             proxy: None,
             dialog_generation: 0,
             file_dialog_in_flight: None,
             folder_dialog_in_flight: None,
+            pending_close_after_saves: None,
+            tab_menu_session_id: 0,
         };
 
         let file_generation = driver.reserve_file_dialog().expect("first file dialog");
@@ -2402,17 +4475,201 @@ mod tests {
         assert!(!driver.finish_folder_dialog(folder_generation));
     }
 
+    fn metadata(document_id: u64, path: &str) -> clay::protocol::DocumentMetadata {
+        clay::protocol::DocumentMetadata {
+            document_id,
+            version: 1,
+            access: clay::protocol::DocumentAccess::Editable {
+                lease_id: document_id,
+            },
+            lease_id: Some(document_id),
+            dirty: false,
+            workspace_root_id: 77,
+            path: path.to_string(),
+        }
+    }
+
+    #[test]
+    fn pending_open_absolute_path_matches_and_is_consumed() {
+        let mut pending = BTreeMap::new();
+        pending.insert(
+            PaneId(2),
+            PendingOpenRequest {
+                path: Some(PathBuf::from("/home/user/proj/src/main.rs")),
+                root_id: None,
+                relative_path: None,
+            },
+        );
+        // Matching DocumentOpened (native dialog / selected-file flow answers
+        // with the canonical absolute path): attributed to pane 2, consumed.
+        assert_eq!(
+            take_pending_open_for(&mut pending, &metadata(9, "/home/user/proj/src/main.rs")),
+            Some(PaneId(2))
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn pending_open_workspace_relative_reference_matches_by_root_and_path() {
+        let mut pending = BTreeMap::new();
+        pending.insert(
+            PaneId(3),
+            PendingOpenRequest {
+                path: None,
+                root_id: Some(77),
+                relative_path: Some("src/lib.rs".to_string()),
+            },
+        );
+        // File-browser / fuzzy / definition-navigation answers carry the
+        // workspace-relative path.
+        assert_eq!(
+            take_pending_open_for(&mut pending, &metadata(9, "src/lib.rs")),
+            Some(PaneId(3))
+        );
+        assert!(pending.is_empty(), "matched entries are consumed");
+    }
+
+    #[test]
+    fn pending_open_does_not_match_other_paths_or_roots() {
+        let mut pending = BTreeMap::new();
+        pending.insert(
+            PaneId(2),
+            PendingOpenRequest {
+                path: Some(PathBuf::from("/home/user/proj/a.md")),
+                root_id: None,
+                relative_path: None,
+            },
+        );
+        pending.insert(
+            PaneId(3),
+            PendingOpenRequest {
+                path: None,
+                root_id: Some(77),
+                relative_path: Some("src/lib.rs".to_string()),
+            },
+        );
+        // Different file, different root, and a server-initiated open with no
+        // pending entry at all must not match.
+        assert_eq!(
+            take_pending_open_for(&mut pending, &metadata(10, "/home/user/proj/b.md")),
+            None
+        );
+        assert_eq!(
+            take_pending_open_for(&mut pending, &metadata(10, "src/main.rs")),
+            None
+        );
+        assert_eq!(pending.len(), 2, "unmatched entries stay pending");
+    }
+
+    #[test]
+    fn pending_open_entries_are_bounded_per_pane() {
+        let mut pending = BTreeMap::new();
+        pending.insert(
+            PaneId(2),
+            PendingOpenRequest {
+                path: Some(PathBuf::from("/a")),
+                root_id: None,
+                relative_path: None,
+            },
+        );
+        // A new request from the same pane replaces the old one.
+        pending.insert(
+            PaneId(2),
+            PendingOpenRequest {
+                path: Some(PathBuf::from("/b")),
+                root_id: None,
+                relative_path: None,
+            },
+        );
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            take_pending_open_for(&mut pending, &metadata(11, "/b")),
+            Some(PaneId(2))
+        );
+    }
+
+    #[test]
+    fn open_intent_pending_request_extracts_workspace_open_arguments() {
+        fn intent(
+            command_id: &str,
+            root_id: Option<u64>,
+            relative: Option<&str>,
+        ) -> SduiActionIntent {
+            let mut arguments = Vec::new();
+            if let Some(root_id) = root_id {
+                arguments.push(clay::protocol::SduiActionArgument {
+                    name: "workspaceRootId".to_string(),
+                    value: clay::protocol::SduiActionValue::U64(root_id),
+                });
+            }
+            if let Some(relative) = relative {
+                arguments.push(clay::protocol::SduiActionArgument {
+                    name: "relativePath".to_string(),
+                    value: clay::protocol::SduiActionValue::String(relative.to_string()),
+                });
+            }
+            SduiActionIntent {
+                command_id: command_id.to_string(),
+                source: clay::protocol::SduiActionSource::Button {
+                    node_id: clay::protocol::SduiNodeId(1),
+                },
+                arguments,
+            }
+        }
+        // File browser and fuzzy open both carry (workspaceRootId, relativePath).
+        for command_id in ["clay.workspace.openFile", "clay.workspace.openFuzzyFile"] {
+            let request = open_intent_pending_request(&intent(command_id, Some(3), Some("a.md")))
+                .expect("workspace open intent records a pending request");
+            assert_eq!(request.path, None);
+            assert_eq!(request.root_id, Some(3));
+            assert_eq!(request.relative_path.as_deref(), Some("a.md"));
+        }
+        // Non-open intents and malformed arguments record nothing.
+        assert!(
+            open_intent_pending_request(&intent(
+                "clay.workspace.revealInTree",
+                Some(3),
+                Some("a.md")
+            ))
+            .is_none()
+        );
+        assert!(
+            open_intent_pending_request(&intent("clay.workspace.openFile", None, Some("a.md")))
+                .is_none()
+        );
+        assert!(
+            open_intent_pending_request(&intent("clay.workspace.openFile", Some(3), None))
+                .is_none()
+        );
+    }
+
     #[test]
     fn driver_routes_editor_actions_to_shell_editor_child() {
         let editor_widget_id = WidgetId::next();
         let shell_or_source_widget_id = WidgetId::next();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
         let driver = Driver {
             editor_widget_id,
+            shell_widget_id: WidgetId::next(),
             window_id: WindowId::next(),
+            tabs: BTreeMap::new(),
+            active_tab: 0,
+            registry: TabRegistrySnapshot {
+                tabs: Vec::new(),
+                active: None,
+            },
+            runtime: runtime.handle().clone(),
+            endpoint: default_endpoint(),
+            reconnect_cancel: BTreeMap::new(),
             proxy: None,
             dialog_generation: 0,
             file_dialog_in_flight: None,
             folder_dialog_in_flight: None,
+            pending_close_after_saves: None,
+            tab_menu_session_id: 0,
         };
 
         assert_eq!(
@@ -2425,6 +4682,7 @@ mod tests {
     fn smoke_launch_routes_sdui_events_to_gui() {
         let window_id = WindowId::next();
         let shell = clay::masonry_shell::ClayShellWidget::single_editor(
+            0,
             clay::masonry_editor::EditorWidget::default(),
         );
         let widget_id = shell.editor_widget_id();
@@ -2516,5 +4774,561 @@ mod tests {
         assert!(!is_printable_text("\r"));
         assert!(!is_printable_text("\n"));
         assert!(!is_printable_text("a\n"));
+    }
+
+    // -- Phase 22.3: multi-connection tab model --
+
+    fn test_driver_with_tabs(tabs: BTreeMap<ClientId, TabState>) -> Driver {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        Driver {
+            editor_widget_id: WidgetId::next(),
+            shell_widget_id: WidgetId::next(),
+            window_id: WindowId::next(),
+            tabs,
+            active_tab: 0,
+            registry: TabRegistrySnapshot {
+                tabs: Vec::new(),
+                active: None,
+            },
+            runtime: runtime.handle().clone(),
+            endpoint: default_endpoint(),
+            reconnect_cancel: BTreeMap::new(),
+            proxy: None,
+            dialog_generation: 0,
+            file_dialog_in_flight: None,
+            folder_dialog_in_flight: None,
+            pending_close_after_saves: None,
+            tab_menu_session_id: 0,
+        }
+    }
+
+    #[test]
+    fn tab_close_allowed_refuses_last_tab_and_unknown_tabs() {
+        let mut driver = test_driver_with_tabs(BTreeMap::from([
+            (1, tab_state_with_queue(ClientEditQueue::bounded(4).0)),
+            (2, tab_state_with_queue(ClientEditQueue::bounded(4).0)),
+        ]));
+        driver.active_tab = 1;
+        // Two tabs: either may close (the dirty guard is separate).
+        assert!(driver.tab_close_allowed(1));
+        assert!(driver.tab_close_allowed(2));
+        // Unknown tabs never close.
+        assert!(!driver.tab_close_allowed(9));
+        // Closing down to one tab is allowed; the LAST tab is refused (the
+        // window never goes to zero tabs — the bar hides at one tab).
+        driver.tabs.remove(&2);
+        assert!(!driver.tab_close_allowed(1), "the last tab cannot close");
+    }
+
+    #[test]
+    fn tab_close_confirm_menu_names_tab_and_dirty_documents() {
+        let (queue_a, _receiver_a) = ClientEditQueue::bounded(4);
+        let mut driver =
+            test_driver_with_tabs(BTreeMap::from([(11, tab_state_with_queue(queue_a))]));
+        driver.registry = TabRegistrySnapshot {
+            tabs: vec![clay::protocol::TabEntry {
+                tab_id: 101,
+                workspace_root_id: 7,
+                client_id: 11,
+                workspace_root: "/home/arn/work".to_string(),
+            }],
+            active: None,
+        };
+
+        // Phase 22.4: the confirm menu names the tab (final path segment) and
+        // every dirty document; one document reads singular, several plural.
+        let menu = driver.tab_close_confirm_menu(11, &["note.md".to_string()]);
+        assert_eq!(
+            menu.prompt(),
+            "Close tab 'work' with 1 unsaved document (note.md)?"
+        );
+        let menu = driver.tab_close_confirm_menu(11, &["a.md".to_string(), "b.md".to_string()]);
+        assert_eq!(
+            menu.prompt(),
+            "Close tab 'work' with 2 unsaved documents (a.md, b.md)?"
+        );
+        // Session ids are distinct per menu (driver-owned counter).
+        assert_ne!(
+            menu.session_id().0,
+            driver
+                .tab_close_confirm_menu(11, &["a.md".to_string()])
+                .session_id()
+                .0
+        );
+    }
+
+    #[test]
+    fn pending_close_after_saves_advances_acks_and_cancels_on_failure() {
+        let saved = |document_id| ClientConnectionEvent::DocumentSaved {
+            document_id,
+            version: 1,
+            dirty: false,
+        };
+        let failed = ClientConnectionEvent::FileOperationFailed {
+            code: clay::protocol::FileErrorCode::DirtyDocument,
+            message: "save failed".to_string(),
+            workspace_root_id: Some(7),
+            document_id: Some(7),
+        };
+
+        // No flow in flight: events pass through untouched.
+        let mut pending = None;
+        assert!(!advance_pending_close_after_saves(
+            &mut pending,
+            11,
+            &saved(7)
+        ));
+        assert!(pending.is_none());
+
+        // Partial acks keep the flow alive; the last ack completes it.
+        let mut pending = Some((11, BTreeSet::from([7, 8])));
+        assert!(!advance_pending_close_after_saves(
+            &mut pending,
+            11,
+            &saved(7)
+        ));
+        assert!(pending.is_some(), "one of two acks still pending");
+        assert!(advance_pending_close_after_saves(
+            &mut pending,
+            11,
+            &saved(8)
+        ));
+        assert!(
+            pending.is_none(),
+            "flow completed; caller enqueues the close"
+        );
+
+        // A failed save cancels the close (the diagnostic surfaces in the pane).
+        let mut pending = Some((11, BTreeSet::from([7])));
+        assert!(!advance_pending_close_after_saves(
+            &mut pending,
+            11,
+            &failed
+        ));
+        assert!(pending.is_none(), "failed save cancels the flow");
+
+        // Other tabs' events never touch this tab's flow.
+        let mut pending = Some((11, BTreeSet::from([7])));
+        assert!(!advance_pending_close_after_saves(
+            &mut pending,
+            22,
+            &saved(7)
+        ));
+        assert!(pending.is_some(), "another tab's ack is ignored");
+    }
+
+    fn tab_state_with_queue(queue: ClientEditQueue) -> TabState {
+        TabState {
+            edit_queue: Some(queue),
+            pending_opens: BTreeMap::new(),
+            tab_id: None,
+            workspace_root: "/tmp/root".to_string(),
+        }
+    }
+
+    #[test]
+    fn apply_tab_registry_fills_server_assigned_tab_ids_and_builds_cards() {
+        let (queue_a, _receiver_a) = ClientEditQueue::bounded(4);
+        let (queue_b, _receiver_b) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([
+            (11, tab_state_with_queue(queue_a)),
+            (22, tab_state_with_queue(queue_b)),
+        ]));
+
+        let reconcile = driver.apply_tab_registry(TabRegistrySnapshot {
+            tabs: vec![
+                clay::protocol::TabEntry {
+                    tab_id: 101,
+                    workspace_root_id: 7,
+                    client_id: 11,
+                    workspace_root: "/tmp/alpha".to_string(),
+                },
+                clay::protocol::TabEntry {
+                    tab_id: 102,
+                    workspace_root_id: 8,
+                    client_id: 22,
+                    workspace_root: "/tmp/beta".to_string(),
+                },
+            ],
+            active: Some(102),
+        });
+
+        assert_eq!(driver.tabs[&11].tab_id, Some(101));
+        assert_eq!(driver.tabs[&22].tab_id, Some(102));
+        assert_eq!(driver.registry.active, Some(102));
+        assert_eq!(driver.registry.tabs.len(), 2);
+        // No removals; the server's active tab (client 22) wins over the
+        // driver mirror (0).
+        assert!(reconcile.removed.is_empty());
+        assert_eq!(reconcile.new_active, Some(22));
+        // Cards follow registry order and carry display names + close.
+        assert_eq!(reconcile.cards.len(), 2);
+        assert_eq!(reconcile.cards[0].client_id, 11);
+        assert_eq!(reconcile.cards[0].name, "alpha");
+        assert!(reconcile.cards[0].closable);
+        assert_eq!(reconcile.cards[1].name, "beta");
+    }
+
+    #[test]
+    fn apply_tab_registry_removes_closed_tab_and_activates_remaining() {
+        let (queue_a, _receiver_a) = ClientEditQueue::bounded(4);
+        let (queue_b, _receiver_b) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([
+            (11, tab_state_with_queue(queue_a)),
+            (22, tab_state_with_queue(queue_b)),
+        ]));
+        driver.active_tab = 22;
+
+        // The server closed tab 102 (client 22): the registry no longer
+        // carries it, and the remaining tab becomes active.
+        let reconcile = driver.apply_tab_registry(TabRegistrySnapshot {
+            tabs: vec![clay::protocol::TabEntry {
+                tab_id: 101,
+                workspace_root_id: 7,
+                client_id: 11,
+                workspace_root: "/tmp/alpha".to_string(),
+            }],
+            active: Some(101),
+        });
+
+        assert_eq!(reconcile.removed, vec![22]);
+        assert_eq!(reconcile.new_active, Some(11));
+        assert_eq!(reconcile.cards.len(), 1);
+        assert_eq!(reconcile.cards[0].client_id, 11);
+    }
+
+    #[test]
+    fn apply_tab_registry_skips_removals_on_empty_snapshot() {
+        // An empty registry means the server restarted (in-memory registry
+        // lost): mounted tabs survive for the lifecycle task's re-registration
+        // (Reclaim/New). No removals, no activation churn.
+        let (queue_a, _receiver_a) = ClientEditQueue::bounded(4);
+        let (queue_b, _receiver_b) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([
+            (11, tab_state_with_queue(queue_a)),
+            (22, tab_state_with_queue(queue_b)),
+        ]));
+        driver.tabs.get_mut(&11).unwrap().tab_id = Some(101);
+
+        let reconcile = driver.apply_tab_registry(TabRegistrySnapshot {
+            tabs: Vec::new(),
+            active: None,
+        });
+
+        assert!(reconcile.removed.is_empty());
+        assert_eq!(reconcile.new_active, None);
+        assert_eq!(driver.tabs.len(), 2);
+        assert_eq!(driver.tabs[&11].tab_id, Some(101), "ids survive");
+        // Both mounted tabs still get cards (entry-less → close disabled).
+        assert_eq!(reconcile.cards.len(), 2);
+        assert!(reconcile.cards.iter().all(|card| !card.closable));
+    }
+
+    // -- Phase 22.4: keyboard tab management --
+
+    fn tab_snapshot(entries: &[(ClientId, clay::protocol::TabId)]) -> TabRegistrySnapshot {
+        TabRegistrySnapshot {
+            tabs: entries
+                .iter()
+                .map(|(client_id, tab_id)| clay::protocol::TabEntry {
+                    tab_id: *tab_id,
+                    workspace_root_id: 1,
+                    client_id: *client_id,
+                    workspace_root: format!("/tmp/root-{client_id}"),
+                })
+                .collect(),
+            active: None,
+        }
+    }
+
+    #[test]
+    fn tab_order_is_registry_order_with_entry_less_mounted_appended() {
+        let (queue_a, _receiver_a) = ClientEditQueue::bounded(4);
+        let (queue_b, _receiver_b) = ClientEditQueue::bounded(4);
+        let (queue_c, _receiver_c) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([
+            (11, tab_state_with_queue(queue_a)),
+            (22, tab_state_with_queue(queue_b)),
+            (33, tab_state_with_queue(queue_c)),
+        ]));
+        // Server registry order: 33, 11. Tab 22 is mounted but has no
+        // registry entry yet (entry-less) and appends.
+        driver.registry = tab_snapshot(&[(33, 301), (11, 302)]);
+
+        assert_eq!(driver.tab_order(), vec![33, 11, 22]);
+        assert_eq!(driver.tab_position_of(33), Some(1));
+        assert_eq!(driver.tab_position_of(11), Some(2));
+        assert_eq!(driver.tab_position_of(22), Some(3));
+        assert_eq!(driver.tab_position_of(99), None);
+        // Numbered activation is 1-based over the same order.
+        assert_eq!(driver.tab_at_position(1), Some(33));
+        assert_eq!(driver.tab_at_position(3), Some(22));
+        // Bounds policy: position 0 and positions beyond the tab count are
+        // silent no-ops — never switch to a non-existent position.
+        assert_eq!(driver.tab_at_position(0), None);
+        assert_eq!(driver.tab_at_position(4), None);
+    }
+
+    #[test]
+    fn tab_offset_resolution_wraps_around_card_order() {
+        let (queue_a, _receiver_a) = ClientEditQueue::bounded(4);
+        let (queue_b, _receiver_b) = ClientEditQueue::bounded(4);
+        let (queue_c, _receiver_c) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([
+            (11, tab_state_with_queue(queue_a)),
+            (22, tab_state_with_queue(queue_b)),
+            (33, tab_state_with_queue(queue_c)),
+        ]));
+        driver.registry = tab_snapshot(&[(33, 301), (11, 302), (22, 303)]);
+
+        // Middle tab: one step either way stays in the order.
+        driver.active_tab = 11;
+        assert_eq!(driver.tab_at_offset(1), Some(22));
+        assert_eq!(driver.tab_at_offset(-1), Some(33));
+        // Wraparound: next from the last tab goes to the first.
+        driver.active_tab = 22;
+        assert_eq!(driver.tab_at_offset(1), Some(33));
+        // Wraparound: prev from the first tab goes to the last.
+        driver.active_tab = 33;
+        assert_eq!(driver.tab_at_offset(-1), Some(22));
+        // Full cycles stay in the order: 33 sits at index 0, so +3 wraps to
+        // itself and -4 wraps to 22.
+        assert_eq!(driver.tab_at_offset(3), Some(33));
+        assert_eq!(driver.tab_at_offset(-4), Some(22));
+    }
+
+    #[test]
+    fn tab_offset_resolution_with_one_tab_is_noop() {
+        let (queue, _receiver) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([(1, tab_state_with_queue(queue))]));
+        driver.registry = tab_snapshot(&[(1, 101)]);
+        driver.active_tab = 1;
+        // A single tab has nothing to cycle: next and prev are no-ops.
+        assert_eq!(driver.tab_at_offset(1), None);
+        assert_eq!(driver.tab_at_offset(-1), None);
+    }
+
+    #[test]
+    fn tab_activate_enqueues_activate_and_entry_less_tabs_skip() {
+        let (queue_a, mut receiver_a) = ClientEditQueue::bounded(4);
+        let (queue_b, mut receiver_b) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([
+            (11, tab_state_with_queue(queue_a)),
+            (22, tab_state_with_queue(queue_b)),
+        ]));
+        driver.apply_tab_registry(tab_snapshot(&[(11, 101)]));
+
+        driver.enqueue_activate(11);
+        match receiver_a.try_recv() {
+            Ok(clay::protocol::ClientMessage::TabCommand {
+                command: clay::protocol::TabCommand::Activate { tab_id },
+                ..
+            }) => assert_eq!(tab_id, 101),
+            other => panic!("expected Activate on tab 11, got {other:?}"),
+        }
+        // Entry-less tab (no server TabId yet): nothing to activate — a
+        // silent no-op, never a queued command.
+        driver.enqueue_activate(22);
+        assert!(
+            receiver_b.try_recv().is_err(),
+            "entry-less tab must not enqueue Activate"
+        );
+    }
+
+    #[test]
+    fn tab_move_left_right_respects_boundary_no_op_policy() {
+        let (queue_a, mut receiver_a) = ClientEditQueue::bounded(4);
+        let (queue_b, _receiver_b) = ClientEditQueue::bounded(4);
+        let (queue_c, mut receiver_c) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([
+            (11, tab_state_with_queue(queue_a)),
+            (22, tab_state_with_queue(queue_b)),
+            (33, tab_state_with_queue(queue_c)),
+        ]));
+        driver.apply_tab_registry(tab_snapshot(&[(11, 101), (22, 102), (33, 103)]));
+
+        // First position: left is a boundary no-op (no wraparound); right
+        // enqueues MoveRight.
+        driver.active_tab = 11;
+        driver.move_active_tab(true);
+        assert!(
+            receiver_a.try_recv().is_err(),
+            "boundary left must not enqueue"
+        );
+        driver.move_active_tab(false);
+        match receiver_a.try_recv() {
+            Ok(clay::protocol::ClientMessage::TabCommand {
+                command: clay::protocol::TabCommand::MoveRight { tab_id },
+                ..
+            }) => assert_eq!(tab_id, 101),
+            other => panic!("expected MoveRight on tab 11, got {other:?}"),
+        }
+
+        // Last position: right is a boundary no-op; left enqueues MoveLeft.
+        driver.active_tab = 33;
+        driver.move_active_tab(false);
+        assert!(
+            receiver_c.try_recv().is_err(),
+            "boundary right must not enqueue"
+        );
+        driver.move_active_tab(true);
+        match receiver_c.try_recv() {
+            Ok(clay::protocol::ClientMessage::TabCommand {
+                command: clay::protocol::TabCommand::MoveLeft { tab_id },
+                ..
+            }) => assert_eq!(tab_id, 103),
+            other => panic!("expected MoveLeft on tab 33, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tab_move_to_enqueues_valid_positions_and_noops_out_of_range() {
+        let (queue_a, _receiver_a) = ClientEditQueue::bounded(4);
+        let (queue_b, mut receiver_b) = ClientEditQueue::bounded(4);
+        let (queue_c, _receiver_c) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([
+            (11, tab_state_with_queue(queue_a)),
+            (22, tab_state_with_queue(queue_b)),
+            (33, tab_state_with_queue(queue_c)),
+        ]));
+        driver.apply_tab_registry(tab_snapshot(&[(11, 101), (22, 102), (33, 103)]));
+        driver.active_tab = 22;
+
+        // Position 0 and positions beyond the tab count are silent no-ops
+        // (the client never enqueues a move the server would reject).
+        driver.move_active_tab_to(0);
+        assert!(
+            receiver_b.try_recv().is_err(),
+            "position 0 must not enqueue"
+        );
+        driver.move_active_tab_to(4);
+        assert!(
+            receiver_b.try_recv().is_err(),
+            "beyond-count position must not enqueue"
+        );
+        // Valid positions (1..=count) enqueue MoveTo with the position.
+        driver.move_active_tab_to(3);
+        match receiver_b.try_recv() {
+            Ok(clay::protocol::ClientMessage::TabCommand {
+                command: clay::protocol::TabCommand::MoveTo { tab_id, position },
+                ..
+            }) => {
+                assert_eq!(tab_id, 102);
+                assert_eq!(position, 3);
+            }
+            other => panic!("expected MoveTo on tab 22, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tab_new_chord_shares_open_tab_dialog_flow() {
+        let mut driver = test_driver_with_tabs(BTreeMap::new());
+        // In-flight guard: a `clientTabNew` chord while the folder dialog is
+        // showing is refused — the exact flow the tab-bar `+` uses, so the
+        // two affordances can never diverge.
+        driver.folder_dialog_in_flight = Some(7);
+        driver.open_new_tab_dialog();
+        assert_eq!(driver.folder_dialog_in_flight, Some(7));
+    }
+
+    #[test]
+    fn tab_command_ids_route_to_shell_tab_variants() {
+        for (id, expected) in [
+            (
+                "clay.shell.clientTabNext",
+                clay::masonry_shell::ShellClientCommand::TabNext,
+            ),
+            (
+                "clay.shell.clientTabPrev",
+                clay::masonry_shell::ShellClientCommand::TabPrev,
+            ),
+            (
+                "clay.shell.clientTabNew",
+                clay::masonry_shell::ShellClientCommand::TabNew,
+            ),
+            (
+                "clay.shell.clientTabClose",
+                clay::masonry_shell::ShellClientCommand::TabClose,
+            ),
+            (
+                "clay.shell.clientTabMoveLeft",
+                clay::masonry_shell::ShellClientCommand::TabMoveLeft,
+            ),
+            (
+                "clay.shell.clientTabMoveRight",
+                clay::masonry_shell::ShellClientCommand::TabMoveRight,
+            ),
+            (
+                "clay.shell.clientTabActivate.3",
+                clay::masonry_shell::ShellClientCommand::TabActivate(3),
+            ),
+            (
+                "clay.shell.clientTabMoveTo.9",
+                clay::masonry_shell::ShellClientCommand::TabMoveTo(9),
+            ),
+        ] {
+            let result = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
+                command_id: id.to_string(),
+                routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
+            });
+            assert!(
+                matches!(result, ClientUiCommandResult::ShellCommand(command) if command == expected),
+                "{id} must route to {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn per_tab_edit_queues_are_isolated() {
+        // Two tabs = two connections = two independent edit queues. An edit
+        // enqueued on tab A's queue never reaches tab B's channel.
+        let (queue_a, mut receiver_a) = ClientEditQueue::bounded(4);
+        let (queue_b, mut receiver_b) = ClientEditQueue::bounded(4);
+        let queue_a = queue_a
+            .with_authority(
+                11,
+                &clay::protocol::DocumentAccess::Editable { lease_id: 1 },
+            )
+            .with_confirmed_version(3);
+        let queue_b = queue_b
+            .with_authority(
+                22,
+                &clay::protocol::DocumentAccess::Editable { lease_id: 2 },
+            )
+            .with_confirmed_version(3);
+        let driver = test_driver_with_tabs(BTreeMap::from([
+            (11, tab_state_with_queue(queue_a.clone())),
+            (22, tab_state_with_queue(queue_b.clone())),
+        ]));
+
+        let event = clay::editor::EditorEditEvent {
+            document_id: 7,
+            base_version: 3,
+            behavior_version: 3,
+            operation: clay::protocol::EditOperation::Insert {
+                byte_offset: 0,
+                text: "tab A edit".to_string(),
+            },
+        };
+        driver.tabs[&11]
+            .edit_queue
+            .as_ref()
+            .expect("tab A queue")
+            .enqueue_edit_event(event, 1)
+            .expect("tab A enqueues");
+
+        let message_a = receiver_a.try_recv().expect("tab A channel receives");
+        assert!(matches!(
+            message_a,
+            clay::protocol::ClientMessage::Edit { client_id: 11, .. }
+        ));
+        assert!(
+            receiver_b.try_recv().is_err(),
+            "tab B's channel must not see tab A's edit"
+        );
+        assert_eq!(driver.tabs[&22].pending_opens.len(), 0);
     }
 }

@@ -128,6 +128,7 @@ mod tests {
                 reset_diagnostics: true,
                 initial_decorations: None,
                 initial_diagnostics: None,
+                behavior_manifest: None,
             }],
             diagnostics: Vec::new(),
         };

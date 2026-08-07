@@ -16,6 +16,7 @@ mod packages;
 mod parse;
 mod planned;
 mod sdui;
+mod shell;
 mod syntax;
 pub(crate) mod theme;
 pub(crate) mod typography;
@@ -97,6 +98,7 @@ use self::{
     parse::{op_clay_parse_register_parse_handler, op_clay_parse_store_update},
     planned::op_clay_runtime_unavailable,
     sdui::{op_clay_sdui_define_node, op_clay_sdui_publish_tree},
+    shell::op_clay_shell_set_pane_focus_policy,
     syntax::{op_clay_syntax_register_syntax_grammar, op_clay_syntax_set_engine_preference},
     theme::{op_clay_theme_set_appearance, op_clay_theme_set_theme},
     typography::op_clay_theme_set_typography,
@@ -185,6 +187,16 @@ pub(crate) struct ClayOpState {
     /// current value.
     caret_style_store:
         Mutex<Option<std::sync::Arc<std::sync::Mutex<Option<crate::protocol::CaretStyle>>>>>,
+    /// Phase 22.1: bounded publisher for shell-level user preferences set by
+    /// `setPaneFocusPolicy`. Wired by the JS runtime service for both domains;
+    /// `None` in unit-test states.
+    shell_preferences_publisher:
+        Mutex<Option<tokio::sync::broadcast::Sender<crate::protocol::ShellPreferences>>>,
+    /// Shared last-known shell preferences (service-owned, both domains write
+    /// through it) so connection initial sync and lag replay can resend the
+    /// current value.
+    shell_preferences_store:
+        Mutex<Option<std::sync::Arc<std::sync::Mutex<crate::protocol::ShellPreferences>>>>,
     runtime_records: Mutex<Vec<String>>,
     published_sdui_tree: Mutex<Option<crate::protocol::SduiTree>>,
     published_decoration_set: Mutex<Option<DecorationSet>>,
@@ -196,6 +208,11 @@ pub(crate) struct ClayOpState {
     last_parse_update_json: Mutex<Option<String>>,
     last_language_intelligence_result_json: Mutex<Option<String>>,
     behavior: Mutex<ActiveBehaviorManifest>,
+    /// The last behavior manifest this op state published during the current
+    /// evaluation (reset at `begin_evaluation`). Harvest and gate reads use it
+    /// so per-document mode layers resolve for the document the evaluation
+    /// actually activated, regardless of the evaluation's runtime document id.
+    last_published_behavior: Mutex<Option<BehaviorManifest>>,
     configured_keymaps: Mutex<Vec<KeyBindingRule>>,
     modes: Mutex<crate::packages::modes::ModeRegistry>,
     commands: Mutex<crate::packages::commands::CommandRegistry>,
@@ -301,6 +318,7 @@ impl ClayOpState {
             last_parse_update_json: Mutex::new(None),
             last_language_intelligence_result_json: Mutex::new(None),
             behavior: Mutex::new(ActiveBehaviorManifest::default()),
+            last_published_behavior: Mutex::new(None),
             configured_keymaps: Mutex::new(Vec::new()),
             modes: Mutex::new(crate::packages::modes::ModeRegistry::new()),
             commands: Mutex::new(crate::packages::commands::CommandRegistry::new()),
@@ -333,6 +351,8 @@ impl ClayOpState {
             editor_command_publisher: Mutex::new(None),
             caret_style_publisher: Mutex::new(None),
             caret_style_store: Mutex::new(None),
+            shell_preferences_publisher: Mutex::new(None),
+            shell_preferences_store: Mutex::new(None),
             third_party_commands: Mutex::new(None),
             package_service,
             language_server_authority_sealed: AtomicBool::new(
@@ -636,6 +656,51 @@ impl ClayOpState {
         true
     }
 
+    /// Phase 22.1: wire the shell-preferences broadcast channel and shared
+    /// store. Called by the JS runtime service for both domains.
+    pub(crate) fn set_shell_preferences_publisher(
+        &self,
+        sender: tokio::sync::broadcast::Sender<crate::protocol::ShellPreferences>,
+        store: std::sync::Arc<std::sync::Mutex<crate::protocol::ShellPreferences>>,
+    ) {
+        *self
+            .shell_preferences_publisher
+            .lock()
+            .expect("shell preferences publisher mutex poisoned") = Some(sender);
+        *self
+            .shell_preferences_store
+            .lock()
+            .expect("shell preferences store mutex poisoned") = Some(store);
+    }
+
+    /// Phase 22.1: publish shell-level user preferences to connected clients
+    /// and record the current value. Returns `true` when a publisher is wired.
+    pub(crate) fn publish_shell_preferences(
+        &self,
+        preferences: crate::protocol::ShellPreferences,
+    ) -> bool {
+        if let Some(store) = self
+            .shell_preferences_store
+            .lock()
+            .expect("shell preferences store mutex poisoned")
+            .clone()
+        {
+            *store
+                .lock()
+                .expect("shell preferences state mutex poisoned") = preferences.clone();
+        }
+        let Some(sender) = self
+            .shell_preferences_publisher
+            .lock()
+            .expect("shell preferences publisher mutex poisoned")
+            .clone()
+        else {
+            return false;
+        };
+        let _ = sender.send(preferences);
+        true
+    }
+
     /// Mode ID the `editor-control` gate treats as active: trusted workers
     /// derive it from manifest scope + mode registry; the third-party worker
     /// reads the host-replicated snapshot.
@@ -748,6 +813,10 @@ impl ClayOpState {
         // Stale package provenance must never leak across commands; the
         // load op or the worker handler branch re-stamps it when needed.
         self.set_current_package(None);
+        *self
+            .last_published_behavior
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = None;
         self.package_activation_depth.store(0, Ordering::Release);
         self.runtime_records
             .lock()
@@ -865,22 +934,54 @@ impl ClayOpState {
     }
 
     pub(crate) fn behavior_manifest(&self) -> BehaviorManifest {
+        // Phase 22.2: an evaluation's own publishes win (harvest and gates
+        // read the mode layer the evaluation activated); otherwise resolve the
+        // manifest governing the current runtime document (its per-document
+        // mode layer when one was published, else the connection-wide global).
+        let last = self
+            .last_published_behavior
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone();
+        if let Some(manifest) = last {
+            return manifest;
+        }
+        let document_id = self.runtime_document_id();
         self.behavior
             .lock()
             .expect("Clay runtime op state mutex poisoned")
-            .manifest()
+            .manifest_for(document_id)
             .clone()
+    }
+
+    /// Publish a behavior replacement through this op state, remembering it
+    /// as the evaluation's last published manifest (harvest carries it out).
+    pub(super) fn publish_behavior_replacement(
+        &self,
+        replacement: BehaviorManifest,
+    ) -> Result<BehaviorManifest, crate::behavior::manifest::ManifestValidationError> {
+        let published = self
+            .behavior
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .publish_replacement(replacement)?;
+        *self
+            .last_published_behavior
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = Some(published.clone());
+        Ok(published)
     }
 
     pub(super) fn bind_key(
         &self,
         rule: KeyBindingRule,
     ) -> Result<BehaviorManifest, crate::behavior::manifest::ManifestValidationError> {
-        let mut behavior = self
+        let mut replacement = self
             .behavior
             .lock()
-            .expect("Clay runtime op state mutex poisoned");
-        let mut replacement = behavior.manifest().clone();
+            .expect("Clay runtime op state mutex poisoned")
+            .manifest()
+            .clone();
         if !replacement
             .commands
             .iter()
@@ -893,8 +994,7 @@ impl ClayOpState {
         });
         replacement.keymaps.push(rule.clone());
         replacement.manifest_id = "clay.runtime.configuration".to_string();
-        let manifest = behavior.publish_replacement(replacement)?;
-        drop(behavior);
+        let manifest = self.publish_behavior_replacement(replacement)?;
         self.replicate_active_editor_mode();
         if self
             .runtime_context
@@ -919,17 +1019,17 @@ impl ClayOpState {
         stroke: &KeyStroke,
         context: &KeyBindingContext,
     ) -> Result<BehaviorManifest, crate::behavior::manifest::ManifestValidationError> {
-        let mut behavior = self
+        let mut replacement = self
             .behavior
             .lock()
-            .expect("Clay runtime op state mutex poisoned");
-        let mut replacement = behavior.manifest().clone();
+            .expect("Clay runtime op state mutex poisoned")
+            .manifest()
+            .clone();
         replacement.keymaps.retain(|existing| {
             existing.context != *context || existing.sequence != vec![stroke.clone()]
         });
         replacement.manifest_id = "clay.runtime.configuration".to_string();
-        let manifest = behavior.publish_replacement(replacement)?;
-        drop(behavior);
+        let manifest = self.publish_behavior_replacement(replacement)?;
         self.replicate_active_editor_mode();
         if self
             .runtime_context
@@ -1126,11 +1226,7 @@ impl ClayOpState {
             }
             manifest.keymaps.push(rule);
         }
-        let published = self
-            .behavior
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .publish_replacement(manifest)?;
+        let published = self.publish_behavior_replacement(manifest)?;
         self.replicate_active_editor_mode();
         Ok(published)
     }
@@ -1709,6 +1805,7 @@ extension!(
         op_clay_configuration_set_package_option,
         op_clay_sdui_define_node,
         op_clay_sdui_publish_tree,
+        op_clay_shell_set_pane_focus_policy,
         op_clay_theme_set_appearance,
         op_clay_theme_set_theme,
         op_clay_theme_set_typography,
@@ -1897,7 +1994,7 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 78);
+        assert_eq!(trusted.len(), 79);
         // 44 = 36 public contribution ops + the seven shared `editor-control`
         // gated editor ops + the gated programmatic execution op (follow-up
         // round); visibility grants nothing without approved permission +
@@ -1912,6 +2009,7 @@ mod domain_extension_tests {
             "op_clay_configuration_load_module",
             "op_clay_configuration_get_state",
             "op_clay_configuration_set_package_option",
+            "op_clay_shell_set_pane_focus_policy",
             "op_clay_theme_set_appearance",
             "op_clay_theme_set_theme",
             "op_clay_theme_set_typography",

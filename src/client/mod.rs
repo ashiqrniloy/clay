@@ -16,7 +16,7 @@ pub use file_dialog::{
 pub(crate) use runtime_state::{ClientRuntimeStateCandidate, ClientRuntimeStateInstallError};
 
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -35,7 +35,7 @@ use crate::protocol::{
     LanguageIntelligenceRejection, LanguageIntelligenceRequest, LanguageIntelligenceRequestId,
     LanguageIntelligenceResult, PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic,
     SduiActionIntent, SduiTree, SduiTreeUpdate, SelectionQueryRequest, SelectionQueryResult,
-    ServerMessage, TransactionId, WorkspaceRootId,
+    ServerMessage, ShellPreferences, TabRegistrySnapshot, TransactionId, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
@@ -70,6 +70,9 @@ pub struct ClientInitialState {
     pub behavior_manifest: BehaviorManifest,
     pub active_theme: crate::protocol::ActiveTheme,
     pub active_typography: ActiveTypography,
+    /// Workspace root path for the initial document (Phase 22.3; the client
+    /// registers its initial tab with `TabCommand::New` using this).
+    pub workspace_root: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,29 +102,59 @@ pub struct ClientSyncSnapshot {
 
 #[derive(Debug)]
 struct ClientSyncState {
-    /// Document currently owning live optimistic version tracking. Acks/rejects
-    /// for other document ids are ignored so backgrounded multi-doc sessions
-    /// cannot corrupt the active document's base version.
-    document_id: Option<DocumentId>,
+    /// Per-document live optimistic-version tracking (Phase 22.2). Every pane's
+    /// document tracks its own confirmed/optimistic version and pending-edit
+    /// queue concurrently; acks/rejects route by `document_id`. All
+    /// `ClientEditQueue` clones (one per pane view plus the connection loop)
+    /// share this state, so edits from any pane reserve against the right
+    /// document's base version.
+    documents: HashMap<DocumentId, DocumentSyncState>,
+    /// Confirmed version assumed for documents reserved before any authority
+    /// install (test bootstrap path; production opens install per-document).
+    default_confirmed_version: DocumentVersion,
+    /// Most recently touched document (compat surface for `snapshot()`).
+    last_touched: Option<DocumentId>,
+}
+
+#[derive(Debug)]
+struct DocumentSyncState {
     confirmed_version: DocumentVersion,
     optimistic_version: DocumentVersion,
     pending: VecDeque<PendingEdit>,
     last_resync: Option<ClientResyncSnapshot>,
+    /// Lease of the open access for this document; sent with outgoing edits.
+    /// Stored per document because the server leases per (client, document).
+    lease_id: Option<crate::protocol::LeaseId>,
 }
 
-impl ClientSyncState {
-    fn new(confirmed_version: DocumentVersion) -> Self {
-        Self::for_document(None, confirmed_version)
-    }
-
-    fn for_document(document_id: Option<DocumentId>, confirmed_version: DocumentVersion) -> Self {
+impl DocumentSyncState {
+    fn new(confirmed_version: DocumentVersion, lease_id: Option<crate::protocol::LeaseId>) -> Self {
         Self {
-            document_id,
             confirmed_version,
             optimistic_version: confirmed_version,
             pending: VecDeque::new(),
             last_resync: None,
+            lease_id,
         }
+    }
+}
+
+impl ClientSyncState {
+    fn new(confirmed_version: DocumentVersion) -> Self {
+        Self {
+            documents: HashMap::new(),
+            default_confirmed_version: confirmed_version,
+            last_touched: None,
+        }
+    }
+
+    /// Get-or-create the tracking state for `document_id`, marking it most
+    /// recently touched.
+    fn entry(&mut self, document_id: DocumentId) -> &mut DocumentSyncState {
+        self.last_touched = Some(document_id);
+        self.documents
+            .entry(document_id)
+            .or_insert_with(|| DocumentSyncState::new(self.default_confirmed_version, None))
     }
 
     fn reserve_pending(
@@ -130,9 +163,10 @@ impl ClientSyncState {
         transaction_id: TransactionId,
         operation: EditOperation,
     ) -> DocumentVersion {
-        let base_version = self.optimistic_version;
-        self.optimistic_version = self.optimistic_version.saturating_add(1);
-        self.pending.push_back(PendingEdit {
+        let state = self.entry(document_id);
+        let base_version = state.optimistic_version;
+        state.optimistic_version = state.optimistic_version.saturating_add(1);
+        state.pending.push_back(PendingEdit {
             document_id,
             base_version,
             transaction_id,
@@ -141,17 +175,22 @@ impl ClientSyncState {
         base_version
     }
 
-    fn rollback_pending_reservation(&mut self, transaction_id: TransactionId) {
-        if let Some(position) = self
-            .pending
-            .iter()
-            .position(|pending| pending.transaction_id == transaction_id)
+    fn rollback_pending_reservation(
+        &mut self,
+        document_id: DocumentId,
+        transaction_id: TransactionId,
+    ) {
+        if let Some(state) = self.documents.get_mut(&document_id)
+            && let Some(position) = state
+                .pending
+                .iter()
+                .position(|pending| pending.transaction_id == transaction_id)
         {
-            self.pending.remove(position);
-            self.optimistic_version = self
+            state.pending.remove(position);
+            state.optimistic_version = state
                 .pending
                 .back()
-                .map_or(self.confirmed_version, |pending| pending.base_version + 1);
+                .map_or(state.confirmed_version, |pending| pending.base_version + 1);
         }
     }
 
@@ -161,53 +200,118 @@ impl ClientSyncState {
         confirmed_version: DocumentVersion,
         transaction_id: TransactionId,
     ) {
-        if self.document_id.is_some() && self.document_id != Some(document_id) {
-            return;
-        }
-        self.confirmed_version = confirmed_version;
-        if let Some(position) = self
-            .pending
-            .iter()
-            .position(|pending| pending.transaction_id == transaction_id)
-        {
-            self.pending.remove(position);
-        }
-        if self.optimistic_version < confirmed_version {
-            self.optimistic_version = confirmed_version;
+        if let Some(state) = self.documents.get_mut(&document_id) {
+            self.last_touched = Some(document_id);
+            state.confirmed_version = confirmed_version;
+            if let Some(position) = state
+                .pending
+                .iter()
+                .position(|pending| pending.transaction_id == transaction_id)
+            {
+                state.pending.remove(position);
+            }
+            if state.optimistic_version < confirmed_version {
+                state.optimistic_version = confirmed_version;
+            }
         }
     }
 
     fn reject(&mut self, document_id: DocumentId, transaction_id: TransactionId) {
-        if self.document_id.is_some() && self.document_id != Some(document_id) {
-            return;
+        if let Some(state) = self.documents.get_mut(&document_id) {
+            self.last_touched = Some(document_id);
+            if let Some(position) = state
+                .pending
+                .iter()
+                .position(|pending| pending.transaction_id == transaction_id)
+            {
+                state.pending.remove(position);
+            }
+            state.optimistic_version = state
+                .pending
+                .back()
+                .map_or(state.confirmed_version, |pending| pending.base_version + 1);
         }
-        if let Some(position) = self
-            .pending
-            .iter()
-            .position(|pending| pending.transaction_id == transaction_id)
-        {
-            self.pending.remove(position);
-        }
-        self.optimistic_version = self
-            .pending
-            .back()
-            .map_or(self.confirmed_version, |pending| pending.base_version + 1);
     }
 
     fn apply_resync_snapshot(&mut self, snapshot: ClientResyncSnapshot) {
-        self.document_id = Some(snapshot.document_id);
-        self.confirmed_version = snapshot.version;
-        self.optimistic_version = snapshot.version;
-        self.pending.clear();
-        self.last_resync = Some(snapshot);
+        self.last_touched = Some(snapshot.document_id);
+        let state = self
+            .documents
+            .entry(snapshot.document_id)
+            .or_insert_with(|| DocumentSyncState::new(snapshot.version, snapshot.lease_id));
+        state.confirmed_version = snapshot.version;
+        state.optimistic_version = snapshot.version;
+        state.pending.clear();
+        state.last_resync = Some(snapshot.clone());
+        state.lease_id = snapshot.lease_id;
+    }
+
+    /// Replace one document's tracking state (fresh open or retained-session
+    /// activation) without disturbing other documents' states.
+    fn install_document_state(
+        &mut self,
+        document_id: DocumentId,
+        confirmed_version: DocumentVersion,
+        pending: Vec<PendingEdit>,
+        lease_id: Option<crate::protocol::LeaseId>,
+    ) {
+        self.last_touched = Some(document_id);
+        let mut state = DocumentSyncState::new(confirmed_version, lease_id);
+        for edit in pending {
+            state.pending.push_back(edit);
+        }
+        if let Some(last) = state.pending.back() {
+            state.optimistic_version = last.base_version.saturating_add(1);
+        }
+        self.documents.insert(document_id, state);
+    }
+
+    fn confirmed_version_for(&self, document_id: DocumentId) -> DocumentVersion {
+        self.documents
+            .get(&document_id)
+            .map(|state| state.confirmed_version)
+            .unwrap_or(self.default_confirmed_version)
+    }
+
+    fn lease_for(&self, document_id: DocumentId) -> Option<crate::protocol::LeaseId> {
+        self.documents
+            .get(&document_id)
+            .and_then(|state| state.lease_id)
+    }
+
+    fn pending_len(&self) -> usize {
+        self.documents
+            .values()
+            .map(|state| state.pending.len())
+            .sum()
+    }
+
+    fn snapshot_for(&self, document_id: DocumentId) -> ClientSyncSnapshot {
+        match self.documents.get(&document_id) {
+            Some(state) => ClientSyncSnapshot {
+                confirmed_version: state.confirmed_version,
+                optimistic_version: state.optimistic_version,
+                pending: state.pending.iter().cloned().collect(),
+                last_resync: state.last_resync.clone(),
+            },
+            None => ClientSyncSnapshot {
+                confirmed_version: self.default_confirmed_version,
+                optimistic_version: self.default_confirmed_version,
+                pending: Vec::new(),
+                last_resync: None,
+            },
+        }
     }
 
     fn snapshot(&self) -> ClientSyncSnapshot {
-        ClientSyncSnapshot {
-            confirmed_version: self.confirmed_version,
-            optimistic_version: self.optimistic_version,
-            pending: self.pending.iter().cloned().collect(),
-            last_resync: self.last_resync.clone(),
+        match self.last_touched {
+            Some(document_id) => self.snapshot_for(document_id),
+            None => ClientSyncSnapshot {
+                confirmed_version: self.default_confirmed_version,
+                optimistic_version: self.default_confirmed_version,
+                pending: Vec::new(),
+                last_resync: None,
+            },
         }
     }
 }
@@ -261,39 +365,42 @@ impl ClientEditQueue {
             MetricMetadata::document(event.document_id, event.base_version),
         );
         let operation = event.operation;
-        let base_version = {
+        let (base_version, lease_id) = {
             let mut state = self.sync_state.lock().expect("client sync state poisoned");
             let base_version =
                 state.reserve_pending(event.document_id, transaction_id, operation.clone());
             recorder.record_gauge(
                 "client.edit_queue.pending_depth",
-                state.pending.len() as u64,
+                state.pending_len() as u64,
             );
-            base_version
+            // Phase 22.2: each document carries its own lease; fall back to the
+            // queue-level lease (pre-open test bootstrap) when unknown.
+            let lease_id = state.lease_for(event.document_id).or(self.lease_id);
+            (base_version, lease_id)
         };
         let message = ClientMessage::Edit {
             document_id: event.document_id,
             client_id: self.client_id,
-            lease_id: self.lease_id,
+            lease_id,
             base_version,
             behavior_version: event.behavior_version,
             transaction_id,
             operation,
         };
 
-        if self.lease_id.is_none() {
+        if lease_id.is_none() {
             let mut state = self.sync_state.lock().expect("client sync state poisoned");
-            state.rollback_pending_reservation(transaction_id);
+            state.rollback_pending_reservation(event.document_id, transaction_id);
             return Err(mpsc::error::TrySendError::Closed(message));
         }
 
         if let Err(error) = self.sender.try_send(message) {
             let mut state = self.sync_state.lock().expect("client sync state poisoned");
-            state.rollback_pending_reservation(transaction_id);
+            state.rollback_pending_reservation(event.document_id, transaction_id);
             recorder.record_counter("client.edit_queue.enqueue_failed", 1);
             recorder.record_gauge(
                 "client.edit_queue.pending_depth",
-                state.pending.len() as u64,
+                state.pending_len() as u64,
             );
             return Err(error);
         }
@@ -369,6 +476,7 @@ impl ClientEditQueue {
             self.sync_state
                 .lock()
                 .expect("client sync state poisoned")
+                .snapshot_for(event.document_id)
                 .optimistic_version,
         );
         self.sender.try_send(ClientMessage::CompletionRequest {
@@ -464,6 +572,34 @@ impl ClientEditQueue {
             })
     }
 
+    /// Phase 22.3: send a server-authoritative tab lifecycle command (New /
+    /// OpenWorkspace / Close / Activate / Reclaim) on this connection.
+    /// Phase 22.3: re-open a document on this connection after a reconnect.
+    /// The plain `OpenDocument` path (workspace root id + relative path) is
+    /// used because a fresh connection holds no selected-file capability for
+    /// its tab's previously open documents.
+    pub fn enqueue_open_document(
+        &self,
+        workspace_root_id: crate::protocol::WorkspaceRootId,
+        path: String,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::OpenDocument {
+            client_id: self.client_id,
+            workspace_root_id,
+            path,
+        })
+    }
+
+    pub fn enqueue_tab_command(
+        &self,
+        command: crate::protocol::TabCommand,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::TabCommand {
+            client_id: self.client_id,
+            command,
+        })
+    }
+
     /// Request a server-first save for an open document. Never blocks paint.
     pub(crate) fn enqueue_save_document(
         &self,
@@ -532,17 +668,14 @@ impl ClientEditQueue {
             .snapshot()
     }
 
-    #[cfg(test)]
-    pub(crate) fn acknowledge_for_test(
-        &self,
-        document_id: DocumentId,
-        confirmed_version: DocumentVersion,
-        transaction_id: TransactionId,
-    ) {
+    /// Snapshot of one document's tracking state (Phase 22.2). Pane views use
+    /// this when stashing a session so only that document's pending edits are
+    /// retained.
+    pub(crate) fn sync_snapshot_for(&self, document_id: DocumentId) -> ClientSyncSnapshot {
         self.sync_state
             .lock()
             .expect("client sync state poisoned")
-            .acknowledge(document_id, confirmed_version, transaction_id);
+            .snapshot_for(document_id)
     }
 
     #[doc(hidden)]
@@ -566,8 +699,15 @@ impl ClientEditQueue {
         confirmed_version: DocumentVersion,
     ) {
         self.lease_id = access.lease_id();
-        *self.sync_state.lock().expect("client sync state poisoned") =
-            ClientSyncState::for_document(Some(document_id), confirmed_version);
+        let mut state = self.sync_state.lock().expect("client sync state poisoned");
+        // Phase 22.2: replace only this document's state; other panes' live
+        // documents keep their own confirmed/optimistic tracking.
+        state.install_document_state(
+            document_id,
+            confirmed_version,
+            Vec::new(),
+            access.lease_id(),
+        );
     }
 
     pub fn install_document_sync_state(
@@ -578,14 +718,8 @@ impl ClientEditQueue {
         pending: Vec<PendingEdit>,
     ) {
         self.lease_id = access.lease_id();
-        let mut state = ClientSyncState::for_document(Some(document_id), confirmed_version);
-        for edit in pending {
-            state.pending.push_back(edit);
-        }
-        if let Some(last) = state.pending.back() {
-            state.optimistic_version = last.base_version.saturating_add(1);
-        }
-        *self.sync_state.lock().expect("client sync state poisoned") = state;
+        let mut state = self.sync_state.lock().expect("client sync state poisoned");
+        state.install_document_state(document_id, confirmed_version, pending, access.lease_id());
     }
 }
 
@@ -671,6 +805,12 @@ pub enum ClientConnectionEvent {
     /// Plan 071 caret-transport fix: runtime caret appearance override from
     /// `clientSetCursorStyle`; `None` clears back to manifest/theme layers.
     CaretStyleOverride(Option<CaretStyle>),
+    /// Phase 22.1 shell-level user preferences from `setPaneFocusPolicy`.
+    ShellPreferences(ShellPreferences),
+    /// Phase 22.3: server-authoritative tab registry snapshot. Broadcast to
+    /// every connection on any registry mutation and replayed on handshake;
+    /// the `Driver` applies it to the tab bar and per-tab connection map.
+    TabRegistry(TabRegistrySnapshot),
     RuntimeDiagnostic(RuntimeDiagnostic),
     EditTransaction(ServerMessage),
     ServerError {
@@ -679,6 +819,34 @@ pub enum ClientConnectionEvent {
     },
     Disconnected,
     ConnectionError(String),
+}
+
+impl ClientConnectionEvent {
+    /// The document a connection event is scoped to, if any (Phase 22.2 pane
+    /// routing). Request-scoped events (completion/language-intelligence
+    /// rejects, selection queries carry their own document) return `None` and
+    /// route by request id instead.
+    pub fn document_id(&self) -> Option<DocumentId> {
+        match self {
+            ClientConnectionEvent::EditAck { document_id, .. }
+            | ClientConnectionEvent::EditRejected { document_id, .. }
+            | ClientConnectionEvent::DocumentSaved { document_id, .. }
+            | ClientConnectionEvent::DocumentClosed { document_id, .. } => Some(*document_id),
+            ClientConnectionEvent::ResyncSnapshot(snapshot) => Some(snapshot.document_id),
+            ClientConnectionEvent::DocumentOpened { metadata, .. }
+            | ClientConnectionEvent::DocumentReloaded { metadata, .. } => {
+                Some(metadata.document_id)
+            }
+            ClientConnectionEvent::FileOperationFailed { document_id, .. } => *document_id,
+            ClientConnectionEvent::DecorationSet(set) => Some(set.document_id),
+            ClientConnectionEvent::DecorationBatch(sets) => sets.first().map(|set| set.document_id),
+            ClientConnectionEvent::DiagnosticSet(set) => Some(set.document_id),
+            ClientConnectionEvent::CompletionResult(result) => Some(result.document_id),
+            ClientConnectionEvent::LanguageIntelligenceResult(result) => Some(result.document_id),
+            ClientConnectionEvent::SelectionQueryResult(result) => Some(result.document_id),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -877,7 +1045,7 @@ where
         _ => return Err(ClientBootstrapError::UnexpectedMessage("expected Welcome")),
     };
 
-    let (document_id, document_version, text, access) =
+    let (document_id, document_version, text, access, workspace_root) =
         match codec.read_server_message(&mut *stream).await? {
             ServerMessage::InitialDocument {
                 document_id,
@@ -885,7 +1053,8 @@ where
                 text,
                 access,
                 lease_id: _,
-            } => (document_id, version, text, access),
+                workspace_root,
+            } => (document_id, version, text, access, workspace_root),
             ServerMessage::Error { code, message } => {
                 return Err(ClientBootstrapError::ServerError { code, message });
             }
@@ -949,6 +1118,7 @@ where
         access,
         behavior_manifest,
         active_theme,
+        workspace_root,
         active_typography,
     })
 }
@@ -1035,7 +1205,7 @@ async fn run_connection<S>(
                                 .lock()
                                 .expect("client sync state poisoned");
                             state.acknowledge(document_id, confirmed_version, transaction_id);
-                            state.pending.len()
+                            state.pending_len()
                         };
                         recorder.record_gauge("client.edit_queue.pending_depth", pending_depth as u64);
                         let _ = events.send(ClientConnectionEvent::EditAck { document_id, version: confirmed_version, transaction_id }).await;
@@ -1046,7 +1216,7 @@ async fn run_connection<S>(
                                 .lock()
                                 .expect("client sync state poisoned");
                             state.reject(document_id, transaction_id);
-                            state.confirmed_version
+                            state.confirmed_version_for(document_id)
                         };
                         let should_resync = rejection_requests_resync(&reason);
                         let _ = events.send(ClientConnectionEvent::EditRejected { document_id, transaction_id, reason }).await;
@@ -1095,25 +1265,20 @@ async fn run_connection<S>(
                             .await;
                     }
                     Ok(ServerMessage::DocumentReloaded { metadata, text }) => {
-                        // Only rewrite live sync state when the reloaded document
-                        // is the currently installed owner. Background sessions
-                        // are updated by the editor widget without touching the
-                        // active queue.
+                        // Phase 22.2: each document owns its tracking state, so
+                        // reloads rewrite only the reloaded document's state
+                        // regardless of which pane is active.
                         {
                             let mut state = sync_state
                                 .lock()
                                 .expect("client sync state poisoned");
-                            if state.document_id.is_none()
-                                || state.document_id == Some(metadata.document_id)
-                            {
-                                state.apply_resync_snapshot(ClientResyncSnapshot {
-                                    document_id: metadata.document_id,
-                                    version: metadata.version,
-                                    text: text.clone(),
-                                    access: metadata.access.clone(),
-                                    lease_id: metadata.lease_id,
-                                });
-                            }
+                            state.apply_resync_snapshot(ClientResyncSnapshot {
+                                document_id: metadata.document_id,
+                                version: metadata.version,
+                                text: text.clone(),
+                                access: metadata.access.clone(),
+                                lease_id: metadata.lease_id,
+                            });
                         }
                         let _ = events
                             .send(ClientConnectionEvent::DocumentReloaded { metadata, text })
@@ -1173,6 +1338,12 @@ async fn run_connection<S>(
                             .await;
                     }
                     Ok(ServerMessage::CaretStyleOverride(_)) => {}
+                    Ok(ServerMessage::ShellPreferences(prefs)) => {
+                        let _ = events.send(ClientConnectionEvent::ShellPreferences(prefs)).await;
+                    }
+                    Ok(ServerMessage::TabRegistry(snapshot)) => {
+                        let _ = events.send(ClientConnectionEvent::TabRegistry(snapshot)).await;
+                    }
                     Ok(ServerMessage::RuntimeDiagnostic(diagnostic)) => {
                         let _ = events.send(ClientConnectionEvent::RuntimeDiagnostic(diagnostic)).await;
                     }
@@ -1383,6 +1554,7 @@ mod tests {
                         text: "Loaded from server 🦀".to_string(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -2086,6 +2258,7 @@ mod tests {
                         text: String::new(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -2188,6 +2361,7 @@ mod tests {
                         text: "local".to_string(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -2297,6 +2471,7 @@ mod tests {
                         text: "local".to_string(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -2420,6 +2595,7 @@ mod tests {
                         text: String::new(),
                         access: DocumentAccess::ReadOnly,
                         lease_id: None,
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -2485,6 +2661,7 @@ mod tests {
                         text: "snapshot".to_string(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -2551,6 +2728,7 @@ mod tests {
                         text: String::new(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -2629,6 +2807,7 @@ mod tests {
                         text: String::new(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -2716,6 +2895,7 @@ mod tests {
                         text: "scratch".to_string(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -2804,6 +2984,7 @@ mod tests {
                         text: String::new(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -2901,6 +3082,7 @@ mod tests {
                             text: String::new(),
                             access: DocumentAccess::Editable { lease_id: 1 },
                             lease_id: Some(1),
+                            workspace_root: String::new(),
                         },
                     )
                     .await
@@ -2984,6 +3166,7 @@ mod tests {
                         text: String::new(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -3115,6 +3298,7 @@ mod tests {
                     text: String::new(),
                     access: DocumentAccess::Editable { lease_id: 1 },
                     lease_id: Some(1),
+                    workspace_root: String::new(),
                 },
             )
             .await
@@ -3256,6 +3440,7 @@ mod tests {
                         text: String::new(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await
@@ -3384,6 +3569,8 @@ mod tests {
             event,
             ClientConnectionEvent::SduiSnapshot { .. }
                 | ClientConnectionEvent::CaretStyleOverride(_)
+                | ClientConnectionEvent::ShellPreferences(_)
+                | ClientConnectionEvent::TabRegistry(_)
         ) {
             event = session.events.recv().await.unwrap();
         }
@@ -3587,6 +3774,8 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
             event,
             ClientConnectionEvent::SduiSnapshot { .. }
                 | ClientConnectionEvent::CaretStyleOverride(_)
+                | ClientConnectionEvent::ShellPreferences(_)
+                | ClientConnectionEvent::TabRegistry(_)
         ) {
             event = session.events.recv().await.unwrap();
         }
@@ -3670,6 +3859,7 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
                     text,
                     access: DocumentAccess::Editable { lease_id },
                     lease_id: Some(snapshot_lease_id),
+                    workspace_root: _,
                 } => {
                     assert_eq!(lease_id, snapshot_lease_id);
                     (document_id, version, text, lease_id)
@@ -3715,8 +3905,10 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
-                | ServerMessage::RuntimeDiagnostic(_) => continue,
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::TabRegistry(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),
             }
         };
@@ -3757,6 +3949,435 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn real_server_tab_command_new_registers_and_rejected_activate_pushes_reconcile() {
+        let socket_path = unique_socket_path("tabcmd");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+        let server_task = tokio::spawn(server.run());
+        let mut session = connect_with_retry(&socket_path).await;
+        let client_id = session.initial_state.client_id;
+
+        let workspace_root =
+            std::env::temp_dir().join(format!("clay-tabcmd-{}-{}", std::process::id(), client_id));
+        tokio::fs::create_dir_all(&workspace_root).await.unwrap();
+
+        // The bootstrap `TabCommand::New` registers the connection's tab.
+        session
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::New {
+                workspace_root: workspace_root.to_string_lossy().into_owned(),
+            })
+            .unwrap();
+        let mut event = session.events.recv().await.unwrap();
+        // The handshake replays the (empty) registry snapshot; skip it and
+        // wait for the snapshot carrying our `New` registration.
+        loop {
+            if matches!(&event, ClientConnectionEvent::TabRegistry(snapshot) if !snapshot.tabs.is_empty())
+            {
+                break;
+            }
+            event = session.events.recv().await.unwrap();
+        }
+        let ClientConnectionEvent::TabRegistry(snapshot) = event else {
+            unreachable!("matched TabRegistry")
+        };
+        assert_eq!(snapshot.tabs.len(), 1);
+        assert_eq!(snapshot.tabs[0].client_id, client_id);
+        assert_eq!(
+            snapshot.tabs[0].workspace_root,
+            workspace_root.to_string_lossy().into_owned()
+        );
+        let created_tab_id = snapshot.tabs[0].tab_id;
+        assert_eq!(snapshot.active, Some(created_tab_id));
+
+        // A rejected `Activate` (unknown tab) still pushes the current
+        // snapshot: the optimistic client reverts to the server's active tab.
+        session
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::Activate { tab_id: 999 })
+            .unwrap();
+        let mut event = session.events.recv().await.unwrap();
+        // The handshake replays the (empty) registry snapshot; skip it and
+        // wait for the snapshot carrying our `New` registration.
+        loop {
+            if matches!(&event, ClientConnectionEvent::TabRegistry(snapshot) if !snapshot.tabs.is_empty())
+            {
+                break;
+            }
+            event = session.events.recv().await.unwrap();
+        }
+        let ClientConnectionEvent::TabRegistry(snapshot) = event else {
+            unreachable!("matched TabRegistry")
+        };
+        assert_eq!(snapshot.tabs.len(), 1);
+        assert_eq!(
+            snapshot.active,
+            Some(created_tab_id),
+            "reject leaves active unchanged"
+        );
+
+        server_task.abort();
+        let _ = tokio::fs::remove_dir_all(&workspace_root).await;
+        let _ = fs::remove_file(&socket_path);
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn real_server_tab_close_ends_connection_and_removes_registry_entry() {
+        let socket_path = unique_socket_path("tabclose");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+        let server_task = tokio::spawn(server.run());
+        let mut session = connect_with_retry(&socket_path).await;
+        let workspace_root =
+            std::env::temp_dir().join(format!("clay-tabclose-{}", std::process::id()));
+        tokio::fs::create_dir_all(&workspace_root).await.unwrap();
+        session
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::New {
+                workspace_root: workspace_root.to_string_lossy().into_owned(),
+            })
+            .unwrap();
+
+        // Wait for the registration snapshot and grab the tab id.
+        let tab_id = loop {
+            let event = session.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs.len() == 1
+            {
+                break snapshot.tabs[0].tab_id;
+            }
+        };
+
+        // Close: the server removes the registry entry and ends the
+        // connection (permit + leases release via the disconnect cleanup).
+        // The closing connection never reads its own broadcast update (the
+        // handler returns before the select loop can), so removal is observed
+        // on a fresh connection's handshake replay.
+        session
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::Close { tab_id })
+            .unwrap();
+        let mut saw_disconnect = false;
+        for _ in 0..4 {
+            if matches!(
+                session.events.recv().await,
+                Some(ClientConnectionEvent::Disconnected)
+            ) {
+                saw_disconnect = true;
+                break;
+            }
+        }
+        assert!(saw_disconnect, "close must end the connection");
+
+        let mut fresh = connect_with_retry(&socket_path).await;
+        let replayed = loop {
+            let event = fresh.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event {
+                break snapshot.tabs.clone();
+            }
+        };
+        assert!(
+            replayed.is_empty(),
+            "close must remove the registry entry (replay on a fresh connection)"
+        );
+
+        server_task.abort();
+        let _ = tokio::fs::remove_dir_all(&workspace_root).await;
+        let _ = fs::remove_file(&socket_path);
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn real_server_tab_move_commands_reorder_broadcast_and_reject() {
+        let socket_path = unique_socket_path("tabmove");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+        let server_task = tokio::spawn(server.run());
+
+        // Two tabs on two connections (distinct roots so `add_root` keeps
+        // both). Registry order after setup: [alpha, beta], active = beta.
+        let mut alpha = connect_with_retry(&socket_path).await;
+        let alpha_root =
+            std::env::temp_dir().join(format!("clay-tabmove-alpha-{}", std::process::id()));
+        tokio::fs::create_dir_all(&alpha_root).await.unwrap();
+        alpha
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::New {
+                workspace_root: alpha_root.to_string_lossy().into_owned(),
+            })
+            .unwrap();
+        let alpha_tab = loop {
+            let event = alpha.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs.len() == 1
+            {
+                break snapshot.tabs[0].tab_id;
+            }
+        };
+
+        let mut beta = connect_with_retry(&socket_path).await;
+        let beta_root =
+            std::env::temp_dir().join(format!("clay-tabmove-beta-{}", std::process::id()));
+        tokio::fs::create_dir_all(&beta_root).await.unwrap();
+        beta.edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::New {
+                workspace_root: beta_root.to_string_lossy().into_owned(),
+            })
+            .unwrap();
+        let (beta_tab, setup_active) = loop {
+            let event = beta.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs.len() == 2
+            {
+                break (snapshot.tabs[1].tab_id, snapshot.active);
+            }
+        };
+        assert_ne!(alpha_tab, beta_tab);
+        assert_eq!(setup_active, Some(beta_tab));
+
+        // A move mutation broadcasts to every connection: alpha's own
+        // connection observes its MoveRight as the new order, and the active
+        // tab keeps its status.
+        alpha
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::MoveRight { tab_id: alpha_tab })
+            .unwrap();
+        let (order, active) = loop {
+            let event = alpha.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs[0].tab_id == beta_tab
+            {
+                break (
+                    snapshot
+                        .tabs
+                        .iter()
+                        .map(|entry| entry.tab_id)
+                        .collect::<Vec<_>>(),
+                    snapshot.active,
+                );
+            }
+        };
+        assert_eq!(order, vec![beta_tab, alpha_tab]);
+        assert_eq!(active, Some(beta_tab), "moves preserve the active tab");
+
+        // Drain beta's stream past the same broadcast so the next registry
+        // event on it is the no-op broadcast, not a stale one.
+        loop {
+            let event = beta.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs[0].tab_id == beta_tab
+            {
+                break;
+            }
+        }
+
+        // Boundary no-op (beta is already first): still broadcasts, order
+        // unchanged — no wraparound.
+        beta.edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::MoveLeft { tab_id: beta_tab })
+            .unwrap();
+        let (order, _) = loop {
+            let event = beta.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs.len() == 2
+            {
+                break (
+                    snapshot
+                        .tabs
+                        .iter()
+                        .map(|entry| entry.tab_id)
+                        .collect::<Vec<_>>(),
+                    snapshot.active,
+                );
+            }
+        };
+        assert_eq!(order, vec![beta_tab, alpha_tab]);
+
+        // Rejected MoveTo (position 3 with 2 tabs): broadcasts the unchanged
+        // registry so the executing client reconciles.
+        alpha
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::MoveTo {
+                tab_id: alpha_tab,
+                position: 3,
+            })
+            .unwrap();
+        let (order, _) = loop {
+            let event = alpha.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs.len() == 2
+            {
+                break (
+                    snapshot
+                        .tabs
+                        .iter()
+                        .map(|entry| entry.tab_id)
+                        .collect::<Vec<_>>(),
+                    snapshot.active,
+                );
+            }
+        };
+        assert_eq!(order, vec![beta_tab, alpha_tab]);
+
+        // Foreign-client move (beta moves alpha's tab): rejected, unchanged.
+        beta.edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::MoveLeft { tab_id: alpha_tab })
+            .unwrap();
+        let (order, _) = loop {
+            let event = beta.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs.len() == 2
+            {
+                break (
+                    snapshot
+                        .tabs
+                        .iter()
+                        .map(|entry| entry.tab_id)
+                        .collect::<Vec<_>>(),
+                    snapshot.active,
+                );
+            }
+        };
+        assert_eq!(order, vec![beta_tab, alpha_tab]);
+
+        // Valid MoveTo reorders and preserves the active tab: [alpha, beta].
+        alpha
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::MoveTo {
+                tab_id: alpha_tab,
+                position: 1,
+            })
+            .unwrap();
+        let (order, active) = loop {
+            let event = alpha.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs[0].tab_id == alpha_tab
+            {
+                break (
+                    snapshot
+                        .tabs
+                        .iter()
+                        .map(|entry| entry.tab_id)
+                        .collect::<Vec<_>>(),
+                    snapshot.active,
+                );
+            }
+        };
+        assert_eq!(order, vec![alpha_tab, beta_tab]);
+        assert_eq!(active, Some(beta_tab));
+
+        // Handshake replay carries the reordered registry to a fresh
+        // connection.
+        let mut fresh = connect_with_retry(&socket_path).await;
+        let replayed = loop {
+            let event = fresh.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event {
+                break snapshot.tabs.clone();
+            }
+        };
+        assert_eq!(replayed.len(), 2);
+        assert_eq!(replayed[0].tab_id, alpha_tab);
+        assert_eq!(replayed[1].tab_id, beta_tab);
+
+        server_task.abort();
+        let _ = tokio::fs::remove_dir_all(&alpha_root).await;
+        let _ = tokio::fs::remove_dir_all(&beta_root).await;
+        let _ = fs::remove_file(&socket_path);
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn real_server_reconnect_reclaims_tab_binding() {
+        let socket_path = unique_socket_path("tabreclaim");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+        let server_task = tokio::spawn(server.run());
+        let workspace_root =
+            std::env::temp_dir().join(format!("clay-tabreclaim-{}", std::process::id()));
+        tokio::fs::create_dir_all(&workspace_root).await.unwrap();
+
+        // First connection registers the tab.
+        let mut first_session = connect_with_retry(&socket_path).await;
+        let first_client_id = first_session.initial_state.client_id;
+        first_session
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::New {
+                workspace_root: workspace_root.to_string_lossy().into_owned(),
+            })
+            .unwrap();
+        let tab_id = loop {
+            let event = first_session.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs.len() == 1
+            {
+                break snapshot.tabs[0].tab_id;
+            }
+        };
+
+        // The connection drops (no Close): the in-memory registry entry
+        // survives with the old client binding.
+        drop(first_session);
+
+        // A reconnecting client (new ClientId) reclaims the same TabId.
+        let mut second_session = connect_with_retry(&socket_path).await;
+        let second_client_id = second_session.initial_state.client_id;
+        assert_ne!(first_client_id, second_client_id);
+        second_session
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::Reclaim { tab_id })
+            .unwrap();
+        // The handshake replay already carries the surviving entry (bound to
+        // the old client id); the rebind snapshot is the one whose entry names
+        // THIS connection.
+        let rebound = loop {
+            let event = second_session.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs.len() == 1
+                && snapshot.tabs[0].client_id == second_client_id
+            {
+                break snapshot.tabs[0].clone();
+            }
+        };
+        assert_eq!(rebound.tab_id, tab_id, "reclaim keeps the tab identity");
+        assert_eq!(
+            rebound.client_id, second_client_id,
+            "reclaim rebinds the client"
+        );
+        assert_eq!(
+            rebound.workspace_root,
+            workspace_root.to_string_lossy().into_owned()
+        );
+
+        server_task.abort();
+        let _ = tokio::fs::remove_dir_all(&workspace_root).await;
+        let _ = fs::remove_file(&socket_path);
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn real_server_connection_cap_refuses_excess_connections() {
+        let socket_path = unique_socket_path("tabcap");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+        let server_task = tokio::spawn(server.run());
+
+        // Fill the connection cap with idle sessions; each occupies a permit.
+        let mut sessions = Vec::new();
+        for _ in 0..crate::perf::budgets::MAX_ACTIVE_CONNECTIONS {
+            sessions.push(connect_with_retry(&socket_path).await);
+        }
+        // The next connect is refused gracefully (the server drops the
+        // stream): the open-tab path surfaces this as a diagnostic and never
+        // mounts a tab.
+        let refused = connect(&IpcEndpoint::from(&socket_path)).await;
+        assert!(
+            refused.is_err(),
+            "the connection cap must refuse excess connections"
+        );
+
+        drop(sessions);
+        server_task.abort();
+        let _ = fs::remove_file(&socket_path);
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    #[tokio::test]
     async fn real_server_end_to_end_stale_edit_rejected_then_resynced() {
         let socket_path = unique_socket_path("stale-resync");
         let server = IpcServer::new(ServerConfig::new(&socket_path));
@@ -3787,6 +4408,7 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
                     text,
                     access: DocumentAccess::Editable { lease_id },
                     lease_id: Some(snapshot_lease_id),
+                    workspace_root: _,
                 } => {
                     assert_eq!(lease_id, snapshot_lease_id);
                     (document_id, version, text, lease_id)
@@ -3832,8 +4454,10 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
-                | ServerMessage::RuntimeDiagnostic(_) => continue,
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::TabRegistry(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),
             }
         };
@@ -3899,6 +4523,7 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
                         text: "Hi".to_string(),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
+                        workspace_root: String::new(),
                     },
                 )
                 .await

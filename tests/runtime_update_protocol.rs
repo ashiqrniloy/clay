@@ -37,6 +37,7 @@ fn valid_snapshot(generation: u64, client_id: u64) -> RuntimeStateSnapshot {
             reset_diagnostics: true,
             initial_decorations: None,
             initial_diagnostics: None,
+            behavior_manifest: None,
         }],
         diagnostics: Vec::new(),
     };
