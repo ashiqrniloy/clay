@@ -333,6 +333,14 @@ impl PaneDocumentView {
         self.pending_menu_sync = Some(None);
     }
 
+    /// Phase 22.5: the active document's open identity (workspace root id +
+    /// relative path) — the persisted per-pane document identity. Retained
+    /// (inactive) sessions are deliberately excluded; blank views (or a pane
+    /// with an open still in flight) return `None`.
+    pub fn active_document_identity(&self) -> Option<(WorkspaceRootId, String)> {
+        self.active_document_path.clone()
+    }
+
     /// Phase 22.3: every document this view holds (active + retained) as its
     /// open identity `(workspace_root_id, relative path)`, for a reconnected
     /// tab to re-open through the plain `OpenDocument` path. Entries without a
@@ -3225,6 +3233,20 @@ mod tests {
                 metadata: metadata(document_id, 1, &format!("doc-{document_id}.md")),
                 text: text.to_string(),
             })
+        );
+    }
+
+    #[test]
+    fn active_document_identity_reflects_only_the_active_document() {
+        let (queue, _receiver) = ClientEditQueue::bounded(8);
+        let mut view = view_with_queue(queue);
+        // Blank view (or an open still in flight): no identity.
+        assert_eq!(view.active_document_identity(), None);
+        // The installed active document's identity: (root id, relative path).
+        open(&mut view, 7, "alpha");
+        assert_eq!(
+            view.active_document_identity(),
+            Some((77, "doc-7.md".to_string()))
         );
     }
 

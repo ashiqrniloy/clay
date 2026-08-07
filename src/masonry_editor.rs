@@ -150,6 +150,10 @@ pub enum EditorAction {
     /// `Close` closes the tab's connection (the registry snapshot drives the
     /// removal).
     TabBar(TabBarAction),
+    /// Phase 22.5: a layout mutation (divider drag, slot resize, topology
+    /// change, keyboard resize) committed in the shell. The driver persists
+    /// the whole window state; the shell debounces the signal (≥500ms).
+    PersistenceDue,
 }
 
 /// Phase 22.3: tab bar card actions. The client id identifies the mounted
@@ -706,6 +710,13 @@ impl EditorWidget {
     /// Phase 22.3: the pane-1 view's documents to re-open after a reconnect.
     pub fn documents_for_reopen(&self) -> Vec<(crate::protocol::WorkspaceRootId, String)> {
         self.view.documents_for_reopen()
+    }
+
+    /// Phase 22.5: the pane-1 view's active document identity (workspace root
+    /// id + relative path) for whole-window persistence. Retained
+    /// (inactive) sessions are deliberately excluded.
+    pub fn active_document_identity(&self) -> Option<(crate::protocol::WorkspaceRootId, String)> {
+        self.view.active_document_identity()
     }
 
     /// Phase 22.2: pane close cleanup for the pane-1 view.

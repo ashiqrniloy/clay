@@ -153,7 +153,17 @@ Slot resize handles are hit-tested via `hit_test_slot_handle` (4px slop). Drag c
 
 ### Layout Persistence
 
-`src/shell/layout_persist.rs` serializes user-modified state (split ratios ≠ 0.5, slots with `resized_by_user` or `collapsed`) to `~/.config/clay/layout.json` via `serde_json`. `save_layout`/`load_layout` handle I/O; `apply_persisted_state` restores with validation (skips invalid entries). Persistence is debounced ≥ 500ms in `ClayShellWidget::persist_debounced()`. Corrupt/missing files fall back to defaults.
+`src/shell/layout_persist.rs` persisted user-modified state (split ratios
+≠ 0.5, slots with `resized_by_user` or `collapsed`) to `~/.config/clay/layout.json`
+via `serde_json` (Phase 20.3). Phase 22.5 replaced the single-tab v1 writer:
+`save_layout` was deleted and the v1 serializers survive only as frozen
+round-trip test fixtures; the file is now the **v2 window state**
+(`save_window_state`/`load_window_state`, see the Phase 22.5 section below),
+and `ClayShellWidget::persist_debounced()` no longer writes files — it
+submits `EditorAction::PersistenceDue` through a ≥ 500 ms debounce so the
+driver persists once per mutation burst. Legacy v1 files still apply to the
+single bootstrap tab exactly as before. Corrupt/missing files fall back to
+defaults.
 
 ### Focus and Input Routing
 
@@ -247,7 +257,9 @@ Phase 22.2 (2026-08-05) wires document views into the pane hosts and makes the s
 - All tree ops are immutable rebuilds bounded by `MAX_PANES_PER_TAB` = 4 and `MAX_PANE_SPLIT_TREE_NODES` = 64.
 - Split command dispatch is pure client work: no server IPC, JS runtime, or package code in the keypress path.
 - The focus policy grants no authority; it only selects which pointer interaction activates a pane.
-- Topology persistence (split trees across restarts) is deferred to Phase 22.5; `layout.json` still records only ratio/slot state.
+- Topology persistence (split trees across restarts) is Phase 22.5, which
+  persists the whole per-tab window state in `layout.json` v2 (see the
+  Phase 22.5 section); legacy v1 files still restore ratio/slot state only.
 
 ### Source Paths
 
@@ -293,8 +305,12 @@ Phase 22.3 (2026-08-06) makes each tab an independent client view with its own s
 - One connection per tab: separate `ClientEditQueue`/sync state, chrome (SDUI region, panels, overlays, runtime generation), split tree, pane targets, focus policy, and pending-open attribution. Editing in one tab never mutates another tab's state.
 - Inactive tabs are retained in-tree at zero size: stable `WidgetId`s across switches, no paint/layout/hit-test work, but connection events still apply so a switched-in tab is current.
 - The client-side tab map is view/routing state and grants nothing; the server registry is authoritative for tab order/active/ids.
-- `layout.json` persistence saves only while a single tab is open (per-tab persistence is 22.5).
-- Multi-client tab reclamation and full server-restart disk restore are out of scope (Phase 21 / 22.5).
+- `layout.json` v2 persistence runs at any tab count (Phase 22.5) — the
+  shell signals `PersistenceDue` on committed layout mutations; the driver
+  writes the whole window state (see the Phase 22.5 section below).
+- Multi-client tab reclamation is out of scope (Phase 21); disk persistence
+  is shipped (22.5), unsaved buffers/caret/viewport are not restored.
+
 
 ### Source Paths
 
@@ -318,6 +334,75 @@ Phase 22.3 (2026-08-06) makes each tab an independent client view with its own s
 - `src/main.rs`: registry application fills server-assigned tab ids; per-tab edit queues are isolated channels. Command: `cargo test --lib main::tests --quiet`.
 - Server-side registry tests: `cargo test --lib server::tab_registry --quiet`.
 
+## Phase 22.5: Window-State Persistence (per-tab layouts and documents)
+
+Phase 22.5 (2026-08-08) persists the whole window to `layout.json` v2 and
+restores it at startup: tab order, active tab, per-tab workspace + split
+tree, and per-pane open documents. The shell side of the design:
+
+- **Persistence signal**: `persist_debounced` (no longer a file writer)
+  emits `EditorAction::PersistenceDue` — the driver's single v2 writer
+  (`persist_window_state` → `clay::shell::save_window_state`) fires from
+  the signal, registry snapshots, `DocumentOpened`, and the quit flush. The
+  ≥ 500 ms debounce (`mark_persistence_due`, `last_persist`) keeps the
+  pointer hot path free of disk I/O; keyboard pane commands
+  (`apply_keyboard_resize`, `apply_tree_change`) also signal.
+- **Collection**: `tab_layout_data()` → `Vec<(ClientId, PersistedTabLayout)>`
+  (owned clones: active pane, `PaneSplitNode` tree root, v1-style slot
+  entries) + per-pane document identity via `PaneDocumentView::
+  active_document_identity()` / the `EditorWidget` wrapper (active document
+  only, retained sessions excluded). Driver orders tabs by registry order
+  with entry-less mounted tabs appended.
+- **Restore constructors**: `restored_single_editor(client_id, editor,
+  persisted)` builds the bootstrap tab's chrome pre-event-loop from
+  `layout_from_persisted_tab` (production primitives: `single_editor` +
+  `PaneSplitTree::new` + `replace_pane_tree` + slot apply; any structural
+  failure degrades to the default single pane, never partial state);
+  `install_restored_tab(ctx, client_id, editor, persisted) -> WidgetId`
+  installs tabs 2..N without switching active (returns the chrome's editor
+  widget id for the event bridge). Both route through the shared
+  `TabChrome::with_layout` (formerly test-only), which now also serves the
+  restore path. A v2 file is a silent no-op for the legacy
+  `apply_persisted_state` (no top-level `splits`/`slots` keys).
+- **TabChrome rebuild path**: restored chromes are built once from the
+  persisted tree (placeholder panes become real targets as documents open),
+  then live exactly like mounted tabs — rekey/reconnect/switch mechanics
+  are unchanged.
+
+### Key Invariants
+
+- The shell never writes files: all disk I/O is the driver's
+  `save_window_state`, off the hot path and debounced.
+- Restore never switches active mid-mount (the driver activates the
+  persisted active tab once at the end; see the tabs-and-clients page for
+  the sequencing state machine).
+
+### Source Paths
+
+- `src/shell/layout_persist.rs`: v2 schema (`PersistedWindowState`/
+  `PersistedTabState`/`PersistedTabLayout`), `serialize_window_state`/
+  `parse_window_state`/`layout_from_persisted_tab`, `save_window_state`/
+  `load_window_state`.
+- `src/masonry_shell.rs`: `persist_debounced`/`mark_persistence_due`,
+  `tab_layout_data`, `restored_single_editor`, `install_restored_tab`,
+  `TabChrome::with_layout`.
+- `src/main.rs`: restore state machine (`advance_restore`,
+  `mount_restored_tab`, `reopen_restored_documents`, `finish_restore`,
+  `abandon_restore`, `RESTORE_CONFIRM_TIMEOUT`) + `persist_window_state`.
+- `src/masonry_editor.rs`, `src/masonry_pane_document.rs`:
+  `active_document_identity` accessors.
+
+### Tests
+
+- `src/shell/layout_persist.rs`: v2 round-trip, bounds, corrupt/legacy
+  fallback, panic-free hostile input. Command: `cargo test --lib
+  layout_persist --quiet`.
+- `src/masonry_shell.rs`: persistence-signal emission (pointer mutation +
+  keyboard resize, multi-tab), `tab_layout_data_returns_every_mounted_tab_layout`,
+  `restored_single_editor_mounts_persisted_split_tree`,
+  `install_restored_tab_mounts_persisted_tree_without_switching`. Command:
+  `cargo test --lib masonry_shell --quiet`.
+- Driver restore suite + real-server E2E: see the tabs-and-clients page.
 ## Related
 
 - [Primitive Architecture](primitive-architecture.md)

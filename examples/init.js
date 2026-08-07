@@ -276,6 +276,10 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 // mounted tabs appended). Next/prev wrap at both ends; moves never wrap; the
 // active-tab status survives moves. Close protects the last tab, and a tab
 // with unsaved documents gets the save-all/discard/cancel confirm menu.
+// Window state persists across restarts (Phase 22.5): tab order, the active
+// tab, each tab's workspace + split tree, and each pane's open document
+// (unsaved edits do not; a missing workspace root or file is skipped on
+// restore).
 // Numbered families are capped at 9 by design — reach tab 10+ with
 // Ctrl+Tab / Ctrl+Shift+Tab or a card click. Tab-bar keyboard focus
 // traversal arrives in Phase 22.6.

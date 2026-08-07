@@ -363,4 +363,34 @@ mod tests {
         // Active tab status survives move_to.
         assert_eq!(snapshot.active, Some(third));
     }
+
+    #[test]
+    fn move_ops_change_order_only_and_preserve_entry_contents() {
+        let (mut registry, first, second) = registry_with_tabs();
+        let third = registry.create_tab(3, 30, "/tmp/gamma".to_string());
+        let contents = |registry: &TabRegistry| {
+            let mut entries: Vec<(TabId, ClientId, WorkspaceRootId, String)> = registry
+                .snapshot()
+                .tabs
+                .iter()
+                .map(|entry| {
+                    (
+                        entry.tab_id,
+                        entry.client_id,
+                        entry.workspace_root_id,
+                        entry.workspace_root.clone(),
+                    )
+                })
+                .collect();
+            entries.sort_by_key(|(tab_id, _, _, _)| *tab_id);
+            entries
+        };
+        let before = contents(&registry);
+        // [1, 2, 3] -> move_to(1, 3): [2, 3, 1] -> move_left(3): [3, 2, 1]
+        // -> move_right(2): [3, 1, 2]. Three distinct reorder shapes.
+        assert!(registry.move_to(first, 1, 3));
+        assert!(registry.move_left(third, 3));
+        assert!(registry.move_right(second, 2));
+        assert_eq!(contents(&registry), before, "reorder changes order only");
+    }
 }

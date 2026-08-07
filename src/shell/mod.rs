@@ -16,6 +16,11 @@ pub(crate) use layout::{
     WorkingAreaLayoutUpdateError, compute_drag_ratio, compute_slot_resize_size,
     hit_test_slot_handle, hit_test_split_divider, slot_handle_rect,
 };
+#[doc(hidden)]
+pub use layout_persist::{
+    PersistedTabLayout, PersistedTabState, PersistedWindowState, load_window_state,
+    save_window_state,
+};
 pub(crate) use package_ui::{
     FixedPackagePanel, PackageInputRouting, PackageOverlayAnchor, PackagePanelVisibility,
     PackageUiComponentTree, PackageUiRuntimeError, PackageUiRuntimeState, PackageUiRuntimeUpdate,

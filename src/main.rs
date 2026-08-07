@@ -1,12 +1,12 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     error::Error,
     ffi::OsString,
     fmt,
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use masonry::core::{ErasedAction, NewWidget, WidgetId};
@@ -36,11 +36,17 @@ use clay::protocol::{
 };
 #[cfg(any(unix, windows))]
 use clay::server::{IpcServer, ServerConfig};
-use clay::shell::{PaneId, TransientMenuSession};
+use clay::shell::{PaneId, PersistedTabState, PersistedWindowState, TransientMenuSession};
 
 const WINDOW_TITLE: &str = "Clay";
 const WINDOW_WIDTH: f64 = 900.0;
 const WINDOW_HEIGHT: f64 = 600.0;
+/// Phase 22.5: a restore mount must be confirmed by a registry snapshot
+/// within this window; a server-rejected mount never confirms (the server
+/// answers `FileOperationFailed` instead of a snapshot), so the deadline
+/// abandons the remaining restore rather than stall the gate. Confirmation
+/// is normally sub-second (handshake replay + `TabCommand::New` broadcast).
+const RESTORE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(15);
 
 struct Driver {
     /// Phase 22.3: the active tab's chrome widget id (mirror of the shell's
@@ -83,6 +89,23 @@ struct Driver {
     /// Phase 22.4: session-id counter for driver-owned tab-close confirm
     /// menus (the views use their own counters for their own sessions).
     tab_menu_session_id: u64,
+    /// Phase 22.5: persisted tabs still to mount, `(persisted index, tab)`.
+    restore_queue: VecDeque<(usize, PersistedTabState)>,
+    /// Phase 22.5: the restore tab whose connection is in flight.
+    restore_pending: Option<(usize, PersistedTabState)>,
+    /// Phase 22.5: mounted restore tabs, `(client id, persisted index, tab)`.
+    restore_mounted: Vec<(ClientId, usize, PersistedTabState)>,
+    /// Phase 22.5: the restore mount awaiting its server `TabId` confirmation
+    /// and the deadline after which the restore is abandoned (a
+    /// server-rejected mount never confirms; the deadline keeps the gate from
+    /// stalling forever). `None` when no restore is in flight.
+    restore_gate: Option<(ClientId, Instant)>,
+    /// Phase 22.5: persisted active-tab index (0-based; `None` when the file
+    /// had none — restore falls back to the first mounted tab).
+    restore_active: Option<usize>,
+    /// Phase 22.5: restore skip diagnostics, flushed to the chrome when the
+    /// restore settles (finishes or is abandoned).
+    restore_diagnostics: Vec<String>,
 }
 
 /// Phase 22.3: the driver-side state of one tab: its connection's command
@@ -148,6 +171,22 @@ fn take_pending_open_for(
         pending.remove(&pane);
     }
     pane
+}
+
+/// Phase 22.5: the persistence tab order — server registry order first
+/// (mount order at restore), then mounted tabs still awaiting their registry
+/// entry appended in client-id order.
+fn ordered_tab_clients(
+    registry: &TabRegistrySnapshot,
+    mounted: &BTreeMap<ClientId, TabState>,
+) -> Vec<ClientId> {
+    let mut ordered: Vec<ClientId> = registry.tabs.iter().map(|entry| entry.client_id).collect();
+    for client_id in mounted.keys() {
+        if !ordered.contains(client_id) {
+            ordered.push(*client_id);
+        }
+    }
+    ordered
 }
 
 /// Extract the pending-open identity from a file-browser / fuzzy-open /
@@ -1017,6 +1056,254 @@ impl Driver {
         }
     }
 
+    // -- Phase 22.5: whole-window restore --
+
+    /// Phase 22.5: advance the restore gate. Called on every registry
+    /// snapshot while a restore is in flight: the last mounted tab must have
+    /// received its server `TabId` (the snapshot confirms it) before the next
+    /// tab connects — the server appends tabs in `New` order, so registry
+    /// order matches persisted order without any `MoveTo`. Tabs whose
+    /// workspace root is gone are skipped with a diagnostic; when the queue
+    /// empties, the restore finishes (documents reopen, active tab
+    /// activates).
+    fn advance_restore(&mut self, ctx: &mut DriverCtx<'_, '_>, window_id: WindowId) {
+        if let Some((index, tab)) = self.restore_next_mount() {
+            self.restore_pending = Some((index, tab));
+            self.spawn_restore_connect();
+        } else if self.restore_gate.is_some() && self.restore_queue.is_empty() {
+            // The last mount is confirmed and nothing is left to mount.
+            self.finish_restore(ctx, window_id);
+        }
+    }
+
+    /// Phase 22.5: the gate's next mount — `Some((persisted index, tab))`
+    /// once the last mounted tab's server `TabId` is confirmed, or `None`
+    /// while the gate waits or the queue is empty (the caller distinguishes:
+    /// a live gate with an empty queue finishes the restore). Tabs whose
+    /// workspace root is gone are skipped here, with a diagnostic.
+    fn restore_next_mount(&mut self) -> Option<(usize, PersistedTabState)> {
+        loop {
+            let (last, _) = self.restore_gate?;
+            let confirmed = self.tabs.get(&last).and_then(|tab| tab.tab_id).is_some();
+            if !confirmed {
+                // Wait for the confirmation snapshot (the deadline check in
+                // `on_action` abandons the restore if it never comes).
+                return None;
+            }
+            let (index, tab) = self.restore_queue.pop_front()?;
+            if !Path::new(&tab.workspace_root).is_dir() {
+                self.restore_diagnostics.push(format!(
+                    "Restore skipped {}: workspace root is missing or not a directory",
+                    tab.workspace_root
+                ));
+                continue;
+            }
+            return Some((index, tab));
+        }
+    }
+
+    /// Phase 22.5: connect the pending restore tab on the runtime (the
+    /// handshake may involve retries); the session returns via
+    /// `OpenTabConnected` and mounts with the persisted layout. A refused
+    /// connection returns via `OpenTabFailed`, which abandons the restore.
+    fn spawn_restore_connect(&mut self) {
+        let Some(proxy) = self.proxy.clone() else {
+            return;
+        };
+        let Some((_, tab)) = self.restore_pending.as_ref() else {
+            return;
+        };
+        let endpoint = self.endpoint.clone();
+        let window_id = self.window_id;
+        let shell_widget_id = self.shell_widget_id;
+        let workspace_root = tab.workspace_root.clone();
+        self.runtime.spawn(async move {
+            match client::connect(&endpoint).await {
+                Ok(session) => {
+                    let _ = proxy.send_event(MasonryUserEvent::Action(
+                        window_id,
+                        Box::new(EditorAction::OpenTabConnected {
+                            session: clay::masonry_editor::DriverSession { session },
+                            workspace_root: PathBuf::from(workspace_root),
+                        }),
+                        shell_widget_id,
+                    ));
+                }
+                Err(error) => {
+                    let _ = proxy.send_event(MasonryUserEvent::Action(
+                        window_id,
+                        Box::new(EditorAction::OpenTabFailed {
+                            message: format!(
+                                "Could not restore a tab for {workspace_root}: {error}"
+                            ),
+                        }),
+                        shell_widget_id,
+                    ));
+                }
+            }
+        });
+    }
+
+    /// Phase 22.5: mount a restored tab's already-connected session with its
+    /// persisted split tree (`TabCommand::New` registers it server-side; the
+    /// persisted index maps the tab back to its documents). Does not switch
+    /// the active tab — restore activates the persisted active tab after
+    /// every mount confirms. Returns `None` on a duplicate connection.
+    fn mount_restored_tab(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        session: client::ClientSession,
+        index: usize,
+        persisted: PersistedTabState,
+    ) -> Option<ClientId> {
+        let client_id = session.initial_state.client_id;
+        if self.tabs.contains_key(&client_id) {
+            return None;
+        }
+        let chrome = EditorWidget::with_initial_state(session.initial_state)
+            .with_edit_queue(session.edit_queue.clone());
+        let edit_queue = session.edit_queue.clone();
+        let events = session.events;
+        let chrome_id =
+            ctx.render_root(window_id)
+                .edit_widget(self.shell_widget_id, |mut widget| {
+                    widget.try_downcast::<ClayShellWidget>().map(|mut shell| {
+                        shell.widget.install_restored_tab(
+                            &mut shell.ctx,
+                            client_id,
+                            chrome,
+                            &persisted,
+                        )
+                    })
+                });
+        let chrome_id = chrome_id?;
+        let _ = edit_queue.enqueue_tab_command(clay::protocol::TabCommand::New {
+            workspace_root: persisted.workspace_root.clone(),
+        });
+        if let Some(proxy) = self.proxy.clone() {
+            spawn_client_connection_event_bridge(
+                &self.runtime,
+                events,
+                proxy,
+                window_id,
+                chrome_id,
+            );
+        }
+        self.tabs.insert(
+            client_id,
+            TabState {
+                edit_queue: Some(edit_queue),
+                pending_opens: BTreeMap::new(),
+                tab_id: None,
+                workspace_root: persisted.workspace_root.clone(),
+            },
+        );
+        self.restore_mounted.push((client_id, index, persisted));
+        self.restore_gate = Some((client_id, Instant::now() + RESTORE_CONFIRM_TIMEOUT));
+        Some(client_id)
+    }
+
+    /// Phase 22.5: reopen every persisted document into its pane through the
+    /// plain `OpenDocument` path with pending-open attribution (the 22.2
+    /// mechanism: each `DocumentOpened` lands in exactly the pane that asked).
+    /// Documents that no longer exist are skipped — the pane stays empty.
+    /// Path safety rides the server's `OpenDocument` validation (out-of-root
+    /// and traversal paths are rejected there, never here).
+    fn reopen_restored_documents(&mut self) {
+        for (client_id, _, persisted) in &self.restore_mounted {
+            let Some(root_id) = self
+                .registry
+                .tabs
+                .iter()
+                .find(|entry| entry.client_id == *client_id)
+                .map(|entry| entry.workspace_root_id)
+            else {
+                continue;
+            };
+            let Some(tab) = self.tabs.get_mut(client_id) else {
+                continue;
+            };
+            for (pane_id, document) in &persisted.panes {
+                let Some(path) = document else {
+                    continue;
+                };
+                if !Path::new(&persisted.workspace_root).join(path).is_file() {
+                    continue;
+                }
+                tab.pending_opens.insert(
+                    *pane_id,
+                    PendingOpenRequest {
+                        path: None,
+                        root_id: Some(root_id),
+                        relative_path: Some(path.clone()),
+                    },
+                );
+                if let Some(queue) = tab.edit_queue.as_ref() {
+                    let _ = queue.enqueue_open_document(root_id, path.clone());
+                }
+            }
+        }
+    }
+
+    /// Phase 22.5: finish the restore: documents reopen, the persisted active
+    /// tab activates (fallback: the first mounted tab), skip diagnostics
+    /// surface on the chrome, and the gate turns off.
+    fn finish_restore(&mut self, ctx: &mut DriverCtx<'_, '_>, window_id: WindowId) {
+        self.reopen_restored_documents();
+        let active_client = self
+            .restore_active
+            .and_then(|index| {
+                self.restore_mounted
+                    .iter()
+                    .find(|(_, mounted_index, _)| *mounted_index == index)
+                    .map(|(client_id, _, _)| *client_id)
+            })
+            .or_else(|| {
+                self.restore_mounted
+                    .first()
+                    .map(|(client_id, _, _)| *client_id)
+            })
+            .or_else(|| self.tabs.keys().next().copied());
+        if let Some(active_client) = active_client {
+            self.activate_tab(ctx, window_id, active_client);
+        }
+        self.restore_gate = None;
+        self.flush_restore_diagnostics(ctx, window_id);
+    }
+
+    /// Phase 22.5: abandon the remaining restore (a connect failed or the
+    /// confirmation deadline passed). Mounted tabs stay; queued tabs drop.
+    fn abandon_restore(&mut self, ctx: &mut DriverCtx<'_, '_>, window_id: WindowId) {
+        self.cancel_restore();
+        self.flush_restore_diagnostics(ctx, window_id);
+    }
+
+    /// Phase 22.5: drop the remaining restore state (mounted tabs stay;
+    /// diagnostics stay queued for `flush_restore_diagnostics`).
+    fn cancel_restore(&mut self) {
+        self.restore_queue.clear();
+        self.restore_pending = None;
+        self.restore_gate = None;
+    }
+
+    /// Phase 22.5: surface collected skip diagnostics on the active chrome
+    /// (`clay.tabs.open_failed` family, as the new-tab failure path).
+    fn flush_restore_diagnostics(&mut self, ctx: &mut DriverCtx<'_, '_>, window_id: WindowId) {
+        let messages: Vec<String> = self.restore_diagnostics.drain(..).collect();
+        for message in messages {
+            self.apply_connection_to_chrome(
+                ctx,
+                window_id,
+                self.editor_widget_id,
+                ClientConnectionEvent::RuntimeDiagnostic(clay::protocol::RuntimeDiagnostic::error(
+                    "clay.tabs.open_failed",
+                    message,
+                )),
+            );
+        }
+    }
+
     /// Phase 22.3: structural close gate — the window never goes to zero
     /// tabs, and only mounted tabs can close.
     fn tab_close_allowed(&self, client_id: ClientId) -> bool {
@@ -1103,6 +1390,88 @@ impl Driver {
             }
         }
         dirty
+    }
+
+    /// Phase 22.5: assemble the whole-window persisted state: every tab's
+    /// layout (topology/ratios/slots/active pane) from the shell, ordered by
+    /// the server registry (mount order at restore), plus per-pane active
+    /// document identity from the pane views. Retained-but-inactive documents
+    /// are not persisted; a pane with an open still in flight (nothing
+    /// installed yet) serializes as document-less. Returns `None` when no
+    /// tabs can be collected.
+    fn collect_window_state(
+        &self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+    ) -> Option<PersistedWindowState> {
+        let layouts = ctx
+            .render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                widget
+                    .try_downcast::<ClayShellWidget>()
+                    .map(|shell| shell.widget.tab_layout_data())
+                    .unwrap_or_default()
+            });
+        if layouts.is_empty() {
+            return None;
+        }
+        let ordered = ordered_tab_clients(&self.registry, &self.tabs);
+        let mut tabs = Vec::new();
+        for client_id in &ordered {
+            let Some((_, layout)) = layouts.iter().find(|(id, _)| id == client_id) else {
+                continue;
+            };
+            let Some(tab_state) = self.tabs.get(client_id) else {
+                continue;
+            };
+            let targets =
+                ctx.render_root(window_id)
+                    .edit_widget(self.shell_widget_id, |mut widget| {
+                        widget
+                            .try_downcast::<ClayShellWidget>()
+                            .map(|shell| shell.widget.pane_targets_for(*client_id))
+                            .unwrap_or_default()
+                    });
+            let mut panes = BTreeMap::new();
+            for (pane_id, target) in targets {
+                let document = ctx
+                    .render_root(window_id)
+                    .edit_widget(target, |mut widget| {
+                        if let Some(editor) = widget.try_downcast::<EditorWidget>() {
+                            editor.widget.active_document_identity()
+                        } else if let Some(view) = widget.try_downcast::<PaneDocumentView>() {
+                            view.widget.active_document_identity()
+                        } else {
+                            None
+                        }
+                    })
+                    .map(|(_, path)| path);
+                panes.insert(pane_id, document);
+            }
+            tabs.push(PersistedTabState {
+                workspace_root: tab_state.workspace_root.clone(),
+                active_pane: layout.active_pane,
+                tree: Some(layout.tree.clone()),
+                slots: layout.slots.clone(),
+                panes,
+            });
+        }
+        if tabs.is_empty() {
+            return None;
+        }
+        let active_tab = ordered
+            .iter()
+            .position(|client_id| *client_id == self.active_tab);
+        Some(PersistedWindowState { tabs, active_tab })
+    }
+
+    /// Phase 22.5: collect the current window state and write it. Called by
+    /// the shell's `PersistenceDue` signal (debounced), tab/document
+    /// lifecycle events, and the quit-time flush.
+    fn persist_window_state(&mut self, ctx: &mut DriverCtx<'_, '_>, window_id: WindowId) {
+        if let Some(state) = self.collect_window_state(ctx, window_id) {
+            clay::shell::save_window_state(&state);
+        }
     }
 
     /// Phase 22.4: show (or clear) the tab-close confirm menu on a tab's
@@ -1566,6 +1935,16 @@ impl AppDriver for Driver {
         widget_id: WidgetId,
         action: ErasedAction,
     ) {
+        // Phase 22.5: a restore mount awaiting confirmation that never comes
+        // (the server rejected it — `FileOperationFailed` instead of a
+        // snapshot) abandons the remaining restore after the deadline. The
+        // check rides every action, so user activity keeps the deadline live.
+        if self
+            .restore_gate
+            .is_some_and(|(_, deadline)| Instant::now() >= deadline)
+        {
+            self.abandon_restore(ctx, window_id);
+        }
         // Reconciled SDUI widget activation (button step 9 / list row step 10):
         // the widget carries its inert intent in the action; route it through the
         // editor's existing server-first command path.
@@ -1639,6 +2018,11 @@ impl AppDriver for Driver {
         };
 
         match *action {
+            EditorAction::PersistenceDue => {
+                // Phase 22.5: a shell layout mutation committed (the shell
+                // debounced the signal); persist the whole window.
+                self.persist_window_state(ctx, window_id);
+            }
             EditorAction::MenuStateChanged => {
                 // A transient menu's local state changed via the keyboard in a
                 // pane view; push the view's current session to the chrome
@@ -1692,6 +2076,13 @@ impl AppDriver for Driver {
                 if let clay::client::ClientConnectionEvent::TabRegistry(snapshot) = &event {
                     let reconcile = self.apply_tab_registry(snapshot.clone());
                     self.apply_registry_reconcile(ctx, window_id, reconcile);
+                    // Phase 22.5: tab lifecycle (mount/close/reorder/active/
+                    // workspace) is registry-driven — persist the window.
+                    self.persist_window_state(ctx, window_id);
+                    // Phase 22.5: a registry snapshot confirms the last
+                    // restore mount; advance the gate (next connect, or
+                    // finish: documents + active tab).
+                    self.advance_restore(ctx, window_id);
                     return;
                 }
                 // Phase 22.1: shell-level preferences go to the shell widget,
@@ -1720,6 +2111,8 @@ impl AppDriver for Driver {
                 if let Some(_document_id) = event.document_id() {
                     if matches!(event, ClientConnectionEvent::DocumentOpened { .. }) {
                         self.route_document_opened(ctx, window_id, client_id, chrome_id, event);
+                        // Phase 22.5: a pane's active document changed.
+                        self.persist_window_state(ctx, window_id);
                     } else {
                         self.route_document_event(ctx, window_id, client_id, chrome_id, event);
                     }
@@ -1977,13 +2370,25 @@ impl AppDriver for Driver {
                 session,
                 workspace_root,
             } => {
-                // Mount the new tab (chrome + default split tree) and switch
-                // to it; `TabCommand::New` registers it server-side. A
-                // duplicate connection (already mounted) is dropped by
-                // `mount_tab` — the previous tab stays.
-                self.mount_tab(ctx, window_id, session.session, workspace_root);
+                if let Some((index, persisted)) = self.restore_pending.take() {
+                    // Phase 22.5: restore mount — the persisted tab drives
+                    // the chrome (split tree + documents).
+                    self.mount_restored_tab(ctx, window_id, session.session, index, persisted);
+                } else {
+                    // Mount the new tab (chrome + default split tree) and switch
+                    // to it; `TabCommand::New` registers it server-side. A
+                    // duplicate connection (already mounted) is dropped by
+                    // `mount_tab` — the previous tab stays.
+                    self.mount_tab(ctx, window_id, session.session, workspace_root);
+                }
             }
             EditorAction::OpenTabFailed { message } => {
+                // Phase 22.5: a restore connect failed (refused at the
+                // connection cap, server down): mounted tabs stay, the
+                // remaining restore drops.
+                if self.restore_pending.is_some() || !self.restore_queue.is_empty() {
+                    self.abandon_restore(ctx, window_id);
+                }
                 // Refused gracefully (connection cap, server down): no tab is
                 // opened; the active tab's chrome surfaces the diagnostic.
                 self.apply_connection_to_chrome(
@@ -3440,6 +3845,8 @@ fn run_client(endpoint: IpcEndpoint, start_server_if_missing: bool) -> Result<()
         }
     };
 
+    let connected = client_session.is_some();
+
     let (client_id, editor_widget, events, initial_workspace_root) =
         if let Some(session) = client_session {
             let initial_workspace_root = session.initial_state.workspace_root.clone();
@@ -3456,6 +3863,15 @@ fn run_client(endpoint: IpcEndpoint, start_server_if_missing: bool) -> Result<()
             )
         };
 
+    // Phase 22.5: whole-window restore — only with a live server connection
+    // (the local fallback has no registry to rebuild); missing/corrupt/legacy
+    // state keeps today's bootstrap exactly.
+    let restore = if connected {
+        clay::shell::load_window_state()
+    } else {
+        None
+    };
+
     run_editor(
         endpoint,
         client_id,
@@ -3463,6 +3879,7 @@ fn run_client(endpoint: IpcEndpoint, start_server_if_missing: bool) -> Result<()
         events,
         initial_workspace_root,
         &runtime,
+        restore,
     )
 }
 
@@ -3605,6 +4022,7 @@ fn run_smoke_gui(
         events,
         String::new(),
         &runtime,
+        None,
     );
     server.shutdown();
     result
@@ -3782,21 +4200,70 @@ fn run_editor(
     events: Option<mpsc::Receiver<ClientConnectionEvent>>,
     initial_workspace_root: String,
     runtime: &tokio::runtime::Runtime,
+    restore: Option<PersistedWindowState>,
 ) -> Result<(), Box<dyn Error>> {
     // Phase 22.2: a master queue clone for mounting pane document views.
     // Phase 22.3: the initial tab's queue lives in its `TabState`.
     let edit_queue = editor_widget.edit_queue_shared();
+    // Phase 22.5: whole-window restore plan. Persisted tab 0 rides the
+    // bootstrap connection (already connected in `run_client`); tabs 1..
+    // mount sequentially inside the event loop, gated on registry
+    // confirmation. A missing tab-0 workspace root falls back to today's
+    // bootstrap (server root) and the rest of the window restores around it.
+    let restore_active = restore.as_ref().and_then(|state| state.active_tab);
+    let (first_valid, restoring) = {
+        let restore_first = restore.as_ref().and_then(|state| state.tabs.first());
+        (
+            restore_first.is_some_and(|tab| Path::new(&tab.workspace_root).is_dir()),
+            restore_first.is_some(),
+        )
+    };
+    let mut restore_tabs = restore.map(|state| state.tabs).unwrap_or_default();
+    let mut restore_queue = VecDeque::new();
+    let mut restore_mounted = Vec::new();
+    let mut restore_diagnostics = Vec::new();
+    if !restore_tabs.is_empty() {
+        let first = restore_tabs.remove(0);
+        if first_valid {
+            restore_mounted.push((client_id, 0, first));
+        } else {
+            restore_diagnostics.push(format!(
+                "Restore skipped {}: workspace root is missing or not a directory",
+                first.workspace_root
+            ));
+        }
+        restore_queue = restore_tabs
+            .into_iter()
+            .enumerate()
+            .map(|(index, tab)| (index + 1, tab))
+            .collect();
+    }
+    let bootstrap_root = restore_mounted
+        .first()
+        .map(|(_, _, tab)| tab.workspace_root.clone())
+        .unwrap_or_else(|| initial_workspace_root.clone());
     // Phase 22.3: register the initial tab with the server registry so the
     // tab bar can name, activate, and close it. The registry entry (and the
     // server-assigned `TabId`) arrives on the next `TabRegistry` snapshot.
-    if !initial_workspace_root.is_empty()
+    if !bootstrap_root.is_empty()
         && let Some(queue) = edit_queue.clone()
     {
         let _ = queue.enqueue_tab_command(clay::protocol::TabCommand::New {
-            workspace_root: initial_workspace_root.clone(),
+            workspace_root: bootstrap_root.clone(),
         });
     }
-    let shell_widget = ClayShellWidget::single_editor(client_id, editor_widget);
+    let shell_widget = if first_valid {
+        ClayShellWidget::restored_single_editor(
+            client_id,
+            editor_widget,
+            &restore_mounted
+                .first()
+                .expect("first_valid mounts persisted tab 0")
+                .2,
+        )
+    } else {
+        ClayShellWidget::single_editor(client_id, editor_widget)
+    };
     let editor_widget_id = shell_widget.editor_widget_id();
     let root_widget = NewWidget::new(shell_widget);
     let shell_widget_id = root_widget.id();
@@ -3834,7 +4301,7 @@ fn run_editor(
                     edit_queue,
                     pending_opens: BTreeMap::new(),
                     tab_id: None,
-                    workspace_root: initial_workspace_root.clone(),
+                    workspace_root: bootstrap_root.clone(),
                 },
             )]),
             active_tab: client_id,
@@ -3851,6 +4318,12 @@ fn run_editor(
             folder_dialog_in_flight: None,
             pending_close_after_saves: None,
             tab_menu_session_id: 0,
+            restore_queue,
+            restore_pending: None,
+            restore_mounted,
+            restore_gate: restoring.then(|| (client_id, Instant::now() + RESTORE_CONFIRM_TIMEOUT)),
+            restore_active,
+            restore_diagnostics,
         },
         default_property_set(),
     )?;
@@ -3896,7 +4369,12 @@ fn connection_event_user_event(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
+    use std::{
+        collections::{BTreeMap, VecDeque},
+        ffi::OsString,
+        path::PathBuf,
+        time::{Duration, Instant},
+    };
 
     #[cfg(not(windows))]
     use super::handle_client_ui_command;
@@ -3904,11 +4382,12 @@ mod tests {
     use super::linux_command_line_is_default_server;
     use super::{
         ClayCommand, ClientUiCommandResult, Driver, FixtureKind, LaunchDiagnostic,
-        LaunchReadinessFailure, PendingOpenRequest, SelectedPathKind, TabState,
-        advance_pending_close_after_saves, background_server_command,
+        LaunchReadinessFailure, PendingOpenRequest, RESTORE_CONFIRM_TIMEOUT, SelectedPathKind,
+        TabState, advance_pending_close_after_saves, background_server_command,
         client_dialog_result_to_command_result, connect_with_retry, connect_with_retry_while,
         connection_event_user_event, extract_profile_perf_flag, is_linux_portal_dialog_command,
-        managed_server_command, open_intent_pending_request, parse_command, take_pending_open_for,
+        managed_server_command, open_intent_pending_request, ordered_tab_clients, parse_command,
+        take_pending_open_for,
     };
     use clay::client::{ClientBootstrapError, ClientConnectionEvent, ClientEditQueue};
     use clay::editor::{EditorSurface, is_printable_text};
@@ -3917,7 +4396,7 @@ mod tests {
     use clay::protocol::SduiActionIntent;
     use clay::protocol::TabRegistrySnapshot;
     use clay::protocol::codec::CodecError;
-    use clay::shell::PaneId;
+    use clay::shell::{PaneId, PersistedTabState};
     use masonry::core::WidgetId;
     use masonry_winit::app::{MasonryUserEvent, WindowId};
     use std::collections::BTreeSet;
@@ -4432,30 +4911,7 @@ mod tests {
 
     #[test]
     fn native_dialog_generations_limit_duplicates_and_reject_stale_results() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        let mut driver = Driver {
-            editor_widget_id: WidgetId::next(),
-            shell_widget_id: WidgetId::next(),
-            window_id: WindowId::next(),
-            tabs: BTreeMap::new(),
-            active_tab: 0,
-            registry: TabRegistrySnapshot {
-                tabs: Vec::new(),
-                active: None,
-            },
-            runtime: runtime.handle().clone(),
-            endpoint: default_endpoint(),
-            reconnect_cancel: BTreeMap::new(),
-            proxy: None,
-            dialog_generation: 0,
-            file_dialog_in_flight: None,
-            folder_dialog_in_flight: None,
-            pending_close_after_saves: None,
-            tab_menu_session_id: 0,
-        };
+        let mut driver = test_driver_with_tabs(BTreeMap::new());
 
         let file_generation = driver.reserve_file_dialog().expect("first file dialog");
         let folder_generation = driver.reserve_folder_dialog().expect("first folder dialog");
@@ -4670,6 +5126,12 @@ mod tests {
             folder_dialog_in_flight: None,
             pending_close_after_saves: None,
             tab_menu_session_id: 0,
+            restore_queue: VecDeque::new(),
+            restore_pending: None,
+            restore_mounted: Vec::new(),
+            restore_gate: None,
+            restore_active: None,
+            restore_diagnostics: Vec::new(),
         };
 
         assert_eq!(
@@ -4802,6 +5264,12 @@ mod tests {
             folder_dialog_in_flight: None,
             pending_close_after_saves: None,
             tab_menu_session_id: 0,
+            restore_queue: VecDeque::new(),
+            restore_pending: None,
+            restore_mounted: Vec::new(),
+            restore_gate: None,
+            restore_active: None,
+            restore_diagnostics: Vec::new(),
         }
     }
 
@@ -5025,6 +5493,191 @@ mod tests {
         // Both mounted tabs still get cards (entry-less → close disabled).
         assert_eq!(reconcile.cards.len(), 2);
         assert!(reconcile.cards.iter().all(|card| !card.closable));
+    }
+
+    #[test]
+    fn apply_tab_registry_reorder_preserves_per_tab_state() {
+        let (queue_a, _receiver_a) = ClientEditQueue::bounded(4);
+        let (queue_b, _receiver_b) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([
+            (11, tab_state_with_queue(queue_a)),
+            (22, tab_state_with_queue(queue_b)),
+        ]));
+        driver.tabs.get_mut(&22).unwrap().pending_opens.insert(
+            PaneId(2),
+            PendingOpenRequest {
+                path: None,
+                root_id: Some(8),
+                relative_path: Some("docs/intro.md".to_string()),
+            },
+        );
+        // Order [11, 22] establishes tab ids.
+        let reconcile = driver.apply_tab_registry(tab_snapshot(&[(11, 101), (22, 102)]));
+        assert_eq!(
+            reconcile
+                .cards
+                .iter()
+                .map(|card| card.client_id)
+                .collect::<Vec<_>>(),
+            vec![11, 22]
+        );
+        // Reordered snapshot [22, 11]: cards follow the new order, and every
+        // tab's internal state (tab id, workspace, pending opens, queue)
+        // survives untouched.
+        let reconcile = driver.apply_tab_registry(tab_snapshot(&[(22, 102), (11, 101)]));
+        assert!(reconcile.removed.is_empty());
+        assert_eq!(
+            reconcile
+                .cards
+                .iter()
+                .map(|card| card.client_id)
+                .collect::<Vec<_>>(),
+            vec![22, 11]
+        );
+        assert_eq!(driver.tabs[&11].tab_id, Some(101));
+        assert_eq!(driver.tabs[&22].tab_id, Some(102));
+        // Mount-time state untouched by reorder (card names read the
+        // registry entries, not this field).
+        assert_eq!(driver.tabs[&11].workspace_root, "/tmp/root");
+        assert_eq!(driver.tabs[&22].workspace_root, "/tmp/root");
+        assert_eq!(driver.tabs[&22].pending_opens.len(), 1);
+        assert!(driver.tabs[&11].edit_queue.is_some());
+        assert!(driver.tabs[&22].edit_queue.is_some());
+    }
+
+    #[test]
+    fn ordered_tab_clients_registry_order_then_entry_less() {
+        let (queue_a, _receiver_a) = ClientEditQueue::bounded(4);
+        let (queue_b, _receiver_b) = ClientEditQueue::bounded(4);
+        let (queue_c, _receiver_c) = ClientEditQueue::bounded(4);
+        let driver = test_driver_with_tabs(BTreeMap::from([
+            (11, tab_state_with_queue(queue_a)),
+            (22, tab_state_with_queue(queue_b)),
+            (33, tab_state_with_queue(queue_c)),
+        ]));
+        // Registry order [22, 11]; tab 33 is mounted but entry-less.
+        let registry = tab_snapshot(&[(22, 202), (11, 101)]);
+        assert_eq!(
+            ordered_tab_clients(&registry, &driver.tabs),
+            vec![22, 11, 33]
+        );
+        // Empty registry: mounted tabs in client-id order.
+        let registry = tab_snapshot(&[]);
+        assert_eq!(
+            ordered_tab_clients(&registry, &driver.tabs),
+            vec![11, 22, 33]
+        );
+    }
+
+    // -- Phase 22.5: whole-window restore --
+
+    fn persisted_tab_state(workspace_root: &str) -> PersistedTabState {
+        PersistedTabState {
+            workspace_root: workspace_root.to_string(),
+            active_pane: PaneId(1),
+            tree: None,
+            slots: Vec::new(),
+            panes: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn restore_gate_waits_for_tab_id_confirmation_before_next_mount() {
+        let (queue, _receiver) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([(11, tab_state_with_queue(queue))]));
+        driver.restore_gate = Some((11, Instant::now() + RESTORE_CONFIRM_TIMEOUT));
+        driver.restore_queue = VecDeque::from([(1, persisted_tab_state("/tmp"))]);
+        // The bootstrap tab has no server `TabId` yet: the gate waits.
+        assert!(driver.restore_next_mount().is_none());
+        assert_eq!(driver.restore_queue.len(), 1);
+        // The registry snapshot fills the `TabId`: the next mount pops.
+        driver.tabs.get_mut(&11).expect("tab").tab_id = Some(101);
+        let (index, tab) = driver.restore_next_mount().expect("confirmed");
+        assert_eq!(index, 1);
+        assert_eq!(tab.workspace_root, "/tmp");
+        // Queue drained and the gate still live: the caller finishes.
+        assert!(driver.restore_queue.is_empty());
+        assert!(driver.restore_gate.is_some());
+        assert!(driver.restore_next_mount().is_none());
+    }
+
+    #[test]
+    fn restore_skips_missing_workspace_root_and_continues_in_order() {
+        let (queue, _receiver) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([(11, tab_state_with_queue(queue))]));
+        driver.tabs.get_mut(&11).expect("tab").tab_id = Some(101);
+        driver.restore_gate = Some((11, Instant::now() + RESTORE_CONFIRM_TIMEOUT));
+        driver.restore_queue = VecDeque::from([
+            (1, persisted_tab_state("/nonexistent/restore-root-1")),
+            (2, persisted_tab_state("/tmp")),
+            (3, persisted_tab_state("/nonexistent/restore-root-3")),
+        ]);
+        // The first entry's root is gone: skipped with a diagnostic, the
+        // loop continues to the next valid root (order preserved).
+        let (index, tab) = driver.restore_next_mount().expect("next valid tab");
+        assert_eq!(index, 2);
+        assert_eq!(tab.workspace_root, "/tmp");
+        assert_eq!(driver.restore_diagnostics.len(), 1);
+        assert!(driver.restore_diagnostics[0].contains("/nonexistent/restore-root-1"));
+        assert_eq!(driver.restore_queue.len(), 1);
+    }
+
+    #[test]
+    fn restore_deadline_cancel_drops_remaining_queue_and_pending() {
+        let (queue, _receiver) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([(11, tab_state_with_queue(queue))]));
+        driver.restore_gate = Some((11, Instant::now() - Duration::from_secs(1)));
+        driver.restore_queue = VecDeque::from([(1, persisted_tab_state("/tmp"))]);
+        driver.restore_pending = Some((2, persisted_tab_state("/tmp")));
+        driver
+            .restore_diagnostics
+            .push("Restore skipped /gone: root missing".to_string());
+        // The deadline expired: the remaining restore drops; mounted tabs
+        // and queued diagnostics stay (flushed by the caller).
+        driver.cancel_restore();
+        assert!(driver.restore_queue.is_empty());
+        assert!(driver.restore_pending.is_none());
+        assert!(driver.restore_gate.is_none());
+        assert_eq!(driver.restore_diagnostics.len(), 1);
+        assert_eq!(driver.tabs.len(), 1);
+    }
+
+    #[test]
+    fn reopen_restored_documents_attributes_panes_and_skips_missing_files() {
+        let (queue, _receiver) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([(11, tab_state_with_queue(queue))]));
+        driver.registry = clay::protocol::TabRegistrySnapshot {
+            tabs: vec![clay::protocol::TabEntry {
+                tab_id: 101,
+                workspace_root_id: 7,
+                client_id: 11,
+                workspace_root: ".".to_string(),
+            }],
+            active: Some(101),
+        };
+        // Persisted panes: pane 1 has an existing file, pane 2 is empty,
+        // pane 3's file is gone (stale state) — only pane 1 reopens.
+        driver.restore_mounted = vec![(
+            11,
+            0,
+            PersistedTabState {
+                workspace_root: ".".to_string(),
+                active_pane: PaneId(1),
+                tree: None,
+                slots: Vec::new(),
+                panes: BTreeMap::from([
+                    (PaneId(1), Some("Cargo.toml".to_string())),
+                    (PaneId(2), None),
+                    (PaneId(3), Some("no-such-file-22-5.md".to_string())),
+                ]),
+            },
+        )];
+        driver.reopen_restored_documents();
+        let tab = driver.tabs.get(&11).expect("tab");
+        assert_eq!(tab.pending_opens.len(), 1);
+        let request = tab.pending_opens.get(&PaneId(1)).expect("pane 1 request");
+        assert_eq!(request.root_id, Some(7));
+        assert_eq!(request.relative_path.as_deref(), Some("Cargo.toml"));
     }
 
     // -- Phase 22.4: keyboard tab management --

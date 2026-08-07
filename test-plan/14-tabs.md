@@ -1,13 +1,15 @@
 # 14 — Tabs (Independent Client Views)
 
 Tabs as independent client views (Phase 22.3) with keyboard tab management
-(Phase 22.4): one client connection per tab, a server-authoritative
-in-memory tab registry, the tab bar chrome, per-tab split trees and document
-views, dirty-guarded closing, default key chords for next/prev/new/close/
-move/activate-by-number, auto-reconnect, and reclaim of registry entries on
-local restart. Deep references:
-`docs/reference/primitives/shell-layout-strategy.md` (Phase 22.3 + 22.4
-sections), `docs/wiki/modules/masonry-shell.md` (tab bar + lifecycle),
+(Phase 22.4) and window-state persistence (Phase 22.5): one client
+connection per tab, a server-authoritative in-memory tab registry, the tab
+bar chrome, per-tab split trees and document views, dirty-guarded closing,
+default key chords for next/prev/new/close/move/activate-by-number,
+auto-reconnect, reclaim of registry entries on local restart, and
+client-owned `layout.json` v2 persistence of tab order, workspaces, split
+trees, and per-pane documents across full restarts. Deep references:
+`docs/reference/primitives/shell-layout-strategy.md` (Phase 22.3 + 22.4 +
+22.5 sections), `docs/wiki/modules/masonry-shell.md` (tab bar + lifecycle),
 `docs/wiki/modules/tabs-and-clients.md` (registry + driver policies),
 `docs/wiki/modules/multi-document-sessions.md` (reconnect restoration),
 `docs/reference/clay-js-api/shell/client-tab-*.md` + `examples/init.js`
@@ -129,6 +131,27 @@ Phase 22.4 section and the `docs/reference/clay-js-api/shell/`
 | T39 | Move a tab (T36–T38), then `Ctrl+<N>` at its new position | Numbered activation follows the NEW card order — the registry is authoritative (switch-then-activate round trip stays consistent) |
 | T40 | With 3 tabs open, run `Ctrl+Tab`, `Ctrl+1`, `Ctrl+Shift+]`, `Ctrl+Shift+2` back-to-back | Every chord lands immediately with no lag — switch = one layout pass; move/close reflow is immediate (subjective responsiveness check) |
 
+## Window-state persistence (Phase 22.5)
+
+Client-owned `layout.json` v2 (in `~/.config/clay/` or `$XDG_CONFIG_HOME`)
+persists tab order, the active tab, each tab's workspace root + split tree,
+and each pane's open document; a full quit/relaunch (client AND server)
+restores the window. Deep reference:
+`docs/reference/primitives/shell-layout-strategy.md` Phase 22.5 section;
+`docs/wiki/modules/tabs-and-clients.md` Phase 22.5 section.
+
+| # | Action | Expected |
+|---|--------|----------|
+| T41 | Build a 3-tab window: tabs A/B/C in that order, each its own workspace; split tab A into 2 panes (`Ctrl+\`) with a different document in each; tab C active with `Ctrl+Shift+2` used first so B is active last (or click C last); quit the window (close the GUI) and relaunch `cargo run` (fresh client AND server) | The window restores: same 3 cards in the SAME order (A B C), same workspaces (card labels), tab A's split tree shape + ratios intact with its two documents in the SAME panes, C's single-pane document intact, and the last-active tab + its active pane focused (tabs mount sequentially — brief flip-through as they connect, settling on the persisted active tab) |
+| T42 | Single-tab window: one workspace, one document open; quit and relaunch | Single-tab behavior unchanged: the editor opens with the same document as before; no tab bar; pre-22.5 bootstrap identical apart from the document reopen |
+| T43 | Replace `layout.json` with a legacy v1 file (pre-22.5 shape: `splits`/`slots` keys, no `version`) and launch | Legacy file still restores ratios/slots on the single bootstrap tab exactly as Phase 20.3 (v1 path preserved; a v2 file is silently ignored by the v1 apply) |
+| T44 | Corrupt `layout.json` (truncate it, or write `{ not json`), then launch | Clean default launch — single tab, default layout, no crash, no hang (parse failure falls back to defaults; see also the hostile-file negative check below) |
+| T45 | Delete one persisted workspace directory (keep its entry in `layout.json`), then launch | That tab is SKIPPED with a `clay.tabs.open_failed` diagnostic on the chrome; every other tab restores normally (missing root degrades to fewer tabs, never a stall) |
+| T46 | Type unsaved text in a tab, quit and relaunch | The unsaved edits are GONE (documented expectation: restore persists open documents, not unsaved buffers) — the restored document shows the last saved content |
+| T47 | 2 split tabs (A: 2 panes, B: 2 panes); run pane chords in A only (`Ctrl+\` once more, `Ctrl+Alt+W` on a pane, divider drag, `Ctrl+Alt+Shift+Left` resize), then switch to B | B's tree, ratios, and documents are byte-identical to before — pane/split operations are scoped to the ACTIVE tab; repeat in B and verify A untouched (composition contract) |
+| T48 | Move tabs (T36–T38) into a new order, quit and relaunch | The MOVED order persists (registry order is persisted), and each tab's internal split tree + documents survived the move + restart intact |
+| T49 | Restore a 3-tab / 4-pane window and watch startup | Reaches interactive state promptly — tabs connect sequentially with no visible stall beyond normal startup (subjective check; restore is startup-only, off the edit hot path) |
+
 ## Negative checks
 
 - The last tab can never be closed (T7) — the editor always keeps one tab.
@@ -158,6 +181,16 @@ Phase 22.4 section and the `docs/reference/clay-js-api/shell/`
   edits only via that explicit item (T34).
 - The last tab is protected from the keyboard too: `Ctrl+Shift+W` on a
   single tab is a no-op (T31), matching the missing `✕` at one tab (T7).
+- A hostile `layout.json` cannot grant authority or crash launch: v2 parses
+  are bounded and panic-free (tabs capped at 64, panes ≤ 4 per tab, node
+  count ≤ 64, ratios finite in 0.05..=0.95, non-zero unique pane ids); a
+  structurally invalid `splitTree` degrades that tab to a single pane;
+  out-of-root document paths are rejected by the server at reopen (T44's
+  corrupt file, T45's missing root — both degrade cleanly).
+- Restore reuses the existing per-connection validation: every restored tab
+  rides the handshake + `TabCommand::New` `add_root` checks, and every
+  restored document rides the plain `OpenDocument` path — persistence grants
+  no filesystem/network/extension authority.
 
 ## Known ceilings (NOT bugs)
 
@@ -173,6 +206,14 @@ Phase 22.4 section and the `docs/reference/clay-js-api/shell/`
   in the in-memory server registry only — a full server restart (not just
   the client) resets them to the single initial workspace. Disk persistence
   for the registry and split trees arrives with Phase 22.5.
+- **Restart drops unsaved state (22.5)**: the persisted window state is tab
+  order, active tab, per-tab workspace + split tree, and per-pane open
+  documents only — unsaved edits, caret/viewport/scroll positions, and
+  per-tab pane-focus-policy runtime changes are NOT restored (T46); the
+  `setPaneFocusPolicy` config API stays the policy source.
+- **No quit-time dirty confirm**: closing the window with unsaved edits
+  closes without asking — the edits are lost (save before quitting; the
+  per-tab close confirm menu (T32) only guards closing a TAB).
 - **No tab-bar keyboard focus traversal**: tab cards are click/command
   driven; keyboard focus movement between cards arrives with Phase 22.6.
 - **No per-tab package chrome**: packages cannot contribute tab or tab-bar

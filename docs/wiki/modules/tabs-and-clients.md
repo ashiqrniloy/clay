@@ -4,8 +4,10 @@ The Phase 22.3 multi-connection model: each tab is an independent client
 view with its own server connection, split tree, and document sessions. This
 page covers the server-authoritative tab registry, the protocol messages,
 the client-side multi-connection driver, event routing per tab, reconnect
-and reclaim, and the isolation invariants. The shell chrome (tab bar,
-inactive-tab retention, per-tab `TabChrome`) lives in
+and reclaim, the isolation invariants, and the Phase 22.5 client-owned
+window-state persistence (restore of tabs, workspaces, split trees, and
+per-pane documents). The shell chrome (tab bar, inactive-tab retention,
+per-tab `TabChrome`) lives in
 [Masonry Shell Runtime](masonry-shell.md); per-pane document hosting in
 [Pane Document Views](pane-document-views.md); reconnect session restoration
 in [Multi-Document Sessions](multi-document-sessions.md).
@@ -15,7 +17,12 @@ in [Multi-Document Sessions](multi-document-sessions.md).
 - `src/server/tab_registry.rs` — server-authoritative in-memory registry.
 - `src/protocol/mod.rs` — `TabId`, `TabEntry`, `TabRegistrySnapshot`,
   `TabCommand`, `ClientMessage::TabCommand`, `ServerMessage::TabRegistry`
-  (protocol v12).
+  (protocol v13; no 22.5 changes — restore rides the existing commands).
+- `src/shell/layout_persist.rs` — Phase 22.5 `layout.json` v2 window state:
+  `PersistedWindowState`/`PersistedTabState`/`PersistedTabLayout`,
+  `serialize_window_state`/`parse_window_state`, `save_window_state`/
+  `load_window_state`, `layout_from_persisted_tab` (see the Phase 22.5
+  section below).
 - `src/server/mod.rs` — `IpcServer` owns the registry + broadcast sender.
 - `src/server/connection.rs` — handshake replay, `TabCommand` dispatch,
   close-terminates-connection, reconciliation snapshots.
@@ -156,6 +163,118 @@ workspace grants; the registry only binds already-authorized connections.
 - **Server reorder**: `TabCommand::MoveLeft/MoveRight/MoveTo` → `TabRegistry::move_left/move_right/move_to` (protocol v13); every mutation broadcasts a snapshot on acceptance **and** rejection; active-tab status is preserved by `TabId`.
 - **Dirty close**: `close_tab` inventories dirty panes (`dirty_documents_in_tab`) instead of the old `guard_tab_close` walk; a dirty tab gets a driver-owned confirm session (`clay::shell::tab_close_confirm_session` — Save all and close / Discard and close / Cancel) hosted on the active pane view + chrome overlay. Save all tracks awaited `DocumentId`s in `pending_close_after_saves`; `advance_pending_close_after_saves` counts `DocumentSaved` acks and enqueues `TabCommand::Close` only after all ack, cancelling on `FileOperationFailed`/disconnect. Discard enqueues close immediately; Cancel clears the session. The menu action IDs (`clay.shell.clientTabClose*`) are driver-local, never declared/routed, so they cannot cross-route with per-view save-conflict menus.
 
+## Window-State Persistence (Phase 22.5)
+
+Phase 22.5 makes the window survive a full quit/relaunch (client AND
+server): tab order, the active tab, each tab's workspace root + split tree,
+and each pane's open document persist to `layout.json` v2 and restore at
+startup. The design is **client-owned persistence, server-rebuilt registry**:
+the client owns the state file and all restored state; the server's
+`TabRegistry` stays in-memory and is rebuilt at startup through the existing
+`TabCommand::New`/`Activate` paths — **no new protocol messages, no new
+server ops, no new authority**. Every restored tab rides the existing
+per-connection validation (handshake, `add_root` canonicalization, `OpenDocument`
+path checks), so a hostile `layout.json` can at most produce fewer/emptier
+tabs, never a capability grant.
+
+### Schema and bounds (`src/shell/layout_persist.rs`)
+
+`layout.json` v2 shape: `{ version: 2, activeTab: <0-based index>,
+tabs: [{ workspaceRoot, activePane, splitTree, slots, panes }] }`.
+`splitTree` is a nested `{leaf: id}` / `{split: {orientation, ratio, first,
+second}}` node (typed `PaneSplitNode` serialization); `panes` maps pane id →
+workspace-relative document path (the identity is the relative path only —
+the root id is re-learned at restore from the registry `TabEntry`); `slots`
+carries only user-modified fixed slots, shared with the v1 collector.
+Legacy v1 files (no `version`, `splits`/`slots` keys) still load and apply
+to the single bootstrap tab exactly as Phase 20.3 — `is_legacy_layout`
+distinguishes them. Parse is bounded and panic-free: tabs truncated to
+`MAX_ACTIVE_CONNECTIONS` (64), invalid/missing `splitTree` degrades to the
+default single-pane layout, `activePane` normalized, non-zero unique pane
+ids and ratio 0.05–0.95 enforced, out-of-range `activeTab` dropped. `parse`
+returns `None` on corrupt/legacy/empty state → bootstrap stays
+byte-identical.
+
+### Persistence triggers (collection + writes)
+
+The shell's `persist_debounced` lost its 22.3 single-tab guard and the v1
+`save_layout` writer was deleted; layout mutations (pointer drags, pane
+commands incl. keyboard resize) now submit `EditorAction::PersistenceDue`
+through a ≥ 500 ms debounce. The driver `persist_window_state` is the single
+v2 writer and fires from four non-hot-path arms: the `PersistenceDue`
+signal, every registry-snapshot reconcile (covers mount/close/reorder/
+switch/workspace change), the `DocumentOpened` route, and the
+`on_close_requested` quit flush. Collection (`collect_window_state`)
+walks `tab_layout_data()` (per-tab `activePane` + tree + slots) and each
+tab's pane targets, downcasting to `EditorWidget`/`PaneDocumentView` and
+reading `active_document_identity()` — the ACTIVE document only; retained
+but inactive sessions are never persisted (a closed document persisting as
+open degrades to an empty pane on restore). Tab order comes from
+`tab_order()`: registry order first, entry-less mounted tabs appended
+(client-id order); `activeTab` is the position of `active_tab` in that
+order. Nothing is written while the tab map is empty (initial handshake).
+
+### Restore state machine (startup, `src/main.rs`)
+
+`run_editor` receives `Option<PersistedWindowState>` (loaded via the
+`clay::shell::load_window_state()` wrapper only when a real session
+connected; the local-fallback/None paths never restore). Tab 0 rides the
+bootstrap connection: its persisted root becomes the initial
+`TabCommand::New` workspace root (the server `add_root`s it; the cwd root
+stays unused) and the shell is built with `restored_single_editor`
+(`TabChrome::with_layout` from `layout_from_persisted_tab`). Tabs 1..N
+mount **sequentially inside the event loop, gated on registry
+confirmation**: `advance_restore` (called after every snapshot) waits until
+the last mounted tab's server-assigned `tab_id` appears in the registry,
+then pops the queue and `spawn_restore_connect`s (existing `client::connect`
+→ `OpenTabConnected` → `mount_restored_tab`, which installs the rebuilt
+layout via `install_restored_tab` WITHOUT switching active). Each new tab's
+`TabCommand::New` sets it active server-side, so the UI flips through tabs
+as they mount; `finish_restore` fixes that with a final `Activate` of the
+persisted active tab. `finish_restore` also runs `reopen_restored_documents`
+(pending-opens keyed by `PaneId`, `enqueue_open_document(root_id, path)`
+with the root id from the confirmed snapshot's `TabEntry`) and flushes
+accumulated diagnostics. Sequencing is deterministic — no `MoveTo` reorder
+needed: mounting in persisted order reproduces it exactly.
+
+### Failure policy
+
+- **Invalid/missing workspace root** (client pre-checks `is_dir`): that ONE
+tab is skipped with a diagnostic (`clay.tabs.open_failed` via
+`flush_restore_diagnostics`) and the queue continues — a stale file
+degrades to fewer tabs, never a stall.
+- **Server-rejected mount**: `TabCommand::New` answers `FileOperationFailed`
+with NO registry snapshot, so the gate would stall; the
+`RESTORE_CONFIRM_TIMEOUT` (15 s) deadline on `restore_gate` is checked at
+the top of `on_action` and in `advance_restore` — expiry abandons the
+remaining queue (`abandon_restore` = pure `cancel_restore` + diagnostic
+flush; mounted tabs are KEPT).
+- **Client connect failure** (`OpenTabFailed`): abandons the whole queue
+(server-level failure), diagnostic surfaced, mounted tabs kept.
+- **Missing document file**: reopen skips it (pane stays empty);
+out-of-root paths are rejected server-side (`WorkspaceState`
+`OutsideRoot`), so a hostile file cannot read outside the root.
+- **Corrupt/legacy file**: `load_window_state` → `None` → bootstrap
+byte-identical (no restore).
+- **Unsaved edits / caret / viewport / scroll**: NOT persisted (documented
+behavior — restore reopens documents at saved content); per-tab pane-focus
+policy is config-driven (`setPaneFocusPolicy`), never persisted.
+
+### Composition guards
+
+22.5 verified pane/split commands (`ShellClientCommand` pane family,
+`apply_layout_update`, divider/slot drags, pane-focus routing) mutate only
+the ACTIVE tab's `TabChrome` via `active()`/`active_mut()` dispatch, and
+reorder/switch leave every tab's internal state byte-identical (guard
+tests: `pane_commands_only_mutate_the_active_tab`,
+`divider_drag_credits_only_the_active_tab`,
+`per_tab_routing_targets_are_isolated`,
+`tab_switch_round_trip_preserves_split_trees_and_active_panes` in
+`src/masonry_shell.rs`;
+`per_tab_edit_queues_are_isolated` in `src/main.rs`;
+`move_ops_change_order_only_and_preserve_entry_contents` in
+`src/server/tab_registry.rs`).
+
 ## Invariants and Constraints
 
 - One connection per tab: separate `ClientEditQueue`/sync state, chrome,
@@ -168,13 +287,19 @@ workspace grants; the registry only binds already-authorized connections.
   surviving entry to a fresh handshake-authenticated connection.
 - The window never drops below one tab; a dirty tab can only close through
   its save-conflict resolution.
-- `layout.json` persistence saves only while exactly one tab is open
-  (per-tab persistence is 22.5).
+- Persistence is client-owned: `layout.json` v2 is user-owned state written
+  at any tab count (the 22.3 single-tab-only guard is gone); the server
+  registry stays in-memory and is rebuilt at startup through existing
+  `TabCommand` paths — no new protocol messages, ops, or authority.
 
 ## Known Ceilings
 
-- No disk persistence of the registry or per-tab split trees (22.5); a full
-  server restart resets to the single bootstrap tab.
+- Restart drops unsaved state: only tab order, active tab, per-tab
+  workspace + split tree, and per-pane open documents are restored —
+  unsaved edits, caret/viewport/scroll positions, and per-tab
+  pane-focus-policy runtime changes are NOT (the `setPaneFocusPolicy` config
+  API stays the policy source). There is no quit-time dirty confirm: closing
+  the window with unsaved edits closes without asking.
 - No multi-client tab reclamation (Phase 21); no per-tab package chrome.
 - Single-tab behavior matches pre-22.3 exactly (no tab bar, no per-tab
   overhead visible).
@@ -201,6 +326,27 @@ workspace grants; the registry only binds already-authorized connections.
   move enqueues + boundary no-ops, command-ID routing, tab-confirm menu
   naming, `advance_pending_close_after_saves` bookkeeping. Command:
   `cargo test --bin clay --quiet`.
+- `src/shell/layout_persist.rs` (22.5): v2 schema round-trip/bounds/corrupt
+  parsing (tabs capped at 64, invalid trees → single pane, ratio/pane-id
+  bounds, legacy v1 detection, panic-free hostile input),
+  `layout_from_persisted_tab_builds_validated_layout`. Command:
+  `cargo test --lib layout_persist --quiet`.
+- `src/main.rs` (bin, 22.5): restore state machine — gate waits for
+  server-assigned `tab_id` before the next mount, missing-root tabs are
+  skipped in order with diagnostics, deadline cancel drops the remaining
+  queue, `reopen_restored_documents` attributes panes by `PaneId` and skips
+  missing files, `tab_order_is_registry_order_with_entry_less_mounted_appended`.
+  Command: `cargo test --bin clay --quiet`.
+- `src/masonry_shell.rs` (22.5): `layout_mutation_signals_persistence_with_multiple_tabs`,
+  `keyboard_resize_signals_persistence`, `tab_layout_data_returns_every_mounted_tab_layout`,
+  `restored_single_editor_mounts_persisted_split_tree`,
+  `install_restored_tab_mounts_persisted_tree_without_switching`.
+- `src/client/mod.rs` (22.5): real-server restore-shape E2E
+  `real_server_restore_sequence_orders_tabs_and_opens_documents` — three
+  sequential `TabCommand::New`s reproduce persisted order with no `MoveTo`,
+  per-pane `OpenDocument` lands in the tab's own root, missing root →
+  `FileOperationFailed` with no registry entry, persisted active tab
+  activates. Command: `cargo test --lib real_server_restore --quiet`.
 - `src/masonry_shell.rs`: install/switch/retention/rekey/zero-size-layout
   tests (see masonry-shell page). Command:
   `cargo test --lib masonry_shell --quiet`.

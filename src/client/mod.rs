@@ -4284,6 +4284,140 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
         let _ = fs::remove_dir(socket_path.parent().unwrap());
     }
 
+    /// Phase 22.5: the client restore flow's server-side shape — sequential
+    /// `TabCommand::New` in persisted order (the restore mounts exactly
+    /// these commands) yields a registry whose order equals the persisted
+    /// order with no `MoveTo`; per-pane `OpenDocument` reopens land in the
+    /// tab's own root; a missing workspace root is rejected without a tab
+    /// (the backstop behind the client's is_dir pre-check and restore
+    /// deadline); the persisted active tab activates via `Activate`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn real_server_restore_sequence_orders_tabs_and_opens_documents() {
+        let socket_path = unique_socket_path("tabrestore");
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+        let server_task = tokio::spawn(server.run());
+
+        // Three roots, each with a document the restore reopens.
+        let mut roots = Vec::new();
+        for name in ["restore-alpha", "restore-beta", "restore-gamma"] {
+            let root = std::env::temp_dir().join(format!("clay-{name}-{}", std::process::id()));
+            tokio::fs::create_dir_all(&root).await.unwrap();
+            tokio::fs::write(root.join("notes.md"), "# restored\n")
+                .await
+                .unwrap();
+            roots.push(root);
+        }
+
+        // Persisted order [alpha, beta, gamma]: the bootstrap connection
+        // mounts alpha, two fresh connections mount beta and gamma.
+        eprintln!("step 1: connect alpha");
+        let mut alpha = connect_with_retry(&socket_path).await;
+        alpha
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::New {
+                workspace_root: roots[0].to_string_lossy().into_owned(),
+            })
+            .unwrap();
+        let mut beta = connect_with_retry(&socket_path).await;
+        beta.edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::New {
+                workspace_root: roots[1].to_string_lossy().into_owned(),
+            })
+            .unwrap();
+        let gamma = connect_with_retry(&socket_path).await;
+        gamma
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::New {
+                workspace_root: roots[2].to_string_lossy().into_owned(),
+            })
+            .unwrap();
+
+        // Registry order equals persisted order — no `MoveTo` needed.
+        let (order, alpha_root_id, alpha_tab) = loop {
+            let event = alpha.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs.len() == 3
+            {
+                let alpha_client = alpha.initial_state.client_id;
+                let alpha_entry = snapshot
+                    .tabs
+                    .iter()
+                    .find(|entry| entry.client_id == alpha_client)
+                    .expect("alpha registry entry");
+                break (
+                    snapshot
+                        .tabs
+                        .iter()
+                        .map(|entry| entry.workspace_root.clone())
+                        .collect::<Vec<_>>(),
+                    alpha_entry.workspace_root_id,
+                    alpha_entry.tab_id,
+                );
+            }
+        };
+        let expected = roots
+            .iter()
+            .map(|root| root.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(order, expected);
+
+        // Per-pane document reopen: the exact `OpenDocument` the restore
+        // enqueues lands in the tab's own root, workspace-relative path
+        // echoed back (the pending-open attribution match key).
+        alpha
+            .edit_queue
+            .enqueue_open_document(alpha_root_id, "notes.md".to_string())
+            .unwrap();
+        let opened = loop {
+            let event = alpha.events.recv().await.unwrap();
+            if let ClientConnectionEvent::DocumentOpened { metadata, .. } = &event {
+                break metadata.clone();
+            }
+        };
+        assert_eq!(opened.path, "notes.md");
+        assert_eq!(opened.workspace_root_id, alpha_root_id);
+
+        // A missing workspace root is rejected: `FileOperationFailed` answer
+        // and no registry entry (the client's is_dir pre-check normally
+        // prevents this; the rejection feeds the restore deadline).
+        let missing =
+            std::env::temp_dir().join(format!("clay-restore-missing-{}", std::process::id()));
+        beta.edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::New {
+                workspace_root: missing.to_string_lossy().into_owned(),
+            })
+            .unwrap();
+        loop {
+            let event = beta.events.recv().await.unwrap();
+            if matches!(&event, ClientConnectionEvent::FileOperationFailed { .. }) {
+                break;
+            }
+        }
+
+        // The persisted active tab (alpha) activates via the shared path.
+        alpha
+            .edit_queue
+            .enqueue_tab_command(crate::protocol::TabCommand::Activate { tab_id: alpha_tab })
+            .unwrap();
+        let active = loop {
+            let event = alpha.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
+                && snapshot.tabs.len() == 3
+            {
+                break snapshot.active;
+            }
+        };
+        assert_eq!(active, Some(alpha_tab));
+
+        server_task.abort();
+        for root in &roots {
+            let _ = tokio::fs::remove_dir_all(root).await;
+        }
+        let _ = fs::remove_file(&socket_path);
+        let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
     #[tokio::test]
     async fn real_server_reconnect_reclaims_tab_binding() {
         let socket_path = unique_socket_path("tabreclaim");

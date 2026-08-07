@@ -17,11 +17,11 @@ use crate::masonry_sdui::paint_sdui_text;
 use crate::protocol::{ClientId, FontRole};
 use crate::shell::{
     Axis, FixedSlotId, InteractionState, KEYBOARD_RESIZE_STEP, PaneId, PaneResizeDirection,
-    PaneSplitTree, PanelChrome, ResolvedUiTheme, ShellComponentKind, SlotDragState, SplitChild,
-    SplitDragState, SplitOrientation, SplitRatio, WorkingAreaLayout, WorkingAreaLayoutObservation,
-    WorkingAreaLayoutUpdate, WorkingAreaLayoutUpdateError, compute_slot_resize_size,
-    hit_test_slot_handle, hit_test_split_divider, paint_divider, paint_focus_ring,
-    paint_panel_chrome, slot_handle_rect,
+    PaneSplitTree, PanelChrome, PersistedTabLayout, PersistedTabState, ResolvedUiTheme,
+    ShellComponentKind, SlotDragState, SplitChild, SplitDragState, SplitOrientation, SplitRatio,
+    WorkingAreaLayout, WorkingAreaLayoutObservation, WorkingAreaLayoutUpdate,
+    WorkingAreaLayoutUpdateError, compute_slot_resize_size, hit_test_slot_handle,
+    hit_test_split_divider, paint_divider, paint_focus_ring, paint_panel_chrome, slot_handle_rect,
 };
 
 // Doc-hidden pass-through for the native `clay` binary's menu-sync routing.
@@ -244,9 +244,9 @@ impl TabChrome {
         Self::with_layout(editor, layout)
     }
 
-    /// Build one tab's chrome state from an explicit layout (tests).
+    /// Build one tab's chrome state from an explicit layout (restore path
+    /// and tests).
     pub(crate) fn with_layout(mut editor: EditorWidget, layout: WorkingAreaLayout) -> Self {
-        let _ = &editor;
         let editor_pane_id = layout.editor_component().pane_id;
         // Phase 22.2: the chrome must know which pane it hosts for pane-focus
         // actions; set before the chrome is moved into the host.
@@ -322,8 +322,29 @@ pub struct ClayShellWidget {
 
 impl ClayShellWidget {
     pub fn single_editor(client_id: ClientId, editor: EditorWidget) -> Self {
+        Self::from_chrome(client_id, TabChrome::single_editor(editor, true))
+    }
+
+    /// Phase 22.5: build the shell for a restored window — the bootstrap tab
+    /// mounts with its persisted split tree (never the 20.3 legacy apply;
+    /// legacy files keep the `single_editor` bootstrap path).
+    pub fn restored_single_editor(
+        client_id: ClientId,
+        editor: EditorWidget,
+        persisted: &PersistedTabState,
+    ) -> Self {
+        Self::from_chrome(
+            client_id,
+            TabChrome::with_layout(
+                editor,
+                crate::shell::layout_persist::layout_from_persisted_tab(persisted),
+            ),
+        )
+    }
+
+    fn from_chrome(client_id: ClientId, chrome: TabChrome) -> Self {
         let mut tabs = BTreeMap::new();
-        tabs.insert(client_id, TabChrome::single_editor(editor, true));
+        tabs.insert(client_id, chrome);
         Self {
             tabs,
             active_tab: client_id,
@@ -448,6 +469,24 @@ impl ClayShellWidget {
         ctx.children_changed();
         ctx.request_layout();
         true
+    }
+
+    /// Phase 22.5: mount a restored tab with its persisted split tree.
+    /// Returns the chrome's widget id (the event-bridge routing tag). Does
+    /// not switch the active tab — restore activates the persisted active
+    /// tab after every mount confirms.
+    pub fn install_restored_tab(
+        &mut self,
+        ctx: &mut MutateCtx<'_>,
+        client_id: ClientId,
+        editor: EditorWidget,
+        persisted: &PersistedTabState,
+    ) -> WidgetId {
+        let layout = crate::shell::layout_persist::layout_from_persisted_tab(persisted);
+        let chrome = TabChrome::with_layout(editor, layout);
+        let chrome_id = chrome.editor_widget_id();
+        self.install_tab(ctx, client_id, chrome);
+        chrome_id
     }
 
     #[cfg(test)]
@@ -598,6 +637,25 @@ impl ClayShellWidget {
             .unwrap_or_default()
     }
 
+    /// Phase 22.5: every mounted tab's layout snapshot (active pane, split
+    /// tree, user-modified slots) in client-id order, for whole-window
+    /// persistence collection. The driver adds per-pane document identity.
+    pub fn tab_layout_data(&self) -> Vec<(ClientId, PersistedTabLayout)> {
+        self.tabs
+            .iter()
+            .map(|(client_id, tab)| {
+                (
+                    *client_id,
+                    PersistedTabLayout {
+                        active_pane: tab.layout.active_pane_id(),
+                        tree: tab.layout.pane_tree().root_node().clone(),
+                        slots: crate::shell::layout_persist::collect_slot_entries(&tab.layout),
+                    },
+                )
+            })
+            .collect()
+    }
+
     pub fn active_pane_id_for(&self, client_id: ClientId) -> PaneId {
         self.tabs
             .get(&client_id)
@@ -683,6 +741,16 @@ impl ClayShellWidget {
         &self.active().layout
     }
 
+    /// Phase 22.5 (tests): any tab's layout, so composition guards can prove
+    /// inactive tabs stay untouched.
+    #[cfg(test)]
+    pub(crate) fn working_area_layout_for(
+        &self,
+        client_id: ClientId,
+    ) -> Option<&WorkingAreaLayout> {
+        self.tabs.get(&client_id).map(|tab| &tab.layout)
+    }
+
     #[cfg(test)]
     pub(crate) fn editor_component_rect_for_size(&self, size: Size) -> Rect {
         self.editor_component_rect(size)
@@ -703,23 +771,29 @@ impl ClayShellWidget {
             .editor_component_rect(Rect::new(0.0, 0.0, size.width, size.height))
     }
 
-    /// Phase 20.3: debounced layout persistence (≥500ms between writes).
-    ///
-    /// Phase 22.3: saves only while a single tab is open — the persisted
-    /// `layout.json` is the single-tab layout; per-tab persistence is 22.5.
-    fn persist_debounced(&mut self) {
-        if self.tabs.len() > 1 {
-            return;
+    /// Phase 20.3 + 22.5: debounced persistence signal (≥500ms between
+    /// emissions). The driver owns the whole-window save (it assembles
+    /// per-tab layouts + per-pane document identity); the shell only reports
+    /// that a layout mutation committed. The 22.3 single-tab guard is gone —
+    /// mutations persist at any tab count.
+    fn persist_debounced(&mut self, ctx: &mut EventCtx<'_>) {
+        if self.mark_persistence_due() {
+            ctx.submit_action::<EditorAction>(EditorAction::PersistenceDue);
         }
+    }
+
+    /// Phase 22.5: debounce gate shared by every shell mutation path
+    /// (pointer drags, keyboard topology changes, keyboard resize).
+    fn mark_persistence_due(&mut self) -> bool {
         let now = std::time::Instant::now();
         if self
             .last_persist
             .is_some_and(|t| now.duration_since(t).as_millis() < 500)
         {
-            return;
+            return false;
         }
         self.last_persist = Some(now);
-        crate::shell::layout_persist::save_layout(&self.active().layout);
+        true
     }
 
     // -- Phase 22.1: multi-pane hosting --
@@ -846,6 +920,9 @@ impl ClayShellWidget {
             self.active_mut().layout.replace_pane_tree(new_tree);
             self.reconcile_pane_hosts(ctx);
             ctx.request_layout();
+            if self.mark_persistence_due() {
+                ctx.submit_action::<EditorAction>(EditorAction::PersistenceDue);
+            }
         }
     }
 
@@ -859,6 +936,9 @@ impl ClayShellWidget {
         ) && self.active_mut().layout.commit_split_drag(&path, ratio)
         {
             ctx.request_layout();
+            if self.mark_persistence_due() {
+                ctx.submit_action::<EditorAction>(EditorAction::PersistenceDue);
+            }
         }
     }
 
@@ -1318,7 +1398,7 @@ impl Widget for ClayShellWidget {
                             .layout
                             .toggle_slot_collapse(pane_id, slot_id);
                         self.last_slot_click = None;
-                        self.persist_debounced();
+                        self.persist_debounced(ctx);
                         ctx.request_layout();
                         return;
                     }
@@ -1461,7 +1541,7 @@ impl Widget for ClayShellWidget {
                         .layout
                         .commit_slot_resize(pane_id, slot_id);
                     self.slot_drag = SlotDragState::Idle;
-                    self.persist_debounced();
+                    self.persist_debounced(ctx);
                     ctx.release_pointer();
                     ctx.request_layout();
                     return;
@@ -1475,7 +1555,7 @@ impl Widget for ClayShellWidget {
                         self.active_mut().layout.commit_split_drag(&path, ratio);
                     }
                     self.split_drag = SplitDragState::Idle;
-                    self.persist_debounced();
+                    self.persist_debounced(ctx);
                     ctx.release_pointer();
                     ctx.request_layout();
                 }
@@ -3107,6 +3187,320 @@ mod tests {
                 PaneFocusPolicy::default()
             );
         });
+    }
+
+    // -- Phase 22.5: tab × split composition guards --
+
+    fn vertical_two_pane_tree() -> PaneSplitTree {
+        PaneSplitTree::new(
+            PaneSplitNode::split(
+                SplitOrientation::Vertical,
+                SplitRatio::new(0.7).unwrap(),
+                PaneSplitNode::leaf(PaneId(1)),
+                PaneSplitNode::leaf(PaneId(2)),
+            ),
+            PaneId(2),
+        )
+        .unwrap()
+    }
+
+    /// Tab 0 active with a horizontal split; tab 2 inactive with a vertical
+    /// split (ratio 0.7, active pane 2) — distinct topologies per tab.
+    fn two_split_tab_shell_root() -> (RenderRoot, WidgetId) {
+        let layout = WorkingAreaLayout::with_pane_tree(two_pane_tree(), PaneId(1)).unwrap();
+        let shell = ClayShellWidget::single_editor_with_layout(EditorWidget::default(), layout);
+        let second = TabChrome::with_layout(
+            EditorWidget::default(),
+            WorkingAreaLayout::with_pane_tree(vertical_two_pane_tree(), PaneId(1)).unwrap(),
+        );
+        let shell_new = NewWidget::new(shell);
+        let shell_id = shell_new.id();
+        let mut render_root = RenderRoot::new(shell_new, |_| {}, render_root_options());
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            // install does not switch: tab 0 stays active.
+            shell.widget.install_tab(&mut shell.ctx, 2, second);
+        });
+        let _ = render_root.redraw();
+        (render_root, shell_id)
+    }
+
+    #[test]
+    fn pane_commands_only_mutate_the_active_tab() {
+        let (mut render_root, shell_id) = two_split_tab_shell_root();
+        let mut inactive_before = None;
+        render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            inactive_before = shell.widget.working_area_layout_for(2).cloned();
+            assert_eq!(shell.widget.active_pane_id(), PaneId(1));
+        });
+        // Pane-family commands while tab 0 is active.
+        for command in [
+            ShellClientCommand::SplitPaneVertical,
+            ShellClientCommand::FocusPaneNext,
+            ShellClientCommand::ResizePaneLeft,
+        ] {
+            dispatch_shell_command(&mut render_root, shell_id, command);
+        }
+        render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            // The active tab took the split.
+            assert_eq!(
+                shell.widget.working_area_layout().pane_tree().pane_count(),
+                3
+            );
+            // The inactive tab's layout is byte-identical: tree, ratios,
+            // slots, active pane.
+            assert_eq!(
+                shell.widget.working_area_layout_for(2),
+                inactive_before.as_ref()
+            );
+        });
+    }
+
+    #[test]
+    fn divider_drag_credits_only_the_active_tab() {
+        use masonry::core::{
+            PointerButtonEvent, PointerId, PointerInfo, PointerState, PointerType,
+        };
+        use masonry::dpi::PhysicalPosition;
+
+        let (mut render_root, shell_id) = two_split_tab_shell_root();
+        // Grab the active tab's divider at the pane boundary and drag it.
+        render_root.handle_pointer_event(PointerEvent::Down(PointerButtonEvent {
+            pointer: PointerInfo {
+                pointer_id: Some(PointerId::PRIMARY),
+                persistent_device_id: None,
+                pointer_type: PointerType::Mouse,
+            },
+            button: Some(PointerButton::Primary),
+            state: PointerState {
+                position: PhysicalPosition::new(450.0, 300.0),
+                ..Default::default()
+            },
+        }));
+        render_root.handle_pointer_event(pointer_move_event(675.0, 300.0));
+        render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            // The active tab's divider moved (675/900).
+            assert_eq!(
+                shell
+                    .widget
+                    .working_area_layout()
+                    .pane_tree()
+                    .split_ratio_at_path(&[]),
+                Some(SplitRatio::new(0.75).unwrap())
+            );
+            // The inactive tab's ratio is untouched.
+            assert_eq!(
+                shell
+                    .widget
+                    .working_area_layout_for(2)
+                    .and_then(|layout| layout.pane_tree().split_ratio_at_path(&[])),
+                Some(SplitRatio::new(0.7).unwrap())
+            );
+        });
+    }
+
+    #[test]
+    fn tab_switch_round_trip_preserves_split_trees_and_active_panes() {
+        let (mut render_root, shell_id) = two_split_tab_shell_root();
+        let mut layouts_before = (None, None);
+        render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            layouts_before.0 = shell.widget.working_area_layout_for(0).cloned();
+            layouts_before.1 = shell.widget.working_area_layout_for(2).cloned();
+        });
+        // Switch 0 -> 2: tab 2's own tree is live (active pane 2).
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            assert!(shell.widget.set_active_tab(&mut shell.ctx, 2));
+            assert_eq!(shell.widget.active_pane_id(), PaneId(2));
+        });
+        // Switch back: both tabs' layouts are exactly as before.
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            assert!(shell.widget.set_active_tab(&mut shell.ctx, 0));
+            assert_eq!(shell.widget.active_pane_id(), PaneId(1));
+            assert_eq!(
+                shell.widget.working_area_layout_for(0),
+                layouts_before.0.as_ref()
+            );
+            assert_eq!(
+                shell.widget.working_area_layout_for(2),
+                layouts_before.1.as_ref()
+            );
+        });
+        let _ = render_root.redraw();
+    }
+
+    // -- Phase 22.5: persistence signals --
+
+    /// A two-tab shell (tab 0 active with a split, tab 2 inactive) capturing
+    /// submitted actions.
+    fn persistence_signal_root() -> (RenderRoot, WidgetId, Rc<RefCell<Vec<EditorAction>>>) {
+        let layout = WorkingAreaLayout::with_pane_tree(two_pane_tree(), PaneId(1)).unwrap();
+        let shell = ClayShellWidget::single_editor_with_layout(EditorWidget::default(), layout);
+        let second = TabChrome::with_layout(
+            EditorWidget::default(),
+            WorkingAreaLayout::with_pane_tree(vertical_two_pane_tree(), PaneId(1)).unwrap(),
+        );
+        let shell_new = NewWidget::new(shell);
+        let shell_id = shell_new.id();
+        let captured: Rc<RefCell<Vec<EditorAction>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = captured.clone();
+        let mut render_root = RenderRoot::new(
+            shell_new,
+            move |signal| {
+                if let RenderRootSignal::Action(action, _id) = signal
+                    && let Ok(editor_action) = action.downcast::<EditorAction>()
+                {
+                    sink.borrow_mut().push(*editor_action);
+                }
+            },
+            render_root_options(),
+        );
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.install_tab(&mut shell.ctx, 2, second);
+        });
+        let _ = render_root.redraw();
+        (render_root, shell_id, captured)
+    }
+
+    #[test]
+    fn layout_mutation_signals_persistence_with_multiple_tabs() {
+        // The 22.3 single-tab guard is gone: a topology mutation with two
+        // tabs mounted reaches the driver as a PersistenceDue action.
+        let (mut render_root, shell_id, captured) = persistence_signal_root();
+        dispatch_shell_command(
+            &mut render_root,
+            shell_id,
+            ShellClientCommand::SplitPaneVertical,
+        );
+        assert!(
+            captured
+                .borrow()
+                .iter()
+                .any(|action| matches!(action, EditorAction::PersistenceDue)),
+            "split with 2 tabs must signal persistence"
+        );
+    }
+
+    #[test]
+    fn keyboard_resize_signals_persistence() {
+        let (mut render_root, shell_id, captured) = persistence_signal_root();
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell
+                .widget
+                .apply_keyboard_resize(&mut shell.ctx, PaneResizeDirection::Right);
+        });
+        assert!(
+            captured
+                .borrow()
+                .iter()
+                .any(|action| matches!(action, EditorAction::PersistenceDue))
+        );
+    }
+
+    #[test]
+    fn tab_layout_data_returns_every_mounted_tab_layout() {
+        let (mut render_root, shell_id, _captured) = persistence_signal_root();
+        let layouts = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.tab_layout_data()
+        });
+        assert_eq!(layouts.len(), 2);
+        let (id0, layout0) = &layouts[0];
+        let (id2, layout2) = &layouts[1];
+        assert_eq!(*id0, 0);
+        assert_eq!(layout0.active_pane, PaneId(1));
+        assert!(matches!(&layout0.tree, PaneSplitNode::Split { .. }));
+        assert_eq!(*id2, 2);
+        assert_eq!(layout2.active_pane, PaneId(2));
+        match &layout2.tree {
+            PaneSplitNode::Split {
+                orientation, ratio, ..
+            } => {
+                assert_eq!(*orientation, SplitOrientation::Vertical);
+                assert_eq!(*ratio, SplitRatio::new(0.7).unwrap());
+            }
+            _ => panic!("tab 2 must be a split"),
+        }
+    }
+
+    // -- Phase 22.5: whole-window restore --
+
+    /// A persisted tab with a 0.7 horizontal two-pane tree, active pane 2.
+    fn persisted_two_pane_tab() -> PersistedTabState {
+        PersistedTabState {
+            workspace_root: "/tmp".to_string(),
+            active_pane: PaneId(2),
+            tree: Some(PaneSplitNode::split(
+                SplitOrientation::Horizontal,
+                SplitRatio::new(0.7).unwrap(),
+                PaneSplitNode::leaf(PaneId(1)),
+                PaneSplitNode::leaf(PaneId(2)),
+            )),
+            slots: Vec::new(),
+            panes: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn restored_single_editor_mounts_persisted_split_tree() {
+        let shell = ClayShellWidget::restored_single_editor(
+            7,
+            EditorWidget::default(),
+            &persisted_two_pane_tab(),
+        );
+        let layout = shell.working_area_layout_for(7).expect("tab 7 layout");
+        assert_eq!(layout.pane_tree().pane_count(), 2);
+        assert_eq!(layout.active_pane_id(), PaneId(2));
+        assert_eq!(
+            layout.pane_tree().split_ratio_at_path(&[]),
+            Some(SplitRatio::new(0.7).unwrap())
+        );
+    }
+
+    #[test]
+    fn install_restored_tab_mounts_persisted_tree_without_switching() {
+        let (mut render_root, shell_id, _captured) = persistence_signal_root();
+        let persisted = persisted_two_pane_tab();
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.install_restored_tab(
+                &mut shell.ctx,
+                5,
+                EditorWidget::default(),
+                &persisted,
+            );
+        });
+        // Tab 5 is mounted with the persisted tree. Pane targets hold only
+        // content hosts (the chrome); the placeholder pane becomes a target
+        // when a document opens into it.
+        let (targets, layouts) = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            (
+                shell.widget.pane_targets_for(5).len(),
+                shell.widget.tab_layout_data(),
+            )
+        });
+        assert_eq!(targets, 1);
+        let tab5 = layouts.iter().find(|(id, _)| *id == 5).expect("tab 5");
+        assert_eq!(tab5.1.active_pane, PaneId(2));
+        // The active tab is unchanged (still tab 0's balanced split — the
+        // restore activates the persisted active tab at the very end).
+        let active_ratio = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell
+                .widget
+                .working_area_layout()
+                .pane_tree()
+                .split_ratio_at_path(&[])
+        });
+        assert_eq!(active_ratio, Some(SplitRatio::new(0.5).unwrap()));
     }
 
     // -- Phase 22.3: tab bar chrome --

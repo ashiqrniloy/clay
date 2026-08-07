@@ -7,12 +7,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use masonry::kurbo::{Point, Rect};
 
 const DEFAULT_WORKING_AREA_ID: WorkingAreaId = WorkingAreaId(1);
-const DEFAULT_PANE_ID: PaneId = PaneId(1);
+pub(crate) const DEFAULT_PANE_ID: PaneId = PaneId(1);
 const DEFAULT_EDITOR_COMPONENT_ID: ShellComponentId = ShellComponentId(1);
 const DEFAULT_LAYOUT_VERSION: ShellLayoutVersion = ShellLayoutVersion(1);
 const MIN_SPLIT_RATIO: f64 = 0.05;
 const MAX_SPLIT_RATIO: f64 = 0.95;
-const MAX_PANE_SPLIT_TREE_NODES: usize = 64;
+pub(crate) const MAX_PANE_SPLIT_TREE_NODES: usize = 64;
 const MAX_PANE_SLOT_LAYOUTS: usize = MAX_PANE_SPLIT_TREE_NODES;
 
 /// Phase 22.1 product cap: at most 4 panes per tab (roadmap Phase 22). The tree
@@ -301,16 +301,18 @@ pub(crate) enum PaneSlotLayoutError {
     },
 }
 
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SplitOrientation {
+pub enum SplitOrientation {
     /// Divides the pane rectangle into left and right regions.
     Horizontal,
     /// Divides the pane rectangle into top and bottom regions.
     Vertical,
 }
 
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct SplitRatio(f64);
+pub struct SplitRatio(f64);
 
 impl SplitRatio {
     pub(crate) fn new(value: f64) -> Result<Self, PaneSplitTreeError> {
@@ -330,8 +332,9 @@ impl SplitRatio {
     }
 }
 
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum PaneSplitNode {
+pub enum PaneSplitNode {
     Leaf {
         pane_id: PaneId,
     },

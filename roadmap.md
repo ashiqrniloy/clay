@@ -97,7 +97,31 @@ Expected outcome:
 
 - Window management is production-safe, documented, and performance-bounded.
 
+## ACP/AG-UI
 
+## Coding agent
+- Basics like pi
+
+### Loop
+- Roadmap
+- Spec/Requirements -> Acceptance Criteria
+- Plan 
+- Execute
+- Review (ponytail)
+- Test
+- Document
+- User to-do
+
+General details:
+- After every turn plan/task, OM compaction
+- If user decision required, choose the simplest and document in user to-do
+- Loop can be started at any stage
+- Can be run manually. Differentiate between auto and manual
+- Each step follows acceptance criteria separately as context injection
+- Context inspection
+- Caveman
+- Ponytail
+- Providers: Alibaba cloud, Ollama-cloud, Opencode-go, Kimi, OpenAI Oauth, Cursor SDK, Gemini SDK
 
 ## User Package and Config segregation with defined ~/.config/clay structure
 
@@ -107,7 +131,7 @@ Expected outcome:
 
 ## Coding agent
 
-### ACP
+
 
 ### Evaluation of Prism capability against requirements
 

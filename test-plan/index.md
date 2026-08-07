@@ -41,8 +41,8 @@ ligature glyphs, IME feel, native dialogs, focus, timing.
 | 10 | [Keybindings and commands](10-keybindings-and-commands.md) | bindKey override, unbind, deny-by-default, execution push channel, Global-scope tab command bindings (22.4) | `docs/development/manual-editor-capabilities-test-plan.md` |
 | 11 | [Performance](11-performance.md) | large files, scroll/type latency, parse feel | `docs/development/performance.md` |
 | 12 | [Platform: Windows](12-platform-windows.md) | MSVC toolchain, named pipes, native dialogs | `docs/development/windows.md` |
-| 13 | [Window splits](13-window-splits.md) | split/close/add-equal/move/resize panes, pane focus policies, per-pane document views + concurrent modes (22.2), shell keybinding overrides (per active tab since 22.3) | `docs/reference/primitives/shell-layout-strategy.md` |
-| 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/masonry-shell.md`, `docs/wiki/modules/tabs-and-clients.md` |
+| 13 | [Window splits](13-window-splits.md) | split/close/add-equal/move/resize panes, pane focus policies, per-pane document views + concurrent modes (22.2), shell keybinding overrides (per active tab since 22.3), per-tab persistence cross-check (22.5) | `docs/reference/primitives/shell-layout-strategy.md` |
+| 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/masonry-shell.md`, `docs/wiki/modules/tabs-and-clients.md` |
 
 ## Coverage matrix (what to run when)
 
@@ -58,7 +58,7 @@ ligature glyphs, IME feel, native dialogs, focus, timing.
 | File IO / save / dialogs | 03 |
 | Keybinding routing / commands | 10, 05 |
 | Shell layout / panes / splits / pane focus | 13, 10, 01 |
-| Tabs / tab bar / keyboard tab chords / multi-connection / reconnect | 14, 10, 13, 03, 01 |
+| Tabs / tab bar / keyboard tab chords / multi-connection / reconnect / window-state persistence | 14, 13, 01 |
 | Pane document views / concurrent modes / duplicate-open routing | 13, 03, 09 |
 | Anything user-visible | 01 always (launch gate) |
 

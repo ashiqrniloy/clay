@@ -107,6 +107,7 @@ bindKey("Ctrl+Shift+P", "clay.shell.clientAddEqualPane", { scope: "global" });
 | # | Action | Expected |
 |---|--------|----------|
 | S21 | Rapidly alternate `Ctrl+\` / `Ctrl+Alt+W` and `Ctrl+Shift+\` | Instant visual response, no visible stall, no torn frames; divider drag stays smooth during the session |
+| S22 | 2 tabs open, tab A with a non-balanced divider drag (ratio ≠ 0.5) and a collapsed/fixed slot; quit and relaunch | Tab A's ratios + user-modified slot geometry survive the restart (persisted per tab in `layout.json` v2); tab B's layout untouched — persistence is per tab (module 14 T41/T47/T48) |
 
 ## Pane document views (Phase 22.2)
 
@@ -167,6 +168,10 @@ shows its own status line with that document's name/dirty state.
 - **No topology/document persistence**: pane trees and per-pane document
   layout reset on restart; persistence arrives with Phase 22.5 (layout.json
   extension).
+- **Persistence restored (22.5)**: pane trees, ratios, user-modified slots,
+  and per-pane documents now survive restart per tab (`layout.json` v2,
+  module 14 S22/T41); unsaved edits and caret/viewport positions still do
+  not (module 14 ceilings).
 - **Global bindings need editor focus**: `Global`-context chords route through
   the focused pane's editor key path; with a placeholder pane active (no
   document) the chords don't fire. Click a document pane first.
