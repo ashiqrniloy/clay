@@ -7952,6 +7952,142 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn configuration_bind_key_table_form_binds_multiple_commands() {
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { bindKey, listKeyBindings } from "clay:keybindings";
+                const bound = bindKey({
+                  scope: "editor",
+                  bindings: {
+                    "Ctrl+O": "clay.documents.clientOpenFileDialog",
+                    "Alt+I": "clay.editor.clientSelectTextobject.function.inner.current",
+                    "Ctrl+S": "clay.documents.serverSaveDocument",
+                  },
+                });
+                const bindings = listKeyBindings("editor");
+                Deno.core.ops.op_clay_runtime_record(`${bound.length}:${bound[0].key}:${bound[1].command}:${bindings.some((binding) => binding.key === "Ctrl+O")}:${bindings.some((binding) => binding.key === "Alt+I")}:${bindings.some((binding) => binding.key === "Ctrl+S")}`);
+                "#,
+            )
+            .await
+            .unwrap();
+        let manifest = result
+            .behavior_manifest
+            .expect("published behavior manifest");
+
+        assert_eq!(
+            result.op_records,
+            vec![
+                "3:Ctrl+O:clay.editor.clientSelectTextobject.function.inner.current:true:true:true"
+            ]
+        );
+        for command_id in [
+            "clay.documents.clientOpenFileDialog",
+            "clay.editor.clientSelectTextobject.function.inner.current",
+            "clay.documents.serverSaveDocument",
+        ] {
+            assert!(
+                manifest
+                    .keymaps
+                    .iter()
+                    .any(|rule| rule.command_id == command_id),
+                "{command_id} must be bound by the table form"
+            );
+        }
+        assert_eq!(
+            manifest
+                .keymaps
+                .iter()
+                .filter(|rule| {
+                    rule.context == crate::protocol::KeyBindingContext::EditorTextFocus
+                        && matches!(
+                            rule.command_id.as_str(),
+                            "clay.documents.clientOpenFileDialog"
+                                | "clay.editor.clientSelectTextobject.function.inner.current"
+                                | "clay.documents.serverSaveDocument"
+                        )
+                })
+                .count(),
+            3
+        );
+    }
+
+    #[tokio::test]
+    async fn configuration_bind_key_table_form_is_all_or_nothing() {
+        let error = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { bindKey, listKeyBindings } from "clay:keybindings";
+                const bound = bindKey({
+                  scope: "editor",
+                  bindings: {
+                    "Ctrl+O": "clay.documents.clientOpenFileDialog",
+                    "PgDn": "clay.editor.clientUndo",
+                  },
+                });
+                Deno.core.ops.op_clay_runtime_record(`${bound.length}`);
+                "#,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, ClayRuntimeError::Runtime(_)));
+        let message = error.to_string();
+        assert!(
+            message.contains("entry 2") && message.contains("unsupported key `PgDn`"),
+            "diagnostic must name the failing table entry: {message}"
+        );
+        // All-or-nothing: the valid first entry must not be applied. The
+        // manifest is not reachable from the error, so verify via a fresh
+        // evaluation that no partial binding leaked into the shared service.
+        let service = ClayJsRuntimeService::default();
+        let result = service
+            .evaluate_controlled_module(
+                r#"
+                import { listKeyBindings } from "clay:keybindings";
+                Deno.core.ops.op_clay_runtime_record(`${listKeyBindings("editor").some((binding) => binding.key === "Ctrl+O")}`);
+                "#,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.op_records, vec!["false"]);
+    }
+
+    #[tokio::test]
+    async fn configuration_unbind_key_table_form_unbinds_multiple_keys() {
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { bindKey, unbindKey, listKeyBindings } from "clay:keybindings";
+                bindKey({
+                  scope: "editor",
+                  bindings: {
+                    "Ctrl+O": "clay.documents.clientOpenFileDialog",
+                    "Alt+I": "clay.editor.clientSelectTextobject.function.inner.current",
+                  },
+                });
+                unbindKey({ scope: "editor", keys: ["Ctrl+O", "Alt+I"] });
+                const bindings = listKeyBindings("editor");
+                Deno.core.ops.op_clay_runtime_record(`${bindings.length}:${bindings.some((binding) => binding.key === "Ctrl+O")}:${bindings.some((binding) => binding.key === "Alt+I")}`);
+                "#,
+            )
+            .await
+            .unwrap();
+        let manifest = result
+            .behavior_manifest
+            .expect("published behavior manifest");
+
+        assert_eq!(result.op_records, vec!["2:false:false"]);
+        assert!(!manifest.keymaps.iter().any(|rule| {
+            matches!(
+                rule.command_id.as_str(),
+                "clay.documents.clientOpenFileDialog"
+                    | "clay.editor.clientSelectTextobject.function.inner.current"
+            )
+        }));
+    }
+
+    #[tokio::test]
     async fn unknown_command_binding_is_rejected() {
         let error = ClayJsRuntimeService::default()
             .evaluate_controlled_module(

@@ -11,10 +11,21 @@ function requireOps() {
     return ops;
 }
 export function bindKey(key, command, options = {}) {
-    return JSON.parse(requireOps().op_clay_keybindings_bind_key(key, command, JSON.stringify(options ?? {})));
+    const ops = requireOps();
+    if (typeof key === "object" && key !== null) {
+        // Table form: bindKey({ scope, bindings: { chord: command, ... } })
+        return JSON.parse(ops.op_clay_keybindings_bind_keys(JSON.stringify(key)));
+    }
+    return JSON.parse(ops.op_clay_keybindings_bind_key(key, command, JSON.stringify(options ?? {})));
 }
 export function unbindKey(key, options = {}) {
-    requireOps().op_clay_keybindings_unbind_key(key, JSON.stringify(options ?? {}));
+    const ops = requireOps();
+    if (typeof key === "object" && key !== null) {
+        // Table form: unbindKey({ scope, keys: [chord, ...] })
+        ops.op_clay_keybindings_unbind_keys(JSON.stringify(key));
+        return;
+    }
+    ops.op_clay_keybindings_unbind_key(key, JSON.stringify(options ?? {}));
 }
 export function listKeyBindings(scope = "all") {
     return JSON.parse(requireOps().op_clay_keybindings_list_key_bindings(scope));

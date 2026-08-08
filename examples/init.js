@@ -203,14 +203,21 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 // ----------------------------------------------------------------------------
 // 7. Key bindings — clay:keybindings
 // ----------------------------------------------------------------------------
-// bindKey(key, commandId, options?)  — bind a chord to a command ID.
-// unbindKey(key, options?)           — remove a binding.
-// listKeyBindings(scope?)            — inspect bindings ("all" default).
+// bindKey(key, commandId, options?)              — bind one chord (single form).
+// bindKey({ scope, bindings: { chord: id, ... } }) — bind a whole table in one
+//                                                    call (table form; scope typed
+//                                                    once; all-or-nothing).
+// unbindKey(key, options?)                       — remove one binding.
+// unbindKey({ scope, keys: [chord, ...] })       — remove many at once.
+// listKeyBindings(scope?)                        — inspect bindings ("all" default).
 //
 // Key format: single stroke "Modifier+Key" (Ctrl/Shift/Alt + a key name,
 // e.g. "Ctrl+O", "Shift+Alt+Down"). Multi-stroke chords ("g g") are NOT
-// supported yet. Bindings validate deny-by-default; unknown or non-editor
-// command IDs are rejected. Last binding for a chord wins.
+// Supported yet. Bindings validate deny-by-default; unknown or non-editor
+// command IDs are rejected. Last binding for a chord wins (within a table,
+// duplicate chords collapse to the last value). Table-form calls validate
+// every entry before applying any: one bad entry rejects the whole table
+// and names its 1-based index, so nothing binds halfway.
 //
 // Bindable editor command IDs (Plan 071 surface):
 //   Movement:      clay.editor.clientMoveCursor.nextWordStart
@@ -282,20 +289,93 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 // restore).
 // Numbered families are capped at 9 by design — reach tab 10+ with
 // Ctrl+Tab / Ctrl+Shift+Tab or a card click. Tab-bar keyboard focus
-// traversal arrives in Phase 22.6.
+// traversal (per-card focus) stays deferred after Phase 22.6 — tab cards
+// remain click/command driven (plan 077 Further Actions).
 //
 // Rebinding tab commands (Phase 22.4; example chords, commented out — one
-// per family kind: scalar, numbered activate, numbered move-to):
-// bindKey("Ctrl+PageDown", "clay.shell.clientTabNext", { scope: "global" });
-// bindKey("Alt+1", "clay.shell.clientTabActivate.1", { scope: "global" });
-// bindKey("Ctrl+Alt+Shift+9", "clay.shell.clientTabMoveTo.9", { scope: "global" });
+// per family kind: scalar, numbered activate, numbered move-to; the chord
+// parser accepts single characters, Tab, arrows, Space, Enter, Backspace,
+// Delete, and Escape — no PageUp/PageDown/F-keys):
+// bindKey({ scope: "global", bindings: {
+//   "Alt+Right": "clay.shell.clientTabNext",
+//   "Alt+1": "clay.shell.clientTabActivate.1",
+//   "Ctrl+Alt+Shift+9": "clay.shell.clientTabMoveTo.9",
+// }});
+
+// Default keybindings — implemented below so this file, taken as-is, installs
+// every shipped default chord (they are already active without init.js;
+// re-declaring them is an idempotent no-op override and doubles as the
+// complete reference). Source of truth: default_keymaps() in
+// src/protocol/mod.rs. Both call forms are shown: batch tables for the
+// defaults, single-form calls for one-off binds.
 
 import { bindKey, unbindKey } from "clay:keybindings";
 
+// Editor-scope defaults (batch table form — one call, scope typed once):
+bindKey({
+  scope: "editor",
+  bindings: {
+    "Enter": "text.insert_newline",
+    "Tab": "text.insert_tab",
+  },
+});
+
+// Global-scope defaults — Phase 22.1 splits and pane focus:
+bindKey({
+  scope: "global",
+  bindings: {
+    "Ctrl+\\": "clay.shell.clientSplitPaneVertical",
+    "Ctrl+-": "clay.shell.clientSplitPaneHorizontal",
+    "Ctrl+Shift+\\": "clay.shell.clientAddEqualPane",
+    "Ctrl+Alt+W": "clay.shell.clientClosePane",
+    "Ctrl+Alt+Left": "clay.shell.clientFocusPanePrev",
+    "Ctrl+Alt+Right": "clay.shell.clientFocusPaneNext",
+    "Ctrl+Alt+Shift+Left": "clay.shell.clientResizePaneLeft",
+    "Ctrl+Alt+Shift+Right": "clay.shell.clientResizePaneRight",
+    "Ctrl+Alt+Shift+Up": "clay.shell.clientResizePaneUp",
+    "Ctrl+Alt+Shift+Down": "clay.shell.clientResizePaneDown",
+    "Ctrl+Alt+[": "clay.shell.clientMovePanePrev",
+    "Ctrl+Alt+]": "clay.shell.clientMovePaneNext",
+  },
+});
+
+// Global-scope defaults — Phase 22.4 tab management (numbered families are
+// capped at 9 by design; reach tab 10+ with Ctrl+Tab / Ctrl+Shift+Tab):
+bindKey({
+  scope: "global",
+  bindings: {
+    "Ctrl+Tab": "clay.shell.clientTabNext",
+    "Ctrl+Shift+Tab": "clay.shell.clientTabPrev",
+    "Ctrl+T": "clay.shell.clientTabNew",
+    "Ctrl+Shift+W": "clay.shell.clientTabClose",
+    "Ctrl+Shift+[": "clay.shell.clientTabMoveLeft",
+    "Ctrl+Shift+]": "clay.shell.clientTabMoveRight",
+    "Ctrl+1": "clay.shell.clientTabActivate.1",
+    "Ctrl+2": "clay.shell.clientTabActivate.2",
+    "Ctrl+3": "clay.shell.clientTabActivate.3",
+    "Ctrl+4": "clay.shell.clientTabActivate.4",
+    "Ctrl+5": "clay.shell.clientTabActivate.5",
+    "Ctrl+6": "clay.shell.clientTabActivate.6",
+    "Ctrl+7": "clay.shell.clientTabActivate.7",
+    "Ctrl+8": "clay.shell.clientTabActivate.8",
+    "Ctrl+9": "clay.shell.clientTabActivate.9",
+    "Ctrl+Shift+1": "clay.shell.clientTabMoveTo.1",
+    "Ctrl+Shift+2": "clay.shell.clientTabMoveTo.2",
+    "Ctrl+Shift+3": "clay.shell.clientTabMoveTo.3",
+    "Ctrl+Shift+4": "clay.shell.clientTabMoveTo.4",
+    "Ctrl+Shift+5": "clay.shell.clientTabMoveTo.5",
+    "Ctrl+Shift+6": "clay.shell.clientTabMoveTo.6",
+    "Ctrl+Shift+7": "clay.shell.clientTabMoveTo.7",
+    "Ctrl+Shift+8": "clay.shell.clientTabMoveTo.8",
+    "Ctrl+Shift+9": "clay.shell.clientTabMoveTo.9",
+  },
+});
+
+// Single form — one binding per call (batch tables work for these too):
 bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 
 // Text objects + smart select ship with NO default bindings by design —
-// bind them to your taste (single strokes only):
+// bound here as single-form examples (single strokes only):
 bindKey("Alt+I", "clay.editor.clientSelectTextobject.function.inner.current", { scope: "editor" });
 bindKey("Alt+O", "clay.editor.clientSelectTextobject.function.around.current", { scope: "editor" });
 bindKey("Alt+A", "clay.editor.clientSelectTextobject.argument.inner.current", { scope: "editor" });
@@ -303,12 +383,13 @@ bindKey("Alt+C", "clay.editor.clientSelectTextobject.comment.around.current", { 
 bindKey("Alt+E", "clay.editor.clientSmartSelect.expand", { scope: "editor" });
 bindKey("Alt+R", "clay.editor.clientSmartSelect.shrink", { scope: "editor" });
 
-// Rebinding a built-in: Ctrl+B becomes "previous word start".
+// Rebinding example (single form): Ctrl+B — unbound by default — becomes
+// "previous word start". Last binding for a chord wins:
 bindKey("Ctrl+B", "clay.editor.clientMoveCursor.prevWordStart", { scope: "editor" });
-// unbindKey("Ctrl+B", { scope: "editor" });
+// unbindKey("Ctrl+B", { scope: "editor" });  // or remove it entirely
 
-// Rebinding a Phase 22.1 split command (example: "add equal pane" on a
-// different chord; scope "global" matches the shipped default context):
+// Rebinding a shipped default (example: "add equal pane" on a different
+// chord; scope "global" matches the shipped default context):
 // bindKey("Ctrl+Shift+P", "clay.shell.clientAddEqualPane", { scope: "global" });
 
 // ----------------------------------------------------------------------------

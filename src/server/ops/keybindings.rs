@@ -16,15 +16,7 @@ pub(super) fn op_clay_keybindings_bind_key(
     #[string] command_id: String,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let options = parse_options(&options_json, "clay.keybindings.invalid_bind")?;
-    let scope = parse_scope(options.get("scope"), "clay.keybindings.invalid_bind")?;
-    reject_when_clause(options.get("when"), "clay.keybindings.invalid_bind")?;
-    let rule = KeyBindingRule {
-        command_id: validate_command_id(&command_id)?,
-        sequence: vec![parse_key_chord(&key)?],
-        context: scope,
-        routing_policy: command_routing_policy(&command_id)?,
-    };
+    let rule = build_bind_rule(&key, &command_id, &options_json)?;
     let manifest = state
         .borrow::<Arc<ClayOpState>>()
         .bind_key(rule)
@@ -36,6 +28,149 @@ pub(super) fn op_clay_keybindings_bind_key(
             .find(|candidate| candidate.command_id == command_id)
             .expect("bound keymap must exist"),
     )
+}
+
+/// Batch table form: `bindKey({ scope, bindings: { chord: command, ... } })`.
+/// One call, one scope, key->command map. Validates every entry before
+/// applying any (all-or-nothing): a bad entry rejects the whole table with
+/// its 1-based entry index in the diagnostic. Duplicate chords inside the
+/// table cannot occur (JSON object keys collapse, last value wins), so the
+/// per-chord "last binding wins" rule is preserved by the JSON parser itself.
+#[op2]
+#[string]
+pub(super) fn op_clay_keybindings_bind_keys(
+    state: &mut OpState,
+    #[string] request_json: String,
+) -> Result<String, JsErrorBox> {
+    let (scope, bindings) = parse_bind_table(&request_json)?;
+    // Pass 1: validate everything before mutating the manifest.
+    let mut rules = Vec::with_capacity(bindings.len());
+    for (index, (chord, command_id)) in bindings.iter().enumerate() {
+        let rule = build_rule(chord, command_id, scope.clone()).map_err(|error| {
+            JsErrorBox::generic(format!(
+                "clay.keybindings.invalid_bind: entry {}: {error}",
+                index + 1
+            ))
+        })?;
+        rules.push(rule);
+    }
+    // Pass 2: apply (each rule follows the single-bind path exactly).
+    let clay = state.borrow::<Arc<ClayOpState>>();
+    for rule in &rules {
+        clay.bind_key(rule.clone())
+            .map_err(manifest_error("clay.keybindings.bind_failed"))?;
+    }
+    serde_json::to_string(&Value::Array(rules.iter().map(key_binding_json).collect()))
+        .map_err(serialize_error("clay.keybindings.bind_failed"))
+}
+
+/// Batch unbind: `unbindKey({ scope, keys: [chord, ...] })`. Mirrors the bind
+/// table: one call, one scope, all chords validated before any is removed.
+#[op2]
+#[string]
+pub(super) fn op_clay_keybindings_unbind_keys(
+    state: &mut OpState,
+    #[string] request_json: String,
+) -> Result<String, JsErrorBox> {
+    let (scope, keys) = parse_unbind_table(&request_json)?;
+    // Pass 1: validate every chord before mutating the manifest.
+    let mut strokes = Vec::with_capacity(keys.len());
+    for (index, chord) in keys.iter().enumerate() {
+        let stroke = parse_key_chord(chord).map_err(|error| {
+            JsErrorBox::generic(format!(
+                "clay.keybindings.invalid_unbind: entry {}: {error}",
+                index + 1
+            ))
+        })?;
+        strokes.push(stroke);
+    }
+    // Pass 2: unbind each; the last manifest carries the final binding list.
+    let clay = state.borrow::<Arc<ClayOpState>>();
+    let mut manifest = None;
+    for stroke in &strokes {
+        manifest = Some(
+            clay.unbind_key(stroke, &scope)
+                .map_err(manifest_error("clay.keybindings.unbind_failed"))?,
+        );
+    }
+    serialize_bindings(&manifest.expect("at least one unbind entry").keymaps)
+}
+
+fn build_bind_rule(
+    key: &str,
+    command_id: &str,
+    options_json: &str,
+) -> Result<KeyBindingRule, JsErrorBox> {
+    let options = parse_options(options_json, "clay.keybindings.invalid_bind")?;
+    let scope = parse_scope(options.get("scope"), "clay.keybindings.invalid_bind")?;
+    reject_when_clause(options.get("when"), "clay.keybindings.invalid_bind")?;
+    build_rule(key, command_id, scope)
+}
+
+fn build_rule(
+    key: &str,
+    command_id: &str,
+    scope: KeyBindingContext,
+) -> Result<KeyBindingRule, JsErrorBox> {
+    Ok(KeyBindingRule {
+        command_id: validate_command_id(command_id)?,
+        sequence: vec![parse_key_chord(key)?],
+        context: scope,
+        routing_policy: command_routing_policy(command_id)?,
+    })
+}
+
+fn parse_bind_table(json: &str) -> Result<(KeyBindingContext, Vec<(String, String)>), JsErrorBox> {
+    let options = parse_options(json, "clay.keybindings.invalid_bind")?;
+    let scope = parse_scope(options.get("scope"), "clay.keybindings.invalid_bind")?;
+    reject_when_clause(options.get("when"), "clay.keybindings.invalid_bind")?;
+    let Some(bindings) = options.get("bindings") else {
+        return Err(JsErrorBox::generic(
+            "clay.keybindings.invalid_bind: table form requires a `bindings` object of chord -> command ID",
+        ));
+    };
+    let Value::Object(entries) = bindings else {
+        return Err(JsErrorBox::generic(
+            "clay.keybindings.invalid_bind: `bindings` must be an object of chord -> command ID",
+        ));
+    };
+    let mut pairs = Vec::with_capacity(entries.len());
+    for (chord, command) in entries {
+        let Some(command) = command.as_str() else {
+            return Err(JsErrorBox::generic(format!(
+                "clay.keybindings.invalid_bind: binding for `{chord}` must map to a command ID string"
+            )));
+        };
+        pairs.push((chord.clone(), command.to_string()));
+    }
+    Ok((scope, pairs))
+}
+
+fn parse_unbind_table(json: &str) -> Result<(KeyBindingContext, Vec<String>), JsErrorBox> {
+    let options = parse_options(json, "clay.keybindings.invalid_unbind")?;
+    let scope = parse_scope(options.get("scope"), "clay.keybindings.invalid_unbind")?;
+    reject_when_clause(options.get("when"), "clay.keybindings.invalid_unbind")?;
+    let Some(keys) = options.get("keys") else {
+        return Err(JsErrorBox::generic(
+            "clay.keybindings.invalid_unbind: table form requires a `keys` array of chords",
+        ));
+    };
+    let Value::Array(entries) = keys else {
+        return Err(JsErrorBox::generic(
+            "clay.keybindings.invalid_unbind: `keys` must be an array of chords",
+        ));
+    };
+    let mut chords = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let Some(chord) = entry.as_str() else {
+            return Err(JsErrorBox::generic(format!(
+                "clay.keybindings.invalid_unbind: entry {} must be a chord string",
+                index + 1
+            )));
+        };
+        chords.push(chord.to_string());
+    }
+    Ok((scope, chords))
 }
 
 #[op2]
@@ -605,5 +740,82 @@ mod tests {
                 "{command} must pass the bindKey validation gate"
             );
         }
+    }
+
+    #[test]
+    fn bind_table_parses_scope_and_chord_command_pairs() {
+        let (scope, pairs) = super::parse_bind_table(
+            r#"{"scope": "global", "bindings": {"Ctrl+\\": "clay.shell.clientSplitPaneVertical", "Ctrl+T": "clay.shell.clientTabNew"}}"#,
+        )
+        .unwrap();
+        assert_eq!(scope, crate::protocol::KeyBindingContext::Global);
+        assert_eq!(
+            pairs,
+            vec![
+                (
+                    "Ctrl+\\".to_string(),
+                    "clay.shell.clientSplitPaneVertical".to_string()
+                ),
+                ("Ctrl+T".to_string(), "clay.shell.clientTabNew".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn bind_table_defaults_scope_to_editor_and_rejects_malformed_shapes() {
+        let (scope, pairs) = super::parse_bind_table(
+            r#"{"bindings": {"Ctrl+O": "clay.documents.clientOpenFileDialog"}}"#,
+        )
+        .unwrap();
+        assert_eq!(scope, crate::protocol::KeyBindingContext::EditorTextFocus);
+        assert_eq!(pairs.len(), 1);
+
+        // Missing `bindings` object.
+        let error = super::parse_bind_table(r#"{"scope": "editor"}"#).unwrap_err();
+        assert!(error.to_string().contains("requires a `bindings` object"));
+        // `bindings` not an object.
+        let error = super::parse_bind_table(r#"{"bindings": ["Ctrl+O"]}"#).unwrap_err();
+        assert!(error.to_string().contains("`bindings` must be an object"));
+        // Value not a command ID string.
+        let error = super::parse_bind_table(r#"{"bindings": {"Ctrl+O": 7}}"#).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("must map to a command ID string")
+        );
+        // Unsupported scope rejected.
+        assert!(super::parse_bind_table(r#"{"scope": "window", "bindings": {}}"#).is_err());
+    }
+
+    #[test]
+    fn unbind_table_parses_scope_and_key_list() {
+        let (scope, keys) =
+            super::parse_unbind_table(r#"{"scope": "global", "keys": ["Ctrl+\\", "Ctrl+T"]}"#)
+                .unwrap();
+        assert_eq!(scope, crate::protocol::KeyBindingContext::Global);
+        assert_eq!(keys, vec!["Ctrl+\\".to_string(), "Ctrl+T".to_string()]);
+
+        // Missing `keys` array.
+        let error = super::parse_unbind_table(r#"{"scope": "editor"}"#).unwrap_err();
+        assert!(error.to_string().contains("requires a `keys` array"));
+        // Non-string entry.
+        let error = super::parse_unbind_table(r#"{"keys": [7]}"#).unwrap_err();
+        assert!(error.to_string().contains("must be a chord string"));
+    }
+
+    #[test]
+    fn batch_validation_errors_carry_one_based_entry_index() {
+        // build_rule failure for entry 2 must be wrapped with its index by the
+        // batch op; this mirrors the op's pass-1 loop over the same helper.
+        let error = super::build_rule(
+            "PgDn",
+            "clay.editor.clientUndo",
+            crate::protocol::KeyBindingContext::EditorTextFocus,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("unsupported key `PgDn`"));
+        let wrapped = format!("clay.keybindings.invalid_bind: entry 2: {error}");
+        assert!(wrapped.contains("entry 2"));
+        assert!(wrapped.contains("unsupported key `PgDn`"));
     }
 }

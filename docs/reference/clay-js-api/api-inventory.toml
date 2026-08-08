@@ -480,6 +480,7 @@ facade_path = "runtime/js/keybindings.js::bindKey"
 backing_rust = "src/protocol/mod.rs::KeyBindingRule"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+deno_ops_batch = ["op_clay_keybindings_bind_keys"]
 documentation_path = "docs/reference/clay-js-api/keybindings/bind-key.md"
 key_bindings = []
 custom_properties = ["key:string", "command:string", "scope:enum=editor", "when:string"]
@@ -503,6 +504,7 @@ facade_path = "runtime/js/keybindings.js::unbindKey"
 backing_rust = "src/protocol/mod.rs::KeyBindingRule"
 deno_op = "op_clay_keybindings_unbind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_unbind_key"
+deno_ops_batch = ["op_clay_keybindings_unbind_keys"]
 documentation_path = "docs/reference/clay-js-api/keybindings/unbind-key.md"
 key_bindings = []
 custom_properties = ["key:string", "scope:enum=editor", "when:string"]

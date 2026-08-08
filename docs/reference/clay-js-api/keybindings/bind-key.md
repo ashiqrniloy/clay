@@ -78,6 +78,37 @@ bindKey("Ctrl+Shift+R", clientRequestResync(), { scope: "editor" });
 bindKey("Ctrl+Shift+D", clientDismissRecovery(), { scope: "editor" });
 ```
 
+Table form (one call, one scope, a chord → command map; returns the bound
+records in table order):
+
+```ts
+import { bindKey } from "clay:keybindings";
+
+const bound = bindKey({
+  scope: "editor",
+  bindings: {
+    "Ctrl+O": "clay.documents.clientOpenFileDialog",
+    "Ctrl+S": "clay.documents.serverSaveDocument",
+    "Ctrl+P": "clay.workspace.openFuzzyFile",
+  },
+});
+// bound.length === 3
+```
+
+The table form is validated all-or-nothing: every chord and command ID is
+validated before any binding is applied, so a bad entry rejects the whole
+table with its 1-based entry index in the diagnostic
+(`clay.keybindings.invalid_bind: entry 2: ...`) and nothing is bound.
+Duplicate chords inside one table collapse to the last value (JSON object
+semantics), preserving the per-chord "last binding wins" rule. Batch unbind
+mirrors the shape:
+
+```ts
+import { unbindKey } from "clay:keybindings";
+
+unbindKey({ scope: "editor", keys: ["Ctrl+O", "Ctrl+S", "Ctrl+P"] });
+```
+
 ## Example
 
 ```ts
@@ -104,6 +135,29 @@ bindKey("Ctrl+Shift+R", clientRequestResync(), { scope: "editor" });
 bindKey("Ctrl+Shift+D", clientDismissRecovery(), { scope: "editor" });
 // Configure the Phase 19 runtime reload route from ~/.config/clay/init.js.
 bindKey("Ctrl+Shift+R", "clay.runtime.reloadConfiguration", { scope: "global" });
+```
+
+The same configuration expressed with the table form (scope typed once,
+command prefixes typed once):
+
+```ts
+bindKey({
+  scope: "editor",
+  bindings: {
+    "Ctrl+O": "clay.documents.clientOpenFileDialog",
+    "Ctrl+S": "clay.documents.serverSaveDocument",
+    "Ctrl+Shift+O": clientOpenFolderDialog(),
+    "Ctrl+Shift+C": clientCopySelection(),
+    "Ctrl+Shift+X": clientCutSelection(),
+    "Ctrl+Shift+V": clientPasteClipboard(),
+    "Alt+Backspace": clientUndo(),
+    "Ctrl+Y": clientRedo(),
+    "Ctrl+Shift+E": clientShowOpenDocuments(),
+    "Ctrl+Shift+R": clientRequestResync(),
+    "Ctrl+Shift+D": clientDismissRecovery(),
+  },
+});
+bindKey({ scope: "global", bindings: { "Ctrl+Shift+R": "clay.runtime.reloadConfiguration" } });
 ```
 
 Phase 18.8 note: `clay.controlCenter.open` is a fixed built-in server-first command id (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`). Binding it through `bindKey` is the documented configuration surface for the Control Center launch route; no default chord exists in Rust. Activating the bound key enqueues an inert command intent that the server-owned `CommandExecutor` validates before any side effect. The transient menu session itself is Clay-owned internal state and is not a callable `clay:configuration` API; see `docs/reference/clay-js-api/configuration.md`.

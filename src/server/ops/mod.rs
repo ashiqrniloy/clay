@@ -73,8 +73,9 @@ use self::{
     },
     git::{op_clay_git_list_statuses, op_clay_git_refresh_status},
     keybindings::{
-        op_clay_keybindings_bind_key, op_clay_keybindings_list_key_bindings,
-        op_clay_keybindings_unbind_key,
+        op_clay_keybindings_bind_key, op_clay_keybindings_bind_keys,
+        op_clay_keybindings_list_key_bindings, op_clay_keybindings_unbind_key,
+        op_clay_keybindings_unbind_keys,
     },
     language_intelligence::{
         op_clay_language_register_intelligence_provider, op_clay_language_store_intelligence_result,
@@ -1831,7 +1832,9 @@ extension!(
         op_clay_git_list_statuses,
         op_clay_git_refresh_status,
         op_clay_keybindings_bind_key,
+        op_clay_keybindings_bind_keys,
         op_clay_keybindings_unbind_key,
+        op_clay_keybindings_unbind_keys,
         op_clay_keybindings_list_key_bindings,
         op_clay_behavior_get_active_manifest,
         op_clay_behavior_list_routes,
@@ -1994,7 +1997,7 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 79);
+        assert_eq!(trusted.len(), 81);
         // 44 = 36 public contribution ops + the seven shared `editor-control`
         // gated editor ops + the gated programmatic execution op (follow-up
         // round); visibility grants nothing without approved permission +
