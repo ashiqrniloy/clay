@@ -418,3 +418,137 @@ tree, and per-pane open documents. The shell side of the design:
 - `plans/025-Phase18.2-Masonry-Clay-Shell-and-Pane-Runtime-Foundation.md`
 - `plans/064-Phase20.3-Layout-Primitives-Splits-Panel-Resizing-and-Screen-Division.md`
 - `plans/072-Phase22.1-Equal-Area-Window-Splits.md`
+
+## Phase 22.6: Window-Model Accessibility and Announcements
+
+Phase 22.6 (2026-08-08) adds the window-model accessibility contract and
+its budgets. Two surfaces: a **structural tree** (roles/names for the tab
+bar, tab cards, and panes) and **polite live announcements** for tab and
+split changes. The public contract (roles table, exact announcement
+strings, sanitization rules) lives in `docs/development/accessibility.md`;
+this section documents the implementation.
+
+### Structural tree (`ClayShellWidget::accessibility`)
+
+- **Virtual-node pattern**: the shell reuses the synthetic-child precedent
+  from `PaneDocumentView::accessibility` (`NodeId::from(WidgetId::next())`,
+  push into `ctx.tree_update().nodes`). AccessKit 0.21 has no
+  `insert_children`, so the shell collects `node.children().to_vec()` and
+  calls `node.set_children(once(tablist_id).chain(active_hosts).chain(
+  once(status_id)))`. Children are rebuilt on every a11y pass (cheap; the
+  pass only runs when the tree is active).
+- **Inactive-tab fix**: pre-22.6 every tab's pane hosts appeared in the
+  tree (inactive chromes are laid out at zero size, not stashed, so they
+  were in `children_ids`). The shell now filters to the ACTIVE tab's hosts,
+  so an inactive tab's panes are never announced or visited. The filter
+  needs the arena-insertion truth: `TabChrome.registered_panes`
+  (`BTreeSet<PaneId>`) records which hosts a register pass actually
+  inserted — `MutateCtx::get_mut` panics on pods not yet in the parent's
+  children arena, and `apply_layout_update` syncing hosts before reconcile
+  was too late (task-3 regression). Reconcile updates counts only for
+  registered hosts.
+- **TabList/Tab**: when `tab_cards.len() >= 2`, one `Role::TabList`
+  (`Workspace tabs`) precedes the pane hosts with one `Role::Tab` per card
+  in card order — sanitized workspace basename, `selected` on
+  `card.client_id == self.active_tab` (`set_selected`, `is_selected` →
+  `Option<bool>`). Single-tab windows keep the pre-22.6 tree shape (no
+  TabList noise). Cards stay painted chrome; the nodes are informational
+  (pane hosts remain the focusable units; keyboard switching is the 22.4
+  tab commands).
+- **Pane labels**: `PaneContentHost` gained `pane_count` (default 1,
+  `with_pane_count` builder, `set_pane_count` during
+  `reconcile_pane_hosts`) and `document_display_name`
+  (`set_document_display_name`). Labels: `Empty pane N of M` /
+  `Pane N of M: editor` / `Pane N of M: {name}` / `Pane N of M: document`
+  (name unknown). Names arrive from the driver via
+  `set_pane_document_name(path)` which runs `sanitize_document_display_name`
+  (pub(crate) in `src/editor/accessibility.rs`, invisible to the bin crate,
+  so sanitization happens at the shell boundary).
+- **Geometry**: `node_window_size` uses `AccessCtx::size()` (no
+  `node.bounds()` needed); `accesskit_rect` builds `Rect` literals
+  (accesskit Rect has no `new`).
+
+### Announcements (task 4)
+
+- One persistent shell-owned `Role::Status` node with
+  `set_live(Live::Polite)` is ALWAYS the last child; its label is
+  `self.announcement: Option<String>` (empty until the first action).
+  Being persistent keeps AT live-region registration stable across tree
+  rebuilds. `announce()` sets the label and calls
+  `ctx.request_accessibility_update()` — the tree is invalidated only when
+  the announcement changes.
+- `compose_announcement(kind, name, position, count)` is an O(1) builder
+  over `AnnouncementKind` (9 variants: TabActivated/TabCreated/TabClosed/
+  SplitPaneVertical/SplitPaneHorizontal/PaneAdded/PaneClosed/
+  PaneMovedForward/PaneMovedBackward); names are sanitized inside, strings
+  are char-truncated to `TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS`
+  (256, the shared transient-menu budget; the cap is defense-in-depth —
+  the 64-char name cap (`ACCESSIBILITY_DISPLAY_NAME_MAX_CHARS`) binds
+  first).
+- **User-initiated paths only** (driver, `src/main.rs`): `switch_tab`
+  returns `bool` and `apply_tree_change` returns `bool` so no-op
+  operations never announce; `activate_tab` announces TabActivated after a
+  real switch, `mount_tab` (its single call site is the new-tab dialog)
+  TabCreated, `remove_tab`/registry reconcile TabClosed, and the
+  `apply_shell_client_command` pane arms Split/Pane announcements only when
+  the tree actually changed. Focus moves, repaints, startup/restore, and
+  no-ops stay silent. Announcements are unconditional (no configuration
+  key; see task 10).
+
+### Budgets and baselines (task 5)
+
+- `src/perf/budgets.rs`: advisory `PANE_PAINT_P95_BUDGET_MS = 1` and
+  `TAB_SWITCH_P95_BUDGET_MS = 1` (window_baselines measured 68–807 ns,
+  linear in pane count), hard
+  `MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES = 4 *
+  DECORATION_PAYLOAD_BUDGET_BYTES` (32768).
+- `src/perf/baselines.rs`: `pane_chrome_piece_count(n)` /
+  `tab_switch_geometry_work(n)` (pub, bench-facing; the focus ring counts
+  only when `pane_count > 1`) over pub(crate) `pane_split_tree_with` /
+  `working_area_layout_with` (balanced comb trees, ≤ 4 panes per the
+  `MAX_PANES_PER_TAB` cap). `benches/window_baselines.rs` (6th Cargo.toml
+  bench entry) benches pane counts 1/2/4/8 as pure geometry work.
+
+### Key Invariants
+
+- Tree order is always TabList (2+ cards) → active pane hosts (pane order)
+  → Status announcement node; inactive-tab hosts are unreachable.
+- One announcement per real user action; no announcement on no-ops/focus
+  moves/repaints; labels carry sanitized basenames only (never host paths,
+  clipboard, or control chars).
+- The a11y nodes are virtual — no new focusable widgets, no new
+  ComponentKind/style tokens, no package-facing surface (task 9 pins
+  op/facade absence).
+
+### Source Paths
+
+- `src/masonry_shell.rs`: `accessibility` (tree chain), `announce`,
+  `announce_tab_activated`/`announce_tab_created` (pub — bin crate),
+  `announce_pane_change` (private), `compose_announcement`/`AnnouncementKind`
+  (pub(crate)), `set_pane_document_name`, `reconcile_pane_hosts` +
+  `registered_panes`, `node_window_size`/`accesskit_rect`.
+- `src/masonry_pane_host.rs`: `pane_count`, `document_display_name`,
+  `with_pane_count`/`set_pane_count`/`set_document_display_name` (pub(crate)),
+  label formats in `accessibility`.
+- `src/main.rs`: `switch_tab -> bool`, `apply_tree_change -> bool`,
+  `activate_tab`/`mount_tab`/`remove_tab` announcement call sites,
+  `route_document_opened`/`route_document_event` label routing;
+  `src/client/mod.rs`: `ClientConnectionEvent::metadata_path`.
+- `src/editor/accessibility.rs`: `sanitize_document_display_name`
+  (pub(crate), 64-char cap).
+
+### Tests
+
+- `src/masonry_shell.rs` (`cargo test --lib masonry_shell --quiet`): 10
+  a11y tests via the `access_tree` helper (`EnableAccessTree` event then
+  `redraw()` → `TreeUpdate`) — single-tab no-TabList, TabList/Tab selected
+  state, inactive-tab hiding, pane `N of M` labels, exact announcement
+  strings (builder table, cap/path-free, switch/close, split no-op
+  silence, focus-move silence), `tab_switch_submits_no_actions_or_messages`.
+- `src/masonry_pane_host.rs`: pane-count defaulting and label updates.
+- `tests/performance_budgets.rs` (pins), `tests/editor_performance_
+  invariants.rs` (linear chrome work, tab-switch no-reserialization source
+  guard, 4-pane aggregate payload), `tests/rust_visibility_api_mapping.rs`
+  (22.6 names op/facade-free, internals pub(crate)/private).
+- Manual: `test-plan/13-window-splits.md` S23–S28,
+  `test-plan/14-tabs.md` T50–T56.

@@ -530,21 +530,50 @@ impl Driver {
                         shell.widget.pane_targets_for(client_id),
                     )
                 });
-        let mut ordered: Vec<WidgetId> = Vec::with_capacity(targets.len());
-        if let Some((_, target)) = targets.iter().find(|(pane, _)| *pane == active) {
-            ordered.push(*target);
+        let mut ordered: Vec<(PaneId, WidgetId)> = Vec::with_capacity(targets.len());
+        if let Some((pane, target)) = targets.iter().find(|(pane, _)| *pane == active) {
+            ordered.push((*pane, *target));
         }
-        for (_, target) in &targets {
-            if !ordered.contains(target) {
-                ordered.push(*target);
+        for (pane, target) in &targets {
+            if !ordered.iter().any(|(_, existing)| *existing == *target) {
+                ordered.push((*pane, *target));
             }
         }
-        for target in ordered {
+        for (pane, target) in ordered {
             if self.apply_event_to_target(ctx, window_id, chrome_id, target, event.clone()) {
+                // Phase 22.6: keep the consuming pane's accessibility label
+                // in sync with the document it now shows.
+                if let Some(path) = event.metadata_path() {
+                    self.set_pane_document_name(ctx, window_id, client_id, pane, path);
+                }
                 return;
             }
         }
         // Unmapped documents (pane closed mid-flight): dropped.
+    }
+
+    /// Phase 22.6: set a pane host's accessibility document name from a raw
+    /// document path (sanitized at the shell boundary).
+    fn set_pane_document_name(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        client_id: ClientId,
+        pane: PaneId,
+        path: &str,
+    ) {
+        let path = path.to_string();
+        ctx.render_root(window_id)
+            .edit_widget(self.shell_widget_id, |mut widget| {
+                if let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() {
+                    shell.widget.set_pane_document_name(
+                        &mut shell.ctx,
+                        client_id,
+                        pane,
+                        Some(&path),
+                    );
+                }
+            });
     }
 
     /// Route a request-scoped event (no document id) to the focused pane's
@@ -595,6 +624,9 @@ impl Driver {
                 .get_mut(&client_id)
                 .and_then(|tab| take_pending_open_for(&mut tab.pending_opens, metadata))
         });
+        // Phase 22.6: document path for the consuming pane's accessibility
+        // label, captured before `event` moves into the apply calls.
+        let opened_path: Option<String> = metadata.map(|metadata| metadata.path.clone());
         let target_pane = match owner {
             Some(pane) => {
                 // Duplicate open (or re-open of a retained document): apply to
@@ -615,6 +647,9 @@ impl Driver {
                 }
                 if client_id == self.active_tab && pane != active {
                     self.focus_pane_target(ctx, window_id, pane);
+                }
+                if let Some(path) = &opened_path {
+                    self.set_pane_document_name(ctx, window_id, client_id, pane, path);
                 }
                 return;
             }
@@ -641,6 +676,9 @@ impl Driver {
                     let _ = self.apply_event_to_target(ctx, window_id, chrome_id, view_id, event);
                 }
             }
+        }
+        if let Some(path) = &opened_path {
+            self.set_pane_document_name(ctx, window_id, client_id, target_pane, path);
         }
     }
 
@@ -994,6 +1032,11 @@ impl Driver {
                         .widget
                         .install_tab(&mut shell.ctx, client_id, tab_chrome);
                     shell.widget.set_active_tab(&mut shell.ctx, client_id);
+                    // Phase 22.6: one polite announcement per user-initiated
+                    // tab (restore mounts don't route here).
+                    shell
+                        .widget
+                        .announce_tab_created(&mut shell.ctx, &workspace_root.to_string_lossy());
                     shell.ctx.request_render();
                 }
             });
@@ -1028,9 +1071,9 @@ impl Driver {
         ctx: &mut DriverCtx<'_, '_>,
         window_id: WindowId,
         client_id: ClientId,
-    ) {
+    ) -> bool {
         if client_id == self.active_tab || !self.tabs.contains_key(&client_id) {
-            return;
+            return false;
         }
         let (chrome_id, target) =
             ctx.render_root(window_id)
@@ -1054,6 +1097,7 @@ impl Driver {
         if let Some(target) = target {
             let _ = ctx.render_root(window_id).focus_on(Some(target));
         }
+        true
     }
 
     // -- Phase 22.5: whole-window restore --
@@ -1651,7 +1695,19 @@ impl Driver {
             return;
         }
         self.enqueue_activate(client_id);
-        self.switch_tab(ctx, window_id, client_id);
+        if self.switch_tab(ctx, window_id, client_id) {
+            // Phase 22.6: one polite announcement per user-initiated switch
+            // (restore and registry-reconcile switches don't route here).
+            let shell_widget_id = self.shell_widget_id;
+            ctx.render_root(window_id)
+                .edit_widget(shell_widget_id, |mut widget| {
+                    if let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() {
+                        shell
+                            .widget
+                            .announce_tab_activated(&mut shell.ctx, client_id);
+                    }
+                });
+        }
     }
 
     /// Phase 22.4: enqueue `TabCommand::Close` once a tab passed the close

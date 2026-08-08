@@ -34,6 +34,18 @@ Each primitive maps to an accessibility role:
 - `paint_icon_slot` → `img` or `presentation`
 - `paint_tooltip_shell` → `tooltip`
 
+### Tab bar chrome (Phase 22.3, accessibility Phase 22.6)
+
+The tab strip (`tab_card_chrome` in `src/shell/primitives.rs`, `TabCard`
+geometry in `src/masonry_shell.rs`) is painted chrome, not a package-facing
+widget. Its accessibility surface is a shell-owned virtual `TabList` node
+(`Workspace tabs`) with one `Tab` per card — sanitized workspace basename,
+`selected` on the active card — present only when two or more cards exist.
+Split dividers were already covered by `paint_divider` → `separator`.
+Announcements for tab/split changes come from the shell's persistent
+`Status` live-region node (`Live::Polite`), one per user action. See
+[Accessibility (Phase 22.6)](../development/accessibility.md).
+
 ## Primitive inventory
 
 | Primitive | Purpose | Token mapping | Accessibility role |
@@ -46,6 +58,7 @@ Each primitive maps to an accessibility role:
 | `paint_kbd_hint` | Keyboard shortcut hint | `color.surface.kbd`, `color.text.kbd`, `dimension.radius.kbd`, `spacing.kbd.padding.x`, `spacing.kbd.padding.y`, `typography.kbd` | `kbd` (via label) |
 | `paint_icon_slot` | Standardized icon placeholder | `dimension.icon.size`, `dimension.icon.slot.size`, `color.text.muted`, `dimension.radius.icon` | `img` or `presentation` |
 | `paint_tooltip_shell` | Tooltip background/border | `color.surface.overlay`, `color.border`, `dimension.border.width`, `dimension.radius.tooltip`, `spacing.tooltip.padding` | `tooltip` |
+| `tab_card_chrome` (Phase 22.3) | Tab card background/text with interaction states and selection | `list_row_fill_color`/`disabled_text_color` state mapping, `color.surface.list`, `color.surface.selected`, `color.surface.hover`, `color.surface.active`, `color.text.disabled`, `opacity.disabled` | informational `Tab` under the shell `TabList` (virtual node, not a widget) |
 
 ## State-color helpers (Phase 20.4)
 

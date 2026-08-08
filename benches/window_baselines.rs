@@ -1,0 +1,31 @@
+// Phase 22.6 (plan 077 task 5): window-model performance baselines — pane
+// paint chrome geometry and tab-switch layout geometry. Both are pure
+// geometry math over the pane tree (shell chrome pieces per pane count);
+// editor-surface paint is viewport-bounded and benched separately in
+// editor_baselines. Results pin the advisory PANE_PAINT_P95_BUDGET_MS and
+// TAB_SWITCH_P95_BUDGET_MS constants (docs/development/performance.md).
+use clay::perf::baselines::{pane_chrome_piece_count, tab_switch_geometry_work};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+
+fn pane_paint_baselines(c: &mut Criterion) {
+    let mut group = c.benchmark_group("pane_paint_baselines");
+    for panes in [1usize, 2, 4] {
+        group.bench_with_input(BenchmarkId::from_parameter(panes), &panes, |b, &panes| {
+            b.iter(|| pane_chrome_piece_count(panes));
+        });
+    }
+    group.finish();
+}
+
+fn tab_switch_baselines(c: &mut Criterion) {
+    let mut group = c.benchmark_group("tab_switch_baselines");
+    for panes in [1usize, 2, 4] {
+        group.bench_with_input(BenchmarkId::from_parameter(panes), &panes, |b, &panes| {
+            b.iter(|| tab_switch_geometry_work(panes));
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, pane_paint_baselines, tab_switch_baselines);
+criterion_main!(benches);

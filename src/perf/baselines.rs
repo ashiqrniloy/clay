@@ -395,3 +395,85 @@ pub fn protocol_hello_roundtrip() -> u32 {
         _ => 0,
     }
 }
+
+// ── Phase 22.6 (plan 077 task 5): window-model geometry baselines ──
+//
+// Advisory pane-paint / tab-switch baselines. The shell's paint pass
+// (dividers, fixed-slot chrome, focus ring) and a tab switch's layout pass
+// (same geometry for the newly active tab) are pure geometry math over the
+// pane tree, so the benchable proxy is the chrome piece count and the time
+// to compute it. Editor-surface paint is viewport-bounded and separately
+// benched (`editor_baselines`). Results feed the advisory
+// `PANE_PAINT_P95_BUDGET_MS` / `TAB_SWITCH_P95_BUDGET_MS` constants
+// (docs/development/performance.md, Phase 22.6 section).
+
+use crate::shell::layout::{
+    PaneId, PaneSplitTree, WorkingAreaId, WorkingAreaLayout, WorkingAreaLayoutUpdate,
+};
+use masonry::kurbo::Rect;
+
+/// A balanced `pane_count`-leaf split tree (active pane 1).
+pub(crate) fn pane_split_tree_with(pane_count: usize) -> PaneSplitTree {
+    let mut tree = PaneSplitTree::single_leaf(PaneId(1));
+    for _ in 1..pane_count {
+        tree = tree
+            .add_equal_pane()
+            .expect("adding a pane to a valid tree succeeds");
+    }
+    tree
+}
+
+/// A working-area layout with `pane_count` panes and no fixed slots.
+pub(crate) fn working_area_layout_with(pane_count: usize) -> WorkingAreaLayout {
+    let mut layout = WorkingAreaLayout::single_editor();
+    if pane_count > 1 {
+        layout
+            .apply_update(WorkingAreaLayoutUpdate {
+                base_version: layout.version(),
+                working_area_id: WorkingAreaId(1),
+                pane_tree: pane_split_tree_with(pane_count),
+                editor_pane_id: PaneId(1),
+                pane_slots: Vec::new(),
+            })
+            .expect("valid pane tree update");
+    }
+    layout
+}
+
+/// Chrome pieces the shell paints for an N-pane window: split dividers
+/// (N-1), fixed-slot handles (none in the default layout), and the focus
+/// ring (1 when N > 1). Linear in pane count: 0, N, N for 1, 2+, N panes.
+pub fn pane_chrome_piece_count(pane_count: usize) -> usize {
+    let layout = working_area_layout_with(pane_count);
+    let area = Rect::new(0.0, 0.0, 1200.0, 800.0);
+    let dividers = layout.pane_tree().divider_rects(area).len();
+    let slots = layout
+        .pane_slot_geometry(layout.active_pane_id(), area)
+        .map_or(0, |geometry| geometry.fixed_slots.len());
+    // The shell paints the focus ring only while more than one pane exists.
+    let focus = if pane_count > 1 {
+        usize::from(layout.focused_pane_rect(area).is_some())
+    } else {
+        0
+    };
+    dividers + slots + focus
+}
+
+/// Geometry work a tab switch triggers on the newly active tab's layout
+/// pass: the same chrome pieces as a paint pass plus the editor component
+/// rect. No document text, serialization, or IPC is involved.
+pub fn tab_switch_geometry_work(pane_count: usize) -> usize {
+    let layout = working_area_layout_with(pane_count);
+    let area = Rect::new(0.0, 0.0, 1200.0, 800.0);
+    let dividers = layout.pane_tree().divider_rects(area).len();
+    let slots = layout
+        .pane_slot_geometry(layout.active_pane_id(), area)
+        .map_or(0, |geometry| geometry.fixed_slots.len());
+    let focus = if pane_count > 1 {
+        usize::from(layout.focused_pane_rect(area).is_some())
+    } else {
+        0
+    };
+    let editor = usize::from(layout.editor_component_rect(area).width() > 0.0);
+    dividers + slots + focus + editor
+}

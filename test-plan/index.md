@@ -39,10 +39,10 @@ ligature glyphs, IME feel, native dialogs, focus, timing.
 | 08 | [Syntax and text objects](08-syntax-and-textobjects.md) | grammar highlighting, textobject/smart-select, engine tiers, advisory degrade | `docs/development/manual-editor-capabilities-test-plan.md` |
 | 09 | [Packages and modes](09-packages-and-modes.md) | package loading, mode classification/activation, settings UI, theme switching | `docs/development/launch-and-gui-smoke.md` |
 | 10 | [Keybindings and commands](10-keybindings-and-commands.md) | bindKey override, unbind, deny-by-default, execution push channel, Global-scope tab command bindings (22.4) | `docs/development/manual-editor-capabilities-test-plan.md` |
-| 11 | [Performance](11-performance.md) | large files, scroll/type latency, parse feel | `docs/development/performance.md` |
+| 11 | [Performance](11-performance.md) | large files, scroll/type latency, parse feel, window-model budgets (22.6: pane paint / tab switch / decoration aggregate) | `docs/development/performance.md` |
 | 12 | [Platform: Windows](12-platform-windows.md) | MSVC toolchain, named pipes, native dialogs | `docs/development/windows.md` |
-| 13 | [Window splits](13-window-splits.md) | split/close/add-equal/move/resize panes, pane focus policies, per-pane document views + concurrent modes (22.2), shell keybinding overrides (per active tab since 22.3), per-tab persistence cross-check (22.5) | `docs/reference/primitives/shell-layout-strategy.md` |
-| 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/masonry-shell.md`, `docs/wiki/modules/tabs-and-clients.md` |
+| 13 | [Window splits](13-window-splits.md) | split/close/add-equal/move/resize panes, pane focus policies, per-pane document views + concurrent modes (22.2), shell keybinding overrides (per active tab since 22.3), per-tab persistence cross-check (22.5), pane a11y roles + split/pane announcements (22.6) | `docs/reference/primitives/shell-layout-strategy.md`, `docs/development/accessibility.md` |
+| 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), tab a11y (TabList/Tab roles, activate/create/close announcements) + cross-tab grant isolation sanity (22.6), single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/masonry-shell.md`, `docs/wiki/modules/tabs-and-clients.md`, `docs/development/accessibility.md` |
 
 ## Coverage matrix (what to run when)
 
@@ -59,6 +59,7 @@ ligature glyphs, IME feel, native dialogs, focus, timing.
 | Keybinding routing / commands | 10, 05 |
 | Shell layout / panes / splits / pane focus | 13, 10, 01 |
 | Tabs / tab bar / keyboard tab chords / multi-connection / reconnect / window-state persistence | 14, 13, 01 |
+| Pane/tab accessibility (roles, names, announcements) / cross-tab isolation | 13, 14 |
 | Pane document views / concurrent modes / duplicate-open routing | 13, 03, 09 |
 | Anything user-visible | 01 always (launch gate) |
 

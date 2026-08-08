@@ -799,3 +799,98 @@ fn ui_design_tokens_resolve_without_package_javascript_in_paint_layout_or_input_
         "PanelDefaults must live in shell/theme.rs as the resolved token-backed geometry source"
     );
 }
+
+// ── Phase 22.6 (plan 077 task 5): window-model performance invariants ──
+
+#[test]
+fn pane_chrome_geometry_work_scales_linearly_with_pane_count() {
+    // The shell's per-pane paint work is chrome geometry: split dividers
+    // (N-1), fixed-slot handles (none in the default layout), and the focus
+    // ring (1 when N > 1). Piece count must be linear in pane count, never
+    // document-size or tab-count dependent.
+    use clay::perf::baselines::pane_chrome_piece_count;
+    assert_eq!(pane_chrome_piece_count(1), 0);
+    assert_eq!(pane_chrome_piece_count(2), 2);
+    assert_eq!(pane_chrome_piece_count(4), 4);
+    assert_eq!(
+        pane_chrome_piece_count(4) - pane_chrome_piece_count(2),
+        pane_chrome_piece_count(2) - pane_chrome_piece_count(1),
+        "pane chrome work must grow linearly with pane count"
+    );
+}
+
+#[test]
+fn tab_switch_path_performs_no_document_reserialization() {
+    // A tab switch mounts the target tab's chrome at its pane rects; it must
+    // never serialize document text, send client messages, enqueue tab
+    // commands, or touch the document lifecycle. The widgets involved are
+    // the shell and the pane host (the driver owns all queues/IPC).
+    for file in ["src/masonry_shell.rs", "src/masonry_pane_host.rs"] {
+        let src = fs::read_to_string(file).unwrap_or_else(|error| panic!("read {file}: {error}"));
+        let body = non_test_body(&src);
+        for forbidden in [
+            "write_client_message",
+            "ClientMessage",
+            "rkyv",
+            "enqueue_tab_command",
+            "InitialDocument",
+            "DocumentOpened",
+            "DocumentReloaded",
+            "encode_client_message",
+            "encode_server_message",
+        ] {
+            assert!(
+                !body.contains(forbidden),
+                "{file} tab-switch path must not serialize documents or send messages: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn four_pane_decoration_aggregate_payload_fits_budget() {
+    // One decoration update across a 4-pane window: each pane's payload
+    // stays within the per-pane budget and the aggregate stays within the
+    // Phase 22.6 4-pane ceiling. Representative syntax-decorated set per
+    // pane (same shape as the Phase 16 payload gate).
+    use clay::perf::budgets::{
+        DECORATION_PAYLOAD_BUDGET_BYTES, MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES,
+    };
+    use clay::protocol::{DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan};
+
+    let mut aggregate = 0usize;
+    for pane in 1..=4 {
+        let set = DecorationSet {
+            document_id: pane as u64,
+            document_version: 3,
+            package_prefix: "markdown".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: 8 * 1024 * 1024,
+            viewport_byte_end: 8 * 1024 * 1024 + 256 * 1024,
+            spans: vec![DecorationSpan::from_style_token(
+                8 * 1024 * 1024,
+                8 * 1024 * 1024 + 16,
+                DecorationKind::Syntax,
+                "markup.heading.1",
+                10,
+                DecorationProvenance {
+                    package_name: "@clay/markdown".to_string(),
+                    package_version: "0.1.0".to_string(),
+                    package_prefix: "markdown".to_string(),
+                },
+            )],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&set)
+            .unwrap_or_else(|error| panic!("serialize pane {pane} decorations: {error}"))
+            .len();
+        assert!(
+            bytes <= DECORATION_PAYLOAD_BUDGET_BYTES,
+            "pane {pane} decoration payload {bytes} exceeds per-pane budget {DECORATION_PAYLOAD_BUDGET_BYTES}"
+        );
+        aggregate += bytes;
+    }
+    assert!(
+        aggregate <= MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES,
+        "4-pane aggregate decoration payload {aggregate} exceeds budget {MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES}"
+    );
+}

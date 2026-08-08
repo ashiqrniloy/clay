@@ -76,6 +76,33 @@ Major-mode manifests are now scoped: the server keeps a global manifest plus per
 - Opens never grant authority client-side; the server's canonical-path duplicate detection and per-(client, document) leases remain authoritative.
 - Hot path: keystroke handling in a 4-pane shell touches only the focused pane, no IPC (guarded by `pane_document_typing_requires_no_server_or_js`).
 
+## Phase 22.6: Display-Name Plumbing for Pane Accessibility
+
+Phase 22.6 gives pane hosts numbered, document-named a11y labels
+(`Empty pane N of M` / `Pane N of M: editor` / `Pane N of M: {name}` /
+`Pane N of M: document`). The host cannot read its child widget during
+`accessibility()`, and `mount_document_view` takes no path, so the driver
+routes the display name down:
+
+- **`ClientConnectionEvent::metadata_path()`** (`src/client/mod.rs`) returns
+  `Some(&metadata.path)` only for `DocumentOpened`/`DocumentReloaded`
+  (the variants that carry a path; `ClientResyncSnapshot` has none).
+- **Driver routing** (`src/main.rs`): `route_document_event` preserves
+  `(pane, target)` pairs and calls `shell.set_pane_document_name(path)`
+  when consuming; `route_document_opened` captures `opened_path` and sets
+  the name in the owner and new-open branches. The alternative —
+  changing `apply_connection_event`'s signature — was rejected (ripples
+  through EditorWidget/view/tests); Masonry `Properties` flow downward,
+  so they cannot carry the name up.
+- **Shell boundary** (`src/masonry_shell.rs`): `set_pane_document_name`
+  maps `Option<&str>` through `sanitize_document_display_name`
+  (pub(crate) in `src/editor/accessibility.rs`, so the bin crate cannot
+  call it directly — sanitization happens here) and calls
+  `host.widget.set_document_display_name`, which requests an a11y update.
+  `clear_content` also clears the name. Hosts learn `M` via
+  `set_pane_count` during shell reconcile (guarded by
+  `registered_panes`, see the masonry-shell page).
+
 ## Known Ceilings
 
 - SDUI sidebars and package panels/overlays are window-scoped chrome (per-client), not per-pane; packages cannot contribute per-pane chrome yet.
@@ -88,7 +115,9 @@ Major-mode manifests are now scoped: the server keeps a global manifest plus per
 - `src/masonry_pane_document.rs`: event isolation, session stash/activate, close-pane release + blank reset, dirty-close gate with conflict menu, per-document edit queueing, duplicate-open no-op, cross-pane menu aggregation + routing, failed-opens leave state unchanged, runtime-snapshot baseline restore, scope-aware manifest install. Command: `cargo test --lib masonry_pane_document --quiet`.
 - `src/masonry_shell.rs`: panes host independent document views with document-scoped routing, typing isolation hot-path guard, routing-target cleanup on pane close, concurrent per-pane major modes isolated across behavior manifests. Command: `cargo test --lib masonry_shell --quiet`.
 - `src/client/mod.rs`: per-document sync state, stale-ack filtering by document, per-document reload updates. Command: `cargo test --lib client --quiet`.
-- `src/main.rs`: `decide_open_route` pure-function tests (owner > pending > active, path matching).
+- `src/main.rs`: `decide_open_route` pure-function tests (owner > pending > active, path matching);
+  Phase 22.6 label routing (`route_document_event`/`route_document_opened`
+  keep `(pane, target)` pairs and set display names).
 - Guard suites scanning the new module: `tests/editor_performance_invariants.rs`, `tests/ui_primitive_conformance.rs`.
 - Full suite: `cargo test --all-targets` (1916 passing).
 

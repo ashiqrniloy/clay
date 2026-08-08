@@ -6730,6 +6730,152 @@ await loadPackage("@clay/markdown");"#,
         let _ = fs::remove_dir(root);
     }
 
+    /// Phase 22.6 (plan 077 task 6): a reconnected/reclaimed tab regains
+    /// only its own grants. Tab A's disconnect releases every document
+    /// grant; a fresh connection re-opening one of the tab's documents
+    /// inherits nothing — the tab's other document stays unknown until
+    /// explicitly re-opened.
+    #[tokio::test]
+    async fn reconnected_tab_regains_only_its_own_reopened_grants() {
+        let root = temp_workspace("tab-reclaim-grants");
+        fs::write(root.join("note.md"), "hello\n").unwrap();
+        fs::write(root.join("second.md"), "second\n").unwrap();
+        let mut workspace_state_value = WorkspaceState::new();
+        let root_id = workspace_state_value.add_root(&root).unwrap();
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let runtime_generation = runtime_generation();
+        let parse_coordinator = parse_coordinator();
+        let document_analysis =
+            crate::server::document_analysis::DocumentAnalysisCoordinator::default();
+
+        // Tab A's connection (99) opens both of the tab's documents.
+        let mut connection_a = TestConnection::connect(
+            99,
+            Arc::clone(&document),
+            Arc::clone(&behavior),
+            Arc::clone(&workspace),
+            runtime_generation.clone(),
+            parse_coordinator.clone(),
+            document_analysis.clone(),
+            language_intelligence_coordinator(),
+        )
+        .await;
+        let first_document =
+            open_document_until_opened(&mut connection_a, 99, root_id, "note.md").await;
+        let second_document =
+            open_document_until_opened(&mut connection_a, 99, root_id, "second.md").await;
+        assert_eq!(first_document, 1);
+        assert_eq!(second_document, 2);
+        connection_a.drain_until_quiet().await;
+        assert!(workspace.lock().await.document_handle(1).is_some());
+        assert!(workspace.lock().await.document_handle(2).is_some());
+
+        // Disconnect: every grant is released and both documents finalize.
+        connection_a.close().await;
+        assert!(
+            workspace.lock().await.document_handle(1).is_none(),
+            "disconnect must release the tab's first document grant"
+        );
+        assert!(
+            workspace.lock().await.document_handle(2).is_none(),
+            "disconnect must release the tab's second document grant"
+        );
+
+        // The reconnected tab (fresh connection 101) inherits nothing.
+        let mut connection_c = TestConnection::connect(
+            101,
+            Arc::clone(&document),
+            Arc::clone(&behavior),
+            Arc::clone(&workspace),
+            runtime_generation,
+            parse_coordinator,
+            document_analysis,
+            language_intelligence_coordinator(),
+        )
+        .await;
+        connection_c
+            .send(&ClientMessage::ListDocuments { client_id: 101 })
+            .await;
+        let list = connection_c.receive_response().await;
+        assert!(
+            matches!(list, ServerMessage::DocumentList { ref documents } if documents.is_empty()),
+            "reconnected tab must inherit no grants, got {list:?}"
+        );
+
+        // Re-opening the tab's own document grants only the new connection:
+        // the old grant was finalized, so the file re-opens as a fresh
+        // document with a fresh lease, not as a restored one.
+        let reopened = open_document_until_opened(&mut connection_c, 101, root_id, "note.md").await;
+        assert_ne!(
+            reopened, first_document,
+            "a finalized grant must not be re-attached; re-open is a fresh grant"
+        );
+        connection_c.drain_until_quiet().await;
+        connection_c
+            .send(&ClientMessage::GetDocumentStatus {
+                client_id: 101,
+                document_id: second_document,
+            })
+            .await;
+        let status = connection_c.receive_response().await;
+        assert!(
+            matches!(
+                status,
+                ServerMessage::FileOperationFailed {
+                    code: FileErrorCode::UnknownDocument,
+                    ..
+                }
+            ),
+            "the tab's second document stays ungranted until re-opened, got {status:?}"
+        );
+        connection_c
+            .send(&ClientMessage::ListDocuments { client_id: 101 })
+            .await;
+        let list = connection_c.receive_response().await;
+        assert!(
+            matches!(list, ServerMessage::DocumentList { ref documents }
+                if documents.len() == 1 && documents[0].document_id == reopened),
+            "re-opened grant is the only grant, got {list:?}"
+        );
+
+        connection_c.close().await;
+        let _ = fs::remove_file(root.join("note.md"));
+        let _ = fs::remove_file(root.join("second.md"));
+        let _ = fs::remove_dir(root);
+    }
+
+    /// Open `path` and return the granted document id, skipping open-time
+    /// follow-up noise (behavior manifest, diagnostics, SDUI snapshot).
+    async fn open_document_until_opened(
+        connection: &mut TestConnection,
+        client_id: u64,
+        root_id: crate::protocol::WorkspaceRootId,
+        path: &str,
+    ) -> crate::protocol::DocumentId {
+        connection
+            .send(&ClientMessage::OpenDocument {
+                client_id,
+                workspace_root_id: root_id,
+                path: path.to_string(),
+            })
+            .await;
+        loop {
+            match connection.receive().await {
+                ServerMessage::DocumentOpened { metadata, .. } => return metadata.document_id,
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::SduiSnapshot { .. } => {}
+                other => panic!("unexpected message during open: {other:?}"),
+            }
+        }
+    }
+
     /// Runtime-diagnostic retention: consecutive duplicates collapse, the
     /// deque never exceeds its capacity, and drops are counted (Plan 060 T6,
     /// P1-8).

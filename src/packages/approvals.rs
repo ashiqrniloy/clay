@@ -730,6 +730,45 @@ mod tests {
         }
     }
 
+    /// Phase 22.6 (plan 077 task 6): package scopes are host-owned and
+    /// tab-independent. Approval records bind package identity and granted
+    /// capability/process sets only — no client, tab, pane, or workspace
+    /// keying — so tab create/close/move can neither widen nor narrow them.
+    /// The exact key set is pinned: a future grant-carrying field changes
+    /// the count and fails this test.
+    #[test]
+    fn approval_records_carry_no_tab_client_or_workspace_keying() {
+        let object = record("@vendor/example").to_json();
+        let object = object.as_object().expect("record serializes as an object");
+        let mut keys: Vec<&String> = object.keys().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec![
+                "api_prefix",
+                "approved_at",
+                "approved_by",
+                "capabilities",
+                "integrity",
+                "package",
+                "package_root",
+                "processes",
+                "relations",
+                "replacements",
+                "resolved_version",
+                "revoked",
+                "source",
+            ],
+            "approval record shape is the documented package-identity field set"
+        );
+        for forbidden in ["client", "tab", "pane", "workspace", "connection"] {
+            assert!(
+                !keys.iter().any(|key| key.contains(forbidden)),
+                "approval record must not carry {forbidden} keying"
+            );
+        }
+    }
+
     #[test]
     fn store_round_trips_and_revokes() {
         let root = temp_root("roundtrip");

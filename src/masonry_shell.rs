@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use masonry::accesskit::{Node, Role};
+use crate::perf::budgets::TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS;
+use masonry::accesskit::{Live, Node, NodeId, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
     AccessCtx, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, MutateCtx, NewWidget, PaintCtx,
@@ -226,6 +227,11 @@ pub struct TabChrome {
     pending_orphans: Vec<WidgetPod<PaneContentHost>>,
     /// Phase 22.1: pane activation policy (click vs focus-follows-cursor).
     pane_focus_policy: PaneFocusPolicy,
+    /// Phase 22.6: pane hosts already inserted in the Masonry tree by a
+    /// register pass. Newly synced hosts are absent until the next register
+    /// pass, and `MutateCtx::get_mut` panics on them, so accessibility count
+    /// updates skip them (they receive the count at creation instead).
+    registered_panes: BTreeSet<PaneId>,
 }
 
 impl TabChrome {
@@ -256,6 +262,7 @@ impl TabChrome {
         let mut editor = Some(editor);
         let mut pane_targets = BTreeMap::new();
         pane_targets.insert(editor_pane_id, editor_widget_id);
+        let pane_count = layout.pane_tree().pane_ids().len();
         let pane_hosts = layout
             .pane_tree()
             .pane_ids()
@@ -271,7 +278,10 @@ impl TabChrome {
                 } else {
                     PaneContentHost::placeholder(pane_id)
                 };
-                (pane_id, NewWidget::new(host).to_pod())
+                (
+                    pane_id,
+                    NewWidget::new(host.with_pane_count(pane_count)).to_pod(),
+                )
             })
             .collect();
         Self {
@@ -281,6 +291,7 @@ impl TabChrome {
             pane_targets,
             pending_orphans: Vec::new(),
             pane_focus_policy: PaneFocusPolicy::default(),
+            registered_panes: BTreeSet::new(),
         }
     }
 
@@ -318,6 +329,10 @@ pub struct ClayShellWidget {
     /// Phase 22.3: shell text paint uses the UI typography profile (default
     /// registry; syncing the active tab's typography is not wired in 22.3).
     typography: TypographyRegistry,
+    /// Phase 22.6 (task 4): pending polite live-region announcement text.
+    /// `None`/empty until the first window-model action; replaced (never
+    /// appended) per action.
+    announcement: Option<String>,
 }
 
 impl ClayShellWidget {
@@ -355,6 +370,7 @@ impl ClayShellWidget {
             tab_cards: Vec::new(),
             tab_bar_hover: None,
             typography: TypographyRegistry::default(),
+            announcement: None,
         }
     }
 
@@ -375,6 +391,7 @@ impl ClayShellWidget {
             tab_cards: Vec::new(),
             tab_bar_hover: None,
             typography: TypographyRegistry::default(),
+            announcement: None,
         }
     }
 
@@ -517,6 +534,26 @@ impl ClayShellWidget {
         if self.tab_cards.len() <= 2 {
             self.tab_bar_hover = None;
         }
+        // Phase 22.6 (task 4): announce the close (name/position from the
+        // registry cards; remaining count from the tabs map after removal).
+        // A connection-drop removal announces too — the tab visibly
+        // disappears, so the window-model change reaches screen-reader
+        // users either way.
+        let position = self
+            .tab_cards
+            .iter()
+            .position(|card| card.client_id == client_id)
+            .unwrap_or(0)
+            + 1;
+        let name = self
+            .tab_cards
+            .iter()
+            .find(|card| card.client_id == client_id)
+            .map(|card| card.name.as_str());
+        self.announce(
+            ctx,
+            compose_announcement(AnnouncementKind::TabClosed, name, position, self.tabs.len()),
+        );
         ctx.children_changed();
     }
 
@@ -555,6 +592,30 @@ impl ClayShellWidget {
             ctx.request_layout();
         }
         ctx.request_render();
+        ctx.request_accessibility_update();
+    }
+
+    /// Phase 22.6: set a pane's document display name from the raw document
+    /// `path` (the app driver calls this when a document open/reload lands
+    /// in the pane); the name is sanitized here, at the accessibility
+    /// boundary, so pane labels never announce host paths. `None` clears it.
+    pub fn set_pane_document_name(
+        &mut self,
+        ctx: &mut MutateCtx<'_>,
+        client_id: ClientId,
+        pane_id: PaneId,
+        path: Option<&str>,
+    ) {
+        let Some(host) = self
+            .tabs
+            .get_mut(&client_id)
+            .and_then(|tab| tab.pane_hosts.get_mut(&pane_id))
+        else {
+            return;
+        };
+        let name = path.map(crate::editor::accessibility::sanitize_document_display_name);
+        let mut host = ctx.get_mut(host);
+        host.widget.set_document_display_name(&mut host.ctx, name);
     }
 
     /// Phase 22.3: computed tab bar geometry for a window `size`. `None` when
@@ -808,6 +869,55 @@ impl ClayShellWidget {
         self.set_pane_focus_policy_for(self.active_tab, policy);
     }
 
+    /// Phase 22.6 (task 4): replace the polite live-region announcement text
+    /// and invalidate the accessibility tree. The tree rebuilds only on this
+    /// request (or an explicit `request_accessibility_update`), so repaints
+    /// alone never re-announce.
+    pub fn announce(&mut self, ctx: &mut MutateCtx<'_>, message: String) {
+        self.announcement = Some(message);
+        ctx.request_accessibility_update();
+    }
+
+    /// Phase 22.6 (task 4): announce a user-initiated tab switch. The driver
+    /// calls this only from `activate_tab` after a successful switch;
+    /// restore and registry-reconcile switches are model changes and stay
+    /// silent.
+    pub fn announce_tab_activated(&mut self, ctx: &mut MutateCtx<'_>, client_id: ClientId) {
+        let position = self
+            .tab_cards
+            .iter()
+            .position(|card| card.client_id == client_id)
+            .unwrap_or(0)
+            + 1;
+        let name = self
+            .tab_cards
+            .iter()
+            .find(|card| card.client_id == client_id)
+            .map(|card| card.name.as_str());
+        self.announce(
+            ctx,
+            compose_announcement(AnnouncementKind::TabActivated, name, position, 0),
+        );
+    }
+
+    /// Phase 22.6 (task 4): announce a user-initiated new tab. The driver
+    /// calls this from `mount_tab` after installing the chrome; restore
+    /// mounts (`install_restored_tab`) are model changes and stay silent.
+    pub fn announce_tab_created(&mut self, ctx: &mut MutateCtx<'_>, name: &str) {
+        let position = self.tabs.len();
+        self.announce(
+            ctx,
+            compose_announcement(AnnouncementKind::TabCreated, Some(name), position, 0),
+        );
+    }
+
+    /// Phase 22.6 (task 4): announce a completed pane-tree change with the
+    /// post-change pane count.
+    fn announce_pane_change(&mut self, ctx: &mut MutateCtx<'_>, kind: AnnouncementKind) {
+        let count = self.active().layout.pane_tree().pane_ids().len();
+        self.announce(ctx, compose_announcement(kind, None, 0, count));
+    }
+
     /// Phase 22.1: execute a client-routed shell pane command.
     ///
     /// No-ops at bounds (single pane close, cap reached, move at ends) without
@@ -824,53 +934,62 @@ impl ClayShellWidget {
             // SplitOrientation::Horizontal; "horizontal" = stacked → Vertical.
             ShellClientCommand::SplitPaneVertical => {
                 let new_id = self.active().layout.pane_tree().next_pane_id();
-                self.apply_tree_change(
-                    ctx,
-                    self.active().layout.pane_tree().split_pane(
-                        active,
-                        new_id,
-                        SplitOrientation::Horizontal,
-                        SplitRatio::balanced(),
-                        SplitChild::Second,
-                    ),
+                let tree = self.active().layout.pane_tree().split_pane(
+                    active,
+                    new_id,
+                    SplitOrientation::Horizontal,
+                    SplitRatio::balanced(),
+                    SplitChild::Second,
                 );
+                if self.apply_tree_change(ctx, tree) {
+                    self.announce_pane_change(ctx, AnnouncementKind::SplitPaneVertical);
+                }
             }
             ShellClientCommand::SplitPaneHorizontal => {
                 let new_id = self.active().layout.pane_tree().next_pane_id();
-                self.apply_tree_change(
-                    ctx,
-                    self.active().layout.pane_tree().split_pane(
-                        active,
-                        new_id,
-                        SplitOrientation::Vertical,
-                        SplitRatio::balanced(),
-                        SplitChild::Second,
-                    ),
+                let tree = self.active().layout.pane_tree().split_pane(
+                    active,
+                    new_id,
+                    SplitOrientation::Vertical,
+                    SplitRatio::balanced(),
+                    SplitChild::Second,
                 );
+                if self.apply_tree_change(ctx, tree) {
+                    self.announce_pane_change(ctx, AnnouncementKind::SplitPaneHorizontal);
+                }
             }
             ShellClientCommand::AddEqualPane => {
-                self.apply_tree_change(ctx, self.active().layout.pane_tree().add_equal_pane());
+                if self.apply_tree_change(ctx, self.active().layout.pane_tree().add_equal_pane()) {
+                    self.announce_pane_change(ctx, AnnouncementKind::PaneAdded);
+                }
             }
             ShellClientCommand::ClosePane => {
-                self.apply_tree_change(ctx, self.active().layout.pane_tree().close_pane(active));
+                if self.apply_tree_change(ctx, self.active().layout.pane_tree().close_pane(active))
+                {
+                    self.announce_pane_change(ctx, AnnouncementKind::PaneClosed);
+                }
             }
             ShellClientCommand::MovePaneNext => {
-                self.apply_tree_change(
+                if self.apply_tree_change(
                     ctx,
                     self.active()
                         .layout
                         .pane_tree()
                         .move_pane(active, SplitChild::Second),
-                );
+                ) {
+                    self.announce_pane_change(ctx, AnnouncementKind::PaneMovedForward);
+                }
             }
             ShellClientCommand::MovePanePrev => {
-                self.apply_tree_change(
+                if self.apply_tree_change(
                     ctx,
                     self.active()
                         .layout
                         .pane_tree()
                         .move_pane(active, SplitChild::First),
-                );
+                ) {
+                    self.announce_pane_change(ctx, AnnouncementKind::PaneMovedBackward);
+                }
             }
             ShellClientCommand::FocusPaneNext => {
                 let next = self.active().layout.pane_tree().next_pane();
@@ -915,7 +1034,13 @@ impl ClayShellWidget {
     }
 
     /// Apply a topology-changing tree operation (split/close/add-equal/move).
-    fn apply_tree_change(&mut self, ctx: &mut MutateCtx<'_>, new_tree: Option<PaneSplitTree>) {
+    /// Returns whether the change happened (bounds no-ops return false), so
+    /// callers announce only real changes.
+    fn apply_tree_change(
+        &mut self,
+        ctx: &mut MutateCtx<'_>,
+        new_tree: Option<PaneSplitTree>,
+    ) -> bool {
         if let Some(new_tree) = new_tree {
             self.active_mut().layout.replace_pane_tree(new_tree);
             self.reconcile_pane_hosts(ctx);
@@ -923,6 +1048,9 @@ impl ClayShellWidget {
             if self.mark_persistence_due() {
                 ctx.submit_action::<EditorAction>(EditorAction::PersistenceDue);
             }
+            true
+        } else {
+            false
         }
     }
 
@@ -960,6 +1088,20 @@ impl ClayShellWidget {
             ctx.remove_child(orphan);
         }
         self.sync_pane_hosts_state();
+        // Phase 22.6: keep the "Pane N of M" accessibility count current on
+        // every registered host. Hosts created by the sync (this call or an
+        // earlier `apply_layout_update`) are not in the Masonry tree until
+        // the next register pass — `get_mut` would panic on them — and they
+        // received the count at creation instead.
+        let count = self.active().layout.pane_tree().pane_ids().len();
+        let registered = self.active().registered_panes.clone();
+        for (pane_id, host) in self.active_mut().pane_hosts.iter_mut() {
+            if !registered.contains(pane_id) {
+                continue;
+            }
+            let mut host = ctx.get_mut(host);
+            host.widget.set_pane_count(&mut host.ctx, count);
+        }
         ctx.children_changed();
     }
 
@@ -976,14 +1118,21 @@ impl ClayShellWidget {
             {
                 // Phase 22.2: drop routing targets of removed panes too.
                 chrome.pane_targets.remove(&pane_id);
+                chrome.registered_panes.remove(&pane_id);
                 chrome.pending_orphans.push(host);
             }
         }
+        let leaf_count = leaves.len();
         for pane_id in leaves {
             if let std::collections::btree_map::Entry::Vacant(slot) =
                 chrome.pane_hosts.entry(pane_id)
             {
-                slot.insert(NewWidget::new(PaneContentHost::placeholder(pane_id)).to_pod());
+                slot.insert(
+                    NewWidget::new(
+                        PaneContentHost::placeholder(pane_id).with_pane_count(leaf_count),
+                    )
+                    .to_pod(),
+                );
             }
         }
     }
@@ -1187,16 +1336,99 @@ impl ClayShellWidget {
     }
 }
 
+/// Phase 22.6: the shell root accessibility node's own bounds as a window
+/// size, so the accessibility pass can reuse the painted tab bar geometry.
+fn node_window_size(node: &Node) -> Size {
+    match node.bounds() {
+        Some(bounds) => Size::new(bounds.width().max(0.0), bounds.height().max(0.0)),
+        None => Size::ZERO,
+    }
+}
+
+/// Phase 22.6: kurbo → AccessKit rect for virtual accessibility nodes.
+fn accesskit_rect(rect: Rect) -> masonry::accesskit::Rect {
+    masonry::accesskit::Rect {
+        x0: rect.x0,
+        y0: rect.y0,
+        x1: rect.x1,
+        y1: rect.y1,
+    }
+}
+
+/// Phase 22.6 (task 4): window-model actions that produce exactly one
+/// polite live-region announcement each. One variant per user action keeps
+/// the announcement strings in one place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AnnouncementKind {
+    TabActivated,
+    TabCreated,
+    TabClosed,
+    SplitPaneVertical,
+    SplitPaneHorizontal,
+    PaneAdded,
+    PaneClosed,
+    PaneMovedForward,
+    PaneMovedBackward,
+}
+
+/// Announcement length cap — the same budget constant menu labels use
+/// (`src/perf/budgets.rs::TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS`).
+pub(crate) const ANNOUNCEMENT_MAX_CHARS: usize = TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS;
+
+/// Shared announcement builder: O(1) (fixed-size inputs — a display name of
+/// at most 64 chars plus two counts) and sanitized — the name passes
+/// `sanitize_document_display_name`, so no host path, separator, or control
+/// character can reach the live region.
+pub(crate) fn compose_announcement(
+    kind: AnnouncementKind,
+    name: Option<&str>,
+    position: usize,
+    count: usize,
+) -> String {
+    let name = name
+        .map(crate::editor::accessibility::sanitize_document_display_name)
+        .unwrap_or_default();
+    let text = match kind {
+        AnnouncementKind::TabActivated => format!("Switched to tab {position}: {name}"),
+        AnnouncementKind::TabCreated => format!("Opened tab {position}: {name}"),
+        AnnouncementKind::TabClosed => {
+            let tabs = if count == 1 { "tab" } else { "tabs" };
+            format!("Closed tab {position}: {name}; {count} {tabs} open")
+        }
+        AnnouncementKind::SplitPaneVertical => "Split pane vertically".to_string(),
+        AnnouncementKind::SplitPaneHorizontal => "Split pane horizontally".to_string(),
+        AnnouncementKind::PaneAdded => "Added pane".to_string(),
+        AnnouncementKind::PaneClosed => {
+            let (pane, verb) = if count == 1 {
+                ("pane", "remains")
+            } else {
+                ("panes", "remain")
+            };
+            format!("Closed pane; {count} {pane} {verb}")
+        }
+        AnnouncementKind::PaneMovedForward => "Moved pane forward".to_string(),
+        AnnouncementKind::PaneMovedBackward => "Moved pane backward".to_string(),
+    };
+    if text.chars().count() > ANNOUNCEMENT_MAX_CHARS {
+        text.chars().take(ANNOUNCEMENT_MAX_CHARS).collect()
+    } else {
+        text
+    }
+}
+
 impl Widget for ClayShellWidget {
     // Phase 22.2: pane-activation notifications (`PaneFocused`) flow to the
     // app driver so Masonry focus can follow pane focus.
     type Action = EditorAction;
-
     fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
         for tab in self.tabs.values_mut() {
+            let pane_ids: Vec<PaneId> = tab.pane_hosts.keys().copied().collect();
             for host in tab.pane_hosts.values_mut() {
                 ctx.register_child(host);
             }
+            // Phase 22.6: every listed host is in the Masonry tree after
+            // this pass (see `registered_panes`).
+            tab.registered_panes.extend(pane_ids);
             for orphan in &mut tab.pending_orphans {
                 ctx.register_child(orphan);
             }
@@ -1619,7 +1851,7 @@ impl Widget for ClayShellWidget {
 
     fn accessibility(
         &mut self,
-        _ctx: &mut AccessCtx<'_>,
+        ctx: &mut AccessCtx<'_>,
         _props: &PropertiesRef<'_>,
         node: &mut Node,
     ) {
@@ -1627,6 +1859,57 @@ impl Widget for ClayShellWidget {
             "Clay working area shell. Active pane {}.",
             self.active().layout.active_pane_id().0
         ));
+        // Phase 22.6: the accessibility tree exposes only the mounted tab's
+        // panes. Inactive tabs' hosts stay in the widget tree at zero size
+        // for reconnect continuity but must not be announced. The tab bar
+        // (visible with 2+ tabs) is exposed as a TabList of Tab nodes with
+        // sanitized workspace names and the active card selected; tab
+        // operations stay keyboard-command-driven (Phase 22.4), so the tab
+        // nodes are informational, matching the status-line precedent.
+        let mut children: Vec<NodeId> = self
+            .active()
+            .pane_hosts
+            .values()
+            .map(|host| host.id().into())
+            .collect();
+        if self.tab_cards.len() >= 2
+            && let Some(geometry) = self.tab_bar_geometry(node_window_size(node))
+        {
+            let list_id = NodeId::from(WidgetId::next());
+            let mut list = Node::new(Role::TabList);
+            list.set_label("Workspace tabs");
+            list.set_bounds(accesskit_rect(geometry.bar));
+            let mut tab_ids = Vec::with_capacity(geometry.cards.len());
+            for (card, card_geometry) in self.tab_cards.iter().zip(&geometry.cards) {
+                let tab_id = NodeId::from(WidgetId::next());
+                let mut tab = Node::new(Role::Tab);
+                tab.set_label(
+                    crate::editor::accessibility::sanitize_document_display_name(&card.name),
+                );
+                tab.set_selected(card.client_id == self.active_tab);
+                tab.set_bounds(accesskit_rect(card_geometry.rect));
+                ctx.tree_update().nodes.push((tab_id, tab));
+                tab_ids.push(tab_id);
+            }
+            list.set_children(tab_ids);
+            ctx.tree_update().nodes.push((list_id, list));
+            children.insert(0, list_id);
+        }
+        // Phase 22.6 (task 4): the polite live-region announcement node is
+        // always present so assistive technologies can register it; only
+        // its label changes per window-model action. Empty until the first
+        // action. `ponytail:` ceiling — an AT may skip an announcement whose
+        // label equals the previous one; a two-phase clear+set is the
+        // upgrade path if repeated identical actions must re-announce.
+        let mut announce = Node::new(Role::Status);
+        announce.set_live(Live::Polite);
+        if let Some(text) = &self.announcement {
+            announce.set_label(text.as_str());
+        }
+        let announce_id = NodeId::from(WidgetId::next());
+        ctx.tree_update().nodes.push((announce_id, announce));
+        children.push(announce_id);
+        node.set_children(children);
     }
 
     fn children_ids(&self) -> ChildrenIds {
@@ -3806,5 +4089,395 @@ mod tests {
             assert_eq!(shell.widget.children_ids().len(), 1);
             assert_eq!(shell.widget.tab_bar_hover_index(), None);
         });
+    }
+
+    // -- Phase 22.6: accessibility tree structure ---------------------------
+
+    /// Enable the AccessKit tree and rebuild it.
+    fn access_tree(render_root: &mut RenderRoot) -> masonry::accesskit::TreeUpdate {
+        render_root.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+        let (_, update) = render_root.redraw();
+        update.expect("access tree is active after EnableAccessTree")
+    }
+
+    /// Phase 22.6 (task 4): the polite live-region announcement node's
+    /// current label (`None` when the node has no text).
+    fn announcement_label(update: &masonry::accesskit::TreeUpdate) -> Option<String> {
+        update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.live() == Some(masonry::accesskit::Live::Polite))
+            .and_then(|(_, node)| node.label().map(str::to_string))
+    }
+
+    fn nodes_with_role(
+        update: &masonry::accesskit::TreeUpdate,
+        role: Role,
+    ) -> Vec<(NodeId, &Node)> {
+        update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == role)
+            .map(|(id, node)| (*id, node))
+            .collect()
+    }
+
+    #[test]
+    fn tab_bar_accessibility_exposes_tablist_with_selected_active_card() {
+        // Two mounted tabs (clients 0 and 2); card 0 = "alpha", card 1 =
+        // "beta"; the active tab is client 2.
+        let (mut render_root, _shell_id, _captured) = tab_bar_two_card_root();
+        let update = access_tree(&mut render_root);
+
+        let lists = nodes_with_role(&update, Role::TabList);
+        assert_eq!(lists.len(), 1, "exactly one TabList for the tab bar");
+        let (_, list) = lists[0];
+        assert_eq!(list.label(), Some("Workspace tabs"));
+
+        let tabs = nodes_with_role(&update, Role::Tab);
+        assert_eq!(tabs.len(), 2);
+        let mut labels: Vec<&str> = tabs
+            .iter()
+            .map(|(_, node)| node.label().expect("tab label"))
+            .collect();
+        labels.sort_unstable();
+        assert_eq!(labels, vec!["alpha", "beta"]);
+        for (id, node) in list.children().iter().map(|id| {
+            (
+                *id,
+                update
+                    .nodes
+                    .iter()
+                    .find(|(node_id, _)| *node_id == *id)
+                    .map(|(_, node)| node)
+                    .expect("TabList child node exists"),
+            )
+        }) {
+            assert_eq!(node.role(), Role::Tab, "TabList child {id:?} is a Tab");
+        }
+        // The active card ("beta") is selected; the other is not.
+        for (_id, node) in &tabs {
+            let expected = node.label() == Some("beta");
+            if expected {
+                assert_eq!(node.is_selected(), Some(true));
+            } else {
+                assert_ne!(node.is_selected(), Some(true));
+            }
+        }
+    }
+
+    #[test]
+    fn shell_accessibility_tree_leads_with_tablist_and_hides_inactive_tabs() {
+        let (mut render_root, shell_id, _captured) = tab_bar_two_card_root();
+        let (all_hosts, active_hosts) = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            let all: Vec<WidgetId> = shell.widget.children_ids().iter().copied().collect();
+            let active: Vec<WidgetId> = shell
+                .widget
+                .pane_host_ids()
+                .into_iter()
+                .map(|(_, id)| id)
+                .collect();
+            (all, active)
+        });
+        assert_eq!(all_hosts.len(), 2);
+        assert_eq!(active_hosts.len(), 1);
+
+        let update = access_tree(&mut render_root);
+        let shell_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == NodeId::from(shell_id))
+            .map(|(_, node)| node)
+            .expect("shell node present");
+        let children = shell_node.children();
+
+        // TabList first, then the mounted tab's pane hosts only.
+        let (list_id, _) = nodes_with_role(&update, Role::TabList)[0];
+        assert_eq!(children.first().copied(), Some(list_id));
+        for host in &active_hosts {
+            assert!(children.contains(&NodeId::from(*host)));
+        }
+        for host in all_hosts.iter().filter(|id| !active_hosts.contains(id)) {
+            assert!(
+                !children.contains(&NodeId::from(*host)),
+                "inactive tab host {host:?} must not be announced"
+            );
+        }
+    }
+
+    #[test]
+    fn single_tab_accessibility_tree_has_no_tablist() {
+        let (mut render_root, shell_id) = shell_command_root();
+        let update = access_tree(&mut render_root);
+        assert!(
+            nodes_with_role(&update, Role::TabList).is_empty(),
+            "hidden tab bar must not appear in the accessibility tree"
+        );
+        let shell_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == NodeId::from(shell_id))
+            .map(|(_, node)| node)
+            .expect("shell node present");
+        assert_eq!(
+            shell_node.children().len(),
+            2,
+            "the single pane host plus the live announcement node"
+        );
+        // The live region is present from tree start (so ATs register it)
+        // with no text until the first window-model action.
+        assert_eq!(announcement_label(&update), None);
+    }
+
+    #[test]
+    fn pane_accessibility_labels_number_panes_and_name_documents() {
+        let (mut render_root, shell_id) = shell_command_root();
+        dispatch_shell_command(
+            &mut render_root,
+            shell_id,
+            ShellClientCommand::SplitPaneVertical,
+        );
+        assert_eq!(pane_count(&mut render_root, shell_id), 2);
+
+        // Pane 2 gets a live document view (driver mount flow) and a raw
+        // host path, which must surface as the sanitized basename only.
+        let view = PaneDocumentView::new(
+            PaneId(2),
+            std::rc::Rc::new(std::cell::Cell::new(1)),
+            std::rc::Rc::new(std::cell::Cell::new(0)),
+        );
+        mount_document_view(&mut render_root, shell_id, PaneId(2), view);
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.set_pane_document_name(
+                &mut shell.ctx,
+                0,
+                PaneId(2),
+                Some("/home/alice/secret/note.md"),
+            );
+        });
+
+        let update = access_tree(&mut render_root);
+        let mut labels: Vec<String> = nodes_with_role(&update, Role::Pane)
+            .into_iter()
+            .map(|(_, node)| node.label().expect("pane label").to_string())
+            .collect();
+        labels.sort();
+        assert_eq!(labels, vec!["Pane 1 of 2: editor", "Pane 2 of 2: note.md"]);
+    }
+
+    #[test]
+    fn empty_pane_accessibility_label_reports_count() {
+        let (mut render_root, shell_id) = shell_command_root();
+        dispatch_shell_command(
+            &mut render_root,
+            shell_id,
+            ShellClientCommand::SplitPaneVertical,
+        );
+        let update = access_tree(&mut render_root);
+        let mut labels: Vec<String> = nodes_with_role(&update, Role::Pane)
+            .into_iter()
+            .map(|(_, node)| node.label().expect("pane label").to_string())
+            .collect();
+        labels.sort();
+        assert_eq!(labels, vec!["Empty pane 2 of 2", "Pane 1 of 2: editor"]);
+    }
+    // -- Phase 22.6: screen-reader announcements (task 4) --
+
+    #[test]
+    fn announcement_builder_composes_exact_strings() {
+        assert_eq!(
+            compose_announcement(AnnouncementKind::TabActivated, Some("notes"), 2, 0),
+            "Switched to tab 2: notes"
+        );
+        assert_eq!(
+            compose_announcement(
+                AnnouncementKind::TabCreated,
+                Some("/home/alice/notes"),
+                3,
+                0
+            ),
+            // Sanitized basename: the host path never reaches the live region.
+            "Opened tab 3: notes"
+        );
+        assert_eq!(
+            compose_announcement(AnnouncementKind::TabClosed, Some("beta"), 2, 1),
+            "Closed tab 2: beta; 1 tab open"
+        );
+        assert_eq!(
+            compose_announcement(AnnouncementKind::TabClosed, Some("beta"), 2, 3),
+            "Closed tab 2: beta; 3 tabs open"
+        );
+        assert_eq!(
+            compose_announcement(AnnouncementKind::SplitPaneVertical, None, 0, 2),
+            "Split pane vertically"
+        );
+        assert_eq!(
+            compose_announcement(AnnouncementKind::SplitPaneHorizontal, None, 0, 2),
+            "Split pane horizontally"
+        );
+        assert_eq!(
+            compose_announcement(AnnouncementKind::PaneAdded, None, 0, 3),
+            "Added pane"
+        );
+        assert_eq!(
+            compose_announcement(AnnouncementKind::PaneClosed, None, 0, 1),
+            "Closed pane; 1 pane remains"
+        );
+        assert_eq!(
+            compose_announcement(AnnouncementKind::PaneClosed, None, 0, 2),
+            "Closed pane; 2 panes remain"
+        );
+        assert_eq!(
+            compose_announcement(AnnouncementKind::PaneMovedForward, None, 0, 2),
+            "Moved pane forward"
+        );
+        assert_eq!(
+            compose_announcement(AnnouncementKind::PaneMovedBackward, None, 0, 2),
+            "Moved pane backward"
+        );
+    }
+
+    #[test]
+    fn announcement_text_is_capped_and_path_free() {
+        // The display-name sanitizer caps at 64 chars before composition, so
+        // the composed cap (256) is a backstop for future longer formats.
+        let long = "x".repeat(300);
+        let text = compose_announcement(AnnouncementKind::TabCreated, Some(&long), 1, 0);
+        assert_eq!(
+            text,
+            format!(
+                "Opened tab 1: {}",
+                "x".repeat(crate::editor::accessibility::ACCESSIBILITY_DISPLAY_NAME_MAX_CHARS)
+            )
+        );
+        assert!(text.chars().count() <= ANNOUNCEMENT_MAX_CHARS);
+        let path = compose_announcement(
+            AnnouncementKind::TabActivated,
+            Some("/home/alice/secret/workspace"),
+            2,
+            0,
+        );
+        assert_eq!(path, "Switched to tab 2: workspace");
+        assert!(!path.contains('/'));
+    }
+
+    #[test]
+    fn tab_switch_and_close_announce_exact_strings() {
+        let (mut render_root, shell_id, _captured) = tab_bar_two_card_root();
+        // User activates tab 0 ("alpha"); the driver announces after the
+        // successful switch.
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            assert!(shell.widget.set_active_tab(&mut shell.ctx, 0));
+            shell.widget.announce_tab_activated(&mut shell.ctx, 0);
+        });
+        assert_eq!(
+            announcement_label(&access_tree(&mut render_root)).as_deref(),
+            Some("Switched to tab 1: alpha")
+        );
+        // Close the other tab; the count reflects the post-close map.
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.remove_tab(&mut shell.ctx, 2);
+        });
+        assert_eq!(
+            announcement_label(&access_tree(&mut render_root)).as_deref(),
+            Some("Closed tab 2: beta; 1 tab open")
+        );
+    }
+
+    #[test]
+    fn split_commands_announce_one_message_each_and_noops_stay_silent() {
+        let (mut render_root, shell_id) = shell_command_root();
+        dispatch_shell_command(
+            &mut render_root,
+            shell_id,
+            ShellClientCommand::SplitPaneVertical,
+        );
+        assert_eq!(
+            announcement_label(&access_tree(&mut render_root)).as_deref(),
+            Some("Split pane vertically")
+        );
+        dispatch_shell_command(&mut render_root, shell_id, ShellClientCommand::ClosePane);
+        assert_eq!(
+            announcement_label(&access_tree(&mut render_root)).as_deref(),
+            Some("Closed pane; 1 pane remains")
+        );
+        // A bounds no-op (single-pane close) announces nothing new.
+        dispatch_shell_command(&mut render_root, shell_id, ShellClientCommand::ClosePane);
+        assert_eq!(
+            announcement_label(&access_tree(&mut render_root)).as_deref(),
+            Some("Closed pane; 1 pane remains")
+        );
+        dispatch_shell_command(&mut render_root, shell_id, ShellClientCommand::AddEqualPane);
+        assert_eq!(
+            announcement_label(&access_tree(&mut render_root)).as_deref(),
+            Some("Added pane")
+        );
+        dispatch_shell_command(&mut render_root, shell_id, ShellClientCommand::MovePaneNext);
+        assert_eq!(
+            announcement_label(&access_tree(&mut render_root)).as_deref(),
+            Some("Moved pane forward")
+        );
+        dispatch_shell_command(&mut render_root, shell_id, ShellClientCommand::MovePanePrev);
+        assert_eq!(
+            announcement_label(&access_tree(&mut render_root)).as_deref(),
+            Some("Moved pane backward")
+        );
+        dispatch_shell_command(
+            &mut render_root,
+            shell_id,
+            ShellClientCommand::SplitPaneHorizontal,
+        );
+        assert_eq!(
+            announcement_label(&access_tree(&mut render_root)).as_deref(),
+            Some("Split pane horizontally")
+        );
+    }
+
+    #[test]
+    fn tab_switch_submits_no_actions_or_messages() {
+        // Phase 22.6 (plan 077 task 5): a tab switch is pure widget-tree
+        // state — no editor actions, no client messages, no document
+        // reserialization. The driver owns all queues/IPC; the shell must
+        // not emit anything from the switch path.
+        let (mut render_root, shell_id, captured) = tab_bar_two_card_root();
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            assert!(shell.widget.set_active_tab(&mut shell.ctx, 0));
+        });
+        let _ = render_root.redraw();
+        assert!(
+            captured.borrow().is_empty(),
+            "tab switch must not submit editor actions, got {:?}",
+            captured.borrow()
+        );
+    }
+
+    #[test]
+    fn focus_moves_and_repaints_do_not_reannounce() {
+        let (mut render_root, shell_id) = shell_command_root();
+        dispatch_shell_command(
+            &mut render_root,
+            shell_id,
+            ShellClientCommand::SplitPaneVertical,
+        );
+        let update = access_tree(&mut render_root);
+        assert_eq!(
+            announcement_label(&update).as_deref(),
+            Some("Split pane vertically")
+        );
+        // A pure focus move keeps the previous announcement text.
+        dispatch_shell_command(
+            &mut render_root,
+            shell_id,
+            ShellClientCommand::FocusPaneNext,
+        );
+        assert_eq!(
+            announcement_label(&access_tree(&mut render_root)).as_deref(),
+            Some("Split pane vertically")
+        );
     }
 }

@@ -37,6 +37,7 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixture generation, Criterion baseline commands, Phase 14 budgets/guardrails, opt-in profiling hooks, and validation commands.
 - [UI Observability and SDUI Structural Regression](development/ui-observability.md) — headless SDUI structural regression coverage, status observability, window-driver smoke relationship, and deferred GPU-backed pixel snapshot path.
 - [Windows MSVC Development](development/windows.md) — Rust MSVC setup, Windows local named-pipe IPC notes, and validation commands.
+- [Accessibility (Phase 22.6)](development/accessibility.md) — window-model accessibility contract: roles/names for the tab bar, tab cards, and panes; polite screen-reader announcements; sanitization budgets; verification and known ceilings.
 - [Manual Test Plan](../test-plan/index.md) — module-segregated human verification guide for the whole application (launch, configuration, files, editing, multi-cursor, caret/typography, syntax, packages, keybindings, performance, Windows); every behavior-changing plan must execute and maintain it.
 
 ## Clay JS API Registry Source Files

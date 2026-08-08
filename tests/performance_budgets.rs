@@ -1,9 +1,11 @@
 use clay::perf::budgets::{
     BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, CLIENT_EDIT_PAYLOAD_BUDGET_BYTES,
-    EDIT_ACK_P95_BUDGET_MS, EDIT_ACK_PAYLOAD_BUDGET_BYTES, KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS,
-    LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB, RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS,
-    SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
-    SDUI_UPDATE_PAYLOAD_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES,
+    DECORATION_PAYLOAD_BUDGET_BYTES, EDIT_ACK_P95_BUDGET_MS, EDIT_ACK_PAYLOAD_BUDGET_BYTES,
+    KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS, LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB,
+    MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES, PANE_PAINT_P95_BUDGET_MS,
+    RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS, SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS,
+    SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+    SYNTAX_CACHE_BUDGET_BYTES, TAB_SWITCH_P95_BUDGET_MS,
 };
 
 fn performance_doc() -> String {
@@ -66,6 +68,7 @@ fn performance_docs_list_all_supported_benchmark_commands() {
         "cargo test --test runtime lsp_bridge::",
         "cargo test --test security language_server_authority::",
         "cargo bench --bench first_party_language_baselines -- --save-baseline pre-lsp",
+        "cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
     ] {
         assert!(
             doc.contains(command),
@@ -490,4 +493,33 @@ fn performance_budget_constants_are_exported() {
     assert_eq!(RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS, 25);
     assert_eq!(LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB, 256);
     assert_eq!(SYNTAX_CACHE_BUDGET_BYTES, 30 * 1024 * 1024);
+}
+
+#[test]
+fn phase22_6_window_budget_constants_are_pinned_and_documented() {
+    // Pinned from `cargo bench --bench window_baselines` on 2026-08-08:
+    // pane_paint_baselines 1/2/4 panes ≈ 69/382/743 ns; tab_switch_baselines
+    // 1/2/4 panes ≈ 88/389/807 ns. Advisory ms ceilings with ~1000x headroom
+    // (debug builds, AT overhead); hard CI promotion follows the Phase 21
+    // stable-runner rule.
+    assert_eq!(PANE_PAINT_P95_BUDGET_MS, 1);
+    assert_eq!(TAB_SWITCH_P95_BUDGET_MS, 1);
+    assert_eq!(
+        MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES,
+        4 * DECORATION_PAYLOAD_BUDGET_BYTES
+    );
+    const { assert!(MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES >= 4 * 8192) };
+
+    let doc = performance_doc();
+    for expected in [
+        format!("<= {} ms (P95, advisory)", PANE_PAINT_P95_BUDGET_MS),
+        format!("<= {} ms (P95, advisory)", TAB_SWITCH_P95_BUDGET_MS),
+        format!("<= {} bytes", MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES),
+        "cargo bench --bench window_baselines".to_string(),
+    ] {
+        assert!(
+            doc.contains(&expected),
+            "performance guide must document Phase 22.6 budget marker `{expected}`"
+        );
+    }
 }

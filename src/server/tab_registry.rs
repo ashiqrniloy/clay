@@ -364,6 +364,58 @@ mod tests {
         assert_eq!(snapshot.active, Some(third));
     }
 
+    /// Phase 22.6 (plan 077 task 6): the registry "grants nothing" — entries
+    /// bind identity only (tab id, bound connection, workspace root) with no
+    /// grant, lease, capability, or package field. The literal below pins
+    /// the shape: adding any grant-carrying field breaks this test's
+    /// compilation, so the invariant is asserted, not just commented.
+    #[test]
+    fn tab_entries_carry_identity_bindings_only_and_grants_nothing() {
+        let mut registry = TabRegistry::new();
+        let tab_id = registry.create_tab(7, 70, "/tmp/identity".to_string());
+        let snapshot = registry.snapshot();
+        assert_eq!(
+            snapshot.tabs,
+            vec![TabEntry {
+                tab_id,
+                workspace_root_id: 70,
+                client_id: 7,
+                workspace_root: "/tmp/identity".to_string(),
+            }]
+        );
+        assert_eq!(snapshot.active, Some(tab_id));
+    }
+
+    /// Phase 22.6 (plan 077 task 6): reclaim re-points only the reclaimed
+    /// tab's connection binding. The superseded connection loses every
+    /// registry operation, the reclaiming connection gains them, and no
+    /// other tab's binding is touched.
+    #[test]
+    fn reclaim_rebinds_only_the_reclaiming_connection() {
+        let (mut registry, first, second) = registry_with_tabs();
+        assert!(registry.reclaim(first, 99));
+
+        // The superseded connection (1) can no longer operate the tab.
+        assert!(!registry.activate(first, 1));
+        assert!(!registry.close_tab(first, 1));
+        assert!(!registry.open_workspace(first, 1, 11, "/tmp/x".to_string()));
+        assert!(!registry.move_left(first, 1));
+        assert!(!registry.move_right(first, 1));
+        assert!(!registry.move_to(first, 1, 2));
+
+        // The reclaiming connection (99) is bound to the reclaimed tab.
+        assert!(registry.activate(first, 99));
+        assert!(registry.open_workspace(first, 99, 71, "/tmp/new".to_string()));
+        assert!(registry.move_right(first, 99));
+
+        // Cross-tab rebinding fails: 99 cannot operate tab 2, and tab 2's
+        // own binding (2) is untouched.
+        assert!(!registry.activate(second, 99));
+        assert!(!registry.close_tab(second, 99));
+        assert!(!registry.open_workspace(second, 99, 21, "/tmp/x".to_string()));
+        assert!(registry.activate(second, 2));
+    }
+
     #[test]
     fn move_ops_change_order_only_and_preserve_entry_contents() {
         let (mut registry, first, second) = registry_with_tabs();

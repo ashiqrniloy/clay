@@ -41,6 +41,18 @@ EOF
 - Advisory local baselines are machine-variant; record numbers only when
   comparing against your own previous runs.
 
+## Window-model budgets (Phase 22.6)
+
+Pane paint, tab switch, and multi-pane decoration traffic gained advisory
+P95 budgets plus deterministic guards in Phase 22.6 (see
+`docs/development/performance.md` Phase 22.6 section — window_baselines
+bench group, `pane_paint_baselines` + `tab_switch_baselines`).
+
+| # | Action | Expected |
+|---|--------|----------|
+| Q8 | `cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2` | Advisory numbers only (linear in pane count, sub-microsecond on dev hardware) — NO wall-clock pass/fail; deterministic guards are automated (linear pane-chrome geometry, no tab-switch document reserialization, 4-pane decoration aggregate ≤ 32768 B) |
+| Q9 | 4-pane window, 2 tabs each at 4 panes; rapid `Ctrl+Tab` + `Ctrl+\\` + `Ctrl+Alt+W` while typing | No perceptible stall; pane/decoration work stays bounded — pane count is the only driver (per-pane paint is O(1) placeholder/chrome fills, never document-size work) |
+
 ## Known ceilings
 
 - Very large files beyond documented open limits are rejected by design

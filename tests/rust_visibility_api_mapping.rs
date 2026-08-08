@@ -382,3 +382,106 @@ fn phase20_4_introduces_no_unexposed_public_rust_function() {
         }
     }
 }
+
+/// Plan 077 task 9: Phase 22.6 window-model accessibility additions are not
+/// public programmatic capabilities. The a11y metadata (announcement builder,
+/// pane counts/display names, per-pane chrome geometry proxies, window budget
+/// constants) is internal chrome state — none of it is a Clay JS API, and none
+/// of it may be wrapped by a deno_core op or exposed through a runtime/js
+/// facade. The shell methods the driver bin crate calls (`announce`,
+/// `announce_tab_activated`, `announce_tab_created`, `set_pane_document_name`,
+/// `metadata_path`) are bare `pub` by the established widget-method convention
+/// (the bin crate cannot see `pub(crate)` lib items; `set_active_tab`/
+/// `remove_tab`/`mount_tab` follow the same rule), but they are Masonry widget
+/// methods, never server-side capabilities.
+#[test]
+fn phase22_6_window_model_a11y_additions_are_not_public_programmatic_surfaces() {
+    let root = repository_root();
+
+    // Internal helpers must be pub(crate) or private, never bare `pub`.
+    let internal_items: &[(&str, &str)] = &[
+        ("src/masonry_shell.rs", "pub(crate) enum AnnouncementKind"),
+        (
+            "src/masonry_shell.rs",
+            "pub(crate) const ANNOUNCEMENT_MAX_CHARS",
+        ),
+        ("src/masonry_shell.rs", "pub(crate) fn compose_announcement"),
+        ("src/masonry_shell.rs", "    fn announce_pane_change"),
+        ("src/masonry_pane_host.rs", "pub(crate) fn with_pane_count"),
+        ("src/masonry_pane_host.rs", "pub(crate) fn set_pane_count"),
+        (
+            "src/masonry_pane_host.rs",
+            "pub(crate) fn set_document_display_name",
+        ),
+        (
+            "src/perf/baselines.rs",
+            "pub(crate) fn pane_split_tree_with",
+        ),
+        (
+            "src/perf/baselines.rs",
+            "pub(crate) fn working_area_layout_with",
+        ),
+    ];
+    for (path, declaration) in internal_items {
+        let source =
+            fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        assert!(
+            source.contains(declaration),
+            "{declaration} in {path} must be pub(crate) or private"
+        );
+    }
+
+    // None of the Phase 22.6 additions may be wrapped by a deno_core op.
+    let ops_names = [
+        "announce",
+        "announce_tab_activated",
+        "announce_tab_created",
+        "set_pane_document_name",
+        "set_pane_count",
+        "set_document_display_name",
+        "with_pane_count",
+        "metadata_path",
+        "compose_announcement",
+        "AnnouncementKind",
+        "pane_chrome_piece_count",
+        "tab_switch_geometry_work",
+        "pane_split_tree_with",
+        "working_area_layout_with",
+        "PANE_PAINT_P95_BUDGET_MS",
+        "TAB_SWITCH_P95_BUDGET_MS",
+        "MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES",
+    ];
+    for entry in fs::read_dir(root.join("src/server/ops")).expect("read src/server/ops") {
+        let path = entry.expect("src/server/ops entry").path();
+        if path.extension().and_then(|value| value.to_str()) != Some("rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read ops source");
+        for name in ops_names {
+            assert!(
+                !source.contains(name),
+                "{} must not wrap Phase 22.6 internal {name} in a deno_core op",
+                path.display()
+            );
+        }
+    }
+
+    // None of the additions may be exposed through a Clay JS facade.
+    for entry in fs::read_dir(root.join("runtime/js")).expect("read runtime/js") {
+        let path = entry.expect("runtime/js entry").path();
+        if !matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("js" | "ts")
+        ) {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read facade source");
+        for name in ops_names {
+            assert!(
+                !source.contains(name),
+                "{} must not expose Phase 22.6 internal {name} to JavaScript",
+                path.display()
+            );
+        }
+    }
+}

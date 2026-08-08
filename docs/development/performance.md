@@ -528,3 +528,43 @@ cargo bench --no-run
 ```
 
 These checks verify deterministic output, UTF-8 validity, shape coverage, exact byte sizing, output path constraints, disabled-by-default profiling behavior, snapshot sanitization, enabled editor metrics, client-first queue invariants, representative protocol payload budgets, documented benchmark command discoverability, and benchmark target compilation.
+
+## Phase 22.6 window-model budgets (pane paint, tab switch, decoration traffic)
+
+Phase 22.6 (plan 077 task 5) adds per-pane paint, tab-switch latency, and
+multi-pane decoration-traffic budgets in the established split: deterministic
+work-count/payload gates run on every push; wall-clock figures stay advisory
+until the Phase 21 stable-CI-runner promotion rule is met.
+
+### Deterministic hard guards
+
+| Focus area | Budget | Enforcement |
+| --- | --- | --- |
+| Per-pane paint chrome work | linear in pane count (1 pane = 0 pieces, N panes = N pieces: N-1 dividers + focus ring) | `pane_chrome_geometry_work_scales_linearly_with_pane_count` |
+| Tab switch reserialization | no document text serialization / client messages / tab-command enqueue in the shell + pane-host switch path | `tab_switch_path_performs_no_document_reserialization` + `tab_switch_submits_no_actions_or_messages` |
+| Multi-pane decoration traffic | per-pane <= 8192 bytes (`DECORATION_PAYLOAD_BUDGET_BYTES`); 4-pane aggregate <= 32768 bytes (`MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES`) | `four_pane_decoration_aggregate_payload_fits_budget` |
+| Phase 22.6 constants | pinned values + docs markers | `phase22_6_window_budget_constants_are_pinned_and_documented` |
+
+### Advisory local baseline budgets (machine-variant)
+
+Measured 2026-08-08 (`cargo bench --bench window_baselines`, sample 10):
+`pane_paint_baselines` 1/2/4 panes ≈ 69/382/743 ns;
+`tab_switch_baselines` 1/2/4 panes ≈ 88/389/807 ns — linear in pane count,
+with the tab-switch pass roughly one chrome geometry pass over the target
+tab. The advisory ceilings are pinned with ~1000x headroom for debug builds
+and assistive-technology overhead; promote to hard CI thresholds only after
+the Phase 21 stable-runner evidence rule is satisfied.
+
+| Focus area | Initial advisory budget | Observe with |
+| --- | --- | --- |
+| Per-pane paint (`pane_paint_baselines`, geometry proxy) | <= 1 ms (P95, advisory) | `cargo bench --bench window_baselines pane_paint_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2` |
+| Tab switch (`tab_switch_baselines`, geometry proxy) | <= 1 ms (P95, advisory) | `cargo bench --bench window_baselines tab_switch_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2` |
+
+The pane/tab geometry benches measure the shell chrome computation a paint
+pass (or a switch's layout pass) performs; editor-surface paint stays
+viewport-bounded and is benched separately under `editor_baselines`. Run the
+full Phase 22.6 window bench set with:
+
+```text
+cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+```

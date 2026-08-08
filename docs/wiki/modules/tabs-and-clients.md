@@ -363,3 +363,78 @@ tests: `pane_commands_only_mutate_the_active_tab`,
   bootstrap each tab reuses.
 - [Document Leases and Region Locks](../flows/document-leases-and-region-locks.md)
   — the per-connection authority path tab ops ride on.
+
+## Phase 22.6: Authority Review, Tab Accessibility, and Protocol Guards
+
+Phase 22.6 (2026-08-08) hardened the tab model: an authority review with
+regression tests (task 6), the tab-bar accessibility surface (tasks 3–4,
+implementation on the masonry-shell page), and protocol compatibility
+tests for all Phase 22 tab messages (task 7). No production behavior
+changed in tasks 6–7 — guards only.
+
+### Authority review outcome (task 6)
+
+- `TabRegistry` binds identity only: `TabId -> ClientId -> workspace root`
+  (`TabEntry` has exactly the 4 identity fields), one `ClientId` per tab,
+  and **grants nothing** — it re-points already-authorized connections.
+  All real authority stays per-connection: workspace file grants are keyed
+  by `client_id` (`workspace.rs` `DocumentAccess`/`acquire_access`/
+  `release_access`), so a document opened in tab A is invisible to tab B,
+  `OutsideRoot` rejects out-of-root opens per tab, and disconnect teardown
+  (`cleanup_connection_documents` → `release_client_access`) releases every
+  grant; a finalized document is never re-attached (re-open after
+  disconnect is a fresh grant on a fresh document id). Reclaim re-points a
+  surviving registry entry to a fresh handshake-authenticated connection
+  and regains only that tab's own re-opened documents.
+- **Package scopes are tab-independent**: `PackageApprovalRecord`
+  (approvals.rs) serializes to exactly 13 keys (package identity,
+  capabilities, processes, relations, replacements, approved_by/at,
+  revoked) with no client/tab/pane/workspace keying; LSP grants are
+  rechecked from `PackageService` with no tab keying. Tab create/close/
+  move neither widens nor narrows package authority — truthful containment
+  (no "sandboxed" claims beyond the OS-enforced external-process boundary).
+- Regression tests (all green, no production change):
+  - `src/server/tab_registry.rs`: `tab_entries_carry_identity_bindings_
+    only_and_grants_nothing` (TabEntry literal compile-pin),
+    `reclaim_rebinds_only_the_reclaiming_connection` (old client ops fail
+    after reclaim; the reclaiming client cannot operate other tabs).
+  - `src/server/connection.rs`: `reconnected_tab_regains_only_its_own_
+    reopened_grants` (A opens 2 docs → disconnect releases both → fresh
+    connection inherits nothing → reopens one, the other stays
+    `UnknownDocument`).
+  - `src/packages/approvals.rs`: `approval_records_carry_no_tab_client_or_
+    workspace_keying` (JSON key-set pin).
+
+### Tab accessibility surface (tasks 3–4)
+
+The shell exposes `Role::TabList` (`Workspace tabs`) with one `Role::Tab`
+per card (sanitized workspace basename, `selected` on the active card) when
+2+ cards exist; single-tab windows keep the old tree. Inactive tabs' pane
+hosts are unreachable from the a11y root. Announcements (single persistent
+polite `Status` node): `Switched to tab {position}: {name}` /
+`Opened tab {position}: {name}` / `Closed tab {position}: {name};
+{n} tabs open` — fired only from user-initiated driver paths after a REAL
+change (`activate_tab` after `switch_tab -> true`, `mount_tab`'s single
+new-tab-dialog call site, `remove_tab`/registry reconcile), never on
+startup/restore, focus moves, or no-ops. Exact strings and ceilings:
+`docs/development/accessibility.md`.
+
+### Protocol guards (task 7)
+
+`tests/window_management_protocol.rs` (protocol suite): pins
+`PROTOCOL_VERSION == 13`; round-trips all 8 `TabCommand` variants,
+`TabRegistrySnapshot`, and the handshake hello through the rkyv
+length-prefixed codec unchanged; rejects malformed/truncated/oversize/
+corrupt tab frames without panic (`matches!` on `CodecError` — no
+PartialEq). rkyv trailing alignment padding means corrupt-byte probes must
+flip a payload byte past the length prefix + message discriminant (index 8),
+not the last byte.
+
+### Tests
+
+- Task 6 suites: `cargo test --lib tab_registry --quiet`,
+  `cargo test --lib connection --quiet` (filters above),
+  `cargo test --lib approvals --quiet`.
+- Protocol: `cargo test --test protocol -- window_management_protocol`.
+- A11y: `cargo test --lib masonry_shell --quiet` (tab a11y + announcement
+  tests); manual `test-plan/14-tabs.md` T50–T56.

@@ -97,3 +97,7 @@ harness = false
 [[bench]]
 name = "first_party_language_baselines"
 harness = false
+
+[[bench]]
+name = "window_baselines"
+harness = false

@@ -40,6 +40,14 @@ pub enum PaneContent {
 pub struct PaneContentHost {
     pane_id: PaneId,
     content: PaneContent,
+    /// Phase 22.6: total pane count of the owning tab's split tree, for the
+    /// "Pane N of M" accessibility label (kept current by the shell's
+    /// `reconcile_pane_hosts`).
+    pane_count: usize,
+    /// Phase 22.6: sanitized display name of the mounted document (set by the
+    /// app driver when a document open/reload lands in this pane; `None` for
+    /// placeholder/editor panes and after `clear_content`).
+    document_display_name: Option<String>,
 }
 
 impl PaneContentHost {
@@ -47,6 +55,8 @@ impl PaneContentHost {
         Self {
             pane_id,
             content: PaneContent::Placeholder,
+            pane_count: 1,
+            document_display_name: None,
         }
     }
 
@@ -54,7 +64,40 @@ impl PaneContentHost {
         Self {
             pane_id,
             content: PaneContent::Editor(editor.to_pod()),
+            pane_count: 1,
+            document_display_name: None,
         }
+    }
+
+    /// Phase 22.6: builder-set pane count for hosts created from an existing
+    /// multi-pane tree (restore path), before the first reconcile.
+    pub(crate) fn with_pane_count(mut self, count: usize) -> Self {
+        self.pane_count = count.max(1);
+        self
+    }
+
+    /// Phase 22.6: keep the "Pane N of M" accessibility label current.
+    pub(crate) fn set_pane_count(&mut self, ctx: &mut MutateCtx<'_>, count: usize) {
+        let count = count.max(1);
+        if self.pane_count == count {
+            return;
+        }
+        self.pane_count = count;
+        ctx.request_accessibility_update();
+    }
+
+    /// Phase 22.6: sanitized document display name for the pane's
+    /// accessibility label (`None` clears it, e.g. when the pane empties).
+    pub(crate) fn set_document_display_name(
+        &mut self,
+        ctx: &mut MutateCtx<'_>,
+        name: Option<String>,
+    ) {
+        if self.document_display_name == name {
+            return;
+        }
+        self.document_display_name = name;
+        ctx.request_accessibility_update();
     }
 
     /// Mount a live document view in this pane (placeholder → document).
@@ -76,7 +119,9 @@ impl PaneContentHost {
         {
             ctx.remove_child(view);
         }
+        self.document_display_name = None;
         ctx.children_changed();
+        ctx.request_accessibility_update();
     }
 
     /// The mounted document view's widget id, if any (pane routing).
@@ -160,10 +205,20 @@ impl Widget for PaneContentHost {
         _props: &PropertiesRef<'_>,
         node: &mut Node,
     ) {
+        // Phase 22.6: "Pane N of M" plus the mounted content kind; document
+        // panes carry the sanitized document display name (never a host
+        // path — the driver sanitizes before setting it).
         node.set_label(match &self.content {
-            PaneContent::Placeholder => format!("Empty pane {}", self.pane_id.0),
-            PaneContent::Editor(_) => format!("Pane {} editor", self.pane_id.0),
-            PaneContent::Document(_) => format!("Pane {} document", self.pane_id.0),
+            PaneContent::Placeholder => {
+                format!("Empty pane {} of {}", self.pane_id.0, self.pane_count)
+            }
+            PaneContent::Editor(_) => {
+                format!("Pane {} of {}: editor", self.pane_id.0, self.pane_count)
+            }
+            PaneContent::Document(_) => match &self.document_display_name {
+                Some(name) => format!("Pane {} of {}: {}", self.pane_id.0, self.pane_count, name),
+                None => format!("Pane {} of {}: document", self.pane_id.0, self.pane_count),
+            },
         });
     }
 

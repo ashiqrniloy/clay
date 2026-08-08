@@ -16,6 +16,8 @@ mod performance_budgets;
 mod performance_protocol;
 #[path = "../primitives_docs.rs"]
 mod primitives_docs;
+#[path = "../window_management_protocol.rs"]
+mod window_management_protocol;
 
 #[test]
 fn integration_suite_inventory_assigns_every_source_once() {

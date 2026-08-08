@@ -218,6 +218,31 @@ pub const TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS: usize = 256;
 pub const PRIMITIVES_REGISTRY_VERSION: &str = "phase16-primitives-v1";
 
 pub const KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS: u64 = 16;
+
+// Phase 22.6 (plan 077 task 5) window-model performance budgets. The two
+// wall-clock budgets are advisory, pinned from `cargo bench --bench
+// window_baselines` measurements (docs/development/performance.md, Phase
+// 22.6 section); per the Phase 21 promotion rule they become hard CI
+// thresholds only after stable CI-runner evidence. The deterministic
+// CI-blocking gates are the work-count/payload invariants in
+// tests/editor_performance_invariants.rs and this file's value pins.
+/// One pane's paint: shell chrome geometry (dividers, slot handles, focus
+/// ring) plus the pane's own surface paint (viewport-bounded, benched
+/// separately). Measured `window_baselines` pane_paint_baselines; pinned
+/// with margin.
+pub const PANE_PAINT_P95_BUDGET_MS: u64 = 1;
+/// One tab switch: mount the target tab's chrome at its pane rects and
+/// repaint its geometry. No document reserialization or IPC — the switch
+/// path sends no client messages (deterministic gate in
+/// tests/editor_performance_invariants.rs). Measured `window_baselines`
+/// tab_switch_baselines; pinned with margin.
+pub const TAB_SWITCH_P95_BUDGET_MS: u64 = 1;
+/// One decoration update aggregated across a 4-pane window: 4 panes × the
+/// per-pane decoration payload budget. Hard gate: per-pane payloads are
+/// still bounded by `DECORATION_PAYLOAD_BUDGET_BYTES`, and the 4-pane
+/// aggregate must stay within this ceiling (deterministic test in
+/// tests/editor_performance_invariants.rs).
+pub const MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES: usize = 4 * DECORATION_PAYLOAD_BUDGET_BYTES;
 pub const EDIT_ACK_P95_BUDGET_MS: u64 = 40;
 pub const SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS: u64 = 16;
 // Hard wall-clock budget for a single server-side JavaScript runtime

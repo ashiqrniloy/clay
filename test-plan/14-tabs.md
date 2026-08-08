@@ -152,6 +152,28 @@ restores the window. Deep reference:
 | T48 | Move tabs (T36–T38) into a new order, quit and relaunch | The MOVED order persists (registry order is persisted), and each tab's internal split tree + documents survived the move + restart intact |
 | T49 | Restore a 3-tab / 4-pane window and watch startup | Reaches interactive state promptly — tabs connect sequentially with no visible stall beyond normal startup (subjective check; restore is startup-only, off the edit hot path) |
 
+## Accessibility and cross-tab isolation (Phase 22.6)
+
+Phase 22.6 tab-surface contract: the shell exposes a `TabList` (`Workspace
+tabs`) with one `Tab` per card — sanitized workspace basename, `selected`
+on the active card — only when two or more cards exist; announcements fire
+on tab activate/create/close. Cross-tab authority is per-connection: the
+registry binds identity and grants nothing, so document leases never cross
+tabs (automated regression coverage: `src/server/tab_registry.rs`,
+`src/server/connection.rs`, `src/packages/approvals.rs` tests from plan 077
+task 6). Deep reference: `docs/development/accessibility.md` and
+`docs/wiki/modules/tabs-and-clients.md`.
+
+| # | Action | Expected |
+|---|--------|----------|
+| T50 | 2 tabs (workspaces `alpha`/`beta`); inspect the accessibility tree | `TabList` named `Workspace tabs` with one `Tab` per card in card order, names = sanitized workspace basenames; the ACTIVE card carries `selected`; pane hosts of the INACTIVE tab are absent from the tree (its panes are never announced or visited) |
+| T51 | With a screen reader active, `Ctrl+Tab` a real switch (2 tabs) | `Switched to tab {position}: {name}` announced ONCE, politely; `selected` moves to the new card; typing right after lands in the new active tab |
+| T52 | `Ctrl+T` (or `+` card) to mount a new tab, then `Ctrl+Shift+W` to close it | `Opened tab {position}: {name}` on mount; `Closed tab {position}: {name}; {n} tabs open` on close — each exactly once; the dirty-close confirm flow (T32–T35) stays silent until the menu resolves |
+| T53 | Single tab: inspect the tree, then attempt `Ctrl+Tab` | NO `TabList` node at one tab (tree matches the pre-22.6 shape — no extra noise); the switch is a silent no-op with NO announcement |
+| T54 | Grant isolation sanity: tab A opens `secret.md`; in tab B (different workspace) list open documents and try to open `secret.md` | Tab B sees only its own workspace's documents; opening a path outside B's workspace root is rejected server-side (`OutsideRoot`); tab A keeps its lease — no cross-tab document surface exists |
+| T55 | Close tab A (connection released), then recreate a tab on the same workspace and reopen `secret.md` | Fresh connection, fresh grants: the document opens through the ordinary open path; nothing from the old connection survives (no stale leases, no ghost docs, no inherited access) |
+| T56 | 2–3 tabs, each with a 4-pane split tree; rapid `Ctrl+Tab` + pane chords + typing | Switch feels instant (one layout pass, off the edit hot path); pane/decoration work stays bounded — advisory `window_baselines` bench numbers in `docs/development/performance.md`; deterministic guards automated |
+
 ## Negative checks
 
 - The last tab can never be closed (T7) — the editor always keeps one tab.
@@ -169,6 +191,10 @@ restores the window. Deep reference:
   per-connection capability/lease path; the server registry only binds
   already-authorized connections (reclaim rebinds a surviving registry
   entry to a fresh handshake-authenticated connection only).
+- Cross-tab document isolation is per-connection: a tab's leases never
+  appear in another tab's view, out-of-root opens are rejected, and a
+  closed tab's grants die with its connection (T54–T55) — the registry
+  binds identity and grants nothing.
 - Opening a 65th connection (tab) while the server is at its 64-connection
   cap is refused (connection limit = `MAX_ACTIVE_CONNECTIONS` 64); the new
   tab fails cleanly with a diagnostic instead of destabilizing existing
@@ -214,8 +240,10 @@ restores the window. Deep reference:
 - **No quit-time dirty confirm**: closing the window with unsaved edits
   closes without asking — the edits are lost (save before quitting; the
   per-tab close confirm menu (T32) only guards closing a TAB).
-- **No tab-bar keyboard focus traversal**: tab cards are click/command
-  driven; keyboard focus movement between cards arrives with Phase 22.6.
+- **No per-card tab focus**: tab cards are informational a11y nodes, not
+  focusable widgets — Phase 22.6 delivered roles/names/announcements;
+  per-card widget focus for AT focus handling remains deferred (Further
+  Actions). Keyboard tab switching stays on the 22.4 tab commands.
 - **No per-tab package chrome**: packages cannot contribute tab or tab-bar
   chrome; their panels/overlays stay connection-wide (later phase).
 - **No multi-client tab reclamation**: the registry reclaims entries only
@@ -223,5 +251,12 @@ restores the window. Deep reference:
   entry is deferred to Phase 21 semantics.
 - **Single-tab match-today**: with one tab the tab bar is hidden and the
   window matches pre-22.3 behavior exactly (T1) — by design, not a bug.
+- **No screen reader on the dev host**: announcement behavior is verified
+  structurally (the `cargo test --lib accessibility` suite asserts the exact
+  announcement strings and silence on no-ops/focus moves); real-AT hearing
+  (e.g. Orca) is the remaining human check and is a known ceiling on hosts
+  without a screen reader.
+- **Identical consecutive announcements may be skipped by an AT** (T51
+  repeated twice in a row) — documented, not a bug.
 - **Per-tab pane cap still 4**: each tab's split tree caps at
   `MAX_PANES_PER_TAB = 4` (module 13, S4) — the cap is per tab.

@@ -847,6 +847,17 @@ impl ClientConnectionEvent {
             _ => None,
         }
     }
+
+    /// Phase 22.6: the document path carried by open/reload events, for the
+    /// driver to keep pane accessibility labels in sync (sanitized by the
+    /// caller before any announcement).
+    pub fn metadata_path(&self) -> Option<&str> {
+        match self {
+            ClientConnectionEvent::DocumentOpened { metadata, .. }
+            | ClientConnectionEvent::DocumentReloaded { metadata, .. } => Some(&metadata.path),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]

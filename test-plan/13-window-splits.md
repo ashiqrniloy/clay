@@ -134,6 +134,28 @@ shows its own status line with that document's name/dirty state.
 | D14 | Focus policy interplay: with `cursor` policy set, move the pointer into another pane | That pane's document view activates; status line/IME follow the newly active pane |
 | D15 | Responsiveness: 4 panes, every pane with a document open, type rapidly in each in turn | No perceptible lag vs single-pane editing; status/decoration updates feel immediate |
 
+## Accessibility roles and announcements (Phase 22.6)
+
+Phase 22.6 gives the window model an accessibility contract: numbered pane
+labels, a `TabList`/`Tab` tree for the tab bar (module 14), and one polite
+`Status` live-region node announcing pane/tab actions exactly once per user
+action. Deep reference:
+`docs/development/accessibility.md` (roles/names table, announcement
+strings, sanitization budgets). Automated equivalents: the shell's
+structural a11y tests (`cargo test --lib accessibility` in
+`src/masonry_shell.rs`) build the exact `TreeUpdate` and assert every role,
+name, and announcement string below — a screen reader is not required for
+the tree shape, only for the human hearing check.
+
+| # | Action | Expected |
+|---|--------|----------|
+| S23 | 2 panes, `a.md` open in pane 1, pane 2 a placeholder; inspect the window's accessibility tree (AT inspector such as `accerciser`/`dogtail` where available, or the automated structural tests) | Shell group named "Clay working area shell. Active pane 1."; pane hosts expose `Pane` role with numbered names: `Pane 1 of 2: a.md` and `Empty pane 2 of 2` — sanitized basenames only (no absolute host paths, no document text, no control characters) |
+| S24 | With a screen reader active, `Ctrl+\\` on a single pane (vertical split) and `Ctrl+-` (horizontal split) | Exactly ONE polite announcement per action: `Split pane vertically` / `Split pane horizontally`; pure focus moves (`Ctrl+Alt+Left`/`Right`) and repaints stay SILENT |
+| S25 | With 2 panes, `Ctrl+Alt+W` (close); then `Ctrl+Alt+[` and `Ctrl+Alt+]` (move) | `Closed pane; 1 pane remains` once; `Moved pane forward` / `Moved pane backward` once per real change; the single-pane close no-op stays silent |
+| S26 | Screen reader active; type, scroll, open the open-documents switcher (`Ctrl+Shift+E`), navigate it, dismiss it | No announcement spam — keystrokes, scrolling, and menu navigation never announce; only the pane/tab actions above do |
+| S27 | Two consecutive identical actions (e.g. move forward twice in a row) | Known ceiling: an AT may skip an announcement identical to the previous one — documented, not a bug |
+| S28 | Perf reference (advisory only): `cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2` | Pane-paint and tab-switch geometry numbers land linear in pane count (sub-microsecond on dev hardware); NO wall-clock pass/fail on shared runners — deterministic guards (linear chrome work, no tab-switch reserialization, 4-pane decoration aggregate ≤ 32768 B) are automated in `tests/editor_performance_invariants.rs` and `docs/development/performance.md` Phase 22.6 section |
+
 ## Negative checks
 
 - A 5th pane is never created (cap = 4; S4).
@@ -175,6 +197,14 @@ shows its own status line with that document's name/dirty state.
 - **Global bindings need editor focus**: `Global`-context chords route through
   the focused pane's editor key path; with a placeholder pane active (no
   document) the chords don't fire. Click a document pane first.
+- **No screen reader on the dev host**: announcement behavior is verified
+  structurally (the `cargo test --lib accessibility` suite asserts the exact
+  `TreeUpdate` labels and that focus moves/repaints do not re-announce);
+  real-AT hearing (e.g. Orca) is the remaining human check and is a known
+  ceiling on hosts without a screen reader.
+- **Identical consecutive announcements may be skipped by an AT** (S27) —
+  the label is replaced in place; upgrade path is a clear-then-set update if
+  real-AT testing shows dropped announcements.
 - **Tab is pane cycling while splits exist**: with more than one pane, `Tab` /
   `Shift+Tab` cycle pane focus instead of inserting indentation (Phase 20.3
   contract, unchanged).
