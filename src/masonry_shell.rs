@@ -257,6 +257,9 @@ impl TabChrome {
         // Phase 22.2: the chrome must know which pane it hosts for pane-focus
         // actions; set before the chrome is moved into the host.
         editor.set_pane_id(editor_pane_id);
+        // Seed pane hosts with the editor's installed theme so restored and
+        // placeholder panes follow the active theme from the first paint.
+        let ui_theme = editor.ui_theme().clone();
         let editor = NewWidget::new(editor);
         let editor_widget_id = editor.id();
         let mut editor = Some(editor);
@@ -280,7 +283,11 @@ impl TabChrome {
                 };
                 (
                     pane_id,
-                    NewWidget::new(host.with_pane_count(pane_count)).to_pod(),
+                    NewWidget::new(
+                        host.with_pane_count(pane_count)
+                            .with_ui_theme(ui_theme.clone()),
+                    )
+                    .to_pod(),
                 )
             })
             .collect();
@@ -333,11 +340,16 @@ pub struct ClayShellWidget {
     /// `None`/empty until the first window-model action; replaced (never
     /// appended) per action.
     announcement: Option<String>,
+    /// Resolved active-theme UI tokens for shell chrome paint (tab bar, split
+    /// dividers, focus rings) and new placeholder panes. Defaults to the Clay
+    /// theme until the first `set_active_theme`.
+    ui_theme: ResolvedUiTheme,
 }
 
 impl ClayShellWidget {
     pub fn single_editor(client_id: ClientId, editor: EditorWidget) -> Self {
-        Self::from_chrome(client_id, TabChrome::single_editor(editor, true))
+        let ui_theme = editor.ui_theme().clone();
+        Self::from_chrome(client_id, TabChrome::single_editor(editor, true), ui_theme)
     }
 
     /// Phase 22.5: build the shell for a restored window — the bootstrap tab
@@ -348,16 +360,18 @@ impl ClayShellWidget {
         editor: EditorWidget,
         persisted: &PersistedTabState,
     ) -> Self {
+        let ui_theme = editor.ui_theme().clone();
         Self::from_chrome(
             client_id,
             TabChrome::with_layout(
                 editor,
                 crate::shell::layout_persist::layout_from_persisted_tab(persisted),
             ),
+            ui_theme,
         )
     }
 
-    fn from_chrome(client_id: ClientId, chrome: TabChrome) -> Self {
+    fn from_chrome(client_id: ClientId, chrome: TabChrome, ui_theme: ResolvedUiTheme) -> Self {
         let mut tabs = BTreeMap::new();
         tabs.insert(client_id, chrome);
         Self {
@@ -371,6 +385,7 @@ impl ClayShellWidget {
             tab_bar_hover: None,
             typography: TypographyRegistry::default(),
             announcement: None,
+            ui_theme,
         }
     }
 
@@ -392,6 +407,7 @@ impl ClayShellWidget {
             tab_bar_hover: None,
             typography: TypographyRegistry::default(),
             announcement: None,
+            ui_theme: ResolvedUiTheme::default(),
         }
     }
 
@@ -1105,11 +1121,38 @@ impl ClayShellWidget {
         ctx.children_changed();
     }
 
+    /// Install an inert `ActiveTheme` snapshot for shell chrome: resolve the
+    /// design tokens over the theme's editor base palette (mirrors the editor
+    /// surface install) and stamp every registered placeholder host so split
+    /// panes follow the theme. Unregistered hosts were stamped at creation.
+    pub fn set_active_theme(
+        &mut self,
+        ctx: &mut MutateCtx<'_>,
+        theme: &crate::protocol::ActiveTheme,
+    ) {
+        let registry = crate::editor::theme::StyleRegistry::from_active_theme(theme);
+        let base = registry.base;
+        let Ok(resolved) = ResolvedUiTheme::from_active_theme(&theme.design_tokens) else {
+            return;
+        };
+        self.ui_theme = resolved.with_base_ui(&base);
+        let ui_theme = self.ui_theme.clone();
+        for tab in self.tabs.values_mut() {
+            let registered = tab.registered_panes.clone();
+            for (pane_id, host) in tab.pane_hosts.iter_mut() {
+                if registered.contains(pane_id) {
+                    ctx.get_mut(host).widget.set_ui_theme(ui_theme.clone());
+                }
+            }
+        }
+    }
+
     /// State-level host sync against the pane tree (no Masonry context).
     ///
     /// Adds placeholder hosts for new leaves and stashes removed hosts in
     /// `pending_orphans` (a later `reconcile_pane_hosts` detaches them).
     fn sync_pane_hosts_state(&mut self) {
+        let ui_theme = self.ui_theme.clone();
         let chrome = self.active_mut();
         let leaves: BTreeSet<PaneId> = chrome.layout.pane_tree().pane_ids().into_iter().collect();
         for pane_id in chrome.pane_hosts.keys().copied().collect::<Vec<_>>() {
@@ -1129,7 +1172,9 @@ impl ClayShellWidget {
             {
                 slot.insert(
                     NewWidget::new(
-                        PaneContentHost::placeholder(pane_id).with_pane_count(leaf_count),
+                        PaneContentHost::placeholder(pane_id)
+                            .with_pane_count(leaf_count)
+                            .with_ui_theme(ui_theme.clone()),
                     )
                     .to_pod(),
                 );
@@ -1146,15 +1191,23 @@ impl ClayShellWidget {
             .collect()
     }
 
-    /// Phase 22.1: host placement rects used by `layout()` (test accessor).
-    #[cfg(test)]
-    pub(crate) fn pane_host_rects(&self, size: Size) -> Vec<(PaneId, Rect)> {
+    /// The pane-layout frame: full widget size minus the shell-owned tab bar
+    /// row. Every consumer of pane geometry (host placement, chrome painting,
+    /// hit-testing) must agree on this frame.
+    fn working_area(&self, size: Size) -> Rect {
         let mut area = Rect::new(0.0, 0.0, size.width, size.height);
-        // Phase 22.3: mirrors `layout()`'s tab bar carve so observations match
-        // actual host placement.
         if let Some(bar) = self.tab_bar_geometry(size) {
             area.y0 = bar.bar.y1;
         }
+        area
+    }
+
+    /// Phase 22.1: host placement rects used by `layout()` (test accessor).
+    #[cfg(test)]
+    pub(crate) fn pane_host_rects(&self, size: Size) -> Vec<(PaneId, Rect)> {
+        // Phase 22.3: mirrors `layout()`'s tab bar carve so observations match
+        // actual host placement.
+        let area = self.working_area(size);
         self.active()
             .pane_hosts
             .keys()
@@ -1442,13 +1495,10 @@ impl Widget for ClayShellWidget {
         bc: &BoxConstraints,
     ) -> Size {
         let size = Self::layout_size(bc);
-        let mut area = Rect::new(0.0, 0.0, size.width, size.height);
         // Phase 22.3: the shell-owned tab bar row carves the top of the
         // working area (window-level row; it never consumes a
         // package-contributable fixed slot, which live inside each pane).
-        if let Some(bar) = self.tab_bar_geometry(size) {
-            area.y0 = bar.bar.y1;
-        }
+        let area = self.working_area(size);
         // Phase 22.1: place each pane host at its pane's main-slot rect; fixed
         // slots keep their Phase 20.3 geometry inside each pane.
         // Phase 22.3: the active tab's hosts get their pane rects; inactive
@@ -1484,8 +1534,8 @@ impl Widget for ClayShellWidget {
     }
 
     fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
-        let area = Rect::new(0.0, 0.0, _ctx.size().width, _ctx.size().height);
-        let theme = ResolvedUiTheme::default();
+        let area = self.working_area(_ctx.size());
+        let theme = self.ui_theme.clone();
 
         // Phase 22.3: the shell-owned tab bar row (painted behind the working
         // area; the pane hosts are laid out below the bar so nothing overlaps).
@@ -1494,14 +1544,8 @@ impl Widget for ClayShellWidget {
         }
 
         let active = self.active();
-        // Phase 20.3: paint split dividers.
-        for divider in active.layout.pane_tree().divider_rects(area) {
-            let axis = match divider.orientation {
-                crate::shell::SplitOrientation::Horizontal => Axis::Vertical,
-                crate::shell::SplitOrientation::Vertical => Axis::Horizontal,
-            };
-            paint_divider(scene, divider.line_rect, axis, &theme);
-        }
+        // Split dividers paint above the pane hosts in `post_paint` (child
+        // hosts repaint over anything drawn here).
 
         // Phase 20.3: paint fixed slot resize handles via paint_panel_chrome.
         let pane_id = active.layout.active_pane_id();
@@ -1530,6 +1574,27 @@ impl Widget for ClayShellWidget {
             && let Some(focus_rect) = active.layout.focused_pane_rect(area)
         {
             paint_focus_ring(scene, focus_rect, &theme);
+        }
+    }
+
+    fn post_paint(
+        &mut self,
+        _ctx: &mut PaintCtx<'_>,
+        _props: &PropertiesRef<'_>,
+        scene: &mut Scene,
+    ) {
+        // Pane hosts are children and repaint over `paint()` output, so the
+        // split boundaries must be drawn here to stay visible — same
+        // hairline treatment for side-by-side and stacked splits.
+        let area = self.working_area(_ctx.size());
+        let theme = self.ui_theme.clone();
+        let active = self.active();
+        for divider in active.layout.pane_tree().divider_rects(area) {
+            let axis = match divider.orientation {
+                crate::shell::SplitOrientation::Horizontal => Axis::Vertical,
+                crate::shell::SplitOrientation::Vertical => Axis::Horizontal,
+            };
+            paint_divider(scene, divider.line_rect, axis, &theme);
         }
     }
 
@@ -1564,7 +1629,7 @@ impl Widget for ClayShellWidget {
         _props: &mut PropertiesMut<'_>,
         event: &PointerEvent,
     ) {
-        let area = Rect::new(0.0, 0.0, ctx.size().width, ctx.size().height);
+        let area = self.working_area(ctx.size());
         let pane_id = self.active().layout.active_pane_id();
 
         match event {
@@ -2458,6 +2523,92 @@ mod tests {
                 .expect("pane host downcasts");
             assert!(host.widget.is_placeholder());
             assert_eq!(host.widget.editor_widget_id(), None);
+        });
+    }
+
+    #[test]
+    fn set_active_theme_stamps_placeholder_hosts_for_new_splits() {
+        let shell = ClayShellWidget::single_editor(0, EditorWidget::default());
+        let shell_new = NewWidget::new(shell);
+        let shell_id = shell_new.id();
+        let mut render_root = RenderRoot::new(shell_new, |_| {}, render_root_options());
+        let _ = render_root.redraw();
+
+        let themed = crate::protocol::ActiveTheme {
+            specifier: "@clay/theme-modus-operandi".to_string(),
+            overrides: Vec::new(),
+            design_tokens: vec![crate::protocol::UiDesignTokenOverride {
+                token: "surface.panel".to_string(),
+                value: crate::protocol::WireDesignTokenValue::Color([0xff, 0xff, 0xff, 0xff]),
+                provenance: "test".to_string(),
+            }],
+        };
+
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.set_active_theme(&mut shell.ctx, &themed);
+        });
+        dispatch_shell_command(
+            &mut render_root,
+            shell_id,
+            ShellClientCommand::SplitPaneHorizontal,
+        );
+
+        let hosts = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.pane_host_ids()
+        });
+        assert_eq!(hosts.len(), 2);
+        render_root.edit_widget(hosts[1].1, |mut widget| {
+            let host = widget.try_downcast::<PaneContentHost>().expect("host");
+            assert!(host.widget.is_placeholder());
+            assert_eq!(
+                host.widget.placeholder_background(),
+                masonry::peniko::Color::from_rgb8(0xff, 0xff, 0xff)
+            );
+        });
+    }
+
+    #[test]
+    fn split_placeholder_seeds_theme_from_editor_at_construction() {
+        // The editor arrives with the active theme already installed
+        // (handshake initial state); the shell seeds its chrome theme from
+        // it so a split placeholder follows the theme without any theme
+        // event (the startup handshake theme never arrives as one).
+        let mut state = initial_state(DocumentAccess::Editable { lease_id: 99 }, 1);
+        state.active_theme = crate::protocol::ActiveTheme {
+            specifier: "@clay/theme-modus-operandi".to_string(),
+            overrides: Vec::new(),
+            design_tokens: vec![crate::protocol::UiDesignTokenOverride {
+                token: "surface.panel".to_string(),
+                value: crate::protocol::WireDesignTokenValue::Color([0x11, 0x22, 0x33, 0xff]),
+                provenance: "test".to_string(),
+            }],
+        };
+        let shell = ClayShellWidget::single_editor(0, EditorWidget::with_initial_state(state));
+        let shell_new = NewWidget::new(shell);
+        let shell_id = shell_new.id();
+        let mut render_root = RenderRoot::new(shell_new, |_| {}, render_root_options());
+        let _ = render_root.redraw();
+
+        dispatch_shell_command(
+            &mut render_root,
+            shell_id,
+            ShellClientCommand::SplitPaneHorizontal,
+        );
+
+        let hosts = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.pane_host_ids()
+        });
+        assert_eq!(hosts.len(), 2);
+        render_root.edit_widget(hosts[1].1, |mut widget| {
+            let host = widget.try_downcast::<PaneContentHost>().expect("host");
+            assert!(host.widget.is_placeholder());
+            assert_eq!(
+                host.widget.placeholder_background(),
+                masonry::peniko::Color::from_rgb8(0x11, 0x22, 0x33)
+            );
         });
     }
 

@@ -25,11 +25,16 @@
 use crate::protocol::{ClientId, TabEntry, TabId, TabRegistrySnapshot, WorkspaceRootId};
 
 /// Server-authoritative tab registry (in-memory).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct TabRegistry {
     tabs: Vec<TabEntry>,
     active: Option<TabId>,
     next_tab_id: TabId,
+    /// Monotonic generation, bumped on every applied mutation. Carried in
+    /// every snapshot so the client can discard stale relays: a connection's
+    /// handshake replay races the broadcast of its own pending tab command,
+    /// and relays from different connections interleave.
+    revision: u64,
 }
 
 impl TabRegistry {
@@ -38,6 +43,7 @@ impl TabRegistry {
             tabs: Vec::new(),
             active: None,
             next_tab_id: 1,
+            revision: 0,
         }
     }
 
@@ -45,6 +51,7 @@ impl TabRegistry {
         TabRegistrySnapshot {
             tabs: self.tabs.clone(),
             active: self.active,
+            revision: self.revision,
         }
     }
 
@@ -66,6 +73,7 @@ impl TabRegistry {
             workspace_root,
         });
         self.active = Some(tab_id);
+        self.revision += 1;
         tab_id
     }
 
@@ -86,6 +94,7 @@ impl TabRegistry {
         }
         entry.workspace_root_id = workspace_root_id;
         entry.workspace_root = workspace_root;
+        self.revision += 1;
         true
     }
 
@@ -103,6 +112,7 @@ impl TabRegistry {
         if self.active == Some(tab_id) {
             self.active = self.tabs.last().map(|entry| entry.tab_id);
         }
+        self.revision += 1;
         true
     }
 
@@ -114,7 +124,10 @@ impl TabRegistry {
         if entry.client_id != client_id {
             return false;
         }
-        self.active = Some(tab_id);
+        if self.active != Some(tab_id) {
+            self.active = Some(tab_id);
+            self.revision += 1;
+        }
         true
     }
 
@@ -126,7 +139,10 @@ impl TabRegistry {
         let Some(entry) = self.tabs.iter_mut().find(|entry| entry.tab_id == tab_id) else {
             return false;
         };
-        entry.client_id = client_id;
+        if entry.client_id != client_id {
+            entry.client_id = client_id;
+            self.revision += 1;
+        }
         true
     }
 
@@ -145,6 +161,7 @@ impl TabRegistry {
             return false;
         }
         self.tabs.swap(index, index - 1);
+        self.revision += 1;
         true
     }
 
@@ -163,6 +180,7 @@ impl TabRegistry {
             return false;
         }
         self.tabs.swap(index, index + 1);
+        self.revision += 1;
         true
     }
 
@@ -186,6 +204,7 @@ impl TabRegistry {
         }
         let entry = self.tabs.remove(index);
         self.tabs.insert(target, entry);
+        self.revision += 1;
         true
     }
 }
@@ -216,6 +235,31 @@ mod tests {
         assert_eq!(snapshot.tabs[1].tab_id, second);
         assert_eq!(snapshot.tabs[1].client_id, 2);
         assert_eq!(snapshot.active, Some(second));
+    }
+
+    #[test]
+    fn revision_advances_on_applied_mutations_only() {
+        // Client-side ordering guard relies on the revision: every applied
+        // mutation bumps it; rejected no-ops leave it put.
+        let mut registry = TabRegistry::new();
+        assert_eq!(registry.snapshot().revision, 0);
+        let first = registry.create_tab(1, 10, "/tmp/alpha".to_string());
+        assert_eq!(registry.snapshot().revision, 1);
+        registry.create_tab(2, 20, "/tmp/beta".to_string());
+        assert_eq!(registry.snapshot().revision, 2);
+        // Rejected mutation (foreign client): no bump.
+        assert!(!registry.close_tab(first, 99));
+        assert_eq!(registry.snapshot().revision, 2);
+        // Applied mutations bump.
+        assert!(registry.activate(first, 1));
+        assert_eq!(registry.snapshot().revision, 3);
+        // No-op activate (already active): no bump.
+        assert!(registry.activate(first, 1));
+        assert_eq!(registry.snapshot().revision, 3);
+        assert!(registry.move_right(first, 1));
+        assert_eq!(registry.snapshot().revision, 4);
+        assert!(registry.close_tab(first, 1));
+        assert_eq!(registry.snapshot().revision, 5);
     }
 
     #[test]

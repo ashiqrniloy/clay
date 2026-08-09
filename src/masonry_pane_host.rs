@@ -48,6 +48,9 @@ pub struct PaneContentHost {
     /// app driver when a document open/reload lands in this pane; `None` for
     /// placeholder/editor panes and after `clear_content`).
     document_display_name: Option<String>,
+    /// Resolved UI theme for the placeholder fill. Stamped by the shell at
+    /// creation and on active-theme changes so split panes follow the theme.
+    ui_theme: ResolvedUiTheme,
 }
 
 impl PaneContentHost {
@@ -57,6 +60,7 @@ impl PaneContentHost {
             content: PaneContent::Placeholder,
             pane_count: 1,
             document_display_name: None,
+            ui_theme: ResolvedUiTheme::default(),
         }
     }
 
@@ -66,7 +70,19 @@ impl PaneContentHost {
             content: PaneContent::Editor(editor.to_pod()),
             pane_count: 1,
             document_display_name: None,
+            ui_theme: ResolvedUiTheme::default(),
         }
+    }
+
+    /// Builder-set resolved UI theme (stamped before the first register pass).
+    pub(crate) fn with_ui_theme(mut self, ui_theme: ResolvedUiTheme) -> Self {
+        self.ui_theme = ui_theme;
+        self
+    }
+
+    /// Install a newer resolved UI theme for the placeholder fill.
+    pub(crate) fn set_ui_theme(&mut self, ui_theme: ResolvedUiTheme) {
+        self.ui_theme = ui_theme;
     }
 
     /// Phase 22.6: builder-set pane count for hosts created from an existing
@@ -144,6 +160,14 @@ impl PaneContentHost {
     pub(crate) fn is_placeholder(&self) -> bool {
         matches!(self.content, PaneContent::Placeholder)
     }
+
+    /// Test accessor for the placeholder fill color.
+    #[cfg(test)]
+    pub(crate) fn placeholder_background(&self) -> Color {
+        self.ui_theme
+            .color("surface.panel")
+            .unwrap_or(Color::TRANSPARENT)
+    }
 }
 
 impl Widget for PaneContentHost {
@@ -183,8 +207,10 @@ impl Widget for PaneContentHost {
             return;
         }
         // Inert empty-pane surface: theme token fill only (no JS, no IPC).
-        let theme = ResolvedUiTheme::default();
-        let background = theme.color("surface.panel").unwrap_or(Color::TRANSPARENT);
+        let background = self
+            .ui_theme
+            .color("surface.panel")
+            .unwrap_or(Color::TRANSPARENT);
         let rect = Rect::new(0.0, 0.0, ctx.size().width, ctx.size().height);
         scene.fill(
             masonry::vello::peniko::Fill::NonZero,

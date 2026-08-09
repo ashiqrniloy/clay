@@ -2822,6 +2822,10 @@ impl PaneDocumentView {
     }
 
     pub(crate) fn paint_in(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
+        let size = ctx.size();
+        if size.width <= 0.0 || size.height <= 0.0 {
+            return;
+        }
         let rect = self.editor_rect;
         scene.fill(
             Fill::NonZero,
@@ -2834,6 +2838,16 @@ impl PaneDocumentView {
     }
 
     pub(crate) fn post_paint_in(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
+        // Zero-size panes must overlay nothing. Inactive-tab hosts and
+        // pending orphans stay in the tree at Size::ZERO / Point::ZERO so they
+        // keep receiving connection events, and `post_paint` is unclipped
+        // (Masonry appends the postfix scene after the clip layer pops), so an
+        // unguarded status line would leak into the top-left corner and paint
+        // over the tab bar.
+        let size = ctx.size();
+        if size.width <= 0.0 || size.height <= 0.0 {
+            return;
+        }
         let recorder = global_recorder();
         let _scope = recorder.scope("masonry.render_prepare.post_paint");
         self.paint_status_line(ctx, scene);
@@ -3903,5 +3917,45 @@ mod tests {
         view.dismiss_recovery();
         let cleared = view.take_pending_menu().expect("clear push");
         assert!(cleared.is_none());
+    }
+
+    fn render_view_scene(width: u32, height: u32) -> Scene {
+        use masonry::app::{RenderRoot, RenderRootOptions, WindowSizePolicy};
+        use masonry::core::NewWidget;
+        use masonry::dpi::PhysicalSize;
+        use masonry::theme::default_property_set;
+
+        let (queue, _receiver) = ClientEditQueue::bounded(8);
+        let mut view = view_with_queue(queue);
+        open(&mut view, 7, "hello");
+        let options = RenderRootOptions {
+            default_properties: default_property_set().into(),
+            use_system_fonts: false,
+            size_policy: WindowSizePolicy::User,
+            size: PhysicalSize::new(width, height),
+            scale_factor: 1.0,
+            test_font: None,
+        };
+        let mut render_root = RenderRoot::new(NewWidget::new(view), |_| {}, options);
+        let (scene, _) = render_root.redraw();
+        scene
+    }
+
+    #[test]
+    fn zero_size_pane_overlays_nothing() {
+        // Sanity: a real-sized pane paints (background + status line).
+        let visible = render_view_scene(900, 600);
+        assert!(
+            !visible.encoding().is_empty(),
+            "a sized pane must paint content"
+        );
+        // A zero-size pane (retained inactive-tab host / pending orphan placed
+        // at Point::ZERO) must overlay nothing: Masonry `post_paint` is
+        // unclipped, so an unguarded status line would leak over the tab bar.
+        let zero = render_view_scene(0, 0);
+        assert!(
+            zero.encoding().is_empty(),
+            "a zero-size pane must not paint the status line"
+        );
     }
 }

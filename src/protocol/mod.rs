@@ -40,7 +40,7 @@ pub use textobjects::*;
 /// so registry order becomes server-authoritative and reorderable via the
 /// Phase 22.4 keyboard tab commands.
 /// Older server processes must not retain the previous wire semantics.
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;
@@ -1613,6 +1613,11 @@ pub struct TabRegistrySnapshot {
     /// `TabCommand::MoveLeft`/`MoveRight`/`MoveTo`).
     pub tabs: Vec<TabEntry>,
     pub active: Option<TabId>,
+    /// Monotonic registry generation: bumped on every mutation. Relays from
+    /// different connections can interleave out of order (a connection's
+    /// handshake replay races the broadcast of its own pending tab command),
+    /// so the client applies a snapshot only when its revision advances.
+    pub revision: u64,
 }
 
 /// Phase 22.3: server-authoritative tab lifecycle command. `New` opens a tab

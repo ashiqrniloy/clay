@@ -538,6 +538,12 @@ impl EditorWidget {
         self.pane_id
     }
 
+    /// Resolved UI theme installed on the hosted document view (shell pane
+    /// hosts seed their placeholder fill from this at construction).
+    pub(crate) fn ui_theme(&self) -> &crate::shell::ResolvedUiTheme {
+        self.view.ui_theme()
+    }
+
     /// Create the inert region child pod (reconciled later by `sync_region`).
     fn new_region_pod() -> WidgetPod<dyn Widget> {
         NewWidget::new(SduiRegionWidget::new()).erased().to_pod()

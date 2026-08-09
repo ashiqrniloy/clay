@@ -1680,6 +1680,15 @@ fn remove_stale_socket(socket_path: &Path) -> Result<(), ServerError> {
     };
 
     if metadata.file_type().is_socket() {
+        // A socket file is only stale when nothing listens on it. If a live
+        // server answers the probe, refuse to replace it: rebinding would
+        // steal the endpoint path, orphaning the running server and every
+        // tab connected to it (the old listener keeps a deleted inode).
+        if unix_socket_has_live_listener(socket_path) {
+            return Err(ServerError::EndpointInUse(
+                socket_path.display().to_string(),
+            ));
+        }
         fs::remove_file(socket_path).map_err(ServerError::RemoveStaleSocket)?;
         return Ok(());
     }
@@ -1688,6 +1697,14 @@ fn remove_stale_socket(socket_path: &Path) -> Result<(), ServerError> {
         "refusing to replace non-socket path {}",
         socket_path.display()
     )))
+}
+
+/// Probe-connect a Unix socket: `true` when a listener accepts. The probe
+/// connection closes immediately; the live server tolerates the handshake
+/// EOF (same path the client readiness probe uses).
+#[cfg(unix)]
+fn unix_socket_has_live_listener(socket_path: &Path) -> bool {
+    std::os::unix::net::UnixStream::connect(socket_path).is_ok()
 }
 
 #[cfg(windows)]
@@ -1860,6 +1877,7 @@ pub enum ServerError {
     EndpointDirectory(io::Error),
     EndpointOwnership(String),
     EndpointPermissions(io::Error),
+    EndpointInUse(String),
     RemoveStaleSocket(io::Error),
     Bind(io::Error),
     Accept(io::Error),
@@ -1891,6 +1909,12 @@ impl fmt::Display for ServerError {
             Self::RemoveStaleSocket(error) => {
                 write!(formatter, "failed to remove stale socket: {error}")
             }
+            Self::EndpointInUse(endpoint) => {
+                write!(
+                    formatter,
+                    "IPC endpoint {endpoint} already has a running Clay server"
+                )
+            }
             Self::Bind(error) => write!(formatter, "failed to bind IPC endpoint: {error}"),
             Self::Accept(error) => write!(formatter, "failed to accept IPC connection: {error}"),
             Self::InvalidWorkspaceRoot(message) => {
@@ -1910,6 +1934,7 @@ impl Error for ServerError {
             | Self::Accept(error) => Some(error),
             Self::InvalidEndpoint(_)
             | Self::EndpointOwnership(_)
+            | Self::EndpointInUse(_)
             | Self::InvalidWorkspaceRoot(_) => None,
         }
     }
