@@ -102,6 +102,137 @@ struct PendingDefinitionNavigation {
     byte_start: u64,
 }
 
+/// Phase 22.7 (C4): per-pane request-id allocators and in-flight request
+/// bookkeeping, grouped out of `PaneDocumentView`'s field list. All
+/// allocators saturate at `u64::MAX` (`saturating_add(1).max(1)`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PaneRequestBookkeeping {
+    next_transaction_id: u64,
+    next_completion_request_id: u64,
+    active_completion_request_id: Option<CompletionRequestId>,
+    next_language_intelligence_request_id: u64,
+    active_language_intelligence_request_id: Option<LanguageIntelligenceRequestId>,
+    next_selection_query_request_id: u64,
+    pending_selection_query: Option<(u64, Vec<crate::protocol::SelectionQueryCursor>)>,
+}
+
+impl Default for PaneRequestBookkeeping {
+    fn default() -> Self {
+        Self {
+            next_transaction_id: 1,
+            next_completion_request_id: 1,
+            active_completion_request_id: None,
+            next_language_intelligence_request_id: 1,
+            active_language_intelligence_request_id: None,
+            next_selection_query_request_id: 1,
+            pending_selection_query: None,
+        }
+    }
+}
+
+impl PaneRequestBookkeeping {
+    /// Allocate the next id in a family (monotonic, saturating at `u64::MAX`).
+    fn bump(next: &mut u64) -> u64 {
+        let id = *next;
+        *next = next.saturating_add(1).max(1);
+        id
+    }
+
+    fn next_transaction_id(&mut self) -> u64 {
+        Self::bump(&mut self.next_transaction_id)
+    }
+
+    fn next_completion_request_id(&mut self) -> CompletionRequestId {
+        Self::bump(&mut self.next_completion_request_id)
+    }
+
+    fn next_language_intelligence_request_id(&mut self) -> LanguageIntelligenceRequestId {
+        Self::bump(&mut self.next_language_intelligence_request_id)
+    }
+
+    fn next_selection_query_request_id(&mut self) -> u64 {
+        Self::bump(&mut self.next_selection_query_request_id)
+    }
+
+    /// Clear the in-flight completion/language-intelligence ids (an edit or
+    /// menu change invalidates them). The pending selection query survives
+    /// until [`Self::reset`].
+    fn clear_active(&mut self) {
+        self.active_completion_request_id = None;
+        self.active_language_intelligence_request_id = None;
+    }
+
+    /// Full reset (view blanking): in-flight ids and pending selection query.
+    fn reset(&mut self) {
+        self.clear_active();
+        self.pending_selection_query = None;
+    }
+
+    /// Clear the completion request when it is the one in flight.
+    fn take_completion_if_current(&mut self, request_id: CompletionRequestId) -> bool {
+        if self.active_completion_request_id == Some(request_id) {
+            self.active_completion_request_id = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Clear the language-intelligence request when it is the one in flight.
+    fn take_language_intelligence_if_current(
+        &mut self,
+        request_id: LanguageIntelligenceRequestId,
+    ) -> bool {
+        if self.active_language_intelligence_request_id == Some(request_id) {
+            self.active_language_intelligence_request_id = None;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Phase 22.7 (C4): the view's transient-menu state — the keyboard-
+/// interactive session copy, the pending push to the connection owner's
+/// overlay (`Some(Some(menu))` shows, `Some(None)` clears, `None` means no
+/// pending change), and the connection-shared session-id allocator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PaneMenuSync {
+    menu: Option<TransientMenuSession>,
+    pending: Option<Option<TransientMenuSession>>,
+    session_ids: Rc<Cell<u64>>,
+}
+
+impl Default for PaneMenuSync {
+    fn default() -> Self {
+        Self {
+            menu: None,
+            pending: None,
+            session_ids: Rc::new(Cell::new(1)),
+        }
+    }
+}
+
+impl PaneMenuSync {
+    /// Take the pending push, leaving the tri-state `None` (no pending change).
+    fn take_pending(&mut self) -> Option<Option<TransientMenuSession>> {
+        self.pending.take()
+    }
+
+    /// Remember `menu` as the current session and mark a pending push.
+    fn push(&mut self, menu: Option<TransientMenuSession>) {
+        self.menu = menu.clone();
+        self.pending = Some(menu);
+    }
+
+    /// Connection-shared session-id allocation (monotonic, saturating).
+    fn next_session_id(&self) -> u64 {
+        let id = self.session_ids.get();
+        self.session_ids.set(id.saturating_add(1).max(1));
+        id
+    }
+}
+
 /// Lightweight per-document editor view (Phase 22.2). Doc-hidden: constructed
 /// and routed by the native `clay` binary; not a Clay JS API.
 #[doc(hidden)]
@@ -112,29 +243,19 @@ pub struct PaneDocumentView {
     /// Window-space rect this view paints/edits within (its pane main rect;
     /// `(0,0,size)` for standalone panes). Set during layout.
     editor_rect: Rect,
-    next_transaction_id: u64,
-    next_completion_request_id: u64,
-    active_completion_request_id: Option<CompletionRequestId>,
-    next_language_intelligence_request_id: u64,
-    active_language_intelligence_request_id: Option<LanguageIntelligenceRequestId>,
-    next_selection_query_request_id: u64,
-    pending_selection_query: Option<(u64, Vec<crate::protocol::SelectionQueryCursor>)>,
     pending_definition_navigation: Option<PendingDefinitionNavigation>,
     last_decoration_viewport: Option<(DocumentId, DocumentVersion, u64, u64)>,
+    /// Phase 22.7 (C4): request-id allocators and in-flight request
+    /// bookkeeping (grouped; see [`PaneRequestBookkeeping`]).
+    requests: PaneRequestBookkeeping,
     status: EditorStatus,
-    /// Keyboard-interactive transient menu owned by this view (completion,
-    /// language intelligence, save-conflict, sync recovery). The connection
-    /// owner displays the current session in its overlay.
-    menu: Option<TransientMenuSession>,
-    /// Pending menu push to the connection owner's overlay: `Some(Some(menu))`
-    /// shows, `Some(None)` clears, `None` means no pending change.
-    pending_menu_sync: Option<Option<TransientMenuSession>>,
+    /// Phase 22.7 (C4): transient-menu state — session copy, pending push,
+    /// session-id allocator (grouped; see [`PaneMenuSync`]).
+    menu_sync: PaneMenuSync,
     layout_invalidated: bool,
     /// Inactive document sessions retained for within-pane switching (Phase 20).
     sessions: DocumentSessionStore,
     has_opened_document: bool,
-    /// Shared transient-menu session-id allocator (one per connection).
-    menu_session_ids: Rc<Cell<u64>>,
     /// Shared SDUI ui_version mirror (one per connection; updated by the chrome).
     sdui_ui_version: Rc<Cell<u64>>,
     /// Last `ActiveTheme` installed (re-seeding baseline for new pane views).
@@ -165,22 +286,14 @@ impl Default for PaneDocumentView {
             editor,
             edit_queue: None,
             editor_rect: Rect::ZERO,
-            next_transaction_id: 1,
-            next_completion_request_id: 1,
-            active_completion_request_id: None,
-            next_language_intelligence_request_id: 1,
-            active_language_intelligence_request_id: None,
-            next_selection_query_request_id: 1,
-            pending_selection_query: None,
             pending_definition_navigation: None,
             last_decoration_viewport: None,
+            requests: PaneRequestBookkeeping::default(),
             status,
-            menu: None,
-            pending_menu_sync: None,
+            menu_sync: PaneMenuSync::default(),
             layout_invalidated: false,
             sessions: DocumentSessionStore::default(),
             has_opened_document: false,
-            menu_session_ids: Rc::new(Cell::new(1)),
             sdui_ui_version: Rc::new(Cell::new(0)),
             active_theme: None,
             active_typography: None,
@@ -200,7 +313,10 @@ impl PaneDocumentView {
     ) -> Self {
         Self {
             pane_id,
-            menu_session_ids,
+            menu_sync: PaneMenuSync {
+                session_ids: menu_session_ids,
+                ..PaneMenuSync::default()
+            },
             sdui_ui_version,
             ..Self::default()
         }
@@ -330,7 +446,7 @@ impl PaneDocumentView {
     pub fn reconnect(&mut self, edit_queue: ClientEditQueue) {
         self.edit_queue = Some(edit_queue);
         self.pending_reconnect_resync = true;
-        self.pending_menu_sync = Some(None);
+        self.menu_sync.pending = Some(None);
     }
 
     /// Phase 22.5: the active document's open identity (workspace root id +
@@ -403,12 +519,10 @@ impl PaneDocumentView {
             self.editor.document_state().access.clone(),
         );
         self.has_opened_document = false;
-        self.menu = None;
-        self.pending_menu_sync = Some(None);
+        self.menu_sync.menu = None;
+        self.menu_sync.pending = Some(None);
         self.last_decoration_viewport = None;
-        self.active_completion_request_id = None;
-        self.active_language_intelligence_request_id = None;
-        self.pending_selection_query = None;
+        self.requests.reset();
     }
 
     /// Blank the surface while preserving the shared theme/typography/behavior
@@ -438,12 +552,11 @@ impl PaneDocumentView {
     /// The pending menu session push for the app driver to forward to the
     /// connection owner's overlay (`Some(Some(menu))` show, `Some(None)` clear).
     pub fn take_pending_menu(&mut self) -> Option<Option<TransientMenuSession>> {
-        self.pending_menu_sync.take()
+        self.menu_sync.take_pending()
     }
 
     pub fn push_menu(&mut self, menu: Option<TransientMenuSession>) {
-        self.menu = menu.clone();
-        self.pending_menu_sync = Some(menu);
+        self.menu_sync.push(menu);
     }
 
     /// Phase 22.4: the pane's active document display name (tab-close
@@ -453,9 +566,7 @@ impl PaneDocumentView {
     }
 
     fn next_menu_session_id(&self) -> u64 {
-        let id = self.menu_session_ids.get();
-        self.menu_session_ids.set(id.saturating_add(1).max(1));
-        id
+        self.menu_sync.next_session_id()
     }
 
     // -- connection events --
@@ -586,8 +697,10 @@ impl PaneDocumentView {
                 self.apply_language_intelligence_result(result)
             }
             ClientConnectionEvent::LanguageIntelligenceRejected { request_id, .. } => {
-                if self.active_language_intelligence_request_id == Some(request_id) {
-                    self.active_language_intelligence_request_id = None;
+                if self
+                    .requests
+                    .take_language_intelligence_if_current(request_id)
+                {
                     self.push_menu(None);
                     true
                 } else {
@@ -604,8 +717,7 @@ impl PaneDocumentView {
                 self.editor.set_caret_style_override(style)
             }
             ClientConnectionEvent::CompletionRejected { request_id, .. } => {
-                if self.active_completion_request_id == Some(request_id) {
-                    self.active_completion_request_id = None;
+                if self.requests.take_completion_if_current(request_id) {
                     self.push_menu(None);
                     true
                 } else {
@@ -1086,7 +1198,7 @@ impl PaneDocumentView {
             {
                 next_status.runtime_diagnostic = None;
             }
-            if self.menu.as_ref().is_some_and(|menu| {
+            if self.menu_sync.menu.as_ref().is_some_and(|menu| {
                 let prompt = menu.prompt();
                 prompt.contains("conflict")
                     || prompt.contains("unsaved edits")
@@ -1443,7 +1555,7 @@ impl PaneDocumentView {
     }
 
     fn clear_sync_recovery_menu(&mut self) {
-        if let Some(menu) = self.menu.as_ref()
+        if let Some(menu) = self.menu_sync.menu.as_ref()
             && menu.is_active()
         {
             let prompt = menu.prompt().to_ascii_lowercase();
@@ -1498,7 +1610,11 @@ impl PaneDocumentView {
     }
 
     pub fn dismiss_recovery(&mut self) -> bool {
-        let cleared_menu = self.menu.as_ref().is_some_and(|menu| menu.is_active());
+        let cleared_menu = self
+            .menu_sync
+            .menu
+            .as_ref()
+            .is_some_and(|menu| menu.is_active());
         self.push_menu(None);
         let mut next_status = self.status.clone();
         let cleared_diagnostic = next_status.runtime_diagnostic.take().is_some();
@@ -1563,7 +1679,7 @@ impl PaneDocumentView {
     }
 
     fn recovery_summary(&self) -> Option<String> {
-        if let Some(menu) = self.menu.as_ref()
+        if let Some(menu) = self.menu_sync.menu.as_ref()
             && menu.is_active()
             && let Some(summary) =
                 crate::editor::accessibility::sanitize_recovery_summary(menu.prompt())
@@ -1787,8 +1903,7 @@ impl PaneDocumentView {
     fn apply_local_edit_outcome(&mut self, outcome: EditorCommandOutcome) -> bool {
         if let Some(edit_queue) = &self.edit_queue {
             for event in outcome.edit_events {
-                let transaction_id = self.next_transaction_id;
-                self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
+                let transaction_id = self.requests.next_transaction_id();
                 let _ = edit_queue.enqueue_edit_event(event, transaction_id);
             }
         }
@@ -1796,8 +1911,7 @@ impl PaneDocumentView {
             if !self.status.dirty {
                 self.status.dirty = true;
             }
-            self.active_completion_request_id = None;
-            self.active_language_intelligence_request_id = None;
+            self.requests.clear_active();
             self.push_menu(None);
             self.enqueue_decoration_viewport_request();
         }
@@ -1813,7 +1927,7 @@ impl PaneDocumentView {
     }
 
     fn apply_completion_result(&mut self, result: CompletionResultSet) -> bool {
-        if self.active_completion_request_id != Some(result.request_id) {
+        if self.requests.active_completion_request_id != Some(result.request_id) {
             return false;
         }
         let document = self.editor.document_state();
@@ -1828,7 +1942,7 @@ impl PaneDocumentView {
     }
 
     fn apply_language_intelligence_result(&mut self, result: LanguageIntelligenceResult) -> bool {
-        if self.active_language_intelligence_request_id != Some(result.request_id) {
+        if self.requests.active_language_intelligence_request_id != Some(result.request_id) {
             return false;
         }
         let document = self.editor.document_state();
@@ -1864,14 +1978,12 @@ impl PaneDocumentView {
         let outcome = self.editor.command_with_event(command);
         if let Some(edit_queue) = &self.edit_queue {
             for event in outcome.edit_events {
-                let transaction_id = self.next_transaction_id;
-                self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
+                let transaction_id = self.requests.next_transaction_id();
                 let _ = edit_queue.enqueue_edit_event(event, transaction_id);
             }
         }
         if outcome.changed {
-            self.active_completion_request_id = None;
-            self.active_language_intelligence_request_id = None;
+            self.requests.clear_active();
             self.push_menu(None);
             self.enqueue_decoration_viewport_request();
             ctx.request_render();
@@ -1898,8 +2010,7 @@ impl PaneDocumentView {
             self.enqueue_language_intelligence_request(language_intelligence);
             ctx.set_handled();
         } else if changed {
-            self.active_completion_request_id = None;
-            self.active_language_intelligence_request_id = None;
+            self.requests.clear_active();
             self.push_menu(None);
         }
         if let Some(command) = outcome.client_ui_command {
@@ -1953,7 +2064,7 @@ impl PaneDocumentView {
     /// if the key was consumed by the menu, keeping editor hot paths free of
     /// command execution or IPC work.
     fn route_menu_key(&mut self, ctx: &mut EventCtx<'_>, key: &KeyStroke) -> bool {
-        if self.menu.is_none() {
+        if self.menu_sync.menu.is_none() {
             return false;
         }
         match key.key {
@@ -1976,8 +2087,7 @@ impl PaneDocumentView {
             KeyCode::Escape => {
                 self.menu_cancel();
                 self.push_menu(None);
-                self.active_completion_request_id = None;
-                self.active_language_intelligence_request_id = None;
+                self.requests.clear_active();
                 ctx.request_render();
                 ctx.set_handled();
                 true
@@ -2003,7 +2113,7 @@ impl PaneDocumentView {
                 .editor
                 .accept_completion_with_event(&completion, commit_character);
             self.finish_local_outcome(ctx, outcome);
-            self.active_completion_request_id = None;
+            self.requests.active_completion_request_id = None;
         } else if let Some(local_action) = self.menu_selected_action() {
             if local_action
                 .command_id
@@ -2142,7 +2252,7 @@ impl PaneDocumentView {
             }
         }
         self.push_menu(None);
-        self.active_language_intelligence_request_id = None;
+        self.requests.active_language_intelligence_request_id = None;
         ctx.request_render();
         ctx.set_handled();
     }
@@ -2205,8 +2315,7 @@ impl PaneDocumentView {
     fn finish_local_outcome(&mut self, ctx: &mut EventCtx<'_>, outcome: EditorCommandOutcome) {
         if let Some(edit_queue) = &self.edit_queue {
             for event in outcome.edit_events {
-                let transaction_id = self.next_transaction_id;
-                self.next_transaction_id = self.next_transaction_id.saturating_add(1).max(1);
+                let transaction_id = self.requests.next_transaction_id();
                 let _ = edit_queue.enqueue_edit_event(event, transaction_id);
             }
         }
@@ -2222,9 +2331,8 @@ impl PaneDocumentView {
         let Some(edit_queue) = &self.edit_queue else {
             return;
         };
-        let request_id = self.next_completion_request_id;
-        self.next_completion_request_id = self.next_completion_request_id.saturating_add(1).max(1);
-        self.active_completion_request_id = Some(request_id);
+        let request_id = self.requests.next_completion_request_id();
+        self.requests.active_completion_request_id = Some(request_id);
         let _ = edit_queue.enqueue_completion_request(event, request_id);
     }
 
@@ -2235,12 +2343,8 @@ impl PaneDocumentView {
         let Some(edit_queue) = &self.edit_queue else {
             return;
         };
-        let request_id = self.next_language_intelligence_request_id;
-        self.next_language_intelligence_request_id = self
-            .next_language_intelligence_request_id
-            .saturating_add(1)
-            .max(1);
-        self.active_language_intelligence_request_id = Some(request_id);
+        let request_id = self.requests.next_language_intelligence_request_id();
+        self.requests.active_language_intelligence_request_id = Some(request_id);
         let _ = edit_queue.enqueue_language_intelligence_request(event, request_id);
     }
 
@@ -2251,12 +2355,8 @@ impl PaneDocumentView {
         let Some(edit_queue) = &self.edit_queue else {
             return;
         };
-        let request_id = self.next_selection_query_request_id;
-        self.next_selection_query_request_id = self
-            .next_selection_query_request_id
-            .saturating_add(1)
-            .max(1);
-        self.pending_selection_query = Some((request_id, event.selections.clone()));
+        let request_id = self.requests.next_selection_query_request_id();
+        self.requests.pending_selection_query = Some((request_id, event.selections.clone()));
         let _ = edit_queue.enqueue_selection_query_request(event, request_id);
     }
 
@@ -2266,7 +2366,8 @@ impl PaneDocumentView {
         &mut self,
         result: crate::protocol::SelectionQueryResult,
     ) -> bool {
-        let Some((request_id, requested_cursors)) = self.pending_selection_query.take() else {
+        let Some((request_id, requested_cursors)) = self.requests.pending_selection_query.take()
+        else {
             return false;
         };
         if request_id != result.request_id {
@@ -2332,21 +2433,21 @@ impl PaneDocumentView {
     // -- menu session helpers (ported from `SduiNativeState`) --
 
     fn menu_select_next(&mut self) {
-        if let Some(menu) = &mut self.menu {
+        if let Some(menu) = &mut self.menu_sync.menu {
             menu.select_next();
-            self.pending_menu_sync = Some(Some(menu.clone()));
+            self.menu_sync.pending = Some(Some(menu.clone()));
         }
     }
 
     fn menu_select_previous(&mut self) {
-        if let Some(menu) = &mut self.menu {
+        if let Some(menu) = &mut self.menu_sync.menu {
             menu.select_previous();
-            self.pending_menu_sync = Some(Some(menu.clone()));
+            self.menu_sync.pending = Some(Some(menu.clone()));
         }
     }
 
     fn menu_activate_selected(&mut self) -> Option<SduiActionIntent> {
-        let menu = self.menu.as_ref()?;
+        let menu = self.menu_sync.menu.as_ref()?;
         let action = menu.activate_selected()?;
         if action.completion_accept.is_some() {
             return None;
@@ -2362,19 +2463,20 @@ impl PaneDocumentView {
     }
 
     fn menu_selected_action(&self) -> Option<TransientMenuAction> {
-        self.menu
+        self.menu_sync
+            .menu
             .as_ref()
             .and_then(crate::shell::TransientMenuSession::activate_selected)
             .cloned()
     }
 
     fn menu_activate_completion(&mut self) -> Option<crate::shell::CompletionMenuAcceptAction> {
-        let menu = self.menu.as_ref()?;
+        let menu = self.menu_sync.menu.as_ref()?;
         menu.activate_selected()?.completion_accept.clone()
     }
 
     fn menu_cancel(&mut self) {
-        if let Some(menu) = &mut self.menu {
+        if let Some(menu) = &mut self.menu_sync.menu {
             menu.cancel();
         }
     }
@@ -3957,5 +4059,60 @@ mod tests {
             zero.encoding().is_empty(),
             "a zero-size pane must not paint the status line"
         );
+    }
+
+    #[test]
+    fn request_bookkeeping_allocates_unique_ids() {
+        let mut b = PaneRequestBookkeeping::default();
+        // First allocation from the default seed is 1; ids are monotonic.
+        assert_eq!(b.next_transaction_id(), 1);
+        assert_eq!(b.next_transaction_id(), 2);
+        let c1 = b.next_completion_request_id();
+        let c2 = b.next_completion_request_id();
+        assert!(c2 > c1);
+        let l1 = b.next_language_intelligence_request_id();
+        let l2 = b.next_language_intelligence_request_id();
+        assert!(l2 > l1);
+        let s1 = b.next_selection_query_request_id();
+        let s2 = b.next_selection_query_request_id();
+        assert!(s2 > s1);
+        // In-flight tracking: only the matching request clears.
+        assert!(b.active_completion_request_id.is_none());
+        b.active_completion_request_id = Some(c1);
+        assert!(b.take_completion_if_current(c1));
+        assert!(!b.take_completion_if_current(c1));
+        assert!(b.active_completion_request_id.is_none());
+        b.active_language_intelligence_request_id = Some(l1);
+        b.pending_selection_query = Some((s1, Vec::new()));
+        b.clear_active();
+        assert!(b.active_language_intelligence_request_id.is_none());
+        assert!(
+            b.pending_selection_query.is_some(),
+            "clear_active keeps the pending query"
+        );
+        b.reset();
+        assert!(b.pending_selection_query.is_none());
+    }
+
+    #[test]
+    fn menu_sync_pending_semantics() {
+        let mut sync = PaneMenuSync::default();
+        // Unchanged tri-state: nothing pending initially.
+        assert_eq!(sync.take_pending(), None);
+        // Show: push remembers the session and marks a one-shot pending push.
+        let session = TransientMenuSession::new(TransientMenuSessionId(1), "test");
+        sync.push(Some(session.clone()));
+        assert_eq!(sync.menu, Some(session.clone()));
+        assert_eq!(sync.take_pending(), Some(Some(session.clone())));
+        assert_eq!(sync.take_pending(), None, "pending push is one-shot");
+        // Clear: Some(None) means an explicit clear, not no-pending.
+        sync.push(None);
+        assert_eq!(sync.menu, None);
+        assert_eq!(sync.take_pending(), Some(None));
+        // Session ids allocate monotonically from the shared cell.
+        let id = sync.next_session_id();
+        assert!(id >= 1);
+        let next = sync.next_session_id();
+        assert!(next > id);
     }
 }

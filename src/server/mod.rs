@@ -35,12 +35,13 @@ mod ui;
 pub(crate) mod workspace;
 
 use std::{
+    collections::HashMap,
     error::Error,
     fmt, io,
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -77,8 +78,9 @@ use crate::{
     packages::commands::CommandRegistry,
     perf::budgets::RUNTIME_STATE_BROADCAST_CAPACITY,
     protocol::{
-        DocumentId, LockOwner, RuntimeDiagnostic, RuntimeGenerationId, RuntimeStateSnapshot,
-        ServerMessage, TabRegistrySnapshot, codec::Codec,
+        ClientId, DocumentAccess, DocumentId, LockOwner, RuntimeDiagnostic, RuntimeGenerationId,
+        RuntimeStateSnapshot, ServerMessage, TabId, TabRegistrySnapshot, WorkspaceRootId,
+        codec::Codec,
     },
     server::command_execution::{
         CommandExecutionDiagnostic, CommandExecutionRequest, CommandExecutionRule,
@@ -439,13 +441,62 @@ pub struct RuntimeReloadOutcome {
     pub refreshed_documents: Vec<ReloadedDocumentRefresh>,
 }
 
+/// Server-owned content state for one stable tab identity. The welcome
+/// document is separate from file-backed documents in the tab workspace, so
+/// each tab can bootstrap and retain its own document set.
+#[derive(Debug, Clone)]
+pub(crate) struct TabServerState {
+    pub(crate) welcome: Arc<Mutex<DocumentState>>,
+    pub(crate) workspace: Arc<Mutex<WorkspaceState>>,
+    /// Per-tab shell state. The workspace tree is hidden until the user
+    /// toggles it on; reconnect/reclaim keeps the tab's current choice.
+    pub(crate) workspace_pane_visible: Arc<AtomicBool>,
+}
+
+impl TabServerState {
+    fn from_workspace(workspace: WorkspaceState, allocator: Arc<AtomicU64>) -> Self {
+        let welcome_id = allocator.fetch_add(1, Ordering::Relaxed);
+        let workspace = workspace.with_document_id_allocator(allocator);
+        Self {
+            welcome: Arc::new(Mutex::new(DocumentState::new(
+                welcome_id,
+                "Welcome to Clay's Phase 4 IPC server.\n".to_string(),
+                DocumentAccess::Editable { lease_id: 1 },
+            ))),
+            workspace: Arc::new(Mutex::new(workspace)),
+            workspace_pane_visible: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(crate) fn workspace_pane_visible(&self) -> bool {
+        self.workspace_pane_visible.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn toggle_workspace_pane(&self) -> bool {
+        !self
+            .workspace_pane_visible
+            .fetch_xor(true, Ordering::Relaxed)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IpcServer {
     config: ServerConfig,
     codec: Codec,
+    /// Pre-bind state used only by the first connection's legacy handshake;
+    /// once `TabCommand::New` succeeds, tab content lives in `tab_states`.
+    bootstrap_state: TabServerState,
+    tab_states: Arc<Mutex<HashMap<TabId, TabServerState>>>,
+    document_id_allocator: Arc<AtomicU64>,
+    bootstrap_consumed: Arc<AtomicBool>,
+    #[cfg(test)]
+    /// Compatibility aliases for existing connection tests that construct or
+    /// inspect the pre-bind bootstrap state directly.
     document: Arc<Mutex<DocumentState>>,
-    behavior: Arc<Mutex<ActiveBehaviorManifest>>,
+    #[cfg(test)]
     workspace: Arc<Mutex<WorkspaceState>>,
+    behavior: Arc<Mutex<ActiveBehaviorManifest>>,
+
     sdui: Arc<Mutex<StaticSduiState>>,
     /// Resolved active theme snapshot (Plan 046 task 7 `setTheme`) shipped to the
     /// client during the welcome handshake. `None` = Clay default theme.
@@ -464,6 +515,11 @@ pub struct IpcServer {
     scoped_locks: ScopedLockManager,
     reload_attempt: Arc<Mutex<()>>,
     next_client_id: Arc<AtomicU64>,
+    /// Phase 22.7: `ClientId`s with a live connection task. The TTL sweep
+    /// never expires entries bound to a live client — presence outranks
+    /// tab-idleness (document editing never touches the registry). Inserted
+    /// at spawn, removed when the task ends.
+    live_clients: Arc<std::sync::Mutex<std::collections::HashSet<crate::protocol::ClientId>>>,
     /// Phase 22.3: server-authoritative in-memory tab registry (order, active
     /// tab, per-tab workspace + client binding) plus its broadcast lane. Every
     /// connection subscribes at spawn and forwards `ServerMessage::TabRegistry`
@@ -542,14 +598,22 @@ impl IpcServer {
                 ServerError::InvalidWorkspaceRoot(error.diagnostic().to_string())
             })?;
         }
-        workspace.reserve_document_ids_from(2);
+        let document_id_allocator = Arc::new(AtomicU64::new(1));
+        let bootstrap_state =
+            TabServerState::from_workspace(workspace, Arc::clone(&document_id_allocator));
 
         Ok(Self {
             config,
             codec: Codec::default(),
-            document: Arc::new(Mutex::new(DocumentState::default())),
+            #[cfg(test)]
+            document: Arc::clone(&bootstrap_state.welcome),
+            #[cfg(test)]
+            workspace: Arc::clone(&bootstrap_state.workspace),
+            bootstrap_state,
+            tab_states: Arc::new(Mutex::new(HashMap::new())),
+            document_id_allocator,
+            bootstrap_consumed: Arc::new(AtomicBool::new(false)),
             behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
-            workspace: Arc::new(Mutex::new(workspace)),
             sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
             active_theme: Arc::new(Mutex::new(None)),
             runtime_diagnostics: Arc::new(
@@ -567,6 +631,7 @@ impl IpcServer {
             scoped_locks: ScopedLockManager::default(),
             reload_attempt: Arc::new(Mutex::new(())),
             next_client_id: Arc::new(AtomicU64::new(1)),
+            live_clients: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             tab_registry: Arc::new(Mutex::new(tab_registry::TabRegistry::new())),
             tab_registry_tx: broadcast::channel(
                 crate::perf::budgets::RUNTIME_STATE_BROADCAST_CAPACITY,
@@ -575,6 +640,118 @@ impl IpcServer {
             #[cfg(test)]
             reload_barrier: ReloadCandidateBarrier::default(),
         })
+    }
+
+    async fn new_tab_state(
+        &self,
+        workspace_root: PathBuf,
+        first_tab: bool,
+    ) -> Result<(TabServerState, WorkspaceRootId), workspace::WorkspaceError> {
+        if first_tab && !self.bootstrap_consumed.load(Ordering::Acquire) {
+            let bootstrap_root_id =
+                if let Ok(canonical_root) = std::fs::canonicalize(&workspace_root) {
+                    self.bootstrap_state
+                        .workspace
+                        .lock()
+                        .await
+                        .directory_roots()
+                        .into_iter()
+                        .find(|root| root.canonical_path == canonical_root)
+                        .map(|root| root.workspace_root_id)
+                } else {
+                    None
+                };
+            if let Some(root_id) = bootstrap_root_id {
+                return Ok((self.bootstrap_state.clone(), root_id));
+            }
+        }
+
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(workspace_root)?;
+        Ok((
+            TabServerState::from_workspace(workspace, Arc::clone(&self.document_id_allocator)),
+            root_id,
+        ))
+    }
+
+    /// Create and register one tab-owned workspace/document state. The first
+    /// tab reuses the validated bootstrap state when it selects the startup
+    /// root; later tabs always receive fresh state.
+    pub(crate) async fn create_tab_state(
+        &self,
+        client_id: ClientId,
+        workspace_root: String,
+    ) -> Result<(TabRegistrySnapshot, TabServerState), workspace::WorkspaceError> {
+        let workspace_root = if workspace_root.is_empty() {
+            self.bootstrap_state
+                .workspace
+                .lock()
+                .await
+                .list_root_metadata()
+                .first()
+                .map(|root| root.display_path.clone())
+                .unwrap_or_default()
+        } else {
+            workspace_root
+        };
+        let mut registry = self.tab_registry.lock().await;
+        let first_tab = self.tab_states.lock().await.is_empty();
+        let (state, root_id) = self
+            .new_tab_state(PathBuf::from(&workspace_root), first_tab)
+            .await?;
+        let tab_id = registry.create_tab(client_id, root_id, workspace_root);
+        let state_for_connection = state.clone();
+        self.tab_states.lock().await.insert(tab_id, state);
+        self.bootstrap_consumed.store(true, Ordering::Release);
+        Ok((registry.snapshot(), state_for_connection))
+    }
+
+    pub(crate) async fn ensure_tab_state(
+        &self,
+        tab_id: TabId,
+        workspace_root: PathBuf,
+    ) -> Result<(), workspace::WorkspaceError> {
+        if self.tab_states.lock().await.contains_key(&tab_id) {
+            return Ok(());
+        }
+        let (state, _) = self.new_tab_state(workspace_root, false).await?;
+        self.tab_states.lock().await.entry(tab_id).or_insert(state);
+        Ok(())
+    }
+
+    pub(crate) async fn tab_state(&self, tab_id: TabId) -> Option<TabServerState> {
+        self.tab_states.lock().await.get(&tab_id).cloned()
+    }
+
+    pub(crate) async fn tab_state_for_client(
+        &self,
+        client_id: ClientId,
+    ) -> Option<(TabId, TabServerState)> {
+        let tab_id = self.tab_registry.lock().await.tab_for_client(client_id)?;
+        let state = self.tab_state(tab_id).await?;
+        Some((tab_id, state))
+    }
+
+    /// The pre-bind state is available only while the registry is empty and
+    /// bootstrap has not been consumed. After that point, an unbound or stale
+    /// connection must not fall back to another tab's bootstrap handles.
+    pub(crate) async fn unbound_bootstrap_state(&self) -> Option<TabServerState> {
+        if self.bootstrap_consumed.load(Ordering::Acquire)
+            || !self.tab_registry.lock().await.snapshot().tabs.is_empty()
+        {
+            return None;
+        }
+        Some(self.bootstrap_state.clone())
+    }
+
+    pub(crate) async fn state_for_client(&self, client_id: ClientId) -> Option<TabServerState> {
+        self.tab_state_for_client(client_id)
+            .await
+            .map(|(_, state)| state)
+    }
+
+    pub(crate) async fn remove_tab_state(&self, tab_id: TabId) {
+        self.tab_states.lock().await.remove(&tab_id);
     }
 
     #[cfg(unix)]
@@ -682,13 +859,15 @@ impl IpcServer {
             service
                 .load_configuration_from_root_with_workspace(
                     config_root,
-                    Arc::clone(&self.workspace),
+                    Arc::clone(&self.bootstrap_state.workspace),
                 )
                 .await
                 .map(Some)
         } else {
             service
-                .load_default_configuration_with_workspace(Arc::clone(&self.workspace))
+                .load_default_configuration_with_workspace(Arc::clone(
+                    &self.bootstrap_state.workspace,
+                ))
                 .await
         }
     }
@@ -927,6 +1106,7 @@ impl IpcServer {
         self.validate_runtime_registrations(generation_id, &service, &evaluation)?;
 
         let open_documents = self
+            .bootstrap_state
             .workspace
             .lock()
             .await
@@ -1152,7 +1332,12 @@ impl IpcServer {
         service: &ClayJsRuntimeService,
         snapshots: Vec<workspace::OpenDocumentSnapshot>,
     ) -> Vec<ReloadedDocumentRefresh> {
-        let roots = self.workspace.lock().await.directory_roots();
+        let roots = self
+            .bootstrap_state
+            .workspace
+            .lock()
+            .await
+            .directory_roots();
         let mut refreshed = Vec::with_capacity(snapshots.len());
         for snapshot in snapshots {
             let mut messages = connection::open_document_followup_messages(
@@ -1205,9 +1390,9 @@ impl IpcServer {
             return;
         };
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
-        let document = Arc::clone(&self.document);
+        let document = Arc::clone(&self.bootstrap_state.welcome);
         let behavior = Arc::clone(&self.behavior);
-        let workspace = Arc::clone(&self.workspace);
+        let workspace = Arc::clone(&self.bootstrap_state.workspace);
         let sdui = Arc::clone(&self.sdui);
         let active_theme = Arc::clone(&self.active_theme);
         let runtime_diagnostics = Arc::clone(&self.runtime_diagnostics);
@@ -1219,10 +1404,30 @@ impl IpcServer {
         let reload_server = IpcServer::clone(self);
         let tab_registry = Arc::clone(&self.tab_registry);
         let tab_registry_tx = self.tab_registry_tx.clone();
+        // Phase 22.7: the TTL sweep runs on connection arrival and departure
+        // (see `sweep_expired_tabs`), so these clones live with the task.
+        // Liveness travels with them too: a connected client's tab never
+        // expires, even when tab-idle beyond the TTL.
+        let sweep_registry = Arc::clone(&self.tab_registry);
+        let sweep_states = Arc::clone(&self.tab_states);
+        let sweep_tx = self.tab_registry_tx.clone();
+        let sweep_live = Arc::clone(&self.live_clients);
+        sweep_live.lock().unwrap().insert(client_id);
         let codec = self.codec;
         connections.spawn(async move {
             // The permit lives exactly as long as the connection task.
             let _permit = permit;
+            // Liveness leaves when the task ends (panic-safe via drop); the
+            // client's own departure sweep still sees it live — its entries
+            // were just touched, and anything truly abandoned falls to the
+            // next sweep.
+            let _live_guard = LiveClientGuard {
+                set: Arc::clone(&sweep_live),
+                client_id,
+            };
+            // Arrival: expire abandoned tabs before this connection's
+            // handshake so reclaimed entries were genuinely within the TTL.
+            sweep_expired_tabs(&sweep_registry, &sweep_states, &sweep_tx, &sweep_live).await;
             if let Err(error) = handle_connection_with_analysis(
                 stream,
                 client_id,
@@ -1246,7 +1451,59 @@ impl IpcServer {
             {
                 eprintln!("clay server connection {client_id} closed with error: {error}");
             }
+            // Departure: a connection that died without closing its tab(s)
+            // leaves abandoned entries for the next sweep.
+            sweep_expired_tabs(&sweep_registry, &sweep_states, &sweep_tx, &sweep_live).await;
         });
+    }
+}
+
+/// Phase 22.7: remove registry entries idle beyond `REGISTRY_TAB_TTL`
+/// (abandoned tabs whose bound connection never returned) and push a
+/// reconciling snapshot when anything was removed. Entries bound to a
+/// currently connected client (`live_clients`) NEVER expire — the
+/// connection task is the liveness proof, and tab-idle presence (document
+/// editing never touches the registry) must not lose a live client's tab.
+/// Runs on connection arrival and departure — O(n) over ≤
+/// `MAX_ACTIVE_CONNECTIONS` entries, never per message — so the registry
+/// stays bounded in long-running servers without a background task.
+async fn sweep_expired_tabs(
+    tab_registry: &Mutex<tab_registry::TabRegistry>,
+    tab_states: &Mutex<HashMap<TabId, TabServerState>>,
+    tab_registry_tx: &broadcast::Sender<TabRegistrySnapshot>,
+    live_clients: &std::sync::Mutex<std::collections::HashSet<crate::protocol::ClientId>>,
+) {
+    let snapshot = {
+        let mut registry = tab_registry.lock().await;
+        let live = live_clients.lock().unwrap().clone();
+        let removed = registry.sweep_expired(
+            std::time::Instant::now(),
+            crate::perf::budgets::REGISTRY_TAB_TTL,
+            &live,
+        );
+        if !removed.is_empty() {
+            let mut states = tab_states.lock().await;
+            for tab_id in &removed {
+                states.remove(tab_id);
+            }
+        }
+        (!removed.is_empty()).then(|| registry.snapshot())
+    };
+    if let Some(snapshot) = snapshot {
+        let _ = tab_registry_tx.send(snapshot);
+    }
+}
+
+/// Phase 22.7: removes its client from the live set when the connection
+/// task ends (drop is panic-safe).
+struct LiveClientGuard {
+    set: Arc<std::sync::Mutex<std::collections::HashSet<crate::protocol::ClientId>>>,
+    client_id: crate::protocol::ClientId,
+}
+
+impl Drop for LiveClientGuard {
+    fn drop(&mut self) {
+        self.set.lock().unwrap().remove(&self.client_id);
     }
 }
 
@@ -2203,6 +2460,65 @@ mod runtime_generation_tests {
         let mut config = ServerConfig::new(IpcEndpoint::from_argument("runtime-generation-test"));
         config.configuration_root = Some(root);
         IpcServer::new(config)
+    }
+
+    async fn bind_test_tab(
+        client: &mut tokio::io::DuplexStream,
+        codec: crate::protocol::codec::Codec,
+    ) {
+        let client_id = loop {
+            match codec.read_server_message(client).await.unwrap() {
+                ServerMessage::Welcome { client_id, .. } => break client_id,
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::FileOpenCapabilityIssued { .. } => {}
+                message => panic!("expected handshake message, got {message:?}"),
+            }
+        };
+        loop {
+            match codec.read_server_message(client).await.unwrap() {
+                ServerMessage::FileOpenCapabilityIssued { .. } => break,
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::TabRegistry(_) => {}
+                message => panic!("expected handshake message, got {message:?}"),
+            }
+        }
+        codec
+            .write_client_message(
+                client,
+                &crate::protocol::ClientMessage::TabCommand {
+                    client_id,
+                    command: crate::protocol::TabCommand::New {
+                        workspace_root: String::new(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        loop {
+            match codec.read_server_message(client).await.unwrap() {
+                ServerMessage::InitialDocument { .. } => break,
+                ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
+                message => panic!("expected InitialDocument, got {message:?}"),
+            }
+        }
+        loop {
+            match codec.read_server_message(client).await.unwrap() {
+                ServerMessage::TabRegistry(_) => break,
+                ServerMessage::SduiSnapshot { .. } => {}
+                message => panic!("expected tab registry after bind, got {message:?}"),
+            }
+        }
     }
 
     fn reload_request() -> CommandExecutionRequest {
@@ -3585,9 +3901,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             )
             .await
             .unwrap();
-        for _ in 0..9 {
-            let _ = codec.read_server_message(&mut client).await.unwrap();
-        }
+        bind_test_tab(&mut client, codec).await;
 
         let document = server.document.lock().await;
         let document_id = document.document_id();
@@ -3691,9 +4005,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             )
             .await
             .unwrap();
-        for _ in 0..9 {
-            let _ = codec.read_server_message(&mut client).await.unwrap();
-        }
+        bind_test_tab(&mut client, codec).await;
 
         codec
             .write_client_message(
@@ -3843,9 +4155,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             )
             .await
             .unwrap();
-        for _ in 0..9 {
-            let _ = codec.read_server_message(&mut client).await.unwrap();
-        }
+        bind_test_tab(&mut client, codec).await;
 
         let document = server.document.lock().await;
         let document_id = document.document_id();
@@ -3939,9 +4249,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             )
             .await
             .unwrap();
-        for _ in 0..9 {
-            let _ = codec.read_server_message(&mut client).await.unwrap();
-        }
+        bind_test_tab(&mut client, codec).await;
 
         let reload_server = server.clone();
         let reload_task =
@@ -4065,9 +4373,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             )
             .await
             .unwrap();
-        for _ in 0..9 {
-            let _ = codec.read_server_message(&mut client).await.unwrap();
-        }
+        bind_test_tab(&mut client, codec).await;
 
         let mut updates = server.runtime_generation.subscribe_runtime_state();
         fs::write(root.join("init.js"), "export const = ;").unwrap();
@@ -4365,15 +4671,156 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
     }
 }
 
+#[cfg(test)]
+mod tab_server_state_tests {
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use crate::{
+        ipc::IpcEndpoint,
+        server::{IpcServer, ServerConfig, workspace::open_existing_file_unlocked},
+    };
+
+    fn temp_root(name: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clay-tab-state-{name}-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).expect("test root directory can be created");
+        root
+    }
+
+    #[tokio::test]
+    async fn new_tab_states_keep_roots_and_documents_disjoint() {
+        let root_a = temp_root("alpha");
+        let root_b = temp_root("beta");
+        fs::write(root_a.join("one.txt"), "one").expect("alpha file can be written");
+        fs::write(root_a.join("two.txt"), "two").expect("alpha file can be written");
+        fs::write(root_b.join("one.txt"), "other").expect("beta file can be written");
+
+        let mut config = ServerConfig::new(IpcEndpoint::from_argument("tab-state-test"));
+        config.workspace_roots.push(root_a.clone());
+        let server = IpcServer::new(config);
+        let (alpha_snapshot, _) = server
+            .create_tab_state(1, root_a.to_string_lossy().into_owned())
+            .await
+            .expect("bootstrap tab state can be created");
+        let alpha_tab = alpha_snapshot.tabs[0].tab_id;
+        let (beta_snapshot, _) = server
+            .create_tab_state(2, root_b.to_string_lossy().into_owned())
+            .await
+            .expect("second tab state can be created");
+        let beta_tab = beta_snapshot.tabs[1].tab_id;
+
+        let alpha = server
+            .tab_state(alpha_tab)
+            .await
+            .expect("alpha state is installed");
+        let beta = server
+            .tab_state(beta_tab)
+            .await
+            .expect("beta state is installed");
+        let alpha_root = alpha
+            .workspace
+            .lock()
+            .await
+            .directory_roots()
+            .into_iter()
+            .next()
+            .expect("alpha has one root");
+        let beta_root = beta
+            .workspace
+            .lock()
+            .await
+            .directory_roots()
+            .into_iter()
+            .next()
+            .expect("beta has one root");
+        assert_eq!(
+            alpha_root.canonical_path,
+            fs::canonicalize(&root_a).unwrap()
+        );
+        assert_eq!(beta_root.canonical_path, fs::canonicalize(&root_b).unwrap());
+        assert!(!alpha.workspace_pane_visible());
+        assert!(!beta.workspace_pane_visible());
+        assert!(alpha.toggle_workspace_pane());
+        assert!(alpha.workspace_pane_visible());
+        assert!(!beta.workspace_pane_visible());
+        assert!(beta.toggle_workspace_pane());
+        assert!(beta.workspace_pane_visible());
+        assert!(alpha.workspace_pane_visible());
+        assert_ne!(
+            alpha.welcome.lock().await.document_id(),
+            beta.welcome.lock().await.document_id()
+        );
+
+        let alpha_one = open_existing_file_unlocked(
+            &alpha.workspace,
+            alpha_root.workspace_root_id,
+            "one.txt",
+            1,
+        )
+        .await
+        .expect("alpha file opens in alpha state");
+        let alpha_two = open_existing_file_unlocked(
+            &alpha.workspace,
+            alpha_root.workspace_root_id,
+            "two.txt",
+            1,
+        )
+        .await
+        .expect("second alpha file opens in alpha state");
+        let beta_one =
+            open_existing_file_unlocked(&beta.workspace, beta_root.workspace_root_id, "one.txt", 2)
+                .await
+                .expect("beta file opens in beta state");
+        assert_ne!(alpha_one.document_id, alpha_two.document_id);
+        assert_ne!(alpha_one.document_id, beta_one.document_id);
+        assert_eq!(
+            alpha
+                .workspace
+                .lock()
+                .await
+                .list_documents(1)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            beta.workspace
+                .lock()
+                .await
+                .list_documents(2)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+
+        fs::remove_dir_all(root_a).expect("alpha test root can be removed");
+        fs::remove_dir_all(root_b).expect("beta test root can be removed");
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use std::{
         fs,
-        sync::{Arc, atomic::AtomicU64},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicU64},
+        },
         time::SystemTime,
     };
 
-    use tokio::{net::UnixStream, sync::Mutex};
+    use tokio::{io::duplex, net::UnixStream, sync::Mutex, task::JoinSet};
 
     use super::{ActiveBehaviorManifest, IpcServer, RuntimeGenerationStore, ServerConfig};
     use crate::server::{
@@ -4383,7 +4830,7 @@ mod tests {
     use crate::{
         protocol::{
             ClientMessage, DocumentAccess, EditOperation, EditRejection, LockOwner,
-            PROTOCOL_VERSION, ServerMessage, codec::Codec,
+            PROTOCOL_VERSION, SduiNodeKind, ServerMessage, TabCommand, codec::Codec,
         },
         server::document::DocumentState,
     };
@@ -4399,16 +4846,42 @@ mod tests {
     }
 
     fn server_with_document(socket_path: &std::path::Path, document: DocumentState) -> IpcServer {
+        server_with_document_and_registry(
+            socket_path,
+            document,
+            Arc::new(Mutex::new(crate::server::tab_registry::TabRegistry::new())),
+        )
+    }
+
+    fn server_with_document_and_registry(
+        socket_path: &std::path::Path,
+        document: DocumentState,
+        tab_registry: Arc<Mutex<crate::server::tab_registry::TabRegistry>>,
+    ) -> IpcServer {
+        let document = Arc::new(Mutex::new(document));
+        let workspace = {
+            let mut workspace = crate::server::workspace::WorkspaceState::new();
+            workspace
+                .add_root(socket_path.parent().expect("socket parent"))
+                .expect("test workspace root");
+            workspace.reserve_document_ids_from(2);
+            Arc::new(Mutex::new(workspace))
+        };
+        let bootstrap_state = super::TabServerState {
+            welcome: Arc::clone(&document),
+            workspace: Arc::clone(&workspace),
+            workspace_pane_visible: Arc::new(AtomicBool::new(true)),
+        };
         IpcServer {
             config: ServerConfig::new(socket_path),
             codec: Codec::default(),
-            document: Arc::new(Mutex::new(document)),
+            bootstrap_state,
+            tab_states: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            document_id_allocator: Arc::new(AtomicU64::new(2)),
+            bootstrap_consumed: Arc::new(AtomicBool::new(false)),
+            document,
             behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
-            workspace: {
-                let mut workspace = crate::server::workspace::WorkspaceState::new();
-                workspace.reserve_document_ids_from(2);
-                Arc::new(Mutex::new(workspace))
-            },
+            workspace,
             sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
             active_theme: Arc::new(Mutex::new(None)),
             runtime_diagnostics: Arc::new(Mutex::new(
@@ -4426,11 +4899,262 @@ mod tests {
             scoped_locks: ScopedLockManager::default(),
             reload_attempt: Arc::new(Mutex::new(())),
             next_client_id: Arc::new(AtomicU64::new(1)),
-            tab_registry: Arc::new(Mutex::new(crate::server::tab_registry::TabRegistry::new())),
+            live_clients: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            tab_registry,
             tab_registry_tx: tokio::sync::broadcast::channel(16).0,
             #[cfg(test)]
             reload_barrier: super::ReloadCandidateBarrier::default(),
         }
+    }
+
+    #[tokio::test]
+    async fn deferred_initial_state_waits_for_tab_binding() {
+        let socket_path = unique_socket_path("deferred-handshake");
+        let selected_root = socket_path.parent().unwrap().join("selected");
+        fs::create_dir(&selected_root).unwrap();
+        fs::write(selected_root.join("selected.txt"), "selected\n").unwrap();
+        let server = IpcServer::new(ServerConfig::new(&socket_path));
+        let (client, server_stream) = duplex(64 * 1024);
+        let mut connections = JoinSet::new();
+        server.spawn_connection(server_stream, &mut connections);
+        let mut client = client;
+        let codec = Codec::default();
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "deferred-handshake".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let client_id = match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::Welcome { client_id, .. } => client_id,
+            message => panic!("expected Welcome, got {message:?}"),
+        };
+        let mut behavior_version = 1;
+        loop {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::FileOpenCapabilityIssued { .. } => break,
+                ServerMessage::InitialDocument { .. } | ServerMessage::SduiSnapshot { .. } => {
+                    panic!("document/SDUI leaked before tab binding")
+                }
+                ServerMessage::BehaviorManifest(manifest) => {
+                    behavior_version = manifest.behavior_version;
+                }
+                ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::TabRegistry(_) => {}
+                message => panic!("unexpected pre-bind message: {message:?}"),
+            }
+        }
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::TabCommand {
+                    client_id,
+                    command: TabCommand::New {
+                        workspace_root: selected_root.to_string_lossy().into_owned(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        let (document_id, workspace_root) = loop {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::InitialDocument {
+                    document_id,
+                    workspace_root,
+                    ..
+                } => break (document_id, workspace_root),
+                ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
+                message => panic!("expected bound InitialDocument, got {message:?}"),
+            }
+        };
+        assert_eq!(
+            workspace_root,
+            fs::canonicalize(&selected_root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        );
+        let tree = loop {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::SduiSnapshot { tree, .. } => break tree,
+                ServerMessage::TabRegistry(_) => {}
+                message => panic!("expected bound workspace SDUI, got {message:?}"),
+            }
+        };
+        assert!(tree.nodes.iter().all(|node| {
+            !matches!(
+                &node.kind,
+                SduiNodeKind::Panel { .. } | SduiNodeKind::List { .. }
+            )
+        }));
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::CommandIntent {
+                    client_id,
+                    document_id,
+                    behavior_version,
+                    command_id: "clay.workspace.toggleFileBrowser".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let tree = loop {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::SduiSnapshot { tree, .. } => break tree,
+                ServerMessage::TabRegistry(_) => {}
+                message => panic!("expected toggled workspace SDUI, got {message:?}"),
+            }
+        };
+        assert!(tree.nodes.iter().any(|node| matches!(
+            &node.kind,
+            SduiNodeKind::List { items } if items.iter().any(|item| item.label == "selected.txt")
+        )));
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::CommandIntent {
+                    client_id,
+                    document_id,
+                    behavior_version,
+                    command_id: "clay.workspace.toggleFileBrowser".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let hidden_tree = loop {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::SduiSnapshot { tree, .. } => break tree,
+                ServerMessage::TabRegistry(_) => {}
+                message => panic!("expected hidden workspace SDUI, got {message:?}"),
+            }
+        };
+        assert!(hidden_tree.nodes.iter().all(|node| {
+            !matches!(
+                &node.kind,
+                SduiNodeKind::Panel { .. } | SduiNodeKind::List { .. }
+            )
+        }));
+
+        drop(client);
+        connections.abort_all();
+        let _ = fs::remove_dir_all(socket_path.parent().unwrap());
+    }
+
+    /// Phase 22.7 verification pass: a LIVE connected client's tab never
+    /// expires. Client A opens a tab, its registry entry is aged far beyond
+    /// the TTL, then client B connects — B's arrival sweep must skip A's
+    /// stale-but-live entry (tab-idle presence, e.g. an hour of document
+    /// editing, never touches the registry; sweeping it would unmount a live
+    /// client's tab out from under its window).
+    #[tokio::test]
+    async fn sweep_skips_tabs_of_live_connected_clients() {
+        let socket_path = unique_socket_path("sweep-liveness");
+        let registry = Arc::new(Mutex::new(crate::server::tab_registry::TabRegistry::new()));
+        let server = server_with_document_and_registry(
+            &socket_path,
+            DocumentState::default(),
+            Arc::clone(&registry),
+        );
+        let server_task = tokio::spawn(server.run());
+
+        // Client A connects and opens a tab.
+        let codec = Codec::default();
+        let mut stream_a = connect_with_retry(&socket_path).await;
+        codec
+            .write_client_message(
+                &mut stream_a,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "sweep-a".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let client_id_a = loop {
+            if let ServerMessage::Welcome { client_id, .. } =
+                codec.read_server_message(&mut stream_a).await.unwrap()
+            {
+                break client_id;
+            }
+        };
+        codec
+            .write_client_message(
+                &mut stream_a,
+                &ClientMessage::TabCommand {
+                    client_id: client_id_a,
+                    command: crate::protocol::TabCommand::New {
+                        workspace_root: socket_path
+                            .parent()
+                            .expect("socket dir")
+                            .to_string_lossy()
+                            .to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        let created = loop {
+            match codec.read_server_message(&mut stream_a).await.unwrap() {
+                ServerMessage::TabRegistry(snapshot) if snapshot.tabs.len() == 1 => {
+                    break snapshot;
+                }
+                _ => {}
+            }
+        };
+        let tab_id = created.tabs[0].tab_id;
+
+        // Age A's entry far beyond the TTL while A stays connected.
+        registry
+            .lock()
+            .await
+            .age_all_entries_for_test(std::time::Duration::from_secs(7200));
+
+        // Client B connects: its arrival sweep runs before its handshake, so
+        // reading B's Welcome proves the sweep already ran.
+        let mut stream_b = connect_with_retry(&socket_path).await;
+        codec
+            .write_client_message(
+                &mut stream_b,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "sweep-b".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        loop {
+            if let ServerMessage::Welcome { .. } =
+                codec.read_server_message(&mut stream_b).await.unwrap()
+            {
+                break;
+            }
+        }
+
+        // A's stale tab survived the arrival sweep: same entry, unchanged
+        // revision (a removal would bump it and broadcast).
+        let after = registry.lock().await.snapshot();
+        assert_eq!(after.tabs.len(), 1, "live client's tab must not expire");
+        assert_eq!(after.tabs[0].tab_id, tab_id);
+        assert_eq!(after.active, Some(tab_id));
+        assert_eq!(
+            after.revision, created.revision,
+            "sweep removed nothing: revision unchanged"
+        );
+
+        drop(stream_a);
+        drop(stream_b);
+        server_task.abort();
     }
 
     #[tokio::test]
@@ -4460,7 +5184,36 @@ mod tests {
             ServerMessage::Welcome { client_id, .. } => client_id,
             message => panic!("expected Welcome, got {message:?}"),
         };
-        let (document_id, version, lease_id) =
+        let behavior_version = match codec.read_server_message(&mut stream).await.unwrap() {
+            ServerMessage::BehaviorManifest(manifest) => manifest.behavior_version,
+            ServerMessage::ActiveTheme(_) => panic!("expected BehaviorManifest before ActiveTheme"),
+            message => panic!("expected BehaviorManifest, got {message:?}"),
+        };
+        let _active_theme = codec.read_server_message(&mut stream).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut stream).await.unwrap();
+        loop {
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::FileOpenCapabilityIssued { .. } => break,
+                ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::TabRegistry(_) => {}
+                message => panic!("expected file-open capability, got {message:?}"),
+            }
+        }
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::TabCommand {
+                    client_id,
+                    command: crate::protocol::TabCommand::New {
+                        workspace_root: String::new(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        let (document_id, version, lease_id) = loop {
             match codec.read_server_message(&mut stream).await.unwrap() {
                 ServerMessage::InitialDocument {
                     document_id,
@@ -4470,26 +5223,12 @@ mod tests {
                     ..
                 } => {
                     assert_eq!(lease_id, snapshot_lease_id);
-                    (document_id, version, lease_id)
+                    break (document_id, version, lease_id);
                 }
+                ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
                 message => panic!("expected editable InitialDocument, got {message:?}"),
-            };
-        let behavior_version = match codec.read_server_message(&mut stream).await.unwrap() {
-            ServerMessage::BehaviorManifest(manifest) => manifest.behavior_version,
-            message => panic!("expected BehaviorManifest, got {message:?}"),
-        };
-        let _active_theme = codec.read_server_message(&mut stream).await.unwrap();
-        let _active_typography = codec.read_server_message(&mut stream).await.unwrap();
-        loop {
-            match codec.read_server_message(&mut stream).await.unwrap() {
-                ServerMessage::FileOpenCapabilityIssued { .. } => break,
-                ServerMessage::SduiSnapshot { .. }
-                | ServerMessage::RuntimeDiagnostic(_)
-                | ServerMessage::ShellPreferences(_)
-                | ServerMessage::TabRegistry(_) => {}
-                message => panic!("expected file-open capability, got {message:?}"),
             }
-        }
+        };
 
         codec
             .write_client_message(
@@ -4527,7 +5266,9 @@ mod tests {
                 }
                 ServerMessage::DecorationSet(_)
                 | ServerMessage::DiagnosticSet(_)
-                | ServerMessage::RuntimeDiagnostic(_) => {}
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::TabRegistry(_) => {}
                 other => panic!("expected region-lock rejection, got {other:?}"),
             }
         }
@@ -4680,17 +5421,45 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(matches!(
-            codec.read_server_message(&mut stream).await.unwrap(),
-            ServerMessage::Welcome { .. }
-        ));
-        assert!(matches!(
-            codec.read_server_message(&mut stream).await.unwrap(),
-            ServerMessage::InitialDocument {
-                access: DocumentAccess::Editable { lease_id: 1 },
-                ..
+        let client_id = match codec.read_server_message(&mut stream).await.unwrap() {
+            ServerMessage::Welcome { client_id, .. } => client_id,
+            message => panic!("expected Welcome, got {message:?}"),
+        };
+        loop {
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::FileOpenCapabilityIssued { .. } => break,
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::TabRegistry(_) => {}
+                message => panic!("expected handshake message, got {message:?}"),
             }
-        ));
+        }
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::TabCommand {
+                    client_id,
+                    command: crate::protocol::TabCommand::New {
+                        workspace_root: String::new(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        loop {
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::InitialDocument {
+                    access: DocumentAccess::Editable { lease_id: 1 },
+                    ..
+                } => break,
+                ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
+                message => panic!("expected InitialDocument, got {message:?}"),
+            }
+        }
 
         server_task.abort();
         let _ = fs::remove_file(&socket_path);

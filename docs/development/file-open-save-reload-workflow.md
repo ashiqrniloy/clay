@@ -9,7 +9,7 @@ Clay's file-open, save, and reload operations are server-first and platform-nati
 | Open file dialog | `clay.documents.clientOpenFileDialog` | none (bind `Ctrl+O`) | editor | client UI → server selected-file grant |
 | Open workspace file | `clay.documents.serverOpenDocument` | none | editor | server workspace-root read |
 | Fuzzy file open | `clay.workspace.openFuzzyFile` | none (bind `Ctrl+P`) | editor | server workspace listing |
-| Toggle file browser | `clay.workspace.toggleFileBrowser` | none (bind `Ctrl+B`) | editor | server workspace listing |
+| Toggle file browser | `clay.workspace.toggleFileBrowser` | canonical example binds `Ctrl+B` | editor | per-tab server workspace-pane visibility |
 | Save document | `clay.documents.serverSaveDocument` | none (bind `Ctrl+S`) | editor | server workspace/selected-file write |
 | Reload document | `clay.documents.serverReloadDocument` | none | editor | server workspace/selected-file read |
 | Show open documents | `clay.editor.clientShowOpenDocuments` | none | editor | client-local session list |
@@ -49,7 +49,7 @@ On unsupported platforms, `clientOpenFileDialog` returns a status diagnostic: `c
 
 ### Workspace file browser and fuzzy open
 
-Workspace-root files are opened through the server workspace model (`docs/wiki/modules/server-file-workspace.md`). The server maintains a registry of workspace roots (configured at startup, discovered from opened-file ancestry, or added via `clientOpenFolderDialog`). File browser and fuzzy-file commands list directory entries and open selected paths through `WorkspaceState::open_existing_file`.
+Workspace-root files are opened through the server workspace model (`docs/wiki/modules/server-file-workspace.md`). The server maintains a registry of workspace roots (configured at startup, discovered from opened-file ancestry, or added via `clientOpenFolderDialog`). Each tab starts with its workspace pane hidden; `clay.workspace.toggleFileBrowser` publishes the bounded tree for that tab or an editor-only snapshot that releases the left slot. File browser and fuzzy-file commands list directory entries and open selected paths through `WorkspaceState::open_existing_file`; `Ctrl+O` remains usable while the pane is hidden.
 
 ```js
 import { clientOpenFolderDialog } from "clay:workspace";

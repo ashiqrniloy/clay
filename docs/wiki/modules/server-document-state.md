@@ -17,7 +17,7 @@ The module proves the server-authoritative text model: client edit deltas cross 
 
 - Own the canonical server text as a `crop::Rope`.
 - Track the document ID, server document version, current editable lease holder, next lease ID, active in-memory region locks, most recent accepted transaction ID, and dirty state for file-backed persistence.
-- Produce `ServerMessage::InitialDocument` snapshots for handshake and `ServerMessage::ResyncSnapshot` snapshots for explicit resync requests with client-specific editable/read-only access metadata.
+- Produce `ServerMessage::InitialDocument` snapshots for a bound tab's post-`New`/`Reclaim` bootstrap and `ServerMessage::ResyncSnapshot` snapshots for explicit resync requests with client-specific editable/read-only access metadata.
 - Expose internal save/reload hooks: `text`, `version`, `mark_clean_if_version`, and `replace_text_from_storage` let `WorkspaceState` persist or refresh file-backed documents without moving filesystem authority into `DocumentState`.
 - Validate incoming edit operations against document ID, base document version, document access, byte ranges, active region locks, and UTF-8 character boundaries before calling panicking `crop` mutation APIs.
 - Reject stale or future client base versions before mutation and return explicit synchronization outcomes.
@@ -31,9 +31,24 @@ It does **not** persist documents, load files, execute behavior scripts, merge c
 
 ## How It Works
 
-`IpcServer` owns an `Arc<tokio::sync::Mutex<DocumentState>>`. Each accepted client connection gets a clone of that shared owner. The connection task decodes client frames through `Codec`, then locks the document only while applying an edit or producing an initial/resync snapshot. `ClientMessage::RequestResync` returns a `ServerMessage::ResyncSnapshot` for the requested document ID or an error for an unknown document.
+Production `IpcServer` no longer exposes one content document to every
+connection. `TabServerState` owns one welcome `Arc<tokio::sync::Mutex<DocumentState>>`
+for a stable `TabId`, while file-backed documents are owned by that tab's
+`WorkspaceState`. A connection first binds through `TabCommand::New` or
+`Reclaim`; the handler then locks only the routed tab document while producing
+its initial/resync snapshot or applying an edit. `ClientMessage::RequestResync`
+returns a `ServerMessage::ResyncSnapshot` only when the requested document is
+known and accessible in that bound tab. Test-only connection harnesses may
+still construct a direct `Arc<Mutex<DocumentState>>` for focused unit coverage.
 
-`DocumentState::new` converts the startup `String` into `crop::Rope::from(text)` and starts the server version at `1`. Snapshots call `Rope::to_string()` only for initial load or resync; ordinary acknowledged edits remain delta messages and do not serialize the full document.
+`TabServerState::from_workspace` allocates each welcome document from the
+server-wide `AtomicU64` allocator, and passes the same allocator into its
+workspace so file-backed `DocumentId`s remain unique across tabs. Standalone
+`WorkspaceState`/`DocumentState` tests retain deterministic local IDs.
+`DocumentState::new` converts text into `crop::Rope::from(text)` and starts
+its server version at `1`. Snapshots call `Rope::to_string()` only for initial
+load, file open, or resync; ordinary acknowledged edits remain delta messages
+and do not serialize the full document.
 
 Before mutation, `apply_edit` checks the target document ID, then compares the client-provided base version with the current canonical server version. Lower base versions return `EditRejection::StaleVersion`; higher base versions return `EditRejection::FutureVersion`. Neither case mutates the rope, advances the server version, or records the transaction. When the base version matches, the document validates that the sending client ID and lease ID match the current editable lease. Missing leases return `LeaseRequired`; guessed, replayed, or otherwise wrong leases return `LeaseExpired`. Only the lease holder can reach byte-range and region-lock validation.
 
@@ -102,9 +117,9 @@ The response is an `EditAck` with confirmed version `2`, and the canonical rope 
 - Initial/resync snapshots, saves, and reloads extract or replace full text at explicit server-side boundaries; ordinary edit acknowledgements do not send full-document text.
 - The server version is authoritative; clients cannot advance it by sending forged future base versions.
 - Version checks are constant-time metadata comparisons before any text mutation.
-- Document state is protected by a Tokio mutex, so connection tasks do not mutate the canonical rope concurrently.
+- Each routed `DocumentState` is protected by a Tokio mutex, so connection tasks do not mutate that canonical rope concurrently; tab routing prevents another tab from reaching it.
 - Region-lock owner metadata can name server/client/extension/AI owners for future phases, but this module does not introduce extension execution or AI mutation authority.
-- File-system persistence is orchestrated by `WorkspaceState`; `DocumentState` only exposes canonical text/version/dirty hooks and does not own paths, workspace roots, extension execution, SDUI command handling, remote listeners, shell/network access, or AI mutation authority.
+- File-system persistence is orchestrated by the bound tab's `WorkspaceState`; `DocumentState` only exposes canonical text/version/dirty hooks and does not own paths, workspace roots, extension execution, SDUI command handling, remote listeners, shell/network access, or AI mutation authority.
 
 ## Tests
 
@@ -116,13 +131,14 @@ The response is an `EditAck` with confirmed version `2`, and the canonical rope 
 - `src/server/document.rs`: `server_accepts_edit_at_current_base_version`, `server_rejects_stale_base_version`, and `server_rejects_future_base_version` validate strict base-version enforcement.
 - `src/server/document.rs`: `first_client_receives_editable_lease`, `second_client_receives_read_only_access`, `server_rejects_edit_without_current_lease`, and `lease_released_or_retained_on_disconnect_matches_policy` validate lease grant, observer, validation, and release behavior.
 - `src/server/document.rs`: `server_rejects_insert_inside_region_lock`, `server_rejects_delete_overlapping_region_lock`, `server_accepts_edit_outside_region_lock`, `region_lock_range_validation_rejects_invalid_boundaries`, and `region_lock_conflict_reports_range_metadata` validate in-memory lock registration, overlap checks, version preservation on conflict, and protocol-ready rejection metadata.
-- `src/server/connection.rs`: server connection tests validate handshake snapshots, edit acknowledgements, resync snapshot responses, and malformed input handling.
+- `src/server/connection.rs`: server connection tests validate deferred post-bind initial snapshots, per-tab edit acknowledgements, resync snapshot responses, cross-tab authority denial, and malformed input handling.
 - `src/server/mod.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates that in-memory region locks reject overlapping edits and preserve conflict metadata across the real Unix socket IPC path.
 - Relevant commands: `cargo fmt`, `cargo test --quiet`, `cargo check --quiet`.
 
 ## Related
 
 - [Server IPC Skeleton](server-ipc-skeleton.md)
+- [Tabs and Independent Client Views](tabs-and-clients.md) — `TabServerState` routing and per-tab document ownership
 - [Protocol Codec](protocol-codec.md)
 - [Client/Server Edit Acknowledgement Flow](../flows/client-server-edit-ack.md)
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)

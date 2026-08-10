@@ -37,7 +37,7 @@ Open an authorized workspace text file through the runtime-backed `clay:document
 
 Authority: `server-authoritative-file-open`. Runtime path: `server-first-file-io`. Opening a file is an explicit server command that may read a full UTF-8 snapshot once; ordinary keypress-to-paint editing remains asynchronous and does not call JavaScript, workspace validation, or file IO.
 
-`serverOpenDocument` opens files under configured workspace roots. The Phase 19 native file dialog uses the separate bindable [`clientOpenFileDialog`](client-open-file-dialog.md) command ID followed by private selected-file IPC and a server single-file grant; do not pass arbitrary host paths to `serverOpenDocument` to emulate user-selected files.
+`serverOpenDocument` opens files under the runtime's server-owned workspace roots. Connection-level `OpenDocument` messages are routed to the calling connection's bound Phase 22.8 `TabServerState`; this facade exposes no `TabId` or arbitrary-tab workspace selector. The Phase 19 native file dialog uses the separate bindable [`clientOpenFileDialog`](client-open-file-dialog.md) command ID followed by private selected-file IPC and a server single-file grant; do not pass arbitrary host paths to `serverOpenDocument` to emulate user-selected files.
 
 ## When to use
 

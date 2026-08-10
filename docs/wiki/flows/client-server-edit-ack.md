@@ -14,12 +14,14 @@ The client keeps the IPC connection open after the initial snapshot handshake. L
 
 ## Responsibilities
 
-- `client::connect` opens the platform local IPC endpoint, performs the `Hello` / `Welcome` / `InitialDocument` / `BehaviorManifest` handshake, and returns a `ClientSession`.
+- `client::connect` opens the platform local IPC endpoint, performs the
+  `Hello` / pre-bind manifest/theme/typography / tab-binding handshake, then
+  returns a `ClientSession` after the bound tab's `InitialDocument` arrives.
 - `ClientSession` contains the initial editor state, a `ClientEditQueue` for outgoing edits, and an event receiver for acknowledgements/errors.
 - `ClientEditQueue` owns shared synchronization metadata: confirmed server version, optimistic local version, and pending transactions.
 - The background client task owns the connected async stream after startup, serializes outgoing `ClientMessage::Edit` values plus explicit non-edit requests such as `OpenSelectedFile`, receives `ServerMessage::EditAck`, `EditRejected`, `ResyncSnapshot`, `DocumentOpened`, `FileOperationFailed`, `EditTransaction`, and `Error` messages, and sends `RequestResync` after recoverable synchronization rejections.
 - The server connection task validates each edit/intent `behavior_version` against the server-owned active behavior manifest before mutating the canonical document.
-- `src/main.rs` parses `clay server`, `clay client`, Linux `clay restart`, `clay smoke-gui`, bare `clay`, and advanced single-endpoint shorthand modes into an `IpcEndpoint` from `src/ipc.rs`. It keeps a multi-thread Tokio runtime alive while Masonry runs, bridges decoded client IPC events into Masonry's user-event/action path, and keeps send/receive work off the GUI input and paint paths.
+- `src/main.rs` parses `clay server`, `clay client`, Linux `clay restart`, `clay smoke-gui`, bare `clay`, and advanced single-endpoint shorthand modes into an `IpcEndpoint` from `src/ipc.rs`. It keeps a multi-thread Tokio runtime alive while Masonry runs, bridges decoded client IPC events into the `Driver`/Masonry user-event path, and keeps send/receive work off the GUI input and paint paths.
 - `EditorWidget` optionally forwards edit events to the queue, still renders local edits immediately, and exposes a narrow `apply_connection_event` boundary that applies real resync snapshots with `EditorSurface::load_snapshot` or installs behavior manifests on the GUI thread.
 
 ## How It Works
@@ -28,9 +30,19 @@ Startup uses a shared endpoint abstraction from `src/ipc.rs`. On Unix, the defau
 
 `clay smoke-gui` is the app-managed smoke path. The parser rejects endpoint arguments for this mode, generates a unique local endpoint with a `smoke-gui-<pid>-<sequence>` suffix, starts a child `clay server <endpoint>` process through `std::process::Command` direct arguments, waits for the ordinary client handshake with bounded retry, detects child exit before readiness, opens the GUI client only after a successful handshake, and terminates/waits for the managed child server when the GUI exits. Unix smoke endpoints are temporary `.sock` paths under `std::env::temp_dir()` and are removed after child shutdown; Windows smoke endpoints are local named pipes under `\\.\pipe\`; no shell, TCP listener, or user-managed endpoint is involved. The optional `--config-fixture runtime-sdui` smoke flag resolves a named repository fixture and forwards that name to the managed child server so runtime-backed configuration can publish SDUI before the GUI connects.
 
-`IpcServer` owns an `ActiveBehaviorManifest` alongside the canonical `DocumentState`. The handshake sends the active manifest after `Welcome` and `InitialDocument`. The manifest is not reconstructed per connection, so future server-side hot reload can validate and publish one replacement state that all connections observe.
+`IpcServer` owns an `ActiveBehaviorManifest` alongside its bootstrap/runtime
+state. The handshake sends the active manifest after `Welcome` and before tab
+binding; the bound `TabServerState` supplies `InitialDocument` after
+`TabCommand::New`/`Reclaim`. The manifest is not reconstructed per connection,
+so future server-side hot reload can validate and publish one replacement
+state that all connections observe, while document/workspace authority stays
+inside each routed tab state.
 
-Client startup calls `client::connect`. The handshake is bounded by the existing five-second startup timeout. Bootstrap errors expose a small category enum for transport unavailable, invalid endpoint, protocol invalid, handshake failed, server rejected, and timeout states; launch code uses those categories in diagnostics rather than parsing error strings. During the server handshake, `DocumentState::acquire_access` grants the first connected client an editable lease and sends later clients read-only observer snapshots. Once the initial snapshot and manifest have been read, `connect_from_stream` creates:
+Client startup calls `client::connect`. The handshake is bounded by the existing five-second startup timeout. Bootstrap errors expose a small category enum for transport unavailable, invalid endpoint, protocol invalid, handshake failed, server rejected, and timeout states; launch code uses those categories in diagnostics rather than parsing error strings. After the client sends its tab-binding command, the server calls
+`DocumentState::acquire_access` on that tab's welcome document. File-backed
+opens use the same routed tab workspace and per-document lease rules; separate
+tabs do not observe one another's documents. Once the pre-bind lanes and the
+bound initial snapshot have been read, `connect_from_stream` creates:
 
 1. A bounded outgoing edit channel used by `ClientEditQueue`.
 2. A bounded connection event channel used for acknowledgements and recoverable connection state.
@@ -102,9 +114,9 @@ When a workspace file opens or a resync arrives, `ClientEditQueue::update_opened
 - `src/client/mod.rs`: `selected_file_open_request_emits_non_edit_message`, `client_applies_document_opened_snapshot_from_selected_file`, and `client_receives_file_operation_failed_event` validate selected-file request/event handling.
 - `src/masonry_editor.rs`: `resync_event_replaces_editor_snapshot`, `document_opened_event_replaces_editor_snapshot`, and `opened_file_edits_continue_as_deltas` validate the UI-safe snapshot boundary and delta edits after selected-file open.
 - `src/masonry_editor.rs`: status tests validate connected editable, read-only observer, local fallback, and edit-ack version updates.
-- `src/client/mod.rs`: `end_to_end_second_client_is_read_only` validates duplicate client observer access through `IpcServer` on a real Unix socket.
+- `src/client/mod.rs`: `end_to_end_second_client_gets_independent_welcome_document` validates that a second real-server tab receives its own editable welcome document and distinct document ID.
 - `src/client/mod.rs`: `real_server_end_to_end_edit_gets_acknowledged` validates the same edit/ack path through `IpcServer` on a real Unix socket.
-- `src/client/mod.rs`: `windows_named_pipe_client_receives_initial_snapshot`, `windows_named_pipe_edit_gets_acknowledged`, `windows_second_client_is_read_only`, and `windows_named_pipe_stale_edit_rejected_then_resynced` validate the Windows named-pipe transport.
+- `src/client/mod.rs`: `windows_named_pipe_client_receives_initial_snapshot`, `windows_named_pipe_edit_gets_acknowledged`, `windows_second_client_gets_independent_welcome_document`, and `windows_named_pipe_stale_edit_rejected_then_resynced` validate the Windows named-pipe transport.
 - `src/client/mod.rs`: `real_server_end_to_end_stale_edit_rejected_then_resynced` validates stale-version rejection and explicit resync recovery through `IpcServer` on a real Unix socket; the Windows named-pipe stale/resync test exercises the same protocol over the Windows transport.
 - `src/server/mod.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates region-lock conflict metadata across the real Unix socket server path.
 - `src/server/connection.rs`: `server_rejects_edit_with_stale_behavior_version_without_mutating_document` validates behavior-version mismatch rejection before canonical mutation.

@@ -2793,6 +2793,52 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
+id = "clay.shell.clientSplitPaneRight"
+category = "shell-pane-management"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:shell"
+js_export = "clientSplitPaneRight"
+user_facing_name = "Split Pane Right"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; actual split runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
+facade_path = "runtime/js/shell.js::clientSplitPaneRight"
+backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/shell/client-split-pane-right.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only (Phase 22.7 alias of clientSplitPaneVertical, canonical binding Ctrl+\ unchanged); after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no package JavaScript, no IPC for topology). Dirty panes are protected; clean panes release their document lease only through the server's existing capability-gated close path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority; does not open files or grant document authority."
+current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+registry_public = true
+
+[[api]]
+id = "clay.shell.clientSplitPaneDown"
+category = "shell-pane-management"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:shell"
+js_export = "clientSplitPaneDown"
+user_facing_name = "Split Pane Down"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "The helper is synchronous and side-effect free; actual split runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
+facade_path = "runtime/js/shell.js::clientSplitPaneDown"
+backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/shell/client-split-pane-down.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only (Phase 22.7 alias of clientSplitPaneHorizontal, canonical binding Ctrl+- unchanged); after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no package JavaScript, no IPC for topology). Dirty panes are protected; clean panes release their document lease only through the server's existing capability-gated close path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority; does not open files or grant document authority."
+current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+registry_public = true
+
+[[api]]
 id = "clay.shell.clientSplitPaneHorizontal"
 category = "shell-pane-management"
 visibility = "public"

@@ -11,10 +11,9 @@ pub mod transient_menu;
 pub use layout::PaneId;
 pub(crate) use layout::{
     FixedSlotId, FixedSlotState, KEYBOARD_RESIZE_STEP, PaneResizeDirection, PaneSlotLayout,
-    PaneSplitTree, ShellComponentKind, SlotDragState, SplitChild, SplitDragState, SplitOrientation,
-    SplitRatio, WorkingAreaLayout, WorkingAreaLayoutObservation, WorkingAreaLayoutUpdate,
-    WorkingAreaLayoutUpdateError, compute_drag_ratio, compute_slot_resize_size,
-    hit_test_slot_handle, hit_test_split_divider, slot_handle_rect,
+    PaneSplitTree, SlotDragState, SplitChild, SplitDragState, SplitOrientation, SplitRatio,
+    WorkingAreaLayout, compute_drag_ratio, compute_slot_resize_size, hit_test_slot_handle,
+    hit_test_split_divider, slot_handle_rect,
 };
 #[doc(hidden)]
 pub use layout_persist::{
@@ -81,5 +80,6 @@ pub fn tab_close_confirm_session(
 #[cfg(test)]
 pub(crate) use layout::{
     PaneSlotId, PaneSlotLayoutAssignment, PaneSplitNode, PaneTreeObservation, ShellComponentId,
-    ShellLayoutVersion, WorkingAreaId,
+    ShellComponentKind, ShellLayoutVersion, WorkingAreaId, WorkingAreaLayoutObservation,
+    WorkingAreaLayoutUpdate, WorkingAreaLayoutUpdateError,
 };

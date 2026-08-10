@@ -122,7 +122,7 @@ Panel, sidebar, and border logical-pixel defaults. These feed `ResolvedUiTheme::
 
 | Token | Value | Use |
 |-------|-------|-----|
-| `dimension.sidebar.default` | 240 | SDUI left-slot + package `Left` fixed panel |
+| `dimension.sidebar.default` | 240 | Visible SDUI left-slot + package `Left` fixed panel; hidden workspace-pane snapshots reserve no left slot |
 | `dimension.panel.side.default` | 240 | Left/Right fixed panel default size |
 | `dimension.panel.side.min` | 48 | Left/Right minimum |
 | `dimension.panel.side.max` | 480 | Left/Right maximum |

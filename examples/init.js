@@ -247,12 +247,18 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 //                  clay.editor.clientRequestResync, ...
 //                  (clientShowOpenDocuments opens on the focused pane and
 //                  lists every pane's open documents since Phase 22.2)
+//   Workspace:     clay.workspace.toggleFileBrowser  Ctrl+B
+//                  (hidden by default; visibility is per tab)
 //
 // Bindable shell command IDs (Phase 22.1 window splits + Phase 22.4 tabs; all
 // ship with default chords, so no bindKey is needed unless you want different
 // ones. Overrides use { scope: "global" } to match the shipped default context):
 //   Splits:        clay.shell.clientSplitPaneVertical    Ctrl+\        side by side
 //                  clay.shell.clientSplitPaneHorizontal  Ctrl+-        stacked
+//                  (Phase 22.7 direction aliases, no default chords — bind
+//                   your own if you prefer direction vocabulary:
+//                   clay.shell.clientSplitPaneRight  = Vertical (beside)
+//                   clay.shell.clientSplitPaneDown   = Horizontal (below))
 //                  clay.shell.clientAddEqualPane         Ctrl+Shift+\  redivide equal
 //                  clay.shell.clientClosePane            Ctrl+Alt+W
 //                  (close is document-aware since Phase 22.2: a pane with a
@@ -373,6 +379,7 @@ bindKey({
 
 // Single form — one binding per call (batch tables work for these too):
 bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
 
 // Text objects + smart select ship with NO default bindings by design —
 // bound here as single-form examples (single strokes only):
@@ -383,10 +390,10 @@ bindKey("Alt+C", "clay.editor.clientSelectTextobject.comment.around.current", { 
 bindKey("Alt+E", "clay.editor.clientSmartSelect.expand", { scope: "editor" });
 bindKey("Alt+R", "clay.editor.clientSmartSelect.shrink", { scope: "editor" });
 
-// Rebinding example (single form): Ctrl+B — unbound by default — becomes
-// "previous word start". Last binding for a chord wins:
-bindKey("Ctrl+B", "clay.editor.clientMoveCursor.prevWordStart", { scope: "editor" });
-// unbindKey("Ctrl+B", { scope: "editor" });  // or remove it entirely
+// Rebinding example (single form): move workspace toggle to another chord
+// if desired. Last binding for a chord wins:
+// bindKey("Alt+W", "clay.workspace.toggleFileBrowser", { scope: "editor" });
+// unbindKey("Ctrl+B", { scope: "editor" });  // or remove the default example binding
 
 // Rebinding a shipped default (example: "add equal pane" on a different
 // chord; scope "global" matches the shipped default context):

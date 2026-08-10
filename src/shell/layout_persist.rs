@@ -17,57 +17,6 @@ use super::layout::{
 };
 use crate::perf::budgets::MAX_ACTIVE_CONNECTIONS;
 
-/// Collect all `(path, ratio)` pairs from a split tree where ratio ≠ 0.5.
-#[allow(dead_code)] // v1 writer kept for the frozen Phase 20.3 round-trip tests.
-fn collect_non_default_splits(
-    node: &PaneSplitNode,
-    path: &mut Vec<SplitChild>,
-    out: &mut Vec<(Vec<SplitChild>, SplitRatio)>,
-) {
-    if let PaneSplitNode::Split {
-        ratio,
-        first,
-        second,
-        ..
-    } = node
-    {
-        if (ratio.value() - 0.5).abs() > 1e-9 {
-            out.push((path.clone(), *ratio));
-        }
-        path.push(SplitChild::First);
-        collect_non_default_splits(first, path, out);
-        path.pop();
-        path.push(SplitChild::Second);
-        collect_non_default_splits(second, path, out);
-        path.pop();
-    }
-}
-
-/// Serialize user-modified layout state to a JSON value.
-#[allow(dead_code)] // v1 writer kept for the frozen Phase 20.3 round-trip tests.
-pub(crate) fn serialize_layout_state(layout: &WorkingAreaLayout) -> Value {
-    let mut splits = Vec::new();
-    let mut path = Vec::new();
-    collect_non_default_splits(layout.pane_tree().root_node(), &mut path, &mut splits);
-
-    let splits_json: Vec<Value> = splits
-        .iter()
-        .map(|(p, r)| {
-            json!({
-                "path": p.iter().map(|c| match c {
-                    SplitChild::First => 0,
-                    SplitChild::Second => 1,
-                }).collect::<Vec<u8>>(),
-                "ratio": r.value(),
-            })
-        })
-        .collect();
-
-    let slots_json = collect_slot_entries(layout);
-
-    json!({ "splits": splits_json, "slots": slots_json })
-}
-
 /// Collect user-modified slot entries (v1 `slots` entry shape) for a layout.
 /// Shared by the v1 writer and the v2 per-tab writer.
 pub(crate) fn collect_slot_entries(layout: &WorkingAreaLayout) -> Vec<Value> {
@@ -213,7 +162,6 @@ pub(crate) fn serialize_window_state(state: &PersistedWindowState) -> Value {
 /// validation are silently skipped: tab count capped at the connection cap,
 /// invalid trees degrade to the default single-pane layout, out-of-range
 /// active tab dropped. Never panics.
-#[allow(dead_code)] // Phase 22.5: wired by startup restore (task 7).
 pub(crate) fn parse_window_state(value: &Value) -> Option<PersistedWindowState> {
     if value.get("version").and_then(|v| v.as_u64()) != Some(2) {
         return None;
@@ -293,7 +241,8 @@ fn parse_tab_state(value: &Value) -> Option<PersistedTabState> {
 /// True for Phase 20.3 v1 documents (no `version` key — or `version: 1` —
 /// carrying `splits`/`slots`). The restore flow applies these to the single
 /// bootstrap tab exactly as before; no rewrite on load.
-#[allow(dead_code)] // Phase 22.5: wired by startup restore (task 7).
+#[cfg(test)] // predicate for the frozen v1 tests; production applies v1 via
+// `load_layout` + `apply_persisted_state` without naming the version.
 pub(crate) fn is_legacy_layout(value: &Value) -> bool {
     let version = value.get("version").and_then(|v| v.as_u64());
     version.is_none_or(|v| v == 1)
@@ -305,7 +254,6 @@ pub(crate) fn is_legacy_layout(value: &Value) -> bool {
 /// production split path (`WorkingAreaLayout::replace_pane_tree`, the same
 /// primitive `apply_tree_change` uses); any structural failure degrades to
 /// the default — never a partial layout.
-#[allow(dead_code)] // Phase 22.5: wired by startup restore (task 7).
 pub(crate) fn layout_from_persisted_tab(tab: &PersistedTabState) -> WorkingAreaLayout {
     let mut layout = WorkingAreaLayout::single_editor();
     if let Some(node) = &tab.tree
@@ -462,6 +410,58 @@ mod tests {
     use crate::shell::layout::{
         FixedSlotState, PaneId, PaneSlotLayout, PaneSplitTree, SplitOrientation,
     };
+
+    // -- Phase 22.7 (plan 078 task 6): the v1 WRITE path is test-only. The
+    // v1 READ path (splits/slots application) stays in production above:
+    // old Phase 20.3 `layout.json` files must still parse. The v1 writer
+    // exists solely so the frozen Phase 20.3 round-trip tests can prove
+    // write→read fidelity; production never writes v1.
+    fn collect_non_default_splits(
+        node: &PaneSplitNode,
+        path: &mut Vec<SplitChild>,
+        out: &mut Vec<(Vec<SplitChild>, SplitRatio)>,
+    ) {
+        if let PaneSplitNode::Split {
+            ratio,
+            first,
+            second,
+            ..
+        } = node
+        {
+            if (ratio.value() - 0.5).abs() > 1e-9 {
+                out.push((path.clone(), *ratio));
+            }
+            path.push(SplitChild::First);
+            collect_non_default_splits(first, path, out);
+            path.pop();
+            path.push(SplitChild::Second);
+            collect_non_default_splits(second, path, out);
+            path.pop();
+        }
+    }
+
+    fn serialize_layout_state(layout: &WorkingAreaLayout) -> Value {
+        let mut splits = Vec::new();
+        let mut path = Vec::new();
+        collect_non_default_splits(layout.pane_tree().root_node(), &mut path, &mut splits);
+
+        let splits_json: Vec<Value> = splits
+            .iter()
+            .map(|(p, r)| {
+                json!({
+                    "path": p.iter().map(|c| match c {
+                        SplitChild::First => 0,
+                        SplitChild::Second => 1,
+                    }).collect::<Vec<u8>>(),
+                    "ratio": r.value(),
+                })
+            })
+            .collect();
+
+        let slots_json = collect_slot_entries(layout);
+
+        json!({ "splits": splits_json, "slots": slots_json })
+    }
 
     #[test]
     fn persistence_round_trip_split_ratios() {

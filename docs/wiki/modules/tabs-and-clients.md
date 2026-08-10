@@ -17,21 +17,24 @@ in [Multi-Document Sessions](multi-document-sessions.md).
 - `src/server/tab_registry.rs` — server-authoritative in-memory registry.
 - `src/protocol/mod.rs` — `TabId`, `TabEntry`, `TabRegistrySnapshot`,
   `TabCommand`, `ClientMessage::TabCommand`, `ServerMessage::TabRegistry`
-  (protocol v13; no 22.5 changes — restore rides the existing commands).
+  (protocol v15; initial document/SDUI now follows tab binding).
 - `src/shell/layout_persist.rs` — Phase 22.5 `layout.json` v2 window state:
   `PersistedWindowState`/`PersistedTabState`/`PersistedTabLayout`,
   `serialize_window_state`/`parse_window_state`, `save_window_state`/
   `load_window_state`, `layout_from_persisted_tab` (see the Phase 22.5
   section below).
-- `src/server/mod.rs` — `IpcServer` owns the registry + broadcast sender.
+- `src/server/mod.rs` — `IpcServer` owns the registry, broadcast sender,
+  bootstrap `TabServerState`, and `TabServerState` map keyed by `TabId`.
 - `src/server/connection.rs` — handshake replay, `TabCommand` dispatch,
   close-terminates-connection, reconciliation snapshots.
-- `src/main.rs` — `Driver`: `TabState` map, `mount_tab`, `switch_tab`,
-  `apply_tab_registry`/`apply_registry_reconcile`, per-tab event bridges,
-  `start_tab_reconnect`, `ReconnectTabConnected` handler, `guard_tab_close`,
-  `tab_close_allowed`, bootstrap `TabCommand::New`, `NewTab` affordance flow.
-- `src/client/mod.rs` — `ClientEditQueue::enqueue_tab_command`;
-  `ClientConnectionEvent::TabRegistry`.
+- `src/driver/mod.rs`, `src/driver/reconcile.rs`,
+  `src/driver/restore.rs` — `Driver`/`TabState`, lifecycle, registry
+  reconciliation, restore/reconnect state machine, per-tab event bridges,
+  typed widget access helpers, and `NewTab`/close flows.
+- `src/main.rs` — event-loop integration and action dispatch into the driver.
+- `src/client/mod.rs` — handshake binding helpers,
+  `ClientEditQueue::enqueue_tab_command` for post-bind lifecycle commands,
+  and `ClientConnectionEvent::TabRegistry`.
 - `src/masonry_shell.rs` — per-tab chrome (`TabChrome`) and tab bar (see
   masonry-shell page).
 - `src/masonry_pane_document.rs`, `src/editor/document_session.rs` —
@@ -61,34 +64,140 @@ workspace grants; the registry only binds already-authorized connections.
   workspace_root }`. `tab_id` and `client_id` are both `u64` newtypes
   (`TabId` follows the `ClientId = u64` alias pattern in
   `src/protocol/mod.rs`).
-- Tab commands arrive as `ClientMessage::TabCommand` (v12):
-  - `New { workspace_root }` — creates a tab bound to this connection; the
-    root path is validated through the shared `WorkspaceState::add_root`
-    (canonicalization, directory check, dedupe, `MAX_WORKSPACE_ROOTS`), which
-    doubles as the structural gate (the message is Clay-owned, so no
-    capability token is required).
+- Tab commands arrive as `ClientMessage::TabCommand` (protocol v15):
+  - `New { workspace_root }` — validates the directory and creates a
+    `TabServerState` for this connection through `IpcServer::create_tab_state`;
+    the first startup-root tab may consume the validated bootstrap state, but
+    later tabs get a fresh `WorkspaceState` rooted only at the selected path.
+    Canonicalization, directory checks, deduplication, and
+    `MAX_WORKSPACE_ROOTS` remain the server-side structural gate; no
+    capability token is needed for this Clay-owned tab bind.
   - `OpenWorkspace { workspace_root }` — adds a workspace root to the
-    sending tab's workspace and renames the entry.
+    sending connection's bound tab workspace and renames the entry; a foreign
+    `TabId` cannot mutate it.
   - `Activate { tab_id }` — makes the tab active; `Close { tab_id }` —
     removes the tab and **terminates that tab's connection** (the closing
     connection exits its handler loop, releasing its connection permit and
     per-connection document leases through the existing disconnect cleanup
-    path). `Reclaim { tab_id }` — rebinds a surviving registry entry to the
+    path). Since Phase 22.7 a REJECTED close (foreign/unknown `tab_id` —
+    `registry.close_tab` only removes an entry whose
+    `entry.client_id == client_id`) is a no-op that keeps the sender's
+    connection alive: the handler captures the `bool`, always pushes the
+    reconciling snapshot, and returns `Ok(())` only when closed.
+    `Reclaim { tab_id }` — rebinds a surviving registry entry to the
     calling connection (reconnect path: keeps `TabId`, rebinds `ClientId`).
 - Every `Activate`/`Close`/`OpenWorkspace` attempt pushes a fresh
   `TabRegistrySnapshot` on the broadcast lane **even when rejected** — that
   is the reconciliation signal that lets an optimistically-switching client
   revert.
-- Handshake: each connection subscribes to the registry lane and gets the
-  current snapshot replayed right after the welcome snapshot + manifest.
-  Snapshot broadcasts happen on the lane; a lagged receiver re-subscribes
-  and re-reads the current state.
+- Handshake: each connection subscribes to the registry lane and receives
+  the current snapshot on the non-document bootstrap lane. Production sends
+  no `InitialDocument` or workspace SDUI before the connection binds with
+  `TabCommand::New` or `Reclaim`; the bound tab's document and pane snapshot
+  follow that command. Snapshot broadcasts happen on the lane; a lagged
+  receiver re-subscribes and re-reads the current state.
 - Connection cap: the existing `MAX_ACTIVE_CONNECTIONS = 64` permit gate
   applies to tabs too — the 65th tab's `connect` fails cleanly
   (`TransportUnavailable`), surfaced as a `clay.tabs.open_failed`
   diagnostic; no half-mounted tabs.
+- **Registry TTL sweep (Phase 22.7)**: entries carry an internal
+  `last_activity: Instant` (wrapped as `RegistryEntry { entry, last_activity }`
+  — `TabEntry` itself is an rkyv protocol type with no room for `Instant`),
+  touched by every mutation (`create_tab`/`open_workspace`/`activate`/
+  `reclaim`/`move_*`). `sweep_expired_tabs(now, ttl, live)` removes entries idle
+  beyond `REGISTRY_TAB_TTL` (1 hour, `src/perf/budgets.rs`;
+  "abandoned-tab horizon; transient reconnects complete in seconds") **unless
+  the entry's client is currently connected** (`live_clients`, maintained by
+  `IpcServer` at connection spawn/exit via a drop guard): presence outranks
+  tab-idleness, because document editing and plain presence never touch the
+  registry — without the liveness filter an hour of editing would let a
+  later connection event sweep a live client's tab out from under it
+  (verification-pass fix). The sweep is O(n), called once at connection
+  arrival and departure in `spawn_connection` (never per message), bumps
+  `revision` only when it removed entries, and pushes a snapshot only after
+  a non-empty sweep. Time is the only honest eviction signal for DEAD
+  clients — dead-but-returning `Reclaim` clients must survive, so no
+  connection-layer-driven eviction.
+
+## Phase 22.8: per-tab server content state
+
+`IpcServer` now keeps `tab_states: Arc<Mutex<HashMap<TabId, TabServerState>>>`.
+Each `TabServerState` owns two server-authoritative handles:
+
+- `welcome`: that tab's default `DocumentState` used for bootstrap/resync
+  compatibility.
+- `workspace`: that tab's `WorkspaceState`, including its roots, file grants,
+  open-document registry, leases, versions, and dirty state.
+
+`TabCommand::New` validates the requested root before creating the registry row
+and installs a fresh state for later tabs. The first tab reuses the validated
+startup bootstrap state when it selects the startup root; that state is marked
+consumed and is never reused after close. `Reclaim` preserves an existing
+`TabServerState` (or reconstructs one from the registry root if a state is
+missing), while accepted `Close` and TTL eviction remove the map entry.
+
+Workspace file document IDs use one server allocator shared by tab workspaces,
+so global coordinator maps cannot collide even though each workspace's roots
+and document registry are independent. Standalone `WorkspaceState` tests keep
+their deterministic local allocator.
+
+The handshake sends `Welcome`, behavior manifest, theme, typography, and
+non-document bootstrap lanes first. It sends no `InitialDocument` or workspace
+SDUI before binding. `client::connect_with_workspace_root` (new tab/restore) or
+`client::connect_for_reclaim` (live reconnect) writes the tab command; the
+reconnect-only `connect_for_reclaim_or_new` falls back to root-scoped `New`
+after a server registry reset. `TabCommand::New`/`Reclaim` installs the bound
+`TabServerState`; the server sends
+that state's `InitialDocument` and workspace-pane `SduiSnapshot` before returning
+the client session. New tabs start with an editor-only snapshot because the
+workspace pane is hidden by default; `clay.workspace.toggleFileBrowser` later
+publishes the bound tab's file tree. A blank new-tab root selects the server
+bootstrap root.
+Legacy scripted unit transports retain their pre-bind fixture only under
+`#[cfg(test)]`; production `IpcServer` connections fail closed until binding.
+After `New`/`Reclaim`, each content-bearing dispatch calls
+`route_connection_tab_state`: the server looks up `ClientId` in `TabRegistry`,
+resolves stable `TabId` to `TabServerState`, and installs those handles for that
+message. `OpenWorkspace` also checks the resolved `TabId` before mutating roots,
+so a foreign tab command cannot alter the caller's workspace.
+
+The route covers edits/intents, resync, decorations, open/selected-file/root,
+save/reload/close/status/list, SDUI and command intents, completion, language
+intelligence, selection queries, and workspace-root mutation. Parse and
+analysis output lanes remain client-subscription scoped rather than broadcast
+to every tab. The connection records each routed state for disconnect cleanup,
+so an old connection still releases its per-tab document grants when a newer
+connection reclaims the registry entry first. Tests:
+`connection_state_route_follows_reclaim_and_fails_closed`, `tab_server_state_tests`,
+`client::tests::real_server_restore_sequence_orders_tabs_and_opens_documents`,
+and `cargo test --lib 'server::'`.
+
+The authority boundary is also exercised at the production dispatch boundary:
+`cross_tab_workspace_and_document_authority_is_fail_closed` binds two real
+`TabServerState`s and proves list/open/resync/status/edit/save/reload/close,
+foreign root IDs, and selected-path capabilities cannot cross tabs. The bound
+connection's foreign `Reclaim` is rejected, and the target tab's text, version,
+dirty state, registry binding, and access remain unchanged. Unknown document IDs
+no longer fall back to welcome text for edit/completion/language-intelligence
+reads; the shared resolver requires the bound client's access holder.
+
+### Clay JS boundary
+
+Per-tab server state is not a public Rust or raw-op surface. The existing
+`clay.shell.clientTabNew` facade drives folder selection and handshake-bound
+`TabCommand::New`; existing `clay.documents`, `clay.workspace`, and
+`clay.commands` facades retain their documented server validation. They expose
+no arbitrary `TabId` or `TabServerState` handle. `clay.workspace.toggleFileBrowser`
+is a fixed command ID bound through `clay.keybindings.bindKey`, not a new
+callable facade; its visibility flag is flipped only by the bound connection.
+The API/visibility audit lives in
+`tests/clay_js_doc_registry.rs::phase22_8_programmatic_surface_inventory_is_closed`
+and `tests/rust_visibility_api_mapping.rs::phase22_8_per_tab_state_has_no_new_public_programmatic_surface`.
 
 ## Client side: the multi-connection Driver
+
+The driver lives in `src/driver/` (Phase 22.7 extraction — see the
+[driver module map](driver.md)); this section summarizes its shape.
 
 - The `Driver` owns `tabs: BTreeMap<ClientId, TabState>` — keyed by
   `ClientId`, **not** `TabId`, because the server-assigned `TabId` arrives
@@ -100,12 +209,11 @@ workspace grants; the registry only binds already-authorized connections.
 - The shell mirrors this as `tabs: BTreeMap<ClientId, TabChrome>` +
   `active_tab`; see the masonry-shell page for `install_tab`,
   `set_active_tab`, `tab_for_chrome`, and zero-size inactive retention.
-- `mount_tab` (new-tab flow): connect a fresh session → send
-  `TabCommand::New` on it → install + activate the chrome → spawn the
-  per-tab event bridge. The bootstrap tab is created the same way in
-  `run_editor` (reads `workspace_root` from `ClientInitialState`, added in
-  v12, and sends `New` explicitly) — the server's replay snapshot then
-  matches what the client mounted.
+- `mount_tab` (new-tab flow): connect a fresh session already bound with
+  `TabCommand::New(workspace_root)` → install + activate the chrome → spawn the
+  per-tab event bridge. The bootstrap tab binds before `run_editor` mounts it;
+  persisted tab 0's root is selected before connect, and the server returns the
+  matching deferred initial document/browser state.
 - Event routing: each tab's bridge tags events with that tab's chrome
   `WidgetId`; the driver resolves the tab via `tab_for_chrome` and routes
   document-scoped events, fan-outs, runtime snapshots, and editor commands
@@ -134,9 +242,12 @@ workspace grants; the registry only binds already-authorized connections.
   → server snapshot reconciles (a rejected activate pushes the real state,
   reverting the optimistic switch).
 - **Reconnect**: on `Disconnected`/`ConnectionError`, `start_tab_reconnect`
-  spawns a per-tab task retrying `client::connect` (existing backoff,
-  50 × 20 ms then 200 ms per cycle) until success or the tab is removed
-  (per-tab `Arc<AtomicBool>` cancellation set by `apply_registry_reconcile`).
+  spawns a per-tab task retrying `client::connect_for_reclaim_or_new` (existing
+  backoff, 50 × 20 ms then 200 ms per cycle) until success or the tab is
+  removed (per-tab `Arc<AtomicBool>` cancellation set by
+  `apply_registry_reconcile`). It first sends `Reclaim`; an unknown `TabId`
+  after server restart or TTL eviction rebuilds the tab with `New` from its
+  persisted workspace root.
   On success the `ReconnectTabConnected` handler: swaps the fresh session's
   queue into the chrome and every pane view (`PaneDocumentView::reconnect` —
   clears the disconnect menu and re-arms the reinstall so the active
@@ -150,17 +261,22 @@ workspace grants; the registry only binds already-authorized connections.
   `workspace_root_id` + path); spawns a new event bridge; restores focus if
   the tab was active. In-flight `pending_opens` died with the old
   connection and are cleared.
-- **Client restart reclaim**: the registry is in-memory on the server, so a
-  local client process restart reconnects per tab and `Reclaim`s the
-  entries — tabs survive client restarts but not a full server restart
-  (disk persistence is 22.5).
+- **Client/server restart**: the registry is in-memory on the server. A
+  client process restart loads `layout.json` and binds each persisted tab with
+  `New(workspace_root)`, rebuilding the registry and per-tab workspace state;
+  connection drops while that server remains alive use `Reclaim` and preserve
+  the existing `TabServerState`. If the server restarts or evicts a dead tab,
+  the reconnect path falls back from stale `Reclaim` to `New(workspace_root)`.
+  An empty registry snapshot resets the driver's revision baseline and clears
+  old `TabId`s before partial replacement snapshots arrive, so pending tabs
+  are not mistaken for closed tabs or resurrected from stale state.
 
 ## Keyboard Management (Phase 22.4)
 
-- **Command IDs**: 24 Clay-owned `client_ui` IDs — `clientTabNext`/`Prev`/`New`/`Close`/`MoveLeft`/`MoveRight` plus dotted families `clientTabActivate.1..9` and `clientTabMoveTo.1..9` — declared in `default_commands()`/`default_keymaps()` (Global scope), allow-listed + routed in `src/server/ops/keybindings.rs` (`tab_family_variant` accepts `1..=9` only), mapped to `ShellClientCommand` variants, exported by `runtime/js/shell.js`, and user-rebindable via `bindKey`/`unbindKey` (`{ scope: "global" }`).
+- **Command IDs**: 26 Clay-owned `client_ui` IDs — `clientTabNext`/`Prev`/`New`/`Close`/`MoveLeft`/`MoveRight` plus dotted families `clientTabActivate.1..9` and `clientTabMoveTo.1..9`, plus the Phase 22.7 direction aliases `clientSplitPaneRight`/`clientSplitPaneDown` (which resolve to the canonical split handlers — see the window-splits surface) — declared in `default_commands()`/`default_keymaps()` (Global scope), allow-listed + routed in `src/server/ops/keybindings.rs` (`tab_family_variant` accepts `1..=9` only; the aliases are in `is_runtime_bindable_command` + the `ClientUiCommand` routing branch), mapped to `ShellClientCommand` variants, exported by `runtime/js/shell.js`, and user-rebindable via `bindKey`/`unbindKey` (`{ scope: "global" }`).
 - **Driver dispatch**: `handle_client_ui_command` returns `ShellCommand`; the driver's `apply_tab_command` intercepts tab commands before the shell widget (whose tab arms stay inert), resolving positions from the card order (`tab_order`/`tab_position_of`/`tab_at_position`/`tab_at_offset`) and routing through the shared execution paths the tab bar also uses.
 - **Policies**: 1-based card numbering; `Activate.N` silent no-op beyond tab count; no variants beyond 9 (`Ctrl+0` unbound); next/prev wrap around; move left/right no-op at ends (no wrap); `MoveTo.N` no-op beyond count; last tab cannot close; `+` and `Ctrl+T` share the new-tab flow (in-flight guard).
-- **Server reorder**: `TabCommand::MoveLeft/MoveRight/MoveTo` → `TabRegistry::move_left/move_right/move_to` (protocol v13); every mutation broadcasts a snapshot on acceptance **and** rejection; active-tab status is preserved by `TabId`.
+- **Server reorder**: `TabCommand::MoveLeft/MoveRight/MoveTo` → `TabRegistry::move_left/move_right/move_to` (protocol v15); every mutation broadcasts a snapshot on acceptance **and** rejection; active-tab status is preserved by `TabId`.
 - **Dirty close**: `close_tab` inventories dirty panes (`dirty_documents_in_tab`) instead of the old `guard_tab_close` walk; a dirty tab gets a driver-owned confirm session (`clay::shell::tab_close_confirm_session` — Save all and close / Discard and close / Cancel) hosted on the active pane view + chrome overlay. Save all tracks awaited `DocumentId`s in `pending_close_after_saves`; `advance_pending_close_after_saves` counts `DocumentSaved` acks and enqueues `TabCommand::Close` only after all ack, cancelling on `FileOperationFailed`/disconnect. Discard enqueues close immediately; Cancel clears the session. The menu action IDs (`clay.shell.clientTabClose*`) are driver-local, never declared/routed, so they cannot cross-route with per-view save-conflict menus.
 
 ## Window-State Persistence (Phase 22.5)
@@ -214,7 +330,7 @@ open degrades to an empty pane on restore). Tab order comes from
 (client-id order); `activeTab` is the position of `active_tab` in that
 order. Nothing is written while the tab map is empty (initial handshake).
 
-### Restore state machine (startup, `src/main.rs`)
+### Restore state machine (startup, `src/driver/restore.rs`)
 
 `run_editor` receives `Option<PersistedWindowState>` (loaded via the
 `clay::shell::load_window_state()` wrapper only when a real session
@@ -287,6 +403,13 @@ tests: `pane_commands_only_mutate_the_active_tab`,
   surviving entry to a fresh handshake-authenticated connection.
 - The window never drops below one tab; a dirty tab can only close through
   its save-conflict resolution.
+- A rejected tab Close never kills the sender (22.7): foreign/unknown
+  closes are no-ops that reconcile via the pushed snapshot — only the
+  entry-owning connection's close terminates it.
+- Abandoned registry entries expire (22.7): idle-beyond-TTL tabs of DEAD
+  clients are swept at connection arrival/departure; live connected clients'
+  tabs never expire regardless of tab-idleness, and transient reconnects
+  (seconds) complete far inside the 1-hour horizon.
 - Persistence is client-owned: `layout.json` v2 is user-owned state written
   at any tab count (the 22.3 single-tab-only guard is gone); the server
   registry stays in-memory and is rebuilt at startup through existing
@@ -315,17 +438,22 @@ tests: `pane_commands_only_mutate_the_active_tab`,
 - `src/client/mod.rs`: real-server tab end-to-end — bootstrap `New`
   registers the tab (name/order in snapshot), rejected `Activate` pushes a
   reconciling snapshot, `Close` ends the connection + removes the entry,
-  dropped connection's entry reclaimed by a new connection, connection-cap
-  refusal, tab move commands reorder/broadcast/reject. Commands:
+  dropped connection's entry reclaimed by a new connection, server-reset
+  reconnect falls back to `New(workspace_root)`, connection-cap refusal, tab
+  move commands reorder/broadcast/reject. Commands:
   `cargo test --lib real_server_tab --quiet`,
   `cargo test --lib real_server_ --quiet`.
-- `src/main.rs` (bin): registry reconciliation (fills ids + builds cards,
-  removes closed tabs + activates survivor, skips removals on empty
-  snapshots), per-tab edit-queue isolation, `tab_close_allowed`, 22.4
+- `src/driver/mod.rs` + `src/driver/reconcile.rs` + `src/driver/restore.rs`
+  (bin, 22.7 extraction): registry reconciliation (fills ids + builds
+  cards, removes closed tabs + activates survivor, skips removals on empty
+  snapshots and clears stale ids for server-reset rebinds), per-tab
+  edit-queue isolation, `tab_close_allowed`, 22.4
   policy resolvers (`tab_order`/`tab_at_position`/`tab_at_offset`),
   move enqueues + boundary no-ops, command-ID routing, tab-confirm menu
-  naming, `advance_pending_close_after_saves` bookkeeping. Command:
-  `cargo test --bin clay --quiet`.
+  naming, `advance_pending_close_after_saves` bookkeeping, restore state
+  machine, and `reconnect_tab`. Command:
+  `cargo test --bin clay --quiet` (test set identical to the pre-move
+  baseline).
 - `src/shell/layout_persist.rs` (22.5): v2 schema round-trip/bounds/corrupt
   parsing (tabs capped at 64, invalid trees → single pane, ratio/pane-id
   bounds, legacy v1 detection, panic-free hostile input),
@@ -336,23 +464,30 @@ tests: `pane_commands_only_mutate_the_active_tab`,
   skipped in order with diagnostics, deadline cancel drops the remaining
   queue, `reopen_restored_documents` attributes panes by `PaneId` and skips
   missing files, `tab_order_is_registry_order_with_entry_less_mounted_appended`.
-  Command: `cargo test --bin clay --quiet`.
+  Command: `cargo test --bin clay --quiet`. (The machine itself moved to
+  `src/driver/restore.rs` in 22.7; tests live in `driver::restore::tests`.)
 - `src/masonry_shell.rs` (22.5): `layout_mutation_signals_persistence_with_multiple_tabs`,
   `keyboard_resize_signals_persistence`, `tab_layout_data_returns_every_mounted_tab_layout`,
   `restored_single_editor_mounts_persisted_split_tree`,
   `install_restored_tab_mounts_persisted_tree_without_switching`.
-- `src/client/mod.rs` (22.5): real-server restore-shape E2E
+- `src/client/mod.rs` (22.5/22.8): real-server restore/rebind E2E
   `real_server_restore_sequence_orders_tabs_and_opens_documents` — three
   sequential `TabCommand::New`s reproduce persisted order with no `MoveTo`,
   per-pane `OpenDocument` lands in the tab's own root, missing root →
   `FileOperationFailed` with no registry entry, persisted active tab
-  activates. Command: `cargo test --lib real_server_restore --quiet`.
+  activates; `real_server_reconnect_reclaims_tab_binding` proves the same
+  welcome document/workspace survives `Reclaim`, and
+  `real_server_restart_rebuilds_reconnect_from_persisted_workspace_root`
+  proves a reset registry rebuilds from the persisted root. Command:
+  `cargo test --lib real_server_restore --quiet`.
 - `src/masonry_shell.rs`: install/switch/retention/rekey/zero-size-layout
   tests (see masonry-shell page). Command:
   `cargo test --lib masonry_shell --quiet`.
 
 ## Related
 
+- [Driver Module Map](driver.md) — the `src/driver/` tab subsystem
+  (lifecycle, reconcile, restore).
 - [Masonry Shell Runtime](masonry-shell.md) — tab chrome, tab bar, zero-size
   inactive retention, per-tab routing queries.
 - [Multi-Document Sessions](multi-document-sessions.md) — reconnect document
@@ -422,7 +557,7 @@ startup/restore, focus moves, or no-ops. Exact strings and ceilings:
 ### Protocol guards (task 7)
 
 `tests/window_management_protocol.rs` (protocol suite): pins
-`PROTOCOL_VERSION == 13`; round-trips all 8 `TabCommand` variants,
+`PROTOCOL_VERSION == 15`; round-trips all 8 `TabCommand` variants,
 `TabRegistrySnapshot`, and the handshake hello through the rkyv
 length-prefixed codec unchanged; rejects malformed/truncated/oversize/
 corrupt tab frames without panic (`matches!` on `CodecError` — no
@@ -438,3 +573,39 @@ not the last byte.
 - Protocol: `cargo test --test protocol -- window_management_protocol`.
 - A11y: `cargo test --lib masonry_shell --quiet` (tab a11y + announcement
   tests); manual `test-plan/14-tabs.md` T50–T56.
+
+## Phase 22.7: Registry Hardening, Rejected Close, and Driver Extraction
+
+Phase 22.7 (2026-08-09) hardened the registry and closed three review
+findings without changing product behavior beyond the deliberate
+rejected-close fix:
+
+- **Rejected close keeps the connection alive**: the `TabCommand::Close`
+  handler captures `closed = registry.close_tab(...)` (only removes an
+  entry whose `entry.client_id == client_id`), always pushes the
+  reconciling snapshot, and returns `Ok(())` only when `closed` — a
+  foreign/unknown close is a no-op instead of terminating the sender's
+  connection (the pre-fix behavior). Same reconcile pattern as the
+  rejected `Activate` path.
+- **Registry TTL sweep**: entries idle beyond `REGISTRY_TAB_TTL` (1 hour)
+  are removed by `sweep_expired_tabs`, run once at connection arrival and
+  departure (never per message); see the Server-side section above.
+- **Driver extraction**: the tab subsystem moved out of `src/main.rs` into
+  `src/driver/` (`mod` / `reconcile` / `restore`), shrinking the root from
+  6194 to 3603 lines with the `with_shell`/`with_editor`/`with_view` typed
+  helpers replacing the `edit_widget` + `try_downcast` boilerplate — see
+  the [driver module map](driver.md). No logic changed; the bin test set is
+  identical to the pre-move baseline.
+- **Split aliases**: `clay.shell.clientSplitPaneRight`/`Down` joined the
+  bindable `client_ui` surface, resolving to the canonical split handlers
+  (see the masonry-shell page).
+- **Tests added**: `sweep_removes_only_expired_entries`,
+  `sweep_noop_keeps_revision`, `sweep_removes_everything_and_clears_active`,
+  `mutations_touch_last_activity`, `sweep_skips_entries_bound_to_live_clients`
+  (`src/server/tab_registry.rs`);
+  `sweep_skips_tabs_of_live_connected_clients` (end-to-end real-server
+  liveness wiring, `src/server/mod.rs`);
+  `rejected_close_keeps_connection_serving` /
+  `accepted_close_still_ends_connection` (`src/server/connection.rs`);
+  alias allowlist + `validate_command_id` gate coverage
+  (`src/server/ops/keybindings.rs`).

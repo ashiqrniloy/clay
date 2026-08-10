@@ -19,10 +19,9 @@ use crate::protocol::{ClientId, FontRole};
 use crate::shell::{
     Axis, FixedSlotId, InteractionState, KEYBOARD_RESIZE_STEP, PaneId, PaneResizeDirection,
     PaneSplitTree, PanelChrome, PersistedTabLayout, PersistedTabState, ResolvedUiTheme,
-    ShellComponentKind, SlotDragState, SplitChild, SplitDragState, SplitOrientation, SplitRatio,
-    WorkingAreaLayout, WorkingAreaLayoutObservation, WorkingAreaLayoutUpdate,
-    WorkingAreaLayoutUpdateError, compute_slot_resize_size, hit_test_slot_handle,
-    hit_test_split_divider, paint_divider, paint_focus_ring, paint_panel_chrome, slot_handle_rect,
+    SlotDragState, SplitChild, SplitDragState, SplitOrientation, SplitRatio, WorkingAreaLayout,
+    compute_slot_resize_size, hit_test_slot_handle, hit_test_split_divider, paint_divider,
+    paint_focus_ring, paint_panel_chrome, slot_handle_rect,
 };
 
 // Doc-hidden pass-through for the native `clay` binary's menu-sync routing.
@@ -31,7 +30,8 @@ pub use crate::shell::TransientMenuSession;
 #[cfg(test)]
 use crate::shell::{
     FixedSlotState, PaneSlotId, PaneSlotLayout, PaneSlotLayoutAssignment, PaneSplitNode,
-    PaneTreeObservation, ShellComponentId, ShellLayoutVersion, WorkingAreaId,
+    PaneTreeObservation, ShellComponentId, ShellComponentKind, ShellLayoutVersion, WorkingAreaId,
+    WorkingAreaLayoutObservation, WorkingAreaLayoutUpdate, WorkingAreaLayoutUpdateError,
 };
 
 /// Internal structural shell snapshot for tests and agent inspection.
@@ -40,7 +40,7 @@ use crate::shell::{
 /// source snippets, raw action payload authority, raw filesystem paths, raw CSS,
 /// raw ops, and executable package code. Public shell APIs must be introduced
 /// separately through Clay JS facade/op/reference-doc coverage.
-#[allow(dead_code)]
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ShellObservableSnapshot {
     pub(crate) layout: WorkingAreaLayoutObservation,
@@ -120,6 +120,13 @@ impl ShellClientCommand {
         match command_id {
             "clay.shell.clientSplitPaneVertical" => Some(Self::SplitPaneVertical),
             "clay.shell.clientSplitPaneHorizontal" => Some(Self::SplitPaneHorizontal),
+            // Phase 22.7 (F3): direction-named aliases for the Vim-style
+            // canonical IDs ("vertical" = side by side). The canonical names
+            // stay for backwards compatibility with existing configs and
+            // docs; the aliases add the direction vocabulary without
+            // duplicating handlers.
+            "clay.shell.clientSplitPaneRight" => Some(Self::SplitPaneVertical), // alias: new pane beside
+            "clay.shell.clientSplitPaneDown" => Some(Self::SplitPaneHorizontal), // alias: new pane below
             "clay.shell.clientAddEqualPane" => Some(Self::AddEqualPane),
             "clay.shell.clientClosePane" => Some(Self::ClosePane),
             "clay.shell.clientFocusPaneNext" => Some(Self::FocusPaneNext),
@@ -166,11 +173,16 @@ impl ShellClientCommand {
 /// consumes a package-contributable fixed slot.
 pub(crate) const TAB_BAR_HEIGHT: f64 = 30.0;
 pub(crate) const TAB_BAR_CARD_WIDTH: f64 = 180.0;
+/// Phase 22.7 (D6/F5): floor on card width; once the strip cannot hold all
+/// cards at this width, cards stop shrinking and the strip scrolls instead.
+pub(crate) const TAB_BAR_CARD_MIN_WIDTH: f64 = 100.0;
 pub(crate) const TAB_BAR_CARD_GAP: f64 = 4.0;
 pub(crate) const TAB_BAR_CARD_PADDING: f64 = 8.0;
 pub(crate) const TAB_BAR_CLOSE_SIZE: f64 = 14.0;
 pub(crate) const TAB_BAR_NEW_TAB_SIZE: f64 = 28.0;
 pub(crate) const TAB_BAR_NEW_TAB_GAP: f64 = 4.0;
+/// Phase 22.7: wheel line-delta multiplier for the tab strip scroll.
+pub(crate) const TAB_BAR_SCROLL_STEP: f64 = 24.0;
 
 /// Phase 22.3: one tab bar card, pushed by the app driver from the
 /// server-authoritative registry snapshot (names/order) plus mounted tabs
@@ -196,6 +208,12 @@ pub(crate) struct TabBarGeometry {
     /// The "new tab" affordance slot at the bar's right edge (present while
     /// the bar is visible). Cards clamp before it.
     pub(crate) new_tab_rect: Rect,
+    /// Phase 22.7: the effective strip scroll used to shift card positions
+    /// (clamped to `[0, scroll_max]`).
+    pub(crate) scroll: f64,
+    /// Phase 22.7: the largest scroll that brings the last card's right edge
+    /// to the "+" slot boundary (`0` when the strip fits — no overflow).
+    pub(crate) scroll_max: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -211,12 +229,28 @@ pub(crate) struct TabCardGeometry {
 /// are laid out at their pane rects — inactive tabs are laid out at zero size
 /// (the Phase 22.1 `pending_orphans` protocol) so their widgets stay in the
 /// tree and keep receiving connection events without painting or hit-testing.
+///
+/// CONTRACT (connection owner): the chrome `EditorWidget` is the tab's
+/// connection owner — the widget connection events (theme, SDUI snapshot,
+/// runtime state, editor commands) apply through, mounted at `editor_pane_id`
+/// (pane 1 today). Closing that pane orphans the owner at zero size; it must
+/// remain in the Masonry tree (`chrome_orphans`) and keep receiving events
+/// — event routing NEVER assumes the owner is visible or mounted in a pane.
 pub struct TabChrome {
     layout: WorkingAreaLayout,
     /// Phase 22.1: one retained content host per pane leaf, keyed by pane ID.
     pane_hosts: BTreeMap<PaneId, WidgetPod<PaneContentHost>>,
     /// `WidgetId` of the hosted `EditorWidget` (mounted once in Phase 22.1).
     editor_widget_id: WidgetId,
+    /// The pane that mounts the connection owner (`PaneContent::Editor`).
+    /// Fixed at construction; closing this pane orphans the owner rather than
+    /// detaching it (see `chrome_orphans`).
+    editor_pane_id: PaneId,
+    /// The connection owner's host after its pane closed (zero-size orphan).
+    /// Unlike `pending_orphans`, these are NEVER detached: the owner must stay
+    /// in the tree so `editor_widget_id` remains editable and connection
+    /// events keep applying. Registered and laid out at zero size forever.
+    chrome_orphans: Vec<WidgetPod<PaneContentHost>>,
     /// Phase 22.2: pane → content widget id for keyboard/event routing. Pane 1
     /// maps to the chrome (`editor_widget_id`); document panes map to their
     /// `PaneDocumentView` (registered by the app driver when mounting).
@@ -295,6 +329,8 @@ impl TabChrome {
             layout,
             pane_hosts,
             editor_widget_id,
+            editor_pane_id,
+            chrome_orphans: Vec::new(),
             pane_targets,
             pending_orphans: Vec::new(),
             pane_focus_policy: PaneFocusPolicy::default(),
@@ -316,7 +352,10 @@ pub struct ClayShellWidget {
     /// by the app driver). The active tab's hosts are laid out at their pane
     /// rects; inactive tabs' hosts are retained at zero size.
     tabs: BTreeMap<ClientId, TabChrome>,
-    /// The mounted (active) tab.
+    /// The mounted (active) tab. Invariant: `active_tab` names a mounted tab
+    /// OR `tabs` is empty (removing the last tab leaves this field at the
+    /// removed value; every public entry point early-returns on the empty
+    /// map, so the stale value is never dereferenced).
     active_tab: ClientId,
     /// Phase 20.3: split divider drag session state.
     split_drag: SplitDragState,
@@ -333,6 +372,10 @@ pub struct ClayShellWidget {
     /// Phase 22.3: hovered card index for state paint (None when the pointer
     /// is not over a card).
     tab_bar_hover: Option<usize>,
+    /// Phase 22.7: horizontal strip scroll offset (one `f64`; clamped to
+    /// `[0, max_scroll]` by `tab_bar_geometry` and every mutation path).
+    /// `0` when the strip fits, so non-overflowing bars never shift.
+    tab_bar_scroll: f64,
     /// Phase 22.3: shell text paint uses the UI typography profile (default
     /// registry; syncing the active tab's typography is not wired in 22.3).
     typography: TypographyRegistry,
@@ -383,6 +426,7 @@ impl ClayShellWidget {
             last_persist: None,
             tab_cards: Vec::new(),
             tab_bar_hover: None,
+            tab_bar_scroll: 0.0,
             typography: TypographyRegistry::default(),
             announcement: None,
             ui_theme,
@@ -405,6 +449,7 @@ impl ClayShellWidget {
             last_persist: None,
             tab_cards: Vec::new(),
             tab_bar_hover: None,
+            tab_bar_scroll: 0.0,
             typography: TypographyRegistry::default(),
             announcement: None,
             ui_theme: ResolvedUiTheme::default(),
@@ -413,11 +458,19 @@ impl ClayShellWidget {
 
     /// The active tab's chrome state.
     fn active(&self) -> &TabChrome {
+        debug_assert!(
+            self.tabs.contains_key(&self.active_tab),
+            "invariant: active_tab names a mounted tab (tabs empty means no active() call)"
+        );
         &self.tabs[&self.active_tab]
     }
 
     /// The active tab's chrome state (mutable).
     fn active_mut(&mut self) -> &mut TabChrome {
+        debug_assert!(
+            self.tabs.contains_key(&self.active_tab),
+            "invariant: active_tab names a mounted tab (tabs empty means no active_mut() call)"
+        );
         self.tabs
             .get_mut(&self.active_tab)
             .expect("active tab is always present")
@@ -499,6 +552,8 @@ impl ClayShellWidget {
         self.split_drag = SplitDragState::Idle;
         self.slot_drag = SlotDragState::Idle;
         self.last_slot_click = None;
+        // Phase 22.7: an off-screen active card must become reachable.
+        self.scroll_active_card_into_view(ctx.size());
         ctx.children_changed();
         ctx.request_layout();
         true
@@ -542,11 +597,16 @@ impl ClayShellWidget {
         for orphan in tab.pending_orphans.drain(..) {
             ctx.remove_child(orphan);
         }
+        // Phase 22.7: the connection owner's orphan host leaves with the tab.
+        for orphan in tab.chrome_orphans.drain(..) {
+            ctx.remove_child(orphan);
+        }
         if self.active_tab == client_id
             && let Some((next, _)) = self.tabs.iter().next()
         {
             self.active_tab = *next;
         }
+        // Removing at the two-card boundary can hide the bar before replacement cards arrive; clear stale hover.
         if self.tab_cards.len() <= 2 {
             self.tab_bar_hover = None;
         }
@@ -603,7 +663,11 @@ impl ClayShellWidget {
         self.tab_cards = cards;
         if self.tab_cards.len() < 2 {
             self.tab_bar_hover = None;
+            self.tab_bar_scroll = 0.0;
         }
+        // Phase 22.7: registry-driven order/names may move the active card;
+        // keep it visible.
+        self.scroll_active_card_into_view(ctx.size());
         if geometry_changed {
             ctx.request_layout();
         }
@@ -648,10 +712,15 @@ impl ClayShellWidget {
             bar.x1 - TAB_BAR_NEW_TAB_GAP,
             bar.y0 + (bar.height() + TAB_BAR_NEW_TAB_SIZE) / 2.0,
         );
+        // Phase 22.7 (D6/F5): cards shrink-to-fit until the minimum width
+        // binds, then the strip overflows and scrolls. Widths come from the
+        // UNSCROLLED positions so every card keeps the same shape; positions
+        // shift by the clamped scroll afterwards.
         let mut cards = Vec::with_capacity(self.tab_cards.len());
         let mut x = TAB_BAR_CARD_GAP;
         for _ in &self.tab_cards {
-            let width = (TAB_BAR_CARD_WIDTH).min((new_tab_rect.x0 - x - TAB_BAR_CARD_GAP).max(0.0));
+            let width = (TAB_BAR_CARD_WIDTH)
+                .min((new_tab_rect.x0 - x - TAB_BAR_CARD_GAP).max(TAB_BAR_CARD_MIN_WIDTH));
             let rect = Rect::new(x, TAB_BAR_CARD_GAP, x + width, bar.y1 - TAB_BAR_CARD_GAP);
             cards.push(TabCardGeometry {
                 rect,
@@ -671,10 +740,37 @@ impl ClayShellWidget {
             });
             x = rect.x1 + TAB_BAR_CARD_GAP;
         }
+        // Last card's right edge can reach the "+" slot boundary.
+        let scroll_max = (x - TAB_BAR_CARD_GAP - new_tab_rect.x0).max(0.0);
+        let scroll = self.tab_bar_scroll.clamp(0.0, scroll_max);
+        if scroll > 0.0 {
+            for card in &mut cards {
+                card.rect = Rect::new(
+                    card.rect.x0 - scroll,
+                    card.rect.y0,
+                    card.rect.x1 - scroll,
+                    card.rect.y1,
+                );
+                card.label_rect = Rect::new(
+                    card.label_rect.x0 - scroll,
+                    card.label_rect.y0,
+                    card.label_rect.x1 - scroll,
+                    card.label_rect.y1,
+                );
+                card.close_rect = Rect::new(
+                    card.close_rect.x0 - scroll,
+                    card.close_rect.y0,
+                    card.close_rect.x1 - scroll,
+                    card.close_rect.y1,
+                );
+            }
+        }
         Some(TabBarGeometry {
             bar,
             cards,
             new_tab_rect,
+            scroll,
+            scroll_max,
         })
     }
 
@@ -694,6 +790,36 @@ impl ClayShellWidget {
             }
         }
         None
+    }
+
+    /// Phase 22.7 (D6/F5): bring the active card's visible edge into the
+    /// strip. Left edge wins when the card is wider than the strip. No-op
+    /// when the bar is hidden or the card is already visible.
+    fn scroll_active_card_into_view(&mut self, size: Size) {
+        let Some(geometry) = self.tab_bar_geometry(size) else {
+            return;
+        };
+        let Some(index) = self
+            .tab_cards
+            .iter()
+            .position(|card| card.client_id == self.active_tab)
+        else {
+            return;
+        };
+        let rect = geometry.cards[index].rect;
+        let mut target = geometry.scroll;
+        if rect.x0 < 0.0 {
+            target += rect.x0;
+        } else if rect.x1 > geometry.new_tab_rect.x0 {
+            target += rect.x1 - geometry.new_tab_rect.x0;
+        }
+        self.tab_bar_scroll = target.clamp(0.0, geometry.scroll_max);
+    }
+
+    /// Phase 22.7: horizontal strip scroll read (for tests and diagnostics).
+    #[cfg(test)]
+    pub(crate) fn tab_bar_scroll(&self) -> f64 {
+        self.tab_bar_scroll
     }
 
     pub fn pane_target_for(&self, client_id: ClientId, pane_id: PaneId) -> Option<WidgetId> {
@@ -790,7 +916,7 @@ impl ClayShellWidget {
         ctx.submit_action::<EditorAction>(EditorAction::PaneFocused(pane_id));
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn apply_layout_update(
         &mut self,
         update: WorkingAreaLayoutUpdate,
@@ -799,7 +925,7 @@ impl ClayShellWidget {
         self.sync_pane_hosts_state();
         Ok(())
     }
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn observable_snapshot(&self, size: Size) -> ShellObservableSnapshot {
         let active = self.active();
         ShellObservableSnapshot {
@@ -841,7 +967,7 @@ impl ClayShellWidget {
         }
     }
 
-    #[allow(dead_code)] // Phase 22.1: kept for split-command dispatch (task 6).
+    #[cfg(test)]
     fn editor_component_rect(&self, size: Size) -> Rect {
         self.active()
             .layout
@@ -944,6 +1070,9 @@ impl ClayShellWidget {
         ctx: &mut MutateCtx<'_>,
         command: ShellClientCommand,
     ) {
+        if self.tabs.is_empty() {
+            return; // zero-tab shell: no pane state to command (invariant guard).
+        }
         let active = self.active().layout.active_pane_id();
         match command {
             // Vim-style: "vertical" = side by side (vertical divider) →
@@ -1098,7 +1227,6 @@ impl ClayShellWidget {
     /// untouched. Call after any tree mutation applied outside construction.
     /// Always re-runs the register pass: `apply_layout_update` may have synced
     /// hosts (new pods) before a context was available.
-    #[allow(dead_code)] // Phase 22.1: wired by the split-command dispatch (task 6).
     pub(crate) fn reconcile_pane_hosts(&mut self, ctx: &mut MutateCtx<'_>) {
         for orphan in self.active_mut().pending_orphans.drain(..) {
             ctx.remove_child(orphan);
@@ -1162,7 +1290,15 @@ impl ClayShellWidget {
                 // Phase 22.2: drop routing targets of removed panes too.
                 chrome.pane_targets.remove(&pane_id);
                 chrome.registered_panes.remove(&pane_id);
-                chrome.pending_orphans.push(host);
+                if pane_id == chrome.editor_pane_id {
+                    // CONTRACT (connection owner): the editor host is NEVER
+                    // detached — it becomes a permanent zero-size orphan so
+                    // `editor_widget_id` stays editable and connection events
+                    // keep applying (theme/SDUI/runtime).
+                    chrome.chrome_orphans.push(host);
+                } else {
+                    chrome.pending_orphans.push(host);
+                }
             }
         }
         let leaf_count = leaves.len();
@@ -1267,6 +1403,15 @@ impl ClayShellWidget {
         let metrics = self
             .typography
             .ui_text_metrics(FontRole::Ui, UiTextVariant::Status);
+        // Phase 22.7: scrolled cards must not paint into the "+" slot region
+        // or off the bar's left edge — clip the card strip to the bar.
+        let strip = Rect::new(
+            geometry.bar.x0,
+            geometry.bar.y0,
+            geometry.new_tab_rect.x0,
+            geometry.bar.y1,
+        );
+        scene.push_clip_layer(masonry::kurbo::Affine::IDENTITY, &strip);
         for (index, (card, card_geometry)) in self.tab_cards.iter().zip(&geometry.cards).enumerate()
         {
             let selected = card.client_id == self.active_tab;
@@ -1317,6 +1462,7 @@ impl ClayShellWidget {
                 paint_focus_ring(scene, card_geometry.rect, theme);
             }
         }
+        scene.pop_layer();
 
         // New-tab affordance: a token-colored "+" at the bar's right edge
         // (hover/focus polish is the 22.4 keybinding task).
@@ -1485,6 +1631,9 @@ impl Widget for ClayShellWidget {
             for orphan in &mut tab.pending_orphans {
                 ctx.register_child(orphan);
             }
+            for orphan in &mut tab.chrome_orphans {
+                ctx.register_child(orphan);
+            }
         }
     }
 
@@ -1529,11 +1678,18 @@ impl Widget for ClayShellWidget {
                 ctx.run_layout(orphan, &BoxConstraints::tight(Size::ZERO));
                 ctx.place_child(orphan, Point::ZERO);
             }
+            for orphan in &mut tab.chrome_orphans {
+                ctx.run_layout(orphan, &BoxConstraints::tight(Size::ZERO));
+                ctx.place_child(orphan, Point::ZERO);
+            }
         }
         size
     }
 
     fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
+        if self.tabs.is_empty() {
+            return; // zero-tab shell paints nothing (invariant guard).
+        }
         let area = self.working_area(_ctx.size());
         let theme = self.ui_theme.clone();
 
@@ -1583,6 +1739,9 @@ impl Widget for ClayShellWidget {
         _props: &PropertiesRef<'_>,
         scene: &mut Scene,
     ) {
+        if self.tabs.is_empty() {
+            return; // zero-tab shell paints nothing (invariant guard).
+        }
         // Pane hosts are children and repaint over `paint()` output, so the
         // split boundaries must be drawn here to stay visible — same
         // hairline treatment for side-by-side and stacked splits.
@@ -1604,6 +1763,9 @@ impl Widget for ClayShellWidget {
         _props: &mut PropertiesMut<'_>,
         event: &TextEvent,
     ) {
+        if self.tabs.is_empty() {
+            return; // zero-tab shell ignores text events (invariant guard).
+        }
         // Phase 20.3: Tab/Shift+Tab focus navigation across panes.
         if let TextEvent::Keyboard(keyboard) = event
             && keyboard.state == KeyState::Down
@@ -1629,6 +1791,9 @@ impl Widget for ClayShellWidget {
         _props: &mut PropertiesMut<'_>,
         event: &PointerEvent,
     ) {
+        if self.tabs.is_empty() {
+            return; // zero-tab shell ignores pointer events (invariant guard).
+        }
         let area = self.working_area(ctx.size());
         let pane_id = self.active().layout.active_pane_id();
 
@@ -1826,6 +1991,32 @@ impl Widget for ClayShellWidget {
                     ctx.request_render();
                 }
             }
+            PointerEvent::Scroll(scroll_event) => {
+                // Phase 22.7 (D6/F5): wheel over the tab bar scrolls the
+                // strip horizontally (vertical wheel scrolls too, matching
+                // tab-strip convention in browsers). No-op when the bar is
+                // hidden or the strip fits.
+                let point = ctx.local_position(scroll_event.state.position);
+                let Some(geometry) = self.tab_bar_geometry(ctx.size()) else {
+                    return;
+                };
+                if !geometry.bar.contains(point) {
+                    return;
+                }
+                let (x, y) = match scroll_event.delta {
+                    masonry::core::ScrollDelta::LineDelta(x, y) => (
+                        (x as f64) * TAB_BAR_SCROLL_STEP,
+                        (y as f64) * TAB_BAR_SCROLL_STEP,
+                    ),
+                    // Pixel deltas are already in pixels — no line multiplier.
+                    masonry::core::ScrollDelta::PixelDelta(p) => (p.x, p.y),
+                    // Synthetic page deltas (scrollbar wells) are not wheel input.
+                    masonry::core::ScrollDelta::PageDelta(..) => return,
+                };
+                self.tab_bar_scroll = (self.tab_bar_scroll + x + y).clamp(0.0, geometry.scroll_max);
+                ctx.request_paint_only();
+                ctx.request_accessibility_update();
+            }
             PointerEvent::Up(_) => {
                 // Commit slot resize.
                 if let SlotDragState::Resizing {
@@ -1920,10 +2111,22 @@ impl Widget for ClayShellWidget {
         _props: &PropertiesRef<'_>,
         node: &mut Node,
     ) {
-        node.set_label(format!(
-            "Clay working area shell. Active pane {}.",
-            self.active().layout.active_pane_id().0
-        ));
+        let mut children: Vec<NodeId> = if self.tabs.is_empty() {
+            // Zero-tab shell: no active pane to name; the polite
+            // announcement node still registers below.
+            node.set_label("Clay working area shell. No mounted tabs.");
+            Vec::new()
+        } else {
+            node.set_label(format!(
+                "Clay working area shell. Active pane {}.",
+                self.active().layout.active_pane_id().0
+            ));
+            self.active()
+                .pane_hosts
+                .values()
+                .map(|host| host.id().into())
+                .collect()
+        };
         // Phase 22.6: the accessibility tree exposes only the mounted tab's
         // panes. Inactive tabs' hosts stay in the widget tree at zero size
         // for reconnect continuity but must not be announced. The tab bar
@@ -1931,12 +2134,6 @@ impl Widget for ClayShellWidget {
         // sanitized workspace names and the active card selected; tab
         // operations stay keyboard-command-driven (Phase 22.4), so the tab
         // nodes are informational, matching the status-line precedent.
-        let mut children: Vec<NodeId> = self
-            .active()
-            .pane_hosts
-            .values()
-            .map(|host| host.id().into())
-            .collect();
         if self.tab_cards.len() >= 2
             && let Some(geometry) = self.tab_bar_geometry(node_window_size(node))
         {
@@ -2746,6 +2943,24 @@ mod tests {
         });
     }
 
+    /// A primary-button down/up/cancel event at `(x, y)`.
+    fn pointer_button_event(x: f64, y: f64, button: Option<PointerButton>) -> PointerEvent {
+        use masonry::core::{PointerId, PointerInfo, PointerState, PointerType};
+        use masonry::dpi::PhysicalPosition;
+        PointerEvent::Down(PointerButtonEvent {
+            button,
+            pointer: PointerInfo {
+                pointer_id: Some(PointerId::PRIMARY),
+                persistent_device_id: None,
+                pointer_type: PointerType::Mouse,
+            },
+            state: PointerState {
+                position: PhysicalPosition::new(x, y),
+                ..Default::default()
+            },
+        })
+    }
+
     fn pointer_move_event(x: f64, y: f64) -> PointerEvent {
         use masonry::core::{PointerId, PointerInfo, PointerState, PointerType, PointerUpdate};
         use masonry::dpi::PhysicalPosition;
@@ -2941,6 +3156,95 @@ mod tests {
             let width = rect.width();
             assert!((width - 300.0).abs() < 1.0, "equal pane width {width}");
         }
+    }
+
+    /// Phase 22.7 (plan 078 task 7, A1/F1/F2): closing pane 1 — the pane that
+    /// mounts the tab's connection owner (`EditorWidget`) — with a sibling
+    /// present keeps the owner wired: the editor host becomes a permanent
+    /// zero-size orphan, `editor_widget_id_for` still resolves, routing
+    /// fallback still reaches it, and a connection event (theme) applies
+    /// through it without error.
+    #[test]
+    fn close_editor_pane_keeps_connection_owner_wired() {
+        let (mut rr, sid) = two_pane_shell_root(); // pane 1 = editor, pane 2 = placeholder
+        dispatch_shell_command(&mut rr, sid, ShellClientCommand::ClosePane);
+        assert_eq!(pane_count(&mut rr, sid), 1, "pane 1 closes; pane 2 remains");
+
+        let owner = rr.edit_widget(sid, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            let owner = shell
+                .widget
+                .editor_widget_id_for(0)
+                .expect("owner id resolves after pane 1 closes");
+            // No pane target exists for the placeholder pane, so routing
+            // falls back to the owner — which must still be in the tree.
+            assert_eq!(shell.widget.focus_fallback_widget_id(), owner);
+            owner
+        });
+
+        // The driver's event-application path (theme/SDUI/runtime) edits the
+        // owner by id; a detached owner panics here.
+        rr.edit_widget(owner, |mut widget| {
+            let editor = widget
+                .try_downcast::<EditorWidget>()
+                .expect("owner is the editor");
+            assert!(
+                editor
+                    .widget
+                    .apply_connection_event(ClientConnectionEvent::ActiveTheme(
+                        crate::protocol::ActiveTheme {
+                            specifier: "@clay/default".to_string(),
+                            overrides: Vec::new(),
+                            design_tokens: Vec::new(),
+                        },
+                    )),
+                "theme event applies through the orphaned owner"
+            );
+        });
+        let _ = rr.redraw();
+    }
+
+    /// Phase 22.7 (plan 078 task 7): split/close churn never drops the owner
+    /// registration — the exact cycle that previously detached the editor
+    /// host (a second tree mutation drains `pending_orphans`, so the owner
+    /// must live in the permanent `chrome_orphans` list, not the drainable
+    /// one).
+    #[test]
+    fn owner_survives_repeated_split_close_cycles() {
+        let (mut rr, sid) = two_pane_shell_root();
+        let owner = rr.edit_widget(sid, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.editor_widget_id_for(0).expect("owner mounted")
+        });
+        // Two churn cycles: close pane 1, split, close the new pane, split.
+        for _ in 0..2 {
+            dispatch_shell_command(&mut rr, sid, ShellClientCommand::ClosePane);
+            dispatch_shell_command(&mut rr, sid, ShellClientCommand::SplitPaneVertical);
+        }
+        // Owner still editable after every cycle.
+        rr.edit_widget(owner, |mut widget| {
+            let editor = widget
+                .try_downcast::<EditorWidget>()
+                .expect("owner is the editor");
+            assert!(
+                editor
+                    .widget
+                    .apply_connection_event(ClientConnectionEvent::ActiveTheme(
+                        crate::protocol::ActiveTheme {
+                            specifier: "@clay/default".to_string(),
+                            overrides: Vec::new(),
+                            design_tokens: Vec::new(),
+                        },
+                    )),
+                "owner receives events after split/close churn"
+            );
+        });
+        // And the shell still reports it as the routing fallback.
+        rr.edit_widget(sid, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            assert_eq!(shell.widget.focus_fallback_widget_id(), owner);
+        });
+        let _ = rr.redraw();
     }
 
     #[test]
@@ -4086,6 +4390,272 @@ mod tests {
         );
     }
 
+    fn tab_bar_wheel_event(render_root: &mut RenderRoot, x: f64, y: f64, dx: f32, dy: f32) {
+        use masonry::core::ScrollDelta;
+        use masonry::core::{
+            PointerId, PointerInfo, PointerScrollEvent, PointerState, PointerType,
+        };
+        use masonry::dpi::PhysicalPosition;
+        render_root.handle_pointer_event(PointerEvent::Scroll(PointerScrollEvent {
+            pointer: PointerInfo {
+                pointer_id: Some(PointerId::PRIMARY),
+                persistent_device_id: None,
+                pointer_type: PointerType::Mouse,
+            },
+            delta: ScrollDelta::LineDelta(dx, dy),
+            state: PointerState {
+                position: PhysicalPosition::new(x, y),
+                ..Default::default()
+            },
+        }));
+    }
+
+    /// Precise-scroll variant: pixel deltas must map 1:1 (no line
+    /// multiplier).
+    fn tab_bar_pixel_wheel_event(render_root: &mut RenderRoot, x: f64, y: f64, dy: f64) {
+        use masonry::core::ScrollDelta;
+        use masonry::core::{
+            PointerId, PointerInfo, PointerScrollEvent, PointerState, PointerType,
+        };
+        use masonry::dpi::PhysicalPosition;
+        render_root.handle_pointer_event(PointerEvent::Scroll(PointerScrollEvent {
+            pointer: PointerInfo {
+                pointer_id: Some(PointerId::PRIMARY),
+                persistent_device_id: None,
+                pointer_type: PointerType::Mouse,
+            },
+            delta: ScrollDelta::PixelDelta(PhysicalPosition::new(0.0, dy)),
+            state: PointerState {
+                position: PhysicalPosition::new(x, y),
+                ..Default::default()
+            },
+        }));
+    }
+
+    /// Six overflowing cards at 900px: widths 180,180,180,180,124,100 →
+    /// strip = 972 vs 868 available → scroll_max = 100.
+    fn six_overflowing_cards(render_root: &mut RenderRoot, shell_id: WidgetId) {
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.set_tab_cards(
+                &mut shell.ctx,
+                (0..6)
+                    .map(|i| TabCard {
+                        client_id: i,
+                        name: format!("t{i}"),
+                        closable: true,
+                    })
+                    .collect(),
+            );
+        });
+    }
+
+    /// Phase 22.7 (F3): the direction-named split aliases resolve to the
+    /// canonical commands; unknown IDs stay rejected.
+    #[test]
+    fn split_alias_ids_resolve_to_canonical_commands() {
+        use crate::masonry_shell::ShellClientCommand;
+        assert_eq!(
+            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneRight"),
+            Some(ShellClientCommand::SplitPaneVertical),
+            "right = side-by-side split (canonical Vertical)"
+        );
+        assert_eq!(
+            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneDown"),
+            Some(ShellClientCommand::SplitPaneHorizontal),
+            "down = stacked split (canonical Horizontal)"
+        );
+        // Canonical IDs unchanged.
+        assert_eq!(
+            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneVertical"),
+            Some(ShellClientCommand::SplitPaneVertical)
+        );
+        assert_eq!(
+            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneHorizontal"),
+            Some(ShellClientCommand::SplitPaneHorizontal)
+        );
+        // Unknown direction names are not aliases.
+        assert_eq!(
+            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneLeft"),
+            None
+        );
+        assert_eq!(
+            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneUp"),
+            None
+        );
+    }
+
+    #[test]
+    fn tab_bar_cards_never_below_min_width() {
+        let (mut render_root, shell_id, _) = tab_bar_two_card_root();
+        six_overflowing_cards(&mut render_root, shell_id);
+        // A 260px window: the strip (228px) cannot hold six 100px cards, so
+        // the floor binds and the bar overflows instead of crushing cards.
+        let geometry = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell
+                .widget
+                .tab_bar_geometry(Size::new(260.0, 600.0))
+                .expect("bar visible")
+        });
+        for card in &geometry.cards {
+            assert!(
+                card.rect.width() >= TAB_BAR_CARD_MIN_WIDTH,
+                "card width {} below floor",
+                card.rect.width()
+            );
+        }
+        assert!(geometry.scroll_max > 0.0, "overflow must be scrollable");
+        // A wide window keeps the pre-22.7 shrink-to-fit shape (no scroll).
+        let wide = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell
+                .widget
+                .tab_bar_geometry(Size::new(1200.0, 600.0))
+                .expect("bar visible")
+        });
+        assert_eq!(wide.scroll, 0.0);
+        assert_eq!(wide.scroll_max, 0.0);
+        assert_eq!(wide.cards[0].rect.width(), TAB_BAR_CARD_WIDTH);
+    }
+
+    #[test]
+    fn tab_bar_wheel_scroll_clamps() {
+        let (mut render_root, shell_id, _) = tab_bar_two_card_root();
+        six_overflowing_cards(&mut render_root, shell_id);
+        let _ = render_root.redraw();
+
+        // Wheel down (dy > 0) over the bar scrolls the strip right, clamped
+        // at scroll_max = 100.
+        for _ in 0..5 {
+            tab_bar_wheel_event(&mut render_root, 300.0, 15.0, 0.0, 3.0);
+        }
+        let scroll = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.tab_bar_scroll()
+        });
+        assert_eq!(scroll, 100.0, "wheel clamps at scroll_max");
+
+        // Wheel up returns to the left edge (clamps at 0).
+        for _ in 0..10 {
+            tab_bar_wheel_event(&mut render_root, 300.0, 15.0, 0.0, -3.0);
+        }
+        let scroll = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.tab_bar_scroll()
+        });
+        assert_eq!(scroll, 0.0, "wheel clamps at 0");
+
+        // Wheel over the working area (below the bar) does not scroll.
+        tab_bar_wheel_event(&mut render_root, 300.0, 15.0, 0.0, 3.0);
+        tab_bar_wheel_event(&mut render_root, 450.0, 300.0, 0.0, 3.0);
+        let scroll = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.tab_bar_scroll()
+        });
+        assert_eq!(scroll, 72.0, "only bar-area wheel scrolls");
+
+        // Pixel deltas (precise scroll) map 1:1 — no 24px line multiplier
+        // (72 - 72 = 0, then +50px lands exactly at 50, not clamped 100).
+        for _ in 0..3 {
+            tab_bar_wheel_event(&mut render_root, 300.0, 15.0, 0.0, -1.0);
+        }
+        tab_bar_pixel_wheel_event(&mut render_root, 300.0, 15.0, 50.0);
+        let scroll = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.tab_bar_scroll()
+        });
+        assert_eq!(scroll, 50.0, "pixel deltas scroll 1:1 in pixels");
+    }
+
+    #[test]
+    fn tab_bar_hit_test_honors_scroll() {
+        let (mut render_root, _shell_id, captured) = tab_bar_two_card_root();
+        six_overflowing_cards(&mut render_root, _shell_id);
+        let _ = render_root.redraw();
+        // Scroll to the far right: card 0 shifts to [-96, 84], card 1 to
+        // [88, 268]. A click at x=140 would hit card 0 at scroll 0 but must
+        // hit card 1 at scroll 100.
+        for _ in 0..5 {
+            tab_bar_wheel_event(&mut render_root, 300.0, 15.0, 0.0, 3.0);
+        }
+        tab_bar_click(&mut render_root, 140.0, 15.0);
+        assert!(
+            captured
+                .borrow()
+                .contains(&EditorAction::TabBar(TabBarAction::Activate {
+                    client_id: 1
+                })),
+            "click must hit the scrolled card 1, actions: {:?}",
+            captured.borrow()
+        );
+        // The close glyph inside a scrolled card still wins: card 1's close
+        // is [246, 260] at scroll 100.
+        tab_bar_click(&mut render_root, 253.0, 15.0);
+        assert!(
+            captured
+                .borrow()
+                .contains(&EditorAction::TabBar(TabBarAction::Close { client_id: 1 })),
+            "close glyph must win inside scrolled cards, actions: {:?}",
+            captured.borrow()
+        );
+    }
+
+    #[test]
+    fn activating_offscreen_tab_scrolls_it_into_view() {
+        let (mut render_root, shell_id, _) = tab_bar_two_card_root();
+        // Ten cards (widths 180x5, 124, 100x4) → scroll_max = 412; tabs 0 and 2
+        // are mounted.
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.set_tab_cards(
+                &mut shell.ctx,
+                (0..10)
+                    .map(|i| TabCard {
+                        client_id: i,
+                        name: format!("t{i}"),
+                        closable: true,
+                    })
+                    .collect(),
+            );
+        });
+        // Wheel to the far right (active card 2 rides out of view on the left).
+        for _ in 0..50 {
+            tab_bar_wheel_event(&mut render_root, 300.0, 15.0, 0.0, 3.0);
+        }
+        // Programmatic activation scrolls the target card back into view.
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            assert!(shell.widget.set_active_tab(&mut shell.ctx, 0));
+        });
+        let scroll = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.tab_bar_scroll()
+        });
+        assert_eq!(scroll, 4.0, "activation reveals the off-screen left card");
+        // Registry-driven reorder (active card 0 moves to the end) scrolls it
+        // back into the strip.
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.set_tab_cards(
+                &mut shell.ctx,
+                (1..10)
+                    .chain(0..1)
+                    .map(|i| TabCard {
+                        client_id: i,
+                        name: format!("t{i}"),
+                        closable: true,
+                    })
+                    .collect(),
+            );
+        });
+        let scroll = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.tab_bar_scroll()
+        });
+        assert_eq!(scroll, 516.0, "reorder reveals the trailing active card");
+    }
+
     #[test]
     fn rekey_tab_moves_chrome_and_keeps_widget_ids_stable() {
         let shell = ClayShellWidget::single_editor(0, EditorWidget::default());
@@ -4237,9 +4807,137 @@ mod tests {
                 shell.widget.working_area_layout().active_pane_id(),
                 PaneId(1)
             );
-            assert_eq!(shell.widget.children_ids().len(), 1);
+            let ids = shell.widget.children_ids();
+            eprintln!("children ids: {:?}", ids);
+            assert_eq!(ids.len(), 1);
             assert_eq!(shell.widget.tab_bar_hover_index(), None);
         });
+    }
+
+    // -- Phase 22.7 (task 2): zero-tab invariant ----------------------------
+
+    /// All `ShellClientCommand` variants (the shell must no-op each one on a
+    /// zero-tab shell).
+    fn all_shell_commands() -> Vec<ShellClientCommand> {
+        vec![
+            ShellClientCommand::SplitPaneVertical,
+            ShellClientCommand::SplitPaneHorizontal,
+            ShellClientCommand::AddEqualPane,
+            ShellClientCommand::ClosePane,
+            ShellClientCommand::FocusPaneNext,
+            ShellClientCommand::FocusPanePrev,
+            ShellClientCommand::ResizePaneLeft,
+            ShellClientCommand::ResizePaneRight,
+            ShellClientCommand::ResizePaneUp,
+            ShellClientCommand::ResizePaneDown,
+            ShellClientCommand::MovePaneNext,
+            ShellClientCommand::MovePanePrev,
+            ShellClientCommand::TabNext,
+            ShellClientCommand::TabPrev,
+            ShellClientCommand::TabNew,
+            ShellClientCommand::TabClose,
+            ShellClientCommand::TabMoveLeft,
+            ShellClientCommand::TabMoveRight,
+            ShellClientCommand::TabActivate(1),
+            ShellClientCommand::TabMoveTo(1),
+        ]
+    }
+
+    #[test]
+    fn zero_tab_shell_is_inert() {
+        let (mut render_root, shell_id, _captured) = tab_bar_shell_root();
+        // Remove the only mounted tab: the shell enters the zero-tab state
+        // (the removed `active_tab` value stays in the field; nothing may
+        // dereference it).
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.remove_tab(&mut shell.ctx, 0);
+        });
+        assert_eq!(
+            render_root.edit_widget(shell_id, |mut widget| {
+                let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+                shell.widget.children_ids().len()
+            }),
+            0
+        );
+
+        // Layout + paint + post_paint with zero tabs: no panic, empty scene.
+        let (scene, _) = render_root.redraw();
+        assert!(scene.encoding().is_empty(), "zero-tab shell paints nothing");
+
+        // Pointer events are all ignored (the zero-tab guard sits at the top
+        // of `on_pointer_event`, before any variant is matched).
+        tab_bar_click(&mut render_root, 50.0, 50.0);
+        render_root.handle_pointer_event(pointer_move_event(50.0, 50.0));
+        render_root.handle_pointer_event(pointer_button_event(50.0, 50.0, None));
+
+        // A text event (Tab focus navigation) is a no-op too.
+        render_root.handle_text_event(TextEvent::Keyboard(KeyboardEvent {
+            state: KeyState::Down,
+            key: Key::Named(NamedKey::Tab),
+            code: Code::Tab,
+            ..KeyboardEvent::default()
+        }));
+
+        // Every shell client command variant is a no-op.
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            for command in all_shell_commands() {
+                shell
+                    .widget
+                    .apply_shell_client_command(&mut shell.ctx, command);
+            }
+        });
+
+        // The accessibility tree still builds: one group, no active pane,
+        // the polite announcement node registered.
+        let update = access_tree(&mut render_root);
+        let groups = nodes_with_role(&update, Role::Group);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(
+            groups[0].1.label().map(str::to_string),
+            Some("Clay working area shell. No mounted tabs.".to_string())
+        );
+        assert!(announcement_label(&update).is_some());
+
+        // Still inert after a further redraw.
+        let (scene, _) = render_root.redraw();
+        assert!(scene.encoding().is_empty());
+    }
+
+    #[test]
+    fn remove_last_tab_then_reinstall() {
+        let (mut render_root, shell_id, _captured) = tab_bar_shell_root();
+        // Removing the last tab leaves the zero-tab inert state.
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.remove_tab(&mut shell.ctx, 0);
+        });
+        let (scene, _) = render_root.redraw();
+        assert!(scene.encoding().is_empty());
+
+        // Reinstalling a tab makes it active again and re-attaches chrome.
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.install_tab(
+                &mut shell.ctx,
+                0,
+                TabChrome::single_editor(EditorWidget::default(), false),
+            );
+            assert_eq!(shell.widget.active_pane_id(), PaneId(1));
+            // Already active: the reinstall made the first tab active.
+            assert!(!shell.widget.set_active_tab(&mut shell.ctx, 0));
+            assert_eq!(shell.widget.children_ids().len(), 1);
+        });
+        // The reinstalled shell lays out and paints again.
+        let _ = render_root.redraw();
+        let update = access_tree(&mut render_root);
+        let groups = nodes_with_role(&update, Role::Group);
+        assert!(
+            groups
+                .iter()
+                .any(|(_, n)| n.label().is_some_and(|l| l.contains("Active pane")))
+        );
     }
 
     // -- Phase 22.6: accessibility tree structure ---------------------------

@@ -10,7 +10,7 @@ use clay::{
     ipc::{IpcEndpoint, smoke_endpoint},
     protocol::{
         BehaviorScope, ClientMessage, DiagnosticSeverity, PROTOCOL_VERSION, ServerMessage,
-        codec::Codec,
+        TabCommand, codec::Codec,
     },
     server::{IpcServer, ServerConfig},
 };
@@ -68,15 +68,37 @@ async fn run_smoke(endpoint: &IpcEndpoint, selected: &Path) {
         ServerMessage::Welcome { client_id, .. } => client_id,
         message => panic!("expected Welcome, got {message:?}"),
     };
-    assert!(matches!(
-        read_message(&codec, &mut stream).await,
-        ServerMessage::InitialDocument { .. }
-    ));
-    assert!(matches!(
-        read_message(&codec, &mut stream).await,
-        ServerMessage::BehaviorManifest(_)
-    ));
     let first_token = read_until_capability(&codec, &mut stream).await;
+    codec
+        .write_client_message(
+            &mut stream,
+            &ClientMessage::TabCommand {
+                client_id,
+                command: TabCommand::New {
+                    workspace_root: selected
+                        .parent()
+                        .expect("selected file parent")
+                        .to_string_lossy()
+                        .into_owned(),
+                },
+            },
+        )
+        .await
+        .unwrap();
+    loop {
+        match read_message(&codec, &mut stream).await {
+            ServerMessage::InitialDocument { .. } => break,
+            ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
+            message => panic!("expected deferred InitialDocument, got {message:?}"),
+        }
+    }
+    loop {
+        match read_message(&codec, &mut stream).await {
+            ServerMessage::TabRegistry(_) => break,
+            ServerMessage::SduiSnapshot { .. } => {}
+            message => panic!("expected post-bind registry, got {message:?}"),
+        }
+    }
 
     codec
         .write_client_message(

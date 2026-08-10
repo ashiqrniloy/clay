@@ -364,7 +364,7 @@ This smoke validates the six-step app workflow on Linux, Clay's primary developm
 
 
 1. Open the Clay app.
-2. See the Clay-owned Workspace file browser.
+2. See the Clay-owned Workspace file browser. It starts hidden; press `Ctrl+B` to show it, confirm the header contains the workspace folder name and full location, then press `Ctrl+B` again to hide it.
 3. Select a folder from the system.
 4. Navigate different folders and files.
 5. See file contents when the selected file is Rust, TypeScript, or JavaScript.
@@ -433,7 +433,7 @@ Typing, paint, layout, pointer, and scroll stay client-local/non-blocking throug
 Manual Linux verification:
 
 1. Run `cargo run -- smoke-gui --config-fixture file-browser-workflow` from the repository root.
-2. Confirm the GUI connects and the Clay-owned Workspace file browser is visible or can be shown with `Ctrl+B`. The file browser is SDUI composed by Clay, not a package widget.
+2. Confirm the GUI connects with the workspace pane hidden. Press `Ctrl+B` to show it; the header must contain the workspace folder name and full location. Press `Ctrl+B` again to hide it and confirm the editor reclaims the left slot. The file browser is SDUI composed by Clay, not a package widget.
 3. Press `Ctrl+O` (or the configured open-file binding) and choose a Markdown file in the native file picker. On Linux this uses xdg-desktop-portal `OpenFile` with Markdown/all-files filters; cancellation is a non-error no-op. Confirm the selected file opens through the existing selected-file grant path without expanding sibling-directory authority.
 4. Press `Ctrl+Shift+O` and choose a regular folder in the native folder picker. On Linux this uses xdg-desktop-portal with `directory=true`; cancellation is a non-error no-op.
 5. Confirm Clay adds only the selected folder as a server-validated workspace root and refreshes the Workspace browser. The selected-folder path is protected by the same selected-path capability family as selected-file opens.

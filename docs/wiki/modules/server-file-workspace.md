@@ -9,6 +9,14 @@
 
 Phase 9 introduces a server-owned workspace/open-document model alongside the existing server-canonical `DocumentState`. Phase 19 extends the same model with selected-file single-file grants for native file-open dialogs. Phase 18.12 adds server-owned workspace-root discovery and bounded directory listing for the Clay-owned file browser. Plan 043 extends explicit user grants to selected folders: a native folder picker can add a validated workspace root and trigger a refreshed file-browser snapshot. The model records authorized workspace roots, selected-file grants, canonical file paths, open document identity, duplicate-open behavior, file-backed dirty state, bounded file-list snapshots, and server-side path authorization without giving the native client or packages filesystem authority.
 
+Phase 22.8 places one `WorkspaceState` inside each `TabServerState`. Content-bearing
+connection messages route `ClientId -> TabId -> TabServerState` before dispatch;
+missing/stale routes fail closed. `document_for_message` accepts only the bound
+welcome document or a workspace document whose access-holder set contains the
+calling client, so a guessed document ID cannot fall back to welcome text.
+Selected-path capability tokens remain per connection, and a bound connection
+cannot `New`/`Reclaim` a second tab.
+
 ## Responsibilities
 
 - `WorkspaceState` owns workspace roots, selected-file single-file grants, canonical path-to-document mapping, document ID allocation, path validation, file type checks, and per-document `Arc<Mutex<DocumentState>>` handles.
@@ -107,7 +115,8 @@ let reloaded = workspace.reload_document(opened.document_id, false).await?;
 - `src/server/js_runtime.rs`: `document_facade_open_status_list_round_trip`, `workspace_roots_facade_reports_authorized_roots`, and `document_facade_rejects_unauthorized_paths` verify the runtime-backed `clay:documents`/`clay:workspace` subset reuses server workspace validation.
 - Phase 18.12 workspace discovery/listing tests in `src/server/workspace.rs`: root deduplication, cwd fallback, marker ancestry discovery, no-marker fallback, explicit directory/file grants, grant deduplication, unknown marker rejection, bounded listing, max-depth/max-entry truncation, default and root `.gitignore` ignores, traversal rejection, cancellation, child counts, and permission-denied diagnostics. Plan 060 T8 tests in `src/server/ops/workspace.rs` block traversal on a FIFO-backed `.gitignore` while open/save complete, then verify cooperative cancellation and token removal on success, error, and unwind.
 - `src/server/connection.rs`: `connection_add_selected_workspace_root_sends_file_browser_snapshot` and `connection_add_selected_workspace_root_rejects_stale_capability` cover selected-folder root grants and stale-token rejection.
-- Relevant commands: `cargo test workspace:: --lib`, `cargo test server:: --lib`, `cargo test`.
+- `src/server/connection.rs`: `cross_tab_workspace_and_document_authority_is_fail_closed` covers per-tab list/open/resync/status/edit/save/reload/close denial, foreign root IDs, cross-connection capability rejection, unchanged target text/version/dirty state, and rejection of a bound connection's foreign `Reclaim`.
+- Relevant commands: `cargo test workspace:: --lib`, `cargo test server::connection::tests`, `cargo test`.
 
 ## Related
 

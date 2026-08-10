@@ -786,13 +786,13 @@ User-visible Phase 18.12 configuration surfaces:
 | Surface | Status | API / mechanism | Notes |
 |---|---|---|---|
 | Fuzzy-open key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in server-first command `clay.workspace.openFuzzyFile`; no default chord exists in Rust, so fuzzy open is only reachable when `init.js` binds a key or another Clay-owned action opens it |
-| File-browser toggle key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to `clay.workspace.toggleFileBrowser`; the command is validated by `CommandExecutor`, not a hidden panel-visibility key |
+| File-browser toggle key binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md) | The canonical `init.js` example binds `Ctrl+B` to `clay.workspace.toggleFileBrowser`; the command is validated by `CommandExecutor` and flips visibility only for the calling tab |
 | Native folder picker binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.workspace.clientOpenFolderDialog` | Bind a key to the fixed client UI command id; native selection still goes through selected-path capability and server root validation |
 | Copy current selection binding | reused, runtime-backed | [`clay.keybindings.bindKey`](keybindings/bind-key.md), `clay.editor.clientCopySelection` | Bind an alternate key to copy the current native editor selection |
 | File open/reveal commands | runtime-backed command APIs | [`clay.commands.serverOpenFile`](commands/server-open-file.md), [`clay.commands.serverRevealInTree`](commands/server-reveal-in-tree.md), [`clay.commands.serverExecuteCommand`](commands/server-execute-command.md) | Open and reveal route through server workspace APIs, root-relative paths, selected-file grants, and open-document metadata validation |
 | Workspace roots and discovery | runtime-backed workspace APIs | [`clay.workspace.serverAddWorkspaceRoot`](workspace/server-add-workspace-root.md), [`clay.workspace.serverDiscoverWorkspaceRootForPath`](workspace/server-discover-workspace-root-for-path.md), [`clay.workspace.serverListWorkspaceRoots`](workspace/server-list-workspace-roots.md) | Roots and grants are explicit server-authoritative workspace APIs, not configuration keys |
 | Directory listing | runtime-backed workspace APIs | [`clay.workspace.serverListDirectory`](workspace/server-list-directory.md), [`clay.workspace.serverCreateListingCancelToken`](workspace/server-create-listing-cancel-token.md), [`clay.workspace.serverCancelListing`](workspace/server-cancel-listing.md) | Listing uses server validation, bounded depth/count, compiled ignore defaults, optional cancellation tokens, and diagnostics |
-| Left file-browser panel visibility/slot | Clay-owned shell state | `src/shell/file_browser.rs::FileBrowserState`; `FixedSlotId::Left` via SDUI composition | The first-party left panel is Clay-owned UI, not package or user configuration in this phase |
+| Left file-browser panel visibility/slot | Clay-owned shell state | `src/server/mod.rs::TabServerState`; `src/shell/file_browser.rs::FileBrowserState`; `FixedSlotId::Left` via SDUI composition | Hidden by default per tab; `Ctrl+B` publishes an inert editor-only tree when hidden and the bounded file tree when shown. The first-party left panel is Clay-owned UI, not a configurable slot |
 | Marker file set | compiled workspace boundary | `KNOWN_PROJECT_MARKERS` in `src/server/workspace.rs` | Closed Clay-owned marker table (`.git`, `Cargo.toml`, `package.json`); packages/users cannot extend it through `init.js` |
 | Ignore defaults and list budgets | compiled listing boundary | `DEFAULT_IGNORED_NAMES`, `MAX_LIST_DIRECTORY_DEPTH`, `MAX_LIST_DIRECTORY_ENTRIES`, `MAX_LEFT_PANEL_ENTRIES`, `MAX_FUZZY_ITEMS` | Bounded security/performance constants, not hidden `init.js` keys |
 
@@ -809,11 +809,11 @@ bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
 bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
 ```
 
-`clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed Clay command IDs validated by `CommandExecutor`. `clay.workspace.clientOpenFolderDialog` and `clay.editor.clientCopySelection` are fixed client UI command IDs returned by synchronous Clay JS helpers. No default `Ctrl+P` or `Ctrl+B` shortcut in Rust exists for Phase 18.12 fuzzy/toggle routes; no default `Ctrl+Shift+O` or `Ctrl+Shift+C` shortcut in Rust exists for folder/copy workflow routes. Native copy (`Ctrl/Cmd+C`) is handled directly by the editor. `bindKey` is the documented configuration surface — the file-browser panel, fuzzy-open menu, workspace discovery scanner, directory listing service, ignore set, marker set, listing budgets, folder-picker backend, and clipboard backend are not callable `clay:configuration` APIs and cannot be styled, repositioned, resized, widened, filtered, granted extra workspace authority, or expose package/configuration/AI clipboard-contents APIs through `init.js`.
+`clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed Clay command IDs validated by `CommandExecutor`. The canonical `examples/init.js` binds `Ctrl+B` to the toggle; the pane remains hidden when no binding is installed and visibility is retained per tab. `clay.workspace.clientOpenFolderDialog` and `clay.editor.clientCopySelection` are fixed client UI command IDs returned by synchronous Clay JS helpers. No default `Ctrl+P` shortcut in Rust exists for fuzzy open, and no default `Ctrl+Shift+O` or `Ctrl+Shift+C` shortcut exists for folder/copy workflow routes. Native copy (`Ctrl/Cmd+C`) is handled directly by the editor. `bindKey` is the documented configuration surface — the file-browser panel, fuzzy-open menu, workspace discovery scanner, directory listing service, ignore set, marker set, listing budgets, folder-picker backend, and clipboard backend are not callable `clay:configuration` APIs and cannot be styled, repositioned, resized, widened, filtered, granted extra workspace authority, or expose package/configuration/AI clipboard-contents APIs through `init.js`.
 
 Hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through a documented API above:
 
-- `fileBrowser.defaultVisibility`, `fileBrowser.visible`, `fileBrowser.leftPanelDefault`, `workspace.fileBrowser.leftPanelDefault`
+- `fileBrowser.defaultVisibility`, `fileBrowser.visible`, `fileBrowser.leftPanelDefault`, `workspace.fileBrowser.leftPanelDefault` (visibility is fixed hidden-by-default; bind the command instead)
 - `fileBrowser.slot`, `fileBrowser.position`, `fileBrowser.width`, `workspace.fileBrowser.width`
 - `fuzzyOpen.key`, `fuzzyOpen.defaultKey`, `fileBrowser.fuzzyOpenKey`, `workspace.fuzzyOpenKey`
 - `workspace.markers`, `workspace.markerFiles`, `workspace.rootMarkers`, `workspace.discoveryDepth`
@@ -823,6 +823,12 @@ Hidden/ad hoc configuration keys that are rejected by policy and are not valid u
 - `clipboard.text`, `clipboard.writeText`, `clipboard.readText`, `copySelection.text`, arbitrary clipboard strings, package/config clipboard-contents keys
 
 File-browser listing/open/reveal authority is server-owned. Root discovery scans only bounded ancestry with a closed marker set; directory listing stays inside known roots and uses bounded ignore/depth/count limits; open file commands route through `WorkspaceState::open_existing_file` or selected-file grants through `WorkspaceState::open_selected_file`; reveal validates open document metadata. Configuration cannot grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, native widget, direct Masonry widget, arbitrary root marker, arbitrary ignore-rule, arbitrary path passthrough, or client-side JavaScript authority.
+
+## Phase 22.8 per-tab workspace configuration verification
+
+Phase 22.8 adds no new `clay:configuration` export, hidden config key, or workspace-root option. New-tab folder selection reuses [`clay.shell.clientTabNew`](shell/client-tab-new.md) and the existing `bindKey` API; the picked folder is bound during the tab handshake, while the per-tab workspace and welcome document remain server-owned. The workspace pane's hidden-by-default state is also Clay-owned per-tab state: `Ctrl+B` is the canonical `bindKey` example for `clay.workspace.toggleFileBrowser`, not a `fileBrowser.visible` or `workspaceRoot` setting.
+
+The canonical `examples/init.js` contains one active `Ctrl+B` binding. Users may override or remove it, but cannot configure pane slot/width, workspace marker/ignore rules, listing budgets, or an arbitrary tab/root selector through `init.js`. Per-tab `workspaceRoot` persistence belongs to client-owned `layout.json`, not the configuration API. Configuration evaluation remains startup/reload work; keypress routing consumes the validated inert binding and does not evaluate JavaScript or perform filesystem work.
 
 ## Phase 20 daily editing product hardening configuration review
 
@@ -977,3 +983,31 @@ setTheme("@clay/theme-gruvbox-material-light"); // source: init-js
 // A later UI choice of Modus Vivendi writes preferences.json (source: ui-session)
 // and wins on the next reload.
 ```
+
+## Phase 22.7 split-command alias configuration review
+
+### What changed
+
+Phase 22.7 added two direction-named split aliases — `clay.shell.clientSplitPaneRight` and `clay.shell.clientSplitPaneDown` — resolving to the existing `SplitPaneVertical` (side-by-side) and `SplitPaneHorizontal` (stacked) handlers. They are bindable command IDs, exactly like the canonical IDs, with no default chords; the canonical `Ctrl+\` and `Ctrl+-` bindings are unchanged.
+
+### Configuration surfaces
+
+The aliases are configuration through the documented Clay JS API convention only: string command IDs accepted by [`bindKey`](keybindings/bind-key.md). Bindability is enforced by the keybinding allowlist (`is_runtime_bindable_command` + the `ClientUiCommand` routing branch in `src/server/ops/keybindings.rs`), which the `bindKey` validation gate (`validate_command_id`) enforces for every `init.js` binding.
+
+```js
+// ~/.config/clay/init.js
+import { bindKey } from "clay:keybindings";
+
+bindKey("Ctrl+Shift+Right", "clay.shell.clientSplitPaneRight", { scope: "global" });
+bindKey("Ctrl+Shift+Down", "clay.shell.clientSplitPaneDown", { scope: "global" });
+```
+
+The `clay:shell` facade also exports the alias IDs as helpers (`clientSplitPaneRight()` / `clientSplitPaneDown()`), documented in [client-split-pane-right](shell/client-split-pane-right.md) and [client-split-pane-down](shell/client-split-pane-down.md).
+
+### Rejected hidden configuration keys
+
+No new configuration keys were introduced. Tab-bar scroll speed, card minimum width, and split direction vocabulary stay fixed behavior or documented command IDs — not `init.js` options.
+
+### Security
+
+Binding an alias grants no authority beyond the canonical command it resolves to: a `client-ui-command-id` that mutates only the Clay-owned pane/split tree client-side after explicit user routing.

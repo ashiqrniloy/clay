@@ -71,7 +71,13 @@ This is atomic only for the runtime service pointer. A behavior/SDUI/theme/typog
 
 Live connections subscribe only to typography plus shared parse/analysis/provider result sources. They do not subscribe to `RuntimeReloadOutcome`; refreshed behavior/SDUI/decorations/diagnostics are not fanned out by reload. The connection source comment also records that one connection drains the shared parse channel, so this is not a multi-client broadcast primitive.
 
-Client startup and live updates are separate messages. Startup receives Welcome, InitialDocument, BehaviorManifest, ActiveTheme, ActiveTypography, then SDUI/diagnostics. Live behavior, theme, typography, SDUI, decoration, and diagnostic events apply independently. No message proves that all installed parts belong to the same runtime generation.
+Client startup and live updates are separate messages. Production startup
+receives `Welcome`, behavior manifests, `ActiveTheme`, `ActiveTypography`,
+non-document runtime lanes, and registry/capability replay; the client then
+binds with `TabCommand::New`/`Reclaim` before receiving the bound tab's
+`InitialDocument` and workspace SDUI. Live behavior, theme, typography,
+SDUI, decoration, and diagnostic events apply independently. No message
+proves that all installed parts belong to the same runtime generation.
 
 ## Existing Budgets and Hot-Path Policy
 

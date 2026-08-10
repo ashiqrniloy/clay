@@ -28,14 +28,15 @@ use crate::editor::{
 use crate::ipc::IpcEndpoint;
 use crate::perf::metrics::{MetricMetadata, global_recorder};
 use crate::protocol::{
-    ActiveTypography, BehaviorManifest, BehaviorVersion, CaretStyle, ClientId, ClientMessage,
-    CompletionRejection, CompletionRequest, CompletionRequestId, CompletionResultSet,
-    DecorationSet, DiagnosticSet, DocumentAccess, DocumentId, DocumentMetadata, DocumentVersion,
-    EditOperation, EditRejection, EditorCommandRequest, FileErrorCode,
-    LanguageIntelligenceRejection, LanguageIntelligenceRequest, LanguageIntelligenceRequestId,
-    LanguageIntelligenceResult, PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic,
-    SduiActionIntent, SduiTree, SduiTreeUpdate, SelectionQueryRequest, SelectionQueryResult,
-    ServerMessage, ShellPreferences, TabRegistrySnapshot, TransactionId, WorkspaceRootId,
+    ActiveTypography, BehaviorManifest, BehaviorScope, BehaviorVersion, CaretStyle, ClientId,
+    ClientMessage, CompletionRejection, CompletionRequest, CompletionRequestId,
+    CompletionResultSet, DecorationSet, DiagnosticSet, DocumentAccess, DocumentId,
+    DocumentMetadata, DocumentVersion, EditOperation, EditRejection, EditorCommandRequest,
+    FileErrorCode, LanguageIntelligenceRejection, LanguageIntelligenceRequest,
+    LanguageIntelligenceRequestId, LanguageIntelligenceResult, PROTOCOL_VERSION, ProtocolErrorCode,
+    RuntimeDiagnostic, SduiActionIntent, SduiTree, SduiTreeUpdate, SelectionQueryRequest,
+    SelectionQueryResult, ServerMessage, ShellPreferences, TabCommand, TabId, TabRegistrySnapshot,
+    TransactionId, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
@@ -70,8 +71,8 @@ pub struct ClientInitialState {
     pub behavior_manifest: BehaviorManifest,
     pub active_theme: crate::protocol::ActiveTheme,
     pub active_typography: ActiveTypography,
-    /// Workspace root path for the initial document (Phase 22.3; the client
-    /// registers its initial tab with `TabCommand::New` using this).
+    /// Workspace root path for the bound initial document. The client binds
+    /// with `TabCommand::New`/`Reclaim` before receiving this state.
     pub workspace_root: String,
 }
 
@@ -929,10 +930,68 @@ impl std::error::Error for ClientBootstrapError {
 }
 
 pub async fn connect(endpoint: &IpcEndpoint) -> Result<ClientSession, ClientBootstrapError> {
+    connect_with_binding(
+        endpoint,
+        TabCommand::New {
+            workspace_root: String::new(),
+        },
+    )
+    .await
+}
+
+/// Connect and bind a new tab to `workspace_root` before returning the
+/// session's initial document. Empty root requests server bootstrap-root
+/// selection for the first tab.
+#[doc(hidden)]
+pub async fn connect_with_workspace_root(
+    endpoint: &IpcEndpoint,
+    workspace_root: impl Into<String>,
+) -> Result<ClientSession, ClientBootstrapError> {
+    connect_with_binding(
+        endpoint,
+        TabCommand::New {
+            workspace_root: workspace_root.into(),
+        },
+    )
+    .await
+}
+
+/// Connect and reclaim an existing server tab before returning its initial
+/// document.
+#[doc(hidden)]
+pub async fn connect_for_reclaim(
+    endpoint: &IpcEndpoint,
+    tab_id: TabId,
+) -> Result<ClientSession, ClientBootstrapError> {
+    connect_with_binding(endpoint, TabCommand::Reclaim { tab_id }).await
+}
+
+/// Rebind a tab when its server still has the registry entry; after a server
+/// restart or TTL eviction, rebuild the tab from its persisted workspace root.
+/// The driver cancels this path when the tab is explicitly removed.
+#[doc(hidden)]
+pub async fn connect_for_reclaim_or_new(
+    endpoint: &IpcEndpoint,
+    tab_id: TabId,
+    workspace_root: String,
+) -> Result<ClientSession, ClientBootstrapError> {
+    match connect_for_reclaim(endpoint, tab_id).await {
+        Ok(session) => Ok(session),
+        Err(error) if error.kind() == ClientBootstrapErrorKind::ServerRejected => {
+            connect_with_workspace_root(endpoint, workspace_root).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
+async fn connect_with_binding(
+    endpoint: &IpcEndpoint,
+    binding: TabCommand,
+) -> Result<ClientSession, ClientBootstrapError> {
     let stream = connect_transport(endpoint).await.map_err(CodecError::Io)?;
     timeout(
         SNAPSHOT_TIMEOUT,
-        connect_from_stream(stream, Codec::default()),
+        connect_from_stream_with_binding(stream, Codec::default(), binding),
     )
     .await
     .map_err(|_| ClientBootstrapError::Timeout)?
@@ -992,17 +1051,39 @@ where
 }
 
 pub async fn connect_from_stream<S>(
-    mut stream: S,
+    stream: S,
     codec: Codec,
 ) -> Result<ClientSession, ClientBootstrapError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let initial_state = handshake_initial_state(&mut stream, codec).await?;
+    connect_from_stream_with_binding(
+        stream,
+        codec,
+        TabCommand::New {
+            workspace_root: String::new(),
+        },
+    )
+    .await
+}
+
+async fn connect_from_stream_with_binding<S>(
+    mut stream: S,
+    codec: Codec,
+    binding: TabCommand,
+) -> Result<ClientSession, ClientBootstrapError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let handshake = handshake_initial_state(&mut stream, codec, binding).await?;
+    let initial_state = handshake.initial_state;
     let (edit_queue, outgoing_edits) = ClientEditQueue::bounded(EDIT_QUEUE_CAPACITY);
-    let edit_queue = edit_queue
+    let mut edit_queue = edit_queue
         .with_authority(initial_state.client_id, &initial_state.access)
         .with_confirmed_version(initial_state.document_version);
+    if let Some(capability) = handshake.file_open_capability {
+        edit_queue = edit_queue.with_file_open_capability(capability);
+    }
     let sync_state = Arc::clone(&edit_queue.sync_state);
     let file_open_capability = Arc::clone(&edit_queue.file_open_capability);
     let behavior_state = Arc::new(Mutex::new(
@@ -1010,6 +1091,13 @@ where
             .map_err(|_| ClientBootstrapError::UnexpectedMessage("invalid BehaviorManifest"))?,
     ));
     let (event_sender, events) = mpsc::channel(EDIT_QUEUE_CAPACITY);
+    for message in handshake.pending_messages {
+        if let Some(event) =
+            pending_handshake_event(message, &behavior_state, initial_state.client_id)
+        {
+            let _ = event_sender.send(event).await;
+        }
+    }
     tokio::spawn(run_connection(
         stream,
         codec,
@@ -1028,10 +1116,17 @@ where
     })
 }
 
+struct HandshakeResult {
+    initial_state: ClientInitialState,
+    pending_messages: Vec<ServerMessage>,
+    file_open_capability: Option<String>,
+}
+
 async fn handshake_initial_state<S>(
     stream: &mut S,
     codec: Codec,
-) -> Result<ClientInitialState, ClientBootstrapError>
+    binding: TabCommand,
+) -> Result<HandshakeResult, ClientBootstrapError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -1056,32 +1151,61 @@ where
         _ => return Err(ClientBootstrapError::UnexpectedMessage("expected Welcome")),
     };
 
-    let (document_id, document_version, text, access, workspace_root) =
-        match codec.read_server_message(&mut *stream).await? {
-            ServerMessage::InitialDocument {
-                document_id,
-                version,
-                text,
-                access,
-                lease_id: _,
-                workspace_root,
-            } => (document_id, version, text, access, workspace_root),
+    // Keep scripted/unit-server compatibility: older handshakes sent the
+    // document before the manifest. Production servers now send the manifest
+    // first and wait for the tab-binding command before sending document text.
+    let first_after_welcome = codec.read_server_message(&mut *stream).await?;
+    if let ServerMessage::InitialDocument {
+        document_id,
+        version,
+        text,
+        access,
+        workspace_root,
+        ..
+    } = first_after_welcome
+    {
+        let behavior_manifest = match codec.read_server_message(&mut *stream).await? {
+            ServerMessage::BehaviorManifest(manifest) => *manifest,
             ServerMessage::Error { code, message } => {
                 return Err(ClientBootstrapError::ServerError { code, message });
             }
             _ => {
                 return Err(ClientBootstrapError::UnexpectedMessage(
-                    "expected InitialDocument",
+                    "expected BehaviorManifest",
                 ));
             }
         };
+        let active_theme = match codec.read_server_message(&mut *stream).await? {
+            ServerMessage::ActiveTheme(theme) => theme,
+            ServerMessage::Error { code, message } => {
+                return Err(ClientBootstrapError::ServerError { code, message });
+            }
+            _ => {
+                return Err(ClientBootstrapError::UnexpectedMessage(
+                    "expected ActiveTheme",
+                ));
+            }
+        };
+        let active_typography = read_active_typography(stream, codec).await?;
+        return Ok(HandshakeResult {
+            initial_state: ClientInitialState {
+                client_id,
+                document_id,
+                document_version: version,
+                text,
+                access,
+                behavior_manifest,
+                active_theme,
+                active_typography,
+                workspace_root,
+            },
+            pending_messages: Vec::new(),
+            file_open_capability: None,
+        });
+    }
 
-    let behavior_manifest = match codec.read_server_message(&mut *stream).await? {
-        ServerMessage::BehaviorManifest(manifest) => {
-            behavior::ClientBehaviorState::new(manifest.as_ref().clone())
-                .map_err(|_| ClientBootstrapError::UnexpectedMessage("invalid BehaviorManifest"))?;
-            *manifest
-        }
+    let mut manifests = match first_after_welcome {
+        ServerMessage::BehaviorManifest(manifest) => vec![*manifest],
         ServerMessage::Error { code, message } => {
             return Err(ClientBootstrapError::ServerError { code, message });
         }
@@ -1091,47 +1215,161 @@ where
             ));
         }
     };
-
-    let active_theme = match codec.read_server_message(&mut *stream).await? {
-        ServerMessage::ActiveTheme(theme) => theme,
-        ServerMessage::Error { code, message } => {
-            return Err(ClientBootstrapError::ServerError { code, message });
+    let active_theme = loop {
+        match codec.read_server_message(&mut *stream).await? {
+            ServerMessage::BehaviorManifest(manifest) => manifests.push(*manifest),
+            ServerMessage::ActiveTheme(theme) => break theme,
+            ServerMessage::Error { code, message } => {
+                return Err(ClientBootstrapError::ServerError { code, message });
+            }
+            _ => {
+                return Err(ClientBootstrapError::UnexpectedMessage(
+                    "expected ActiveTheme",
+                ));
+            }
         }
-        _ => {
-            return Err(ClientBootstrapError::UnexpectedMessage(
-                "expected ActiveTheme",
-            ));
+    };
+    let active_typography = read_active_typography(stream, codec).await?;
+
+    codec
+        .write_client_message(
+            &mut *stream,
+            &ClientMessage::TabCommand {
+                client_id,
+                command: binding,
+            },
+        )
+        .await?;
+
+    let mut pending_messages = Vec::new();
+    let mut file_open_capability = None;
+    let (document_id, document_version, text, access, workspace_root) = loop {
+        match codec.read_server_message(&mut *stream).await? {
+            ServerMessage::InitialDocument {
+                document_id,
+                version,
+                text,
+                access,
+                workspace_root,
+                ..
+            } => break (document_id, version, text, access, workspace_root),
+            ServerMessage::FileOpenCapabilityIssued { token } => {
+                file_open_capability = Some(token);
+            }
+            ServerMessage::Error { code, message } => {
+                return Err(ClientBootstrapError::ServerError { code, message });
+            }
+            message => pending_messages.push(message),
         }
     };
 
-    let active_typography = match codec.read_server_message(&mut *stream).await? {
-        ServerMessage::ActiveTypography(typography) if typography.validate().is_ok() => typography,
-        ServerMessage::ActiveTypography(_) => {
-            return Err(ClientBootstrapError::UnexpectedMessage(
-                "invalid ActiveTypography",
-            ));
-        }
-        ServerMessage::Error { code, message } => {
-            return Err(ClientBootstrapError::ServerError { code, message });
-        }
-        _ => {
-            return Err(ClientBootstrapError::UnexpectedMessage(
-                "expected ActiveTypography",
-            ));
-        }
-    };
+    let behavior_manifest = manifests
+        .iter()
+        .find(|manifest| matches!(manifest.scope, BehaviorScope::GlobalDefault))
+        .cloned()
+        .or_else(|| manifests.last().cloned())
+        .ok_or(ClientBootstrapError::UnexpectedMessage(
+            "expected BehaviorManifest",
+        ))?;
 
-    Ok(ClientInitialState {
-        client_id,
-        document_id,
-        document_version,
-        text,
-        access,
-        behavior_manifest,
-        active_theme,
-        workspace_root,
-        active_typography,
+    Ok(HandshakeResult {
+        initial_state: ClientInitialState {
+            client_id,
+            document_id,
+            document_version,
+            text,
+            access,
+            behavior_manifest,
+            active_theme,
+            active_typography,
+            workspace_root,
+        },
+        pending_messages: manifests
+            .into_iter()
+            .filter(|manifest| !matches!(manifest.scope, BehaviorScope::GlobalDefault))
+            .map(|manifest| ServerMessage::BehaviorManifest(Box::new(manifest)))
+            .chain(pending_messages)
+            .collect(),
+        file_open_capability,
     })
+}
+
+async fn read_active_typography<S>(
+    stream: &mut S,
+    codec: Codec,
+) -> Result<ActiveTypography, ClientBootstrapError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    match codec.read_server_message(&mut *stream).await? {
+        ServerMessage::ActiveTypography(typography) if typography.validate().is_ok() => {
+            Ok(typography)
+        }
+        ServerMessage::ActiveTypography(_) => Err(ClientBootstrapError::UnexpectedMessage(
+            "invalid ActiveTypography",
+        )),
+        ServerMessage::Error { code, message } => {
+            Err(ClientBootstrapError::ServerError { code, message })
+        }
+        _ => Err(ClientBootstrapError::UnexpectedMessage(
+            "expected ActiveTypography",
+        )),
+    }
+}
+
+fn pending_handshake_event(
+    message: ServerMessage,
+    behavior_state: &Arc<Mutex<behavior::ClientBehaviorState>>,
+    client_id: ClientId,
+) -> Option<ClientConnectionEvent> {
+    match message {
+        ServerMessage::BehaviorManifest(manifest) => {
+            let behavior_version = manifest.behavior_version;
+            match behavior_state
+                .lock()
+                .expect("client behavior state poisoned")
+                .install_replacement(manifest.as_ref().clone())
+            {
+                Ok(()) => Some(ClientConnectionEvent::BehaviorManifestInstalled {
+                    behavior_version,
+                    manifest: *manifest,
+                }),
+                Err(error) => Some(ClientConnectionEvent::BehaviorManifestRejected {
+                    behavior_version,
+                    reason: format!("{error:?}"),
+                }),
+            }
+        }
+        ServerMessage::CaretStyleOverride(style)
+            if style.as_ref().is_none_or(|style| style.validate().is_ok()) =>
+        {
+            Some(ClientConnectionEvent::CaretStyleOverride(style))
+        }
+        ServerMessage::ShellPreferences(preferences) => {
+            Some(ClientConnectionEvent::ShellPreferences(preferences))
+        }
+        ServerMessage::SduiSnapshot { client_id, tree } => {
+            Some(ClientConnectionEvent::SduiSnapshot { client_id, tree })
+        }
+        ServerMessage::SduiUpdate { update } => Some(ClientConnectionEvent::SduiUpdate(update)),
+        ServerMessage::TabRegistry(snapshot) => Some(ClientConnectionEvent::TabRegistry(snapshot)),
+        ServerMessage::RuntimeDiagnostic(diagnostic) => {
+            Some(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
+        }
+        ServerMessage::ActiveTheme(theme) => Some(ClientConnectionEvent::ActiveTheme(theme)),
+        ServerMessage::ActiveTypography(typography) if typography.validate().is_ok() => {
+            Some(ClientConnectionEvent::ActiveTypography(typography))
+        }
+        ServerMessage::RuntimeStateSnapshot(snapshot)
+            if snapshot.client_id == client_id && snapshot.validate().is_ok() =>
+        {
+            Some(ClientConnectionEvent::RuntimeStateSnapshot(snapshot))
+        }
+        ServerMessage::Error { code, message } => {
+            Some(ClientConnectionEvent::ServerError { code, message })
+        }
+        _ => None,
+    }
 }
 
 fn rejection_requests_resync(reason: &EditRejection) -> bool {
@@ -1429,7 +1667,7 @@ async fn run_connection<S>(
 mod tests {
     #[cfg(unix)]
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     #[cfg(any(unix, windows))]
     use std::time::SystemTime;
 
@@ -1440,7 +1678,10 @@ mod tests {
     #[cfg(windows)]
     use super::connect_transport;
     use super::{
-        ClientConnectionEvent, ClientEditQueue, connect_from_stream, load_initial_state_from_stream,
+        ClientConnectionEvent, ClientEditQueue,
+        connect_for_reclaim as connect_for_reclaim_endpoint, connect_for_reclaim_or_new,
+        connect_from_stream, connect_with_workspace_root as connect_with_workspace_root_endpoint,
+        load_initial_state_from_stream,
     };
     #[cfg(any(unix, windows))]
     use super::{ClientSession, connect};
@@ -1501,6 +1742,22 @@ mod tests {
             }
         }
         panic!("failed to connect to test socket: {:?}", last_error);
+    }
+
+    #[cfg(unix)]
+    async fn connect_with_workspace_root(
+        socket_path: &Path,
+        workspace_root: String,
+    ) -> Result<ClientSession, super::ClientBootstrapError> {
+        connect_with_workspace_root_endpoint(&IpcEndpoint::from(socket_path), workspace_root).await
+    }
+
+    #[cfg(unix)]
+    async fn connect_for_reclaim(
+        socket_path: &Path,
+        tab_id: crate::protocol::TabId,
+    ) -> Result<ClientSession, super::ClientBootstrapError> {
+        connect_for_reclaim_endpoint(&IpcEndpoint::from(socket_path), tab_id).await
     }
 
     #[test]
@@ -3528,19 +3785,32 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn end_to_end_second_client_is_read_only() {
+    async fn end_to_end_second_client_gets_independent_welcome_document() {
         let socket_path = unique_socket_path("read-only");
         let server = IpcServer::new(ServerConfig::new(&socket_path));
         let server_task = tokio::spawn(server.run());
 
         let first = connect_with_retry(&socket_path).await;
         let second = connect_with_retry(&socket_path).await;
+        let startup_root = std::fs::canonicalize(std::env::current_dir().unwrap())
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(first.initial_state.workspace_root, startup_root);
+        assert_eq!(second.initial_state.workspace_root, startup_root);
 
         assert!(matches!(
             first.initial_state.access,
             DocumentAccess::Editable { lease_id: 1 }
         ));
-        assert_eq!(second.initial_state.access, DocumentAccess::ReadOnly);
+        assert!(matches!(
+            second.initial_state.access,
+            DocumentAccess::Editable { lease_id: 1 }
+        ));
+        assert_ne!(
+            first.initial_state.document_id, second.initial_state.document_id,
+            "per-tab welcome documents are independent"
+        );
 
         drop(first);
         drop(second);
@@ -3805,7 +4075,7 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
 
     #[cfg(windows)]
     #[tokio::test]
-    async fn windows_second_client_is_read_only() {
+    async fn windows_second_client_gets_independent_welcome_document() {
         let endpoint = unique_named_pipe("read-only");
         let server = IpcServer::new(ServerConfig::new(endpoint.clone()));
         let server_task = tokio::spawn(server.run());
@@ -3817,7 +4087,14 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
             first.initial_state.access,
             DocumentAccess::Editable { lease_id: 1 }
         ));
-        assert_eq!(second.initial_state.access, DocumentAccess::ReadOnly);
+        assert!(matches!(
+            second.initial_state.access,
+            DocumentAccess::Editable { lease_id: 1 }
+        ));
+        assert_ne!(
+            first.initial_state.document_id, second.initial_state.document_id,
+            "per-tab welcome documents are independent"
+        );
 
         server_task.abort();
     }
@@ -3862,7 +4139,36 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
             ServerMessage::Welcome { client_id, .. } => client_id,
             message => panic!("expected Welcome, got {message:?}"),
         };
-        let (document_id, version, text, lease_id) =
+        let server_behavior_version = match codec.read_server_message(&mut stream).await.unwrap() {
+            ServerMessage::BehaviorManifest(manifest) => manifest.behavior_version,
+            ServerMessage::ActiveTheme(_) => panic!("expected BehaviorManifest before ActiveTheme"),
+            message => panic!("expected BehaviorManifest, got {message:?}"),
+        };
+        let _active_theme = codec.read_server_message(&mut stream).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut stream).await.unwrap();
+        loop {
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::FileOpenCapabilityIssued { .. } => break,
+                ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::TabRegistry(_) => {}
+                message => panic!("expected file-open capability, got {message:?}"),
+            }
+        }
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::TabCommand {
+                    client_id,
+                    command: crate::protocol::TabCommand::New {
+                        workspace_root: String::new(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        let (document_id, version, text, lease_id) = loop {
             match codec.read_server_message(&mut stream).await.unwrap() {
                 ServerMessage::InitialDocument {
                     document_id,
@@ -3873,18 +4179,12 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
                     workspace_root: _,
                 } => {
                     assert_eq!(lease_id, snapshot_lease_id);
-                    (document_id, version, text, lease_id)
+                    break (document_id, version, text, lease_id);
                 }
+                ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
                 message => panic!("expected editable InitialDocument, got {message:?}"),
-            };
-        let server_behavior_version = match codec.read_server_message(&mut stream).await.unwrap() {
-            ServerMessage::BehaviorManifest(manifest) => manifest.behavior_version,
-            message => panic!("expected BehaviorManifest, got {message:?}"),
+            }
         };
-        // The server may also send an SDUI snapshot, runtime diagnostics, and a
-        // post-handshake FileOpenCapabilityIssued token before entering the
-        // request loop. We send the edit and then skip those messages when
-        // reading the response.
 
         codec
             .write_client_message(
@@ -3964,20 +4264,17 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
         let socket_path = unique_socket_path("tabcmd");
         let server = IpcServer::new(ServerConfig::new(&socket_path));
         let server_task = tokio::spawn(server.run());
-        let mut session = connect_with_retry(&socket_path).await;
+        let workspace_root =
+            std::env::temp_dir().join(format!("clay-tabcmd-{}", std::process::id()));
+        tokio::fs::create_dir_all(&workspace_root).await.unwrap();
+        let mut session = connect_with_workspace_root(
+            &socket_path,
+            workspace_root.to_string_lossy().into_owned(),
+        )
+        .await
+        .unwrap();
         let client_id = session.initial_state.client_id;
 
-        let workspace_root =
-            std::env::temp_dir().join(format!("clay-tabcmd-{}-{}", std::process::id(), client_id));
-        tokio::fs::create_dir_all(&workspace_root).await.unwrap();
-
-        // The bootstrap `TabCommand::New` registers the connection's tab.
-        session
-            .edit_queue
-            .enqueue_tab_command(crate::protocol::TabCommand::New {
-                workspace_root: workspace_root.to_string_lossy().into_owned(),
-            })
-            .unwrap();
         let mut event = session.events.recv().await.unwrap();
         // The handshake replays the (empty) registry snapshot; skip it and
         // wait for the snapshot carrying our `New` registration.
@@ -4037,16 +4334,15 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
         let socket_path = unique_socket_path("tabclose");
         let server = IpcServer::new(ServerConfig::new(&socket_path));
         let server_task = tokio::spawn(server.run());
-        let mut session = connect_with_retry(&socket_path).await;
         let workspace_root =
             std::env::temp_dir().join(format!("clay-tabclose-{}", std::process::id()));
         tokio::fs::create_dir_all(&workspace_root).await.unwrap();
-        session
-            .edit_queue
-            .enqueue_tab_command(crate::protocol::TabCommand::New {
-                workspace_root: workspace_root.to_string_lossy().into_owned(),
-            })
-            .unwrap();
+        let mut session = connect_with_workspace_root(
+            &socket_path,
+            workspace_root.to_string_lossy().into_owned(),
+        )
+        .await
+        .unwrap();
 
         // Wait for the registration snapshot and grab the tab id.
         let tab_id = loop {
@@ -4079,13 +4375,33 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
         }
         assert!(saw_disconnect, "close must end the connection");
 
-        let mut fresh = connect_with_retry(&socket_path).await;
+        let mut fresh = connect_stream_with_retry(&socket_path).await;
+        let codec = Codec::default();
+        codec
+            .write_client_message(
+                &mut fresh,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "close-replay".to_string(),
+                },
+            )
+            .await
+            .unwrap();
         let replayed = loop {
-            let event = fresh.events.recv().await.unwrap();
-            if let ClientConnectionEvent::TabRegistry(snapshot) = &event {
-                break snapshot.tabs.clone();
+            match codec.read_server_message(&mut fresh).await.unwrap() {
+                ServerMessage::TabRegistry(snapshot) => break snapshot.tabs,
+                ServerMessage::Welcome { .. } => {}
+                ServerMessage::FileOpenCapabilityIssued { .. }
+                | ServerMessage::BehaviorManifest(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::RuntimeDiagnostic(_) => {}
+                message => panic!("expected registry replay, got {message:?}"),
             }
         };
+        drop(fresh);
         assert!(
             replayed.is_empty(),
             "close must remove the registry entry (replay on a fresh connection)"
@@ -4103,18 +4419,15 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
         let server = IpcServer::new(ServerConfig::new(&socket_path));
         let server_task = tokio::spawn(server.run());
 
-        // Two tabs on two connections (distinct roots so `add_root` keeps
-        // both). Registry order after setup: [alpha, beta], active = beta.
-        let mut alpha = connect_with_retry(&socket_path).await;
+        // Two tabs on two connections (distinct roots). Registry order after
+        // setup: [alpha, beta], active = beta.
         let alpha_root =
             std::env::temp_dir().join(format!("clay-tabmove-alpha-{}", std::process::id()));
         tokio::fs::create_dir_all(&alpha_root).await.unwrap();
-        alpha
-            .edit_queue
-            .enqueue_tab_command(crate::protocol::TabCommand::New {
-                workspace_root: alpha_root.to_string_lossy().into_owned(),
-            })
-            .unwrap();
+        let mut alpha =
+            connect_with_workspace_root(&socket_path, alpha_root.to_string_lossy().into_owned())
+                .await
+                .unwrap();
         let alpha_tab = loop {
             let event = alpha.events.recv().await.unwrap();
             if let ClientConnectionEvent::TabRegistry(snapshot) = &event
@@ -4124,15 +4437,13 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
             }
         };
 
-        let mut beta = connect_with_retry(&socket_path).await;
         let beta_root =
             std::env::temp_dir().join(format!("clay-tabmove-beta-{}", std::process::id()));
         tokio::fs::create_dir_all(&beta_root).await.unwrap();
-        beta.edit_queue
-            .enqueue_tab_command(crate::protocol::TabCommand::New {
-                workspace_root: beta_root.to_string_lossy().into_owned(),
-            })
-            .unwrap();
+        let mut beta =
+            connect_with_workspace_root(&socket_path, beta_root.to_string_lossy().into_owned())
+                .await
+                .unwrap();
         let (beta_tab, setup_active) = loop {
             let event = beta.events.recv().await.unwrap();
             if let ClientConnectionEvent::TabRegistry(snapshot) = &event
@@ -4276,14 +4587,35 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
         assert_eq!(active, Some(beta_tab));
 
         // Handshake replay carries the reordered registry to a fresh
-        // connection.
-        let mut fresh = connect_with_retry(&socket_path).await;
+        // unbound connection. It must not create a new tab just to observe
+        // the replay.
+        let mut fresh = connect_stream_with_retry(&socket_path).await;
+        let codec = Codec::default();
+        codec
+            .write_client_message(
+                &mut fresh,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "move-replay".to_string(),
+                },
+            )
+            .await
+            .unwrap();
         let replayed = loop {
-            let event = fresh.events.recv().await.unwrap();
-            if let ClientConnectionEvent::TabRegistry(snapshot) = &event {
-                break snapshot.tabs.clone();
+            match codec.read_server_message(&mut fresh).await.unwrap() {
+                ServerMessage::TabRegistry(snapshot) => break snapshot.tabs,
+                ServerMessage::Welcome { .. } => {}
+                ServerMessage::FileOpenCapabilityIssued { .. }
+                | ServerMessage::BehaviorManifest(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::RuntimeDiagnostic(_) => {}
+                message => panic!("expected registry replay, got {message:?}"),
             }
         };
+        drop(fresh);
         assert_eq!(replayed.len(), 2);
         assert_eq!(replayed[0].tab_id, alpha_tab);
         assert_eq!(replayed[1].tab_id, beta_tab);
@@ -4320,53 +4652,96 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
             roots.push(root);
         }
 
-        // Persisted order [alpha, beta, gamma]: the bootstrap connection
-        // mounts alpha, two fresh connections mount beta and gamma.
+        // Persisted order [alpha, beta, gamma]: each connection binds its
+        // selected root before returning its session.
         eprintln!("step 1: connect alpha");
-        let mut alpha = connect_with_retry(&socket_path).await;
-        alpha
-            .edit_queue
-            .enqueue_tab_command(crate::protocol::TabCommand::New {
-                workspace_root: roots[0].to_string_lossy().into_owned(),
-            })
-            .unwrap();
-        let mut beta = connect_with_retry(&socket_path).await;
-        beta.edit_queue
-            .enqueue_tab_command(crate::protocol::TabCommand::New {
-                workspace_root: roots[1].to_string_lossy().into_owned(),
-            })
-            .unwrap();
-        let gamma = connect_with_retry(&socket_path).await;
-        gamma
-            .edit_queue
-            .enqueue_tab_command(crate::protocol::TabCommand::New {
-                workspace_root: roots[2].to_string_lossy().into_owned(),
-            })
-            .unwrap();
-
-        // Registry order equals persisted order — no `MoveTo` needed.
-        let (order, alpha_root_id, alpha_tab) = loop {
-            let event = alpha.events.recv().await.unwrap();
-            if let ClientConnectionEvent::TabRegistry(snapshot) = &event
-                && snapshot.tabs.len() == 3
+        let mut alpha =
+            connect_with_workspace_root(&socket_path, roots[0].to_string_lossy().into_owned())
+                .await
+                .unwrap();
+        let mut beta =
+            connect_with_workspace_root(&socket_path, roots[1].to_string_lossy().into_owned())
+                .await
+                .unwrap();
+        let _gamma =
+            connect_with_workspace_root(&socket_path, roots[2].to_string_lossy().into_owned())
+                .await
+                .unwrap();
+        assert_eq!(
+            alpha.initial_state.workspace_root,
+            roots[0].to_string_lossy()
+        );
+        assert_eq!(
+            beta.initial_state.workspace_root,
+            roots[1].to_string_lossy()
+        );
+        let initial_alpha_browser = loop {
+            if let ClientConnectionEvent::SduiSnapshot { tree, .. } =
+                alpha.events.recv().await.unwrap()
             {
-                let alpha_client = alpha.initial_state.client_id;
-                let alpha_entry = snapshot
-                    .tabs
-                    .iter()
-                    .find(|entry| entry.client_id == alpha_client)
-                    .expect("alpha registry entry");
-                break (
-                    snapshot
-                        .tabs
-                        .iter()
-                        .map(|entry| entry.workspace_root.clone())
-                        .collect::<Vec<_>>(),
-                    alpha_entry.workspace_root_id,
-                    alpha_entry.tab_id,
-                );
+                break tree;
             }
         };
+        assert!(initial_alpha_browser.nodes.iter().all(|node| {
+            !matches!(
+                &node.kind,
+                SduiNodeKind::Panel { .. } | SduiNodeKind::List { .. }
+            )
+        }));
+        alpha
+            .edit_queue
+            .enqueue_command_intent(
+                alpha.initial_state.document_id,
+                alpha.initial_state.behavior_manifest.behavior_version,
+                "clay.workspace.toggleFileBrowser".to_string(),
+            )
+            .unwrap();
+        let mut registry_snapshot = None;
+        let alpha_browser = loop {
+            match alpha.events.recv().await.unwrap() {
+                ClientConnectionEvent::SduiSnapshot { tree, .. } => break tree,
+                ClientConnectionEvent::TabRegistry(snapshot) => {
+                    if snapshot.tabs.len() == 3 {
+                        registry_snapshot = Some(snapshot);
+                    }
+                }
+                ClientConnectionEvent::ServerError { code, message } => {
+                    panic!("toggle command failed: {code:?}: {message}")
+                }
+                event => panic!("unexpected toggle event: {event:?}"),
+            }
+        };
+        assert!(alpha_browser.nodes.iter().any(|node| matches!(
+            &node.kind,
+            SduiNodeKind::List { items } if items.iter().any(|item| item.label == "notes.md")
+        )));
+
+        // Registry order equals persisted order — no `MoveTo` needed.
+        let snapshot = if let Some(snapshot) = registry_snapshot {
+            snapshot
+        } else {
+            loop {
+                if let ClientConnectionEvent::TabRegistry(snapshot) =
+                    alpha.events.recv().await.unwrap()
+                    && snapshot.tabs.len() == 3
+                {
+                    break snapshot;
+                }
+            }
+        };
+        let alpha_client = alpha.initial_state.client_id;
+        let alpha_entry = snapshot
+            .tabs
+            .iter()
+            .find(|entry| entry.client_id == alpha_client)
+            .expect("alpha registry entry");
+        let order = snapshot
+            .tabs
+            .iter()
+            .map(|entry| entry.workspace_root.clone())
+            .collect::<Vec<_>>();
+        let alpha_root_id = alpha_entry.workspace_root_id;
+        let alpha_tab = alpha_entry.tab_id;
         let expected = roots
             .iter()
             .map(|root| root.to_string_lossy().into_owned())
@@ -4438,15 +4813,16 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
             std::env::temp_dir().join(format!("clay-tabreclaim-{}", std::process::id()));
         tokio::fs::create_dir_all(&workspace_root).await.unwrap();
 
-        // First connection registers the tab.
-        let mut first_session = connect_with_retry(&socket_path).await;
+        // First connection binds the tab during its handshake.
+        let mut first_session = connect_with_workspace_root(
+            &socket_path,
+            workspace_root.to_string_lossy().into_owned(),
+        )
+        .await
+        .unwrap();
         let first_client_id = first_session.initial_state.client_id;
-        first_session
-            .edit_queue
-            .enqueue_tab_command(crate::protocol::TabCommand::New {
-                workspace_root: workspace_root.to_string_lossy().into_owned(),
-            })
-            .unwrap();
+        let first_document_id = first_session.initial_state.document_id;
+        let first_workspace_root = first_session.initial_state.workspace_root.clone();
         let tab_id = loop {
             let event = first_session.events.recv().await.unwrap();
             if let ClientConnectionEvent::TabRegistry(snapshot) = &event
@@ -4460,14 +4836,16 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
         // survives with the old client binding.
         drop(first_session);
 
-        // A reconnecting client (new ClientId) reclaims the same TabId.
-        let mut second_session = connect_with_retry(&socket_path).await;
+        // A reconnecting client (new ClientId) reclaims the same TabId during
+        // its handshake.
+        let mut second_session = connect_for_reclaim(&socket_path, tab_id).await.unwrap();
         let second_client_id = second_session.initial_state.client_id;
         assert_ne!(first_client_id, second_client_id);
-        second_session
-            .edit_queue
-            .enqueue_tab_command(crate::protocol::TabCommand::Reclaim { tab_id })
-            .unwrap();
+        assert_eq!(second_session.initial_state.document_id, first_document_id);
+        assert_eq!(
+            second_session.initial_state.workspace_root,
+            first_workspace_root
+        );
         // The handshake replay already carries the surviving entry (bound to
         // the old client id); the rebind snapshot is the one whose entry names
         // THIS connection.
@@ -4494,6 +4872,91 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
         let _ = tokio::fs::remove_dir_all(&workspace_root).await;
         let _ = fs::remove_file(&socket_path);
         let _ = fs::remove_dir(socket_path.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn real_server_restart_rebuilds_reconnect_from_persisted_workspace_root() {
+        let socket_path = unique_socket_path("tab-restart-reconnect");
+        let workspace_root = socket_path.parent().unwrap().join("persisted-root");
+        tokio::fs::create_dir_all(&workspace_root).await.unwrap();
+
+        let first_server = IpcServer::new(ServerConfig::new(&socket_path));
+        let first_server_task = tokio::spawn(first_server.run());
+        let mut first_session = loop {
+            match connect_with_workspace_root(
+                &socket_path,
+                workspace_root.to_string_lossy().into_owned(),
+            )
+            .await
+            {
+                Ok(session) => break session,
+                Err(error)
+                    if error.kind() == super::ClientBootstrapErrorKind::TransportUnavailable =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("initial server connection failed: {error}"),
+            }
+        };
+        let old_tab_id = loop {
+            let event = first_session.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = event
+                && snapshot.tabs.len() == 1
+            {
+                break snapshot.tabs[0].tab_id;
+            }
+        };
+        drop(first_session);
+        first_server_task.abort();
+        let _ = fs::remove_file(&socket_path);
+
+        // The new server has an empty in-memory registry. Reclaim must not
+        // resurrect that stale entry; the reconnect helper rebuilds a fresh
+        // tab from the persisted root with `New`.
+        let second_server = IpcServer::new(ServerConfig::new(&socket_path));
+        let second_server_task = tokio::spawn(second_server.run());
+        let endpoint = IpcEndpoint::from(&socket_path);
+        let mut second_session = loop {
+            match connect_for_reclaim_or_new(
+                &endpoint,
+                old_tab_id,
+                workspace_root.to_string_lossy().into_owned(),
+            )
+            .await
+            {
+                Ok(session) => break session,
+                Err(error)
+                    if error.kind() == super::ClientBootstrapErrorKind::TransportUnavailable =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("server restart reconnect failed: {error}"),
+            }
+        };
+        assert_eq!(
+            second_session.initial_state.workspace_root,
+            fs::canonicalize(&workspace_root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        );
+        let rebound = loop {
+            let event = second_session.events.recv().await.unwrap();
+            if let ClientConnectionEvent::TabRegistry(snapshot) = event
+                && snapshot.tabs.len() == 1
+            {
+                break snapshot.tabs[0].clone();
+            }
+        };
+        assert_eq!(
+            rebound.workspace_root,
+            workspace_root.to_string_lossy().into_owned()
+        );
+
+        drop(second_session);
+        second_server_task.abort();
+        let _ = fs::remove_dir_all(socket_path.parent().unwrap());
     }
 
     #[tokio::test]
@@ -4545,7 +5008,36 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
             ServerMessage::Welcome { client_id, .. } => client_id,
             message => panic!("expected Welcome, got {message:?}"),
         };
-        let (document_id, version, text, lease_id) =
+        let server_behavior_version = match codec.read_server_message(&mut stream).await.unwrap() {
+            ServerMessage::BehaviorManifest(manifest) => manifest.behavior_version,
+            ServerMessage::ActiveTheme(_) => panic!("expected BehaviorManifest before ActiveTheme"),
+            message => panic!("expected BehaviorManifest, got {message:?}"),
+        };
+        let _active_theme = codec.read_server_message(&mut stream).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut stream).await.unwrap();
+        loop {
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::FileOpenCapabilityIssued { .. } => break,
+                ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::TabRegistry(_) => {}
+                message => panic!("expected file-open capability, got {message:?}"),
+            }
+        }
+        codec
+            .write_client_message(
+                &mut stream,
+                &ClientMessage::TabCommand {
+                    client_id,
+                    command: crate::protocol::TabCommand::New {
+                        workspace_root: String::new(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        let (document_id, version, text, lease_id) = loop {
             match codec.read_server_message(&mut stream).await.unwrap() {
                 ServerMessage::InitialDocument {
                     document_id,
@@ -4556,18 +5048,12 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
                     workspace_root: _,
                 } => {
                     assert_eq!(lease_id, snapshot_lease_id);
-                    (document_id, version, text, lease_id)
+                    break (document_id, version, text, lease_id);
                 }
+                ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
                 message => panic!("expected editable InitialDocument, got {message:?}"),
-            };
-        let server_behavior_version = match codec.read_server_message(&mut stream).await.unwrap() {
-            ServerMessage::BehaviorManifest(manifest) => manifest.behavior_version,
-            message => panic!("expected BehaviorManifest, got {message:?}"),
+            }
         };
-        // The server may also send an SDUI snapshot, runtime diagnostics, and a
-        // post-handshake FileOpenCapabilityIssued token before entering the
-        // request loop. We send the edit and then skip those messages when
-        // reading the response.
 
         codec
             .write_client_message(

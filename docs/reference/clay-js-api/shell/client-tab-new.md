@@ -35,7 +35,7 @@ Return the stable bindable command ID for opening a new tab.
 
 `clientTabNew` is the public Clay JS API descriptor for **New Tab**. It returns the stable command ID `clay.shell.clientTabNew` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
 
-New Tab New Tab runs the same flow as the tab bar's `+` affordance: the native folder picker opens, the picked folder connects as a new independent client view, and the server registers the tab (server-validated `TabCommand::New`). A second new-tab request while one is in flight is ignored.
+New Tab New Tab runs the same flow as the tab bar's `+` affordance: the native folder picker opens, the picked folder connects as a new independent client view, and the server registers the tab (server-validated `TabCommand::New`). A second new-tab request while one is in flight is ignored. Phase 22.8 binds the picked folder during the connection handshake with `TabCommand::New`; the server then owns that tab's workspace and welcome document. This API does not expose a `TabId`, workspace handle, or arbitrary-tab selector.
 
 Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Tab switching happens later only after an explicit user key/command route reaches the driver's tab-command dispatcher.
 
@@ -68,7 +68,7 @@ import { bindKey } from "clay:keybindings";
 bindKey("Ctrl+T", clientTabNew(), { scope: "global" });
 ```
 
-The default `Ctrl+Tab` chord ships in Clay's `default_keymaps()` with `Global` context. This API exists for documented keybinding/configuration metadata and alternate chords.
+The default `Ctrl+T` chord ships in Clay's `default_keymaps()` with `Global` context. This API exists for documented keybinding/configuration metadata and alternate chords.
 
 ## Options
 
@@ -76,7 +76,7 @@ No options are accepted. The command takes no arguments; tab state is Clay-owned
 
 ## Key bindings
 
-Default: `Ctrl+Tab` (Global context). Additional bindings may be configured with `bindKey`.
+Default: `Ctrl+T` (Global context). Additional bindings may be configured with `bindKey`.
 
 ## Custom properties
 
@@ -112,6 +112,6 @@ Use `clay.shell.clientTabNew` only as a documented command ID for `bindKey` to r
 - User-facing name: New Tab
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientTabNew`
-- Default key bindings: `Ctrl+Tab`
+- Default key bindings: `Ctrl+T`
 - Custom properties: none
 - Tags: `[shell, tabs, keybindings, js-api]`

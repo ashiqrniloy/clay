@@ -279,6 +279,18 @@ impl SduiNativeState {
         self.editor_binding.as_ref()
     }
 
+    fn has_sidebar_panel(&self) -> bool {
+        self.nodes.values().any(|node| {
+            matches!(
+                &node.kind,
+                SduiNodeKind::Panel { .. }
+                    | SduiNodeKind::Label { .. }
+                    | SduiNodeKind::Button { .. }
+                    | SduiNodeKind::List { .. }
+            )
+        })
+    }
+
     pub fn contains_node(&self, node_id: SduiNodeId) -> bool {
         self.nodes.contains_key(&node_id)
     }
@@ -638,16 +650,15 @@ pub fn editor_region_for_document(
     sdui: &SduiNativeState,
     _document_id: DocumentId,
 ) -> Rect {
-    // Reserve the Clay-owned left file-browser slot whenever a Clay-owned SDUI
-    // panel exists, even if its editor binding still points at the bootstrap
-    // document while a freshly opened workspace document is active. Reserving
-    // by panel presence (not binding match) keeps the editor main region from
-    // overlapping the left file browser after a workspace file opens.
+    // Reserve the Clay-owned left file-browser slot whenever a sidebar panel
+    // exists, even if its editor binding still points at the bootstrap document
+    // while a freshly opened workspace document is active. Hidden workspace
+    // snapshots contain only the editor view, so the main region reclaims the
+    // full width instead of preserving a stale left slot.
     let defaults = sdui.ui_theme.panel_defaults();
     let full_rect = size.to_rect();
     let layout = sdui.package_ui.slot_layout(&defaults);
-    let want_left = (sdui.root_id.is_some() || sdui.editor_binding().is_some())
-        && size.width > defaults.sidebar_width + 100.0;
+    let want_left = sdui.has_sidebar_panel() && size.width > defaults.sidebar_width + 100.0;
     with_default_left_slot(layout, &defaults, want_left)
         .compute_geometry(full_rect)
         .main_rect
@@ -676,14 +687,14 @@ fn with_default_left_slot(
 fn sdui_slot_layout(size: Size, sdui: &SduiNativeState) -> PaneSlotLayout {
     let defaults = sdui.ui_theme.panel_defaults();
     let layout = sdui.package_ui.slot_layout(&defaults);
-    let want_left = sdui.editor_binding().is_some() && size.width > defaults.sidebar_width + 100.0;
+    let want_left = sdui.has_sidebar_panel() && size.width > defaults.sidebar_width + 100.0;
     with_default_left_slot(layout, &defaults, want_left)
 }
 
 fn sdui_panel_slot_layout(sdui: &SduiNativeState) -> PaneSlotLayout {
     let defaults = sdui.ui_theme.panel_defaults();
     let layout = sdui.package_ui.slot_layout(&defaults);
-    with_default_left_slot(layout, &defaults, sdui.root_id.is_some())
+    with_default_left_slot(layout, &defaults, sdui.has_sidebar_panel())
 }
 
 fn fixed_sdui_left_slot(defaults: &PanelDefaults) -> FixedSlotState {
@@ -1476,6 +1487,19 @@ mod tests {
                 "{kind:?} has no chrome"
             );
         }
+    }
+
+    #[test]
+    fn hidden_workspace_browser_reclaims_left_slot() {
+        let mut state = SduiNativeState::empty();
+        state.apply_snapshot(crate::shell::file_browser::FileBrowserState::hidden_sdui_tree(7, 1));
+
+        let size = Size::new(900.0, 600.0);
+        assert!(state.sidebar_geometry(size).is_none());
+        assert_eq!(
+            editor_region_for_document(size, &state, 7),
+            Rect::new(0.0, 0.0, 900.0, 600.0)
+        );
     }
 
     #[test]

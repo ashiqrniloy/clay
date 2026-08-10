@@ -58,8 +58,9 @@ pub enum CommandExecutionStatus {
     Discovery(DiscoveryResult),
     /// Phase 18.12 workspace action result. Produced by
     /// [`CommandExecutor::execute_workspace`] when a built-in file-browser
-    /// command opens, reveals, or toggles the file browser through
-    /// server-authoritative workspace APIs.
+    /// command opens, reveals, or requests a visibility toggle through
+    /// server-authoritative workspace APIs. The connection handler applies the
+    /// toggle to its bound tab state and publishes the resulting SDUI snapshot.
     Workspace(WorkspaceActionResult),
     /// Phase 18.13 read-only Git discovery command result, backed by
     /// server-owned workspace roots and the Git status cache.
@@ -89,7 +90,8 @@ pub enum WorkspaceActionResult {
     /// A reveal request was accepted; the server will update the focused tree
     /// state on the next SDUI snapshot.
     Revealed,
-    /// A file-browser visibility toggle was accepted.
+    /// A file-browser visibility toggle was accepted; the bound connection
+    /// owns applying it to its per-tab shell state.
     Toggled,
 }
 

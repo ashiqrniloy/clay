@@ -24,7 +24,13 @@ Phase 5 synchronizes text with a server-authoritative document version and optim
 
 ## How It Works
 
-Startup returns `ClientInitialState` from the `Hello` / `Welcome` / `InitialDocument` / `BehaviorManifest` handshake. The initial document includes the server document ID, canonical version, full text, access state, and optional lease ID. `EditorWidget::with_initial_state` loads that snapshot into `EditorSurface`; `connect_from_stream` creates a `ClientEditQueue` initialized with the server-confirmed version and access metadata.
+Startup returns `ClientInitialState` after the `Hello` / `Welcome` /
+manifest-theme-typography / `TabCommand::New` or `Reclaim` handshake. The
+bound tab's `InitialDocument` includes the server document ID, canonical
+version, full text, access state, and optional lease ID. `EditorWidget::with_initial_state`
+loads that snapshot into `EditorSurface`; `connect_from_stream` creates a
+`ClientEditQueue` initialized with the server-confirmed version and access
+metadata.
 
 When a text command mutates an editable editor surface, `EditorSurface::command_with_event` updates the local shadow immediately and emits an `EditorEditEvent` only when the installed behavior manifest declares client-first text editing. `EditorWidget::local_command` passes that event to `ClientEditQueue::enqueue_edit_event`; it does not perform socket I/O or wait for the server.
 
@@ -59,7 +65,7 @@ ClientMessage::RequestResync {
 - Client confirmed versions advance only from server acknowledgements or resync snapshots.
 - Client optimistic versions advance when edits are queued, not when keys are pressed or acknowledged.
 - Pending edits remain until acknowledgement, rejection, queue rollback, or resync recovery.
-- Ordinary edit IPC carries deltas only; full text appears only in initial snapshots and explicit resync snapshots.
+- Ordinary edit IPC carries deltas only; full text appears only in bound initial/file-open/reload snapshots and explicit resync snapshots.
 - Masonry input and paint handlers do not perform socket reads/writes, wait for acknowledgements, execute JavaScript, or serialize full documents.
 - Base-version checks are constant-time server metadata checks before lease, range, lock, and rope mutation work.
 - IPC bytes are bounded and validated by `Codec` before synchronization code sees protocol messages.

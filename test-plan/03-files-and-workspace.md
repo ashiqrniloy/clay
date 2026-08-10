@@ -60,6 +60,20 @@ Open `/tmp/clay-manual` as the workspace.
 | F12 | Fuzzy-open `sub/c.txt` from browser | Opens in editor |
 | F12a | Fuzzy-open `sub/c.txt` from a split pane while it is already open in another pane | Focuses the owning pane; no duplicate view (see F3c) |
 
+## Phase 22.8 workspace-pane and hidden-open checks
+
+Deep reference: `docs/development/file-open-save-reload-workflow.md` and
+`docs/development/launch-and-gui-smoke.md` (End-to-end file browser workflow).
+These checks use the per-tab server workspace and the existing `Ctrl+O`
+binding from Setup.
+
+| # | Action | Expected |
+|---|--------|----------|
+| F13 | Fresh launch with a workspace root and no prior toggle | Workspace pane starts hidden; the editor occupies the left slot; no file-browser `Panel`/`List` is visible |
+| F14 | Press `Ctrl+B` | Workspace pane appears for the active tab; header contains `Workspace`, the folder name, and the full workspace location |
+| F15 | Press `Ctrl+B` again | Pane disappears; the editor reclaims the left slot; no other tab or document state changes |
+| F16 | While pane is hidden, press `Ctrl+O` and select `b.md` | Native file dialog opens normally; selected document opens in the active pane despite hidden workspace chrome; cancellation remains a no-op |
+
 ## Negative checks
 
 - Opening files grants access to the selected file + workspace roots only —

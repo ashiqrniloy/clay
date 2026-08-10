@@ -96,6 +96,8 @@ The generated documentation registry must read this section as the explicit incl
 - [serverInsertText](reference/clay-js-api/editor/server-insert-text.md) — `clay.editor.serverInsertText`
 - [clientSplitPaneVertical](reference/clay-js-api/shell/client-split-pane-vertical.md) — `clay.shell.clientSplitPaneVertical`
 - [clientSplitPaneHorizontal](reference/clay-js-api/shell/client-split-pane-horizontal.md) — `clay.shell.clientSplitPaneHorizontal`
+- [clientSplitPaneRight](reference/clay-js-api/shell/client-split-pane-right.md) — `clay.shell.clientSplitPaneRight`
+- [clientSplitPaneDown](reference/clay-js-api/shell/client-split-pane-down.md) — `clay.shell.clientSplitPaneDown`
 - [clientAddEqualPane](reference/clay-js-api/shell/client-add-equal-pane.md) — `clay.shell.clientAddEqualPane`
 - [clientClosePane](reference/clay-js-api/shell/client-close-pane.md) — `clay.shell.clientClosePane`
 - [clientFocusPaneNext](reference/clay-js-api/shell/client-focus-pane-next.md) — `clay.shell.clientFocusPaneNext`

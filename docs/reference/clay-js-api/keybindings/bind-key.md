@@ -162,7 +162,7 @@ bindKey({ scope: "global", bindings: { "Ctrl+Shift+R": "clay.runtime.reloadConfi
 
 Phase 18.8 note: `clay.controlCenter.open` is a fixed built-in server-first command id (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`). Binding it through `bindKey` is the documented configuration surface for the Control Center launch route; no default chord exists in Rust. Activating the bound key enqueues an inert command intent that the server-owned `CommandExecutor` validates before any side effect. The transient menu session itself is Clay-owned internal state and is not a callable `clay:configuration` API; see `docs/reference/clay-js-api/configuration.md`.
 
-Phase 18.12 note: `clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed built-in server-first workspace file-browser command ids. Binding them through `bindKey` is the documented configuration surface for fuzzy-open and file-browser toggle routes; no default `Ctrl+P` or `Ctrl+B` chord exists in Rust. Activation is revalidated by `CommandExecutor`, and file opening still routes through server workspace roots or selected-file grants. The left file-browser panel, bottom transient fuzzy-open menu, workspace marker set, ignore set, and listing budgets are Clay-owned internals, not callable `clay:configuration` APIs.
+Phase 18.12/22.8 note: `clay.workspace.openFuzzyFile` and `clay.workspace.toggleFileBrowser` are fixed built-in server-first workspace file-browser command ids. Binding them through `bindKey` is the documented configuration surface for fuzzy-open and file-browser toggle routes. The canonical `examples/init.js` binds `Ctrl+B` to the toggle; the pane starts hidden and the server retains visibility per tab. Activation is revalidated by `CommandExecutor`, and file opening still routes through server workspace roots or selected-file grants. The left file-browser panel, bottom transient fuzzy-open menu, workspace marker set, ignore set, and listing budgets are Clay-owned internals, not callable `clay:configuration` APIs.
 
 End-to-end file-browser workflow note: `clay.workspace.clientOpenFolderDialog` and `clay.editor.clientCopySelection` are fixed built-in client UI command ids. Binding them through `bindKey` installs inert client UI routes only. The folder picker still requires explicit native user selection plus the server's selected-path capability/root validation flow. Copy runs only after an explicit user-routed command; it does not expose package/configuration/AI clipboard-contents APIs, arbitrary clipboard text writes, or server clipboard access.
 
@@ -181,7 +181,9 @@ Shifted character matching note: character-key chords match case-insensitively a
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.keybindings.bindKey` in `~/.config/clay/init.js`.
+The canonical `examples/init.js` binds `Ctrl+B` to
+`clay.workspace.toggleFileBrowser`; users may copy or override that binding in
+`~/.config/clay/init.js`. The pane is hidden by default when no binding is run.
 
 ## Custom properties
 

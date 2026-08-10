@@ -22,12 +22,24 @@
 //!   single-client reclaim in 22.3). Multi-client reclaim needs a stable
 //!   client-instance identity (Phase 21).
 
+use std::time::Instant;
+
 use crate::protocol::{ClientId, TabEntry, TabId, TabRegistrySnapshot, WorkspaceRootId};
+
+/// One registry row: the protocol-visible `TabEntry` plus server-local
+/// metadata. `last_activity` deliberately lives OUTSIDE the rkyv-serialized
+/// protocol type (snapshots cross IPC; `Instant` is not serializable) — the
+/// Phase 22.6 "grants nothing" shape test pins the protocol side.
+#[derive(Debug)]
+struct RegistryEntry {
+    entry: TabEntry,
+    last_activity: Instant,
+}
 
 /// Server-authoritative tab registry (in-memory).
 #[derive(Debug)]
 pub(crate) struct TabRegistry {
-    tabs: Vec<TabEntry>,
+    tabs: Vec<RegistryEntry>,
     active: Option<TabId>,
     next_tab_id: TabId,
     /// Monotonic generation, bumped on every applied mutation. Carried in
@@ -49,10 +61,24 @@ impl TabRegistry {
 
     pub(crate) fn snapshot(&self) -> TabRegistrySnapshot {
         TabRegistrySnapshot {
-            tabs: self.tabs.clone(),
+            tabs: self.tabs.iter().map(|row| row.entry.clone()).collect(),
             active: self.active,
             revision: self.revision,
         }
+    }
+
+    pub(crate) fn entry(&self, tab_id: TabId) -> Option<TabEntry> {
+        self.tabs
+            .iter()
+            .find(|row| row.entry.tab_id == tab_id)
+            .map(|row| row.entry.clone())
+    }
+
+    pub(crate) fn tab_for_client(&self, client_id: ClientId) -> Option<TabId> {
+        self.tabs
+            .iter()
+            .find(|row| row.entry.client_id == client_id)
+            .map(|row| row.entry.tab_id)
     }
 
     /// Create a tab bound to `client_id`, `workspace_root_id`, and the
@@ -66,11 +92,14 @@ impl TabRegistry {
     ) -> TabId {
         let tab_id = self.next_tab_id;
         self.next_tab_id = self.next_tab_id.saturating_add(1);
-        self.tabs.push(TabEntry {
-            tab_id,
-            workspace_root_id,
-            client_id,
-            workspace_root,
+        self.tabs.push(RegistryEntry {
+            entry: TabEntry {
+                tab_id,
+                workspace_root_id,
+                client_id,
+                workspace_root,
+            },
+            last_activity: Instant::now(),
         });
         self.active = Some(tab_id);
         self.revision += 1;
@@ -86,14 +115,15 @@ impl TabRegistry {
         workspace_root_id: WorkspaceRootId,
         workspace_root: String,
     ) -> bool {
-        let Some(entry) = self.tabs.iter_mut().find(|entry| entry.tab_id == tab_id) else {
+        let Some(row) = self.tabs.iter_mut().find(|row| row.entry.tab_id == tab_id) else {
             return false;
         };
-        if entry.client_id != client_id {
+        if row.entry.client_id != client_id {
             return false;
         }
-        entry.workspace_root_id = workspace_root_id;
-        entry.workspace_root = workspace_root;
+        row.entry.workspace_root_id = workspace_root_id;
+        row.entry.workspace_root = workspace_root;
+        row.last_activity = Instant::now();
         self.revision += 1;
         true
     }
@@ -104,26 +134,75 @@ impl TabRegistry {
         let Some(index) = self
             .tabs
             .iter()
-            .position(|entry| entry.tab_id == tab_id && entry.client_id == client_id)
+            .position(|row| row.entry.tab_id == tab_id && row.entry.client_id == client_id)
         else {
             return false;
         };
         self.tabs.remove(index);
         if self.active == Some(tab_id) {
-            self.active = self.tabs.last().map(|entry| entry.tab_id);
+            self.active = self.tabs.last().map(|row| row.entry.tab_id);
         }
         self.revision += 1;
         true
     }
 
+    /// Remove entries idle beyond `ttl` (abandoned-tab horizon: transient
+    /// reconnects complete in seconds; anything this old had its connection
+    /// die and never return). Entries bound to a CURRENTLY CONNECTED client
+    /// (`live`) never expire — their connection task is the liveness proof,
+    /// and tab-idle presence (e.g. an hour of document editing, which never
+    /// touches the registry) must not lose a live client's tab. Returns
+    /// the removed `TabId`s so callers can push a reconciling snapshot.
+    /// Fixes up `active` like `close_tab` (falls back to the last kept tab)
+    /// and bumps the revision once when anything was removed.
+    pub(crate) fn sweep_expired(
+        &mut self,
+        now: Instant,
+        ttl: std::time::Duration,
+        live: &std::collections::HashSet<ClientId>,
+    ) -> Vec<TabId> {
+        let mut removed = Vec::new();
+        let mut last_kept = None;
+        self.tabs.retain(|row| {
+            if live.contains(&row.entry.client_id)
+                || now.saturating_duration_since(row.last_activity) < ttl
+            {
+                last_kept = Some(row.entry.tab_id);
+                true
+            } else {
+                removed.push(row.entry.tab_id);
+                false
+            }
+        });
+        if !removed.is_empty() {
+            if self.active.is_some_and(|active| removed.contains(&active)) {
+                self.active = last_kept;
+            }
+            self.revision += 1;
+        }
+        removed
+    }
+
+    /// Test-only: age every entry by `age` so TTL sweep tests on a real
+    /// server do not wait out the horizon.
+    #[cfg(test)]
+    pub(crate) fn age_all_entries_for_test(&mut self, age: std::time::Duration) {
+        for row in &mut self.tabs {
+            row.last_activity -= age;
+        }
+    }
+
     /// Set the active tab. Only the tab's bound connection may activate it.
     pub(crate) fn activate(&mut self, tab_id: TabId, client_id: ClientId) -> bool {
-        let Some(entry) = self.tabs.iter().find(|entry| entry.tab_id == tab_id) else {
+        let Some(row) = self.tabs.iter_mut().find(|row| row.entry.tab_id == tab_id) else {
             return false;
         };
-        if entry.client_id != client_id {
+        if row.entry.client_id != client_id {
             return false;
         }
+        // Presence proven: refresh the idle horizon even when this is a
+        // no-op activate (already active) so idle-but-present clients live.
+        row.last_activity = Instant::now();
         if self.active != Some(tab_id) {
             self.active = Some(tab_id);
             self.revision += 1;
@@ -136,27 +215,30 @@ impl TabRegistry {
     /// tab. Multi-client reclaim needs a stable client-instance identity
     /// (Phase 21) — recorded as a known ceiling.
     pub(crate) fn reclaim(&mut self, tab_id: TabId, client_id: ClientId) -> bool {
-        let Some(entry) = self.tabs.iter_mut().find(|entry| entry.tab_id == tab_id) else {
+        let Some(row) = self.tabs.iter_mut().find(|row| row.entry.tab_id == tab_id) else {
             return false;
         };
-        if entry.client_id != client_id {
-            entry.client_id = client_id;
+        if row.entry.client_id != client_id {
+            row.entry.client_id = client_id;
             self.revision += 1;
         }
+        row.last_activity = Instant::now();
         true
     }
 
+    // Keep one method per TabCommand: clarity over cleverness for this small surface.
     /// Move a tab one position toward the front. Only the tab's bound
     /// connection may move it. Moving at the first position is a no-op — no
     /// wraparound (explicit Phase 22.4 policy). The active tab keeps its
     /// status wherever it moves.
     pub(crate) fn move_left(&mut self, tab_id: TabId, client_id: ClientId) -> bool {
-        let Some(index) = self.tabs.iter().position(|entry| entry.tab_id == tab_id) else {
+        let Some(index) = self.tabs.iter().position(|row| row.entry.tab_id == tab_id) else {
             return false;
         };
-        if self.tabs[index].client_id != client_id {
+        if self.tabs[index].entry.client_id != client_id {
             return false;
         }
+        self.tabs[index].last_activity = Instant::now();
         if index == 0 {
             return false;
         }
@@ -170,12 +252,13 @@ impl TabRegistry {
     /// wraparound (explicit Phase 22.4 policy). The active tab keeps its
     /// status wherever it moves.
     pub(crate) fn move_right(&mut self, tab_id: TabId, client_id: ClientId) -> bool {
-        let Some(index) = self.tabs.iter().position(|entry| entry.tab_id == tab_id) else {
+        let Some(index) = self.tabs.iter().position(|row| row.entry.tab_id == tab_id) else {
             return false;
         };
-        if self.tabs[index].client_id != client_id {
+        if self.tabs[index].entry.client_id != client_id {
             return false;
         }
+        self.tabs[index].last_activity = Instant::now();
         if index + 1 >= self.tabs.len() {
             return false;
         }
@@ -189,12 +272,13 @@ impl TabRegistry {
     /// clamped); moving a tab to its current position is a no-op. The active
     /// tab keeps its status wherever it moves.
     pub(crate) fn move_to(&mut self, tab_id: TabId, client_id: ClientId, position: u32) -> bool {
-        let Some(index) = self.tabs.iter().position(|entry| entry.tab_id == tab_id) else {
+        let Some(index) = self.tabs.iter().position(|row| row.entry.tab_id == tab_id) else {
             return false;
         };
-        if self.tabs[index].client_id != client_id {
+        if self.tabs[index].entry.client_id != client_id {
             return false;
         }
+        self.tabs[index].last_activity = Instant::now();
         if position == 0 || position as usize > self.tabs.len() {
             return false;
         }
@@ -212,6 +296,10 @@ impl TabRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stale(now: Instant, ttl: std::time::Duration) -> Instant {
+        now - ttl - std::time::Duration::from_secs(1)
+    }
 
     fn registry_with_tabs() -> (TabRegistry, TabId, TabId) {
         let mut registry = TabRegistry::new();
@@ -488,5 +576,139 @@ mod tests {
         assert!(registry.move_left(third, 3));
         assert!(registry.move_right(second, 2));
         assert_eq!(contents(&registry), before, "reorder changes order only");
+    }
+
+    /// Phase 22.7 (plan 078 task 5): the TTL sweep removes only entries idle
+    /// beyond the horizon, fixes up `active` like `close_tab` (last kept
+    /// tab), and bumps the revision exactly once per sweep that removed
+    /// anything.
+    #[test]
+    fn sweep_removes_only_expired_entries() {
+        let (mut registry, first, second) = registry_with_tabs();
+        let ttl = std::time::Duration::from_secs(3600);
+        let now = std::time::Instant::now();
+        // Expire the active tab (2) and one fresh tab (1); keep the middle
+        // entry fresh. Registry order: [1(fresh), 2(expired), 3(fresh)].
+        let third = registry.create_tab(3, 30, "/tmp/gamma".to_string());
+        registry.tabs[1].last_activity = stale(now, ttl);
+
+        let removed = registry.sweep_expired(now, ttl, &std::collections::HashSet::new());
+        assert_eq!(removed, vec![second]);
+        let snapshot = registry.snapshot();
+        assert_eq!(
+            snapshot
+                .tabs
+                .iter()
+                .map(|entry| entry.tab_id)
+                .collect::<Vec<_>>(),
+            vec![first, third]
+        );
+        // Active (2) was removed: falls back to the last kept tab.
+        assert_eq!(snapshot.active, Some(third));
+        assert_eq!(snapshot.revision, 4, "create x3 + one sweep = 4 bumps");
+    }
+
+    #[test]
+    fn sweep_noop_keeps_revision() {
+        let (mut registry, _, _) = registry_with_tabs();
+        let ttl = std::time::Duration::from_secs(3600);
+        let revision = registry.snapshot().revision;
+        let removed = registry.sweep_expired(
+            std::time::Instant::now(),
+            ttl,
+            &std::collections::HashSet::new(),
+        );
+        assert!(removed.is_empty());
+        assert_eq!(
+            registry.snapshot().revision,
+            revision,
+            "no-op sweep must not bump"
+        );
+        assert_eq!(registry.snapshot().tabs.len(), 2);
+    }
+
+    #[test]
+    fn sweep_removes_everything_and_clears_active() {
+        let (mut registry, _, _) = registry_with_tabs();
+        let ttl = std::time::Duration::from_secs(3600);
+        let now = std::time::Instant::now();
+        for row in &mut registry.tabs {
+            row.last_activity = stale(now, ttl);
+        }
+        let removed = registry.sweep_expired(now, ttl, &std::collections::HashSet::new());
+        assert_eq!(removed, vec![1, 2]);
+        let snapshot = registry.snapshot();
+        assert!(snapshot.tabs.is_empty());
+        assert_eq!(snapshot.active, None);
+    }
+
+    /// An entry idle beyond the TTL but still bound to a CURRENTLY CONNECTED
+    /// client survives the sweep: liveness (the connection task) outranks
+    /// tab-idleness, because document editing and plain presence never touch
+    /// the registry — sweeping such an entry would unmount a live client's
+    /// tab out from under it.
+    #[test]
+    fn sweep_skips_entries_bound_to_live_clients() {
+        let (mut registry, first, second) = registry_with_tabs();
+        let ttl = std::time::Duration::from_secs(3600);
+        let now = std::time::Instant::now();
+        // Both entries are stale; client 1 is still connected.
+        for row in &mut registry.tabs {
+            row.last_activity = stale(now, ttl);
+        }
+        let live = std::collections::HashSet::from([1]);
+        let removed = registry.sweep_expired(now, ttl, &live);
+        assert_eq!(removed, vec![second]);
+        let snapshot = registry.snapshot();
+        assert_eq!(snapshot.tabs.len(), 1);
+        assert_eq!(snapshot.tabs[0].tab_id, first);
+        // Active was tab 2 (removed): falls back to the kept live tab.
+        assert_eq!(snapshot.active, Some(first));
+    }
+
+    /// Phase 22.7: every mutation that proves the bound client is present
+    /// refreshes the idle horizon — including no-op calls (already-active
+    /// activate, boundary moves) — while rejected foreign calls do not.
+    #[test]
+    fn mutations_touch_last_activity() {
+        let (mut registry, first, second) = registry_with_tabs();
+        let stale = std::time::Instant::now() - std::time::Duration::from_secs(3600);
+        registry.tabs[0].last_activity = stale;
+        let fresh = |registry: &TabRegistry| registry.tabs[0].last_activity > stale;
+
+        // No-op activate (tab 1 is not active; activate it first so the next
+        // call is a true no-op): both touch.
+        assert!(registry.activate(first, 1));
+        assert!(fresh(&registry));
+        registry.tabs[0].last_activity = stale;
+        assert!(
+            registry.activate(first, 1),
+            "no-op activate still proves presence"
+        );
+        assert!(fresh(&registry));
+
+        // Boundary no-op moves touch.
+        registry.tabs[0].last_activity = stale;
+        assert!(!registry.move_left(first, 1), "boundary no-op");
+        assert!(fresh(&registry));
+        registry.tabs[0].last_activity = stale;
+        assert!(!registry.move_to(first, 1, 1), "same-position no-op");
+        assert!(fresh(&registry));
+
+        // Reclaim and open_workspace touch.
+        registry.tabs[0].last_activity = stale;
+        assert!(registry.reclaim(first, 7));
+        assert!(fresh(&registry));
+        registry.tabs[0].last_activity = stale;
+        assert!(registry.open_workspace(first, 7, 70, "/tmp/alpha".to_string()));
+        assert!(fresh(&registry));
+
+        // Foreign rejected calls do NOT touch: tab 2's horizon stays old.
+        let stale_second = stale;
+        registry.tabs[1].last_activity = stale_second;
+        assert!(!registry.activate(second, 99));
+        assert!(!registry.move_right(second, 99));
+        assert!(!registry.close_tab(second, 99));
+        assert_eq!(registry.tabs[1].last_activity, stale_second);
     }
 }

@@ -7,7 +7,7 @@
 - `src/masonry_shell.rs` — `ClayShellWidget` (pane hosts, `pane_targets`, focus actions)
 - `src/masonry_pane_host.rs` — `PaneContentHost` / `PaneContent::Document`
 - `src/client/mod.rs` — `ClientSyncState` per-document map, `ClientConnectionEvent::document_id()`
-- `src/main.rs` — `Driver` event routing, pending-open attribution, close arm
+- `src/driver/mod.rs` — `Driver` event routing, pending-open attribution, close arm
 - `src/editor/document_session.rs` — `DocumentSessionStore` per pane
 - `src/server/behavior.rs`, `src/server/ops/mod.rs` — per-document behavior manifest layers (see [Behavior Manifests](behavior-manifests.md))
 - `src/protocol/runtime.rs` — `DocumentRuntimeRenderState::behavior_manifest`
@@ -38,7 +38,7 @@ The per-pane view encapsulates what used to be `EditorWidget`'s document state:
 
 `close_pane()` sends capability-gated close requests for the active document AND every retained session in the store (`DocumentSessionStore::document_ids()` + `clear()`), then resets to a blank surface. `guard_pane_close()` returns true when the active document is dirty — the driver blocks the close and shows the save-conflict menu instead (no topology change, no lease release until resolved).
 
-### Event routing (`src/main.rs` Driver + `src/masonry_editor.rs` chrome)
+### Event routing (`src/driver/mod.rs` Driver + `src/masonry_editor.rs` chrome)
 
 `ClientConnectionEvent::document_id()` classifies events. The `Driver` routes:
 
@@ -87,7 +87,7 @@ routes the display name down:
 - **`ClientConnectionEvent::metadata_path()`** (`src/client/mod.rs`) returns
   `Some(&metadata.path)` only for `DocumentOpened`/`DocumentReloaded`
   (the variants that carry a path; `ClientResyncSnapshot` has none).
-- **Driver routing** (`src/main.rs`): `route_document_event` preserves
+- **Driver routing** (`src/driver/mod.rs`): `route_document_event` preserves
   `(pane, target)` pairs and calls `shell.set_pane_document_name(path)`
   when consuming; `route_document_opened` captures `opened_path` and sets
   the name in the owner and new-open branches. The alternative —
@@ -103,6 +103,37 @@ routes the display name down:
   `set_pane_count` during shell reconcile (guarded by
   `registered_panes`, see the masonry-shell page).
 
+## Phase 22.7: Field-Group Decomposition
+
+Phase 22.7 (finding C4) decomposed `PaneDocumentView`'s 30 fields into two
+helper structs — mechanical delegation, no logic change:
+
+- `PaneRequestBookkeeping` (private fields): the seven request-id fields
+  (`next_transaction_id`, `next_completion_request_id`,
+  `active_completion_request_id`, `next_language_intelligence_request_id`,
+  `active_language_intelligence_request_id`,
+  `next_selection_query_request_id`, `pending_selection_query`) with a
+  shared `bump(next)` allocator (`saturating_add(1).max(1)`), the
+  `next_*_request_id` accessors, `clear_active()` (both active ids only),
+  `reset()` (active ids + pending query), and
+  `take_completion_if_current(id)` / `take_language_intelligence_if_current(id)`
+  for the rejected/current-request checks.
+- `PaneMenuSync` (private fields): `menu`, `pending_menu_sync`, and
+  `menu_session_ids: Rc<Cell<u64>>` with `push(menu)` (clone + set pair),
+  `take_pending()` (the one-shot tri-state: None = none, Some(Some) =
+  show, Some(None) = clear), and `next_session_id()` (interior
+  mutability). `PaneDocumentView::new` overrides `session_ids` from the
+  caller's `Rc<Cell<u64>>`.
+
+`PaneDocumentView` dropped 30 → 20 fields; `pending_definition_navigation`
+and `last_decoration_viewport` stay on the view. The 30 `self.menu` read
+sites re-point to `self.menu_sync.menu`. Tests:
+`request_bookkeeping_allocates_unique_ids` (allocators never collide,
+`clear_active`/`reset` semantics, `take_*_if_current` matches only the
+current request id) and `menu_sync_pending_semantics` (one-shot tri-state
+`take_pending`, `next_session_id` allocation) in
+`src/masonry_pane_document.rs`.
+
 ## Known Ceilings
 
 - SDUI sidebars and package panels/overlays are window-scoped chrome (per-client), not per-pane; packages cannot contribute per-pane chrome yet.
@@ -115,7 +146,7 @@ routes the display name down:
 - `src/masonry_pane_document.rs`: event isolation, session stash/activate, close-pane release + blank reset, dirty-close gate with conflict menu, per-document edit queueing, duplicate-open no-op, cross-pane menu aggregation + routing, failed-opens leave state unchanged, runtime-snapshot baseline restore, scope-aware manifest install. Command: `cargo test --lib masonry_pane_document --quiet`.
 - `src/masonry_shell.rs`: panes host independent document views with document-scoped routing, typing isolation hot-path guard, routing-target cleanup on pane close, concurrent per-pane major modes isolated across behavior manifests. Command: `cargo test --lib masonry_shell --quiet`.
 - `src/client/mod.rs`: per-document sync state, stale-ack filtering by document, per-document reload updates. Command: `cargo test --lib client --quiet`.
-- `src/main.rs`: `decide_open_route` pure-function tests (owner > pending > active, path matching);
+- `src/driver/mod.rs`: `decide_open_route` pure-function tests (owner > pending > active, path matching);
   Phase 22.6 label routing (`route_document_event`/`route_document_opened`
   keep `(pane, target)` pairs and set display names).
 - Guard suites scanning the new module: `tests/editor_performance_invariants.rs`, `tests/ui_primitive_conformance.rs`.

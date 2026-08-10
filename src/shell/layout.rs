@@ -1,7 +1,5 @@
 // Phase 18.2 installs generic shell layout foundations before every split
 // constructor/update path is exercised by non-test runtime code.
-#![allow(dead_code)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use masonry::kurbo::{Point, Rect};
@@ -64,6 +62,7 @@ pub(crate) struct ShellComponentBinding {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum PaneSlotId {
+    #[cfg(test)]
     Main,
     Left,
     Right,
@@ -105,6 +104,7 @@ pub(crate) struct FixedSlotState {
 }
 
 impl FixedSlotState {
+    #[cfg(test)]
     pub(crate) fn new(
         slot_id: FixedSlotId,
         size: f64,
@@ -133,22 +133,26 @@ impl FixedSlotState {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn with_visible(mut self, visible: bool) -> Self {
         self.visible = visible;
         self
     }
 
+    #[cfg(test)]
     pub(crate) fn with_collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
         self
     }
 
+    #[cfg(test)]
     pub(crate) fn with_resized_by_user(mut self, resized_by_user: bool) -> Self {
         self.resized_by_user = resized_by_user;
         self
     }
 
     /// Resize to `new_size`, clamped to `min_size..=max_size`. Sets `resized_by_user`.
+    #[cfg(test)]
     pub(crate) fn resize_to(&mut self, new_size: f64) {
         self.size = new_size.clamp(self.min_size, self.max_size);
         self.resized_by_user = true;
@@ -213,6 +217,7 @@ impl PaneSlotLayout {
         self
     }
 
+    #[cfg(test)]
     pub(crate) fn has_main_slot(&self) -> bool {
         let _ = self.main;
         true
@@ -220,6 +225,7 @@ impl PaneSlotLayout {
 
     pub(crate) fn contains_slot(&self, slot_id: PaneSlotId) -> bool {
         match slot_id {
+            #[cfg(test)]
             PaneSlotId::Main => true,
             PaneSlotId::Left => self.left.is_some(),
             PaneSlotId::Right => self.right.is_some(),
@@ -289,6 +295,7 @@ impl Default for PaneSlotLayout {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(test)]
 pub(crate) enum PaneSlotLayoutError {
     InvalidFixedSlotSize {
         slot_id: FixedSlotId,
@@ -409,6 +416,7 @@ impl PaneSplitTree {
         self.active_pane_id
     }
 
+    #[cfg(test)]
     pub(crate) fn root_leaf_pane_id(&self) -> PaneId {
         self.first_leaf_pane_id(&self.root)
     }
@@ -443,6 +451,7 @@ impl PaneSplitTree {
         geometry
     }
 
+    #[cfg(test)]
     fn observation(&self) -> PaneTreeObservation {
         observe_pane_tree_node(&self.root)
     }
@@ -482,6 +491,7 @@ impl PaneSplitTree {
         Ok(())
     }
 
+    #[cfg(test)]
     fn first_leaf_pane_id(&self, node: &PaneSplitNode) -> PaneId {
         first_leaf_pane_id(node)
     }
@@ -992,6 +1002,7 @@ pub(crate) enum PaneSplitTreeError {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg(test)]
 pub(crate) enum PaneTreeObservation {
     Leaf {
         pane_id: PaneId,
@@ -1005,6 +1016,7 @@ pub(crate) enum PaneTreeObservation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(test)]
 pub(crate) struct PaneSlotObservation {
     pub(crate) pane_id: PaneId,
     pub(crate) slot_id: PaneSlotId,
@@ -1014,6 +1026,7 @@ pub(crate) struct PaneSlotObservation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct ShellComponentObservation {
     pub(crate) id: ShellComponentId,
     pub(crate) kind: ShellComponentKind,
@@ -1021,6 +1034,7 @@ pub(crate) struct ShellComponentObservation {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg(test)]
 pub(crate) struct WorkingAreaLayoutObservation {
     pub(crate) layout_version: ShellLayoutVersion,
     pub(crate) working_area_id: WorkingAreaId,
@@ -1208,12 +1222,9 @@ impl WorkingAreaLayout {
         self.version
     }
 
+    #[cfg(test)]
     pub(crate) fn working_area_id(&self) -> WorkingAreaId {
         self.working_area_id
-    }
-
-    pub(crate) fn root_pane_id(&self) -> PaneId {
-        self.pane_tree.root_leaf_pane_id()
     }
 
     pub(crate) fn editor_component(&self) -> ShellComponentBinding {
@@ -1251,6 +1262,7 @@ impl WorkingAreaLayout {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn observable_snapshot(&self, working_area: Rect) -> WorkingAreaLayoutObservation {
         let working_area = normalized_rect(working_area);
         let slots = self.slot_observations(working_area);
@@ -1442,6 +1454,7 @@ impl WorkingAreaLayout {
         Ok(())
     }
 
+    #[cfg(test)]
     fn slot_observations(&self, working_area: Rect) -> Vec<PaneSlotObservation> {
         let mut slots = Vec::new();
         for pane in self.pane_tree.compute_geometry(working_area) {
@@ -1647,6 +1660,7 @@ fn leaf_path_in_node(node: &PaneSplitNode, pane_id: PaneId) -> Option<SplitPath>
     }
 }
 
+#[cfg(test)]
 fn observe_pane_tree_node(node: &PaneSplitNode) -> PaneTreeObservation {
     match node {
         PaneSplitNode::Leaf { pane_id } => PaneTreeObservation::Leaf { pane_id: *pane_id },

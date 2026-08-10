@@ -11,7 +11,7 @@
 
 ## Overview
 
-Phase 5 adds server-owned edit authority for the current in-memory document. A document can have one editable lease holder; additional clients are read-only observers. The same server document state also owns in-memory region locks that reject overlapping user edits before canonical rope mutation. These mechanisms protect the server-authoritative document without introducing AI, extension, file, shell, network, or workspace authority.
+Phase 5 adds server-owned edit authority for each in-memory document. A document can have one editable lease holder; additional clients are read-only observers. In Phase 22.8, welcome and open-file documents live inside each tab's `WorkspaceState`, so the lease boundary is per tab as well as per document. The same server document state also owns in-memory region locks that reject overlapping user edits before canonical rope mutation. These mechanisms protect the server-authoritative document without introducing AI, extension, file, shell, network, or workspace authority.
 
 ## Responsibilities
 
@@ -23,7 +23,7 @@ Phase 5 adds server-owned edit authority for the current in-memory document. A d
 
 ## How It Works
 
-During handshake, `send_welcome_snapshot_and_manifest` locks the shared `DocumentState` and calls `acquire_access(client_id)`. If no lease is active, the client receives `DocumentAccess::Editable { lease_id }`; if another client holds the lease, the new client receives `DocumentAccess::ReadOnly`. A reconnecting holder can receive the same editable access while it remains active. When a connection ends or errors, `handle_connection` calls `release_access(client_id)`, which clears the active lease only for the holder.
+Production handshake sends no document access before tab binding. After `TabCommand::New`/`Reclaim` resolves a `TabServerState`, `send_tab_initial_state` locks that tab's welcome `DocumentState` and calls `acquire_access(client_id)`. The same per-tab rule applies to `OpenDocument` leases. A reconnecting holder reopens through its reclaimed tab state; when a connection ends or errors, `handle_connection` releases access only in the routed tab state(s) it held.
 
 Every edit message includes both `client_id` and `lease_id`. `DocumentState::apply_edit` rejects edits before mutation when there is no active lease, the message omits a lease, or the client/lease pair does not match the active holder. Missing authority returns `LeaseRequired`; stale, guessed, or replayed lease IDs return `LeaseExpired { lease_id }`. Read-only clients are stopped twice: `EditorSurface` does not produce mutation events for read-only snapshots, and `ClientEditQueue` rolls back pending reservations instead of sending an edit when no lease ID is configured.
 

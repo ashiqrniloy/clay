@@ -39,8 +39,11 @@ pub use textobjects::*;
 /// Version 13 adds tab reorder commands (`MoveLeft`/`MoveRight`/`MoveTo`)
 /// so registry order becomes server-authoritative and reorderable via the
 /// Phase 22.4 keyboard tab commands.
+/// Version 15 defers `InitialDocument` and the initial SDUI/file-browser
+/// snapshot until the connection binds a tab with `TabCommand::New` or
+/// `TabCommand::Reclaim`.
 /// Older server processes must not retain the previous wire semantics.
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;

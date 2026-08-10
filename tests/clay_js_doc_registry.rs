@@ -1792,6 +1792,138 @@ fn clay_js_api_inventory_unchanged_or_documented() {
 }
 
 #[test]
+fn phase22_8_programmatic_surface_inventory_is_closed() {
+    // Plan 079 task 10: tab state is server-internal. Existing documented
+    // workspace/document/tab APIs remain the only public programmatic routes;
+    // none accepts an arbitrary TabId or exposes per-tab server handles.
+    let root = repository_root();
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+
+    for id in [
+        "clay.commands.serverExecuteCommand",
+        "clay.commands.serverOpenFile",
+        "clay.commands.serverOpenDirectory",
+        "clay.documents.serverOpenDocument",
+        "clay.documents.serverListDocuments",
+        "clay.workspace.serverListWorkspaceRoots",
+        "clay.workspace.serverAddWorkspaceRoot",
+        "clay.workspace.clientOpenFolderDialog",
+        "clay.shell.clientTabNew",
+        "clay.keybindings.bindKey",
+    ] {
+        let entry = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("existing public API {id} is missing from registry"));
+        assert_eq!(entry.visibility, "public", "{id} must remain public");
+        assert!(
+            !entry.js_facade.is_empty(),
+            "{id} needs a JS facade mapping"
+        );
+        assert!(!entry.deno_op_path.is_empty(), "{id} needs an op mapping");
+        assert!(
+            root.join(&entry.documentation_path).is_file(),
+            "{id} documentation path must exist: {}",
+            entry.documentation_path
+        );
+        assert!(!entry.lookup_tags.is_empty(), "{id} needs lookup tags");
+    }
+
+    for absent_id in [
+        "clay.tabs.serverCreateTab",
+        "clay.tabs.serverSelectTabWorkspace",
+        "clay.workspace.serverOpenDocumentInTab",
+        "clay.documents.serverOpenDocumentInTab",
+        "clay.documents.serverListDocumentsForTab",
+        "clay.workspace.serverToggleFileBrowser",
+        // This is a fixed built-in command ID routed through bindKey, not a
+        // callable facade API or a second configuration surface.
+        "clay.workspace.toggleFileBrowser",
+    ] {
+        assert!(
+            registry.by_id(absent_id).is_none(),
+            "Phase 22.8 must not register internal/arbitrary-tab API {absent_id}"
+        );
+    }
+
+    let keybindings =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey API doc");
+    assert!(
+        keybindings.contains("clay.workspace.toggleFileBrowser"),
+        "bindKey docs must document the fixed workspace toggle command"
+    );
+    let configuration =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration API doc");
+    assert!(
+        configuration.contains("visibility is retained per tab"),
+        "configuration docs must document per-tab workspace-pane state"
+    );
+}
+
+#[test]
+fn configuration_api_documents_phase22_8_workspace_surface_without_new_keys() {
+    // Plan 079 task 11: Phase 22.8 reuses bindKey; per-tab roots and pane
+    // visibility remain server/client implementation state.
+    let root = repository_root();
+    let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
+    let bind_key = registry
+        .by_id("clay.keybindings.bindKey")
+        .expect("bindKey must remain a public configuration API");
+    assert!(bind_key.key_bindings.is_empty());
+    let client_tab_new = registry
+        .by_id("clay.shell.clientTabNew")
+        .expect("clientTabNew must remain a public configuration API");
+    assert_eq!(client_tab_new.key_bindings, vec!["Ctrl+T".to_string()]);
+    let client_tab_new_doc =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/shell/client-tab-new.md"))
+            .expect("read clientTabNew API doc");
+    assert!(client_tab_new_doc.contains("Default: `Ctrl+T`"));
+    for property in ["key", "command", "scope", "when"] {
+        assert!(
+            bind_key
+                .custom_properties
+                .iter()
+                .any(|entry| entry.name == property)
+        );
+    }
+
+    let configuration =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration API doc");
+    for required in [
+        "Phase 22.8 per-tab workspace configuration verification",
+        "adds no new `clay:configuration` export",
+        "clay.shell.clientTabNew",
+        "clay.workspace.toggleFileBrowser",
+        "fileBrowser.visible",
+        "layout.json",
+        "Configuration evaluation remains startup/reload work",
+    ] {
+        assert!(
+            configuration.contains(required),
+            "missing Phase 22.8 config marker {required}"
+        );
+    }
+
+    let example = std::fs::read_to_string(root.join("examples/init.js"))
+        .expect("read canonical init.js example");
+    assert_eq!(
+        example
+            .matches("bindKey(\"Ctrl+B\", \"clay.workspace.toggleFileBrowser\"")
+            .count(),
+        1,
+        "canonical init.js must contain one active Ctrl+B workspace-toggle example"
+    );
+    assert!(
+        root.join("docs/index.md").is_file()
+            && std::fs::read_to_string(root.join("docs/index.md"))
+                .expect("read docs index")
+                .contains("reference/clay-js-api/configuration.md")
+    );
+}
+
+#[test]
 fn configuration_api_documents_phase20_6_appearance_and_precedence() {
     // Plan 067 task 11: Phase 20.6 treats appearance + persistence as
     // documented Clay JS configuration APIs. setAppearance is a registry-

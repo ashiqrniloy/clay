@@ -384,6 +384,10 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "clay.workspace.serverListWorkspaceRoots"
             | "clay.shell.clientSplitPaneVertical"
             | "clay.shell.clientSplitPaneHorizontal"
+            // Phase 22.7 (F3): direction-named aliases are bindable like the
+            // canonical IDs they resolve to.
+            | "clay.shell.clientSplitPaneRight"
+            | "clay.shell.clientSplitPaneDown"
             | "clay.shell.clientAddEqualPane"
             | "clay.shell.clientClosePane"
             | "clay.shell.clientFocusPaneNext"
@@ -471,6 +475,9 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
             | "clay.editor.clientUndoCursorMove"
             | "clay.shell.clientSplitPaneVertical"
             | "clay.shell.clientSplitPaneHorizontal"
+            // Phase 22.7 (F3): aliases route ClientUiCommand like the canonical IDs.
+            | "clay.shell.clientSplitPaneRight"
+            | "clay.shell.clientSplitPaneDown"
             | "clay.shell.clientAddEqualPane"
             | "clay.shell.clientClosePane"
             | "clay.shell.clientFocusPaneNext"
@@ -634,10 +641,25 @@ mod tests {
     }
 
     #[test]
+    fn workspace_file_browser_toggle_is_bindable_and_server_routed() {
+        let command = "clay.workspace.toggleFileBrowser";
+        assert!(is_runtime_bindable_command(command));
+        assert_eq!(
+            command_routing_policy(command).unwrap(),
+            RoutingPolicy::ServerFirst
+        );
+        assert_eq!(validate_command_id(command).unwrap(), command);
+    }
+
+    #[test]
     fn phase_22_1_shell_commands_are_bindable_and_client_ui_routed() {
         let shell_commands = [
             "clay.shell.clientSplitPaneVertical",
             "clay.shell.clientSplitPaneHorizontal",
+            // Phase 22.7 (F3): direction aliases are bindable and routed like
+            // the canonical IDs.
+            "clay.shell.clientSplitPaneRight",
+            "clay.shell.clientSplitPaneDown",
             "clay.shell.clientAddEqualPane",
             "clay.shell.clientClosePane",
             "clay.shell.clientFocusPaneNext",
@@ -667,6 +689,20 @@ mod tests {
         assert!(!is_runtime_bindable_command(
             "clay.shell.clientSplitPane.diagonal"
         ));
+        // Phase 22.7 configuration gate: the aliases pass the full bindKey
+        // validation gate (the op calls validate_command_id, which
+        // allow-lists + routes), so `bindKey(chord, alias)` from init.js
+        // binds exactly like the canonical IDs.
+        for command in [
+            "clay.shell.clientSplitPaneRight",
+            "clay.shell.clientSplitPaneDown",
+        ] {
+            assert_eq!(
+                validate_command_id(command).unwrap(),
+                command,
+                "{command} must pass the bindKey validation gate"
+            );
+        }
     }
 
     #[test]

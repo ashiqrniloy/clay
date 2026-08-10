@@ -26,6 +26,15 @@ export function clientSplitPaneVertical() {
 export function clientSplitPaneHorizontal() {
     return "clay.shell.clientSplitPaneHorizontal";
 }
+// Phase 22.7 (F3): direction-named aliases resolving to the canonical
+// split handlers (clientSplitPaneRight -> vertical, clientSplitPaneDown ->
+// horizontal). No default chords; canonical IDs keep their bindings.
+export function clientSplitPaneRight() {
+    return "clay.shell.clientSplitPaneRight";
+}
+export function clientSplitPaneDown() {
+    return "clay.shell.clientSplitPaneDown";
+}
 export function clientAddEqualPane() {
     return "clay.shell.clientAddEqualPane";
 }

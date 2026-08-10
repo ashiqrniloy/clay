@@ -47,11 +47,11 @@ Server state lives in `ActiveTypographyState` (`src/server/mod.rs`): an `Arc<Mut
 
 ### Protocol and delivery
 
-`ServerMessage::ActiveTypography(ActiveTypography)` is the fifth bootstrap message, sent after `ActiveTheme` in `send_welcome_snapshot_and_manifest` (`src/server/connection.rs`). Variant ordering in `ServerMessage` is fixed for rkyv wire stability.
+`ServerMessage::ActiveTypography(ActiveTypography)` is the final pre-bind handshake message, sent after `ActiveTheme` in `send_welcome_snapshot_and_manifest` (`src/server/connection.rs`). The tab binding and per-tab `InitialDocument` follow it. Variant ordering in `ServerMessage` is fixed for rkyv wire stability.
 
 Live updates are multiplexed in the per-connection event loop via `tokio::select!` over `subscribe_typography()`. A successful `replace` emits exactly one `ServerMessage::ActiveTypography` to each connected client; a broadcast lag (closed/lagged receiver) re-sends the current snapshot so a client never misses the authoritative state. `live_typography_update_reaches_connection_once` locks the one-update-per-replacement invariant.
 
-The client handshake (`src/client/mod.rs::handshake_initial_state`) reads `ActiveTypography` as the fifth message, validates it via `typography.validate().is_ok()`, and rejects invalid snapshots with `UnexpectedMessage`. `ClientInitialState` carries `active_typography`; `run_connection` forwards `ServerMessage::ActiveTypography` to `ClientConnectionEvent::ActiveTypography`, silently dropping invalid live snapshots.
+The client handshake (`src/client/mod.rs::handshake_initial_state`) reads and validates `ActiveTypography` as the final pre-bind message, then writes `TabCommand::New`/`Reclaim` and consumes the deferred document snapshot. Invalid typography returns `UnexpectedMessage`. `ClientInitialState` carries `active_typography`; `run_connection` forwards `ServerMessage::ActiveTypography` to `ClientConnectionEvent::ActiveTypography`, silently dropping invalid live snapshots.
 
 ### Ligature and OpenType feature policy (Plan 071)
 
@@ -202,7 +202,7 @@ cargo test --test protocol manual_smoke_docs::
 - [Masonry Editor Widget Status Observability](masonry-editor.md) — status-line typography and layout invalidation.
 - [Slot-Aware Package UI](slot-aware-package-ui.md) — component `style.fontRole` catalog.
 - [Server-Driven UI Protocol Schema](server-driven-ui.md) — SDUI typography metrics and accessibility bounds.
-- [Client Snapshot Bootstrap](client-snapshot-bootstrap.md) — fifth bootstrap message and registry revalidation.
+- [Client Snapshot Bootstrap](client-snapshot-bootstrap.md) — pre-bind typography handshake, tab binding, deferred document snapshot, and registry revalidation.
 - [Protocol Codec](protocol-codec.md) — `ServerMessage::ActiveTypography` and variant ordering.
 - [Configuration Runtime](configuration-runtime.md) — `setTypography` atomicity and reload behavior.
 - [Phase 18.16.5 Semantic Typography Primitive Review](phase18.16.5-typography-primitive-review.md) — pre-implementation inventory and rejected shapes.

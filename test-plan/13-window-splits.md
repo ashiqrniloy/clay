@@ -2,8 +2,9 @@
 
 Equal-area window splits and per-pane document views: split/close/add-equal/
 move/resize of panes in the working area, pane focus policies, one document
-view per pane (Phase 22.2), and the user-rebindable `clay.shell.client*`
-command surface. Deep references:
+view per pane (Phase 22.2), the user-rebindable `clay.shell.client*`
+command surface, and the Phase 22.7 direction-named split aliases. Deep
+references:
 `docs/reference/primitives/shell-layout-strategy.md` (Phase 22.1 + 22.2
 sections), `docs/reference/clay-js-api/shell/` (command + configuration docs),
 `docs/reference/clay-js-api/editor/client-show-open-documents.md`,
@@ -29,6 +30,11 @@ sections), `docs/reference/clay-js-api/shell/` (command + configuration docs),
 | Focus prev/next pane | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` |
 | Resize pane left/right/up/down | `Ctrl+Alt+Shift+arrows` |
 | Move pane prev/next | `Ctrl+Alt+[` / `Ctrl+Alt+]` |
+
+Phase 22.7 direction aliases (`clay.shell.clientSplitPaneRight` =
+`clientSplitPaneVertical` beside; `clientSplitPaneDown` =
+`clientSplitPaneHorizontal` below) have NO default chords — bind them in
+init.js (S29–S32).
 
 ## Split creation
 
@@ -134,6 +140,19 @@ shows its own status line with that document's name/dirty state.
 | D14 | Focus policy interplay: with `cursor` policy set, move the pointer into another pane | That pane's document view activates; status line/IME follow the newly active pane |
 | D15 | Responsiveness: 4 panes, every pane with a document open, type rapidly in each in turn | No perceptible lag vs single-pane editing; status/decoration updates feel immediate |
 
+## Phase 22.8 per-tab split/document verification
+
+Deep references: `docs/development/file-open-save-reload-workflow.md` and
+module 14 steps T63–T70. These checks distinguish one tab's pane/document
+state from another tab's server-owned workspace state.
+
+| # | Action | Expected |
+|---|--------|----------|
+| D16 | In one tab, split into 2 panes and open two different files from that tab's workspace, one per pane | Both documents open concurrently in that tab; each pane keeps its own caret, selection, viewport, mode, version, and dirty state |
+| D17 | Edit and save the two documents from D16 in alternating panes | Edits and acknowledgements stay document-scoped; saving one pane does not clear the other pane's dirty marker or change its version |
+| D18 | Open the first file from the second pane, then repeat from a third/fourth pane | Existing-document ownership wins: the owning pane focuses and no duplicate view/session is created; the four-pane cap remains bounded |
+| D19 | Switch to another tab, then return to the tab from D16 | The original tab's split tree and both document sessions remain unchanged; the other tab's panes/documents are not mounted into it |
+
 ## Accessibility roles and announcements (Phase 22.6)
 
 Phase 22.6 gives the window model an accessibility contract: numbered pane
@@ -156,6 +175,31 @@ the tree shape, only for the human hearing check.
 | S27 | Two consecutive identical actions (e.g. move forward twice in a row) | Known ceiling: an AT may skip an announcement identical to the previous one — documented, not a bug |
 | S28 | Perf reference (advisory only): `cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2` | Pane-paint and tab-switch geometry numbers land linear in pane count (sub-microsecond on dev hardware); NO wall-clock pass/fail on shared runners — deterministic guards (linear chrome work, no tab-switch reserialization, 4-pane decoration aggregate ≤ 32768 B) are automated in `tests/editor_performance_invariants.rs` and `docs/development/performance.md` Phase 22.6 section |
 
+## Split direction aliases (Phase 22.7)
+
+Phase 22.7 added direction-named aliases that resolve to the canonical
+split handlers: `clay.shell.clientSplitPaneRight` = `SplitPaneVertical`
+(side by side), `clay.shell.clientSplitPaneDown` = `SplitPaneHorizontal`
+(stacked). They are bindable command IDs with NO default chords; the
+canonical `Ctrl+\` / `Ctrl+-` bindings are unchanged. Deep reference:
+`docs/reference/clay-js-api/shell/client-split-pane-right.md` and
+`client-split-pane-down.md`.
+
+init.js additions for these steps:
+
+```js
+import { bindKey } from "clay:keybindings";
+bindKey("Ctrl+Shift+Right", "clay.shell.clientSplitPaneRight", { scope: "global" });
+bindKey("Ctrl+Shift+Down", "clay.shell.clientSplitPaneDown", { scope: "global" });
+```
+
+| # | Action | Expected |
+|---|--------|----------|
+| S29 | Reload with the bindings above; single pane focused; `Ctrl+Shift+Right` then `Ctrl+Shift+Down` | Two panes side by side, EQUAL widths (identical result to S1/`Ctrl+\`); then two panes stacked, EQUAL heights (identical result to S2/`Ctrl+-`) — the aliases resolve to the canonical handlers |
+| S30 | After S29, press the canonical `Ctrl+\` and `Ctrl+-` | Canonical bindings unchanged — both still split side by side / stacked |
+| S31 | Fresh launch WITHOUT the alias bindings (or with the lines commented), press `Ctrl+Shift+Right` | NO-OP — the aliases ship with no default chords; nothing binds, nothing splits, no diagnostic |
+| S32 | Replace the string forms with the facade helpers: `import { clientSplitPaneRight, clientSplitPaneDown } from "clay:shell"; bindKey("Ctrl+Shift+Right", clientSplitPaneRight(), { scope: "global" }); bindKey("Ctrl+Shift+Down", clientSplitPaneDown(), { scope: "global" });`, reload | Same behavior as S29 — the helpers return the alias command IDs |
+
 ## Negative checks
 
 - A 5th pane is never created (cap = 4; S4).
@@ -165,7 +209,8 @@ the tree shape, only for the human hearing check.
   reject with a diagnostic (S17).
 - Split commands grant no filesystem/network/extension authority — they are
   client-UI command IDs only (see the per-command docs under
-  `docs/reference/clay-js-api/shell/`).
+  `docs/reference/clay-js-api/shell/`); the Phase 22.7 aliases resolve to
+  the canonical handlers and grant nothing more (S29–S32).
 - A file open in one pane can never be opened a second time in another pane
   (D6–D7) — the one-view-per-document rule is enforced client-side after the
   server's canonical-path duplicate detection.

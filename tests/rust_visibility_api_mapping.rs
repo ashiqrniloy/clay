@@ -485,3 +485,119 @@ fn phase22_6_window_model_a11y_additions_are_not_public_programmatic_surfaces() 
         }
     }
 }
+
+/// Plan 079 task 10: per-tab server state and routing are implementation
+/// details. Public workspace/document/tab behavior keeps using the existing
+/// curated Clay JS APIs; no JS surface may accept an arbitrary tab-state
+/// handle or bypass the connection's bound-tab authority.
+#[test]
+fn phase22_8_per_tab_state_has_no_new_public_programmatic_surface() {
+    let root = repository_root();
+    let server = fs::read_to_string(root.join("src/server/mod.rs")).expect("read server/mod.rs");
+    for method in [
+        "create_tab_state",
+        "ensure_tab_state",
+        "tab_state",
+        "tab_state_for_client",
+        "unbound_bootstrap_state",
+        "state_for_client",
+        "remove_tab_state",
+    ] {
+        assert!(
+            server.contains(&format!("pub(crate) async fn {method}")),
+            "IpcServer::{method} must stay pub(crate)"
+        );
+        assert!(
+            !server.contains(&format!("pub async fn {method}")),
+            "IpcServer::{method} must not become a bare-public API"
+        );
+    }
+    assert!(
+        server.contains("pub(crate) struct TabServerState"),
+        "TabServerState must stay server-internal"
+    );
+    for method in ["workspace_pane_visible", "toggle_workspace_pane"] {
+        assert!(
+            server.contains(&format!("pub(crate) fn {method}")),
+            "TabServerState::{method} must stay pub(crate)"
+        );
+    }
+
+    let connection = fs::read_to_string(root.join("src/server/connection.rs"))
+        .expect("read server/connection.rs");
+    for function in [
+        "route_connection_tab_state",
+        "message_requires_tab_state",
+        "document_for_message",
+        "workspace_command_result_message",
+    ] {
+        assert!(
+            connection.contains(&format!("async fn {function}"))
+                || connection.contains(&format!("fn {function}")),
+            "connection::{function} must remain private"
+        );
+        assert!(
+            !connection.contains(&format!("pub async fn {function}"))
+                && !connection.contains(&format!("pub fn {function}")),
+            "connection::{function} must not become a public API"
+        );
+    }
+
+    let registry = fs::read_to_string(root.join("src/server/tab_registry.rs"))
+        .expect("read server/tab_registry.rs");
+    for method in [
+        "entry",
+        "tab_for_client",
+        "create_tab",
+        "open_workspace",
+        "reclaim",
+        "sweep_expired",
+    ] {
+        assert!(
+            registry.contains(&format!("pub(crate) fn {method}")),
+            "TabRegistry::{method} must stay pub(crate)"
+        );
+        assert!(
+            !registry.contains(&format!("pub fn {method}")),
+            "TabRegistry::{method} must not become a public API"
+        );
+    }
+
+    let workspace =
+        fs::read_to_string(root.join("src/server/workspace.rs")).expect("read server/workspace.rs");
+    assert!(
+        workspace.contains("pub(crate) fn with_document_id_allocator"),
+        "WorkspaceState allocator plumbing must stay pub(crate)"
+    );
+    assert!(
+        !workspace.contains("pub fn with_document_id_allocator"),
+        "WorkspaceState allocator plumbing must not become a public API"
+    );
+
+    let facades = fs::read_dir(root.join("runtime/js"))
+        .expect("read runtime/js")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            matches!(
+                entry.path().extension().and_then(|value| value.to_str()),
+                Some("js" | "ts")
+            )
+        })
+        .map(|entry| fs::read_to_string(entry.path()).expect("read facade"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for internal_name in [
+        "createTabState",
+        "ensureTabState",
+        "tabStateForClient",
+        "serverSelectTabWorkspace",
+        "serverOpenDocumentInTab",
+        "serverListDocumentsForTab",
+        "serverToggleFileBrowser",
+    ] {
+        assert!(
+            !facades.contains(internal_name),
+            "runtime JS must not expose per-tab internal name {internal_name}"
+        );
+    }
+}

@@ -37,7 +37,7 @@ fn registry_snapshot() -> TabRegistrySnapshot {
 /// deliberately when the wire changes; this test fails loudly otherwise.
 #[test]
 fn protocol_version_is_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 14);
+    assert_eq!(PROTOCOL_VERSION, 15);
 }
 
 /// The handshake itself round-trips: `Hello` carries the pinned version to

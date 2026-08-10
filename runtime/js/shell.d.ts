@@ -1,5 +1,7 @@
 export type ClientSplitPaneVerticalCommandId = "clay.shell.clientSplitPaneVertical";
 export type ClientSplitPaneHorizontalCommandId = "clay.shell.clientSplitPaneHorizontal";
+export type ClientSplitPaneRightCommandId = "clay.shell.clientSplitPaneRight";
+export type ClientSplitPaneDownCommandId = "clay.shell.clientSplitPaneDown";
 export type ClientAddEqualPaneCommandId = "clay.shell.clientAddEqualPane";
 export type ClientClosePaneCommandId = "clay.shell.clientClosePane";
 export type ClientFocusPaneNextCommandId = "clay.shell.clientFocusPaneNext";
@@ -23,6 +25,8 @@ export type ClientTabMoveToCommandId = `clay.shell.clientTabMoveTo.${ClientTabPo
 
 export declare function clientSplitPaneVertical(): ClientSplitPaneVerticalCommandId;
 export declare function clientSplitPaneHorizontal(): ClientSplitPaneHorizontalCommandId;
+export declare function clientSplitPaneRight(): ClientSplitPaneRightCommandId;
+export declare function clientSplitPaneDown(): ClientSplitPaneDownCommandId;
 export declare function clientAddEqualPane(): ClientAddEqualPaneCommandId;
 export declare function clientClosePane(): ClientClosePaneCommandId;
 export declare function clientFocusPaneNext(): ClientFocusPaneNextCommandId;

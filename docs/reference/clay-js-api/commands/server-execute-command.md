@@ -35,7 +35,7 @@ Execute a registered server command through the CommandExecution validation boun
 
 `serverExecuteCommand` is the Phase 18.12 runtime-backed Clay JS API for **Execute Command**. It is exposed through the curated `clay:commands` facade so package/configuration/runtime code does not call raw ops or Rust internals.
 
-This API is server-first background/action work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths.
+This API is server-first background/action work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths. Phase 22.8 does not add a tab selector: connection-level workspace commands resolve the caller's bound `TabServerState`, and this facade exposes neither arbitrary `TabId` access nor a `TabServerState` handle.
 
 ## When to use
 

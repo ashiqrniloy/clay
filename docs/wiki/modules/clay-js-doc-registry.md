@@ -117,6 +117,55 @@ let configurable_color_apis = registry.by_custom_property("color");
 - `tests/package_loading_docs.rs`: generic package-document rows bind language-package docs to package manifests, load entries, API inventory ownership, and the no-hidden-package-configuration rule.
 - Synthetic validator checks prove missing fields/markers report exact IDs/paths and harmless prose rewrites pass. Validators read files only; only `cargo run --bin update-doc-registry` writes generated output.
 
+## Phase 22.7: Split-Alias Entries
+
+Phase 22.7 added `clay.shell.clientSplitPaneRight` and
+`clay.shell.clientSplitPaneDown` as registry-public entries (123 total,
+all public) with `key_bindings: []` (aliases — the canonical
+`Ctrl+\`/`Ctrl+-` defaults stay on the vertical/horizontal entries) and
+`phase: Phase 22.7`. They ride the same validation surface as every other
+entry: facade exports in `runtime/js/shell.js` (+ `.d.ts`), master-index
+links, inventory rows, and the generic validators — no new test code
+needed; the drift guard (`public_inventory_docs_index_and_generated_matrix_match_exactly`)
+fails until `cargo run --bin update-doc-registry` is re-run.
+
+## Phase 22.8: Per-tab API boundary audit
+
+Phase 22.8 adds server-owned tab routing, not a new JavaScript authority
+surface. The changed server functions are intentionally internal:
+`IpcServer::{create_tab_state, ensure_tab_state, tab_state,
+tab_state_for_client, unbound_bootstrap_state, state_for_client,
+remove_tab_state}`, `TabServerState::{workspace_pane_visible,
+toggle_workspace_pane}`, `TabRegistry` lookup/mutation helpers, and
+`WorkspaceState::with_document_id_allocator` are `pub(crate)`; connection
+routing (`route_connection_tab_state`, `document_for_message`, and workspace
+command result handling) remains private. The client reconnect/restore helpers
+are native client plumbing, not server-side JavaScript APIs.
+
+Existing documented APIs remain the public boundary: `clay.shell.clientTabNew`
+starts a picker-backed connection-bound `TabCommand::New`,
+`clay.documents.serverOpenDocument` and `clay.workspace` APIs operate through
+server-owned workspace validation, and `clay.commands.serverOpenFile`/
+`serverOpenDirectory` reuse the command boundary. None accepts an arbitrary
+`TabId` or exposes a `TabServerState` handle. `clay.workspace.toggleFileBrowser`
+is a fixed built-in command ID routed through the existing
+`clay.keybindings.bindKey` API, so it is documented in the keybinding/configuration
+reference but is deliberately not a second callable facade or registry entry.
+This keeps the per-tab workspace pane flag server-authoritative without adding
+hidden configuration keys or implicit filesystem authority.
+
+The audit is enforced by
+`tests/rust_visibility_api_mapping.rs::phase22_8_per_tab_state_has_no_new_public_programmatic_surface`
+and
+`tests/clay_js_doc_registry.rs::phase22_8_programmatic_surface_inventory_is_closed`.
+The first pins Rust visibility and rejects internal facade names; the second
+pins existing facade/op/docs/lookup metadata, rejects arbitrary-tab IDs, and
+requires the fixed file-browser command to remain documented through
+`bindKey`. The authoritative usage pages are
+[`clientTabNew`](../../reference/clay-js-api/shell/client-tab-new.md),
+[`serverOpenDocument`](../../reference/clay-js-api/documents/server-open-document.md),
+and [`serverListWorkspaceRoots`](../../reference/clay-js-api/workspace/server-list-workspace-roots.md).
+
 ## Related
 
 - [Clay JS Facade Skeleton](clay-js-facade-skeleton.md)

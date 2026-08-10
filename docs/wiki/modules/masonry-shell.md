@@ -40,7 +40,7 @@ Phase 18.2 implements the `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLay
 
 `src/masonry_shell.rs` owns the Masonry container behavior. `register_children` registers the already-created editor child. During layout, the shell computes its working-area size, asks `WorkingAreaLayout` for the editor component rectangle, runs the child layout with tight constraints for that rectangle, and places the child at the computed origin. The shell's `children_ids` remains the already-registered editor child list; split geometry does not mutate the Masonry child tree.
 
-Inside the editor child, `src/masonry_editor.rs` reuses the same SDUI/package `PaneSlotLayout` main-region calculation for paint and pointer hit-testing. `EditorWidget::editor_main_rect` asks `editor_region_for_document` for the current `main` rect, paints `EditorSurface::paint_in_rect` clipped to that rect, and translates pointer positions into editor-local coordinates before caret placement or selection extension. `editor_region_for_document` reserves the Clay-owned left file-browser slot whenever a Clay-owned SDUI panel is present (`SduiNativeState::root_id` is set or an editor binding exists), not only when the SDUI editor binding matches the active document, so opening a workspace file under a new document ID never lets the editor main region overlap the left file browser. Accepted visible fixed panels therefore consume `left`/`right`/`top`/`bottom` geometry instead of covering text, while transient overlays still paint after fixed panels and may cover content by design.
+Inside the editor child, `src/masonry_editor.rs` reuses the same SDUI/package `PaneSlotLayout` main-region calculation for paint and pointer hit-testing. `EditorWidget::editor_main_rect` asks `editor_region_for_document` for the current `main` rect, paints `EditorSurface::paint_in_rect` clipped to that rect, and translates pointer positions into editor-local coordinates before caret placement or selection extension. `editor_region_for_document` reserves the Clay-owned left file-browser slot when the installed SDUI tree contains a sidebar panel, not merely because an editor binding/root exists. This keeps the main region away from a visible browser after opening a workspace file under a new document ID, while an editor-only hidden snapshot reclaims the full width. Accepted visible fixed panels therefore consume `left`/`right`/`top`/`bottom` geometry instead of covering text, while transient overlays still paint after fixed panels and may cover content by design.
 
 `WorkingAreaLayoutUpdate` is the Phase 18.2 inert update path. It carries the current `base_version`, target `WorkingAreaId`, a prevalidated `PaneSplitTree`, the editor pane, and bounded per-pane `PaneSlotLayout` assignments. `WorkingAreaLayout::apply_update` rejects stale base versions, wrong working-area IDs, editor panes not in the tree, slot assignments for missing panes, duplicate pane-slot assignments, and more slot layouts than the tree can contain. Phase 18.3 `PackageUiRuntimeUpdate` carries the current package UI runtime version plus bounded fixed panels and transient overlays; `PackageUiRuntimeState::apply_update` rejects stale versions, more than four fixed panels, more than sixteen overlays, duplicate contribution IDs, and duplicate exclusive fixed-slot claims. Successful updates increment local runtime versions and replace only local pane/slot/component-binding/panel/overlay state; no package JavaScript, IPC, protocol decoding, widget-tree mutation, or document work runs in Masonry paint/layout/text-event handlers.
 
@@ -133,8 +133,8 @@ Phase 18.2 is an internal runtime foundation, not a public package UI API releas
 - `src/masonry_shell.rs::tests::shell_routes_edit_ack_and_resync_to_editor`: validates edit acknowledgements and resync snapshots still update editor text/status state through the shell child route.
 - `src/masonry_shell.rs::tests::shell_routes_sdui_snapshots_to_editor_component`: validates SDUI connection events still land in the editor component under the shell.
 - `src/masonry_editor.rs::tests::fixed_package_panel_shrinks_editor_hit_region`: validates visible package fixed panels offset the editor hit region instead of letting panel coordinates place the caret under the panel.
-- `src/main.rs::tests::connection_event_action_is_dispatched_to_shell_editor_child`: validates GUI connection-event user events target the shell-owned editor child.
-- `src/main.rs::tests::driver_routes_editor_actions_to_shell_editor_child`: validates `AppDriver` editor action routing uses the shell editor child ID even if a shell/root source is reported.
+- `src/driver/mod.rs::tests::connection_event_action_is_dispatched_to_shell_editor_child`: validates GUI connection-event user events target the shell-owned editor child.
+- `src/driver/mod.rs::tests::driver_routes_editor_actions_to_shell_editor_child`: validates `AppDriver` editor action routing uses the shell editor child ID even if a shell/root source is reported.
 - Command: `cargo test --lib shell --quiet`
 - Command: `cargo test --lib masonry_shell --quiet`
 - Command: `cargo test --lib main --quiet`
@@ -276,7 +276,7 @@ Phase 22.2 (2026-08-05) wires document views into the pane hosts and makes the s
 ### Tests
 
 - `src/shell/layout.rs`: cap rejection, equal-area redivision (2/3/4 panes, area equality), close/merge/focus-handoff, move swaps + end no-ops + ratio preservation, keyboard resize bordering/deepest/clamp/no-divider. Command: `cargo test --lib shell::layout --quiet`.
-- `src/masonry_shell.rs`: host identity stability across tree mutations, orphan detachment, placeholder hosting, per-pane placement, click-to-focus on placeholders, focus-policy behavior (default, follows-cursor, drag-skip), all 12 command dispatches, 4-pane cap enforcement, the no-server/no-JS hot-path guard, and (22.2) independent per-pane document views with document-scoped routing, typing-isolation hot-path guard, routing-target cleanup on pane close, and concurrent per-pane major modes isolated across behavior manifests. Command: `cargo test --lib masonry_shell --quiet`.
+- `src/masonry_shell.rs`: host identity stability across tree mutations, orphan detachment, placeholder hosting, per-pane placement, click-to-focus on placeholders, focus-policy behavior (default, follows-cursor, drag-skip), all 12 command dispatches, 4-pane cap enforcement, the no-server/no-JS hot-path guard, and (22.2) independent per-pane document views with document-scoped routing, typing-isolation hot-path guard, routing-target cleanup on pane close, and concurrent per-pane major modes isolated across behavior manifests. Phase 22.8 verification re-runs this matrix with per-tab server roots/document sets, per-document lease/version reservations, retained-session switching, duplicate-open ownership, and the four-pane cap; no split or hot-path implementation changes were needed. Command: `cargo test --lib masonry_shell --quiet`.
 - `src/server/js_runtime.rs`: policy publish/reject/default-unset through real init.js evaluation.
 - `src/server/ops/keybindings.rs`: all 12 shell IDs bindable + `ClientUiCommand`-routed; unknown `clay.shell.*` rejected.
 - `src/protocol/mod.rs`: defaults present with `Global` context and `ClientUi` authority.
@@ -287,7 +287,17 @@ Phase 22.3 (2026-08-06) makes each tab an independent client view with its own s
 
 - `ClayShellWidget` now owns `tabs: BTreeMap<ClientId, TabChrome>` + `active_tab: ClientId`. `TabChrome` (new, `src/masonry_shell.rs`) bundles one tab's `WorkingAreaLayout`, `pane_hosts`, `pane_targets`, `pane_focus_policy`, and `pending_orphans` — everything that was previously shell-level single-tab state. The shell hosts **every** tab's hosts as registered children; only the active tab's hosts are laid out at their pane rects, inactive tabs' hosts are laid out at zero size (the Phase 22.1 `pending_orphans` protocol) so their widgets stay in the tree and keep receiving connection events without painting or hit-testing.
 - Tabs are keyed by the connection's `ClientId` (the client-known identity at mount time; the server-assigned `TabId` arrives asynchronously via the registry snapshot and is tracked by the app driver). `install_tab` mounts a tab's chrome (first tab becomes active; later tabs are retained until `set_active_tab`), `set_active_tab` switches with one layout pass and resets in-flight drag sessions, `tab_for_chrome` resolves an event's tab from its chrome id, and per-tab queries (`pane_targets_for`, `pane_host_id_for`, `editor_widget_id_for`, `set_pane_focus_policy_for`, …) scope routing to one tab. The no-arg routing methods delegate to the active tab, so single-tab behavior is the pre-22.3 experience.
-- `src/main.rs` `Driver` owns `tabs: BTreeMap<ClientId, TabState>` (`TabState` = the connection's `ClientEditQueue` clone, per-tab `pending_opens`, and the server-assigned `tab_id`), `active_tab`, and the latest `registry` snapshot. The session itself is consumed at mount (initial state → chrome, events → per-tab bridge, edit queue → chrome + `TabState`). `mount_tab` (open-tab mechanism: builds the chrome + `TabChrome`, sends `TabCommand::New`, installs + activates, spawns the per-tab event bridge) and `switch_tab` are wired by the lifecycle task's affordance; `apply_tab_registry` fills each tab's `tab_id` by matching `client_id`.
+- `src/driver/mod.rs` `Driver` owns `tabs: BTreeMap<ClientId, TabState>`
+  (`TabState` = the connection's `ClientEditQueue` clone, per-tab
+  `pending_opens`, and the server-assigned `tab_id`), `active_tab`, and the
+  latest `registry` snapshot (Phase 22.7: the whole driver moved here from
+  `src/main.rs` — see the [driver module map](driver.md)). The session
+  itself is consumed at mount (initial state → chrome, events → per-tab
+  bridge, edit queue → chrome + `TabState`). `mount_tab` (open-tab
+  mechanism: receives a session already bound with `TabCommand::New`, builds
+  the chrome + `TabChrome`, installs + activates, and spawns the per-tab event bridge) and `switch_tab`
+  are wired by the lifecycle task's affordance; `apply_tab_registry` fills
+  each tab's `tab_id` by matching `client_id`.
 - Event routing: each tab's bridge tags its events with that tab's chrome `WidgetId`; the driver resolves the tab via `tab_for_chrome` and routes document-scoped events, fan-outs, runtime snapshots, and editor commands to **that tab's** targets only. `ShellPreferences` applies to the sending tab's focus policy; `TabRegistry` snapshots are driver-level state. Menus display in the tab's own chrome overlay. Focus follows only for the active tab (an inactive tab's open never steals focus).
 - `ClientEditQueue::enqueue_tab_command` sends `ClientMessage::TabCommand` on a connection.
 
@@ -295,10 +305,10 @@ Phase 22.3 (2026-08-06) makes each tab an independent client view with its own s
 
 ### Lifecycle (22.3 task 7: open / close / switch / reconnect)
 
-- **Open tab**: the tab bar's `+` affordance (`TabBarAction::NewTab`, right edge of the bar, present whenever the bar is) opens the native folder picker; the picked folder becomes the new tab's workspace root. The driver connects a fresh session on the runtime and `mount_tab` sends `TabCommand::New` (server-validated via `add_root`), mounts a new chrome + default single-pane split tree, spawns its event bridge, and switches to it. Connection failures (`OpenTabFailed` — e.g. the `MAX_ACTIVE_CONNECTIONS` cap) surface a `clay.tabs.open_failed` diagnostic on the active tab's chrome and never mount a tab. `Ctrl+T` (22.4) routes to the same `open_new_tab_dialog` path as `+` — same flow, same in-flight guard (a second request while the picker is open is ignored).
+- **Open tab**: the tab bar's `+` affordance (`TabBarAction::NewTab`, right edge of the bar, present whenever the bar is) opens the native folder picker; the picked folder becomes the new tab's workspace root. The driver connects a fresh session with `TabCommand::New(workspace_root)` during the handshake; the server returns that tab's initial document/browser state, then `mount_tab` mounts a new chrome + default single-pane split tree, spawns its event bridge, and switches to it. Connection failures (`OpenTabFailed` — e.g. the `MAX_ACTIVE_CONNECTIONS` cap) surface a `clay.tabs.open_failed` diagnostic on the active tab's chrome and never mount a tab. `Ctrl+T` (22.4) routes to the same `open_new_tab_dialog` path as `+` — same flow, same in-flight guard (a second request while the picker is open is ignored).
 - **Close tab**: the driver's `close_tab` (shared by card `✕` and `Ctrl+Shift+W`) first passes `tab_close_allowed` (never the last tab — the window never goes to zero tabs) and then the 22.4 dirty inventory `dirty_documents_in_tab` (replaces the 22.3 `guard_tab_close` first-dirty-view walk): a clean tab enqueues `TabCommand::Close` directly; a dirty tab gets the driver-owned confirm session (`clay::shell::tab_close_confirm_session` — Save all and close / Discard and close / Cancel) hosted on the active pane view + chrome overlay, with `pending_close_after_saves`/`advance_pending_close_after_saves` counting `DocumentSaved` acks before the close enqueues (cancelled on `FileOperationFailed`/disconnect). A clean close is server-authoritative: the server removes the registry entry and ends the connection, so the permit + leases release through the existing disconnect cleanup; the removal snapshot (observed on the other tabs' connections — the closing connection never reads its own broadcast update) drives `apply_registry_reconcile` uninstall.
 - **Switch tab**: card click → optimistic `switch_tab` + `TabCommand::Activate`; the server registry reconciles rejections.
-- **Reconnect**: on `Disconnected`/`ConnectionError` for a tab, `start_tab_reconnect` spawns a per-tab task that retries `client::connect` with the existing `connect_with_retry_while` backoff (50 × 20 ms, then 200 ms between cycles) until it succeeds or the tab is removed (per-tab `Arc<AtomicBool>` cancellation flag set by `apply_registry_reconcile`). On success the driver: swaps the fresh session's queue into the chrome and every pane view (`reconnect` — clears the disconnect recovery menu and re-arms the reinstall so the next `DocumentOpened` for the active document is not swallowed by the 22.2 duplicate-open no-op); re-keys the tab (`rekey_tab`: the `TabChrome` moves wholesale, widget ids stay stable, `active_tab` and card client ids follow); rebinds the registry via `TabCommand::Reclaim { tab_id }` (or `New` when the tab never got its id); re-opens every document the tab holds (`documents_for_reopen` — active + retained identities retained per-session since 22.3 — through the plain `OpenDocument` path, since a fresh connection holds no selected-file capability); spawns a new event bridge to the same chrome; restores focus when the tab was active. In-flight `pending_opens` are cleared (they died with the old connection). Split trees and per-pane document state restore from the retained in-memory `TabChrome`/sessions; a full client process restart reclaims the server's in-memory registry per tab on reconnect. Multi-client reclamation and server-restart disk restore are 21/22.5 ceilings.
+- **Reconnect**: on `Disconnected`/`ConnectionError` for a tab, `start_tab_reconnect` spawns a per-tab task that retries `client::connect_for_reclaim_or_new(tab_id, workspace_root)` with the existing backoff until it succeeds or the tab is removed (per-tab `Arc<AtomicBool>` cancellation flag set by `apply_registry_reconcile`). The fresh session already owns the reclaimed tab's initial document/browser state when `Reclaim` succeeds; after a server reset or TTL eviction, the same persisted root is bound through `New`. The driver swaps its queue into the chrome and every pane view (`reconnect`), re-keys the tab, and re-opens every document it holds through plain `OpenDocument` because the fresh connection has no selected-file capability. It spawns a new event bridge to the same chrome and restores focus when the tab was active. In-flight `pending_opens` are cleared. Split trees and per-pane document state restore from retained `TabChrome`/sessions; a full client process restart selects each persisted root before handshake-bound `New`. Multi-client reclamation remains a 21 ceiling.
 
 ### Key Invariants
 
@@ -319,19 +329,24 @@ Phase 22.3 (2026-08-06) makes each tab an independent client view with its own s
 - `src/masonry_pane_document.rs`: `reconnect` (queue swap + reinstall re-arm + menu clear), `documents_for_reopen`, per-session `workspace_root_id`/`path` retention.
 - `src/editor/document_session.rs`: `RetainedDocumentSession` open identity; `reopen_documents`.
 - `src/masonry_editor.rs`: `EditorAction::TabBar` + `TabBarAction`.
-- `src/main.rs`: `TabRegistryReconcile` (pure `apply_tab_registry` + shell-side `apply_registry_reconcile`), `TabBar` action handler (optimistic activate / dirty-guarded close / `NewTab` affordance), bootstrap `TabCommand::New`, reconnect (`start_tab_reconnect`, `ReconnectTabConnected` handler: queue swap, rekey, `Reclaim`, `OpenDocument` re-opens, new bridge), `guard_tab_close`, `tab_close_allowed`, `tab_card_display_name`.
-- `src/main.rs`: `TabState`, `mount_tab`/`switch_tab`/`apply_tab_registry`, per-tab event routing, per-tab bridges.
+- `src/driver/mod.rs` + `src/driver/reconcile.rs`: `TabRegistryReconcile` (pure `apply_tab_registry` + shell-side `apply_registry_reconcile`), `TabBar` action handler (optimistic activate / dirty-guarded close / `NewTab` affordance), handshake-bound `TabCommand::New`, reconnect (`start_tab_reconnect`, `reconnect_tab` handler: queue swap, rekey, reclaimed initial state, `OpenDocument` re-opens, new bridge), `guard_tab_close`, `tab_close_allowed`, `tab_card_display_name`.
+- `src/driver/mod.rs`: `TabState`, `mount_tab`/`switch_tab`/`apply_tab_registry`, per-tab event routing, per-tab bridges, `with_shell`/`with_editor`/`with_view` typed access helpers.
 - `src/client/mod.rs`: `ClientEditQueue::enqueue_tab_command`.
-- `src/protocol/mod.rs`: `TabId`, `TabEntry`, `TabRegistrySnapshot`, `TabCommand`, `ClientMessage::TabCommand`, `ServerMessage::TabRegistry`, protocol v11.
+- `src/protocol/mod.rs`: `TabId`, `TabEntry`, `TabRegistrySnapshot`, `TabCommand`, `ClientMessage::TabCommand`, `ServerMessage::TabRegistry`, protocol v15 deferred-binding pin.
 - `src/server/tab_registry.rs`: server-authoritative in-memory registry.
 
 ### Tests
 
 - `src/masonry_shell.rs`: install-then-activate, stable chrome/host ids across switches, inactive hosts laid out at zero size, single-tab shape unchanged, per-tab routing-target and focus-policy isolation; tab bar: hidden below two cards (single-tab geometry unchanged), geometry/carve with two cards, activate/close/no-op click actions, hover tracking, remove-tab uninstall + active fallback. Command: `cargo test --lib masonry_shell --quiet`.
 - `src/shell/primitives.rs`: `tab_card_chrome` resolves every state (Rest/Hover/Active/Focus/Disabled × selected). Command: `cargo test --lib shell::primitives --quiet`.
-- `src/client/mod.rs`: real-server tab command end-to-end — bootstrap `New` registers the tab (name/order in the snapshot), a rejected `Activate` pushes a reconciling snapshot, `Close` ends the connection + removes the registry entry (observed on a fresh connection's replay), a dropped connection's entry is reclaimed by a new connection (`Reclaim` keeps `TabId`, rebinds `ClientId`), and the connection cap refuses excess connections. Command: `cargo test --lib client::tests::real_server_tab --quiet`, `cargo test --lib real_server_ --quiet`.
-- `src/main.rs` (bin): registry reconciliation — fills tab ids + builds cards, removes closed tabs + activates the remaining one, skips removals on empty (restart) snapshots. Command: `cargo test --bin clay --quiet`.
-- `src/main.rs`: registry application fills server-assigned tab ids; per-tab edit queues are isolated channels. Command: `cargo test --lib main::tests --quiet`.
+- `src/client/mod.rs`: real-server tab command end-to-end — handshake-bound `New` registers the selected root, a rejected `Activate` pushes a reconciling snapshot, `Close` ends the connection + removes the registry entry (observed on an unbound fresh replay), a dropped connection is reclaimed by `connect_for_reclaim` (`Reclaim` keeps `TabId`, rebinds `ClientId`), server restart falls back to root-scoped `New`, and the connection cap refuses excess connections. Command: `cargo test --lib client::tests::real_server_tab --quiet`, `cargo test --lib real_server_ --quiet`.
+- `src/driver/reconcile.rs`: registry reconciliation — fills tab ids +
+  builds cards, removes closed tabs + activates the remaining one, skips
+  removals on empty (restart) snapshots. Command:
+  `cargo test --bin clay --quiet`.
+- `src/driver/mod.rs`: registry application fills server-assigned tab ids;
+  per-tab edit queues are isolated channels. Command:
+  `cargo test --bin clay --quiet` (driver tests).
 - Server-side registry tests: `cargo test --lib server::tab_registry --quiet`.
 
 ## Phase 22.5: Window-State Persistence (per-tab layouts and documents)
@@ -386,7 +401,7 @@ tree, and per-pane open documents. The shell side of the design:
 - `src/masonry_shell.rs`: `persist_debounced`/`mark_persistence_due`,
   `tab_layout_data`, `restored_single_editor`, `install_restored_tab`,
   `TabChrome::with_layout`.
-- `src/main.rs`: restore state machine (`advance_restore`,
+- `src/driver/restore.rs`: restore state machine (`advance_restore`,
   `mount_restored_tab`, `reopen_restored_documents`, `finish_restore`,
   `abandon_restore`, `RESTORE_CONFIRM_TIMEOUT`) + `persist_window_state`.
 - `src/masonry_editor.rs`, `src/masonry_pane_document.rs`:
@@ -485,7 +500,7 @@ this section documents the implementation.
   (256, the shared transient-menu budget; the cap is defense-in-depth —
   the 64-char name cap (`ACCESSIBILITY_DISPLAY_NAME_MAX_CHARS`) binds
   first).
-- **User-initiated paths only** (driver, `src/main.rs`): `switch_tab`
+- **User-initiated paths only** (driver, `src/driver/`): `switch_tab`
   returns `bool` and `apply_tree_change` returns `bool` so no-op
   operations never announce; `activate_tab` announces TabActivated after a
   real switch, `mount_tab` (its single call site is the new-tab dialog)
@@ -530,9 +545,11 @@ this section documents the implementation.
 - `src/masonry_pane_host.rs`: `pane_count`, `document_display_name`,
   `with_pane_count`/`set_pane_count`/`set_document_display_name` (pub(crate)),
   label formats in `accessibility`.
-- `src/main.rs`: `switch_tab -> bool`, `apply_tree_change -> bool`,
-  `activate_tab`/`mount_tab`/`remove_tab` announcement call sites,
-  `route_document_opened`/`route_document_event` label routing;
+- `src/driver/mod.rs`: `switch_tab -> bool`, `mount_tab` announcement call
+  site; `src/driver/restore.rs`: `activate_tab` announcement call site;
+  `src/masonry_shell.rs`: `apply_tree_change -> bool`, `remove_tab`
+  announcement call site, `route_document_opened`/`route_document_event`
+  label routing;
   `src/client/mod.rs`: `ClientConnectionEvent::metadata_path`.
 - `src/editor/accessibility.rs`: `sanitize_document_display_name`
   (pub(crate), 64-char cap).
@@ -552,3 +569,110 @@ this section documents the implementation.
   (22.6 names op/facade-free, internals pub(crate)/private).
 - Manual: `test-plan/13-window-splits.md` S23–S28,
   `test-plan/14-tabs.md` T50–T56.
+
+## Phase 22.7: Hardening — Active-Tab Invariant, Connection-Owner Contract, Tab Bar Overflow, Aliases
+
+Phase 22.7 (2026-08-09) closed review findings C3/C4/D1/D4/D5/D6/F5/A6 with
+no product behavior change except the deliberate tab-bar scroll and the
+additive split aliases:
+
+### Active-tab invariant (finding D1)
+
+`active_tab: ClientId` keeps a sentinel in the zero-tab state; the
+invariant "`active_tab` names a mounted tab OR `tabs` is empty" is stated
+at the field and enforced with `debug_assert!` (zero release overhead) plus
+early-return guards at every public entry point that calls `active()`
+(`paint`, `post_paint`, `on_text_event`, `on_pointer_event`,
+`accessibility`, `apply_shell_client_command`) when `tabs.is_empty()`.
+Rejected: `Option<ClientId>` with fallible accessors (~30 call sites) and
+silent fallback to the first tab. The zero-tab accessibility branch labels
+the shell "Clay working area shell. No mounted tabs." with empty children.
+Tests: `zero_tab_shell_is_inert`, `remove_last_tab_then_reinstall`.
+
+### Connection-owner contract (findings A1/F1/F2)
+
+Closing pane 1 (the editor pane) with siblings must keep the tab's
+connection owner — the `EditorWidget` pod — wired, because the driver
+routes theme/SDUI/runtime events to `editor_widget_id_for(client_id)`
+unconditionally. A probe showed that the old `pending_orphans` drain
+detached the editor host on close-then-split churn, so `edit_widget` on
+the editor id panicked ("Could not find widget in tree" — masonry_core
+`MutateCtx::remove_child` removes the node from the arena). The fix:
+
+- `TabChrome` gains `chrome_orphans: Vec<WidgetPod<PaneContentHost>>`
+  (permanent zero-size orphans, never detached) and
+  `editor_pane_id: PaneId`.
+- `sync_pane_hosts_state` routes the editor pane's host into
+  `chrome_orphans` instead of `pending_orphans`; `register_children`
+  registers them, layout lays them at zero size, and `remove_tab` detaches
+  them.
+- `PaneContent` stays a `#[doc(hidden)]` closed enum (Placeholder/Editor/
+  Document) with a documented extension seam — a future pane kind adds a
+  variant plus host paint/register/layout branches; a package-facing
+  `Custom` variant is a Plan 079+ decision. `PaneContentHost` carries the
+  theme-stamping (`with_ui_theme`/`set_ui_theme`) and placeholder-fill
+  logic (the dark-split bug source, finding D5) and now has direct
+  `#[cfg(test)]` unit tests.
+
+Tests: `close_editor_pane_keeps_connection_owner_wired`,
+`owner_survives_repeated_split_close_cycles`,
+`host_stamps_theme_on_placeholder_at_creation_and_via_setter`,
+`host_content_transitions_preserve_pane_identity`.
+
+### Tab bar overflow scroll (findings D6/F5)
+
+The tab bar is a bespoke-painted Clay-owned row (see the Phase 22.3 tab
+bar bullet). Cards shrink-to-fit until `TAB_BAR_CARD_MIN_WIDTH = 100.0`
+binds, then the strip scrolls:
+
+- `tab_bar_geometry` gains `scroll: f64` + `scroll_max: f64` (pure read:
+  `scroll` is clamped to `[0, scroll_max]` on read, no write-back);
+  card x positions shift by `-scroll`; `scroll_max = max(0, last_card_x1 -
+  strip_right)` where the strip's right boundary is the `+` slot.
+- Wheel (`PointerEvent::Scroll`) over the bar
+  rect adjusts the stored `tab_bar_scroll`: `LineDelta` lines ×
+  `TAB_BAR_SCROLL_STEP = 24.0`, `PixelDelta` 1:1 in pixels (precise-scroll
+  input must not inherit the line multiplier — verification-pass fix), page
+  deltas ignored (scrollbar wells are not wheel input); clamped to
+  `[0, scroll_max]`. `set_active_tab`/card mutation paths call
+  `scroll_active_card_into_view` (target = `scroll + rect.x0` when the left
+  edge is offscreen, else `scroll + (rect.x1 - strip_right)` when the right
+  edge passes the `+` slot, then clamp).
+- Paint clips cards to `[bar.x0, new_tab_rect.x0]` and pops before the `+`
+  glyph; `tab_bar_hit_test` honors the scroll offset. Overflow needs 6+
+  cards at 900 px (5 cards still fit — the last shrinks to ~124 px).
+
+Rejected: an overflow `»` menu and a real scroll-component strip
+(wheel-driven offset on a fixed-height painted bar is the minimum working
+solution — the catalog scroll component chrome stays for content regions).
+Tests: `tab_bar_cards_never_below_min_width`, `tab_bar_wheel_scroll_clamps`,
+`tab_bar_hit_test_honors_scroll`, `activating_offscreen_tab_scrolls_it_into_view`.
+
+### Split direction aliases (finding F3)
+
+`clay.shell.clientSplitPaneRight` → `SplitPaneVertical` (side-by-side) and
+`clay.shell.clientSplitPaneDown` → `SplitPaneHorizontal` (stacked) map in
+`ShellClientCommand::from_command_id` (src/masonry_shell.rs), were added to
+both keybinding allowlists (`is_runtime_bindable_command` and the
+`ClientUiCommand` routing branch, `src/server/ops/keybindings.rs`), and are
+exported by `runtime/js/shell.js` (+ `.d.ts`). No default chords; canonical
+`Ctrl+\` / `Ctrl+-` unchanged. The aliases pass the full `validate_command_id`
+gate (the `bindKey` config path).
+
+### Cleanup sweep
+
+- Removed the `#![allow(dead_code)]` module attribute from
+  `src/shell/layout.rs`; test-only layout symbols (observation types,
+  `FixedSlotState` methods, `has_main_slot`, `PaneSlotLayoutError`,
+  `working_area_id`/`root_pane_id`, `observable_snapshot`/`slot_observations`,
+  `observe_pane_tree_node`) are now `#[cfg(test)]`-gated (the layout types
+  stay production via `src/perf/baselines.rs`).
+- Dropped the stale `main.rs` "clay client IPC event" eprintln; documented
+  the `<=2` hover-reset and the move-tab clarity rationale; the A6 note
+  (bespoke two-stroke tab-bar glyphs stay, token-driven colors, no glyph
+  primitive) lives in `docs/reference/ui-components.md`.
+- `PaneDocumentView` field groups decomposed into `PaneRequestBookkeeping`
+  (7 request-id fields) and `PaneMenuSync` (menu/pending/session ids):
+  30 → 20 fields, mechanical delegation, focused unit tests
+  `request_bookkeeping_allocates_unique_ids`,
+  `menu_sync_pending_semantics` (see the pane-document-views page).

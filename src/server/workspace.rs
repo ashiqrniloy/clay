@@ -355,6 +355,10 @@ pub(crate) struct WorkspaceState {
     path_to_document: HashMap<PathBuf, DocumentId>,
     next_root_id: WorkspaceRootId,
     next_document_id: DocumentId,
+    /// Server-created tab workspaces share this allocator so document IDs
+    /// remain unique across tabs. Standalone test workspaces keep the local
+    /// allocator for deterministic IDs.
+    document_id_allocator: Option<Arc<AtomicU64>>,
 }
 
 impl WorkspaceState {
@@ -365,7 +369,13 @@ impl WorkspaceState {
             path_to_document: HashMap::new(),
             next_root_id: 1,
             next_document_id: 1,
+            document_id_allocator: None,
         }
+    }
+
+    pub(crate) fn with_document_id_allocator(mut self, allocator: Arc<AtomicU64>) -> Self {
+        self.document_id_allocator = Some(allocator);
+        self
     }
 
     pub(crate) fn reserve_document_ids_from(&mut self, next_document_id: DocumentId) {
@@ -1428,8 +1438,13 @@ impl WorkspaceState {
             return existing;
         }
         self.enforce_document_ceilings(client_id).await?;
-        let document_id = self.next_document_id;
-        self.next_document_id = self.next_document_id.saturating_add(1);
+        let document_id = if let Some(allocator) = &self.document_id_allocator {
+            allocator.fetch_add(1, Ordering::Relaxed)
+        } else {
+            let document_id = self.next_document_id;
+            self.next_document_id = self.next_document_id.saturating_add(1);
+            document_id
+        };
         let document = Arc::new(Mutex::new(DocumentState::new(
             document_id,
             text,

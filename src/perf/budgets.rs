@@ -61,6 +61,12 @@ pub(crate) const MAX_DOCUMENTS_PER_CLIENT: usize = CLIENT_DOCUMENT_SESSION_MAX;
 // permit owned by each connection task; excess connections are refused at
 // accept time instead of spawning unbounded tasks (Plan 060 T6, P1-10).
 pub(crate) const MAX_ACTIVE_CONNECTIONS: usize = 64;
+// Abandoned-tab horizon for the registry TTL sweep (Phase 22.7): entries
+// whose bound connection never returned within the horizon are removed by
+// the connect/departure sweep. Transient reconnects complete in seconds;
+// the horizon is deliberately generous and keeps the registry bounded in
+// long-running servers without a background task.
+pub(crate) const REGISTRY_TAB_TTL: std::time::Duration = std::time::Duration::from_secs(3600);
 // Server-wide open-document ceiling: every connection could hold the
 // per-client maximum. Beyond this, opens fail closed with
 // `WorkspaceLimitExceeded` rather than growing workspace registries without

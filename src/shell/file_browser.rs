@@ -39,7 +39,8 @@ pub(crate) const TOGGLE_FILE_BROWSER_COMMAND_ID: &str = "clay.workspace.toggleFi
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FileBrowserState {
     root_id: WorkspaceRootId,
-    root_path_display: String,
+    root_display_name: String,
+    root_display_path: String,
     current_directory: PathBuf,
     entries: Vec<FileBrowserEntry>,
 }
@@ -118,7 +119,8 @@ impl FileBrowserState {
 
         Ok(Self {
             root_id,
-            root_path_display: root_metadata.display_name,
+            root_display_name: root_metadata.display_name,
+            root_display_path: root_metadata.display_path,
             current_directory: relative_path,
             entries,
         })
@@ -146,14 +148,14 @@ impl FileBrowserState {
         let file_list_id = SduiNodeId(5);
         let editor_id = SduiNodeId(6);
 
+        let workspace_title = format!(
+            "Workspace · {} · {}",
+            self.root_display_name, self.root_display_path
+        );
         let title = if self.current_directory.as_os_str().is_empty() {
-            format!("Workspace · {}", self.root_path_display)
+            workspace_title
         } else {
-            format!(
-                "Workspace · {} · {}",
-                self.root_path_display,
-                self.current_directory.display()
-            )
+            format!("{workspace_title} · {}", self.current_directory.display())
         };
         let title_label = SduiNode::new(title_label_id, SduiNodeKind::Label { text: title });
 
@@ -205,6 +207,39 @@ impl FileBrowserState {
             ui_version: 1,
             root_id,
             nodes: vec![root, sidebar, sidebar_stack, title_label, file_list, editor],
+        }
+    }
+
+    /// Produce the inert editor-only tree used while the workspace pane is
+    /// hidden. The editor binding keeps the existing document surface alive;
+    /// the absence of a panel lets the client reclaim the left slot.
+    pub(crate) fn hidden_sdui_tree(
+        document_id: DocumentId,
+        document_version: DocumentVersion,
+    ) -> SduiTree {
+        let root_id = SduiNodeId(1);
+        let editor_id = SduiNodeId(2);
+        SduiTree {
+            ui_version: 1,
+            root_id,
+            nodes: vec![
+                SduiNode::new(
+                    root_id,
+                    SduiNodeKind::Flex {
+                        direction: SduiFlexDirection::Row,
+                        children: vec![editor_id],
+                    },
+                ),
+                SduiNode::new(
+                    editor_id,
+                    SduiNodeKind::EditorView {
+                        binding: SduiEditorBinding {
+                            document_id,
+                            expected_version: Some(document_version),
+                        },
+                    },
+                ),
+            ],
         }
     }
 
@@ -392,6 +427,8 @@ mod tests {
     fn file_browser_sdui_tree_has_left_workspace_panel() {
         let root = temp_workspace("browser-sdui");
         fs::write(root.join("main.rs"), "fn main() {}").unwrap();
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src").join("lib.rs"), "").unwrap();
 
         let mut workspace = WorkspaceState::new();
         let root_id = workspace.add_root(&root).unwrap();
@@ -403,6 +440,35 @@ mod tests {
                 .iter()
                 .any(|node| matches!(node.kind, SduiNodeKind::Panel { .. }))
         );
+        let title = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::Label { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .expect("workspace header label");
+        let root_metadata = workspace
+            .list_root_metadata()
+            .into_iter()
+            .find(|root| root.workspace_root_id == root_id)
+            .unwrap();
+        assert!(title.contains(&root_metadata.display_name));
+        assert!(title.contains(&root_metadata.display_path));
+
+        let nested =
+            FileBrowserState::from_workspace_at(&workspace, root_id, PathBuf::from("src")).unwrap();
+        let nested_title = nested
+            .to_sdui_tree(7, 3)
+            .nodes
+            .into_iter()
+            .find_map(|node| match node.kind {
+                SduiNodeKind::Label { text } => Some(text),
+                _ => None,
+            })
+            .unwrap();
+        assert!(nested_title.ends_with(" · src"));
+
         let list = tree
             .nodes
             .iter()
@@ -414,6 +480,27 @@ mod tests {
         assert!(list.iter().any(|item| item.label == "main.rs"));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn hidden_sdui_tree_keeps_editor_without_left_panel() {
+        let tree = FileBrowserState::hidden_sdui_tree(7, 3);
+        assert_eq!(tree.nodes.len(), 2);
+        assert!(tree.nodes.iter().all(|node| {
+            !matches!(
+                node.kind,
+                SduiNodeKind::Panel { .. } | SduiNodeKind::List { .. }
+            )
+        }));
+        assert!(tree.nodes.iter().any(|node| matches!(
+            node.kind,
+            SduiNodeKind::EditorView {
+                binding: SduiEditorBinding {
+                    document_id: 7,
+                    expected_version: Some(3),
+                }
+            }
+        )));
     }
 
     #[test]

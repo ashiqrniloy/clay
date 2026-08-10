@@ -20,18 +20,19 @@ use crate::{
     protocol::{
         BehaviorManifest, ClientId, ClientMessage, CompletionProvenance, CompletionRequest,
         CompletionResultSet, CompletionStatus, CompletionTrigger, DocumentId, DocumentMetadata,
-        LanguageIntelligenceFeature, LanguageIntelligencePayload, LanguageIntelligenceResult,
-        LanguageIntelligenceStatus, PROTOCOL_VERSION, ParseByteRange, ParseInputEdit, ParsePolicy,
-        ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic, SduiActionArgument,
-        SduiActionIntent, SduiActionSource, SduiActionValue, SelectionQueryRange,
-        SelectionQueryResult, ServerMessage, TabCommand, TabRegistrySnapshot, WorkspaceRootId,
+        DocumentVersion, LanguageIntelligenceFeature, LanguageIntelligencePayload,
+        LanguageIntelligenceResult, LanguageIntelligenceStatus, PROTOCOL_VERSION, ParseByteRange,
+        ParseInputEdit, ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic,
+        SduiActionArgument, SduiActionIntent, SduiActionSource, SduiActionValue,
+        SelectionQueryRange, SelectionQueryResult, ServerMessage, TabCommand, TabId,
+        TabRegistrySnapshot, WorkspaceRootId,
         codec::{Codec, CodecError},
         completion::estimated_result_payload_bytes,
     },
 };
 
 use super::{
-    RuntimeGenerationStore,
+    RuntimeGenerationStore, TabServerState,
     behavior::{ActiveBehaviorManifest, BehaviorVersionDecision},
     command_execution::{CommandExecutionRequest, CommandExecutionTarget, CommandExecutor},
     completion::{CompletionProviderMeta, apply_exclusive_suppression},
@@ -129,6 +130,97 @@ fn client_message_identity(message: &ClientMessage) -> Option<ClientId> {
     }
 }
 
+/// Per-message state route. Production connections must already be bound to a
+/// live registry entry; test-only handlers without an `IpcServer` retain their
+/// explicit bootstrap handles.
+#[derive(Debug, Clone)]
+struct RoutedTabState {
+    tab_id: Option<TabId>,
+    state: TabServerState,
+}
+
+async fn route_connection_tab_state(
+    client_id: ClientId,
+    reload_server: Option<&super::IpcServer>,
+    bootstrap_document: &Arc<Mutex<DocumentState>>,
+    bootstrap_workspace: &Arc<Mutex<WorkspaceState>>,
+) -> Option<RoutedTabState> {
+    if let Some(server) = reload_server {
+        if let Some((tab_id, state)) = server.tab_state_for_client(client_id).await {
+            return Some(RoutedTabState {
+                tab_id: Some(tab_id),
+                state,
+            });
+        }
+        return server
+            .unbound_bootstrap_state()
+            .await
+            .map(|state| RoutedTabState {
+                tab_id: None,
+                state,
+            });
+    }
+
+    Some(RoutedTabState {
+        tab_id: None,
+        state: TabServerState {
+            welcome: Arc::clone(bootstrap_document),
+            workspace: Arc::clone(bootstrap_workspace),
+            workspace_pane_visible: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        },
+    })
+}
+
+fn message_requires_tab_state(message: &ClientMessage) -> bool {
+    matches!(
+        message,
+        ClientMessage::Edit { .. }
+            | ClientMessage::EditorIntent { .. }
+            | ClientMessage::RequestResync { .. }
+            | ClientMessage::DecorationViewportRequest { .. }
+            | ClientMessage::OpenDocument { .. }
+            | ClientMessage::OpenSelectedFile { .. }
+            | ClientMessage::AddSelectedWorkspaceRoot { .. }
+            | ClientMessage::SaveDocument { .. }
+            | ClientMessage::ReloadDocument { .. }
+            | ClientMessage::CloseDocument { .. }
+            | ClientMessage::GetDocumentStatus { .. }
+            | ClientMessage::ListDocuments { .. }
+            | ClientMessage::SduiAction { .. }
+            | ClientMessage::CommandIntent { .. }
+            | ClientMessage::CompletionRequest { .. }
+            | ClientMessage::LanguageIntelligenceRequest { .. }
+            | ClientMessage::SelectionQueryRequest { .. }
+            | ClientMessage::TabCommand {
+                command: TabCommand::OpenWorkspace { .. },
+                ..
+            }
+    )
+}
+
+fn unbound_tab_state_error() -> ServerMessage {
+    ServerMessage::Error {
+        code: ProtocolErrorCode::InvalidMessage,
+        message: "connection is not bound to a live tab".to_string(),
+    }
+}
+
+fn tab_binding_conflict_error() -> ServerMessage {
+    ServerMessage::Error {
+        code: ProtocolErrorCode::InvalidMessage,
+        message: "connection is already bound to a different tab".to_string(),
+    }
+}
+
+fn new_tab_binding_conflict_error() -> ServerMessage {
+    ServerMessage::FileOperationFailed {
+        code: crate::protocol::FileErrorCode::AccessDenied,
+        message: "connection is already bound to a tab".to_string(),
+        workspace_root_id: None,
+        document_id: None,
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 async fn handle_connection<S>(
@@ -198,6 +290,8 @@ where
 {
     let cleanup_document = Arc::clone(&document);
     let cleanup_workspace = Arc::clone(&workspace);
+    let cleanup_server = reload_server.clone();
+    let cleanup_bound_state = Arc::new(std::sync::Mutex::new(None));
     let cleanup_parse = parse_coordinator.clone();
     let cleanup_completion = completion.clone();
     let cleanup_language_intelligence = language_intelligence.clone();
@@ -208,6 +302,7 @@ where
         document,
         behavior,
         workspace,
+        Arc::clone(&cleanup_bound_state),
         sdui,
         active_theme,
         runtime_diagnostics,
@@ -239,6 +334,34 @@ where
         result => result,
     };
 
+    // A connection starts on bootstrap state for the legacy handshake, then
+    // switches to its bound tab after `New`/`Reclaim`. Clean the last state
+    // actually routed to this connection even when a later `Reclaim` removed
+    // its registry binding before the old connection exited.
+    let tracked_state = cleanup_bound_state.lock().unwrap().clone();
+    let tracked_state = match tracked_state {
+        Some(state) => Some(state),
+        None => match cleanup_server.as_ref() {
+            Some(server) => server.state_for_client(client_id).await,
+            None => None,
+        },
+    };
+    if let Some(state) = tracked_state
+        && (!Arc::ptr_eq(&state.welcome, &cleanup_document)
+            || !Arc::ptr_eq(&state.workspace, &cleanup_workspace))
+    {
+        cleanup_connection_documents(
+            client_id,
+            &state.welcome,
+            &state.workspace,
+            &cleanup_parse,
+            &cleanup_completion,
+            &cleanup_language_intelligence,
+            &cleanup_document_analysis,
+        )
+        .await;
+    }
+
     // Every exit path, including failed asynchronous server writes, releases
     // document authority and document-scoped coordinator state.
     cleanup_connection_documents(
@@ -261,9 +384,10 @@ where
 async fn handle_connection_loop<S>(
     mut stream: S,
     client_id: u64,
-    document: Arc<Mutex<DocumentState>>,
+    mut document: Arc<Mutex<DocumentState>>,
     behavior: Arc<Mutex<ActiveBehaviorManifest>>,
-    workspace: Arc<Mutex<WorkspaceState>>,
+    mut workspace: Arc<Mutex<WorkspaceState>>,
+    bound_state: Arc<std::sync::Mutex<Option<TabServerState>>>,
     sdui: Arc<Mutex<StaticSduiState>>,
     active_theme: Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
     runtime_diagnostics: Arc<Mutex<RuntimeDiagnosticStore>>,
@@ -321,6 +445,8 @@ where
         document_analysis: document_analysis.clone(),
         client_id,
     };
+    let bootstrap_document = Arc::clone(&document);
+    let bootstrap_workspace = Arc::clone(&workspace);
     let default_document_id = document.lock().await.document_id();
     parse_coordinator.subscribe_document(default_document_id, client_id);
     document_analysis.subscribe_document(default_document_id, client_id);
@@ -333,13 +459,15 @@ where
             send_welcome_snapshot_and_manifest(
                 &mut stream,
                 client_id,
-                &document,
                 &behavior,
-                &workspace,
-                &sdui,
                 &active_theme,
                 &runtime_diagnostics,
                 &runtime_generation,
+                if reload_server.is_none() {
+                    Some((&bootstrap_document, &bootstrap_workspace, &sdui))
+                } else {
+                    None
+                },
                 codec,
             )
             .await?;
@@ -415,6 +543,7 @@ where
     });
     let _read_pump_guard = crate::protocol::codec::ReadPumpGuard::new(read_pump.abort_handle());
 
+    let mut bound_tab_id = None;
     loop {
         let message = match tokio::select! {
             typography = typography_updates.recv() => match typography {
@@ -628,6 +757,26 @@ where
             continue;
         }
 
+        if message_requires_tab_state(&message) {
+            let Some(routed) = route_connection_tab_state(
+                client_id,
+                reload_server.as_ref(),
+                &bootstrap_document,
+                &bootstrap_workspace,
+            )
+            .await
+            else {
+                codec
+                    .write_server_message(&mut stream, &unbound_tab_state_error())
+                    .await?;
+                continue;
+            };
+            bound_tab_id = routed.tab_id;
+            *bound_state.lock().unwrap() = Some(routed.state.clone());
+            document = routed.state.welcome;
+            workspace = routed.state.workspace;
+        }
+
         match message {
             ClientMessage::Edit {
                 document_id,
@@ -704,23 +853,11 @@ where
             } => {
                 // Plan 060 T4 (P0-2): resync returns full document text, so a
                 // guessed workspace document id must fail closed instead of
-                // leaking another connection's payload. The default document
-                // is authorized at welcome.
-                let authorized = {
-                    let default_id = document.lock().await.document_id();
-                    if document_id == default_id {
-                        Some(Arc::clone(&document))
-                    } else {
-                        let workspace = workspace.lock().await;
-                        match workspace.document_handle(document_id) {
-                            Some(handle) if handle.lock().await.has_access(client_id) => {
-                                Some(handle)
-                            }
-                            _ => None,
-                        }
-                    }
-                };
-                let Some(target_document) = authorized else {
+                // leaking another connection's payload. The shared helper
+                // authorizes only this connection's welcome/document grant.
+                let Some(target_document) =
+                    document_for_message(document_id, client_id, &document, &workspace).await
+                else {
                     let response = file_operation_failed(
                         crate::server::workspace::WorkspaceError::UnknownDocument { document_id },
                         None,
@@ -871,11 +1008,19 @@ where
                         .await?;
                     continue;
                 }
+                let workspace_pane_visible = match reload_server.as_ref() {
+                    Some(server) => server
+                        .state_for_client(client_id)
+                        .await
+                        .is_some_and(|state| state.workspace_pane_visible()),
+                    None => true,
+                };
                 for message in add_selected_workspace_root_messages(
                     &workspace,
                     &document,
                     &sdui,
                     client_id,
+                    workspace_pane_visible,
                     selected_path,
                 )
                 .await
@@ -969,25 +1114,71 @@ where
             // snapshot to all connections.
             ClientMessage::TabCommand { client_id, command } => match command {
                 TabCommand::New { workspace_root } => {
-                    let root_id = {
-                        let mut workspace = workspace.lock().await;
-                        match workspace.add_root(std::path::PathBuf::from(workspace_root.clone())) {
-                            Ok(root_id) => root_id,
-                            Err(error) => {
-                                let response = file_operation_failed(error, None, None);
-                                codec.write_server_message(&mut stream, &response).await?;
-                                continue;
+                    if bound_tab_id.is_some()
+                        || tab_registry
+                            .lock()
+                            .await
+                            .tab_for_client(client_id)
+                            .is_some()
+                    {
+                        codec
+                            .write_server_message(&mut stream, &new_tab_binding_conflict_error())
+                            .await?;
+                        continue;
+                    }
+                    let (snapshot, workspace_pane_visible) =
+                        if let Some(server) = reload_server.as_ref() {
+                            match server.create_tab_state(client_id, workspace_root).await {
+                                Ok((snapshot, state)) => {
+                                    let workspace_pane_visible = state.workspace_pane_visible();
+                                    *bound_state.lock().unwrap() = Some(state.clone());
+                                    document = state.welcome;
+                                    workspace = state.workspace;
+                                    (snapshot, workspace_pane_visible)
+                                }
+                                Err(error) => {
+                                    let response = file_operation_failed(error, None, None);
+                                    codec.write_server_message(&mut stream, &response).await?;
+                                    continue;
+                                }
                             }
-                        }
-                    };
-                    let snapshot = {
-                        let mut registry = tab_registry.lock().await;
-                        registry.create_tab(client_id, root_id, workspace_root);
-                        registry.snapshot()
-                    };
+                        } else {
+                            let root_id = {
+                                let mut workspace = workspace.lock().await;
+                                match workspace
+                                    .add_root(std::path::PathBuf::from(workspace_root.clone()))
+                                {
+                                    Ok(root_id) => root_id,
+                                    Err(error) => {
+                                        let response = file_operation_failed(error, None, None);
+                                        codec.write_server_message(&mut stream, &response).await?;
+                                        continue;
+                                    }
+                                }
+                            };
+                            let mut registry = tab_registry.lock().await;
+                            registry.create_tab(client_id, root_id, workspace_root);
+                            (registry.snapshot(), true)
+                        };
+                    bound_tab_id = tab_registry.lock().await.tab_for_client(client_id);
+                    send_tab_initial_state(
+                        &mut stream,
+                        client_id,
+                        &document,
+                        &workspace,
+                        &sdui,
+                        workspace_pane_visible,
+                        codec,
+                    )
+                    .await?;
                     let _ = tab_registry_tx.send(snapshot);
                 }
                 TabCommand::OpenWorkspace { tab_id, root } => {
+                    if bound_tab_id.is_some_and(|bound| bound != tab_id) {
+                        let snapshot = tab_registry.lock().await.snapshot();
+                        let _ = tab_registry_tx.send(snapshot);
+                        continue;
+                    }
                     let root_id = {
                         let mut workspace = workspace.lock().await;
                         match workspace.add_root(std::path::PathBuf::from(root.clone())) {
@@ -1007,18 +1198,26 @@ where
                     let _ = tab_registry_tx.send(snapshot);
                 }
                 TabCommand::Close { tab_id } => {
-                    let snapshot = {
+                    let closed = {
                         let mut registry = tab_registry.lock().await;
-                        registry.close_tab(tab_id, client_id);
-                        registry.snapshot()
+                        let closed = registry.close_tab(tab_id, client_id);
+                        let snapshot = registry.snapshot();
+                        let _ = tab_registry_tx.send(snapshot);
+                        closed
                     };
-                    let _ = tab_registry_tx.send(snapshot);
-                    // The tab's connection is this connection (only the bound
-                    // client may close it): end the connection so the permit +
-                    // leases release via the existing disconnect cleanup path.
-                    // A rejected close (unknown/foreign tab) also pushes a
-                    // snapshot so the optimistic client reconciles.
-                    return Ok(());
+                    if closed {
+                        if let Some(server) = reload_server.as_ref() {
+                            server.remove_tab_state(tab_id).await;
+                        }
+                        // The tab's connection is this connection (only the
+                        // bound client may close it): end the connection so
+                        // the permit + leases release via the existing
+                        // disconnect cleanup path.
+                        return Ok(());
+                    }
+                    // Rejected close (unknown/foreign tab): the snapshot
+                    // above reconciles the optimistic client; this
+                    // connection keeps serving.
                 }
                 TabCommand::Activate { tab_id } => {
                     // Always push a snapshot, accepted or not: the client
@@ -1033,6 +1232,28 @@ where
                     let _ = tab_registry_tx.send(snapshot);
                 }
                 TabCommand::Reclaim { tab_id } => {
+                    let current_tab =
+                        bound_tab_id.or(tab_registry.lock().await.tab_for_client(client_id));
+                    if current_tab.is_some_and(|bound| bound != tab_id) {
+                        codec
+                            .write_server_message(&mut stream, &tab_binding_conflict_error())
+                            .await?;
+                        continue;
+                    }
+                    let existing_entry = tab_registry.lock().await.entry(tab_id);
+                    if let Some(server) = reload_server.as_ref()
+                        && let Some(entry) = existing_entry.as_ref()
+                        && let Err(error) = server
+                            .ensure_tab_state(
+                                tab_id,
+                                std::path::PathBuf::from(&entry.workspace_root),
+                            )
+                            .await
+                    {
+                        let response = file_operation_failed(error, None, None);
+                        codec.write_server_message(&mut stream, &response).await?;
+                        continue;
+                    }
                     let snapshot = {
                         let mut registry = tab_registry.lock().await;
                         if registry.reclaim(tab_id, client_id) {
@@ -1042,7 +1263,37 @@ where
                         }
                     };
                     if let Some(snapshot) = snapshot {
+                        bound_tab_id = Some(tab_id);
+                        let mut workspace_pane_visible = true;
+                        if let Some(server) = reload_server.as_ref()
+                            && let Some(state) = server.tab_state(tab_id).await
+                        {
+                            workspace_pane_visible = state.workspace_pane_visible();
+                            *bound_state.lock().unwrap() = Some(state.clone());
+                            document = state.welcome;
+                            workspace = state.workspace;
+                        }
+                        send_tab_initial_state(
+                            &mut stream,
+                            client_id,
+                            &document,
+                            &workspace,
+                            &sdui,
+                            workspace_pane_visible,
+                            codec,
+                        )
+                        .await?;
                         let _ = tab_registry_tx.send(snapshot);
+                    } else {
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::Error {
+                                    code: ProtocolErrorCode::InvalidMessage,
+                                    message: "could not reclaim tab".to_string(),
+                                },
+                            )
+                            .await?;
                     }
                 }
                 // Phase 22.4: server-authoritative tab reorder. The registry
@@ -1167,6 +1418,23 @@ where
                         .await?;
                     continue;
                 }
+                let Some(target_document) =
+                    document_for_message(request.document_id, client_id, &document, &workspace)
+                        .await
+                else {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::Error {
+                                code: ProtocolErrorCode::InvalidMessage,
+                                message:
+                                    "completion document is not authorized for this connection"
+                                        .to_string(),
+                            },
+                        )
+                        .await?;
+                    continue;
+                };
                 let manifest_id = behavior
                     .lock()
                     .await
@@ -1174,8 +1442,6 @@ where
                     .manifest_id
                     .clone();
                 let package_prefix = manifest_id.split('.').next().unwrap_or("");
-                let target_document =
-                    document_for_message(request.document_id, &document, &workspace).await;
                 let document_text = target_document.lock().await.text();
                 let providers = runtime_generation
                     .current()
@@ -1280,8 +1546,22 @@ where
                     continue;
                 }
 
-                let target_document =
-                    document_for_message(request.document_id, &document, &workspace).await;
+                let Some(target_document) =
+                    document_for_message(request.document_id, client_id, &document, &workspace)
+                        .await
+                else {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::Error {
+                                code: ProtocolErrorCode::InvalidMessage,
+                                message: "language-intelligence document is not authorized for this connection"
+                                    .to_string(),
+                            },
+                        )
+                        .await?;
+                    continue;
+                };
                 let document_text = target_document.lock().await.text();
                 let window = {
                     let behavior = behavior.lock().await;
@@ -1417,12 +1697,23 @@ where
                 let mut ranges: Vec<Option<SelectionQueryRange>> =
                     vec![None; request.selections.len()];
                 if let Some(metadata) = metadata {
-                    let document_text =
-                        document_for_message(request.document_id, &document, &workspace)
+                    let Some(target_document) =
+                        document_for_message(request.document_id, client_id, &document, &workspace)
                             .await
-                            .lock()
-                            .await
-                            .text();
+                    else {
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::Error {
+                                    code: ProtocolErrorCode::InvalidMessage,
+                                    message: "selection-query document is not authorized for this connection"
+                                        .to_string(),
+                                },
+                            )
+                            .await?;
+                        continue;
+                    };
+                    let document_text = target_document.lock().await.text();
                     let runtime = runtime_generation.current().await;
                     if let Some((meta, _policy)) = runtime
                         .service
@@ -1551,6 +1842,22 @@ async fn dispatch_edit_operation<S>(
 where
     S: AsyncWrite + Unpin,
 {
+    let Some(target_document) =
+        document_for_message(document_id, client_id, document, workspace).await
+    else {
+        codec
+            .write_server_message(
+                stream,
+                &ServerMessage::EditRejected {
+                    document_id,
+                    transaction_id,
+                    reason: crate::protocol::EditRejection::InvalidDocument { document_id },
+                },
+            )
+            .await?;
+        return Ok(());
+    };
+
     let behavior_decision = match validate_edit_behavior_version(
         behavior,
         runtime_generation,
@@ -1574,8 +1881,6 @@ where
             return Ok(());
         }
     };
-
-    let target_document = document_for_message(document_id, document, workspace).await;
     let analysis_delta = document_analysis_delta(&operation);
     let (response, parse_input) = {
         let mut document = target_document.lock().await;
@@ -1735,8 +2040,15 @@ async fn execute_command_intent(
         };
         match result {
             Ok(result) => {
-                workspace_command_result_message(result, &workspace, document, sdui, client_id)
-                    .await
+                workspace_command_result_message(
+                    result,
+                    &workspace,
+                    document,
+                    sdui,
+                    client_id,
+                    reload_server,
+                )
+                .await
             }
             Err(error) => Some(ServerMessage::Error {
                 code: ProtocolErrorCode::InvalidMessage,
@@ -1766,6 +2078,7 @@ async fn workspace_command_result_message(
     document: &Arc<Mutex<DocumentState>>,
     sdui: &Arc<Mutex<StaticSduiState>>,
     client_id: ClientId,
+    reload_server: Option<&super::IpcServer>,
 ) -> Option<ServerMessage> {
     use crate::server::command_execution::{CommandExecutionStatus, WorkspaceActionResult};
     match result.status {
@@ -1778,17 +2091,50 @@ async fn workspace_command_result_message(
         CommandExecutionStatus::Workspace(WorkspaceActionResult::Navigated {
             root_id,
             relative_path,
-        }) => Some(
-            file_browser_snapshot_message(
-                workspace,
-                document,
-                sdui,
-                client_id,
-                root_id,
-                relative_path,
+        }) => {
+            let workspace_pane_visible = match reload_server {
+                Some(server) => server
+                    .state_for_client(client_id)
+                    .await
+                    .is_some_and(|state| state.workspace_pane_visible()),
+                None => true,
+            };
+            Some(
+                file_browser_snapshot_for_visibility(
+                    workspace,
+                    document,
+                    sdui,
+                    client_id,
+                    workspace_pane_visible,
+                    root_id,
+                    relative_path,
+                )
+                .await,
             )
-            .await,
-        ),
+        }
+        CommandExecutionStatus::Workspace(WorkspaceActionResult::Toggled) => {
+            let server = reload_server?;
+            let state = server.state_for_client(client_id).await?;
+            let workspace_pane_visible = state.toggle_workspace_pane();
+            let root_id = workspace
+                .lock()
+                .await
+                .list_root_metadata()
+                .first()
+                .map(|root| root.workspace_root_id)?;
+            Some(
+                file_browser_snapshot_for_visibility(
+                    workspace,
+                    document,
+                    sdui,
+                    client_id,
+                    workspace_pane_visible,
+                    root_id,
+                    PathBuf::new(),
+                )
+                .await,
+            )
+        }
         _ => None,
     }
 }
@@ -1918,17 +2264,140 @@ fn sdui_action_value_json(value: &SduiActionValue) -> serde_json::Value {
     }
 }
 
+async fn send_tab_initial_document<S>(
+    stream: &mut S,
+    client_id: ClientId,
+    document: &Arc<Mutex<DocumentState>>,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    codec: Codec,
+) -> Result<(DocumentId, DocumentVersion), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let initial_document = {
+        let mut document = document.lock().await;
+        let access = document.acquire_access(client_id);
+        let workspace_root = workspace
+            .lock()
+            .await
+            .list_root_metadata()
+            .first()
+            .map(|root| root.display_path.clone())
+            .unwrap_or_default();
+        document.initial_document_message(access, workspace_root)
+    };
+    let (document_id, document_version) = match &initial_document {
+        ServerMessage::InitialDocument {
+            document_id,
+            version,
+            ..
+        } => (*document_id, *version),
+        _ => (0, 0),
+    };
+    codec
+        .write_server_message(stream, &initial_document)
+        .await?;
+    Ok((document_id, document_version))
+}
+
+fn hidden_file_browser_snapshot(
+    client_id: ClientId,
+    document_id: DocumentId,
+    document_version: DocumentVersion,
+) -> ServerMessage {
+    ServerMessage::SduiSnapshot {
+        client_id,
+        tree: FileBrowserState::hidden_sdui_tree(document_id, document_version),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
+async fn send_tab_file_browser_snapshot<S>(
+    stream: &mut S,
+    client_id: ClientId,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    document_id: DocumentId,
+    document_version: DocumentVersion,
+    workspace_pane_visible: bool,
+    codec: Codec,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    if !workspace_pane_visible {
+        codec
+            .write_server_message(
+                stream,
+                &hidden_file_browser_snapshot(client_id, document_id, document_version),
+            )
+            .await?;
+        return Ok(());
+    }
+
+    let file_browser_tree = {
+        let workspace = workspace.lock().await;
+        let roots = workspace.list_root_metadata();
+        roots.first().and_then(|root| {
+            let browser =
+                FileBrowserState::from_workspace(&workspace, root.workspace_root_id).ok()?;
+            Some(browser.to_sdui_tree(document_id, document_version))
+        })
+    };
+
+    if let Some(tree) = file_browser_tree {
+        let mut state = sdui.lock().await;
+        let _ = state.replace_for_document_with_runtime_tree(document_id, tree.clone());
+        codec
+            .write_server_message(stream, &ServerMessage::SduiSnapshot { client_id, tree })
+            .await?;
+    } else if let Some(sdui_snapshot) = sdui.lock().await.snapshot_message(client_id) {
+        codec.write_server_message(stream, &sdui_snapshot).await?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn send_tab_initial_state<S>(
+    stream: &mut S,
+    client_id: ClientId,
+    document: &Arc<Mutex<DocumentState>>,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    workspace_pane_visible: bool,
+    codec: Codec,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let (document_id, document_version) =
+        send_tab_initial_document(stream, client_id, document, workspace, codec).await?;
+    send_tab_file_browser_snapshot(
+        stream,
+        client_id,
+        workspace,
+        sdui,
+        document_id,
+        document_version,
+        workspace_pane_visible,
+        codec,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 async fn send_welcome_snapshot_and_manifest<S>(
     stream: &mut S,
     client_id: u64,
-    document: &Arc<Mutex<DocumentState>>,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    sdui: &Arc<Mutex<StaticSduiState>>,
     active_theme: &Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
     runtime_diagnostics: &Arc<Mutex<RuntimeDiagnosticStore>>,
     runtime_generation: &RuntimeGenerationStore,
+    legacy_bootstrap: Option<(
+        &Arc<Mutex<DocumentState>>,
+        &Arc<Mutex<WorkspaceState>>,
+        &Arc<Mutex<StaticSduiState>>,
+    )>,
     codec: Codec,
 ) -> Result<(), CodecError>
 where
@@ -1944,21 +2413,11 @@ where
         )
         .await?;
 
-    let initial_document = {
-        let mut document = document.lock().await;
-        let access = document.acquire_access(client_id);
-        let workspace_root = workspace
-            .lock()
-            .await
-            .list_root_metadata()
-            .first()
-            .map(|root| root.display_path.clone())
-            .unwrap_or_default();
-        document.initial_document_message(access, workspace_root)
+    let legacy_initial = if let Some((document, workspace, _)) = legacy_bootstrap.as_ref() {
+        Some(send_tab_initial_document(stream, client_id, document, workspace, codec).await?)
+    } else {
+        None
     };
-    codec
-        .write_server_message(stream, &initial_document)
-        .await?;
 
     let behavior_guard = behavior.lock().await;
     let mut manifest_messages = behavior_guard.document_manifest_messages();
@@ -2003,36 +2462,20 @@ where
             .await?;
     }
 
-    let (document_id, document_version) = match &initial_document {
-        ServerMessage::InitialDocument {
+    if let (Some((_, workspace, sdui)), Some((document_id, document_version))) =
+        (legacy_bootstrap.as_ref(), legacy_initial)
+    {
+        send_tab_file_browser_snapshot(
+            stream,
+            client_id,
+            workspace,
+            sdui,
             document_id,
-            version,
-            ..
-        } => (*document_id, *version),
-        _ => (0, 0),
-    };
-
-    let file_browser_tree = {
-        let workspace = workspace.lock().await;
-        let roots = workspace.list_root_metadata();
-        roots.first().and_then(|root| {
-            let browser =
-                FileBrowserState::from_workspace(&workspace, root.workspace_root_id).ok()?;
-            Some(browser.to_sdui_tree(document_id, document_version))
-        })
-    };
-
-    if let Some(tree) = file_browser_tree {
-        let mut state = sdui.lock().await;
-        let _ = state.replace_for_document_with_runtime_tree(document_id, tree.clone());
-        codec
-            .write_server_message(stream, &ServerMessage::SduiSnapshot { client_id, tree })
-            .await?;
-    } else {
-        let sdui_snapshot = sdui.lock().await.snapshot_message(client_id);
-        if let Some(sdui_snapshot) = sdui_snapshot {
-            codec.write_server_message(stream, &sdui_snapshot).await?;
-        }
+            document_version,
+            true,
+            codec,
+        )
+        .await?;
     }
 
     let diagnostics = runtime_diagnostics.lock().await.snapshot();
@@ -2098,16 +2541,26 @@ where
     Ok(())
 }
 
+// Resolve only an explicitly authorized document. Unknown IDs must not fall
+// through to welcome text: globally unique IDs make that fallback an
+// information leak for completion, language, and edit requests.
 async fn document_for_message(
     document_id: DocumentId,
+    client_id: ClientId,
     default_document: &Arc<Mutex<DocumentState>>,
     workspace: &Arc<Mutex<WorkspaceState>>,
-) -> Arc<Mutex<DocumentState>> {
-    workspace
-        .lock()
-        .await
-        .document_handle(document_id)
-        .unwrap_or_else(|| Arc::clone(default_document))
+) -> Option<Arc<Mutex<DocumentState>>> {
+    let is_authorized_default = {
+        let default_document = default_document.lock().await;
+        default_document.document_id() == document_id && default_document.has_access(client_id)
+    };
+    if is_authorized_default {
+        return Some(Arc::clone(default_document));
+    }
+
+    let document = workspace.lock().await.document_handle(document_id)?;
+    let authorized = document.lock().await.has_access(client_id);
+    authorized.then_some(document)
 }
 
 fn document_analysis_delta(operation: &crate::protocol::EditOperation) -> (u64, u64, String) {
@@ -2287,6 +2740,7 @@ async fn add_selected_workspace_root_messages(
     document: &Arc<Mutex<DocumentState>>,
     sdui: &Arc<Mutex<StaticSduiState>>,
     client_id: ClientId,
+    workspace_pane_visible: bool,
     selected_path: String,
 ) -> Vec<ServerMessage> {
     let root_id = {
@@ -2297,11 +2751,12 @@ async fn add_selected_workspace_root_messages(
         }
     };
     vec![
-        file_browser_snapshot_message(
+        file_browser_snapshot_for_visibility(
             workspace,
             document,
             sdui,
             client_id,
+            workspace_pane_visible,
             root_id,
             PathBuf::new(),
         )
@@ -2342,6 +2797,27 @@ async fn file_browser_snapshot_message(
         .await
         .replace_for_document_with_runtime_tree(document_id, tree.clone());
     ServerMessage::SduiSnapshot { client_id, tree }
+}
+
+async fn file_browser_snapshot_for_visibility(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    document: &Arc<Mutex<DocumentState>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    client_id: ClientId,
+    workspace_pane_visible: bool,
+    root_id: WorkspaceRootId,
+    relative_path: PathBuf,
+) -> ServerMessage {
+    if workspace_pane_visible {
+        file_browser_snapshot_message(workspace, document, sdui, client_id, root_id, relative_path)
+            .await
+    } else {
+        let (document_id, document_version) = {
+            let document = document.lock().await;
+            (document.document_id(), document.version())
+        };
+        hidden_file_browser_snapshot(client_id, document_id, document_version)
+    }
 }
 
 async fn open_selected_file_response(
@@ -3016,8 +3492,8 @@ mod tests {
 
     use super::{
         RuntimeDiagnosticStore, execute_command_intent, handle_connection,
-        language_intelligence_document_window_for_behavior, sdui_command_request,
-        static_package_completion_result,
+        language_intelligence_document_window_for_behavior, route_connection_tab_state,
+        sdui_command_request, static_package_completion_result,
     };
     use crate::server::command_execution::{CommandExecutionRequest, CommandExecutionTarget};
 
@@ -3696,13 +4172,12 @@ await loadPackage("@clay/markdown");"#,
 
     /// Plan 060 T4 test helpers: drain the bootstrap sequence through the
     /// always-terminal capability issue so tests start from a clean cursor.
-    async fn drain_bootstrap(client: &mut tokio::io::DuplexStream, codec: Codec) {
+    async fn drain_bootstrap(client: &mut tokio::io::DuplexStream, codec: Codec) -> String {
         loop {
-            if matches!(
-                codec.read_server_message(client).await.unwrap(),
-                ServerMessage::FileOpenCapabilityIssued { .. }
-            ) {
-                break;
+            if let ServerMessage::FileOpenCapabilityIssued { token } =
+                codec.read_server_message(client).await.unwrap()
+            {
+                return token;
             }
         }
     }
@@ -3711,6 +4186,7 @@ await loadPackage("@clay/markdown");"#,
         client: tokio::io::DuplexStream,
         server_task: tokio::task::JoinHandle<Result<(), crate::protocol::codec::CodecError>>,
         codec: Codec,
+        file_open_capability: String,
     }
 
     impl TestConnection {
@@ -3727,6 +4203,39 @@ await loadPackage("@clay/markdown");"#,
             parse_coordinator: ParseCoordinator,
             document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
             language_intelligence: LanguageIntelligenceCoordinator,
+        ) -> Self {
+            let registry = Arc::new(Mutex::new(crate::server::tab_registry::TabRegistry::new()));
+            let (tab_registry_tx, _) = tokio::sync::broadcast::channel(16);
+            Self::connect_with_registry(
+                client_id,
+                document,
+                behavior,
+                workspace,
+                runtime_generation,
+                parse_coordinator,
+                document_analysis,
+                language_intelligence,
+                registry,
+                tab_registry_tx,
+            )
+            .await
+        }
+
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "test connection harness mirrors the server's explicit authority parameters"
+        )]
+        async fn connect_with_registry(
+            client_id: u64,
+            document: Arc<Mutex<DocumentState>>,
+            behavior: Arc<Mutex<ActiveBehaviorManifest>>,
+            workspace: Arc<Mutex<WorkspaceState>>,
+            runtime_generation: super::RuntimeGenerationStore,
+            parse_coordinator: ParseCoordinator,
+            document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
+            language_intelligence: LanguageIntelligenceCoordinator,
+            tab_registry: Arc<Mutex<crate::server::tab_registry::TabRegistry>>,
+            tab_registry_tx: tokio::sync::broadcast::Sender<crate::protocol::TabRegistrySnapshot>,
         ) -> Self {
             let (client, server) = duplex(65536);
             let codec = Codec::default();
@@ -3745,8 +4254,8 @@ await loadPackage("@clay/markdown");"#,
                 document_analysis,
                 language_intelligence,
                 None,
-                Arc::new(Mutex::new(crate::server::tab_registry::TabRegistry::new())),
-                tokio::sync::broadcast::channel(16).0,
+                tab_registry,
+                tab_registry_tx,
                 codec,
             ));
             let mut client = client;
@@ -3760,11 +4269,127 @@ await loadPackage("@clay/markdown");"#,
                 )
                 .await
                 .unwrap();
-            drain_bootstrap(&mut client, codec).await;
+            let file_open_capability = drain_bootstrap(&mut client, codec).await;
             Self {
                 client,
                 server_task,
                 codec,
+                file_open_capability,
+            }
+        }
+
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "test connection harness mirrors the production IpcServer connection wiring"
+        )]
+        async fn connect_with_server(client_id: u64, server: super::super::IpcServer) -> Self {
+            let (client, server_stream) = duplex(65536);
+            let codec = Codec::default();
+            let document = Arc::clone(&server.bootstrap_state.welcome);
+            let behavior = Arc::clone(&server.behavior);
+            let workspace = Arc::clone(&server.bootstrap_state.workspace);
+            let sdui = Arc::clone(&server.sdui);
+            let active_theme = Arc::clone(&server.active_theme);
+            let runtime_diagnostics = Arc::clone(&server.runtime_diagnostics);
+            let runtime_generation = server.runtime_generation.clone();
+            let parse_coordinator = server.parse_coordinator.clone();
+            let completion = server.completion.clone();
+            let document_analysis = server.document_analysis.clone();
+            let language_intelligence = server.language_intelligence.clone();
+            let tab_registry = Arc::clone(&server.tab_registry);
+            let tab_registry_tx = server.tab_registry_tx.clone();
+            let server_task = tokio::spawn(super::handle_connection_with_analysis(
+                server_stream,
+                client_id,
+                document,
+                behavior,
+                workspace,
+                sdui,
+                active_theme,
+                runtime_diagnostics,
+                runtime_generation,
+                parse_coordinator,
+                completion,
+                document_analysis,
+                language_intelligence,
+                Some(server),
+                tab_registry,
+                tab_registry_tx,
+                codec,
+            ));
+            let mut client = client;
+            codec
+                .write_client_message(
+                    &mut client,
+                    &ClientMessage::Hello {
+                        protocol_version: PROTOCOL_VERSION,
+                        client_name: "test-client".to_string(),
+                    },
+                )
+                .await
+                .unwrap();
+            let file_open_capability = drain_bootstrap(&mut client, codec).await;
+            Self {
+                client,
+                server_task,
+                codec,
+                file_open_capability,
+            }
+        }
+
+        async fn reclaim(&mut self, client_id: u64, tab_id: crate::protocol::TabId) {
+            self.send(&ClientMessage::TabCommand {
+                client_id,
+                command: crate::protocol::TabCommand::Reclaim { tab_id },
+            })
+            .await;
+            let mut received_initial_document = false;
+            loop {
+                match self.receive().await {
+                    ServerMessage::InitialDocument { .. } => received_initial_document = true,
+                    ServerMessage::TabRegistry(_) if received_initial_document => return,
+                    ServerMessage::SduiSnapshot { .. }
+                    | ServerMessage::TabRegistry(_)
+                    | ServerMessage::RuntimeDiagnostic(_)
+                    | ServerMessage::FileOpenCapabilityIssued { .. }
+                    | ServerMessage::BehaviorManifest(_) => {}
+                    other => panic!("unexpected message during tab reclaim: {other:?}"),
+                }
+            }
+        }
+
+        async fn open_document(
+            &mut self,
+            client_id: u64,
+            workspace_root_id: crate::protocol::WorkspaceRootId,
+            path: &str,
+        ) -> (DocumentMetadata, crate::protocol::BehaviorVersion) {
+            self.send(&ClientMessage::OpenDocument {
+                client_id,
+                workspace_root_id,
+                path: path.to_string(),
+            })
+            .await;
+            let mut behavior_version = 1;
+            loop {
+                match self.receive().await {
+                    message @ ServerMessage::BehaviorManifest(_) => {
+                        let ServerMessage::BehaviorManifest(manifest) = message else {
+                            unreachable!();
+                        };
+                        behavior_version = manifest.behavior_version;
+                    }
+                    message @ ServerMessage::DocumentOpened { .. } => {
+                        let ServerMessage::DocumentOpened { metadata, .. } = message else {
+                            unreachable!();
+                        };
+                        return (metadata, behavior_version);
+                    }
+                    ServerMessage::RuntimeDiagnostic(_)
+                    | ServerMessage::SduiSnapshot { .. }
+                    | ServerMessage::TabRegistry(_) => {}
+                    other => panic!("unexpected message during document open: {other:?}"),
+                }
             }
         }
 
@@ -3800,6 +4425,23 @@ await loadPackage("@clay/markdown");"#,
             {}
         }
 
+        /// Drain a bounded amount of asynchronous output. Some parser lanes
+        /// can continuously publish while a test is intentionally not asserting
+        /// every advisory frame.
+        async fn drain_bounded(&mut self) {
+            for _ in 0..32 {
+                if timeout(
+                    Duration::from_millis(10),
+                    self.codec.read_server_message(&mut self.client),
+                )
+                .await
+                .is_err()
+                {
+                    break;
+                }
+            }
+        }
+
         /// Read until the response frame arrives, skipping asynchronous parse
         /// and activation output that can race a request/response exchange.
         async fn receive_response(&mut self) -> ServerMessage {
@@ -3820,6 +4462,590 @@ await loadPackage("@clay/markdown");"#,
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn connection_state_route_follows_reclaim_and_fails_closed() {
+        let root_a = temp_workspace("route-alpha");
+        let root_b = temp_workspace("route-beta");
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("connection-state-route"),
+        ));
+        let (alpha_snapshot, alpha_state) = server
+            .create_tab_state(11, root_a.to_string_lossy().into_owned())
+            .await
+            .expect("alpha tab state is created");
+        let (beta_snapshot, beta_state) = server
+            .create_tab_state(22, root_b.to_string_lossy().into_owned())
+            .await
+            .expect("beta tab state is created");
+        let alpha_tab = alpha_snapshot.tabs[0].tab_id;
+        let beta_tab = beta_snapshot.tabs[1].tab_id;
+
+        let alpha_route = route_connection_tab_state(
+            11,
+            Some(&server),
+            &alpha_state.welcome,
+            &alpha_state.workspace,
+        )
+        .await
+        .expect("bound alpha route");
+        assert_eq!(alpha_route.tab_id, Some(alpha_tab));
+        assert!(Arc::ptr_eq(
+            &alpha_route.state.workspace,
+            &alpha_state.workspace
+        ));
+        assert!(!Arc::ptr_eq(
+            &alpha_route.state.workspace,
+            &beta_state.workspace
+        ));
+
+        fs::write(root_a.join("alpha.txt"), "alpha").expect("alpha file is written");
+        fs::write(root_b.join("beta.txt"), "beta").expect("beta file is written");
+        let alpha_root_id = alpha_state
+            .workspace
+            .lock()
+            .await
+            .directory_roots()
+            .into_iter()
+            .next()
+            .expect("alpha root")
+            .workspace_root_id;
+        let beta_root_id = beta_state
+            .workspace
+            .lock()
+            .await
+            .directory_roots()
+            .into_iter()
+            .next()
+            .expect("beta root")
+            .workspace_root_id;
+        let alpha_document = crate::server::workspace::open_existing_file_unlocked(
+            &alpha_route.state.workspace,
+            alpha_root_id,
+            "alpha.txt",
+            11,
+        )
+        .await
+        .expect("alpha document opens in alpha state");
+        let beta_document = crate::server::workspace::open_existing_file_unlocked(
+            &beta_state.workspace,
+            beta_root_id,
+            "beta.txt",
+            22,
+        )
+        .await
+        .expect("beta document opens in beta state");
+        let alpha_response = alpha_document.document.lock().await.apply_edit(
+            alpha_document.document_id,
+            11,
+            alpha_document.access.lease_id(),
+            1,
+            1,
+            crate::protocol::EditOperation::Insert {
+                byte_offset: 5,
+                text: "!".to_string(),
+            },
+        );
+        assert!(matches!(alpha_response, ServerMessage::EditAck { .. }));
+        let beta_document_state = beta_document.document.lock().await;
+        assert_eq!(beta_document_state.version(), 1);
+        assert!(!beta_document_state.is_dirty());
+        assert_eq!(beta_document_state.text(), "beta");
+
+        assert!(server.tab_registry.lock().await.reclaim(alpha_tab, 33));
+        assert!(
+            route_connection_tab_state(
+                11,
+                Some(&server),
+                &alpha_state.welcome,
+                &alpha_state.workspace,
+            )
+            .await
+            .is_none()
+        );
+        let reclaimed_route = route_connection_tab_state(
+            33,
+            Some(&server),
+            &alpha_state.welcome,
+            &alpha_state.workspace,
+        )
+        .await
+        .expect("reclaimed route");
+        assert_eq!(reclaimed_route.tab_id, Some(alpha_tab));
+        assert!(Arc::ptr_eq(
+            &reclaimed_route.state.workspace,
+            &alpha_state.workspace
+        ));
+
+        server.remove_tab_state(beta_tab).await;
+        assert!(
+            route_connection_tab_state(
+                22,
+                Some(&server),
+                &beta_state.welcome,
+                &beta_state.workspace,
+            )
+            .await
+            .is_none()
+        );
+
+        let _ = fs::remove_dir_all(root_a);
+        let _ = fs::remove_dir_all(root_b);
+    }
+
+    #[tokio::test]
+    async fn cross_tab_workspace_and_document_authority_is_fail_closed() {
+        let root_a = temp_workspace("authority-alpha");
+        let root_b = temp_workspace("authority-beta");
+        let extra_root_a = temp_workspace("authority-alpha-extra");
+        fs::write(root_a.join("alpha.txt"), "alpha").unwrap();
+        fs::write(root_b.join("beta.txt"), "beta").unwrap();
+        fs::write(extra_root_a.join("only-alpha.txt"), "only alpha").unwrap();
+
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("cross-tab-authority"),
+        ));
+        let (alpha_snapshot, alpha_state) = server
+            .create_tab_state(11, root_a.to_string_lossy().into_owned())
+            .await
+            .expect("alpha tab state is created");
+        let (beta_snapshot, beta_state) = server
+            .create_tab_state(22, root_b.to_string_lossy().into_owned())
+            .await
+            .expect("beta tab state is created");
+        let alpha_tab = alpha_snapshot.tabs[0].tab_id;
+        let beta_tab = beta_snapshot.tabs[1].tab_id;
+        let alpha_root_id = alpha_state
+            .workspace
+            .lock()
+            .await
+            .directory_roots()
+            .into_iter()
+            .next()
+            .expect("alpha root")
+            .workspace_root_id;
+        let alpha_extra_root_id = alpha_state
+            .workspace
+            .lock()
+            .await
+            .add_root(&extra_root_a)
+            .expect("alpha extra root");
+        let beta_root_id = beta_state
+            .workspace
+            .lock()
+            .await
+            .directory_roots()
+            .into_iter()
+            .next()
+            .expect("beta root")
+            .workspace_root_id;
+
+        let mut connection_a = TestConnection::connect_with_server(11, server.clone()).await;
+        connection_a.reclaim(11, alpha_tab).await;
+        let mut connection_b = TestConnection::connect_with_server(22, server.clone()).await;
+        connection_b.reclaim(22, beta_tab).await;
+        connection_a.drain_bounded().await;
+
+        let (alpha_metadata, alpha_behavior_version) = connection_a
+            .open_document(11, alpha_root_id, "alpha.txt")
+            .await;
+        let (beta_metadata, _) = connection_b
+            .open_document(22, beta_root_id, "beta.txt")
+            .await;
+        connection_a.drain_bounded().await;
+        connection_b.drain_bounded().await;
+        connection_a
+            .send(&ClientMessage::ListDocuments { client_id: 11 })
+            .await;
+        let alpha_list = connection_a.receive_response().await;
+        assert!(matches!(
+            alpha_list,
+            ServerMessage::DocumentList { ref documents }
+                if documents.len() == 1 && documents[0].document_id == alpha_metadata.document_id
+        ));
+
+        connection_b
+            .send(&ClientMessage::ListDocuments { client_id: 22 })
+            .await;
+        let beta_list = connection_b.receive_response().await;
+        assert!(matches!(
+            beta_list,
+            ServerMessage::DocumentList { ref documents }
+                if documents.len() == 1 && documents[0].document_id == beta_metadata.document_id
+        ));
+
+        connection_a
+            .send(&ClientMessage::OpenDocument {
+                client_id: 11,
+                workspace_root_id: beta_root_id,
+                path: "beta.txt".to_string(),
+            })
+            .await;
+        let foreign_open = connection_a.receive_response().await;
+        assert!(matches!(
+            foreign_open,
+            ServerMessage::FileOperationFailed {
+                code: FileErrorCode::NotFound,
+                ..
+            }
+        ));
+
+        connection_b
+            .send(&ClientMessage::OpenDocument {
+                client_id: 22,
+                workspace_root_id: alpha_extra_root_id,
+                path: "only-alpha.txt".to_string(),
+            })
+            .await;
+        let foreign_root = connection_b.receive_response().await;
+        assert!(matches!(
+            foreign_root,
+            ServerMessage::FileOperationFailed {
+                code: FileErrorCode::UnknownWorkspaceRoot,
+                ..
+            }
+        ));
+
+        connection_a
+            .send(&ClientMessage::RequestResync {
+                client_id: 11,
+                document_id: beta_metadata.document_id,
+                known_version: 1,
+            })
+            .await;
+        let foreign_resync = connection_a.receive_response().await;
+        assert!(matches!(
+            foreign_resync,
+            ServerMessage::FileOperationFailed {
+                code: FileErrorCode::UnknownDocument,
+                ..
+            }
+        ));
+
+        connection_a
+            .send(&ClientMessage::GetDocumentStatus {
+                client_id: 11,
+                document_id: beta_metadata.document_id,
+            })
+            .await;
+        let foreign_status = connection_a.receive_response().await;
+        assert!(matches!(
+            foreign_status,
+            ServerMessage::FileOperationFailed {
+                code: FileErrorCode::UnknownDocument,
+                ..
+            }
+        ));
+
+        connection_a
+            .send(&ClientMessage::SaveDocument {
+                client_id: 11,
+                document_id: beta_metadata.document_id,
+                known_version: beta_metadata.version,
+            })
+            .await;
+        let foreign_save = connection_a.receive_response().await;
+        assert!(matches!(
+            foreign_save,
+            ServerMessage::FileOperationFailed {
+                code: FileErrorCode::UnknownDocument,
+                ..
+            }
+        ));
+
+        connection_a
+            .send(&ClientMessage::ReloadDocument {
+                client_id: 11,
+                document_id: beta_metadata.document_id,
+                known_version: beta_metadata.version,
+                force: true,
+            })
+            .await;
+        let foreign_reload = connection_a.receive_response().await;
+        assert!(matches!(
+            foreign_reload,
+            ServerMessage::FileOperationFailed {
+                code: FileErrorCode::UnknownDocument,
+                ..
+            }
+        ));
+
+        connection_a
+            .send(&ClientMessage::CloseDocument {
+                client_id: 11,
+                document_id: beta_metadata.document_id,
+                force: true,
+            })
+            .await;
+        let foreign_close = connection_a.receive_response().await;
+        assert!(matches!(
+            foreign_close,
+            ServerMessage::FileOperationFailed {
+                code: FileErrorCode::UnknownDocument,
+                ..
+            }
+        ));
+
+        connection_a
+            .send(&ClientMessage::Edit {
+                client_id: 11,
+                document_id: beta_metadata.document_id,
+                lease_id: beta_metadata.lease_id,
+                base_version: beta_metadata.version,
+                behavior_version: alpha_behavior_version,
+                transaction_id: 7,
+                operation: EditOperation::Insert {
+                    byte_offset: 0,
+                    text: "leak".to_string(),
+                },
+            })
+            .await;
+        let foreign_edit = connection_a.receive().await;
+        assert!(matches!(
+            foreign_edit,
+            ServerMessage::EditRejected {
+                reason: EditRejection::InvalidDocument { document_id },
+                ..
+            } if document_id == beta_metadata.document_id
+        ));
+
+        connection_a
+            .send(&ClientMessage::OpenSelectedFile {
+                client_id: 11,
+                capability: connection_b.file_open_capability.clone(),
+                selected_path: root_b.join("beta.txt").to_string_lossy().into_owned(),
+            })
+            .await;
+        let capability_replenish = connection_a.receive().await;
+        let capability_rejection = connection_a.receive().await;
+        assert!(matches!(
+            capability_replenish,
+            ServerMessage::FileOpenCapabilityIssued { .. }
+        ));
+        assert!(matches!(
+            capability_rejection,
+            ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic { ref code, .. })
+                if code == "clay.client.selected_file_open.unauthorized"
+        ));
+
+        connection_b
+            .send(&ClientMessage::RequestResync {
+                client_id: 22,
+                document_id: beta_metadata.document_id,
+                known_version: beta_metadata.version,
+            })
+            .await;
+        let beta_resync = connection_b.receive_response().await;
+        assert!(matches!(
+            beta_resync,
+            ServerMessage::ResyncSnapshot { ref text, document_id, .. }
+                if document_id == beta_metadata.document_id && text == "beta"
+        ));
+        connection_b
+            .send(&ClientMessage::GetDocumentStatus {
+                client_id: 22,
+                document_id: beta_metadata.document_id,
+            })
+            .await;
+        let beta_status = connection_b.receive_response().await;
+        assert!(matches!(
+            beta_status,
+            ServerMessage::DocumentStatus { ref metadata }
+                if metadata.document_id == beta_metadata.document_id
+                    && metadata.version == beta_metadata.version
+                    && !metadata.dirty
+        ));
+
+        connection_a
+            .send(&ClientMessage::TabCommand {
+                client_id: 11,
+                command: crate::protocol::TabCommand::Reclaim { tab_id: beta_tab },
+            })
+            .await;
+        let reclaim_foreign = connection_a.receive().await;
+        assert!(matches!(
+            reclaim_foreign,
+            ServerMessage::Error {
+                code: ProtocolErrorCode::InvalidMessage,
+                ..
+            }
+        ));
+        let registry = server.tab_registry.lock().await.snapshot();
+        assert!(
+            registry
+                .tabs
+                .iter()
+                .any(|entry| entry.tab_id == alpha_tab && entry.client_id == 11)
+        );
+        assert!(
+            registry
+                .tabs
+                .iter()
+                .any(|entry| entry.tab_id == beta_tab && entry.client_id == 22)
+        );
+
+        connection_a.close().await;
+        connection_b.close().await;
+        let _ = fs::remove_dir_all(root_a);
+        let _ = fs::remove_dir_all(root_b);
+        let _ = fs::remove_dir_all(extra_root_a);
+    }
+
+    /// Read until a `TabRegistry` snapshot arrives (skipping unrelated
+    /// frames that can race the tab-command exchange).
+    async fn receive_tab_registry_snapshot(
+        connection: &mut TestConnection,
+    ) -> crate::protocol::TabRegistrySnapshot {
+        loop {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::TabRegistry(snapshot)) => return snapshot,
+                Ok(_) => continue,
+                Err(_) => panic!("timed out awaiting TabRegistry snapshot"),
+            }
+        }
+    }
+
+    /// A shared registry seeded with two tabs: tab 1 bound to client 99 (the
+    /// test connection's identity) and tab 2 bound to a foreign client (7).
+    fn two_tab_registry() -> (
+        Arc<Mutex<crate::server::tab_registry::TabRegistry>>,
+        tokio::sync::broadcast::Sender<crate::protocol::TabRegistrySnapshot>,
+    ) {
+        let mut registry = crate::server::tab_registry::TabRegistry::new();
+        registry.create_tab(99, 1, "/workspaces/alpha".to_string());
+        registry.create_tab(7, 2, "/workspaces/beta".to_string());
+        let registry = Arc::new(Mutex::new(registry));
+        let (tab_registry_tx, _) = tokio::sync::broadcast::channel(16);
+        (registry, tab_registry_tx)
+    }
+
+    /// Phase 22.7 (task 3): a rejected `Close` (foreign tab) pushes the
+    /// reconciling snapshot and the sender's connection keeps serving.
+    #[tokio::test]
+    async fn rejected_close_keeps_connection_serving() {
+        let root = temp_workspace("rejected-close");
+        let mut workspace_state_value = WorkspaceState::new();
+        workspace_state_value.add_root(&root).unwrap();
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let runtime_generation = runtime_generation();
+        let parse_coordinator = parse_coordinator();
+        let document_analysis =
+            crate::server::document_analysis::DocumentAnalysisCoordinator::default();
+        let (registry, tab_registry_tx) = two_tab_registry();
+        let mut connection = TestConnection::connect_with_registry(
+            99,
+            document,
+            Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
+            Arc::clone(&workspace),
+            runtime_generation,
+            parse_coordinator,
+            document_analysis,
+            language_intelligence_coordinator(),
+            Arc::clone(&registry),
+            tab_registry_tx,
+        )
+        .await;
+
+        // A (client 99) tries to close B's tab (tab 2): rejected.
+        connection
+            .send(&ClientMessage::TabCommand {
+                client_id: 99,
+                command: crate::protocol::TabCommand::Close { tab_id: 2 },
+            })
+            .await;
+        let snapshot = receive_tab_registry_snapshot(&mut connection).await;
+        // Registry unchanged: both tabs still bound, tab 2 still owned by 7.
+        assert_eq!(snapshot.tabs.len(), 2);
+        assert!(
+            snapshot
+                .tabs
+                .iter()
+                .any(|entry| entry.tab_id == 2 && entry.client_id == 7)
+        );
+        assert!(
+            snapshot
+                .tabs
+                .iter()
+                .any(|entry| entry.tab_id == 1 && entry.client_id == 99)
+        );
+
+        // A's next command still processes: activate its own tab succeeds and
+        // pushes another snapshot (the connection never ended).
+        connection
+            .send(&ClientMessage::TabCommand {
+                client_id: 99,
+                command: crate::protocol::TabCommand::Activate { tab_id: 1 },
+            })
+            .await;
+        let snapshot = receive_tab_registry_snapshot(&mut connection).await;
+        assert_eq!(snapshot.active, Some(1));
+
+        assert!(registry.lock().await.snapshot().tabs.len() == 2);
+        connection.close().await;
+    }
+
+    /// Phase 22.7 (task 3): an accepted `Close` (own tab) still ends the
+    /// connection (EOF on the client stream) and removes the tab.
+    #[tokio::test]
+    async fn accepted_close_still_ends_connection() {
+        let root = temp_workspace("accepted-close");
+        let mut workspace_state_value = WorkspaceState::new();
+        workspace_state_value.add_root(&root).unwrap();
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let runtime_generation = runtime_generation();
+        let parse_coordinator = parse_coordinator();
+        let document_analysis =
+            crate::server::document_analysis::DocumentAnalysisCoordinator::default();
+        let (registry, tab_registry_tx) = two_tab_registry();
+        let mut connection = TestConnection::connect_with_registry(
+            99,
+            document,
+            Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
+            Arc::clone(&workspace),
+            runtime_generation,
+            parse_coordinator,
+            document_analysis,
+            language_intelligence_coordinator(),
+            Arc::clone(&registry),
+            tab_registry_tx,
+        )
+        .await;
+
+        // A closes its own tab (tab 1): accepted, the connection ends.
+        connection
+            .send(&ClientMessage::TabCommand {
+                client_id: 99,
+                command: crate::protocol::TabCommand::Close { tab_id: 1 },
+            })
+            .await;
+        // The server task resolves and the client stream reaches EOF.
+        timeout(
+            Duration::from_secs(2),
+            connection.codec.read_server_message(&mut connection.client),
+        )
+        .await
+        .expect("EOF expected within the timeout")
+        .expect_err("accepted close must end the connection (EOF)");
+        // The tab is gone from the shared registry; the foreign tab remains.
+        let snapshot = registry.lock().await.snapshot();
+        assert_eq!(snapshot.tabs.len(), 1);
+        assert!(
+            snapshot
+                .tabs
+                .iter()
+                .any(|entry| entry.tab_id == 2 && entry.client_id == 7)
+        );
     }
 
     /// Plan 060 T4 (P0-2): one pre-dispatch boundary rejects every legacy

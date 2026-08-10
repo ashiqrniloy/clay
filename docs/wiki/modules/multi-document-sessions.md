@@ -6,7 +6,7 @@
 - `src/masonry_editor.rs`
 - `src/masonry_pane_document.rs`
 - `src/client/mod.rs` (`ClientSyncState`, `ClientEditQueue`)
-- `src/main.rs` (`Driver` cross-pane aggregation)
+- `src/driver/mod.rs` (`Driver` cross-pane aggregation; 22.7 extraction)
 - `src/client/clipboard.rs`
 - `runtime/js/editor.js`
 
@@ -15,6 +15,23 @@
 Phase 20 replaces the single-editor-buffer model with a bounded client-local multi-document session store. Opening a second file stashes the prior `EditorSurface` (text, caret/selection, viewport, edit history, dirty chrome) instead of destroying it. Users switch active documents through a client-local transient menu without re-downloading text or waiting on the server. Each document retains mode, status, dirty state, lease, manifest version, caret, viewport, and pending-edit state. Server open-document registry and lease authority remain authoritative.
 
 Phase 22.2 extends the same mechanics per pane: each `PaneDocumentView` owns its own `DocumentSessionStore` (same 64-session LRU ceiling), the shared `ClientSyncState` became a per-document map so several panes' documents can have in-flight edits concurrently, and the open-documents switcher aggregates sessions across ALL panes with cross-pane focus-and-switch activation.
+
+## Phase 22.8: Isolation verification
+
+Phase 22.8 keeps this Phase 22.2 model intact while moving server workspace/document
+state behind the tab binding. The verified path is: split a tab locally (bounded
+by `MAX_PANES_PER_TAB`), mount one `PaneDocumentView` per opened file, share only
+the connection's `ClientEditQueue`, and route acknowledgements, leases, versions,
+dirty state, and behavior manifests by `DocumentId`. A duplicate open is resolved
+by the driver to the existing owning pane; it never creates a second view.
+
+The regression matrix covers two pane documents, local typing isolation, per-
+document lease/version reservations, retained-session switching, concurrent
+major-mode layers, the four-pane cap, and the server's disjoint per-tab
+workspace/document sets. No split-tree, pane-host, protocol, or hot-path code
+was added for 22.8. Commands: `cargo test --lib masonry_shell --quiet`,
+`cargo test --lib masonry_pane_document --quiet`, `cargo test --bin clay --quiet`,
+and `cargo test --all-targets`.
 
 ## Responsibilities
 

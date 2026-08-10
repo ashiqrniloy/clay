@@ -7,7 +7,9 @@ bar chrome, per-tab split trees and document views, dirty-guarded closing,
 default key chords for next/prev/new/close/move/activate-by-number,
 auto-reconnect, reclaim of registry entries on local restart, and
 client-owned `layout.json` v2 persistence of tab order, workspaces, split
-trees, and per-pane documents across full restarts. Deep references:
+trees, and per-pane documents across full restarts — plus the Phase 22.7
+tab-bar overflow scroll (cards shrink to a 100 px minimum, then the strip
+scrolls under the wheel). Deep references:
 `docs/reference/primitives/shell-layout-strategy.md` (Phase 22.3 + 22.4 +
 22.5 sections), `docs/wiki/modules/masonry-shell.md` (tab bar + lifecycle),
 `docs/wiki/modules/tabs-and-clients.md` (registry + driver policies),
@@ -39,7 +41,8 @@ echo "fn main() {}" > main.rs
   - Keyboard tab management ships in Phase 22.4 — full chord table in the
     Keyboard section below (T25+).
 - The tab bar sits below the top fixed panel and above the working area; it
-  shows only when more than one tab exists.
+  shows only when more than one tab exists. Since Phase 22.7 the cards
+  shrink-to-fit down to a 100 px minimum before the strip scrolls (T57–T62).
 
 ## Tab bar and open-second-tab
 
@@ -174,6 +177,58 @@ task 6). Deep reference: `docs/development/accessibility.md` and
 | T55 | Close tab A (connection released), then recreate a tab on the same workspace and reopen `secret.md` | Fresh connection, fresh grants: the document opens through the ordinary open path; nothing from the old connection survives (no stale leases, no ghost docs, no inherited access) |
 | T56 | 2–3 tabs, each with a 4-pane split tree; rapid `Ctrl+Tab` + pane chords + typing | Switch feels instant (one layout pass, off the edit hot path); pane/decoration work stays bounded — advisory `window_baselines` bench numbers in `docs/development/performance.md`; deterministic guards automated |
 
+## Tab bar overflow scroll (Phase 22.7)
+
+Cards shrink-to-fit as tabs are added; below the 100 px minimum
+(`TAB_BAR_CARD_MIN_WIDTH`) the strip scrolls instead of shrinking further.
+At a ~900 px window, 5 cards still fit (the last card shrinks to ~124 px)
+and overflow starts at 6+ cards. The `+` affordance stays pinned at the
+bar's right edge; cards clip at its left boundary. Deep reference:
+`docs/reference/ui-components.md` Tabs row (Phase 22.7 scroll behavior).
+Automated equivalents: `tab_bar_cards_never_below_min_width`,
+`tab_bar_wheel_scroll_clamps`, `tab_bar_hit_test_honors_scroll`, and
+`activating_offscreen_tab_scrolls_it_into_view` in `src/masonry_shell.rs`.
+
+Setup: use `Ctrl+T` (or `+`) to open workspaces `/tmp/clay-manual`,
+`/tmp/clay-manual-tab2`, … `/tmp/clay-manual-tab7` (8 tabs total), then
+resize the window to ~900 px wide.
+
+| # | Action | Expected |
+|---|--------|----------|
+| T57 | 8 tabs at ~900 px wide | Every card is ≥100 px wide (cards stop shrinking at the floor); the rightmost cards are CLIPPED at the `+` slot — the strip overflows; the `+` stays pinned at the bar's right edge, always fully visible; no layout break, no overlap |
+| T58 | Wheel up/down over the tab bar | The strip scrolls left/right smoothly; scrolling CLAMPS at both ends — no overscroll, no bounce, no elastic; wheel over the working area (below the bar) does NOT scroll the strip |
+| T59 | 5 or fewer tabs (or a wide window) | No overflow: the strip starts flush at the left edge, every card fully visible, and wheel over the bar is a NO-OP — scrolling is only active while cards hit the minimum width |
+| T60 | Scroll the strip so a card is scrolled out of view, then activate it via `Ctrl+<N>` numbered activation | The strip AUTO-SCROLLS the active card fully into view — the active card is never left clipped; switching back and forth keeps the active card visible |
+| T61 | Scroll so a card is partially clipped, then click its visible part | Hit-testing follows the SCROLLED position: the click activates the card under the pointer in the scrolled strip (not the card that would sit there at scroll 0); clicking a clipped-away region does nothing |
+| T62 | Scroll the strip, then type in the active tab and run `Ctrl+\` / `Ctrl+-` | The scroll offset is chrome-only: editing, splits, pane focus, and the working area are unaffected; the strip keeps its offset until an activation auto-scrolls |
+
+## Phase 22.8 per-tab workspace, restore, reconnect, and authority
+
+Deep references: `docs/development/launch-and-gui-smoke.md`,
+`docs/development/file-open-save-reload-workflow.md`, and
+`docs/wiki/modules/tabs-and-clients.md`. Run these on Linux with two scratch
+roots containing distinct filenames/content.
+
+| # | Action | Expected |
+|---|--------|----------|
+| T63 | Create a new tab with `+`/`Ctrl+T`, choose scratch root B, and inspect its first document/browser state | The new tab card, initial document, and workspace tree all identify root B; root A's files are not shown; the selected folder is bound before the tab becomes interactive |
+| T64 | With roots A and B open, toggle the workspace pane and open/edit one distinct file in each tab | Tabs remain independent: pane visibility, roots, file lists, text, caret/viewport, versions, dirty markers, and active modes change only in the active tab |
+| T65 | In tab A, split into 2 panes and open/edit two different files from root A | Both pane documents edit concurrently with independent document state; tab B's single-pane tree and documents remain untouched (module 13 D16–D19) |
+| T66 | Build two tabs with different roots/documents, quit the client and server, then relaunch with the persisted `layout.json` | Each restored tab reconnects through its own persisted workspace root; documents reopen only in their owning tab, in their previous panes/order; a missing root skips only that tab with a diagnostic |
+| T67 | With two tabs and documents open, drop the server connection and let both clients reconnect | Each tab reclaims/rebuilds its own server state; workspace root, welcome/document identity, split tree, and reopened documents stay per tab; no tab receives the other's reconnect events |
+| T68 | In tab B, try to open tab A's file by path/browser-relative identity and list/open tab A's documents | Server rejects the foreign/out-of-root request; tab B's document list, text, version, dirty state, and grants remain unchanged; tab A remains readable/editable only in tab A |
+| T69 | Open a selected-file capability in tab A, then attempt to reuse that path/token from tab B | The request is denied or the token is replenished without opening the file in tab B; no foreign document/lease appears in tab B |
+| T70 | Repeat T63–T69 while watching tab creation, split, restore, and reconnect latency | No perceptible stall is introduced on typing or pane paint; restore/reconnect work is bounded and asynchronous after the normal startup/connection sequence |
+
+## Linux execution record (2026-08-10)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| Launch/bootstrap and hidden-pane toggle (T1, F13–F15) | PASS | `cargo build`; `WAYLAND_DISPLAY= WINIT_UNIX_BACKEND=x11 target/debug/clay smoke-gui --config-fixture file-browser-workflow` connected on the real Linux desktop. Client log showed the initial editor-only `SduiSnapshot`; X11 keyboard input toggled `Ctrl+B` on/off, and the visible snapshot contained `Workspace · clay · /home/arn/Projects/clay`. |
+| File dialog open/select (F16, T63) | BLOCKED — portal UI selection unavailable to this agent | The real Linux client issued the xdg-desktop-portal request, but this session has no usable portal/UI automation path to select a folder/file. No product failure inferred; complete manually on a desktop and record result here. |
+| Split/multi-document, restore/reconnect (D16–D19, T64–T67) | AUTOMATED COVERAGE / MANUAL FOLLOW-UP | Real-server restore/reconnect and split isolation suites pass; visual multi-tab selection and pane/session checks require human interaction. |
+| Cross-tab denial (T68–T69) | AUTOMATED COVERAGE / MANUAL FOLLOW-UP | `cross_tab_workspace_and_document_authority_is_fail_closed` passes the same negative cases; manual UI attempt remains required when portal/file selection is available. |
+
 ## Negative checks
 
 - The last tab can never be closed (T7) — the editor always keeps one tab.
@@ -184,6 +239,13 @@ task 6). Deep reference: `docs/development/accessibility.md` and
   longer lists the closed tab, and the per-connection document leases are
   cleaned up server-side (see module 01 connection steps for the observer
   view).
+- A REJECTED tab Close (foreign/unknown tab id, e.g. a stale close racing a
+  disconnect) keeps the sender's connection alive — the close is a no-op
+  that reconciles via the pushed registry snapshot instead of terminating
+  the connection. Not reachable from the tab bar (the bar routes Close on
+  the tab's own connection); automated-only coverage:
+  `rejected_close_keeps_connection_serving` and
+  `accepted_close_still_ends_connection` in `src/server/connection.rs`.
 - Events for a closed tab's connection never reach the shell: after T15,
   the closed tab's chrome is gone — no stale diagnostics, no ghost panes.
 - Tab open/close/switch grant no filesystem/network/extension authority —
@@ -202,6 +264,9 @@ task 6). Deep reference: `docs/development/accessibility.md` and
 - Numbered activation/move-to beyond the tab count are silent no-ops (T27,
   T38); numbered IDs beyond 9 do not exist as command IDs and are rejected
   deny-by-default at bind time (module 10, K17).
+- The tab strip never scrolls while the cards fit at minimum width —
+  wheel over the bar is a no-op below the overflow threshold (T59), and
+  the offset clamps at both ends with no overscroll (T58).
 - Boundary moves are silent no-ops — the card order never wraps (T36–T37).
 - Dirty-close "Cancel" preserves the tab (T35); "Discard and close" drops
   edits only via that explicit item (T34).
@@ -226,6 +291,10 @@ task 6). Deep reference: `docs/development/accessibility.md` and
 - **Tab moves never wrap**: `Ctrl+Shift+[`/`]` and `Ctrl+Shift+<N>` are
   boundary/beyond-count no-ops by design — wraparound would fight the
   explicit card order (T36–T38).
+- **No scrollbar or drag-to-scroll on the tab strip (22.7)**: overflow
+  scrolling is wheel-driven offset only — no visible scrollbar, no
+  drag-to-scroll, no touch gesture (T57–T62); the `+` affordance stays
+  pinned and cards clip at its left boundary (no overflow `»` menu).
 - **No drag-to-reorder**: card order changes only via the 22.4 move chords;
   drag reordering is not implemented.
 - **No tab persistence to disk**: tab structure and per-tab split trees live

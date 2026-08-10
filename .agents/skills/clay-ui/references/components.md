@@ -96,13 +96,13 @@ Validated in `src/shell/components.rs`. Token-backed variables must reference a 
 |---------|--------|------|---------|
 | Shell root widget | internal | `src/masonry_shell.rs` | `ClayShellWidget`, owns working area above editor |
 | Pane split tree | internal | `src/shell/layout.rs` | Horizontal/vertical splits, ratio 0.05–0.95 |
-| Fixed panel slots | internal | `src/shell/layout.rs` | `left`/`right`/`top`/`bottom` with size/min/max/visible/collapsed/resized_by_user |
+| Fixed panel slots | internal | `src/shell/layout.rs` | `left`/`right`/`top`/`bottom` with size/min/max/visible/collapsed/resized_by_user; the Clay workspace browser may be absent entirely when its per-tab visibility flag is off |
 | Status bar | internal | editor/shell paint | Uses `statusBg`/`statusText` theme keys |
 | Transient menu | internal | `src/shell/transient_menu.rs` | Bottom-pane prompt + filtered item list, focus policy, package provenance; Phase 20.5: `TransientMenuOrigin` (`CommandPalette`/`ContextMenu`/`MenuBar`) selects overlay anchor |
 | Inline completion pop-up | internal | `src/shell/transient_menu.rs` | Completion results rendered through the transient menu session (`completion_result_to_menu_session`) |
 | Fixed package panels | internal | `src/shell/package_ui.rs` | Slot-bound package panels with visibility |
 | Transient package overlays | internal | `src/shell/package_ui.rs` | Anchored overlays (`PackageOverlayAnchor`) |
-| File browser | internal | `src/shell/file_browser.rs` | Workspace/selected-file browsing surface |
+| File browser | internal | `src/shell/file_browser.rs` | Workspace/selected-file browsing surface; Phase 22.8 starts with an editor-only hidden snapshot, toggles a per-tab left panel, and shows workspace name + full location when visible |
 | Editor chrome | internal | `src/editor/surface.rs` | Caret, selection, scrollbar, diagnostics paint |
 
 ## Clay-Native Chrome Primitives (internal)
@@ -157,7 +157,7 @@ Reuse-first: before adding any of these, confirm no implemented kind composes to
 | Completion pop-up (uplift) | implemented | Inline completion restyle | Phase 20.5: routes through shared `paint_package_overlays` + `paint_tooltip_shell`; cursor inset from `ui_theme` |
 | Command palette | implemented | Command Centre surface | Phase 20.5: `TransientMenuOrigin::CommandPalette` (default); `Modal` focus policy + `Bottom` anchor |
 | Tooltip | planned | Hover hint | `overlay` anchored, `detail` typography |
-| Tabs | implemented | Tab strip (window tab bar) | Phase 22.3: shell-owned tab bar row above the working area; token-state cards (idle/hover/active/focus/disabled) via `tab_card_chrome`; the close glyph, switch-on-click, and server-registry reconciliation. Generic paint contract (cards with labels + close affordance) so later phases can reuse it for panel/pane tabs; shell-level, not package-facing |
+| Tabs | implemented | Tab strip (window tab bar) | Phase 22.3: shell-owned tab bar row above the working area; token-state cards (idle/hover/active/focus/disabled) via `tab_card_chrome`; the close glyph, switch-on-click, and server-registry reconciliation. The close glyph remains bespoke two-stroke internal chrome, not a package-facing icon primitive. Phase 22.7: cards shrink-to-fit until `TAB_BAR_CARD_MIN_WIDTH` (100px) binds, then the strip scrolls — wheel over the bar scrolls (one `f64` offset, clamped to the last card's right edge at the "+" slot), activation auto-scrolls the active card into view, cards clip to the strip, and hit-testing honors the offset. Scroll is bespoke internal chrome (the `scroll` component stays rejected for the strip — recorded ceiling). Generic paint contract (cards with labels + close affordance) so later phases can reuse it for panel/pane tabs; shell-level, not package-facing |
 | Split divider | implemented | Draggable pane/slot separator | Phase 20.3: `paint_divider` + drag interaction on `PaneSplitTree`; resize handles via `paint_panel_chrome` |
 | Badge / tag | planned | Status/count marker | `label` + muted pastel tokens |
 | Toast / notification | planned | Transient feedback | `overlay` + portal, auto-dismiss |
