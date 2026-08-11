@@ -58,7 +58,7 @@ text objects (inner/around word/paragraph/function/class/argument/comment/test
 - **Major modes** carry `EditorBehaviorRules` (`src/protocol/mod.rs:370`,
   fields: `text_edits`, `enter`, `tab`, `pairs`, `comments`, `electric_characters`,
   `autocomplete_triggers`), built declaratively by `clay:behavior::buildCodeEditingManifest`
-  and registered via `clay.modes.serverRegisterModePattern`.
+  and registered via `modes.serverRegisterModePattern`.
 - **Key bindings** (`clay:keybindings::bindKey`) bind a chord to a **stable command
   ID** in an explicit **allowlist** (`src/server/ops/keybindings.rs::is_runtime_bindable_command`).
   Routed commands become `RoutedBehavior::ClientUiCommand(ClientUiCommandRoute{command_id, args})`
@@ -87,13 +87,13 @@ text objects (inner/around word/paragraph/function/class/argument/comment/test
   `_` or alphanumeric).
 - **Caret rendering** (`surface.rs:2368::paint_caret`): a **hardcoded
   `CARET_WIDTH = 1.5`** vertical bar, color `theme.base.caret`. **No blink,
-  no shape enum, no width/thickness config.** `clay.editor.clientSetCursorStyle`
+  no shape enum, no width/thickness config.** `editor.clientSetCursorStyle`
   is documented (`docs/.../editor/client-set-cursor-style.md`) with
   `{color, blinking, type: block|bar|underline}` but is **`planned` (Phase 8),
   not wired** — no op, not in the allowlist, no Rust field.
-- **`clay.editor.clientMoveCursor`** (`direction` enum + `extendSelection` bool,
+- **`editor.clientMoveCursor`** (`direction` enum + `extendSelection` bool,
   default keys `Arrow*`, `Home`, `End`, `Ctrl+Home`, `Ctrl+End`) and
-  **`clay.editor.clientSetSelection`** are likewise documented but **`planned`/unwired**.
+  **`editor.clientSetSelection`** are likewise documented but **`planned`/unwired**.
   Movement today is **hardcoded key dispatch** in `masonry_editor.rs::local_key`
   (`ArrowLeft/Right` → `MoveLeft/Right`/`SelectLeft/Right`, `Up/Down` → `Move*`,
   `Home/End` → `LineStart/End` or `DocumentStart/End` with Ctrl/Meta). Movement
@@ -273,7 +273,7 @@ variant that extends the selection (`cursorWordLeftSelect`, etc.).
 2. **One movement engine, many command IDs.** Implement movement *semantics*
    once in `CursorState`/`EditorSurface` (word/WORD/paragraph/sub-word boundaries,
    sticky column, affinity). Expose them as **stable, allowlisted command IDs**
-   (`clay.editor.clientMoveCursor`, `clay.editor.clientSetSelection`, …) with
+   (`editor.clientMoveCursor`, `editor.clientSetSelection`, …) with
    **typed args** (`direction`, `granularity`, `extend`, `count`) so `bindKey`
    and modes can rebind/extend without touching Rust — exactly how clipboard/
    undo/resync commands already work.
@@ -392,7 +392,7 @@ the command IDs.** (Recommended)
   `masonry_editor.rs` key handling.
 
 **Approach B — Generic movement command table (string direction + granularity +
-  extend + count) routed through one command ID `clay.editor.clientMoveCursor`
+  extend + count) routed through one command ID `editor.clientMoveCursor`
   with typed args.**
 - *Pros*: one command ID, maximum rebinding flexibility, matches the *documented*
   `clientMoveCursor{direction, extendSelection}` contract; trivially extensible
@@ -412,12 +412,12 @@ the command IDs.** (Recommended)
 
 **Recommendation: A + B hybrid.** Keep `EditorCommand` variants for the
 hardcoded default-key path (compile-time safety, minimal diff), **and** allowlist
-`clay.editor.clientMoveCursor` / `clay.editor.clientSetSelection` as
+`editor.clientMoveCursor` / `editor.clientSetSelection` as
 arg-bearing `ClientUiCommand` IDs (Approach B) so packages/modes can bind any
 motion to any chord and even add motions Clay's defaults don't ship. The
 `EditorWidget` command handler translates both paths into the same
 `CursorState`/`EditorSurface` methods. This is exactly the dual pattern already
-used (hardcoded `Ctrl+C` vs bindable `clay.editor.clientCopySelection`).
+used (hardcoded `Ctrl+C` vs bindable `editor.clientCopySelection`).
 
 ### 5.5 Multi-cursor (in scope)
 
@@ -427,20 +427,20 @@ index; movement/selection commands operate on the primary selection by default
 and the multi-cursor commands grow the set.
 
 Commands (all stable Clay JS API IDs, allowlisted as `ClientUiCommand`):
-- `clay.editor.clientAddCursor` — `{ direction: above | below }` add a caret on
+- `editor.clientAddCursor` — `{ direction: above | below }` add a caret on
   the next/previous visual line (VSCode `insertCursorBelow/Above`).
-- `clay.editor.clientSelectNextMatch` / `clientSelectPrevMatch` — select next/
+- `editor.clientSelectNextMatch` / `clientSelectPrevMatch` — select next/
   previous occurrence of the primary selection's text, adding a selection
   (VSCode `addSelectionToNextFindMatch` `Ctrl+D`).
-- `clay.editor.clientSelectAllMatches` — select all occurrences (VSCode
+- `editor.clientSelectAllMatches` — select all occurrences (VSCode
   `selectHighlights` `Ctrl+Shift+L`).
-- `clay.editor.clientCancelMultipleSelections` — collapse to primary
+- `editor.clientCancelMultipleSelections` — collapse to primary
   (VSCode `removeSecondaryCursors` `Escape`).
-- `clay.editor.clientColumnSelect` — `{ direction }` start/extend box selection
+- `editor.clientColumnSelect` — `{ direction }` start/extend box selection
   (VSCode `cursorColumnSelect*`); renders as N carets across the column.
-- `clay.editor.clientKeepSelection` / `clientRemoveSelection` —
+- `editor.clientKeepSelection` / `clientRemoveSelection` —
   Helix `keep_primary_selection`/`remove_primary_selection` ergonomics.
-- `clay.editor.clientUndoCursorMove` — restore the previous selection *set*
+- `editor.clientUndoCursorMove` — restore the previous selection *set*
   (VSCode `cursorUndo` `Ctrl+U`).
 
 Paint path (`paint_caret`/`paint_selection`) draws every selection; the primary
@@ -654,7 +654,7 @@ serverRegisterModePattern(manifest, {
 // A third-party vim-emulation package registers a "vim-normal" mode that:
 //  - sets caretStyle shape: "block" (normal), "bar" (insert) via manifest data
 //  - sets movement word_separators to Vim's iskeyword set
-//  - binds w/b/e/ge/{/}/gg/G/0/^/$ to clay.editor.clientMoveCursor with the right direction
+//  - binds w/b/e/ge/{/}/gg/G/0/^/$ to editor.clientMoveCursor with the right direction
 //  - uses extend:true for all motions to get Helix/Vim-visual-style selection
 // No new Rust required — purely declarative manifest + key bindings.
 ```
@@ -679,7 +679,7 @@ Each phase is independently shippable and follows Clay's Linux-blocking gates
 - Extend `EditorCommand` + `EditorSurface::move_cursor`/`extend_selection`;
 - add `SelectWord`, `SelectLine{extend}`, `select_next_line`/`select_previous_line`.
 - Add `MovementRules` to `EditorBehaviorRules` (default = current code behavior).
-- Allowlist `clay.editor.clientMoveCursor`, `clay.editor.clientSetSelection`
+- Allowlist `editor.clientMoveCursor`, `editor.clientSetSelection`
   as `ClientUiCommand` with typed args; wire `EditorWidget` dispatch.
 - Default keys: `Ctrl+Left/Right` = prev/next word start; `Ctrl+Shift+Left/Right`
   = extend; `Ctrl+Up/Down` = prev/next paragraph; `Ctrl+Shift+Up/Down` = extend
@@ -696,7 +696,7 @@ Each phase is independently shippable and follows Clay's Linux-blocking gates
   + color override; keep IME preedit caret consistent.
 - Add blink timer in `EditorSurface`/`EditorWidget` (on/off/wait, reset on input);
   optional smooth caret animation reusing the `visual_scroll_y` interpolation.
-- Wire `clay.editor.clientSetCursorStyle` op + allowlist.
+- Wire `editor.clientSetCursorStyle` op + allowlist.
 - **Acceptance**: visual smoke (screenshot/test) for each shape; blink phase unit
   test; per-mode `caretStyle` override verified via a fixture mode; `init.js`
   can set `clientSetCursorStyle({ shape: "block", blink: "solid" })`.
@@ -731,9 +731,9 @@ Each phase is independently shippable and follows Clay's Linux-blocking gates
   `queries/textobjects.scm` with Helix-style `@textobject.{start,end}` captures
   (with `#match?`/`#not-match?` predicates where needed) for objects
   word/paragraph/function/class/argument/comment/comment-block/test/tag.
-- New `ClientUiCommand` IDs `clay.editor.clientSelectTextobject`
+- New `ClientUiCommand` IDs `editor.clientSelectTextobject`
   (`{ object, around: bool, direction: next | prev | current }`) and
-  `clay.editor.clientSmartSelect` (`{ action: expand | shrink }`) that query the
+  `editor.clientSmartSelect` (`{ action: expand | shrink }`) that query the
   document's syntax tree (reusing `src/server/syntax.rs` `tree_sitter` engine +
   `QueryCursor`) for the range(s) around the primary caret and apply them as
   selection(s). Multi-cursor-aware: `clientSelectTextobject` can grow the

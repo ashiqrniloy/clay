@@ -21,10 +21,10 @@ pub(super) fn op_clay_decorations_publish_decorations(
     state: &mut OpState,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let options_value = parse_json(&options_json, "clay.decorations.invalid_publication")?;
-    let options = options_value.as_object().ok_or_else(|| {
-        clay_error("clay.decorations.invalid_publication: options must be an object")
-    })?;
+    let options_value = parse_json(&options_json, "decorations.invalid_publication")?;
+    let options = options_value
+        .as_object()
+        .ok_or_else(|| clay_error("decorations.invalid_publication: options must be an object"))?;
     // Provenance comes from the host-owned executing-package context,
     // resolved against the enabled set with an approved capability check;
     // caller-supplied manifests are never consulted.
@@ -33,30 +33,22 @@ pub(super) fn op_clay_decorations_publish_decorations(
         .require_current_package_capability(
             crate::packages::permissions::PackagePermission::RenderDecorations,
         )?;
-    let document_id = required_u64(
-        options,
-        "documentId",
-        "clay.decorations.invalid_publication",
-    )?;
+    let document_id = required_u64(options, "documentId", "decorations.invalid_publication")?;
     let document_version = required_u64(
         options,
         "documentVersion",
-        "clay.decorations.invalid_publication",
+        "decorations.invalid_publication",
     )?;
     let current_document_version =
         optional_u64(options.get("currentDocumentVersion"))?.unwrap_or(document_version);
-    let viewport = required_object(options, "viewport", "clay.decorations.invalid_publication")?;
-    let viewport_byte_start = required_u64(
-        viewport,
-        "byteStart",
-        "clay.decorations.invalid_publication",
-    )?;
-    let viewport_byte_end =
-        required_u64(viewport, "byteEnd", "clay.decorations.invalid_publication")?;
+    let viewport = required_object(options, "viewport", "decorations.invalid_publication")?;
+    let viewport_byte_start =
+        required_u64(viewport, "byteStart", "decorations.invalid_publication")?;
+    let viewport_byte_end = required_u64(viewport, "byteEnd", "decorations.invalid_publication")?;
     let spans = options
         .get("spans")
         .and_then(Value::as_array)
-        .ok_or_else(|| clay_error("clay.decorations.invalid_publication: spans must be an array"))?
+        .ok_or_else(|| clay_error("decorations.invalid_publication: spans must be an array"))?
         .iter()
         .enumerate()
         .map(|(index, span)| span_from_value(index, span, &package))
@@ -88,7 +80,7 @@ pub(super) fn op_clay_decorations_publish_decorations(
     }))
     .map_err(|error| {
         clay_error(format!(
-            "clay.decorations.publish_failed: failed to serialize result ({error})"
+            "decorations.publish_failed: failed to serialize result ({error})"
         ))
     })
 }
@@ -100,17 +92,17 @@ fn span_from_value(
 ) -> Result<DecorationSpan, JsErrorBox> {
     let object = value.as_object().ok_or_else(|| {
         clay_error(format!(
-            "clay.decorations.invalid_span: span {index} must be an object"
+            "decorations.invalid_span: span {index} must be an object"
         ))
     })?;
-    let kind = match required_str(object, "kind", "clay.decorations.invalid_span")? {
+    let kind = match required_str(object, "kind", "decorations.invalid_span")? {
         "syntax" | "Syntax" => DecorationKind::Syntax,
         "semantic" | "Semantic" => DecorationKind::Semantic,
         "diagnostic" | "Diagnostic" => DecorationKind::Diagnostic,
         "search-match" | "searchMatch" | "SearchMatch" => DecorationKind::SearchMatch,
         other => {
             return Err(clay_error(format!(
-                "clay.decorations.invalid_span: unsupported decoration kind `{other}`"
+                "decorations.invalid_span: unsupported decoration kind `{other}`"
             )));
         }
     };
@@ -122,18 +114,18 @@ fn span_from_value(
             }
             _ => {
                 return Err(clay_error(
-                    "clay.decorations.invalid_span: fontRole must be `monospace` or `proportional`",
+                    "decorations.invalid_span: fontRole must be `monospace` or `proportional`",
                 ));
             }
         },
         Some(_) => {
             return Err(clay_error(
-                "clay.decorations.invalid_span: fontRole must be a semantic role string",
+                "decorations.invalid_span: fontRole must be a semantic role string",
             ));
         }
     };
-    let byte_start = required_u64(object, "byteStart", "clay.decorations.invalid_span")?;
-    let byte_end = required_u64(object, "byteEnd", "clay.decorations.invalid_span")?;
+    let byte_start = required_u64(object, "byteStart", "decorations.invalid_span")?;
+    let byte_end = required_u64(object, "byteEnd", "decorations.invalid_span")?;
     let priority = optional_u64(object.get("priority"))?.unwrap_or(0) as u16;
     let provenance = DecorationProvenance {
         package_name: package.manifest.name.clone(),
@@ -156,7 +148,7 @@ fn span_from_value(
         (Some(token_type_name), _) => {
             let token_type = TokenType::from_name(token_type_name).ok_or_else(|| {
                 clay_error(format!(
-                    "clay.decorations.invalid_span: unknown tokenType `{token_type_name}`"
+                    "decorations.invalid_span: unknown tokenType `{token_type_name}`"
                 ))
             })?;
             let modifiers = modifiers_from_value(object.get("modifiers"))?;
@@ -174,7 +166,7 @@ fn span_from_value(
         ),
         (None, None) => {
             return Err(clay_error(
-                "clay.decorations.invalid_span: span must provide tokenType or styleToken",
+                "decorations.invalid_span: span must provide tokenType or styleToken",
             ));
         }
     };
@@ -189,18 +181,16 @@ fn modifiers_from_value(value: Option<&Value>) -> Result<Modifiers, JsErrorBox> 
             let mut owned = Vec::with_capacity(names.len());
             for entry in names {
                 let name = entry.as_str().ok_or_else(|| {
-                    clay_error(
-                        "clay.decorations.invalid_span: modifiers must be an array of strings",
-                    )
+                    clay_error("decorations.invalid_span: modifiers must be an array of strings")
                 })?;
                 owned.push(name);
             }
             let borrowed = owned.to_vec();
             Modifiers::from_names(&borrowed)
-                .ok_or_else(|| clay_error("clay.decorations.invalid_span: unknown modifiers entry"))
+                .ok_or_else(|| clay_error("decorations.invalid_span: unknown modifiers entry"))
         }
         Some(_) => Err(clay_error(
-            "clay.decorations.invalid_span: modifiers must be an array of strings",
+            "decorations.invalid_span: modifiers must be an array of strings",
         )),
     }
 }
@@ -248,7 +238,7 @@ pub(super) fn optional_u64(value: Option<&Value>) -> Result<Option<u64>, JsError
     match value {
         Some(Value::Null) | None => Ok(None),
         Some(value) => value.as_u64().map(Some).ok_or_else(|| {
-            clay_error("clay.runtime.invalid_options: optional integer must be unsigned")
+            clay_error("runtime.invalid_options: optional integer must be unsigned")
         }),
     }
 }
@@ -258,5 +248,5 @@ pub(super) fn clay_error(message: impl Into<String>) -> JsErrorBox {
 }
 
 fn decoration_error(error: DecorationValidationError) -> JsErrorBox {
-    clay_error(format!("clay.decorations.publish_failed: {error:?}"))
+    clay_error(format!("decorations.publish_failed: {error:?}"))
 }

@@ -960,17 +960,17 @@ fn built_in_language_intelligence_commands_are_discoverable_and_feature_mapped()
 
     let manifest = BehaviorManifest::minimal_text_editing(1);
     for (command_id, feature) in [
-        ("clay.language.hover", LanguageIntelligenceFeature::Hover),
+        ("language.hover", LanguageIntelligenceFeature::Hover),
         (
-            "clay.language.goToDefinition",
+            "language.goToDefinition",
             LanguageIntelligenceFeature::GoToDefinition,
         ),
         (
-            "clay.language.codeActions",
+            "language.codeActions",
             LanguageIntelligenceFeature::CodeAction,
         ),
         (
-            "clay.language.signatureHelp",
+            "language.signatureHelp",
             LanguageIntelligenceFeature::SignatureHelp,
         ),
     ] {
@@ -994,10 +994,10 @@ fn built_in_language_intelligence_commands_are_discoverable_and_feature_mapped()
 
     // Empty default key bindings: none of the four commands are bound by default.
     for command_id in [
-        "clay.language.hover",
-        "clay.language.goToDefinition",
-        "clay.language.codeActions",
-        "clay.language.signatureHelp",
+        "language.hover",
+        "language.goToDefinition",
+        "language.codeActions",
+        "language.signatureHelp",
     ] {
         assert!(
             !manifest
@@ -1012,7 +1012,7 @@ fn built_in_language_intelligence_commands_are_discoverable_and_feature_mapped()
 #[test]
 fn language_intelligence_feature_for_command_rejects_unknown_ids() {
     use clay::client::language_intelligence_feature_for_command;
-    assert!(language_intelligence_feature_for_command("clay.language.rename").is_none());
+    assert!(language_intelligence_feature_for_command("language.rename").is_none());
     assert!(language_intelligence_feature_for_command("completion.trigger").is_none());
 }
 

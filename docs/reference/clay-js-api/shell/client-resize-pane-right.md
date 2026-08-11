@@ -1,5 +1,5 @@
 ---
-id: clay.shell.clientResizePaneRight
+id: shell.clientResizePaneRight
 kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientResizePaneRight
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+Alt+Shift+Right"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.
-agent_guidance: "Use `clay.shell.clientResizePaneRight` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
+agent_guidance: "Use `shell.clientResizePaneRight` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
 lookup_tags: [shell, panes, splits, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for growing the focused pane toward the ri
 
 ## Description
 
-`clientResizePaneRight` is the public Clay JS API descriptor for **Resize Pane Right**. It returns the stable command ID `clay.shell.clientResizePaneRight` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
+`clientResizePaneRight` is the public Clay JS API descriptor for **Resize Pane Right**. It returns the stable command ID `shell.clientResizePaneRight` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
 
 Resize Right adjusts the ratio of the deepest ancestor Horizontal split whose first child contains the focused pane, shrinking the right neighbor. Clamped to `MIN_SPLIT_RATIO`/`MAX_SPLIT_RATIO` in `KEYBOARD_RESIZE_STEP` increments. No-op if no bordering divider exists.
 
@@ -55,7 +55,7 @@ bindKey("Ctrl+Alt+Shift+Right", clientResizePaneRight(), { scope: "global" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+Alt+Shift+Right", "clay.shell.clientResizePaneRight", { scope: "global" });
+bindKey("Ctrl+Alt+Shift+Right", "shell.clientResizePaneRight", { scope: "global" });
 ```
 
 ## Example
@@ -84,7 +84,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.shell.clientResizePaneRight"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
+Returns the string literal command ID `"shell.clientResizePaneRight"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ Bindable client UI command ID only; after explicit user routing it mutates only 
 
 ## Agent guidance
 
-Use `clay.shell.clientResizePaneRight` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
+Use `shell.clientResizePaneRight` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.shell.clientResizePaneRight` only as a documented command ID for `bind
 
 ## Lookup metadata
 
-- Stable ID: `clay.shell.clientResizePaneRight`
+- Stable ID: `shell.clientResizePaneRight`
 - User-facing name: Resize Pane Right
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientResizePaneRight`

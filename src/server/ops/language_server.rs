@@ -16,11 +16,11 @@ pub(super) async fn op_clay_language_server_authorize(
 ) -> Result<String, JsErrorBox> {
     let request: Value = serde_json::from_str(&request_json).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.language_server.invalid_grant: input must be valid JSON ({error})"
+            "language_server.invalid_grant: input must be valid JSON ({error})"
         ))
     })?;
     let object = request.as_object().ok_or_else(|| {
-        JsErrorBox::generic("clay.language_server.invalid_grant: options must be an object")
+        JsErrorBox::generic("language_server.invalid_grant: options must be an object")
     })?;
     if object.len() != 3
         || !object.contains_key("package")
@@ -28,7 +28,7 @@ pub(super) async fn op_clay_language_server_authorize(
         || !object.contains_key("workspaceRootIds")
     {
         return Err(JsErrorBox::generic(
-            "clay.language_server.invalid_grant: options require only package, contribution, and workspaceRootIds",
+            "language_server.invalid_grant: options require only package, contribution, and workspaceRootIds",
         ));
     }
     let package = required_string(object.get("package"), "package")?;
@@ -50,7 +50,7 @@ pub(super) async fn op_clay_language_server_authorize(
         let record = crate::packages::record::assemble_package_record(&installed.package_json)
             .map_err(|error| {
                 JsErrorBox::generic(format!(
-                    "clay.language_server.invalid_contribution: {:?}: {}",
+                    "language_server.invalid_contribution: {:?}: {}",
                     error.rule, error.message
                 ))
             })?;
@@ -61,7 +61,7 @@ pub(super) async fn op_clay_language_server_authorize(
             .find(|descriptor| descriptor.id == contribution)
             .ok_or_else(|| {
                 JsErrorBox::generic(format!(
-                    "clay.language_server.unknown_contribution: package `{resolved_name}` does not declare `{contribution}`"
+                    "language_server.unknown_contribution: package `{resolved_name}` does not declare `{contribution}`"
                 ))
             })?;
         (resolved_name, descriptor)
@@ -74,17 +74,18 @@ pub(super) async fn op_clay_language_server_authorize(
             .any(|known| known.workspace_root_id == *requested)
     }) {
         return Err(JsErrorBox::generic(
-            "clay.language_server.unknown_workspace_root: every workspaceRootId must name a current directory root",
+            "language_server.unknown_workspace_root: every workspaceRootId must name a current directory root",
         ));
     }
-    let canonical_executable =
-        crate::packages::authorization::resolve_language_server_executable(&descriptor.executable)
-            .ok_or_else(|| {
-                JsErrorBox::generic(format!(
-                    "clay.language_server.executable_not_found: `{}` was not found or is not a canonical file",
-                    descriptor.executable
-                ))
-            })?;
+    let canonical_executable = crate::packages::authorization::resolve_language_server_executable(
+        &descriptor.executable,
+    )
+    .ok_or_else(|| {
+        JsErrorBox::generic(format!(
+            "language_server.executable_not_found: `{}` was not found or is not a canonical file",
+            descriptor.executable
+        ))
+    })?;
 
     // Recheck after async workspace access so a concurrent load cannot seal
     // authority while this request is pending.
@@ -101,9 +102,7 @@ pub(super) async fn op_clay_language_server_authorize(
             "init.js",
         )
         .map_err(|error| {
-            JsErrorBox::generic(format!(
-                "clay.language_server.authorization_failed: {error}"
-            ))
+            JsErrorBox::generic(format!("language_server.authorization_failed: {error}"))
         })?
         .clone();
 
@@ -118,7 +117,7 @@ pub(super) async fn op_clay_language_server_authorize(
     }))
     .map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.language_server.authorization_failed: failed to serialize grant ({error})"
+            "language_server.authorization_failed: failed to serialize grant ({error})"
         ))
     })
 }
@@ -128,7 +127,7 @@ fn ensure_authorization_open(state: &ClayOpState) -> Result<(), JsErrorBox> {
         Ok(())
     } else {
         Err(JsErrorBox::generic(
-            "clay.language_server.authorization_sealed: grants are accepted only from init.js before the first package load",
+            "language_server.authorization_sealed: grants are accepted only from init.js before the first package load",
         ))
     }
 }
@@ -139,7 +138,7 @@ fn required_string<'a>(value: Option<&'a Value>, field: &str) -> Result<&'a str,
         .filter(|value| !value.trim().is_empty() && value.len() <= 256)
         .ok_or_else(|| {
             JsErrorBox::generic(format!(
-                "clay.language_server.invalid_grant: {field} must be a non-empty bounded string"
+                "language_server.invalid_grant: {field} must be a non-empty bounded string"
             ))
         })
 }
@@ -147,12 +146,12 @@ fn required_string<'a>(value: Option<&'a Value>, field: &str) -> Result<&'a str,
 fn parse_root_ids(value: Option<&Value>) -> Result<Vec<u64>, JsErrorBox> {
     let values = value.and_then(Value::as_array).ok_or_else(|| {
         JsErrorBox::generic(
-            "clay.language_server.invalid_grant: workspaceRootIds must be a non-empty array",
+            "language_server.invalid_grant: workspaceRootIds must be a non-empty array",
         )
     })?;
     if values.is_empty() || values.len() > 32 {
         return Err(JsErrorBox::generic(
-            "clay.language_server.invalid_grant: workspaceRootIds must contain 1..=32 entries",
+            "language_server.invalid_grant: workspaceRootIds must contain 1..=32 entries",
         ));
     }
     let mut roots = Vec::with_capacity(values.len());
@@ -163,7 +162,7 @@ fn parse_root_ids(value: Option<&Value>) -> Result<Vec<u64>, JsErrorBox> {
             .filter(|root| *root > 0)
             .ok_or_else(|| {
                 JsErrorBox::generic(
-                    "clay.language_server.invalid_grant: workspaceRootIds entries must be positive integers or decimal strings",
+                    "language_server.invalid_grant: workspaceRootIds entries must be positive integers or decimal strings",
                 )
             })?;
         if !roots.contains(&root) {
@@ -182,18 +181,18 @@ pub(super) async fn op_clay_language_server_start_session(
 ) -> Result<String, JsErrorBox> {
     let request: Value = serde_json::from_str(&request_json).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.language_server.invalid_session: input must be valid JSON ({error})"
+            "language_server.invalid_session: input must be valid JSON ({error})"
         ))
     })?;
     let object = request.as_object().ok_or_else(|| {
-        JsErrorBox::generic("clay.language_server.invalid_session: options must be an object")
+        JsErrorBox::generic("language_server.invalid_session: options must be an object")
     })?;
     if object.len() != 2
         || !object.contains_key("contribution")
         || !object.contains_key("workspaceRootId")
     {
         return Err(JsErrorBox::generic(
-            "clay.language_server.invalid_session: options require only contribution and workspaceRootId",
+            "language_server.invalid_session: options require only contribution and workspaceRootId",
         ));
     }
     // The session-owning package is the host-stamped executing package, never
@@ -216,7 +215,7 @@ pub(super) async fn op_clay_language_server_start_session(
         .filter(|value| *value > 0)
         .ok_or_else(|| {
             JsErrorBox::generic(
-                "clay.language_server.invalid_session: workspaceRootId must be a positive integer",
+                "language_server.invalid_session: workspaceRootId must be a positive integer",
             )
         })?;
 
@@ -231,13 +230,13 @@ pub(super) async fn op_clay_language_server_start_session(
             .language_server_grant(&resolved_name, contribution)
             .ok_or_else(|| {
                 JsErrorBox::generic(format!(
-                    "clay.language_server.missing_grant: package `{resolved_name}` has no current grant for `{contribution}`"
+                    "language_server.missing_grant: package `{resolved_name}` has no current grant for `{contribution}`"
                 ))
             })?
             .clone();
         if !grant.workspace_root_ids.contains(&workspace_root_id) {
             return Err(JsErrorBox::generic(format!(
-                "clay.language_server.root_not_authorized: workspaceRootId `{workspace_root_id}` is not part of the grant for `{contribution}`"
+                "language_server.root_not_authorized: workspaceRootId `{workspace_root_id}` is not part of the grant for `{contribution}`"
             )));
         }
         // Re-fetch the current descriptor and verify its fingerprint matches
@@ -249,7 +248,7 @@ pub(super) async fn op_clay_language_server_start_session(
         let record = crate::packages::record::assemble_package_record(&installed.package_json)
             .map_err(|error| {
                 JsErrorBox::generic(format!(
-                    "clay.language_server.invalid_contribution: {:?}: {}",
+                    "language_server.invalid_contribution: {:?}: {}",
                     error.rule, error.message
                 ))
             })?;
@@ -260,14 +259,14 @@ pub(super) async fn op_clay_language_server_start_session(
             .find(|descriptor| descriptor.id == contribution)
             .ok_or_else(|| {
                 JsErrorBox::generic(format!(
-                    "clay.language_server.unknown_contribution: package `{resolved_name}` does not declare `{contribution}`"
+                    "language_server.unknown_contribution: package `{resolved_name}` does not declare `{contribution}`"
                 ))
             })?;
         let fingerprint =
             crate::packages::authorization::language_server_descriptor_fingerprint(&descriptor);
         if fingerprint != grant.descriptor_fingerprint {
             return Err(JsErrorBox::generic(
-                "clay.language_server.stale_grant: package contribution changed after authorization",
+                "language_server.stale_grant: package contribution changed after authorization",
             ));
         }
         let canonical_executable =
@@ -275,7 +274,7 @@ pub(super) async fn op_clay_language_server_start_session(
                 .filter(|path| path == &grant.canonical_executable)
                 .ok_or_else(|| {
                     JsErrorBox::generic(format!(
-                        "clay.language_server.executable_not_found: `{}` is not the authorized canonical executable",
+                        "language_server.executable_not_found: `{}` is not the authorized canonical executable",
                         descriptor.executable
                     ))
                 })?;
@@ -303,7 +302,7 @@ pub(super) async fn op_clay_language_server_start_session(
             .map(|root| root.canonical_path)
             .ok_or_else(|| {
                 JsErrorBox::generic(format!(
-                    "clay.language_server.root_not_authorized: workspaceRootId `{workspace_root_id}` is not a current directory root"
+                    "language_server.root_not_authorized: workspaceRootId `{workspace_root_id}` is not a current directory root"
                 ))
             })?
     };
@@ -318,7 +317,7 @@ pub(super) async fn op_clay_language_server_start_session(
     }))
     .map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.language_server.session_failed: failed to serialize result ({error})"
+            "language_server.session_failed: failed to serialize result ({error})"
         ))
     })
 }
@@ -350,7 +349,7 @@ pub(super) async fn op_clay_language_server_send_bytes(
     let (session_id, package, contribution) = parse_session_bytes(&request_json)?;
     if bytes.len() > crate::perf::budgets::LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES {
         return Err(JsErrorBox::generic(format!(
-            "clay.language_server.invalid_bytes: payload exceeds {} bytes",
+            "language_server.invalid_bytes: payload exceeds {} bytes",
             crate::perf::budgets::LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES
         )));
     }
@@ -367,7 +366,7 @@ fn require_executing_package_owner(
     let record = clay_state.current_package_record()?;
     if record.manifest.name != package {
         return Err(JsErrorBox::generic(format!(
-            "clay.language_server.session_owner_mismatch: executing package `{}` cannot drive a session owned by `{package}`",
+            "language_server.session_owner_mismatch: executing package `{}` cannot drive a session owned by `{package}`",
             record.manifest.name
         )));
     }
@@ -400,12 +399,12 @@ pub(super) async fn op_clay_language_server_read_message(
     let bytes = read_session_bytes(state, parse_session_read(&request_json)?).await?;
     let message = String::from_utf8(bytes).map_err(|_| {
         JsErrorBox::generic(
-            "clay.language_server.invalid_utf8: stdout chunk is not valid UTF-8; use readBytes for framed protocols",
+            "language_server.invalid_utf8: stdout chunk is not valid UTF-8; use readBytes for framed protocols",
         )
     })?;
     serde_json::to_string(&json!({ "message": message })).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.language_server.read_failed: failed to serialize result ({error})"
+            "language_server.read_failed: failed to serialize result ({error})"
         ))
     })
 }
@@ -456,15 +455,15 @@ pub(super) async fn op_clay_language_server_stop_session(
 ) -> Result<String, JsErrorBox> {
     let request: Value = serde_json::from_str(&request_json).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.language_server.invalid_stop: input must be valid JSON ({error})"
+            "language_server.invalid_stop: input must be valid JSON ({error})"
         ))
     })?;
     let object = request.as_object().ok_or_else(|| {
-        JsErrorBox::generic("clay.language_server.invalid_stop: options must be an object")
+        JsErrorBox::generic("language_server.invalid_stop: options must be an object")
     })?;
     if object.len() != 3 || !object.contains_key("sessionId") {
         return Err(JsErrorBox::generic(
-            "clay.language_server.invalid_stop: options require only sessionId, package, and contribution",
+            "language_server.invalid_stop: options require only sessionId, package, and contribution",
         ));
     }
     let session_id = require_session_id(object.get("sessionId"))?;
@@ -497,7 +496,7 @@ fn parse_session_message(
     let object = parse_session_request(json_text, "invalid_message")?;
     if object.len() != 4 || !object.contains_key("message") {
         return Err(JsErrorBox::generic(
-            "clay.language_server.invalid_message: options require only sessionId, package, contribution, and message",
+            "language_server.invalid_message: options require only sessionId, package, contribution, and message",
         ));
     }
     let (session_id, package, contribution) = parse_session_identity(&object)?;
@@ -505,11 +504,11 @@ fn parse_session_message(
         .get("message")
         .and_then(Value::as_str)
         .ok_or_else(|| {
-            JsErrorBox::generic("clay.language_server.invalid_message: message must be a string")
+            JsErrorBox::generic("language_server.invalid_message: message must be a string")
         })?;
     if message.len() > crate::perf::budgets::LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES {
         return Err(JsErrorBox::generic(format!(
-            "clay.language_server.invalid_message: message exceeds {} bytes",
+            "language_server.invalid_message: message exceeds {} bytes",
             crate::perf::budgets::LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES
         )));
     }
@@ -529,7 +528,7 @@ fn parse_session_bytes(
     let object = parse_session_request(json_text, "invalid_bytes")?;
     if object.len() != 3 {
         return Err(JsErrorBox::generic(
-            "clay.language_server.invalid_bytes: options require only sessionId, package, and contribution",
+            "language_server.invalid_bytes: options require only sessionId, package, and contribution",
         ));
     }
     parse_session_identity(&object)
@@ -539,7 +538,7 @@ fn parse_session_read(json_text: &str) -> Result<SessionReadRequest, JsErrorBox>
     let object = parse_session_request(json_text, "invalid_read")?;
     if object.len() != 5 || !object.contains_key("maxBytes") || !object.contains_key("timeoutMs") {
         return Err(JsErrorBox::generic(
-            "clay.language_server.invalid_read: options require only sessionId, package, contribution, maxBytes, and timeoutMs",
+            "language_server.invalid_read: options require only sessionId, package, contribution, maxBytes, and timeoutMs",
         ));
     }
     let (session_id, package, contribution) = parse_session_identity(&object)?;
@@ -550,12 +549,12 @@ fn parse_session_read(json_text: &str) -> Result<SessionReadRequest, JsErrorBox>
         .filter(|value| *value > 0)
         .ok_or_else(|| {
             JsErrorBox::generic(
-                "clay.language_server.invalid_read: maxBytes must be a positive bounded integer",
+                "language_server.invalid_read: maxBytes must be a positive bounded integer",
             )
         })?;
     if max_bytes > crate::perf::budgets::LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES {
         return Err(JsErrorBox::generic(format!(
-            "clay.language_server.invalid_read: maxBytes exceeds {} bytes",
+            "language_server.invalid_read: maxBytes exceeds {} bytes",
             crate::perf::budgets::LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES
         )));
     }
@@ -565,7 +564,7 @@ fn parse_session_read(json_text: &str) -> Result<SessionReadRequest, JsErrorBox>
         .filter(|value| *value > 0)
         .ok_or_else(|| {
             JsErrorBox::generic(
-                "clay.language_server.invalid_read: timeoutMs must be a positive integer",
+                "language_server.invalid_read: timeoutMs must be a positive integer",
             )
         })?;
     Ok((session_id, package, contribution, max_bytes, timeout_ms))
@@ -577,13 +576,13 @@ fn parse_session_request(
 ) -> Result<serde_json::Map<String, Value>, JsErrorBox> {
     let request: Value = serde_json::from_str(json_text).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.language_server.{error_code}: input must be valid JSON ({error})"
+            "language_server.{error_code}: input must be valid JSON ({error})"
         ))
     })?;
     match request {
         Value::Object(object) => Ok(object),
         _ => Err(JsErrorBox::generic(format!(
-            "clay.language_server.{error_code}: options must be an object"
+            "language_server.{error_code}: options must be an object"
         ))),
     }
 }
@@ -603,7 +602,7 @@ fn parse_session_identity(
         || !object.contains_key("contribution")
     {
         return Err(JsErrorBox::generic(
-            "clay.language_server.invalid_session: sessionId, package, and contribution are required",
+            "language_server.invalid_session: sessionId, package, and contribution are required",
         ));
     }
     Ok((
@@ -627,7 +626,7 @@ fn require_session_id(
         .map(crate::server::language_server::LanguageServerSessionId::from_u64)
         .ok_or_else(|| {
             JsErrorBox::generic(
-                "clay.language_server.invalid_session: sessionId must be a positive integer",
+                "language_server.invalid_session: sessionId must be a positive integer",
             )
         })
 }
@@ -645,12 +644,12 @@ fn require_current_fingerprint(
         .language_server_grant(package, contribution)
         .ok_or_else(|| {
             JsErrorBox::generic(format!(
-                "clay.language_server.missing_grant: package `{package}` has no current grant for `{contribution}`"
+                "language_server.missing_grant: package `{package}` has no current grant for `{contribution}`"
             ))
         })?;
     Ok(grant.descriptor_fingerprint)
 }
 
 fn map_session_error(error: LanguageServerError) -> JsErrorBox {
-    JsErrorBox::generic(format!("clay.language_server.session_failed: {error}"))
+    JsErrorBox::generic(format!("language_server.session_failed: {error}"))
 }

@@ -18,14 +18,14 @@ function plannedApi(name) {
 }
 export async function serverGetDocumentSnapshot(documentId) {
     void documentId;
-    plannedApi("clay.documents.serverGetDocumentSnapshot");
+    plannedApi("documents.serverGetDocumentSnapshot");
 }
 export async function serverGetDocumentLease(documentId) {
     void documentId;
-    plannedApi("clay.documents.serverGetDocumentLease");
+    plannedApi("documents.serverGetDocumentLease");
 }
 export function clientOpenFileDialog() {
-    return "clay.documents.clientOpenFileDialog";
+    return "documents.clientOpenFileDialog";
 }
 export async function serverOpenDocument(options) {
     return JSON.parse(await documentOps().op_clay_documents_open_document(JSON.stringify(options)));

@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientAddCursor
+id: editor.clientAddCursor
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientAddCursor
@@ -21,7 +21,7 @@ custom_properties:
     default: none
     description: Where the new caret is added relative to the primary (below, above).
 security: Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientAddCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `editor.clientAddCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, multi-cursor, selection]
 app_visible: true
 help_visible: true
@@ -37,7 +37,7 @@ Add a collapsed caret one line below or above the primary caret at the same colu
 
 ## Description
 
-`clientAddCursor` is the public API for **Add Cursor** (Plan 071 task 9, VSCode `insertCursorBelow`/`insertCursorAbove`). The `op_clay_editor_add_cursor` deno op validates the `direction` argument (deny-by-default enum) and returns the direction-specific command descriptor (`clay.editor.clientAddCursor.below` or `.above`). Key-driven execution is served client-local by those command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`). The new caret is placed at the same scalar column on the target line, clamped to the line end, and becomes the primary. A caret is never stacked twice on one line.
+`clientAddCursor` is the public API for **Add Cursor** (Plan 071 task 9, VSCode `insertCursorBelow`/`insertCursorAbove`). The `op_clay_editor_add_cursor` deno op validates the `direction` argument (deny-by-default enum) and returns the direction-specific command descriptor (`editor.clientAddCursor.below` or `.above`). Key-driven execution is served client-local by those command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`). The new caret is placed at the same scalar column on the target line, clamped to the line end, and becomes the primary. A caret is never stacked twice on one line.
 
 Authority: `client-local-ui-state`. Runtime path: `client-local-hot-path`.
 
@@ -69,7 +69,7 @@ Default key bindings:
 
 - `Ctrl+Alt+Down` (add cursor below), `Ctrl+Alt+Up` (add cursor above)
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs (`clay.editor.clientAddCursor.below`, `clay.editor.clientAddCursor.above`).
+Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs (`editor.clientAddCursor.below`, `editor.clientAddCursor.above`).
 
 ## Custom properties
 
@@ -93,7 +93,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientAddCursor` when the user asks for add-cursor multi-editing through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientAddCursor` when the user asks for add-cursor multi-editing through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -104,7 +104,7 @@ Use `clay.editor.clientAddCursor` when the user asks for add-cursor multi-editin
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientAddCursor`
+- Stable ID: `editor.clientAddCursor`
 - User-facing name: Add Cursor
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientAddCursor`

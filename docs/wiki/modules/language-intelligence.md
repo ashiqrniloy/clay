@@ -43,7 +43,7 @@ A package declares `clay.contributions.languageIntelligenceProviders` and calls 
 ### Request and coordination flow
 
 ```text
-clay.language.hover | goToDefinition | codeActions | signatureHelp
+language.hover | goToDefinition | codeActions | signatureHelp
   -> client captures document/version/behavior/cursor byte offset
   -> nonblocking ClientMessage::LanguageIntelligenceRequest
   -> connection builds a UTF-8-safe <=64 KiB document window
@@ -76,7 +76,7 @@ The coordinator owns one in-flight task key per client/document/feature. A newer
 - Hover and signature help use modeless sessions with Markdown converted to inert plain text.
 - Definitions and code actions use modal selectable sessions.
 - Same-document definitions call `navigate_to_byte_offset`.
-- Workspace definitions reuse `clay.workspace.openFile`, then apply a pending byte-offset jump after `DocumentOpened`.
+- Workspace definitions reuse `workspace.openFile`, then apply a pending byte-offset jump after `DocumentOpened`.
 - Command-backed actions use existing SDUI/`CommandExecution` validation.
 - Edit previews display status only; Phase 18.20 never applies them.
 

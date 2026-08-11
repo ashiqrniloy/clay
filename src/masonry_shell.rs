@@ -82,7 +82,7 @@ impl PaneFocusPolicy {
 
 /// Phase 22.1: client-routed shell pane-management commands.
 ///
-/// Mapped from `clay.shell.client*` command IDs by [`Self::from_command_id`].
+/// Mapped from `shell.client*` command IDs by [`Self::from_command_id`].
 /// Vim-style naming: "vertical" = side by side (vsplit), "horizontal" = stacked.
 /// Phase 22.4 adds tab management: `TabActivate(u32)`/`TabMoveTo(u32)` carry
 /// the 1-based tab position from the numbered `clientTabActivate.N`/
@@ -114,40 +114,40 @@ pub enum ShellClientCommand {
 }
 
 impl ShellClientCommand {
-    /// Maps an allowlisted `clay.shell.client*` command ID to its shell command.
+    /// Maps an allowlisted `shell.client*` command ID to its shell command.
     /// `None` for IDs outside the allowlisted surface.
     pub fn from_command_id(command_id: &str) -> Option<Self> {
         match command_id {
-            "clay.shell.clientSplitPaneVertical" => Some(Self::SplitPaneVertical),
-            "clay.shell.clientSplitPaneHorizontal" => Some(Self::SplitPaneHorizontal),
+            "shell.clientSplitPaneVertical" => Some(Self::SplitPaneVertical),
+            "shell.clientSplitPaneHorizontal" => Some(Self::SplitPaneHorizontal),
             // Phase 22.7 (F3): direction-named aliases for the Vim-style
             // canonical IDs ("vertical" = side by side). The canonical names
             // stay for backwards compatibility with existing configs and
             // docs; the aliases add the direction vocabulary without
             // duplicating handlers.
-            "clay.shell.clientSplitPaneRight" => Some(Self::SplitPaneVertical), // alias: new pane beside
-            "clay.shell.clientSplitPaneDown" => Some(Self::SplitPaneHorizontal), // alias: new pane below
-            "clay.shell.clientAddEqualPane" => Some(Self::AddEqualPane),
-            "clay.shell.clientClosePane" => Some(Self::ClosePane),
-            "clay.shell.clientFocusPaneNext" => Some(Self::FocusPaneNext),
-            "clay.shell.clientFocusPanePrev" => Some(Self::FocusPanePrev),
-            "clay.shell.clientResizePaneLeft" => Some(Self::ResizePaneLeft),
-            "clay.shell.clientResizePaneRight" => Some(Self::ResizePaneRight),
-            "clay.shell.clientResizePaneUp" => Some(Self::ResizePaneUp),
-            "clay.shell.clientResizePaneDown" => Some(Self::ResizePaneDown),
-            "clay.shell.clientMovePaneNext" => Some(Self::MovePaneNext),
-            "clay.shell.clientMovePanePrev" => Some(Self::MovePanePrev),
+            "shell.clientSplitPaneRight" => Some(Self::SplitPaneVertical), // alias: new pane beside
+            "shell.clientSplitPaneDown" => Some(Self::SplitPaneHorizontal), // alias: new pane below
+            "shell.clientAddEqualPane" => Some(Self::AddEqualPane),
+            "shell.clientClosePane" => Some(Self::ClosePane),
+            "shell.clientFocusPaneNext" => Some(Self::FocusPaneNext),
+            "shell.clientFocusPanePrev" => Some(Self::FocusPanePrev),
+            "shell.clientResizePaneLeft" => Some(Self::ResizePaneLeft),
+            "shell.clientResizePaneRight" => Some(Self::ResizePaneRight),
+            "shell.clientResizePaneUp" => Some(Self::ResizePaneUp),
+            "shell.clientResizePaneDown" => Some(Self::ResizePaneDown),
+            "shell.clientMovePaneNext" => Some(Self::MovePaneNext),
+            "shell.clientMovePanePrev" => Some(Self::MovePanePrev),
             // Phase 22.4: tab management. Numbered families parse N in 1..=9
             // only (the command surface declares no "beyond 9" IDs).
-            "clay.shell.clientTabNext" => Some(Self::TabNext),
-            "clay.shell.clientTabPrev" => Some(Self::TabPrev),
-            "clay.shell.clientTabNew" => Some(Self::TabNew),
-            "clay.shell.clientTabClose" => Some(Self::TabClose),
-            "clay.shell.clientTabMoveLeft" => Some(Self::TabMoveLeft),
-            "clay.shell.clientTabMoveRight" => Some(Self::TabMoveRight),
+            "shell.clientTabNext" => Some(Self::TabNext),
+            "shell.clientTabPrev" => Some(Self::TabPrev),
+            "shell.clientTabNew" => Some(Self::TabNew),
+            "shell.clientTabClose" => Some(Self::TabClose),
+            "shell.clientTabMoveLeft" => Some(Self::TabMoveLeft),
+            "shell.clientTabMoveRight" => Some(Self::TabMoveRight),
             command_id
                 if let Some(n) = command_id
-                    .strip_prefix("clay.shell.clientTabActivate.")
+                    .strip_prefix("shell.clientTabActivate.")
                     .and_then(|suffix| suffix.parse::<u32>().ok())
                     .filter(|n| (1..=9).contains(n)) =>
             {
@@ -155,7 +155,7 @@ impl ShellClientCommand {
             }
             command_id
                 if let Some(n) = command_id
-                    .strip_prefix("clay.shell.clientTabMoveTo.")
+                    .strip_prefix("shell.clientTabMoveTo.")
                     .and_then(|suffix| suffix.parse::<u32>().ok())
                     .filter(|n| (1..=9).contains(n)) =>
             {
@@ -4456,31 +4456,31 @@ mod tests {
     fn split_alias_ids_resolve_to_canonical_commands() {
         use crate::masonry_shell::ShellClientCommand;
         assert_eq!(
-            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneRight"),
+            ShellClientCommand::from_command_id("shell.clientSplitPaneRight"),
             Some(ShellClientCommand::SplitPaneVertical),
             "right = side-by-side split (canonical Vertical)"
         );
         assert_eq!(
-            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneDown"),
+            ShellClientCommand::from_command_id("shell.clientSplitPaneDown"),
             Some(ShellClientCommand::SplitPaneHorizontal),
             "down = stacked split (canonical Horizontal)"
         );
         // Canonical IDs unchanged.
         assert_eq!(
-            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneVertical"),
+            ShellClientCommand::from_command_id("shell.clientSplitPaneVertical"),
             Some(ShellClientCommand::SplitPaneVertical)
         );
         assert_eq!(
-            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneHorizontal"),
+            ShellClientCommand::from_command_id("shell.clientSplitPaneHorizontal"),
             Some(ShellClientCommand::SplitPaneHorizontal)
         );
         // Unknown direction names are not aliases.
         assert_eq!(
-            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneLeft"),
+            ShellClientCommand::from_command_id("shell.clientSplitPaneLeft"),
             None
         );
         assert_eq!(
-            ShellClientCommand::from_command_id("clay.shell.clientSplitPaneUp"),
+            ShellClientCommand::from_command_id("shell.clientSplitPaneUp"),
             None
         );
     }

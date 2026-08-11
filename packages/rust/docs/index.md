@@ -33,7 +33,7 @@ All first-party language packages are implemented through generic primitives (sy
 
 ## Configuration
 
-Phase 18.18 keeps Rust editing defaults (4-space indentation, `//` line comments, bracket/quote pairs, electric `}` outdent, and one-character `.`/`:` autocomplete triggers) as package-defined values. No new user-tunable configuration keys are introduced in this phase. Future phases may expose documented, package-prefixed options through `clay.configuration.setPackageOption` after they are declared in `clay.contributions.packageOptions`.
+Phase 18.18 keeps Rust editing defaults (4-space indentation, `//` line comments, bracket/quote pairs, electric `}` outdent, and one-character `.`/`:` autocomplete triggers) as package-defined values. No new user-tunable configuration keys are introduced in this phase. Future phases may expose documented, package-prefixed options through `configuration.setPackageOption` after they are declared in `clay.contributions.packageOptions`.
 
 ## Permissions
 
@@ -62,7 +62,7 @@ The package is not auto-loaded. Without this line, `.rs` files remain editable u
 - **Tier 2 web-tree-sitter WASM** remains available to an explicitly selected package that actually supplies a confined WASM artifact; `@clay/rust` itself ships native metadata only.
 - **Tier 3 JavaScript fallback** remains available through the server parse-handler path when `setSyntaxEnginePreference("rust", "javascript")` is selected or no grammar is available.
 
-All tiers use one capture-to-`TokenType`/`Modifiers` vocabulary mapper. Open returns before parsing finishes; later failures publish sanitized `clay.parse.open_failed` diagnostics. See the [tiered syntax engine package-author contract](../../../docs/reference/packages/creating-packages.md#phase-1816-authoring-contract-tiered-syntax-engine).
+All tiers use one capture-to-`TokenType`/`Modifiers` vocabulary mapper. Open returns before parsing finishes; later failures publish sanitized `parse.open_failed` diagnostics. See the [tiered syntax engine package-author contract](../../../docs/reference/packages/creating-packages.md#phase-1816-authoring-contract-tiered-syntax-engine).
 
 ## Typography
 

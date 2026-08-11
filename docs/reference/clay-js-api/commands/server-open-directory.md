@@ -1,5 +1,5 @@
 ---
-id: clay.commands.serverOpenDirectory
+id: commands.serverOpenDirectory
 kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverOpenDirectory
@@ -16,8 +16,8 @@ visibility: public
 permissions: ["workspace-read"]
 key_bindings: []
 custom_properties: []
-security: Routes through clay.workspace.openDirectory and server workspace APIs; directory paths are root-relative and validated inside a known workspace root, and this API does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard authority, or client-side JavaScript authority.
-agent_guidance: Use `clay.commands.serverOpenDirectory` only through the documented Clay JS facade or Clay-owned SDUI file-browser actions; do not bind it as a global key without root-relative arguments, call raw Rust/protocol/ops, or invent broader filesystem/workspace authority.
+security: Routes through workspace.openDirectory and server workspace APIs; directory paths are root-relative and validated inside a known workspace root, and this API does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard authority, or client-side JavaScript authority.
+agent_guidance: Use `commands.serverOpenDirectory` only through the documented Clay JS facade or Clay-owned SDUI file-browser actions; do not bind it as a global key without root-relative arguments, call raw Rust/protocol/ops, or invent broader filesystem/workspace authority.
 lookup_tags: [commands, workspace, open-directory, file-browser, navigation, phase19, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Navigate the Clay-owned workspace file browser to a root-relative directory thro
 
 ## Description
 
-`serverOpenDirectory` is the runtime-backed Clay JS API for **Open Directory**. It wraps the built-in `clay.workspace.openDirectory` command and returns the validated navigation target. The same command ID is used by Clay-owned file-browser SDUI directory rows, which include the required `workspaceRootId` and `relativePath` arguments.
+`serverOpenDirectory` is the runtime-backed Clay JS API for **Open Directory**. It wraps the built-in `workspace.openDirectory` command and returns the validated navigation target. The same command ID is used by Clay-owned file-browser SDUI directory rows, which include the required `workspaceRootId` and `relativePath` arguments.
 
 This API is server-first background/action work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths. The server validates the directory with `WorkspaceState::list_directory` bounds and refreshes file-browser SDUI when invoked from the live file-browser action path.
 
@@ -86,13 +86,13 @@ The runtime rejects malformed arguments, unavailable runtime ops, unknown comman
 
 Requires: `["workspace-read"]`.
 
-Routes through `clay.workspace.openDirectory` and server workspace APIs; directory paths are root-relative and validated inside a known workspace root, and this API does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard authority, or client-side JavaScript authority.
+Routes through `workspace.openDirectory` and server workspace APIs; directory paths are root-relative and validated inside a known workspace root, and this API does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard authority, or client-side JavaScript authority.
 
 The file browser remains Clay-owned SDUI, not a package/native widget. Packages/configuration cannot override marker files, ignore lists, listing budgets, directory traversal validation, or SDUI action validation through this API.
 
 ## Agent guidance
 
-Use `clay.commands.serverOpenDirectory` only through the documented Clay JS facade or Clay-owned SDUI file-browser actions. Do not call raw Rust functions, protocol DTOs, raw `Deno.core.ops`, shell commands, arbitrary absolute paths, hidden workspace grants, package-manager actions, WASM, AI mutation, clipboard APIs, native widgets, or client-side JavaScript execution.
+Use `commands.serverOpenDirectory` only through the documented Clay JS facade or Clay-owned SDUI file-browser actions. Do not call raw Rust functions, protocol DTOs, raw `Deno.core.ops`, shell commands, arbitrary absolute paths, hidden workspace grants, package-manager actions, WASM, AI mutation, clipboard APIs, native widgets, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -102,7 +102,7 @@ Use `clay.commands.serverOpenDirectory` only through the documented Clay JS faca
 
 ## Lookup metadata
 
-- Stable ID: `clay.commands.serverOpenDirectory`
+- Stable ID: `commands.serverOpenDirectory`
 - User-facing name: Open Directory
 - Kind: `clay-js-api`
 - Module/export: `clay:commands` / `serverOpenDirectory`

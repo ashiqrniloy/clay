@@ -160,7 +160,7 @@ Lagging package work must be visually safe and predictable:
 No code is added in Phase 16, but later phases should attach parsing at these boundaries:
 
 - `src/server/document.rs`: after accepted edits in `DocumentState::apply_edit`, expose compact accepted-edit metadata to the coordinator. Do not run JavaScript here.
-- `src/server/js_runtime.rs`: extend the controlled `deno_core` runtime/facade allowlist with future `clay:parse` APIs such as `clay.parse.serverRegisterParseHandler`; preserve server-side execution and sanitized diagnostics.
+- `src/server/js_runtime.rs`: extend the controlled `deno_core` runtime/facade allowlist with future `clay:parse` APIs such as `parse.serverRegisterParseHandler`; preserve server-side execution and sanitized diagnostics.
 - `src/server/parse_coordinator.rs`: new module recommended for per-document parse queues, cancellation tokens/generations, timeout policy, viewport priority, cache management, and result validation/publication.
 - Future protocol modules: define `ParseEditNotification`, `ParseResult`, and `DecorationUpdate`/folding/diagnostic publication messages as bounded protocol shapes.
 
@@ -176,7 +176,7 @@ One parse/capture result becomes `IncrementalParseUpdate::decoration_updates`: c
 
 Package load validates grammar metadata, paths, style maps, permissions, provenance, and budgets. At document open/reload/reclassification/package-load time, Clay selects syntax independently of major mode. `setSyntaxEnginePreference(target, tier)` is the only user override and accepts `native`, `wasm`, or `javascript`/`js`; package load order cannot silently replace a native descriptor. A document can remain editable as `core.code` or `core.text` while syntax is selected, and no grammar/fallback selection leaves major-mode editability unchanged.
 
-Open scheduling is enqueue-only: text and the initial mode state return before parse completion. Handler errors, timeouts, invalid updates, and budget failures are sanitized into `RuntimeDiagnostic` values such as `clay.parse.open_failed` through `ParseCoordinator::finish_task`; they do not block open or leak paths/source text. The client may interpolate already-validated inert syntax spans through optimistic edits, then subtract the exact authoritative half-open viewport from overlapping provisional chunks of the same package/layer via `apply_set`, preserving left/right span fragments outside authority and locally coalescing compatible residual chunks/spans. Tree-sitter and package parse/highlight work remains `Background`, cancellable, stale-version rejecting, viewport-prioritized, and bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`; no grammar package JavaScript, parser/query compilation, native artifact loading, filesystem/network/shell/AI/raw-op authority, or full-document IPC runs in editor hot paths. Tier 2 runtime assets are local/resolver-validated; no runtime download, shell/package-manager build, or native-library load occurs.
+Open scheduling is enqueue-only: text and the initial mode state return before parse completion. Handler errors, timeouts, invalid updates, and budget failures are sanitized into `RuntimeDiagnostic` values such as `parse.open_failed` through `ParseCoordinator::finish_task`; they do not block open or leak paths/source text. The client may interpolate already-validated inert syntax spans through optimistic edits, then subtract the exact authoritative half-open viewport from overlapping provisional chunks of the same package/layer via `apply_set`, preserving left/right span fragments outside authority and locally coalescing compatible residual chunks/spans. Tree-sitter and package parse/highlight work remains `Background`, cancellable, stale-version rejecting, viewport-prioritized, and bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`; no grammar package JavaScript, parser/query compilation, native artifact loading, filesystem/network/shell/AI/raw-op authority, or full-document IPC runs in editor hot paths. Tier 2 runtime assets are local/resolver-validated; no runtime download, shell/package-manager build, or native-library load occurs.
 
 ## Security Rules
 
@@ -209,7 +209,7 @@ Security and performance rules:
 
 ## Phase 17/18 Follow-Up
 
-- Add the `clay:parse` facade and `clay.parse.serverRegisterParseHandler` planned API stub.
+- Add the `clay:parse` facade and `parse.serverRegisterParseHandler` planned API stub.
 - Implement `src/server/parse_coordinator.rs` with bounded queues, cancellation, timeout, viewport priority, and stale-result discard tests.
 - Add protocol structs and payload-bound tests for parse notifications/results and decoration publication.
 - Implement Markdown mode parser behavior with line-group-level incremental updates and region-level fenced-code invalidation.

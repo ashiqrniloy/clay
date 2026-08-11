@@ -1,5 +1,5 @@
 ---
-id: clay.keybindings.unbindKey
+id: keybindings.unbindKey
 kind: clay-js-api
 js_module: "clay:keybindings"
 js_export: unbindKey
@@ -29,7 +29,7 @@ custom_properties:
     default: none
     description: Behavior-changing setting `when` for this API.
 security: Changes documented key routing only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.keybindings.unbindKey` only for its documented keybindings responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `keybindings.unbindKey` only for its documented keybindings responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [js-api, keybindingmanagement, keybindings]
 app_visible: true
 help_visible: true
@@ -75,7 +75,7 @@ unbindKey("Ctrl+I", { scope: "editor" });
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.keybindings.unbindKey` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `keybindings.unbindKey` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -103,7 +103,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.keybindings.unbindKey` when the user asks for unbind key through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `keybindings.unbindKey` when the user asks for unbind key through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -114,7 +114,7 @@ Use `clay.keybindings.unbindKey` when the user asks for unbind key through the C
 
 ## Lookup metadata
 
-- Stable ID: `clay.keybindings.unbindKey`
+- Stable ID: `keybindings.unbindKey`
 - User-facing name: Unbind Key
 - Kind: `clay-js-api`
 - Module/export: `clay:keybindings` / `unbindKey`

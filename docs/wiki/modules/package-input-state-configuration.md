@@ -38,10 +38,10 @@ Phase 18.4 completes the documentation-backed integration layer for package inpu
 
 The implemented public surfaces are:
 
-- `clay.ui.serverRegisterInputContribution`
-- `clay.ui.serverRegisterUiStateScope`
-- `clay.ui.serverSetLayoutOverride`
-- `clay.configuration.setPackageOption`
+- `ui.serverRegisterInputContribution`
+- `ui.serverRegisterUiStateScope`
+- `ui.serverSetLayoutOverride`
+- `configuration.setPackageOption`
 
 These APIs are runtime-backed for declaration/override records. They do **not** implement durable state-value persistence, low-level working-area/split/direct slot mutation, pane selector APIs, multi-panel ordering, overlay z-order control, cross-window layout, or package enable/disable authority.
 

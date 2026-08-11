@@ -38,7 +38,7 @@ async fn developer_hot_reload_trigger_reports_success_and_sanitized_failure() {
     assert_eq!(failed.active_generation_id, 2);
     assert!(failed.refreshed_documents.is_empty());
     let diagnostic = failed.diagnostics.last().unwrap();
-    assert_eq!(diagnostic.code, "clay.runtime.syntax_error");
+    assert_eq!(diagnostic.code, "runtime.syntax_error");
     assert!(
         !diagnostic
             .message
@@ -72,7 +72,7 @@ async fn developer_hot_reload_keeps_runtime_authority_denials_after_success() {
     assert_eq!(denied.previous_generation_id, 2);
     assert_eq!(denied.active_generation_id, 2);
     let diagnostic = denied.diagnostics.last().unwrap();
-    assert_eq!(diagnostic.code, "clay.configuration.invalid_module");
+    assert_eq!(diagnostic.code, "configuration.invalid_module");
     assert!(
         !diagnostic
             .message
@@ -103,7 +103,7 @@ async fn failed_reload_keeps_generation_and_sanitized_diagnostic_without_advanci
     assert_eq!(failed.active_generation_id, 2);
     assert!(failed.refreshed_documents.is_empty());
     let diagnostic = failed.diagnostics.last().unwrap();
-    assert_eq!(diagnostic.code, "clay.runtime.syntax_error");
+    assert_eq!(diagnostic.code, "runtime.syntax_error");
     assert!(
         !diagnostic
             .message

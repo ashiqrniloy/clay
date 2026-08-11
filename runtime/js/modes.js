@@ -6,7 +6,7 @@
 const ops = globalThis.Deno?.core?.ops;
 function requireOps() {
     if (!ops) {
-        throw new Error("clay.modes.runtime_unavailable: Clay mode APIs require the server runtime");
+        throw new Error("modes.runtime_unavailable: Clay mode APIs require the server runtime");
     }
     return ops;
 }
@@ -39,7 +39,7 @@ export function serverActivateClassifiedMode(classification, input = {}) {
     const classified = classification;
     const activation = activationRegistry[activationKey(String(classified?.apiPrefix), String(classified?.modeId))];
     if (!activation || classified?.documentId === undefined || !classified?.modeId) {
-        throw new Error("clay.modes.activation_failed: classified mode has no registered activation metadata");
+        throw new Error("modes.activation_failed: classified mode has no registered activation metadata");
     }
     return serverActivateMajorMode({
         ...input,
@@ -52,17 +52,17 @@ export function serverActivateClassifiedMode(classification, input = {}) {
 }
 export function serverSelectDocumentManifest(options) {
     void options;
-    return requireOps().op_clay_runtime_unavailable("clay.modes.serverSelectDocumentManifest");
+    return requireOps().op_clay_runtime_unavailable("modes.serverSelectDocumentManifest");
 }
 export function serverRegisterDecorationProvider(options) {
     void options;
-    return requireOps().op_clay_runtime_unavailable("clay.modes.serverRegisterDecorationProvider");
+    return requireOps().op_clay_runtime_unavailable("modes.serverRegisterDecorationProvider");
 }
 export function serverRegisterParseProvider(options) {
     void options;
-    return requireOps().op_clay_runtime_unavailable("clay.modes.serverRegisterParseProvider");
+    return requireOps().op_clay_runtime_unavailable("modes.serverRegisterParseProvider");
 }
 export function serverRegisterFoldingProvider(options) {
     void options;
-    return requireOps().op_clay_runtime_unavailable("clay.modes.serverRegisterFoldingProvider");
+    return requireOps().op_clay_runtime_unavailable("modes.serverRegisterFoldingProvider");
 }

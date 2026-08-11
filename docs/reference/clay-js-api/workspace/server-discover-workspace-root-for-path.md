@@ -1,5 +1,5 @@
 ---
-id: clay.workspace.serverDiscoverWorkspaceRootForPath
+id: workspace.serverDiscoverWorkspaceRootForPath
 kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverDiscoverWorkspaceRootForPath
@@ -17,7 +17,7 @@ permissions: ["workspace-read"]
 key_bindings: []
 custom_properties: []
 security: Uses a closed Clay-owned marker set and bounded ancestry scan over an already-authorized path; packages cannot add marker names or root rules; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.workspace.serverDiscoverWorkspaceRootForPath` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
+agent_guidance: Use `workspace.serverDiscoverWorkspaceRootForPath` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
 lookup_tags: [workspace, discovery, roots, markers, phase18.12, js-api]
 app_visible: true
 help_visible: true
@@ -61,7 +61,7 @@ const result = await serverDiscoverWorkspaceRootForPath("/home/me/project/src/ma
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.workspace.serverDiscoverWorkspaceRootForPath` through documented keybinding/configuration APIs where appropriate.
+No default key binding is assigned. Users may bind a key to `workspace.serverDiscoverWorkspaceRootForPath` through documented keybinding/configuration APIs where appropriate.
 
 ## Custom properties
 
@@ -85,7 +85,7 @@ Uses a closed Clay-owned marker set and bounded ancestry scan over an already-au
 
 ## Agent guidance
 
-Use `clay.workspace.serverDiscoverWorkspaceRootForPath` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
+Use `workspace.serverDiscoverWorkspaceRootForPath` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.workspace.serverDiscoverWorkspaceRootForPath` only through the documen
 
 ## Lookup metadata
 
-- Stable ID: `clay.workspace.serverDiscoverWorkspaceRootForPath`
+- Stable ID: `workspace.serverDiscoverWorkspaceRootForPath`
 - User-facing name: Discover Workspace Root For Path
 - Kind: `clay-js-api`
 - Module/export: `clay:workspace` / `serverDiscoverWorkspaceRootForPath`

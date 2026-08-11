@@ -2,14 +2,14 @@
 
 Equal-area window splits and per-pane document views: split/close/add-equal/
 move/resize of panes in the working area, pane focus policies, one document
-view per pane (Phase 22.2), the user-rebindable `clay.shell.client*`
+view per pane (Phase 22.2), the user-rebindable `shell.client*`
 command surface, and the Phase 22.7 direction-named split aliases. Deep
 references:
 `docs/reference/primitives/shell-layout-strategy.md` (Phase 22.1 + 22.2
 sections), `docs/reference/clay-js-api/shell/` (command + configuration docs),
 `docs/reference/clay-js-api/editor/client-show-open-documents.md`,
 `docs/development/file-open-save-reload-workflow.md` (document lifecycle),
-`examples/init.js` sections 7–8.
+`examples/init.js` section 6 (shell policy) and section 5 (key bindings).
 
 ## Setup
 
@@ -31,7 +31,7 @@ sections), `docs/reference/clay-js-api/shell/` (command + configuration docs),
 | Resize pane left/right/up/down | `Ctrl+Alt+Shift+arrows` |
 | Move pane prev/next | `Ctrl+Alt+[` / `Ctrl+Alt+]` |
 
-Phase 22.7 direction aliases (`clay.shell.clientSplitPaneRight` =
+Phase 22.7 direction aliases (`shell.clientSplitPaneRight` =
 `clientSplitPaneVertical` beside; `clientSplitPaneDown` =
 `clientSplitPaneHorizontal` below) have NO default chords — bind them in
 init.js (S29–S32).
@@ -100,13 +100,13 @@ init.js additions for these steps:
 
 ```js
 import { bindKey } from "clay:keybindings";
-bindKey("Ctrl+Shift+P", "clay.shell.clientAddEqualPane", { scope: "global" });
+bindKey("Ctrl+Shift+P", "shell.clientAddEqualPane", { scope: "global" });
 ```
 
 | # | Action | Expected |
 |---|--------|----------|
 | S19 | Reload with the binding above, press `Ctrl+Shift+P` | Add-equal-pane runs from the user chord (bindings route through the same ClientUi path as the defaults) |
-| S20 | `bindKey("Ctrl+X", "clay.shell.clientNotARealCommand", { scope: "global" })`, reload | Rejected deny-by-default — diagnostic names the unknown command ID |
+| S20 | `bindKey("Ctrl+X", "shell.clientNotARealCommand", { scope: "global" })`, reload | Rejected deny-by-default — diagnostic names the unknown command ID |
 
 ## Responsiveness (subjective)
 
@@ -131,7 +131,7 @@ shows its own status line with that document's name/dirty state.
 | D5 | Focus routing: focus the `a.md` pane and press a mode-specific chord, then focus `b.md` and press it again | The chord is interpreted by the FOCUSED pane's document mode only (e.g. markdown- or rust-specific bindings fire in the pane that owns that document, never in both) |
 | D6 | Duplicate open: from pane 2, open `a.md` (already open in pane 1) | NO second view — pane 1 is focused instead; `a.md` stays in pane 1 with its caret/content intact |
 | D7 | Duplicate open from several panes (3rd and 4th panes, same file) | Always routes to the single owning pane; still no duplicate view |
-| D8 | Open-documents switcher (`Ctrl+Shift+E` — `clay.editor.clientShowOpenDocuments`) on the focused pane | Menu lists EVERY pane's open document (`pane N: <name>` entries with active/dirty markers) plus retained sessions; selecting a cross-pane entry switches the OWNING pane's document and focuses it; selecting an own-pane entry activates locally |
+| D8 | Open-documents switcher (`Ctrl+Shift+E` — `editor.clientShowOpenDocuments`) on the focused pane | Menu lists EVERY pane's open document (`pane N: <name>` entries with active/dirty markers) plus retained sessions; selecting a cross-pane entry switches the OWNING pane's document and focuses it; selecting an own-pane entry activates locally |
 | D9 | Close pane, CLEAN document (`Ctrl+Alt+W` on a pane whose doc is saved) | Pane closes, tree merges; the document's lease is released (reopen it after — opens fresh, no stale caret/session) |
 | D10 | Close pane, DIRTY document: type in a pane, then `Ctrl+Alt+W` | Close is BLOCKED — save-conflict menu appears on that pane; no topology change until resolved |
 | D11 | From the D10 state, SAVE via the conflict menu, then `Ctrl+Alt+W` | Pane closes normally after the conflict resolves |
@@ -178,8 +178,8 @@ the tree shape, only for the human hearing check.
 ## Split direction aliases (Phase 22.7)
 
 Phase 22.7 added direction-named aliases that resolve to the canonical
-split handlers: `clay.shell.clientSplitPaneRight` = `SplitPaneVertical`
-(side by side), `clay.shell.clientSplitPaneDown` = `SplitPaneHorizontal`
+split handlers: `shell.clientSplitPaneRight` = `SplitPaneVertical`
+(side by side), `shell.clientSplitPaneDown` = `SplitPaneHorizontal`
 (stacked). They are bindable command IDs with NO default chords; the
 canonical `Ctrl+\` / `Ctrl+-` bindings are unchanged. Deep reference:
 `docs/reference/clay-js-api/shell/client-split-pane-right.md` and
@@ -189,8 +189,8 @@ init.js additions for these steps:
 
 ```js
 import { bindKey } from "clay:keybindings";
-bindKey("Ctrl+Shift+Right", "clay.shell.clientSplitPaneRight", { scope: "global" });
-bindKey("Ctrl+Shift+Down", "clay.shell.clientSplitPaneDown", { scope: "global" });
+bindKey("Ctrl+Shift+Right", "shell.clientSplitPaneRight", { scope: "global" });
+bindKey("Ctrl+Shift+Down", "shell.clientSplitPaneDown", { scope: "global" });
 ```
 
 | # | Action | Expected |

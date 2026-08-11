@@ -46,7 +46,7 @@ pub(super) async fn op_clay_workspace_list_roots(
     );
     serde_json::to_string(&value).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.workspace.list_roots_failed: failed to serialize result: {error}"
+            "workspace.list_roots_failed: failed to serialize result: {error}"
         ))
     })
 }
@@ -68,7 +68,7 @@ pub(super) async fn op_clay_workspace_add_root(
     });
     serde_json::to_string(&value).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.workspace.add_root_failed: failed to serialize result: {error}"
+            "workspace.add_root_failed: failed to serialize result: {error}"
         ))
     })
 }
@@ -97,7 +97,7 @@ pub(super) async fn op_clay_workspace_discover_root_for_path(
     };
     serde_json::to_string(&value).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.workspace.discover_root_for_path_failed: failed to serialize result: {error}"
+            "workspace.discover_root_for_path_failed: failed to serialize result: {error}"
         ))
     })
 }
@@ -119,7 +119,7 @@ pub(super) async fn op_clay_workspace_list_directory(
     let page = run_directory_listing(workspace, request, token_id, token).await?;
     serde_json::to_string(&serialize_file_list_page(&page)).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.workspace.list_directory_failed: failed to serialize result: {error}"
+            "workspace.list_directory_failed: failed to serialize result: {error}"
         ))
     })
 }
@@ -139,17 +139,13 @@ async fn run_directory_listing(
     let permit = Arc::clone(&DIRECTORY_LISTING_PERMITS)
         .acquire_owned()
         .await
-        .map_err(|_| {
-            JsErrorBox::generic("clay.workspace.list_directory_failed: service stopped")
-        })?;
+        .map_err(|_| JsErrorBox::generic("workspace.list_directory_failed: service stopped"))?;
     let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         traverse_directory(plan, Some(&token))
     })
     .await
-    .map_err(|_| {
-        JsErrorBox::generic("clay.workspace.list_directory_failed: traversal task failed")
-    })?;
+    .map_err(|_| JsErrorBox::generic("workspace.list_directory_failed: traversal task failed"))?;
     result.map_err(|error| JsErrorBox::generic(error.diagnostic().to_string()))
 }
 
@@ -169,7 +165,7 @@ pub(super) async fn op_clay_workspace_cancel_listing(
 fn parse_file_list_request(json: &str) -> Result<FileListRequest, JsErrorBox> {
     let value: Value = serde_json::from_str(json).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.workspace.list_directory_failed: invalid request JSON: {error}"
+            "workspace.list_directory_failed: invalid request JSON: {error}"
         ))
     })?;
     let defaults = FileListRequest::default();

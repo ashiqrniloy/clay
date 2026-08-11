@@ -1,5 +1,5 @@
 ---
-id: clay.commands.serverExecuteCommand
+id: commands.serverExecuteCommand
 kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverExecuteCommand
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Revalidates command id, routing policy, provenance, permissions, target context, and argument budget before side effects; workspace commands re-check roots and selected-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.commands.serverExecuteCommand` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
+agent_guidance: Use `commands.serverExecuteCommand` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
 lookup_tags: [commands, execution, workspace, file-browser, phase18.12, js-api]
 app_visible: true
 help_visible: true
@@ -46,13 +46,13 @@ Use this API when server-side Clay JavaScript needs execute command behavior thr
 ```ts
 import { serverExecuteCommand } from "clay:commands";
 
-const result = await serverExecuteCommand("clay.workspace.revealInTree", { documentId });
+const result = await serverExecuteCommand("workspace.revealInTree", { documentId });
 ```
 
 ## Example
 
 ```ts
-const result = await serverExecuteCommand("clay.workspace.revealInTree", { documentId });
+const result = await serverExecuteCommand("workspace.revealInTree", { documentId });
 ```
 
 ## Options
@@ -61,7 +61,7 @@ const result = await serverExecuteCommand("clay.workspace.revealInTree", { docum
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.commands.serverExecuteCommand` through documented keybinding/configuration APIs where appropriate.
+No default key binding is assigned. Users may bind a key to `commands.serverExecuteCommand` through documented keybinding/configuration APIs where appropriate.
 
 ## Custom properties
 
@@ -85,7 +85,7 @@ Revalidates command id, routing policy, provenance, permissions, target context,
 
 ## Agent guidance
 
-Use `clay.commands.serverExecuteCommand` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
+Use `commands.serverExecuteCommand` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.commands.serverExecuteCommand` only through the documented Clay JS fac
 
 ## Lookup metadata
 
-- Stable ID: `clay.commands.serverExecuteCommand`
+- Stable ID: `commands.serverExecuteCommand`
 - User-facing name: Execute Command
 - Kind: `clay-js-api`
 - Module/export: `clay:commands` / `serverExecuteCommand`

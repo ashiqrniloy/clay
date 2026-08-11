@@ -1442,6 +1442,10 @@ pub(crate) struct ClayRuntimeEvaluation {
     /// configured one. The server assigns its authoritative revision only after
     /// the evaluation succeeds.
     pub(crate) active_typography: Option<crate::protocol::ActiveTypography>,
+    /// Warnings emitted by optional configuration-module imports. These are
+    /// drained from the configuration runtime before the evaluation is
+    /// returned so reload callers can retain and report them.
+    pub(crate) configuration_diagnostics: Vec<RuntimeDiagnostic>,
 }
 
 #[derive(Debug)]
@@ -1495,24 +1499,24 @@ impl ClayRuntimeError {
     pub(crate) fn diagnostic(&self) -> RuntimeDiagnostic {
         match self {
             Self::Configuration(error) => RuntimeDiagnostic::error(
-                "clay.configuration.invalid_module",
+                "configuration.invalid_module",
                 configuration_diagnostic_message(&error.to_string()),
             ),
             Self::InvalidMainSpecifier(_) => RuntimeDiagnostic::error(
-                "clay.runtime.invalid_main",
+                "runtime.invalid_main",
                 "Runtime configuration entry point could not be parsed.",
             ),
             Self::Runtime(message) => runtime_error_diagnostic(message),
             Self::Timeout => RuntimeDiagnostic::error(
-                "clay.runtime.timeout",
+                "runtime.timeout",
                 "JavaScript runtime evaluation timed out and was terminated.",
             ),
             Self::HeapLimit => RuntimeDiagnostic::error(
-                "clay.runtime.heap_limit",
+                "runtime.heap_limit",
                 "JavaScript runtime exceeded its heap budget and was terminated.",
             ),
             Self::Join(_) => RuntimeDiagnostic::error(
-                "clay.runtime.task_failed",
+                "runtime.task_failed",
                 "JavaScript runtime worker failed before configuration completed.",
             ),
         }
@@ -1522,42 +1526,38 @@ impl ClayRuntimeError {
 fn runtime_error_diagnostic(message: &str) -> RuntimeDiagnostic {
     let code = extract_clay_error_code(message).unwrap_or_else(|| {
         if message.contains("SyntaxError") {
-            "clay.runtime.syntax_error".to_string()
+            "runtime.syntax_error".to_string()
         } else {
-            "clay.runtime.exception".to_string()
+            "runtime.exception".to_string()
         }
     });
     let detail = match code.as_str() {
-        "clay.runtime.invalid_import" => {
+        "runtime.invalid_import" => {
             "Only clay:* facades and relative local configuration modules are allowed."
         }
-        "clay.configuration.invalid_module" => {
+        "configuration.invalid_module" => {
             // Secure but actionable: name the allowed import families (clay:*
             // facades + relative local .js) so a typo (e.g. `clay:themes` vs
             // `clay:theme`) is diagnosable without echoing the rejected
             // specifier/URL/path (which must not leak).
             "Configuration import rejected: only clay:* facades (clay:theme, clay:configuration, clay:keybindings, clay:packages, clay:ui, clay:commands, ...) and explicit relative .js files under the configuration root are allowed. Check the import specifier spelling."
         }
-        "clay.runtime.syntax_error" => {
+        "runtime.syntax_error" => {
             "JavaScript syntax error while evaluating server-side configuration."
         }
-        "clay.runtime.invalid_record" => "Runtime op validation rejected an empty record.",
-        "clay.sdui.invalid_tree" => "Published SDUI tree failed server validation.",
-        "clay.sdui.invalid_action" => {
-            "Published SDUI action contains unsupported command authority."
-        }
-        "clay.keybindings.unknown_command" => {
+        "runtime.invalid_record" => "Runtime op validation rejected an empty record.",
+        "sdui.invalid_tree" => "Published SDUI tree failed server validation.",
+        "sdui.invalid_action" => "Published SDUI action contains unsupported command authority.",
+        "keybindings.unknown_command" => {
             "Key binding references an unknown or unsupported command."
         }
-        code if code.starts_with("clay.ui.") => {
+        code if code.starts_with("ui.") => {
             "Package UI contribution registration failed server validation."
         }
-        code if code.starts_with("clay.documents.") => {
+        code if code.starts_with("documents.") => {
             "Document/workspace operation failed server validation."
         }
-        code if code.starts_with("clay.workspace.") => {
-            "Workspace operation failed server validation."
-        }
+        code if code.starts_with("workspace.") => "Workspace operation failed server validation.",
         _ => "JavaScript runtime evaluation failed.",
     };
 
@@ -1576,11 +1576,11 @@ fn configuration_diagnostic_message(message: &str) -> String {
     }
 }
 
-/// Extract the human-readable detail from a `clay.configuration.invalid_module: <detail>`
+/// Extract the human-readable detail from a `configuration.invalid_module: <detail>`
 /// JS error string so runtime-routed configuration errors name the rejected
 /// module/path instead of an opaque generic message.
 fn configuration_runtime_detail(message: &str) -> Option<&str> {
-    let prefix = "clay.configuration.invalid_module:";
+    let prefix = "configuration.invalid_module:";
     message
         .strip_prefix(prefix)
         .map(str::trim)
@@ -1590,7 +1590,13 @@ fn configuration_runtime_detail(message: &str) -> Option<&str> {
 fn extract_clay_error_code(message: &str) -> Option<String> {
     message
         .split(|character: char| character.is_whitespace() || character == ':' || character == '`')
-        .find(|part| part.starts_with("clay.") && part.chars().all(is_error_code_character))
+        .find(|part| {
+            part.contains('.')
+                && part.chars().all(is_error_code_character)
+                && part.split('.').next().is_some_and(|domain| {
+                    crate::packages::manifest::RESERVED_CORE_API_DOMAINS.contains(&domain)
+                })
+        })
         .map(ToOwned::to_owned)
 }
 
@@ -1787,7 +1793,7 @@ fn run_runtime_worker(
                     && domain != crate::packages::bundled::RuntimeDomain::Trusted
                 {
                     let _ = response.send(Err(ClayRuntimeError::Runtime(
-                        "clay.domain.trusted_only: configuration evaluation requires the trusted runtime domain"
+                        "domain.trusted_only: configuration evaluation requires the trusted runtime domain"
                             .to_string(),
                     )));
                     continue;
@@ -2056,6 +2062,7 @@ fn harvest_op_state_evaluation(op_state: &Arc<ClayOpState>) -> ClayRuntimeEvalua
         document_analyzers: op_state.document_analyzers(),
         active_theme,
         active_typography: op_state.active_typography(),
+        configuration_diagnostics: Vec::new(),
     }
 }
 
@@ -2115,7 +2122,28 @@ async fn evaluate_loaded_module(
         if let Some(configuration) = &loaded_configuration.configuration {
             apply_persisted_preferences(op_state, configuration);
         }
-        Ok(harvest_op_state_evaluation(op_state))
+        let configuration_diagnostics = loaded_configuration
+            .configuration
+            .as_ref()
+            .map(|configuration| {
+                configuration
+                    .take_module_errors()
+                    .into_iter()
+                    .map(|error| {
+                        RuntimeDiagnostic::warning(
+                            "configuration.module_failed",
+                            format!(
+                                "Optional configuration module {} failed: {}",
+                                error.path, error.message
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut evaluation = harvest_op_state_evaluation(op_state);
+        evaluation.configuration_diagnostics = configuration_diagnostics;
+        Ok(evaluation)
     }
     .await;
 
@@ -2182,7 +2210,7 @@ async fn evaluate_js_parse_handler(
 const registry = globalThis.__clayParseHandlers ?? Object.create(null);
 const handler = registry[{token:?}];
 if (typeof handler !== "function") {{
-  throw new Error("clay.parse.handler_missing: registered parse handler is unavailable");
+  throw new Error("parse.handler_missing: registered parse handler is unavailable");
 }}
 const notification = {notification};
 const update = await handler(notification);
@@ -2207,9 +2235,7 @@ Deno.core.ops.op_clay_parse_store_update(JSON.stringify(update ?? null));
     );
     evaluate_loaded_module(runtime, op_state, loaded, timeout, false, heap_limit_hit).await?;
     let update_json = op_state.take_parse_update_json().ok_or_else(|| {
-        ClayRuntimeError::Runtime(
-            "clay.parse.invalid_update: handler produced no update".to_string(),
-        )
+        ClayRuntimeError::Runtime("parse.invalid_update: handler produced no update".to_string())
     })?;
     parse_update_json(&update_json, registration, notification)
 }
@@ -2238,7 +2264,7 @@ async fn evaluate_js_document_analyzer(
 import * as analyzerModule from {module_specifier};
 const handler = analyzerModule[{export_name}];
 if (typeof handler !== "function") {{
-  throw new Error("clay.analysis.handler_missing: registered analyzer export is unavailable");
+  throw new Error("analysis.handler_missing: registered analyzer export is unavailable");
 }}
 const result = await handler({event_json});
 Deno.core.ops.op_clay_runtime_record(JSON.stringify(result ?? null));
@@ -2406,7 +2432,7 @@ async fn evaluate_js_completion_provider(
 const registry = globalThis.__clayCompletionHandlers ?? Object.create(null);
 const handler = registry[{token:?}];
 if (typeof handler !== "function") {{
-  throw new Error("clay.completion.handler_missing: registered completion handler is unavailable");
+  throw new Error("completion.handler_missing: registered completion handler is unavailable");
 }}
 const result = await handler({request}, {window});
 Deno.core.ops.op_clay_completion_store_result(JSON.stringify(result ?? null));
@@ -2433,7 +2459,7 @@ Deno.core.ops.op_clay_completion_store_result(JSON.stringify(result ?? null));
     evaluate_loaded_module(runtime, op_state, loaded, timeout, false, heap_limit_hit).await?;
     let result_json = op_state.take_completion_result_json().ok_or_else(|| {
         ClayRuntimeError::Runtime(
-            "clay.completion.invalid_result: handler produced no result".to_string(),
+            "completion.invalid_result: handler produced no result".to_string(),
         )
     })?;
     completion_result_from_json(&result_json, &registration.package, &request)
@@ -2487,12 +2513,10 @@ fn completion_result_from_json(
     };
 
     let value: serde_json::Value = serde_json::from_str(result_json).map_err(|error| {
-        ClayRuntimeError::Runtime(format!("clay.completion.invalid_result: {error}"))
+        ClayRuntimeError::Runtime(format!("completion.invalid_result: {error}"))
     })?;
     let object = value.as_object().ok_or_else(|| {
-        ClayRuntimeError::Runtime(
-            "clay.completion.invalid_result: result must be an object".to_string(),
-        )
+        ClayRuntimeError::Runtime("completion.invalid_result: result must be an object".to_string())
     })?;
     let status = match object
         .get("status")
@@ -2505,7 +2529,7 @@ fn completion_result_from_json(
         "providerError" | "ProviderError" | "error" => CompletionStatus::ProviderError,
         other => {
             return Err(ClayRuntimeError::Runtime(format!(
-                "clay.completion.invalid_result: unsupported status `{other}`"
+                "completion.invalid_result: unsupported status `{other}`"
             )));
         }
     };
@@ -2523,7 +2547,7 @@ fn completion_result_from_json(
                 .map(|item| {
                     let item = item.as_object().ok_or_else(|| {
                         ClayRuntimeError::Runtime(
-                            "clay.completion.invalid_result: item must be an object".to_string(),
+                            "completion.invalid_result: item must be an object".to_string(),
                         )
                     })?;
                     let label = item
@@ -2531,8 +2555,7 @@ fn completion_result_from_json(
                         .and_then(serde_json::Value::as_str)
                         .ok_or_else(|| {
                             ClayRuntimeError::Runtime(
-                                "clay.completion.invalid_result: item label is required"
-                                    .to_string(),
+                                "completion.invalid_result: item label is required".to_string(),
                             )
                         })?
                         .to_string();
@@ -2604,7 +2627,7 @@ async fn evaluate_js_language_intelligence_provider(
 const registry = globalThis.__clayLanguageIntelligenceHandlers ?? Object.create(null);
 const handler = registry[{token:?}];
 if (typeof handler !== "function") {{
-  throw new Error("clay.language.handler_missing: registered language-intelligence handler is unavailable");
+  throw new Error("language.handler_missing: registered language-intelligence handler is unavailable");
 }}
 const request = {request};
 const window = {window};
@@ -2635,7 +2658,7 @@ Deno.core.ops.op_clay_language_store_intelligence_result(JSON.stringify(result ?
         .take_language_intelligence_result_json()
         .ok_or_else(|| {
             ClayRuntimeError::Runtime(
-                "clay.language.invalid_result: handler produced no result".to_string(),
+                "language.invalid_result: handler produced no result".to_string(),
             )
         })?;
     language_intelligence_result_from_json(&result_json, &registration.package, &request)
@@ -2693,13 +2716,10 @@ fn language_intelligence_result_from_json(
         LanguageIntelligenceResult, LanguageIntelligenceStatus, SignatureHelpResult,
     };
 
-    let value: serde_json::Value = serde_json::from_str(result_json).map_err(|error| {
-        ClayRuntimeError::Runtime(format!("clay.language.invalid_result: {error}"))
-    })?;
+    let value: serde_json::Value = serde_json::from_str(result_json)
+        .map_err(|error| ClayRuntimeError::Runtime(format!("language.invalid_result: {error}")))?;
     let object = value.as_object().ok_or_else(|| {
-        ClayRuntimeError::Runtime(
-            "clay.language.invalid_result: result must be an object".to_string(),
-        )
+        ClayRuntimeError::Runtime("language.invalid_result: result must be an object".to_string())
     })?;
     let status = match object
         .get("status")
@@ -2712,7 +2732,7 @@ fn language_intelligence_result_from_json(
         "providerError" | "ProviderError" | "error" => LanguageIntelligenceStatus::ProviderError,
         other => {
             return Err(ClayRuntimeError::Runtime(format!(
-                "clay.language.invalid_result: unsupported status `{other}`"
+                "language.invalid_result: unsupported status `{other}`"
             )));
         }
     };
@@ -2849,17 +2869,14 @@ fn language_intelligence_location_from_value(
     value: &serde_json::Value,
 ) -> Result<crate::protocol::TextLocation, ClayRuntimeError> {
     let object = value.as_object().ok_or_else(|| {
-        ClayRuntimeError::Runtime(
-            "clay.language.invalid_result: location must be an object".to_string(),
-        )
+        ClayRuntimeError::Runtime("language.invalid_result: location must be an object".to_string())
     })?;
     let range = object
         .get("range")
         .and_then(language_intelligence_range_from_value)
         .ok_or_else(|| {
             ClayRuntimeError::Runtime(
-                "clay.language.invalid_result: location.range requires byteStart/byteEnd"
-                    .to_string(),
+                "language.invalid_result: location.range requires byteStart/byteEnd".to_string(),
             )
         })?;
     if let Some(document_id) = object.get("documentId").and_then(serde_json::Value::as_u64) {
@@ -2870,7 +2887,7 @@ fn language_intelligence_location_from_value(
         .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| {
             ClayRuntimeError::Runtime(
-                "clay.language.invalid_result: location requires documentId or workspaceRootId"
+                "language.invalid_result: location requires documentId or workspaceRootId"
                     .to_string(),
             )
         })?;
@@ -2879,8 +2896,7 @@ fn language_intelligence_location_from_value(
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| {
             ClayRuntimeError::Runtime(
-                "clay.language.invalid_result: workspace location requires relativePath"
-                    .to_string(),
+                "language.invalid_result: workspace location requires relativePath".to_string(),
             )
         })?
         .to_string();
@@ -2897,7 +2913,7 @@ fn language_intelligence_code_action_from_value(
 ) -> Result<crate::protocol::CodeAction, ClayRuntimeError> {
     let object = value.as_object().ok_or_else(|| {
         ClayRuntimeError::Runtime(
-            "clay.language.invalid_result: code action must be an object".to_string(),
+            "language.invalid_result: code action must be an object".to_string(),
         )
     })?;
     let range = object
@@ -2962,7 +2978,7 @@ fn language_intelligence_signature_from_value(
 ) -> Result<crate::protocol::SignatureInformation, ClayRuntimeError> {
     let object = value.as_object().ok_or_else(|| {
         ClayRuntimeError::Runtime(
-            "clay.language.invalid_result: signature must be an object".to_string(),
+            "language.invalid_result: signature must be an object".to_string(),
         )
     })?;
     let parameters = object
@@ -3053,11 +3069,10 @@ fn parse_update_json(
     registration: &crate::server::parse_coordinator::JsParseHandlerRegistration,
     fallback: ParseEditNotification,
 ) -> Result<IncrementalParseUpdate, ClayRuntimeError> {
-    let value: serde_json::Value = serde_json::from_str(update_json).map_err(|error| {
-        ClayRuntimeError::Runtime(format!("clay.parse.invalid_update: {error}"))
-    })?;
+    let value: serde_json::Value = serde_json::from_str(update_json)
+        .map_err(|error| ClayRuntimeError::Runtime(format!("parse.invalid_update: {error}")))?;
     let object = value.as_object().ok_or_else(|| {
-        ClayRuntimeError::Runtime("clay.parse.invalid_update: update must be an object".to_string())
+        ClayRuntimeError::Runtime("parse.invalid_update: update must be an object".to_string())
     })?;
     let viewport = object
         .get("viewport")
@@ -3132,9 +3147,7 @@ fn diagnostic_set_from_value(
     viewport: ParseByteRange,
 ) -> Result<DiagnosticSet, ClayRuntimeError> {
     let object = value.as_object().ok_or_else(|| {
-        ClayRuntimeError::Runtime(
-            "clay.parse.invalid_update: diagnostics must be an object".to_string(),
-        )
+        ClayRuntimeError::Runtime("parse.invalid_update: diagnostics must be an object".to_string())
     })?;
     let source = required_string(object, "source", "diagnostics")?;
     let provenance = DecorationProvenance {
@@ -3147,7 +3160,7 @@ fn diagnostic_set_from_value(
         .and_then(serde_json::Value::as_array)
         .ok_or_else(|| {
             ClayRuntimeError::Runtime(
-                "clay.parse.invalid_update: diagnostics.spans must be an array".to_string(),
+                "parse.invalid_update: diagnostics.spans must be an array".to_string(),
             )
         })?
         .iter()
@@ -3171,7 +3184,7 @@ fn diagnostic_span_from_value(
 ) -> Result<DiagnosticSpan, ClayRuntimeError> {
     let object = value.as_object().ok_or_else(|| {
         ClayRuntimeError::Runtime(
-            "clay.parse.invalid_update: diagnostic span must be an object".to_string(),
+            "parse.invalid_update: diagnostic span must be an object".to_string(),
         )
     })?;
     let severity = match required_string(object, "severity", "diagnostic span")? {
@@ -3180,7 +3193,7 @@ fn diagnostic_span_from_value(
         "info" => DiagnosticSeverity::Info,
         other => {
             return Err(ClayRuntimeError::Runtime(format!(
-                "clay.parse.invalid_update: unsupported diagnostic severity `{other}`"
+                "parse.invalid_update: unsupported diagnostic severity `{other}`"
             )));
         }
     };
@@ -3205,7 +3218,7 @@ fn required_string<'a>(
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| {
             ClayRuntimeError::Runtime(format!(
-                "clay.parse.invalid_update: {context}.{field} must be a string"
+                "parse.invalid_update: {context}.{field} must be a string"
             ))
         })
 }
@@ -3220,7 +3233,7 @@ fn required_u64(
         .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| {
             ClayRuntimeError::Runtime(format!(
-                "clay.parse.invalid_update: {context}.{field} must be an unsigned integer"
+                "parse.invalid_update: {context}.{field} must be an unsigned integer"
             ))
         })
 }
@@ -3244,7 +3257,7 @@ fn span_from_value(
     registration: &crate::server::parse_coordinator::JsParseHandlerRegistration,
 ) -> Result<DecorationSpan, ClayRuntimeError> {
     let object = value.as_object().ok_or_else(|| {
-        ClayRuntimeError::Runtime("clay.parse.invalid_update: span must be an object".to_string())
+        ClayRuntimeError::Runtime("parse.invalid_update: span must be an object".to_string())
     })?;
     let kind = match object
         .get("kind")
@@ -3257,7 +3270,7 @@ fn span_from_value(
         "search-match" | "searchMatch" | "SearchMatch" => DecorationKind::SearchMatch,
         other => {
             return Err(ClayRuntimeError::Runtime(format!(
-                "clay.parse.invalid_update: unsupported decoration kind `{other}`"
+                "parse.invalid_update: unsupported decoration kind `{other}`"
             )));
         }
     };
@@ -3411,7 +3424,7 @@ impl ClayModuleLoader {
 
     fn denied(specifier: &str) -> JsErrorBox {
         JsErrorBox::generic(format!(
-            "clay.runtime.invalid_import: module specifier `{specifier}` is not allowed in the server runtime boundary"
+            "runtime.invalid_import: module specifier `{specifier}` is not allowed in the server runtime boundary"
         ))
     }
 }
@@ -3982,9 +3995,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("clay.packages.package_not_enabled"),
+            error.to_string().contains("packages.package_not_enabled"),
             "stale package callback must fail closed, got {error}"
         );
     }
@@ -4036,7 +4047,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            evaluation_contains(&error, "clay.language_server.session_owner_mismatch"),
+            evaluation_contains(&error, "language_server.session_owner_mismatch"),
             "cross-package session IO must fail, got {:?}",
             error.op_records
         );
@@ -5200,7 +5211,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            error.to_string().contains("clay.parse.invalid_handler"),
+            error.to_string().contains("parse.invalid_handler"),
             "unexpected registration error: {error}"
         );
         // Missing approved parse-document capability fails closed.
@@ -5218,9 +5229,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("clay.packages.missing_permission"),
+            error.to_string().contains("packages.missing_permission"),
             "unexpected registration error: {error}"
         );
     }
@@ -5408,7 +5417,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            error.to_string().contains("clay.syntax.invalid_grammar"),
+            error.to_string().contains("syntax.invalid_grammar"),
             "unexpected syntax registration error: {error}"
         );
         // Third-party grammar contributions are rejected at host-side manifest
@@ -5649,7 +5658,7 @@ mod tests {
             .await
             .unwrap_err();
             assert!(
-                error.to_string().contains("clay.language.invalid_analyzer"),
+                error.to_string().contains("language.invalid_analyzer"),
                 "unexpected analyzer registration error: {error}"
             );
         }
@@ -5687,7 +5696,7 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(
-                error.to_string().contains("clay.language.invalid_provider"),
+                error.to_string().contains("language.invalid_provider"),
                 "unexpected language registration error: {error}"
             );
         }
@@ -5844,11 +5853,7 @@ mod tests {
                 .evaluate_controlled_module_for_document(source, 88)
                 .await
                 .unwrap_err();
-            assert!(
-                error
-                    .to_string()
-                    .contains("clay.completion.invalid_disable")
-            );
+            assert!(error.to_string().contains("completion.invalid_disable"));
         }
     }
 
@@ -5866,9 +5871,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("clay.completion.invalid_provider"),
+            error.to_string().contains("completion.invalid_provider"),
             "unexpected completion registration error: {error}"
         );
         // Approved-capability check: enable with the capability granted, then
@@ -5944,9 +5947,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("clay.packages.missing_permission")
+            error.to_string().contains("packages.missing_permission")
                 && error.to_string().contains("completion-provider"),
             "unexpected completion registration error: {error}"
         );
@@ -6524,7 +6525,7 @@ mod tests {
             started.elapsed() < Duration::from_secs(1),
             "registered handler timeout budget should beat global 5s guard"
         );
-        assert_eq!(error.diagnostic().code, "clay.runtime.timeout");
+        assert_eq!(error.diagnostic().code, "runtime.timeout");
     }
 
     #[tokio::test]
@@ -6571,8 +6572,8 @@ mod tests {
         );
         assert_eq!(
             error.diagnostic().code,
-            "clay.runtime.timeout",
-            "timeout should surface the clay.runtime.timeout diagnostic"
+            "runtime.timeout",
+            "timeout should surface the runtime.timeout diagnostic"
         );
         // Timed-out evaluations are not counted as successful completions.
         assert_eq!(service.evaluation_count(), 0);
@@ -6627,7 +6628,7 @@ mod tests {
             matches!(error, ClayRuntimeError::HeapLimit),
             "expected heap limit, got {error:?}"
         );
-        assert_eq!(error.diagnostic().code, "clay.runtime.heap_limit");
+        assert_eq!(error.diagnostic().code, "runtime.heap_limit");
         assert_eq!(service.evaluation_count(), 0);
     }
 
@@ -6689,7 +6690,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ClayRuntimeError::Runtime(_)));
-        assert!(error.to_string().contains("clay.runtime.invalid_import"));
+        assert!(error.to_string().contains("runtime.invalid_import"));
         assert_eq!(service.evaluation_count(), 0);
     }
 
@@ -6733,6 +6734,108 @@ mod tests {
         let result = service.load_configuration_from_root(root).await.unwrap();
 
         assert_eq!(result.op_records, vec!["ui-loaded", "./init.js", "./ui.js"]);
+    }
+
+    #[tokio::test]
+    async fn configuration_optional_module_failure_isolated_and_reported() {
+        let root = config_fixture("optional-syntax");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadConfigurationModule } from "clay:configuration";
+            const result = await loadConfigurationModule({ path: "./broken.js", optional: true });
+            Deno.core.ops.op_clay_runtime_record(`${result.loaded}:${typeof result.error}`);
+            Deno.core.ops.op_clay_runtime_record("after");
+            "#,
+        )
+        .unwrap();
+        fs::write(root.join("broken.js"), "export const = ;").unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("optional syntax failure must not fail configuration evaluation");
+
+        assert_eq!(result.op_records, vec!["false:string", "after"]);
+        let diagnostic = result
+            .configuration_diagnostics
+            .first()
+            .expect("optional module failure diagnostic");
+        assert_eq!(diagnostic.code, "configuration.module_failed");
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Warning);
+        assert!(diagnostic.message.contains("./broken.js"));
+    }
+
+    #[tokio::test]
+    async fn configuration_optional_missing_module_failure_isolated_and_reported() {
+        let root = config_fixture("optional-missing");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadConfigurationModule } from "clay:configuration";
+            const result = await loadConfigurationModule({ path: "./missing.js", optional: true });
+            Deno.core.ops.op_clay_runtime_record(`${result.loaded}:${typeof result.error}`);
+            Deno.core.ops.op_clay_runtime_record("after");
+            "#,
+        )
+        .unwrap();
+
+        let result = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect("optional missing module must not fail configuration evaluation");
+
+        assert_eq!(result.op_records, vec!["false:string", "after"]);
+        let diagnostic = result
+            .configuration_diagnostics
+            .first()
+            .expect("optional missing module diagnostic");
+        assert_eq!(diagnostic.code, "configuration.module_failed");
+        assert!(diagnostic.message.contains("./missing.js"));
+    }
+
+    #[tokio::test]
+    async fn configuration_required_module_failure_still_fails_evaluation() {
+        let root = config_fixture("required-module");
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadConfigurationModule } from "clay:configuration";
+            await loadConfigurationModule({ path: "./broken.js" });
+            "#,
+        )
+        .unwrap();
+        fs::write(root.join("broken.js"), "export const = ;").unwrap();
+
+        let error = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect_err("required module failure must preserve fail-evaluation behavior");
+
+        assert!(error.to_string().contains("SyntaxError"));
+    }
+
+    #[tokio::test]
+    async fn configuration_optional_module_path_escape_still_fails_before_catch() {
+        let parent = config_fixture("optional-escape");
+        let root = parent.join("config");
+        fs::create_dir(&root).unwrap();
+        fs::write(parent.join("outside.js"), "export const outside = true;").unwrap();
+        fs::write(
+            root.join("init.js"),
+            r#"
+            import { loadConfigurationModule } from "clay:configuration";
+            await loadConfigurationModule({ path: "../outside.js", optional: true });
+            "#,
+        )
+        .unwrap();
+
+        let error = ClayJsRuntimeService::default()
+            .load_configuration_from_root(root)
+            .await
+            .expect_err("optional path escape must remain a hard failure");
+
+        assert!(error.to_string().contains("configuration.invalid_module"));
     }
 
     #[tokio::test]
@@ -6860,7 +6963,7 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(error, ClayRuntimeError::Runtime(_)));
-        assert!(error.to_string().contains("clay.ui.registration_failed"));
+        assert!(error.to_string().contains("ui.registration_failed"));
     }
 
     #[tokio::test]
@@ -6903,7 +7006,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("clay.documents.serverGetDocumentSnapshot is planned")
+                .contains("documents.serverGetDocumentSnapshot is planned")
         );
     }
 
@@ -7033,11 +7136,11 @@ mod tests {
                         ..crate::protocol::KeyModifiers::NONE
                     },
                 }]
-                && rule.command_id == "clay.documents.clientOpenFileDialog"
+                && rule.command_id == "documents.clientOpenFileDialog"
                 && rule.routing_policy == crate::protocol::RoutingPolicy::ClientUiCommand
         }));
         assert!(manifest.commands.iter().any(|command| {
-            command.command_id == "clay.documents.clientOpenFileDialog"
+            command.command_id == "documents.clientOpenFileDialog"
                 && command.authority == crate::protocol::CommandAuthority::ClientUi
         }));
         assert!(
@@ -7318,14 +7421,14 @@ mod tests {
             );
         }
         for command_id in [
-            "clay.workspace.clientOpenFolderDialog",
-            "clay.workspace.openFuzzyFile",
-            "clay.workspace.toggleFileBrowser",
-            "clay.documents.serverSaveDocument",
-            "clay.editor.clientCopySelection",
-            "clay.editor.clientCutSelection",
-            "clay.editor.clientPasteClipboard",
-            "clay.editor.clientShowOpenDocuments",
+            "workspace.clientOpenFolderDialog",
+            "workspace.openFuzzyFile",
+            "workspace.toggleFileBrowser",
+            "documents.serverSaveDocument",
+            "editor.clientCopySelection",
+            "editor.clientCutSelection",
+            "editor.clientPasteClipboard",
+            "editor.clientShowOpenDocuments",
         ] {
             assert!(
                 manifest
@@ -7336,11 +7439,11 @@ mod tests {
             );
         }
         for command_id in [
-            "clay.workspace.clientOpenFolderDialog",
-            "clay.editor.clientCopySelection",
-            "clay.editor.clientCutSelection",
-            "clay.editor.clientPasteClipboard",
-            "clay.editor.clientShowOpenDocuments",
+            "workspace.clientOpenFolderDialog",
+            "editor.clientCopySelection",
+            "editor.clientCutSelection",
+            "editor.clientPasteClipboard",
+            "editor.clientShowOpenDocuments",
         ] {
             assert!(manifest.commands.iter().any(|command| {
                 command.command_id == command_id
@@ -7435,7 +7538,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ClayRuntimeError::Runtime(_)));
-        assert!(error.to_string().contains("clay.sdui.invalid_tree"));
+        assert!(error.to_string().contains("sdui.invalid_tree"));
     }
 
     #[tokio::test]
@@ -7455,7 +7558,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ClayRuntimeError::Runtime(_)));
-        assert!(error.to_string().contains("clay.sdui.invalid_action"));
+        assert!(error.to_string().contains("sdui.invalid_action"));
     }
 
     #[tokio::test]
@@ -7583,8 +7686,8 @@ mod tests {
             const cold = await serverListGitStatuses();
             const repo = await serverRefreshGitStatus({ workspaceRootId: cold[0].workspaceRootId });
             const plain = await serverRefreshGitStatus({ workspaceRootId: cold[1].workspaceRootId });
-            const listed = await serverExecuteCommand("clay.git.listStatuses");
-            const refreshed = await serverExecuteCommand("clay.git.refreshStatus", { workspaceRootId: cold[0].workspaceRootId });
+            const listed = await serverExecuteCommand("git.listStatuses");
+            const refreshed = await serverExecuteCommand("git.refreshStatus", { workspaceRootId: cold[0].workspaceRootId });
             Deno.core.ops.op_clay_runtime_record(`${cold.length}:${cold[0].refreshState.kind}:${repo.snapshot.head.kind}:${repo.snapshot.dirty}:${plain.snapshot.lastRefresh.kind}:${listed.status.kind}:${listed.status.statuses.length}:${refreshed.status.action}`);
             "#,
         )
@@ -7720,7 +7823,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ClayRuntimeError::Runtime(_)));
-        assert!(error.to_string().contains("clay.documents.open_failed"));
+        assert!(error.to_string().contains("documents.open_failed"));
         assert!(error.to_string().contains("outside the authorized root"));
     }
 
@@ -7749,11 +7852,7 @@ mod tests {
                 .unwrap_err();
 
             assert!(matches!(error, ClayRuntimeError::Runtime(_)));
-            assert!(
-                error
-                    .to_string()
-                    .contains("clay.configuration.invalid_module")
-            );
+            assert!(error.to_string().contains("configuration.invalid_module"));
         }
     }
 
@@ -7776,7 +7875,7 @@ mod tests {
             .await
             .unwrap_err();
         let diagnostic = error.diagnostic();
-        assert_eq!(diagnostic.code, "clay.configuration.invalid_module");
+        assert_eq!(diagnostic.code, "configuration.invalid_module");
         // Secure: the rejected specifier (`clay:themes`) must NOT leak...
         assert!(
             !diagnostic.message.contains("clay:themes"),
@@ -7801,11 +7900,11 @@ mod tests {
                 r#"
                 import { bindKey, listKeyBindings } from "clay:keybindings";
                 import { getActiveBehaviorManifest, listBehaviorRoutes } from "clay:behavior";
-                const bound = bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+                const bound = bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 const bindings = listKeyBindings("editor");
                 const manifest = await getActiveBehaviorManifest();
                 const routes = await listBehaviorRoutes();
-                Deno.core.ops.op_clay_runtime_record(`${bound.key}:${bound.command}:${manifest.version}:${bindings.length}:${routes.some((route) => route.apiId === "clay.documents.serverSaveDocument")}`);
+                Deno.core.ops.op_clay_runtime_record(`${bound.key}:${bound.command}:${manifest.version}:${bindings.length}:${routes.some((route) => route.apiId === "documents.serverSaveDocument")}`);
                 "#,
             )
             .await
@@ -7816,34 +7915,54 @@ mod tests {
 
         assert_eq!(
             result.op_records,
-            vec!["Ctrl+S:clay.documents.serverSaveDocument:2:3:true"]
+            vec!["Ctrl+S:documents.serverSaveDocument:2:3:true"]
         );
         assert_eq!(manifest.behavior_version, 2);
         assert!(manifest.keymaps.iter().any(|rule| {
-            rule.command_id == "clay.documents.serverSaveDocument"
+            rule.command_id == "documents.serverSaveDocument"
                 && rule.routing_policy == crate::protocol::RoutingPolicy::ServerFirst
         }));
     }
 
     #[tokio::test]
-    async fn configuration_can_explicitly_bind_reload_without_default_binding() {
+    async fn configuration_default_reload_binding_is_present_and_overridable() {
         let result = ClayJsRuntimeService::default()
             .evaluate_controlled_module(
                 r#"
-                import { bindKey } from "clay:keybindings";
-                bindKey("Ctrl+Shift+R", "clay.runtime.reloadConfiguration", { scope: "global" });
+                import { bindKey, listKeyBindings, unbindKey } from "clay:keybindings";
+                const defaultBinding = listKeyBindings("global").find(
+                  (binding) => binding.command === "runtime.reloadConfiguration"
+                );
+                unbindKey("Ctrl+Shift+R", { scope: "global" });
+                bindKey("Ctrl+Alt+R", "runtime.reloadConfiguration", { scope: "global" });
+                const bindings = listKeyBindings("global");
+                Deno.core.ops.op_clay_runtime_record(
+                  `${defaultBinding?.key}:${bindings.some((binding) => binding.key === "Ctrl+Shift+R")}:${bindings.some((binding) => binding.key === "Ctrl+Alt+R")}`
+                );
                 "#,
             )
             .await
-            .expect("bind reload command");
+            .expect("override reload command");
         let manifest = result.behavior_manifest.expect("bound behavior manifest");
         let rule = manifest
             .keymaps
             .iter()
-            .find(|rule| rule.command_id == "clay.runtime.reloadConfiguration")
-            .expect("explicit reload binding");
+            .find(|rule| rule.command_id == "runtime.reloadConfiguration")
+            .expect("overridden reload binding");
 
+        assert_eq!(result.op_records, vec!["Ctrl+Shift+R:false:true"]);
         assert_eq!(rule.context, crate::protocol::KeyBindingContext::Global);
+        assert_eq!(
+            rule.sequence,
+            vec![crate::protocol::KeyStroke {
+                key: crate::protocol::KeyCode::Character("r".to_string()),
+                modifiers: crate::protocol::KeyModifiers {
+                    control: true,
+                    alt: true,
+                    ..crate::protocol::KeyModifiers::NONE
+                },
+            }]
+        );
         assert_eq!(
             rule.routing_policy,
             crate::protocol::RoutingPolicy::ServerFirstWithLock {
@@ -7859,7 +7978,7 @@ mod tests {
                 r#"
                 import { serverExecuteCommand } from "clay:commands";
                 try {
-                  await serverExecuteCommand("clay.runtime.reloadConfiguration");
+                  await serverExecuteCommand("runtime.reloadConfiguration");
                 } catch (error) {
                   Deno.core.ops.op_clay_runtime_record(String(error));
                 }
@@ -7890,9 +8009,9 @@ mod tests {
                 const copy = bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
                 const bindings = listKeyBindings("editor");
                 const routes = await listBehaviorRoutes();
-                const fileRoute = routes.find((candidate) => candidate.apiId === "clay.documents.clientOpenFileDialog");
-                const folderRoute = routes.find((candidate) => candidate.apiId === "clay.workspace.clientOpenFolderDialog");
-                const copyRoute = routes.find((candidate) => candidate.apiId === "clay.editor.clientCopySelection");
+                const fileRoute = routes.find((candidate) => candidate.apiId === "documents.clientOpenFileDialog");
+                const folderRoute = routes.find((candidate) => candidate.apiId === "workspace.clientOpenFolderDialog");
+                const copyRoute = routes.find((candidate) => candidate.apiId === "editor.clientCopySelection");
                 Deno.core.ops.op_clay_runtime_record(`${file.key}:${file.command}:${folder.key}:${folder.command}:${copy.key}:${copy.command}:${bindings.length}:${fileRoute.runtimePath}:${fileRoute.authority}:${folderRoute.runtimePath}:${folderRoute.authority}:${copyRoute.runtimePath}:${copyRoute.authority}`);
                 "#,
             )
@@ -7905,13 +8024,13 @@ mod tests {
         assert_eq!(
             result.op_records,
             vec![
-                "Ctrl+O:clay.documents.clientOpenFileDialog:Ctrl+Shift+O:clay.workspace.clientOpenFolderDialog:Ctrl+Shift+C:clay.editor.clientCopySelection:5:client-ui-command:client-ui:client-ui-command:client-ui:client-ui-command:client-ui"
+                "Ctrl+O:documents.clientOpenFileDialog:Ctrl+Shift+O:workspace.clientOpenFolderDialog:Ctrl+Shift+C:editor.clientCopySelection:5:client-ui-command:client-ui:client-ui-command:client-ui:client-ui-command:client-ui"
             ]
         );
         for command_id in [
-            "clay.documents.clientOpenFileDialog",
-            "clay.workspace.clientOpenFolderDialog",
-            "clay.editor.clientCopySelection",
+            "documents.clientOpenFileDialog",
+            "workspace.clientOpenFolderDialog",
+            "editor.clientCopySelection",
         ] {
             assert!(manifest.keymaps.iter().any(|rule| {
                 rule.command_id == command_id
@@ -7930,7 +8049,7 @@ mod tests {
             .evaluate_controlled_module(
                 r#"
                 import { bindKey, unbindKey, listKeyBindings } from "clay:keybindings";
-                bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+                bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 unbindKey("Ctrl+S", { scope: "editor" });
                 Deno.core.ops.op_clay_runtime_record(`${listKeyBindings("editor").some((binding) => binding.key === "Ctrl+S")}`);
                 "#,
@@ -7947,7 +8066,7 @@ mod tests {
             !manifest
                 .keymaps
                 .iter()
-                .any(|rule| rule.command_id == "clay.documents.serverSaveDocument")
+                .any(|rule| rule.command_id == "documents.serverSaveDocument")
         );
     }
 
@@ -7960,9 +8079,9 @@ mod tests {
                 const bound = bindKey({
                   scope: "editor",
                   bindings: {
-                    "Ctrl+O": "clay.documents.clientOpenFileDialog",
-                    "Alt+I": "clay.editor.clientSelectTextobject.function.inner.current",
-                    "Ctrl+S": "clay.documents.serverSaveDocument",
+                    "Ctrl+O": "documents.clientOpenFileDialog",
+                    "Alt+I": "editor.clientSelectTextobject.function.inner.current",
+                    "Ctrl+S": "documents.serverSaveDocument",
                   },
                 });
                 const bindings = listKeyBindings("editor");
@@ -7977,14 +8096,12 @@ mod tests {
 
         assert_eq!(
             result.op_records,
-            vec![
-                "3:Ctrl+O:clay.editor.clientSelectTextobject.function.inner.current:true:true:true"
-            ]
+            vec!["3:Ctrl+O:editor.clientSelectTextobject.function.inner.current:true:true:true"]
         );
         for command_id in [
-            "clay.documents.clientOpenFileDialog",
-            "clay.editor.clientSelectTextobject.function.inner.current",
-            "clay.documents.serverSaveDocument",
+            "documents.clientOpenFileDialog",
+            "editor.clientSelectTextobject.function.inner.current",
+            "documents.serverSaveDocument",
         ] {
             assert!(
                 manifest
@@ -8002,9 +8119,9 @@ mod tests {
                     rule.context == crate::protocol::KeyBindingContext::EditorTextFocus
                         && matches!(
                             rule.command_id.as_str(),
-                            "clay.documents.clientOpenFileDialog"
-                                | "clay.editor.clientSelectTextobject.function.inner.current"
-                                | "clay.documents.serverSaveDocument"
+                            "documents.clientOpenFileDialog"
+                                | "editor.clientSelectTextobject.function.inner.current"
+                                | "documents.serverSaveDocument"
                         )
                 })
                 .count(),
@@ -8021,8 +8138,8 @@ mod tests {
                 const bound = bindKey({
                   scope: "editor",
                   bindings: {
-                    "Ctrl+O": "clay.documents.clientOpenFileDialog",
-                    "PgDn": "clay.editor.clientUndo",
+                    "Ctrl+O": "documents.clientOpenFileDialog",
+                    "PgDn": "editor.clientUndo",
                   },
                 });
                 Deno.core.ops.op_clay_runtime_record(`${bound.length}`);
@@ -8062,8 +8179,8 @@ mod tests {
                 bindKey({
                   scope: "editor",
                   bindings: {
-                    "Ctrl+O": "clay.documents.clientOpenFileDialog",
-                    "Alt+I": "clay.editor.clientSelectTextobject.function.inner.current",
+                    "Ctrl+O": "documents.clientOpenFileDialog",
+                    "Alt+I": "editor.clientSelectTextobject.function.inner.current",
                   },
                 });
                 unbindKey({ scope: "editor", keys: ["Ctrl+O", "Alt+I"] });
@@ -8081,8 +8198,8 @@ mod tests {
         assert!(!manifest.keymaps.iter().any(|rule| {
             matches!(
                 rule.command_id.as_str(),
-                "clay.documents.clientOpenFileDialog"
-                    | "clay.editor.clientSelectTextobject.function.inner.current"
+                "documents.clientOpenFileDialog"
+                    | "editor.clientSelectTextobject.function.inner.current"
             )
         }));
     }
@@ -8100,18 +8217,14 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ClayRuntimeError::Runtime(_)));
-        assert!(
-            error
-                .to_string()
-                .contains("clay.keybindings.unknown_command")
-        );
+        assert!(error.to_string().contains("keybindings.unknown_command"));
     }
 
     #[tokio::test]
     async fn raw_clipboard_and_dialog_command_bindings_are_rejected() {
         for command_id in [
-            "clay.clipboard.writeText",
-            "clay.dialog.openRawPath",
+            "clipboard.writeText",
+            "dialog.openRawPath",
             "Deno.core.ops.op_clipboard_write",
         ] {
             let source = format!(
@@ -8127,9 +8240,7 @@ mod tests {
 
             assert!(matches!(error, ClayRuntimeError::Runtime(_)));
             assert!(
-                error
-                    .to_string()
-                    .contains("clay.keybindings.unknown_command"),
+                error.to_string().contains("keybindings.unknown_command"),
                 "{command_id} must stay rejected: {error}"
             );
         }
@@ -8182,7 +8293,7 @@ mod tests {
                     loadEntry: "./dist/load.js",
                     docs: "./docs/index.md",
                     performance: { estimatedManifestBytes: 2048 },
-                    apiDependencies: ["clay.modes.serverRegisterModePattern", "clay.commands.serverRegisterCommand"],
+                    apiDependencies: ["modes.serverRegisterModePattern", "commands.serverRegisterCommand"],
                     contributions: {
                       commands: [{ id: "markdown.togglePreview", displayName: "Toggle Markdown Preview", routingPolicy: "server-first" }],
                       configuration: [{ key: "markdown.preview.enabled", type: "boolean", default: false }]
@@ -8595,7 +8706,7 @@ mod tests {
         // code movement for core.code, caret deferred to the editor default
         // bar, and role-selected typography ligatures from the baseline.
         let code = crate::protocol::BehaviorManifest::core_code_editing(1);
-        assert_eq!(code.manifest_id, "clay.default.code");
+        assert_eq!(code.manifest_id, "default.code");
         assert_eq!(
             code.editor_rules.movement.word_separators,
             crate::protocol::WordSeparatorPolicy::Code
@@ -8609,7 +8720,7 @@ mod tests {
         );
 
         let text = crate::protocol::BehaviorManifest::minimal_text_editing(1);
-        assert_eq!(text.manifest_id, "clay.default.text");
+        assert_eq!(text.manifest_id, "default.text");
         assert_eq!(text.editor_rules.caret_style, None);
         assert_eq!(
             text.document_font_role,
@@ -8734,7 +8845,7 @@ mod tests {
             serverActivateClassifiedMode(classification, { path: "a.feo" });
             const moved = JSON.parse(Deno.core.ops.op_clay_editor_move_cursor(
                 JSON.stringify({ direction: "nextWordStart" })));
-            if (moved.commandId !== "clay.editor.clientMoveCursor" || moved.direction !== "nextWordStart") {
+            if (moved.commandId !== "editor.clientMoveCursor" || moved.direction !== "nextWordStart") {
                 throw new Error("unexpected descriptor: " + moved.commandId + "/" + moved.direction);
             }
             "#,
@@ -8862,14 +8973,14 @@ mod tests {
             const classification = serverClassifyDocument({ documentId: 75, path: "a.fex" });
             serverActivateClassifiedMode(classification, { path: "a.fex" });
             const executed = JSON.parse(Deno.core.ops.op_clay_editor_execute_command(
-                JSON.stringify({ commandId: "clay.editor.clientMoveCursor.nextWordStart" })));
+                JSON.stringify({ commandId: "editor.clientMoveCursor.nextWordStart" })));
             if (!executed.requested) {
                 throw new Error("expected requested=true");
             }
             let error = "";
             try {
                 Deno.core.ops.op_clay_editor_execute_command(
-                    JSON.stringify({ commandId: "clay.application.quit" }));
+                    JSON.stringify({ commandId: "application.quit" }));
             } catch (e) {
                 error = String(e && e.message ? e.message : e);
             }
@@ -8888,10 +8999,7 @@ mod tests {
             .await
             .expect("execution request reaches the connection lane")
             .expect("editor command channel stays open");
-        assert_eq!(
-            request.command_id,
-            "clay.editor.clientMoveCursor.nextWordStart"
-        );
+        assert_eq!(request.command_id, "editor.clientMoveCursor.nextWordStart");
         assert_eq!(request.package_prefix, "fixtureeditorexec");
         assert_eq!(request.mode_id, "fixtureeditorexec");
     }
@@ -9055,11 +9163,11 @@ mod tests {
             r#"
             const moved = JSON.parse(Deno.core.ops.op_clay_editor_move_cursor(
                 JSON.stringify({ direction: "prevWordStart" })));
-            if (moved.commandId !== "clay.editor.clientMoveCursor" || moved.direction !== "prevWordStart") {
+            if (moved.commandId !== "editor.clientMoveCursor" || moved.direction !== "prevWordStart") {
                 throw new Error("unexpected descriptor: " + moved.commandId + "/" + moved.direction);
             }
             const executed = JSON.parse(Deno.core.ops.op_clay_editor_execute_command(
-                JSON.stringify({ commandId: "clay.editor.clientSetSelection.selectLine" })));
+                JSON.stringify({ commandId: "editor.clientSetSelection.selectLine" })));
             if (!executed.requested) {
                 throw new Error("expected requested=true");
             }
@@ -9074,10 +9182,7 @@ mod tests {
             .await
             .expect("third-party execution request reaches the connection lane")
             .expect("editor command channel stays open");
-        assert_eq!(
-            request.command_id,
-            "clay.editor.clientSetSelection.selectLine"
-        );
+        assert_eq!(request.command_id, "editor.clientSetSelection.selectLine");
         assert_eq!(request.package_prefix, "editoruser");
         assert_eq!(request.mode_id, "fixturetpowner");
 
@@ -9443,7 +9548,7 @@ mod tests {
 
         let message = error.to_string();
         assert!(
-            message.contains("clay.packages.no_active_package"),
+            message.contains("packages.no_active_package"),
             "expected no-active-package provenance error, got: {message}"
         );
     }
@@ -9461,11 +9566,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ClayRuntimeError::Runtime(_)));
-        assert!(
-            error
-                .to_string()
-                .contains("clay.packages.prohibited_authority")
-        );
+        assert!(error.to_string().contains("packages.prohibited_authority"));
         assert!(error.to_string().contains("network"));
     }
 
@@ -9488,7 +9589,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("clay.configuration.setModePreference is planned")
+                .contains("configuration.setModePreference is planned")
         );
     }
 
@@ -9713,9 +9814,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            missing
-                .to_string()
-                .contains("clay.packages.no_active_package"),
+            missing.to_string().contains("packages.no_active_package"),
             "publication without package context must fail, got {missing}"
         );
 
@@ -9740,9 +9839,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("clay.packages.missing_permission"),
+            error.to_string().contains("packages.missing_permission"),
             "missing render-decorations approval must fail, got {error}"
         );
     }
@@ -9776,9 +9873,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(
-            stale
-                .to_string()
-                .contains("clay.diagnostics.publish_failed"),
+            stale.to_string().contains("diagnostics.publish_failed"),
             "stale version must fail, got {stale}"
         );
 
@@ -9802,7 +9897,7 @@ mod tests {
         assert!(
             executable
                 .to_string()
-                .contains("clay.diagnostics.invalid_publication"),
+                .contains("diagnostics.invalid_publication"),
             "executable callback must fail, got {executable}"
         );
 
@@ -9829,9 +9924,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            oversized
-                .to_string()
-                .contains("clay.diagnostics.publish_failed"),
+            oversized.to_string().contains("diagnostics.publish_failed"),
             "oversized message must fail, got {oversized}"
         );
     }
@@ -10760,7 +10853,7 @@ mod tests {
                 .block_on(service.evaluate_controlled_module(
                     r#"
                     import { bindKey } from "clay:keybindings";
-                    bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+                    bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                     "#,
                 ))
                 .unwrap()
@@ -10780,7 +10873,7 @@ mod tests {
             routed,
             crate::client::behavior::RoutedBehavior::ServerIntent(
                 crate::client::behavior::ServerIntentRoute {
-                    command_id: "clay.documents.serverSaveDocument".to_string(),
+                    command_id: "documents.serverSaveDocument".to_string(),
                     routing_policy: crate::protocol::RoutingPolicy::ServerFirst,
                 }
             )
@@ -10799,7 +10892,7 @@ mod tests {
                 .block_on(service.evaluate_controlled_module(
                     r#"
                     import { bindKey } from "clay:keybindings";
-                    bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+                    bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
                     "#,
                 ))
                 .unwrap()
@@ -10819,7 +10912,7 @@ mod tests {
             routed,
             crate::client::behavior::RoutedBehavior::ClientUiCommand(
                 crate::client::behavior::ClientUiCommandRoute {
-                    command_id: "clay.documents.clientOpenFileDialog".to_string(),
+                    command_id: "documents.clientOpenFileDialog".to_string(),
                     routing_policy: crate::protocol::RoutingPolicy::ClientUiCommand,
                 }
             )
@@ -10842,7 +10935,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ClayRuntimeError::Runtime(_)));
-        assert!(error.to_string().contains("clay.runtime.invalid_record"));
+        assert!(error.to_string().contains("runtime.invalid_record"));
         assert_eq!(service.evaluation_count(), 0);
     }
 
@@ -10855,7 +10948,7 @@ mod tests {
         let diagnostic = error.diagnostic();
 
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
-        assert_eq!(diagnostic.code, "clay.runtime.syntax_error");
+        assert_eq!(diagnostic.code, "runtime.syntax_error");
         assert_eq!(
             diagnostic.message,
             "JavaScript syntax error while evaluating server-side configuration."
@@ -10870,7 +10963,7 @@ mod tests {
             .unwrap_err();
         let diagnostic = error.diagnostic();
 
-        assert_eq!(diagnostic.code, "clay.runtime.invalid_import");
+        assert_eq!(diagnostic.code, "runtime.invalid_import");
         assert!(!diagnostic.message.contains("/home/example"));
         assert!(!diagnostic.message.contains("secret.js"));
     }
@@ -10883,7 +10976,7 @@ mod tests {
             .unwrap_err();
         let diagnostic = error.diagnostic();
 
-        assert_eq!(diagnostic.code, "clay.runtime.invalid_record");
+        assert_eq!(diagnostic.code, "runtime.invalid_record");
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
     }
 
@@ -11470,7 +11563,7 @@ mod tests {
         ] {
             let err = resolve_by_specifier(denied).await.unwrap_err();
             assert!(
-                err.contains("clay.packages.not_installed"),
+                err.contains("packages.not_installed"),
                 "uninstalled specifier `{denied}` must be not_installed, got: {err}"
             );
         }
@@ -11487,7 +11580,7 @@ mod tests {
         ] {
             let err = resolve_by_specifier(denied).await.unwrap_err();
             assert!(
-                err.contains("clay.packages.invalid_specifier"),
+                err.contains("packages.invalid_specifier"),
                 "invalid bundled specifier `{denied}` must be invalid_specifier, got: {err}"
             );
         }
@@ -11665,7 +11758,7 @@ mod tests {
 
         let message = err.to_string();
         assert!(
-            message.contains("clay.runtime.invalid_import"),
+            message.contains("runtime.invalid_import"),
             "escaping relative import must fail at module loader boundary, got: {message}"
         );
         let _ = fs::remove_dir_all(root.parent().unwrap());
@@ -11689,7 +11782,7 @@ mod tests {
         .unwrap_err();
         let message = err.to_string();
         assert!(
-            message.contains("clay.package_approval.missing"),
+            message.contains("package_approval.missing"),
             "unapproved loadPackage must fail at the adoption gate, got: {message}"
         );
         assert!(
@@ -11706,7 +11799,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            err.contains("clay.packages.not_installed"),
+            err.contains("packages.not_installed"),
             "unknown first-party package must be not_installed, got: {err}"
         );
     }
@@ -11842,7 +11935,7 @@ mod tests {
                 .resolve(url, "clay://runtime/main.js", ResolutionKind::Import)
                 .expect_err("unallowlisted package URL must be denied");
             assert!(
-                error.to_string().contains("clay.runtime.invalid_import"),
+                error.to_string().contains("runtime.invalid_import"),
                 "unallowlisted `{url}` must be denied, got: {error:?}"
             );
         }
@@ -11917,7 +12010,7 @@ mod tests {
                 .resolve(specifier, "clay://runtime/main.js", ResolutionKind::Import)
                 .expect_err("non-allowlisted specifier must be denied");
             assert!(
-                error.to_string().contains("clay.runtime.invalid_import"),
+                error.to_string().contains("runtime.invalid_import"),
                 "specifier `{specifier}` must be denied, got: {error:?}"
             );
         }
@@ -12135,8 +12228,8 @@ mod tests {
             result
                 .op_records
                 .iter()
-                .any(|r| r == "appearance:rejected:clay.theme.invalid_request"),
-            "unknown appearance must be rejected with clay.theme.invalid_request"
+                .any(|r| r == "appearance:rejected:theme.invalid_request"),
+            "unknown appearance must be rejected with theme.invalid_request"
         );
     }
 
@@ -12591,8 +12684,8 @@ mod tests {
                 result
                     .op_records
                     .iter()
-                    .any(|record| record.contains("clay.packages.invalid_specifier")),
-                "`{invalid}` must throw clay.packages.invalid_specifier, got {:?}",
+                    .any(|record| record.contains("packages.invalid_specifier")),
+                "`{invalid}` must throw packages.invalid_specifier, got {:?}",
                 result.op_records
             );
             assert!(
@@ -12776,7 +12869,7 @@ mod tests {
             !manifest
                 .keymaps
                 .iter()
-                .any(|rule| rule.command_id == "clay.documents.clientOpenFileDialog"),
+                .any(|rule| rule.command_id == "documents.clientOpenFileDialog"),
             "loadPackage must NOT install the Ctrl+O file-open keymap; it stays a separate bindKey call, got {:?}",
             manifest
                 .keymaps
@@ -12794,7 +12887,7 @@ mod tests {
             import { loadPackage } from "clay:packages";
             import { bindKey } from "clay:keybindings";
             await loadPackage("@clay/markdown");
-            bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+            bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
             "#,
         )
         .unwrap();
@@ -12810,7 +12903,7 @@ mod tests {
             manifest
                 .keymaps
                 .iter()
-                .any(|rule| rule.command_id == "clay.documents.clientOpenFileDialog"),
+                .any(|rule| rule.command_id == "documents.clientOpenFileDialog"),
             "the separate bindKey call must install the Ctrl+O file-open keymap, got {:?}",
             manifest
                 .keymaps

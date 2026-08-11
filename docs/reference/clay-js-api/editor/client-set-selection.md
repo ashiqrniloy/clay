@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientSetSelection
+id: editor.clientSetSelection
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSetSelection
@@ -29,7 +29,7 @@ custom_properties:
     default: current
     description: Selection direction (current, next, prev).
 security: Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientSetSelection` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `editor.clientSetSelection` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, selection]
 app_visible: true
 help_visible: true
@@ -45,7 +45,7 @@ Set the selection through the `clay:editor` Clay JavaScript facade.
 
 ## Description
 
-`clientSetSelection` is the public API for **Set Selection**. The `op_clay_editor_set_selection` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. Key-driven selection is served client-local by the direction-specific `clay.editor.clientSetSelection.*` command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`).
+`clientSetSelection` is the public API for **Set Selection**. The `op_clay_editor_set_selection` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. Key-driven selection is served client-local by the direction-specific `editor.clientSetSelection.*` command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`).
 
 Authority: `client-local-ui-state`. Runtime path: `client-local-hot-path`. Shift-arrow, pointer-drag, Ctrl+L (line), and Ctrl+D (word) selection update local state and are not serialized unless followed by a document edit.
 
@@ -82,7 +82,7 @@ Default key bindings:
 - `PrimaryPointerDrag`
 - `Ctrl+L` (select current line), `Ctrl+D` (select word at caret)
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs (e.g. `clay.editor.clientSetSelection.selectLine`).
+Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs (e.g. `editor.clientSetSelection.selectLine`).
 
 ## Custom properties
 
@@ -108,7 +108,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientSetSelection` when the user asks for set selection through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientSetSelection` when the user asks for set selection through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -119,7 +119,7 @@ Use `clay.editor.clientSetSelection` when the user asks for set selection throug
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientSetSelection`
+- Stable ID: `editor.clientSetSelection`
 - User-facing name: Set Selection
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientSetSelection`

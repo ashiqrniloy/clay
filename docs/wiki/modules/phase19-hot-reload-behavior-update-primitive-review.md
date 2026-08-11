@@ -135,7 +135,7 @@ These are reusable lifecycle/protocol primitives. No gap justifies `if rust`, `i
 - Prepare G2 in a fresh runtime while G1 remains active; serialize attempts, validate all affected snapshots, and acquire `LockScope::Behavior` only for final compare-and-swap commit.
 - Broadcast capacity-16, connection-scoped complete snapshots under the 1 MiB frame ceiling. Clients validate/stage snapshots and send `RuntimeGenerationInstalled(G2)`; invalid snapshots receive no acknowledgement. Full atomic client install and fail-closed reconnect remain the next task.
 - Retain only G1's inert manifest/metadata for normally valid already-rendered `Edit`/`EditorIntent` operations until that connection acknowledges G2 or the global two-second/256-accepted-transaction ceiling closes. Reject old commands, stale-drop old provider/render work, and recover expired edits with latest runtime state plus canonical document resync.
-- Route explicit reload through built-in `clay.runtime.reloadConfiguration` with no default binding, no watcher, and no dedicated reload IPC.
+- Route explicit reload through built-in `runtime.reloadConfiguration` with no dedicated reload IPC. The original Phase 19 scope had no default binding or watcher; Plan 080 supersedes those two deferrals with global `Ctrl+Shift+R` and bounded config-root polling delegated to the same reload service.
 - Treat server commit as the rollback boundary: logically revoke old executable authority at commit, then apply existing bounded worker/session cleanup. Consider diffs/chunking only at 768 KiB payload p95 or 16 ms client-install p95 through a separate reviewed decision.
 
 ## Rejected Implementation Shapes

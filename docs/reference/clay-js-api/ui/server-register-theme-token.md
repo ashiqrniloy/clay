@@ -1,5 +1,5 @@
 ---
-id: clay.ui.serverRegisterThemeToken
+id: ui.serverRegisterThemeToken
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterThemeToken
@@ -37,7 +37,7 @@ custom_properties:
     default: package
     description: Provenance source for the declaration; Phase 18.3 accepts package declarations.
 security: Validates package-prefixed semantic token names, token types, same-type Clay core fallbacks, descriptions, provenance, and token conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, raw CSS, raw style strings, arbitrary raw colors, direct Masonry widgets, native widget handles, Vello callbacks, Parley callbacks, renderer callbacks, arbitrary GPU draw authority, or external authority.
-agent_guidance: Use `clay.ui.serverRegisterThemeToken` for semantic package theme tokens only; do not expose raw colors, CSS, renderer callbacks, native handles, raw ops, hidden theme override keys, or client-side JavaScript style hooks.
+agent_guidance: Use `ui.serverRegisterThemeToken` for semantic package theme tokens only; do not expose raw colors, CSS, renderer callbacks, native handles, raw ops, hidden theme override keys, or client-side JavaScript style hooks.
 lookup_tags: [ui, package-ui, theme-token, style-tokens, clay-js-api, phase18.3, runtime-backed]
 app_visible: true
 help_visible: true
@@ -127,7 +127,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.ui.serverRegisterThemeToken` when the user asks for a public Clay JS API for package theme token declarations. Avoid raw color values, raw CSS, renderer callbacks, native style mutation, direct Rust calls, raw `Deno.core.ops`, hidden override keys, or client-side JavaScript styling hooks.
+Use `ui.serverRegisterThemeToken` when the user asks for a public Clay JS API for package theme token declarations. Avoid raw color values, raw CSS, renderer callbacks, native style mutation, direct Rust calls, raw `Deno.core.ops`, hidden override keys, or client-side JavaScript styling hooks.
 
 ## Backing implementation
 
@@ -138,7 +138,7 @@ Use `clay.ui.serverRegisterThemeToken` when the user asks for a public Clay JS A
 
 ## Lookup metadata
 
-- Stable ID: `clay.ui.serverRegisterThemeToken`
+- Stable ID: `ui.serverRegisterThemeToken`
 - User-facing name: Register Theme Token
 - Kind: `clay-js-api`
 - Module/export: `clay:ui` / `serverRegisterThemeToken`

@@ -19,16 +19,16 @@ pub(super) async fn op_clay_documents_open_document(
     state: Rc<RefCell<OpState>>,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let options = parse_object(&options_json, "clay.documents.invalid_open_options")?;
+    let options = parse_object(&options_json, "documents.invalid_open_options")?;
     let workspace_root_id = parse_required_u64(
         options.get("workspaceRootId"),
         "workspaceRootId",
-        "clay.documents.invalid_open_options",
+        "documents.invalid_open_options",
     )?;
     let path = parse_required_string(
         options.get("path"),
         "path",
-        "clay.documents.invalid_open_options",
+        "documents.invalid_open_options",
     )?;
     let workspace = state.borrow().borrow::<Arc<ClayOpState>>().workspace();
     let opened = crate::server::workspace::open_existing_file_unlocked(
@@ -38,7 +38,7 @@ pub(super) async fn op_clay_documents_open_document(
         RUNTIME_CLIENT_ID,
     )
     .await
-    .map_err(workspace_error("clay.documents.open_failed"))?;
+    .map_err(workspace_error("documents.open_failed"))?;
     let document = opened.document.lock().await;
     let metadata = DocumentMetadata {
         document_id: opened.document_id,
@@ -54,7 +54,7 @@ pub(super) async fn op_clay_documents_open_document(
             "metadata": metadata_json(&metadata),
             "text": document.text(),
         }),
-        "clay.documents.open_failed",
+        "documents.open_failed",
     )
 }
 
@@ -64,15 +64,15 @@ pub(super) async fn op_clay_documents_save_document(
     state: Rc<RefCell<OpState>>,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let options = parse_object(&options_json, "clay.documents.invalid_save_options")?;
+    let options = parse_object(&options_json, "documents.invalid_save_options")?;
     let document_id = parse_required_u64(
         options.get("documentId"),
         "documentId",
-        "clay.documents.invalid_save_options",
+        "documents.invalid_save_options",
     )?;
     let known_version = options
         .get("knownVersion")
-        .map(|value| parse_u64_value(value, "knownVersion", "clay.documents.invalid_save_options"))
+        .map(|value| parse_u64_value(value, "knownVersion", "documents.invalid_save_options"))
         .transpose()?
         .unwrap_or(0);
     let workspace = state.borrow().borrow::<Arc<ClayOpState>>().workspace();
@@ -85,14 +85,14 @@ pub(super) async fn op_clay_documents_save_document(
         known_version,
     )
     .await
-    .map_err(workspace_error("clay.documents.save_failed"))?;
+    .map_err(workspace_error("documents.save_failed"))?;
     serialize_result(
         json!({
             "documentId": outcome.document_id.to_string(),
             "version": outcome.version,
             "dirty": outcome.dirty,
         }),
-        "clay.documents.save_failed",
+        "documents.save_failed",
     )
 }
 
@@ -102,11 +102,11 @@ pub(super) async fn op_clay_documents_reload_document(
     state: Rc<RefCell<OpState>>,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let options = parse_object(&options_json, "clay.documents.invalid_reload_options")?;
+    let options = parse_object(&options_json, "documents.invalid_reload_options")?;
     let document_id = parse_required_u64(
         options.get("documentId"),
         "documentId",
-        "clay.documents.invalid_reload_options",
+        "documents.invalid_reload_options",
     )?;
     let force = options
         .get("force")
@@ -121,13 +121,13 @@ pub(super) async fn op_clay_documents_reload_document(
             force,
         )
         .await
-        .map_err(workspace_error("clay.documents.reload_failed"))?;
+        .map_err(workspace_error("documents.reload_failed"))?;
         let metadata = workspace
             .lock()
             .await
             .document_metadata(document_id, RUNTIME_CLIENT_ID)
             .await
-            .map_err(workspace_error("clay.documents.reload_failed"))?;
+            .map_err(workspace_error("documents.reload_failed"))?;
         (metadata, outcome.text)
     };
     serialize_result(
@@ -135,7 +135,7 @@ pub(super) async fn op_clay_documents_reload_document(
             "metadata": metadata_json(&metadata),
             "text": text,
         }),
-        "clay.documents.reload_failed",
+        "documents.reload_failed",
     )
 }
 
@@ -149,7 +149,7 @@ pub(super) async fn op_clay_documents_get_document_status(
         &serde_json::from_str::<Value>(&document_id_json)
             .unwrap_or(Value::String(document_id_json)),
         "documentId",
-        "clay.documents.invalid_status_options",
+        "documents.invalid_status_options",
     )?;
     let workspace = state.borrow().borrow::<Arc<ClayOpState>>().workspace();
     let metadata = workspace
@@ -157,8 +157,8 @@ pub(super) async fn op_clay_documents_get_document_status(
         .await
         .document_metadata(document_id, RUNTIME_CLIENT_ID)
         .await
-        .map_err(workspace_error("clay.documents.status_failed"))?;
-    serialize_result(metadata_json(&metadata), "clay.documents.status_failed")
+        .map_err(workspace_error("documents.status_failed"))?;
+    serialize_result(metadata_json(&metadata), "documents.status_failed")
 }
 
 #[op2]
@@ -172,10 +172,10 @@ pub(super) async fn op_clay_documents_list_documents(
         .await
         .list_documents(RUNTIME_CLIENT_ID)
         .await
-        .map_err(workspace_error("clay.documents.list_failed"))?;
+        .map_err(workspace_error("documents.list_failed"))?;
     serialize_result(
         Value::Array(documents.iter().map(metadata_json).collect()),
-        "clay.documents.list_failed",
+        "documents.list_failed",
     )
 }
 

@@ -1,5 +1,5 @@
 ---
-id: clay.application.quit
+id: application.quit
 kind: clay-js-api
 js_module: "clay:application"
 js_export: quit
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: [Escape]
 custom_properties: []
 security: Requests application shutdown only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.application.quit` only for its documented application responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `application.quit` only for its documented application responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [application, escapequitapplicationactions, js-api]
 app_visible: true
 help_visible: true
@@ -91,7 +91,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.application.quit` when the user asks for quit clay through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `application.quit` when the user asks for quit clay through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -102,7 +102,7 @@ Use `clay.application.quit` when the user asks for quit clay through the Clay JS
 
 ## Lookup metadata
 
-- Stable ID: `clay.application.quit`
+- Stable ID: `application.quit`
 - User-facing name: Quit Clay
 - Kind: `clay-js-api`
 - Module/export: `clay:application` / `quit`

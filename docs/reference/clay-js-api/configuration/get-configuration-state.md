@@ -1,5 +1,5 @@
 ---
-id: clay.configuration.getConfigurationState
+id: configuration.getConfigurationState
 kind: clay-js-api
 js_module: "clay:configuration"
 js_export: getConfigurationState
@@ -25,7 +25,7 @@ custom_properties:
     default: []
     description: Ordered local configuration module paths once runtime loading exists.
 security: Returns configuration metadata only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.configuration.getConfigurationState` only for read-only configuration metadata and discovery; do not invent configuration execution, filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.
+agent_guidance: Use `configuration.getConfigurationState` only for read-only configuration metadata and discovery; do not invent configuration execution, filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.
 lookup_tags: [configuration, entrypoint, initjs, js-api]
 app_visible: true
 help_visible: true
@@ -72,7 +72,7 @@ No options are accepted.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.configuration.getConfigurationState` in `~/.config/clay/init.js` if a future command surface supports displaying configuration metadata.
+No default key binding is assigned. Users may bind a key to `configuration.getConfigurationState` in `~/.config/clay/init.js` if a future command surface supports displaying configuration metadata.
 
 ## Custom properties
 
@@ -106,7 +106,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.configuration.getConfigurationState` when the user asks for Clay configuration entry point or module-loading status. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution.
+Use `configuration.getConfigurationState` when the user asks for Clay configuration entry point or module-loading status. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -117,7 +117,7 @@ Use `clay.configuration.getConfigurationState` when the user asks for Clay confi
 
 ## Lookup metadata
 
-- Stable ID: `clay.configuration.getConfigurationState`
+- Stable ID: `configuration.getConfigurationState`
 - User-facing name: Get Configuration State
 - Kind: `clay-js-api`
 - Module/export: `clay:configuration` / `getConfigurationState`

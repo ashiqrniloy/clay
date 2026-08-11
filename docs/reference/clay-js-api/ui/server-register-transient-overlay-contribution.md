@@ -1,5 +1,5 @@
 ---
-id: clay.ui.serverRegisterTransientOverlayContribution
+id: ui.serverRegisterTransientOverlayContribution
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterTransientOverlayContribution
@@ -41,7 +41,7 @@ custom_properties:
     default: []
     description: Registered package-prefixed command IDs that overlay components may emit.
 security: Validates package-prefixed overlay IDs, anchors, focus and dismissal policy, bounded component payloads, registered action targets, provenance, and conflicts while Clay owns z-order, focus, accessibility, and native overlay rendering; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.
-agent_guidance: Use `clay.ui.serverRegisterTransientOverlayContribution` for declarative dismissible package overlays only; avoid fixed-slot panels, raw ops, native widget handles, direct Masonry APIs, raw CSS, renderer callbacks, client-side JavaScript hooks, and hidden focus/z-order settings.
+agent_guidance: Use `ui.serverRegisterTransientOverlayContribution` for declarative dismissible package overlays only; avoid fixed-slot panels, raw ops, native widget handles, direct Masonry APIs, raw CSS, renderer callbacks, client-side JavaScript hooks, and hidden focus/z-order settings.
 lookup_tags: [ui, package-ui, overlay, focus-policy, clay-js-api, phase18.3, runtime-backed]
 app_visible: true
 help_visible: true
@@ -149,7 +149,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.ui.serverRegisterTransientOverlayContribution` when the user asks for a public Clay JS API for package overlays. Avoid direct Rust calls, raw `Deno.core.ops`, protocol DTO construction, Masonry widgets, raw CSS, renderer callbacks, hidden focus/z-order keys, or client-side JavaScript execution.
+Use `ui.serverRegisterTransientOverlayContribution` when the user asks for a public Clay JS API for package overlays. Avoid direct Rust calls, raw `Deno.core.ops`, protocol DTO construction, Masonry widgets, raw CSS, renderer callbacks, hidden focus/z-order keys, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -160,7 +160,7 @@ Use `clay.ui.serverRegisterTransientOverlayContribution` when the user asks for 
 
 ## Lookup metadata
 
-- Stable ID: `clay.ui.serverRegisterTransientOverlayContribution`
+- Stable ID: `ui.serverRegisterTransientOverlayContribution`
 - User-facing name: Register Transient Overlay Contribution
 - Kind: `clay-js-api`
 - Module/export: `clay:ui` / `serverRegisterTransientOverlayContribution`

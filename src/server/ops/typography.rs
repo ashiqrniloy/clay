@@ -41,9 +41,8 @@ pub(super) fn op_clay_theme_set_typography(
 ) -> Result<String, JsErrorBox> {
     let clay_state = state.borrow::<Arc<ClayOpState>>();
     let typography = apply_typography(clay_state, &request_json)?;
-    serde_json::to_string(&json!({ "revision": typography.revision })).map_err(|_| {
-        JsErrorBox::generic("clay.theme.invalid_typography: failed to serialize result")
-    })
+    serde_json::to_string(&json!({ "revision": typography.revision }))
+        .map_err(|_| JsErrorBox::generic("theme.invalid_typography: failed to serialize result"))
 }
 
 fn parse_typography(value: &Value) -> Result<ActiveTypography, JsErrorBox> {
@@ -200,7 +199,7 @@ fn reject_unknown_keys(object: &Map<String, Value>, allowed: &[&str]) -> Result<
 
 fn invalid_typography() -> JsErrorBox {
     JsErrorBox::generic(
-        "clay.theme.invalid_typography: setTypography requires complete monospace, proportional, and ui profiles with only families and size",
+        "theme.invalid_typography: setTypography requires complete monospace, proportional, and ui profiles with only families and size",
     )
 }
 

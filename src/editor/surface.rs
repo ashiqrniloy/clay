@@ -6528,11 +6528,11 @@ mod tests {
         );
         let mut manifest = BehaviorManifest::minimal_text_editing(3);
         manifest.commands.push(CommandDeclaration::client_ui(
-            "clay.documents.clientOpenFileDialog",
+            "documents.clientOpenFileDialog",
             "Open File Dialog",
         ));
         manifest.keymaps.push(KeyBindingRule {
-            command_id: "clay.documents.clientOpenFileDialog".to_string(),
+            command_id: "documents.clientOpenFileDialog".to_string(),
             sequence: vec![KeyStroke {
                 key: KeyCode::Character("o".to_string()),
                 modifiers: KeyModifiers {
@@ -6558,7 +6558,7 @@ mod tests {
         assert_eq!(outcome.server_intent, None);
         assert_eq!(
             outcome.client_ui_command.unwrap().command_id,
-            "clay.documents.clientOpenFileDialog"
+            "documents.clientOpenFileDialog"
         );
     }
 
@@ -6576,11 +6576,11 @@ mod tests {
         );
         let mut manifest = BehaviorManifest::minimal_text_editing(3);
         manifest.commands.push(CommandDeclaration::client_ui(
-            "clay.editor.clientMoveCursor.nextParagraph",
+            "editor.clientMoveCursor.nextParagraph",
             "Next Paragraph",
         ));
         manifest.keymaps.push(KeyBindingRule {
-            command_id: "clay.editor.clientMoveCursor.nextParagraph".to_string(),
+            command_id: "editor.clientMoveCursor.nextParagraph".to_string(),
             sequence: vec![KeyStroke {
                 key: KeyCode::ArrowRight,
                 modifiers: KeyModifiers {
@@ -6608,7 +6608,7 @@ mod tests {
         assert_eq!(editor.visible_text(), "para one\n\npara two");
         assert_eq!(
             outcome.client_ui_command.unwrap().command_id,
-            "clay.editor.clientMoveCursor.nextParagraph"
+            "editor.clientMoveCursor.nextParagraph"
         );
     }
 
@@ -6619,11 +6619,11 @@ mod tests {
         let mut editor = multi_cursor_editor("foo bar foo");
         let mut manifest = BehaviorManifest::minimal_text_editing(3);
         manifest.commands.push(CommandDeclaration::client_ui(
-            "clay.editor.clientSelectAllMatches",
+            "editor.clientSelectAllMatches",
             "Select All Matches",
         ));
         manifest.keymaps.push(KeyBindingRule {
-            command_id: "clay.editor.clientSelectAllMatches".to_string(),
+            command_id: "editor.clientSelectAllMatches".to_string(),
             sequence: vec![KeyStroke {
                 key: KeyCode::Character("m".to_string()),
                 modifiers: KeyModifiers {
@@ -6651,7 +6651,7 @@ mod tests {
         assert_eq!(editor.visible_text(), "foo bar foo");
         assert_eq!(
             outcome.client_ui_command.unwrap().command_id,
-            "clay.editor.clientSelectAllMatches"
+            "editor.clientSelectAllMatches"
         );
     }
 
@@ -6664,11 +6664,11 @@ mod tests {
         let mut editor = multi_cursor_editor("foo bar foo");
         let mut manifest = BehaviorManifest::minimal_text_editing(3);
         manifest.commands.push(CommandDeclaration::ui_reactive(
-            "clay.editor.clientSmartSelect.expand",
+            "editor.clientSmartSelect.expand",
             "Expand Selection",
         ));
         manifest.keymaps.push(KeyBindingRule {
-            command_id: "clay.editor.clientSmartSelect.expand".to_string(),
+            command_id: "editor.clientSmartSelect.expand".to_string(),
             sequence: vec![KeyStroke {
                 key: KeyCode::Character("\\".to_string()),
                 modifiers: KeyModifiers {
@@ -6697,7 +6697,7 @@ mod tests {
         assert_eq!(editor.visible_text(), "foo bar foo");
         assert_eq!(
             outcome.server_intent.unwrap().command_id,
-            "clay.editor.clientSmartSelect.expand"
+            "editor.clientSmartSelect.expand"
         );
     }
 

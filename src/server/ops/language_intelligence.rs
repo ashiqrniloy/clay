@@ -34,10 +34,10 @@ pub(super) fn op_clay_language_register_intelligence_provider(
     state: &mut OpState,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let options_value = parse_json(&options_json, "clay.language.invalid_provider")?;
+    let options_value = parse_json(&options_json, "language.invalid_provider")?;
     let options = options_value
         .as_object()
-        .ok_or_else(|| clay_error("clay.language.invalid_provider: options must be an object"))?;
+        .ok_or_else(|| clay_error("language.invalid_provider: options must be an object"))?;
     reject_executable_fields(options)?;
 
     let package = state
@@ -80,7 +80,7 @@ pub(super) fn op_clay_language_register_intelligence_provider(
 
     let clay = state.borrow::<Arc<ClayOpState>>();
     clay.register_language_intelligence_provider_metadata(meta.clone())
-        .map_err(|message| clay_error(format!("clay.language.registration_failed: {message}")))?;
+        .map_err(|message| clay_error(format!("language.registration_failed: {message}")))?;
     if runtime_bridge {
         clay.register_js_language_intelligence_provider(registration);
     }
@@ -101,7 +101,7 @@ pub(super) fn op_clay_language_register_intelligence_provider(
     }))
     .map_err(|error| {
         clay_error(format!(
-            "clay.language.registration_failed: failed to serialize result ({error})"
+            "language.registration_failed: failed to serialize result ({error})"
         ))
     })
 }
@@ -132,11 +132,11 @@ fn provider_meta_from_options(
         });
     }
 
-    let id = required_str(options, "id", "clay.language.invalid_provider")?.to_string();
+    let id = required_str(options, "id", "language.invalid_provider")?.to_string();
     let api_prefix = package.manifest.clay.api_prefix.as_str();
     if id.starts_with("clay.") {
         return Err(clay_error(format!(
-            "clay.language.invalid_provider: provider id `{id}` claims the reserved clay.* namespace"
+            "language.invalid_provider: provider id `{id}` claims the reserved clay.* namespace"
         )));
     }
     if !(id == api_prefix
@@ -145,14 +145,14 @@ fn provider_meta_from_options(
             .is_some_and(|rest| rest.starts_with('.')))
     {
         return Err(clay_error(format!(
-            "clay.language.invalid_provider: provider id `{id}` must be owned by apiPrefix `{api_prefix}`"
+            "language.invalid_provider: provider id `{id}` must be owned by apiPrefix `{api_prefix}`"
         )));
     }
 
     let features = parse_features(options.get("features"))?;
     if features.is_empty() {
         return Err(clay_error(
-            "clay.language.invalid_provider: features must contain at least one entry",
+            "language.invalid_provider: features must contain at least one entry",
         ));
     }
     let modes = match options.get("modes") {
@@ -166,14 +166,14 @@ fn provider_meta_from_options(
                     .map(str::to_string)
                     .ok_or_else(|| {
                         clay_error(
-                            "clay.language.invalid_provider: modes entries must be non-empty strings",
+                            "language.invalid_provider: modes entries must be non-empty strings",
                         )
                     })
             })
             .collect::<Result<Vec<_>, _>>()?,
         Some(_) => {
             return Err(clay_error(
-                "clay.language.invalid_provider: modes must be an array of strings",
+                "language.invalid_provider: modes must be an array of strings",
             ));
         }
     };
@@ -188,7 +188,7 @@ fn provider_meta_from_options(
         .unwrap_or(LANGUAGE_INTELLIGENCE_DEFAULT_TIMEOUT_MS);
     if timeout_ms == 0 || timeout_ms > LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS {
         return Err(clay_error(format!(
-            "clay.language.invalid_provider: timeoutMs must be within 1..={LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS}"
+            "language.invalid_provider: timeoutMs must be within 1..={LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS}"
         )));
     }
 
@@ -215,7 +215,7 @@ fn parse_features(value: Option<&Value>) -> Result<Vec<LanguageIntelligenceFeatu
     for value in values {
         let Some(name) = value.as_str() else {
             return Err(clay_error(
-                "clay.language.invalid_provider: features entries must be strings",
+                "language.invalid_provider: features entries must be strings",
             ));
         };
         let feature = match name {
@@ -227,7 +227,7 @@ fn parse_features(value: Option<&Value>) -> Result<Vec<LanguageIntelligenceFeatu
             "signatureHelp" | "SignatureHelp" => LanguageIntelligenceFeature::SignatureHelp,
             other => {
                 return Err(clay_error(format!(
-                    "clay.language.invalid_provider: unsupported feature `{other}`"
+                    "language.invalid_provider: unsupported feature `{other}`"
                 )));
             }
         };
@@ -262,14 +262,14 @@ fn reject_executable_fields(options: &Map<String, Value>) -> Result<(), JsErrorB
     ] {
         if options.contains_key(key) {
             return Err(clay_error(format!(
-                "clay.language.invalid_provider: executable or process authority field `{key}` is not accepted by the public registration contract"
+                "language.invalid_provider: executable or process authority field `{key}` is not accepted by the public registration contract"
             )));
         }
         if let Some(provider) = options.get("provider").and_then(Value::as_object)
             && provider.contains_key(key)
         {
             return Err(clay_error(format!(
-                "clay.language.invalid_provider: executable or process authority field `{key}` is not accepted by the public registration contract"
+                "language.invalid_provider: executable or process authority field `{key}` is not accepted by the public registration contract"
             )));
         }
     }
@@ -281,10 +281,10 @@ pub(super) fn op_clay_language_store_intelligence_result(
     state: &mut OpState,
     #[string] result_json: String,
 ) -> Result<(), JsErrorBox> {
-    let value = parse_json(&result_json, "clay.language.invalid_result")?;
+    let value = parse_json(&result_json, "language.invalid_result")?;
     if !value.is_object() {
         return Err(clay_error(
-            "clay.language.invalid_result: result must be an object",
+            "language.invalid_result: result must be an object",
         ));
     }
     // Bridge ingress revalidation (Plan 061 task 7): reject stale/revoked

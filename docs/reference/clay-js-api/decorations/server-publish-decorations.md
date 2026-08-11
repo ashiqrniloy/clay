@@ -1,5 +1,5 @@
 ---
-id: clay.decorations.serverPublishDecorations
+id: decorations.serverPublishDecorations
 kind: clay-js-api
 js_module: "clay:decorations"
 js_export: serverPublishDecorations
@@ -37,7 +37,7 @@ custom_properties:
     default: package context
     description: Package API prefix retained as provenance.
 security: Requires render-decorations permission plus server validation of package provenance, current document version, byte ranges, viewport bounds, known style tokens, known kinds, and DECORATION_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary CSS, draw callbacks, GPU commands, or native widget mutation authority.
-agent_guidance: Use `clay.decorations.serverPublishDecorations` from server-side package code only. Publish inert spans; never invent renderer callbacks, CSS, raw ops, or client-side JavaScript hooks.
+agent_guidance: Use `decorations.serverPublishDecorations` from server-side package code only. Publish inert spans; never invent renderer callbacks, CSS, raw ops, or client-side JavaScript hooks.
 lookup_tags: [js-api, decorations, markdown, decorationrange, syntax-highlighting]
 app_visible: true
 help_visible: true
@@ -171,7 +171,7 @@ Prefer this facade over raw ops or Rust internals. Keep publications viewport-bo
 
 ## Lookup metadata
 
-- Stable ID: `clay.decorations.serverPublishDecorations`
+- Stable ID: `decorations.serverPublishDecorations`
 - User-facing name: Publish Decorations
 - Lookup tags: `js-api`, `decorations`, `markdown`, `decorationrange`, `syntax-highlighting`
 - App/help visible: true

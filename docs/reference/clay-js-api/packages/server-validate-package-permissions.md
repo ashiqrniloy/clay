@@ -1,5 +1,5 @@
 ---
-id: clay.packages.serverValidatePackagePermissions
+id: packages.serverValidatePackagePermissions
 kind: clay-js-api
 js_module: "clay:packages"
 js_export: serverValidatePackagePermissions
@@ -21,7 +21,7 @@ custom_properties:
     default: required
     description: Behavior-changing setting `permissions` for this primitive gate API.
 security: Validates declared package permissions and grants no authority by itself; rejects unknown, undeclared, prohibited, or unapproved scopes through server validation and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, package installation, enable/disable, or package execution authority.
-agent_guidance: Use `clay.packages.serverValidatePackagePermissions` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `packages.serverValidatePackagePermissions` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [js-api, packagepermissionvalidation, packages]
 app_visible: true
 help_visible: true
@@ -65,7 +65,7 @@ const result = serverValidatePackagePermissions(["mode-registration", "mode-acti
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.packages.serverValidatePackagePermissions` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `packages.serverValidatePackagePermissions` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -91,7 +91,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.packages.serverValidatePackagePermissions` when the user asks for Validate Package Permissions through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `packages.serverValidatePackagePermissions` when the user asks for Validate Package Permissions through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -102,7 +102,7 @@ Use `clay.packages.serverValidatePackagePermissions` when the user asks for Vali
 
 ## Lookup metadata
 
-- Stable ID: `clay.packages.serverValidatePackagePermissions`
+- Stable ID: `packages.serverValidatePackagePermissions`
 - User-facing name: Validate Package Permissions
 - Kind: `clay-js-api`
 - Module/export: `clay:packages` / `serverValidatePackagePermissions`

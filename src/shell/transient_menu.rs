@@ -474,7 +474,7 @@ pub(crate) fn language_intelligence_result_to_menu_session(
                     TransientMenuItem::new(
                         "hover.0",
                         plain.clone(),
-                        TransientMenuAction::new("clay.language.dismissResult"),
+                        TransientMenuAction::new("language.dismissResult"),
                     )
                     .with_detail(format!(
                         "{} {}",
@@ -514,7 +514,7 @@ pub(crate) fn language_intelligence_result_to_menu_session(
                         TransientMenuItem::new(
                             format!("signature.{index}"),
                             signature.label.clone(),
-                            TransientMenuAction::new("clay.language.dismissResult"),
+                            TransientMenuAction::new("language.dismissResult"),
                         )
                         .with_detail(detail)
                         .with_accessibility_label(format!("Signature {}", signature.label))
@@ -569,7 +569,7 @@ pub(crate) fn language_intelligence_result_to_menu_session(
                     TransientMenuAction::new(command_id.clone())
                 } else {
                     // Inert edit-preview-only actions never mutate text in Phase 18.20.
-                    TransientMenuAction::new("clay.language.previewEdit").with_arguments(
+                    TransientMenuAction::new("language.previewEdit").with_arguments(
                         serde_json::json!({
                             "title": action.title,
                             "previewOnly": true,
@@ -620,13 +620,14 @@ fn definition_location_to_menu_item(
                 "document {document_id} [{}-{}]",
                 range.byte_start, range.byte_end
             );
-            let action = TransientMenuAction::new("clay.language.navigateDefinition")
-                .with_arguments(serde_json::json!({
+            let action = TransientMenuAction::new("language.navigateDefinition").with_arguments(
+                serde_json::json!({
                     "kind": "openDocument",
                     "documentId": document_id,
                     "byteStart": range.byte_start,
                     "byteEnd": range.byte_end,
-                }));
+                }),
+            );
             Some(
                 TransientMenuItem::new(format!("definition.{index}"), label.clone(), action)
                     .with_accessibility_label(format!("Go to {label}")),
@@ -640,15 +641,14 @@ fn definition_location_to_menu_item(
             let label = format!("{relative_path} [{}-{}]", range.byte_start, range.byte_end);
             // Reuse the existing workspace open command; pending caret jump is
             // applied client-side after DocumentOpened.
-            let action = TransientMenuAction::new("clay.workspace.openFile").with_arguments(
-                serde_json::json!({
+            let action =
+                TransientMenuAction::new("workspace.openFile").with_arguments(serde_json::json!({
                     "workspaceRootId": workspace_root_id,
                     "relativePath": relative_path,
                     "byteStart": range.byte_start,
                     "byteEnd": range.byte_end,
                     "languageIntelligenceNavigation": true,
-                }),
-            );
+                }));
             Some(
                 TransientMenuItem::new(format!("definition.{index}"), label.clone(), action)
                     .with_detail(format!("workspace root {workspace_root_id}"))
@@ -663,7 +663,7 @@ mod tests {
     use super::*;
 
     fn sample_item(id: &str, label: &str) -> TransientMenuItem {
-        TransientMenuItem::new(id, label, TransientMenuAction::new("clay.builtIn.test"))
+        TransientMenuItem::new(id, label, TransientMenuAction::new("builtIn.test"))
     }
 
     #[test]
@@ -706,18 +706,9 @@ mod tests {
                 "every choice has an accessibility label"
             );
         }
-        assert_eq!(
-            items[0].action.command_id,
-            "clay.shell.clientTabCloseSaveAll"
-        );
-        assert_eq!(
-            items[1].action.command_id,
-            "clay.shell.clientTabCloseDiscard"
-        );
-        assert_eq!(
-            items[2].action.command_id,
-            "clay.shell.clientTabCloseCancel"
-        );
+        assert_eq!(items[0].action.command_id, "shell.clientTabCloseSaveAll");
+        assert_eq!(items[1].action.command_id, "shell.clientTabCloseDiscard");
+        assert_eq!(items[2].action.command_id, "shell.clientTabCloseCancel");
     }
 
     #[test]
@@ -795,18 +786,18 @@ mod tests {
                 TransientMenuItem::new(
                     "b",
                     "Beta",
-                    TransientMenuAction::new("clay.builtIn.run")
+                    TransientMenuAction::new("builtIn.run")
                         .with_arguments(serde_json::json!({"foo": "bar"})),
                 ),
             ]);
 
         let action = session.activate_selected().expect("first item has action");
-        assert_eq!(action.command_id, "clay.builtIn.test");
+        assert_eq!(action.command_id, "builtIn.test");
 
         let mut session = session;
         session.select_next();
         let action = session.activate_selected().expect("second item has action");
-        assert_eq!(action.command_id, "clay.builtIn.run");
+        assert_eq!(action.command_id, "builtIn.run");
         assert_eq!(action.arguments, serde_json::json!({"foo": "bar"}));
     }
 
@@ -1012,7 +1003,7 @@ mod tests {
         assert!(!session.items()[0].label.contains("**"));
         assert_eq!(
             session.items()[0].action.command_id,
-            "clay.language.dismissResult"
+            "language.dismissResult"
         );
     }
 
@@ -1063,11 +1054,11 @@ mod tests {
         assert_eq!(definition_menu.items().len(), 2);
         assert_eq!(
             definition_menu.items()[0].action.command_id,
-            "clay.language.navigateDefinition"
+            "language.navigateDefinition"
         );
         assert_eq!(
             definition_menu.items()[1].action.command_id,
-            "clay.workspace.openFile"
+            "workspace.openFile"
         );
         assert_eq!(
             definition_menu.items()[1].action.arguments["relativePath"],
@@ -1122,7 +1113,7 @@ mod tests {
         assert_eq!(action_menu.items()[0].action.command_id, "pkg.rename");
         assert_eq!(
             action_menu.items()[1].action.command_id,
-            "clay.language.previewEdit"
+            "language.previewEdit"
         );
         assert_eq!(action_menu.items()[1].action.arguments["previewOnly"], true);
     }

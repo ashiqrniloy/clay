@@ -208,8 +208,13 @@ fn validate_inventory(entries: &[InventoryEntry]) -> Vec<String> {
                     "{id}: registry-public API must have public visibility"
                 ));
             }
-            if !entry.get("id").starts_with("clay.") {
-                errors.push(format!("{id}: public stable id must start with clay."));
+            let domain = entry.get("id").split('.').next().unwrap_or_default();
+            if entry.get("id").starts_with("clay.")
+                || !clay::packages::manifest::RESERVED_CORE_API_DOMAINS.contains(&domain)
+            {
+                errors.push(format!(
+                    "{id}: public stable id must use a bare Clay core API domain (<domain>.<name>)"
+                ));
             }
             for authority in DENIED_AUTHORITIES {
                 if !entry.get("security_notes").contains(authority) {
@@ -479,7 +484,7 @@ fn every_public_api_has_generic_sections_facade_and_naming_contract() {
             .unwrap_or_else(|| panic!("{id}: js_module must start with clay:"));
         assert_eq!(
             id,
-            format!("clay.{module}.{}", entry.get("js_export")),
+            format!("{module}.{}", entry.get("js_export")),
             "{id}: stable id must derive from module/export"
         );
         let export = entry.get("js_export");

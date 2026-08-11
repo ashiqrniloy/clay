@@ -6,7 +6,7 @@
 # or grant permissions.
 
 [[api]]
-id = "clay.editor.serverInsertText"
+id = "editor.serverInsertText"
 category = "text-insertion"
 visibility = "public"
 status = "planned"
@@ -29,7 +29,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::insert_text_with_eve
 registry_public = true
 
 [[api]]
-id = "clay.editor.serverInsertNewline"
+id = "editor.serverInsertNewline"
 category = "newline"
 visibility = "public"
 status = "planned"
@@ -52,7 +52,7 @@ current_rust_owner = "src/editor/surface.rs::newline_text_at; src/client/behavio
 registry_public = true
 
 [[api]]
-id = "clay.editor.serverDeleteRange"
+id = "editor.serverDeleteRange"
 category = "backspace-delete"
 visibility = "public"
 status = "planned"
@@ -75,7 +75,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::backspace_with_event
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientMoveCursor"
+id = "editor.clientMoveCursor"
 category = "cursor-movement"
 visibility = "public"
 status = "runtime-backed"
@@ -98,7 +98,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::move_word_start; src
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientSetSelection"
+id = "editor.clientSetSelection"
 category = "selection"
 visibility = "public"
 status = "runtime-backed"
@@ -121,7 +121,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::select_word; src/mas
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientAddCursor"
+id = "editor.clientAddCursor"
 category = "multi-cursor"
 visibility = "public"
 status = "runtime-backed"
@@ -144,7 +144,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::add_cursor_line; src
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientColumnSelect"
+id = "editor.clientColumnSelect"
 category = "multi-cursor"
 visibility = "public"
 status = "runtime-backed"
@@ -167,7 +167,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::add_cursor_line; src
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientSelectNextMatch"
+id = "editor.clientSelectNextMatch"
 category = "multi-cursor"
 visibility = "public"
 status = "runtime-backed-command"
@@ -190,7 +190,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::select_next_match; s
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientSelectPrevMatch"
+id = "editor.clientSelectPrevMatch"
 category = "multi-cursor"
 visibility = "public"
 status = "runtime-backed-command"
@@ -213,7 +213,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::select_next_match; s
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientSelectAllMatches"
+id = "editor.clientSelectAllMatches"
 category = "multi-cursor"
 visibility = "public"
 status = "runtime-backed-command"
@@ -236,7 +236,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::select_all_matches; 
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientCancelMultipleSelections"
+id = "editor.clientCancelMultipleSelections"
 category = "multi-cursor"
 visibility = "public"
 status = "runtime-backed-command"
@@ -259,7 +259,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::cancel_multiple_sele
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientKeepSelection"
+id = "editor.clientKeepSelection"
 category = "multi-cursor"
 visibility = "public"
 status = "runtime-backed-command"
@@ -282,7 +282,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::keep_selection; src/
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientRemoveSelection"
+id = "editor.clientRemoveSelection"
 category = "multi-cursor"
 visibility = "public"
 status = "runtime-backed-command"
@@ -305,7 +305,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::remove_selection; sr
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientUndoCursorMove"
+id = "editor.clientUndoCursorMove"
 category = "multi-cursor"
 visibility = "public"
 status = "runtime-backed-command"
@@ -328,7 +328,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::undo_cursor_move; sr
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientSelectTextobject"
+id = "editor.clientSelectTextobject"
 category = "textobjects"
 visibility = "public"
 status = "runtime-backed"
@@ -351,7 +351,7 @@ current_rust_owner = "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_q
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientSmartSelect"
+id = "editor.clientSmartSelect"
 category = "textobjects"
 visibility = "public"
 status = "runtime-backed"
@@ -374,7 +374,7 @@ current_rust_owner = "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_q
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientExecuteEditorCommand"
+id = "editor.clientExecuteEditorCommand"
 category = "editor-control"
 visibility = "public"
 status = "runtime-backed"
@@ -397,7 +397,7 @@ current_rust_owner = "src/server/ops/editor.rs::op_clay_editor_execute_command; 
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientScrollTo"
+id = "editor.clientScrollTo"
 category = "scrolling"
 visibility = "public"
 status = "planned"
@@ -420,7 +420,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::scroll_lines; src/ed
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientSetViewport"
+id = "editor.clientSetViewport"
 category = "resize-viewport"
 visibility = "public"
 status = "planned"
@@ -443,7 +443,7 @@ current_rust_owner = "src/editor/viewport.rs::Viewport; src/editor/buffer.rs::Ed
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientSetCursorStyle"
+id = "editor.clientSetCursorStyle"
 category = "cursor-style-customization"
 visibility = "public"
 status = "runtime-backed"
@@ -466,7 +466,7 @@ current_rust_owner = "src/editor/surface.rs::EditorSurface::paint_caret; src/edi
 registry_public = true
 
 [[api]]
-id = "clay.keybindings.bindKey"
+id = "keybindings.bindKey"
 category = "key-binding-management"
 visibility = "public"
 status = "runtime-backed"
@@ -490,7 +490,7 @@ current_rust_owner = "src/protocol/mod.rs::KeyBindingRule; src/client/behavior.r
 registry_public = true
 
 [[api]]
-id = "clay.keybindings.unbindKey"
+id = "keybindings.unbindKey"
 category = "key-binding-management"
 visibility = "public"
 status = "runtime-backed"
@@ -514,7 +514,7 @@ current_rust_owner = "src/protocol/mod.rs::KeyBindingRule"
 registry_public = true
 
 [[api]]
-id = "clay.keybindings.listKeyBindings"
+id = "keybindings.listKeyBindings"
 category = "key-binding-management"
 visibility = "public"
 status = "runtime-backed"
@@ -537,7 +537,7 @@ current_rust_owner = "src/protocol/mod.rs::BehaviorManifest; src/protocol/mod.rs
 registry_public = true
 
 [[api]]
-id = "clay.configuration.loadConfigurationModule"
+id = "configuration.loadConfigurationModule"
 category = "configuration-entrypoint"
 visibility = "public"
 status = "runtime-backed"
@@ -553,14 +553,14 @@ deno_op = "op_clay_configuration_load_module"
 deno_op_path = "src/server/ops/configuration.rs::op_clay_configuration_load_module"
 documentation_path = "docs/reference/clay-js-api/configuration/load-configuration-module.md"
 key_bindings = []
-custom_properties = ["path:string"]
+custom_properties = ["path:string", "optional:boolean"]
 permissions = []
 security_notes = "Local modular configuration contract only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "runtime/js/configuration.js::loadConfigurationModule"
 registry_public = true
 
 [[api]]
-id = "clay.configuration.getConfigurationState"
+id = "configuration.getConfigurationState"
 category = "configuration-entrypoint"
 visibility = "public"
 status = "runtime-backed"
@@ -583,7 +583,7 @@ current_rust_owner = "runtime/js/configuration.js::getConfigurationState"
 registry_public = true
 
 [[api]]
-id = "clay.behavior.getActiveBehaviorManifest"
+id = "behavior.getActiveBehaviorManifest"
 category = "behavior-manifest-routing"
 visibility = "public"
 status = "runtime-backed"
@@ -606,7 +606,7 @@ current_rust_owner = "src/behavior/manifest.rs::validate_manifest; src/client/be
 registry_public = true
 
 [[api]]
-id = "clay.behavior.listBehaviorRoutes"
+id = "behavior.listBehaviorRoutes"
 category = "behavior-manifest-routing"
 visibility = "public"
 status = "runtime-backed"
@@ -629,7 +629,7 @@ current_rust_owner = "src/protocol/mod.rs::RoutingPolicy; src/client/behavior.rs
 registry_public = true
 
 [[api]]
-id = "clay.behavior.buildCodeEditingManifest"
+id = "behavior.buildCodeEditingManifest"
 category = "behavior-manifest-construction"
 visibility = "public"
 status = "runtime-backed"
@@ -652,7 +652,7 @@ current_rust_owner = "runtime/js/behavior.js"
 registry_public = true
 
 [[api]]
-id = "clay.documents.serverGetDocumentSnapshot"
+id = "documents.serverGetDocumentSnapshot"
 category = "lease-read-only-state"
 visibility = "public"
 status = "planned"
@@ -675,7 +675,7 @@ current_rust_owner = "src/server/document.rs::DocumentState::initial_document_me
 registry_public = true
 
 [[api]]
-id = "clay.documents.serverGetDocumentLease"
+id = "documents.serverGetDocumentLease"
 category = "lease-read-only-state"
 visibility = "public"
 status = "planned"
@@ -698,7 +698,7 @@ current_rust_owner = "src/server/document.rs::DocumentState::acquire_access; src
 registry_public = true
 
 [[api]]
-id = "clay.application.quit"
+id = "application.quit"
 category = "escape-quit-application-actions"
 visibility = "public"
 status = "planned"
@@ -721,7 +721,7 @@ current_rust_owner = "src/masonry_editor.rs::EditorWidget::on_text_event; src/ma
 registry_public = true
 
 [[api]]
-id = "clay.documents.serverOpenDocument"
+id = "documents.serverOpenDocument"
 category = "file-workspace-document-lifecycle"
 visibility = "public"
 status = "runtime-backed"
@@ -744,7 +744,7 @@ current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/
 registry_public = true
 
 [[api]]
-id = "clay.documents.serverSaveDocument"
+id = "documents.serverSaveDocument"
 category = "file-workspace-document-lifecycle"
 visibility = "public"
 status = "runtime-backed"
@@ -767,7 +767,7 @@ current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/
 registry_public = true
 
 [[api]]
-id = "clay.documents.serverReloadDocument"
+id = "documents.serverReloadDocument"
 category = "file-workspace-document-lifecycle"
 visibility = "public"
 status = "runtime-backed"
@@ -790,7 +790,7 @@ current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/
 registry_public = true
 
 [[api]]
-id = "clay.documents.serverGetDocumentStatus"
+id = "documents.serverGetDocumentStatus"
 category = "file-workspace-document-metadata"
 visibility = "public"
 status = "runtime-backed"
@@ -813,7 +813,7 @@ current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/
 registry_public = true
 
 [[api]]
-id = "clay.documents.serverListDocuments"
+id = "documents.serverListDocuments"
 category = "file-workspace-document-metadata"
 visibility = "public"
 status = "runtime-backed"
@@ -836,7 +836,7 @@ current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/
 registry_public = true
 
 [[api]]
-id = "clay.workspace.serverListWorkspaceRoots"
+id = "workspace.serverListWorkspaceRoots"
 category = "file-workspace-root-metadata"
 visibility = "public"
 status = "runtime-backed"
@@ -859,7 +859,7 @@ current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/
 registry_public = true
 
 [[api]]
-id = "clay.sdui.definePanel"
+id = "sdui.definePanel"
 category = "sdui-panel"
 visibility = "public"
 status = "runtime-backed"
@@ -882,7 +882,7 @@ current_rust_owner = "src/protocol/sdui.rs::SduiNodeKind; src/server/sdui.rs::de
 registry_public = true
 
 [[api]]
-id = "clay.sdui.defineLabel"
+id = "sdui.defineLabel"
 category = "sdui-label"
 visibility = "public"
 status = "runtime-backed"
@@ -905,7 +905,7 @@ current_rust_owner = "src/protocol/sdui.rs::SduiNodeKind; src/server/sdui.rs::de
 registry_public = true
 
 [[api]]
-id = "clay.sdui.defineButton"
+id = "sdui.defineButton"
 category = "sdui-button-action-intent"
 visibility = "public"
 status = "runtime-backed"
@@ -928,7 +928,7 @@ current_rust_owner = "src/protocol/sdui.rs::SduiActionIntent; src/server/sdui.rs
 registry_public = true
 
 [[api]]
-id = "clay.sdui.defineList"
+id = "sdui.defineList"
 category = "sdui-list"
 visibility = "public"
 status = "runtime-backed"
@@ -951,7 +951,7 @@ current_rust_owner = "src/protocol/sdui.rs::SduiListItem; src/server/sdui.rs::de
 registry_public = true
 
 [[api]]
-id = "clay.sdui.defineEditorView"
+id = "sdui.defineEditorView"
 category = "sdui-editor-view"
 visibility = "public"
 status = "runtime-backed"
@@ -974,7 +974,7 @@ current_rust_owner = "src/protocol/sdui.rs::SduiEditorBinding; src/server/sdui.r
 registry_public = true
 
 [[api]]
-id = "clay.sdui.defineFlex"
+id = "sdui.defineFlex"
 category = "sdui-layout"
 visibility = "public"
 status = "runtime-backed"
@@ -997,7 +997,7 @@ current_rust_owner = "src/protocol/sdui.rs::SduiFlexDirection; src/masonry_sdui.
 registry_public = true
 
 [[api]]
-id = "clay.sdui.defineStack"
+id = "sdui.defineStack"
 category = "sdui-layout"
 visibility = "public"
 status = "runtime-backed"
@@ -1020,7 +1020,7 @@ current_rust_owner = "src/protocol/sdui.rs::SduiNodeKind; src/masonry_sdui.rs::S
 registry_public = true
 
 [[api]]
-id = "clay.sdui.publishTree"
+id = "sdui.publishTree"
 category = "sdui-publication"
 visibility = "public"
 status = "runtime-backed"
@@ -1140,7 +1140,7 @@ registry_public = false
 # parse, and folding provider APIs remain planned/unavailable stubs.
 
 [[api]]
-id = "clay.packages.serverValidatePackageManifest"
+id = "packages.serverValidatePackageManifest"
 category = "package-manifest-validation"
 visibility = "public"
 status = "runtime-backed"
@@ -1163,7 +1163,7 @@ current_rust_owner = "src/packages/manifest.rs::ClayPackageManifest; src/package
 registry_public = true
 
 [[api]]
-id = "clay.packages.serverValidatePackagePermissions"
+id = "packages.serverValidatePackagePermissions"
 category = "package-permission-validation"
 visibility = "public"
 status = "runtime-backed"
@@ -1186,7 +1186,7 @@ current_rust_owner = "src/packages/permissions.rs::PackagePermission; src/packag
 registry_public = true
 
 [[api]]
-id = "clay.packages.serverLoadPackage"
+id = "packages.serverLoadPackage"
 category = "package-loading"
 visibility = "public"
 status = "runtime-backed"
@@ -1209,7 +1209,7 @@ current_rust_owner = "src/packages/record.rs::PackageRecord; src/packages/record
 registry_public = true
 
 [[api]]
-id = "clay.modes.serverRegisterModePattern"
+id = "modes.serverRegisterModePattern"
 category = "mode-document-classification"
 visibility = "public"
 status = "runtime-backed"
@@ -1232,7 +1232,7 @@ current_rust_owner = "src/packages/modes.rs::ModeRegistry; src/packages/modes.rs
 registry_public = true
 
 [[api]]
-id = "clay.modes.serverClassifyDocument"
+id = "modes.serverClassifyDocument"
 category = "mode-document-classification-query"
 visibility = "public"
 status = "runtime-backed"
@@ -1255,7 +1255,7 @@ current_rust_owner = "src/packages/modes.rs::ModeRegistry; src/packages/modes.rs
 registry_public = true
 
 [[api]]
-id = "clay.modes.serverActivateMajorMode"
+id = "modes.serverActivateMajorMode"
 category = "mode-activation"
 visibility = "public"
 status = "runtime-backed"
@@ -1278,7 +1278,7 @@ current_rust_owner = "src/packages/modes.rs::ModeRegistry; src/packages/modes.rs
 registry_public = true
 
 [[api]]
-id = "clay.modes.serverSelectDocumentManifest"
+id = "modes.serverSelectDocumentManifest"
 category = "per-document-behavior-manifest-selection"
 visibility = "public"
 status = "planned"
@@ -1301,7 +1301,7 @@ current_rust_owner = "src/packages/modes.rs::ModeRegistry::select_behavior_manif
 registry_public = false
 
 [[api]]
-id = "clay.commands.serverRegisterCommand"
+id = "commands.serverRegisterCommand"
 category = "command-registry"
 visibility = "public"
 status = "runtime-backed"
@@ -1324,7 +1324,7 @@ current_rust_owner = "src/packages/commands.rs::CommandRegistry; src/packages/co
 registry_public = true
 
 [[api]]
-id = "clay.commands.serverListCommands"
+id = "commands.serverListCommands"
 category = "command-registry-query"
 visibility = "public"
 status = "runtime-backed"
@@ -1347,7 +1347,7 @@ current_rust_owner = "src/packages/commands.rs::CommandRegistry; src/packages/co
 registry_public = true
 
 [[api]]
-id = "clay.decorations.serverPublishDecorations"
+id = "decorations.serverPublishDecorations"
 category = "decoration-range-publication"
 visibility = "public"
 status = "runtime-backed"
@@ -1370,7 +1370,7 @@ current_rust_owner = "src/server/decorations.rs::validate_decoration_publication
 registry_public = true
 
 [[api]]
-id = "clay.diagnostics.serverPublishDiagnostics"
+id = "diagnostics.serverPublishDiagnostics"
 category = "range-diagnostic-publication"
 visibility = "public"
 status = "runtime-backed"
@@ -1393,7 +1393,7 @@ current_rust_owner = "src/server/diagnostics.rs::validate_diagnostic_publication
 registry_public = true
 
 [[api]]
-id = "clay.parse.serverRegisterParseHandler"
+id = "parse.serverRegisterParseHandler"
 category = "incremental-parse-handler"
 visibility = "public"
 status = "runtime-backed"
@@ -1416,7 +1416,7 @@ current_rust_owner = "src/server/parse_coordinator.rs::ParseCoordinator; src/ser
 registry_public = true
 
 [[api]]
-id = "clay.syntax.serverRegisterSyntaxGrammar"
+id = "syntax.serverRegisterSyntaxGrammar"
 category = "syntax-grammar-registration"
 visibility = "public"
 status = "runtime-backed"
@@ -1439,7 +1439,7 @@ current_rust_owner = "src/server/syntax.rs::SyntaxGrammarRegistry; src/server/op
 registry_public = true
 
 [[api]]
-id = "clay.syntax.setSyntaxEnginePreference"
+id = "syntax.setSyntaxEnginePreference"
 category = "syntax-engine-configuration"
 visibility = "public"
 status = "runtime-backed"
@@ -1462,7 +1462,7 @@ current_rust_owner = "src/server/syntax.rs::SyntaxGrammarRegistry; src/server/op
 registry_public = true
 
 [[api]]
-id = "clay.completion.serverRegisterCompletionProvider"
+id = "completion.serverRegisterCompletionProvider"
 category = "completion-provider-registration"
 visibility = "public"
 status = "runtime-backed"
@@ -1485,7 +1485,7 @@ current_rust_owner = "src/server/ops/completion.rs; src/server/completion.rs::Co
 registry_public = true
 
 [[api]]
-id = "clay.completion.serverDisableCompletion"
+id = "completion.serverDisableCompletion"
 category = "completion-provider-configuration"
 visibility = "public"
 status = "runtime-backed"
@@ -1508,7 +1508,7 @@ current_rust_owner = "src/server/ops/completion.rs::op_clay_completion_disable; 
 registry_public = true
 
 [[api]]
-id = "clay.completion.serverListCompletionProvidersForTrigger"
+id = "completion.serverListCompletionProvidersForTrigger"
 category = "completion-provider-query"
 visibility = "public"
 status = "runtime-backed"
@@ -1531,7 +1531,7 @@ current_rust_owner = "src/server/ops/completion.rs; src/server/completion.rs::Co
 registry_public = true
 
 [[api]]
-id = "clay.completion.completionTriggerCharactersFromEditorRules"
+id = "completion.completionTriggerCharactersFromEditorRules"
 category = "completion-helper"
 visibility = "public"
 status = "runtime-backed"
@@ -1554,7 +1554,7 @@ current_rust_owner = "runtime/js/completion.js"
 registry_public = true
 
 [[api]]
-id = "clay.folding.serverPublishFoldingRanges"
+id = "folding.serverPublishFoldingRanges"
 category = "folding-range-publication"
 visibility = "public"
 status = "planned"
@@ -1581,7 +1581,7 @@ registry_public = false
 # `~/.config/clay/init.js`. package enable/disable is package loading authority; no configuration API is added for it in this phase.
 # future enable/disable API requires an approved decision log, explicit permission model, and server validation before it can exist.
 [[api]]
-id = "clay.configuration.setPackageOption"
+id = "configuration.setPackageOption"
 # Phase 16/17 historical planned-stub trace retained for documentation tests: status = "planned"; registry_public = false; op_clay_runtime_unavailable.
 category = "package-configuration"
 visibility = "public"
@@ -1605,7 +1605,7 @@ current_rust_owner = "src/server/configuration.rs::ConfigurationRuntime"
 registry_public = true
 
 [[api]]
-id = "clay.configuration.setModePreference"
+id = "configuration.setModePreference"
 category = "mode-configuration"
 visibility = "public"
 status = "planned"
@@ -1628,7 +1628,7 @@ current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime
 registry_public = false
 
 [[api]]
-id = "clay.configuration.setDecorationTheme"
+id = "configuration.setDecorationTheme"
 category = "decoration-configuration"
 visibility = "public"
 status = "planned"
@@ -1651,7 +1651,7 @@ current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime
 registry_public = false
 
 [[api]]
-id = "clay.configuration.setParsePolicy"
+id = "configuration.setParsePolicy"
 category = "parse-configuration"
 visibility = "public"
 status = "planned"
@@ -1684,7 +1684,7 @@ registry_public = false
 # WorkingAreaLayout, PaneSplitTree, PaneSlotLayout, PackageUiStateScope, and
 # PackageLayoutOverride remain planned/unavailable inventory stubs.
 [[api]]
-id = "clay.ui.serverRegisterWorkingAreaLayout"
+id = "ui.serverRegisterWorkingAreaLayout"
 category = "shell-working-area-layout"
 visibility = "public"
 status = "planned"
@@ -1707,8 +1707,8 @@ current_rust_owner = "planned: src/shell/layout.rs::WorkingAreaLayout (internal 
 registry_public = false
 
 [[api]]
-id = "clay.ui.serverRegisterPaneSplitTree"
-# Superseded by clay.ui.serverRequestLayoutIntent (Phase 20.3). Direct split-tree mutation replaced by inert versioned layout intent model. Remains planned/unavailable.
+id = "ui.serverRegisterPaneSplitTree"
+# Superseded by ui.serverRequestLayoutIntent (Phase 20.3). Direct split-tree mutation replaced by inert versioned layout intent model. Remains planned/unavailable.
 category = "shell-pane-split-tree"
 visibility = "public"
 status = "planned"
@@ -1731,7 +1731,7 @@ current_rust_owner = "planned: src/shell/layout.rs::PaneSplitTree (internal runt
 registry_public = false
 
 [[api]]
-id = "clay.ui.serverSetPaneSlotLayout"
+id = "ui.serverSetPaneSlotLayout"
 category = "shell-pane-slot-layout"
 visibility = "public"
 status = "planned"
@@ -1754,7 +1754,7 @@ current_rust_owner = "planned: src/shell/layout.rs::PaneSlotLayout (internal run
 registry_public = false
 
 [[api]]
-id = "clay.ui.serverRegisterPanelContribution"
+id = "ui.serverRegisterPanelContribution"
 category = "package-panel-contribution"
 visibility = "public"
 status = "runtime-backed"
@@ -1777,7 +1777,7 @@ current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs;
 registry_public = true
 
 [[api]]
-id = "clay.ui.serverRegisterComponentContribution"
+id = "ui.serverRegisterComponentContribution"
 category = "package-component-contribution"
 visibility = "public"
 status = "runtime-backed"
@@ -1800,7 +1800,7 @@ current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs;
 registry_public = true
 
 [[api]]
-id = "clay.ui.serverRegisterTransientOverlayContribution"
+id = "ui.serverRegisterTransientOverlayContribution"
 category = "package-transient-overlay-contribution"
 visibility = "public"
 status = "runtime-backed"
@@ -1823,7 +1823,7 @@ current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs;
 registry_public = true
 
 [[api]]
-id = "clay.ui.serverRegisterInputContribution"
+id = "ui.serverRegisterInputContribution"
 category = "package-input-contribution"
 visibility = "public"
 status = "runtime-backed"
@@ -1846,7 +1846,7 @@ current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs;
 registry_public = true
 
 [[api]]
-id = "clay.ui.serverRegisterThemeToken"
+id = "ui.serverRegisterThemeToken"
 category = "package-theme-token-declaration"
 visibility = "public"
 status = "runtime-backed"
@@ -1869,7 +1869,7 @@ current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs;
 registry_public = true
 
 [[api]]
-id = "clay.ui.serverRegisterUiStateScope"
+id = "ui.serverRegisterUiStateScope"
 category = "package-ui-state-scope"
 visibility = "public"
 status = "runtime-backed"
@@ -1892,7 +1892,7 @@ current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs;
 registry_public = true
 
 [[api]]
-id = "clay.ui.serverSetLayoutOverride"
+id = "ui.serverSetLayoutOverride"
 # Historical planned-stub trace retained after Phase 18.4 promotion: status = "planned"; registry_public = false; op_clay_runtime_unavailable; documentation_path = "docs/reference/primitives/shell-layout-strategy.md"; planned; client-side JavaScript; raw Deno ops; direct Masonry widgets; native widget handles; raw CSS.
 category = "package-layout-override-configuration"
 visibility = "public"
@@ -1916,7 +1916,7 @@ current_rust_owner = "src/server/ui.rs::PackageUiRegistry::set_layout_override; 
 registry_public = true
 
 [[api]]
-id = "clay.ui.serverRequestLayoutIntent"
+id = "ui.serverRequestLayoutIntent"
 category = "package-layout-intent"
 visibility = "public"
 status = "runtime-backed"
@@ -1939,7 +1939,7 @@ current_rust_owner = "src/server/ui.rs::PackageUiRegistry::request_layout_intent
 registry_public = true
 
 [[api]]
-id = "clay.documents.clientOpenFileDialog"
+id = "documents.clientOpenFileDialog"
 category = "client-open-file-dialog"
 visibility = "public"
 status = "runtime-backed-command"
@@ -1962,7 +1962,7 @@ current_rust_owner = "src/client/file_dialog.rs; src/main.rs::handle_client_ui_c
 registry_public = true
 
 [[api]]
-id = "clay.packages.loadPackage"
+id = "packages.loadPackage"
 category = "package-loading"
 visibility = "public"
 status = "runtime-backed"
@@ -1985,7 +1985,7 @@ current_rust_owner = "src/server/ops/packages.rs::op_clay_packages_load_package_
 registry_public = true
 
 [[api]]
-id = "clay.packages.authorize"
+id = "packages.authorize"
 category = "package-loading"
 visibility = "public"
 status = "planned"
@@ -2008,7 +2008,7 @@ current_rust_owner = "planned: src/packages/authorization.rs; src/packages/servi
 registry_public = false
 
 [[api]]
-id = "clay.packages.setConflictOverride"
+id = "packages.setConflictOverride"
 category = "package-loading"
 visibility = "public"
 status = "planned"
@@ -2031,7 +2031,7 @@ current_rust_owner = "planned: src/packages/conflict.rs; src/packages/service.rs
 registry_public = false
 
 [[api]]
-id = "clay.packages.install"
+id = "packages.install"
 category = "package-loading"
 visibility = "public"
 status = "planned"
@@ -2054,7 +2054,7 @@ current_rust_owner = "planned: src/packages/service.rs"
 registry_public = false
 
 [[api]]
-id = "clay.packages.enable"
+id = "packages.enable"
 category = "package-loading"
 visibility = "public"
 status = "planned"
@@ -2077,7 +2077,7 @@ current_rust_owner = "planned: src/packages/service.rs"
 registry_public = false
 
 [[api]]
-id = "clay.packages.disable"
+id = "packages.disable"
 category = "package-loading"
 visibility = "public"
 status = "planned"
@@ -2100,7 +2100,7 @@ current_rust_owner = "planned: src/packages/service.rs"
 registry_public = false
 
 [[api]]
-id = "clay.packages.inspect"
+id = "packages.inspect"
 category = "package-loading"
 visibility = "public"
 status = "planned"
@@ -2123,7 +2123,7 @@ current_rust_owner = "planned: src/packages/service.rs"
 registry_public = false
 
 [[api]]
-id = "clay.packages.list"
+id = "packages.list"
 category = "package-loading"
 visibility = "public"
 status = "planned"
@@ -2146,7 +2146,7 @@ current_rust_owner = "planned: src/packages/service.rs"
 registry_public = false
 
 [[api]]
-id = "clay.workspace.serverAddWorkspaceRoot"
+id = "workspace.serverAddWorkspaceRoot"
 category = "workspace-root-discovery"
 visibility = "public"
 status = "runtime-backed"
@@ -2169,7 +2169,7 @@ current_rust_owner = "src/server/workspace.rs::WorkspaceState"
 registry_public = true
 
 [[api]]
-id = "clay.workspace.serverDiscoverWorkspaceRootForPath"
+id = "workspace.serverDiscoverWorkspaceRootForPath"
 category = "workspace-root-discovery"
 visibility = "public"
 status = "runtime-backed"
@@ -2192,7 +2192,7 @@ current_rust_owner = "src/server/workspace.rs::WorkspaceState"
 registry_public = true
 
 [[api]]
-id = "clay.workspace.serverListDirectory"
+id = "workspace.serverListDirectory"
 category = "workspace-directory-listing"
 visibility = "public"
 status = "runtime-backed"
@@ -2215,7 +2215,7 @@ current_rust_owner = "src/server/workspace.rs::WorkspaceState"
 registry_public = true
 
 [[api]]
-id = "clay.workspace.serverCreateListingCancelToken"
+id = "workspace.serverCreateListingCancelToken"
 category = "workspace-directory-listing"
 visibility = "public"
 status = "runtime-backed"
@@ -2238,7 +2238,7 @@ current_rust_owner = "src/server/workspace.rs::create_listing_cancel_token"
 registry_public = true
 
 [[api]]
-id = "clay.workspace.serverCancelListing"
+id = "workspace.serverCancelListing"
 category = "workspace-directory-listing"
 visibility = "public"
 status = "runtime-backed"
@@ -2261,7 +2261,7 @@ current_rust_owner = "src/server/workspace.rs::cancel_listing"
 registry_public = true
 
 [[api]]
-id = "clay.commands.serverExecuteCommand"
+id = "commands.serverExecuteCommand"
 category = "command-execution"
 visibility = "public"
 status = "runtime-backed"
@@ -2284,7 +2284,7 @@ current_rust_owner = "src/server/command_execution.rs::CommandExecutor"
 registry_public = true
 
 [[api]]
-id = "clay.commands.serverOpenFile"
+id = "commands.serverOpenFile"
 category = "command-execution"
 visibility = "public"
 status = "runtime-backed"
@@ -2302,12 +2302,12 @@ documentation_path = "docs/reference/clay-js-api/commands/server-open-file.md"
 key_bindings = []
 custom_properties = []
 permissions = ["workspace-read"]
-security_notes = "Routes through clay.workspace.openFile and server workspace APIs; in-root paths are root-relative and out-of-root paths use selected-file single-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+security_notes = "Routes through workspace.openFile and server workspace APIs; in-root paths are root-relative and out-of-root paths use selected-file single-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
 current_rust_owner = "src/server/command_execution.rs::CommandExecutor"
 registry_public = true
 
 [[api]]
-id = "clay.commands.serverRevealInTree"
+id = "commands.serverRevealInTree"
 category = "command-execution"
 visibility = "public"
 status = "runtime-backed"
@@ -2330,7 +2330,7 @@ current_rust_owner = "src/server/command_execution.rs::CommandExecutor"
 registry_public = true
 
 [[api]]
-id = "clay.git.serverListGitStatuses"
+id = "git.serverListGitStatuses"
 category = "git-discovery"
 visibility = "public"
 status = "runtime-backed"
@@ -2353,7 +2353,7 @@ current_rust_owner = "src/server/git.rs::GitStatusCache; src/server/ops/git.rs::
 registry_public = true
 
 [[api]]
-id = "clay.git.serverRefreshGitStatus"
+id = "git.serverRefreshGitStatus"
 category = "git-discovery"
 visibility = "public"
 status = "runtime-backed"
@@ -2376,7 +2376,7 @@ current_rust_owner = "src/server/git.rs::GitStatusCache; src/server/ops/git.rs::
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientCopySelection"
+id = "editor.clientCopySelection"
 category = "clipboard"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2399,7 +2399,7 @@ current_rust_owner = "src/masonry_editor.rs::EditorWidget::copy_selection_to_sys
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientCutSelection"
+id = "editor.clientCutSelection"
 category = "clipboard"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2422,7 +2422,7 @@ current_rust_owner = "src/masonry_editor.rs::EditorWidget::cut_selection_to_syst
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientPasteClipboard"
+id = "editor.clientPasteClipboard"
 category = "clipboard"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2445,7 +2445,7 @@ current_rust_owner = "src/masonry_editor.rs::EditorWidget::paste_from_system_cli
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientUndo"
+id = "editor.clientUndo"
 category = "history"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2468,7 +2468,7 @@ current_rust_owner = "src/masonry_editor.rs::EditorWidget::undo"
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientRedo"
+id = "editor.clientRedo"
 category = "history"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2492,7 +2492,7 @@ registry_public = true
 
 
 [[api]]
-id = "clay.editor.clientShowOpenDocuments"
+id = "editor.clientShowOpenDocuments"
 category = "editor"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2515,7 +2515,7 @@ current_rust_owner = "src/masonry_pane_document.rs::PaneDocumentView::show_open_
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientRequestResync"
+id = "editor.clientRequestResync"
 category = "editor"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2538,7 +2538,7 @@ current_rust_owner = "src/masonry_editor.rs::EditorWidget::request_resync_active
 registry_public = true
 
 [[api]]
-id = "clay.editor.clientDismissRecovery"
+id = "editor.clientDismissRecovery"
 category = "editor"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2561,7 +2561,7 @@ current_rust_owner = "src/masonry_editor.rs::EditorWidget::dismiss_recovery"
 registry_public = true
 
 [[api]]
-id = "clay.workspace.clientOpenFolderDialog"
+id = "workspace.clientOpenFolderDialog"
 category = "workspace-dialog"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2584,7 +2584,7 @@ current_rust_owner = "src/client/file_dialog.rs::open_folder_dialog"
 registry_public = true
 
 [[api]]
-id = "clay.commands.serverOpenDirectory"
+id = "commands.serverOpenDirectory"
 category = "workspace-navigation"
 visibility = "public"
 status = "runtime-backed"
@@ -2602,12 +2602,12 @@ documentation_path = "docs/reference/clay-js-api/commands/server-open-directory.
 key_bindings = []
 custom_properties = []
 permissions = ["workspace-read"]
-security_notes = "Routes through clay.workspace.openDirectory and server workspace APIs; directory paths are root-relative and validated inside a known workspace root, and this API does not grant filesystem/workspace authority beyond that root, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard authority, or client-side JavaScript authority."
+security_notes = "Routes through workspace.openDirectory and server workspace APIs; directory paths are root-relative and validated inside a known workspace root, and this API does not grant filesystem/workspace authority beyond that root, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard authority, or client-side JavaScript authority."
 current_rust_owner = "src/server/command_execution.rs::CommandExecutor::execute_workspace"
 registry_public = true
 
 [[api]]
-id = "clay.theme.setTheme"
+id = "theme.setTheme"
 category = "theme"
 visibility = "public"
 status = "runtime-backed"
@@ -2630,7 +2630,7 @@ current_rust_owner = "src/server/ops/theme.rs::op_clay_theme_set_theme"
 registry_public = true
 
 [[api]]
-id = "clay.theme.setAppearance"
+id = "theme.setAppearance"
 category = "theme"
 visibility = "public"
 status = "runtime-backed"
@@ -2653,7 +2653,7 @@ current_rust_owner = "src/server/ops/theme.rs::op_clay_theme_set_appearance"
 registry_public = true
 
 [[api]]
-id = "clay.theme.setTypography"
+id = "theme.setTypography"
 category = "typography"
 visibility = "public"
 status = "runtime-backed"
@@ -2676,7 +2676,7 @@ current_rust_owner = "src/server/ops/typography.rs::op_clay_theme_set_typography
 registry_public = true
 
 [[api]]
-id = "clay.language.serverRegisterLanguageIntelligenceProvider"
+id = "language.serverRegisterLanguageIntelligenceProvider"
 category = "language-intelligence"
 visibility = "public"
 status = "runtime-backed"
@@ -2699,7 +2699,7 @@ current_rust_owner = "src/server/ops/language_intelligence.rs::op_clay_language_
 registry_public = true
 
 [[api]]
-id = "clay.language.serverRegisterDocumentAnalyzer"
+id = "language.serverRegisterDocumentAnalyzer"
 category = "document-analysis"
 visibility = "public"
 status = "runtime-backed"
@@ -2722,7 +2722,7 @@ current_rust_owner = "src/server/ops/document_analysis.rs::op_clay_language_regi
 registry_public = true
 
 [[api]]
-id = "clay.language-server.authorizeLanguageServer"
+id = "language-server.authorizeLanguageServer"
 category = "language-server"
 visibility = "public"
 status = "runtime-backed"
@@ -2745,7 +2745,7 @@ current_rust_owner = "src/server/ops/language_server.rs::op_clay_language_server
 registry_public = true
 
 [[api]]
-id = "clay.language-server.startLanguageServerSession"
+id = "language-server.startLanguageServerSession"
 category = "language-server"
 visibility = "public"
 status = "runtime-backed"
@@ -2770,7 +2770,7 @@ registry_public = true
 # Phase 22.1: Clay shell pane management command IDs (client-ui-command, bindable via bindKey).
 
 [[api]]
-id = "clay.shell.clientSplitPaneVertical"
+id = "shell.clientSplitPaneVertical"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2793,7 +2793,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientSplitPaneRight"
+id = "shell.clientSplitPaneRight"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2816,7 +2816,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientSplitPaneDown"
+id = "shell.clientSplitPaneDown"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2839,7 +2839,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientSplitPaneHorizontal"
+id = "shell.clientSplitPaneHorizontal"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2862,7 +2862,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientAddEqualPane"
+id = "shell.clientAddEqualPane"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2885,7 +2885,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientClosePane"
+id = "shell.clientClosePane"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2908,7 +2908,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientFocusPaneNext"
+id = "shell.clientFocusPaneNext"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2931,7 +2931,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientFocusPanePrev"
+id = "shell.clientFocusPanePrev"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2954,7 +2954,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientResizePaneLeft"
+id = "shell.clientResizePaneLeft"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -2977,7 +2977,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientResizePaneRight"
+id = "shell.clientResizePaneRight"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3000,7 +3000,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientResizePaneUp"
+id = "shell.clientResizePaneUp"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3023,7 +3023,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientResizePaneDown"
+id = "shell.clientResizePaneDown"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3046,7 +3046,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientMovePaneNext"
+id = "shell.clientMovePaneNext"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3069,7 +3069,7 @@ current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_
 registry_public = true
 
 [[api]]
-id = "clay.shell.clientMovePanePrev"
+id = "shell.clientMovePanePrev"
 category = "shell-pane-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3094,7 +3094,7 @@ registry_public = true
 # Phase 22.1: Clay shell pane-focus policy configuration API.
 
 [[api]]
-id = "clay.shell.setPaneFocusPolicy"
+id = "shell.setPaneFocusPolicy"
 category = "shell-configuration"
 visibility = "public"
 status = "runtime-backed"
@@ -3119,7 +3119,7 @@ registry_public = true
 # Phase 22.4: Clay shell tab-management command facade (Next Tab).
 
 [[api]]
-id = "clay.shell.clientTabNext"
+id = "shell.clientTabNext"
 category = "shell-tab-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3144,7 +3144,7 @@ registry_public = true
 # Phase 22.4: Clay shell tab-management command facade (Previous Tab).
 
 [[api]]
-id = "clay.shell.clientTabPrev"
+id = "shell.clientTabPrev"
 category = "shell-tab-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3169,7 +3169,7 @@ registry_public = true
 # Phase 22.4: Clay shell tab-management command facade (New Tab).
 
 [[api]]
-id = "clay.shell.clientTabNew"
+id = "shell.clientTabNew"
 category = "shell-tab-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3194,7 +3194,7 @@ registry_public = true
 # Phase 22.4: Clay shell tab-management command facade (Close Tab).
 
 [[api]]
-id = "clay.shell.clientTabClose"
+id = "shell.clientTabClose"
 category = "shell-tab-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3219,7 +3219,7 @@ registry_public = true
 # Phase 22.4: Clay shell tab-management command facade (Move Tab Left).
 
 [[api]]
-id = "clay.shell.clientTabMoveLeft"
+id = "shell.clientTabMoveLeft"
 category = "shell-tab-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3244,7 +3244,7 @@ registry_public = true
 # Phase 22.4: Clay shell tab-management command facade (Move Tab Right).
 
 [[api]]
-id = "clay.shell.clientTabMoveRight"
+id = "shell.clientTabMoveRight"
 category = "shell-tab-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3269,7 +3269,7 @@ registry_public = true
 # Phase 22.4: Clay shell tab-management command facade (Activate Tab).
 
 [[api]]
-id = "clay.shell.clientTabActivate"
+id = "shell.clientTabActivate"
 category = "shell-tab-management"
 visibility = "public"
 status = "runtime-backed-command"
@@ -3294,7 +3294,7 @@ registry_public = true
 # Phase 22.4: Clay shell tab-management command facade (Move Tab to Position).
 
 [[api]]
-id = "clay.shell.clientTabMoveTo"
+id = "shell.clientTabMoveTo"
 category = "shell-tab-management"
 visibility = "public"
 status = "runtime-backed-command"

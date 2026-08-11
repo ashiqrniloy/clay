@@ -1,5 +1,5 @@
 ---
-id: clay.git.serverListGitStatuses
+id: git.serverListGitStatuses
 kind: clay-js-api
 js_module: "clay:git"
 js_export: serverListGitStatuses
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Reads the server-owned Git status cache for authorized workspace roots only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.git.serverListGitStatuses` only through the documented `clay:git` facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not spawn Git, invent shell arguments, mutate repositories, or bypass workspace roots.
+agent_guidance: Use `git.serverListGitStatuses` only through the documented `clay:git` facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not spawn Git, invent shell arguments, mutate repositories, or bypass workspace roots.
 lookup_tags: [git, status, branch, workspace, phase18.13, js-api]
 app_visible: true
 help_visible: true
@@ -65,7 +65,7 @@ No options. The API lists cached status for every known workspace root.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.git.serverListGitStatuses` through documented keybinding/configuration APIs where appropriate.
+No default key binding is assigned. Users may bind a key to `git.serverListGitStatuses` through documented keybinding/configuration APIs where appropriate.
 
 ## Custom properties
 
@@ -89,7 +89,7 @@ Reads the server-owned Git status cache for authorized workspace roots only; doe
 
 ## Agent guidance
 
-Use `clay.git.serverListGitStatuses` only through the documented `clay:git` facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not spawn Git, invent shell arguments, mutate repositories, or bypass workspace roots.
+Use `git.serverListGitStatuses` only through the documented `clay:git` facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not spawn Git, invent shell arguments, mutate repositories, or bypass workspace roots.
 
 ## Backing implementation
 
@@ -99,7 +99,7 @@ Use `clay.git.serverListGitStatuses` only through the documented `clay:git` faca
 
 ## Lookup metadata
 
-- Stable ID: `clay.git.serverListGitStatuses`
+- Stable ID: `git.serverListGitStatuses`
 - User-facing name: List Git Statuses
 - Kind: `clay-js-api`
 - Module/export: `clay:git` / `serverListGitStatuses`

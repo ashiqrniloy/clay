@@ -93,13 +93,13 @@ impl Driver {
             return;
         };
         let (generation, is_file) = match command.command_id.as_str() {
-            "clay.documents.clientOpenFileDialog" => {
+            "documents.clientOpenFileDialog" => {
                 let Some(generation) = self.reserve_file_dialog() else {
                     return;
                 };
                 (generation, true)
             }
-            "clay.workspace.clientOpenFolderDialog" => {
+            "workspace.clientOpenFolderDialog" => {
                 let Some(generation) = self.reserve_folder_dialog() else {
                     return;
                 };
@@ -639,7 +639,7 @@ fn is_linux_portal_dialog_command(command_id: &str) -> bool {
     cfg!(target_os = "linux")
         && matches!(
             command_id,
-            "clay.documents.clientOpenFileDialog" | "clay.workspace.clientOpenFolderDialog"
+            "documents.clientOpenFileDialog" | "workspace.clientOpenFolderDialog"
         )
 }
 
@@ -1041,7 +1041,7 @@ impl AppDriver for Driver {
                     window_id,
                     self.editor_widget_id,
                     ClientConnectionEvent::RuntimeDiagnostic(
-                        clay::protocol::RuntimeDiagnostic::error("clay.tabs.open_failed", message),
+                        clay::protocol::RuntimeDiagnostic::error("tabs.open_failed", message),
                     ),
                 );
             }
@@ -1133,16 +1133,16 @@ impl AppDriver for Driver {
                 // session is driver-owned; the pane view handed the selection
                 // here (tab-confirm actions never reach the server).
                 match command_id.as_str() {
-                    "clay.shell.clientTabCloseSaveAll" => {
+                    "shell.clientTabCloseSaveAll" => {
                         self.save_all_then_close_tab(ctx, window_id, client_id);
                     }
-                    "clay.shell.clientTabCloseDiscard" => {
+                    "shell.clientTabCloseDiscard" => {
                         // Explicit destructive choice: drop the unsaved edits
                         // and close. The server's disconnect teardown releases
                         // the tab's documents.
                         self.enqueue_close(client_id);
                     }
-                    "clay.shell.clientTabCloseCancel" => {
+                    "shell.clientTabCloseCancel" => {
                         self.show_tab_close_confirm_menu(ctx, window_id, client_id, None);
                     }
                     _ => {}
@@ -1563,22 +1563,22 @@ enum ClientUiCommandResult {
 
 fn handle_client_ui_command(command: &clay::client::ClientUiCommandRoute) -> ClientUiCommandResult {
     match command.command_id.as_str() {
-        "clay.documents.clientOpenFileDialog" => client_dialog_result_to_command_result(
+        "documents.clientOpenFileDialog" => client_dialog_result_to_command_result(
             clay::client::open_markdown_file_dialog(),
             SelectedPathKind::File,
         ),
-        "clay.workspace.clientOpenFolderDialog" => client_dialog_result_to_command_result(
+        "workspace.clientOpenFolderDialog" => client_dialog_result_to_command_result(
             clay::client::open_folder_dialog(),
             SelectedPathKind::Folder,
         ),
-        "clay.editor.clientCopySelection" => ClientUiCommandResult::CopySelection,
-        "clay.editor.clientCutSelection" => ClientUiCommandResult::CutSelection,
-        "clay.editor.clientPasteClipboard" => ClientUiCommandResult::PasteClipboard,
-        "clay.editor.clientUndo" => ClientUiCommandResult::Undo,
-        "clay.editor.clientRedo" => ClientUiCommandResult::Redo,
-        "clay.editor.clientShowOpenDocuments" => ClientUiCommandResult::ShowOpenDocuments,
-        "clay.editor.clientRequestResync" => ClientUiCommandResult::RequestResync,
-        "clay.editor.clientDismissRecovery" => ClientUiCommandResult::DismissRecovery,
+        "editor.clientCopySelection" => ClientUiCommandResult::CopySelection,
+        "editor.clientCutSelection" => ClientUiCommandResult::CutSelection,
+        "editor.clientPasteClipboard" => ClientUiCommandResult::PasteClipboard,
+        "editor.clientUndo" => ClientUiCommandResult::Undo,
+        "editor.clientRedo" => ClientUiCommandResult::Redo,
+        "editor.clientShowOpenDocuments" => ClientUiCommandResult::ShowOpenDocuments,
+        "editor.clientRequestResync" => ClientUiCommandResult::RequestResync,
+        "editor.clientDismissRecovery" => ClientUiCommandResult::DismissRecovery,
         command_id
             if let Some(command) =
                 clay::masonry_editor::EditorClientCommand::from_command_id(command_id) =>
@@ -1613,15 +1613,12 @@ fn client_dialog_result_to_command_result(
         clay::client::FileDialogResult::Cancelled => ClientUiCommandResult::None,
         clay::client::FileDialogResult::Unsupported { message } => {
             ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(
-                clay::protocol::RuntimeDiagnostic::error(
-                    "clay.client.file_dialog.unsupported",
-                    message,
-                ),
+                clay::protocol::RuntimeDiagnostic::error("client.file_dialog.unsupported", message),
             ))
         }
         clay::client::FileDialogResult::Failed { message } => {
             ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(
-                clay::protocol::RuntimeDiagnostic::error("clay.client.file_dialog.failed", message),
+                clay::protocol::RuntimeDiagnostic::error("client.file_dialog.failed", message),
             ))
         }
     }
@@ -3397,7 +3394,7 @@ mod tests {
         assert!(matches!(
             unsupported,
             ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
-                if diagnostic.code == "clay.client.file_dialog.unsupported"
+                if diagnostic.code == "client.file_dialog.unsupported"
                     && diagnostic.message == "Windows only"
         ));
 
@@ -3410,7 +3407,7 @@ mod tests {
         assert!(matches!(
             failed,
             ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
-                if diagnostic.code == "clay.client.file_dialog.failed"
+                if diagnostic.code == "client.file_dialog.failed"
                     && diagnostic.message == "dialog failed"
         ));
     }
@@ -3418,7 +3415,7 @@ mod tests {
     #[test]
     fn client_copy_selection_command_routes_to_editor_widget() {
         let result = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
-            command_id: "clay.editor.clientCopySelection".to_string(),
+            command_id: "editor.clientCopySelection".to_string(),
             routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
         });
 
@@ -3428,7 +3425,7 @@ mod tests {
     #[test]
     fn client_cut_selection_command_routes_to_editor_widget() {
         let result = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
-            command_id: "clay.editor.clientCutSelection".to_string(),
+            command_id: "editor.clientCutSelection".to_string(),
             routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
         });
 
@@ -3438,7 +3435,7 @@ mod tests {
     #[test]
     fn client_paste_clipboard_command_routes_to_editor_widget() {
         let result = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
-            command_id: "clay.editor.clientPasteClipboard".to_string(),
+            command_id: "editor.clientPasteClipboard".to_string(),
             routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
         });
 
@@ -3448,28 +3445,28 @@ mod tests {
     #[test]
     fn client_undo_and_redo_commands_route_to_editor_widget() {
         let undo = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
-            command_id: "clay.editor.clientUndo".to_string(),
+            command_id: "editor.clientUndo".to_string(),
             routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
         });
         assert!(matches!(undo, ClientUiCommandResult::Undo));
 
         let redo = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
-            command_id: "clay.editor.clientRedo".to_string(),
+            command_id: "editor.clientRedo".to_string(),
             routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
         });
         assert!(matches!(redo, ClientUiCommandResult::Redo));
         let show = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
-            command_id: "clay.editor.clientShowOpenDocuments".to_string(),
+            command_id: "editor.clientShowOpenDocuments".to_string(),
             routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
         });
         assert!(matches!(show, ClientUiCommandResult::ShowOpenDocuments));
         let resync = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
-            command_id: "clay.editor.clientRequestResync".to_string(),
+            command_id: "editor.clientRequestResync".to_string(),
             routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
         });
         assert!(matches!(resync, ClientUiCommandResult::RequestResync));
         let dismiss = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
-            command_id: "clay.editor.clientDismissRecovery".to_string(),
+            command_id: "editor.clientDismissRecovery".to_string(),
             routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
         });
         assert!(matches!(dismiss, ClientUiCommandResult::DismissRecovery));
@@ -3479,14 +3476,14 @@ mod tests {
     #[test]
     fn unsupported_platform_client_open_file_dialog_command_reports_status_diagnostic() {
         let result = handle_client_ui_command(&clay::client::ClientUiCommandRoute {
-            command_id: "clay.documents.clientOpenFileDialog".to_string(),
+            command_id: "documents.clientOpenFileDialog".to_string(),
             routing_policy: clay::protocol::RoutingPolicy::ClientUiCommand,
         });
 
         assert!(matches!(
             result,
             ClientUiCommandResult::ConnectionEvent(ClientConnectionEvent::RuntimeDiagnostic(diagnostic))
-                if diagnostic.code == "clay.client.file_dialog.unsupported"
+                if diagnostic.code == "client.file_dialog.unsupported"
                     && diagnostic.message.contains("not supported on this platform")
         ));
     }
@@ -3495,13 +3492,13 @@ mod tests {
     #[test]
     fn linux_native_dialog_commands_use_non_blocking_driver_path() {
         assert!(is_linux_portal_dialog_command(
-            "clay.documents.clientOpenFileDialog"
+            "documents.clientOpenFileDialog"
         ));
         assert!(is_linux_portal_dialog_command(
-            "clay.workspace.clientOpenFolderDialog"
+            "workspace.clientOpenFolderDialog"
         ));
         assert!(!is_linux_portal_dialog_command(
-            "clay.editor.clientCopySelection"
+            "editor.clientCopySelection"
         ));
     }
 
@@ -3590,35 +3587,35 @@ mod tests {
     fn tab_command_ids_route_to_shell_tab_variants() {
         for (id, expected) in [
             (
-                "clay.shell.clientTabNext",
+                "shell.clientTabNext",
                 clay::masonry_shell::ShellClientCommand::TabNext,
             ),
             (
-                "clay.shell.clientTabPrev",
+                "shell.clientTabPrev",
                 clay::masonry_shell::ShellClientCommand::TabPrev,
             ),
             (
-                "clay.shell.clientTabNew",
+                "shell.clientTabNew",
                 clay::masonry_shell::ShellClientCommand::TabNew,
             ),
             (
-                "clay.shell.clientTabClose",
+                "shell.clientTabClose",
                 clay::masonry_shell::ShellClientCommand::TabClose,
             ),
             (
-                "clay.shell.clientTabMoveLeft",
+                "shell.clientTabMoveLeft",
                 clay::masonry_shell::ShellClientCommand::TabMoveLeft,
             ),
             (
-                "clay.shell.clientTabMoveRight",
+                "shell.clientTabMoveRight",
                 clay::masonry_shell::ShellClientCommand::TabMoveRight,
             ),
             (
-                "clay.shell.clientTabActivate.3",
+                "shell.clientTabActivate.3",
                 clay::masonry_shell::ShellClientCommand::TabActivate(3),
             ),
             (
-                "clay.shell.clientTabMoveTo.9",
+                "shell.clientTabMoveTo.9",
                 clay::masonry_shell::ShellClientCommand::TabMoveTo(9),
             ),
         ] {

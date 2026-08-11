@@ -922,7 +922,7 @@ fn parse_failure_diagnostic(
         _ => "parse result rejected",
     };
     RuntimeDiagnostic::error(
-        "clay.parse.open_failed",
+        "parse.open_failed",
         format!(
             "Background parse for package '{}' mode '{}' on document {} failed: {}.",
             task_key.package_prefix, task_key.mode_id, task_key.document_id, reason

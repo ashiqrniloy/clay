@@ -50,7 +50,7 @@ Only an explicit analyzer package may publish `DiagnosticSet` data through the v
 
 ## Publication and Rendering
 
-- Package analyzers publish through [`clay.diagnostics.serverPublishDiagnostics`](../clay-js-api/diagnostics/server-publish-diagnostics.md) under existing `render-decorations`.
+- Package analyzers publish through [`diagnostics.serverPublishDiagnostics`](../clay-js-api/diagnostics/server-publish-diagnostics.md) under existing `render-decorations`.
 - Server validation lives in `src/server/diagnostics.rs`; transport is `ServerMessage::DiagnosticSet`.
 - Client `EditorDiagnosticState` retains near-viewport chunks under `DIAGNOSTIC_CACHE_BUDGET_BYTES`.
 - `StyleRegistry::diagnostic_style(severity)` resolves `diagnosticError` / `diagnosticWarning` / `diagnosticInfo`.

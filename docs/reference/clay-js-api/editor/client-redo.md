@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientRedo
+id: editor.clientRedo
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientRedo
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+Shift+Z", "Cmd+Shift+Z", "Ctrl+Y"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it reapplies a client-local ordinary inverse edit under the editable lease through the ordinary local edit path, and this API does not grant filesystem/workspace authority, package/configuration/AI history mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientRedo` only as a documented command ID for `bindKey`; do not expose raw history stacks, server undo protocols, raw Rust calls, protocol DTOs, or `Deno.core.ops`.
+agent_guidance: Use `editor.clientRedo` only as a documented command ID for `bindKey`; do not expose raw history stacks, server undo protocols, raw Rust calls, protocol DTOs, or `Deno.core.ops`.
 lookup_tags: [editor, redo, history, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for redoing the latest undone local edit o
 
 ## Description
 
-`clientRedo` is the public Clay JS API descriptor for **Redo**. It returns the stable command ID `clay.editor.clientRedo` so configuration, help, key-binding discovery, and agents can name the redo route without hard-coding Rust shortcuts or inventing a server undo protocol.
+`clientRedo` is the public Clay JS API descriptor for **Redo**. It returns the stable command ID `editor.clientRedo` so configuration, help, key-binding discovery, and agents can name the redo route without hard-coding Rust shortcuts or inventing a server undo protocol.
 
 Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Redo happens later only after an explicit user key/command route reaches the native editor widget. The command pops the per-document client redo stack, reapplies the forward insert/delete/replace locally, restores caret/selection, and enqueues a normal optimistic `Edit` under the editable lease. Read-only observers are a no-op. Empty redo stacks are a no-op. Any new divergent user edit clears the redo stack. Rejected redo edits recover through the existing resync path.
 
@@ -53,7 +53,7 @@ bindKey("Ctrl+Y", clientRedo(), { scope: "editor" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+Y", "clay.editor.clientRedo", { scope: "editor" });
+bindKey("Ctrl+Y", "editor.clientRedo", { scope: "editor" });
 ```
 
 ## Example
@@ -82,7 +82,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.editor.clientRedo"` synchronously. The helper does not mutate history, call the server, execute package code, read files, or run client-side JavaScript.
+Returns the string literal command ID `"editor.clientRedo"` synchronously. The helper does not mutate history, call the server, execute package code, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ Redo applies locally first and enqueues through the existing bounded edit queue.
 
 ## Agent guidance
 
-Use `clay.editor.clientRedo` only as a documented command ID for `bindKey`. Avoid raw history inspection APIs, server undo protocols, shell commands, network effects, WASM, AI mutation, raw ops, or client-side JavaScript execution.
+Use `editor.clientRedo` only as a documented command ID for `bindKey`. Avoid raw history inspection APIs, server undo protocols, shell commands, network effects, WASM, AI mutation, raw ops, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.editor.clientRedo` only as a documented command ID for `bindKey`. Avoi
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientRedo`
+- Stable ID: `editor.clientRedo`
 - User-facing name: Redo
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientRedo`

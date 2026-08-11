@@ -56,7 +56,7 @@ use self::{
     },
     configuration::{
         op_clay_configuration_get_state, op_clay_configuration_load_module,
-        op_clay_configuration_set_package_option,
+        op_clay_configuration_record_module_error, op_clay_configuration_set_package_option,
     },
     decorations::op_clay_decorations_publish_decorations,
     diagnostics::op_clay_diagnostics_publish_diagnostics,
@@ -490,7 +490,7 @@ impl ClayOpState {
             .clone()
             .ok_or_else(|| {
                 JsErrorBox::generic(
-                    "clay.packages.no_active_package: package-facing APIs require an active \
+                    "packages.no_active_package: package-facing APIs require an active \
                      package activation or host-invoked package callback",
                 )
             })?;
@@ -501,7 +501,7 @@ impl ClayOpState {
             .cloned()
             .ok_or_else(|| {
                 JsErrorBox::generic(format!(
-                    "clay.packages.package_not_enabled: package `{}` version `{}` is not enabled",
+                    "packages.package_not_enabled: package `{}` version `{}` is not enabled",
                     context.package_name, context.package_version
                 ))
             })
@@ -521,7 +521,7 @@ impl ClayOpState {
             .has_approved_capability(&record.manifest.name, permission);
         if !approved {
             return Err(JsErrorBox::generic(format!(
-                "clay.packages.missing_permission: package `{}` lacks approved `{}`",
+                "packages.missing_permission: package `{}` lacks approved `{}`",
                 record.manifest.name,
                 permission.as_str()
             )));
@@ -994,7 +994,7 @@ impl ClayOpState {
             existing.context != rule.context || existing.sequence != rule.sequence
         });
         replacement.keymaps.push(rule.clone());
-        replacement.manifest_id = "clay.runtime.configuration".to_string();
+        replacement.manifest_id = "runtime.configuration".to_string();
         let manifest = self.publish_behavior_replacement(replacement)?;
         self.replicate_active_editor_mode();
         if self
@@ -1029,7 +1029,7 @@ impl ClayOpState {
         replacement.keymaps.retain(|existing| {
             existing.context != *context || existing.sequence != vec![stroke.clone()]
         });
-        replacement.manifest_id = "clay.runtime.configuration".to_string();
+        replacement.manifest_id = "runtime.configuration".to_string();
         let manifest = self.publish_behavior_replacement(replacement)?;
         self.replicate_active_editor_mode();
         if self
@@ -1786,7 +1786,7 @@ fn op_clay_runtime_ping() -> Result<String, JsErrorBox> {
 fn op_clay_runtime_record(state: &mut OpState, #[string] value: String) -> Result<(), JsErrorBox> {
     if value.trim().is_empty() {
         return Err(JsErrorBox::generic(
-            "clay.runtime.invalid_record: value must not be empty",
+            "runtime.invalid_record: value must not be empty",
         ));
     }
 
@@ -1795,13 +1795,14 @@ fn op_clay_runtime_record(state: &mut OpState, #[string] value: String) -> Resul
 }
 
 // Trusted domain: configuration evaluation and bundled first-party packages.
-// This is the full op set (78 ops).
+// This is the full trusted op set (82 ops).
 extension!(
     clay_runtime_trusted_extension,
     ops = [
         op_clay_runtime_ping,
         op_clay_runtime_record,
         op_clay_configuration_load_module,
+        op_clay_configuration_record_module_error,
         op_clay_configuration_get_state,
         op_clay_configuration_set_package_option,
         op_clay_sdui_define_node,
@@ -1997,7 +1998,7 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 81);
+        assert_eq!(trusted.len(), 82);
         // 44 = 36 public contribution ops + the seven shared `editor-control`
         // gated editor ops + the gated programmatic execution op (follow-up
         // round); visibility grants nothing without approved permission +
@@ -2010,6 +2011,7 @@ mod domain_extension_tests {
         for admin in [
             "op_clay_runtime_ping",
             "op_clay_configuration_load_module",
+            "op_clay_configuration_record_module_error",
             "op_clay_configuration_get_state",
             "op_clay_configuration_set_package_option",
             "op_clay_shell_set_pane_focus_policy",

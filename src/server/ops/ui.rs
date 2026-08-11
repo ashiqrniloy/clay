@@ -23,13 +23,13 @@ pub(super) fn op_clay_ui_register_panel_contribution(
     let package = state
         .borrow::<Arc<ClayOpState>>()
         .current_package_record()?;
-    let declaration = parse_json(&declaration_json, "clay.ui.invalid_panel_contribution")?;
+    let declaration = parse_json(&declaration_json, "ui.invalid_panel_contribution")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
         .register_panel_contribution(&package.manifest, &declaration)
-        .map_err(ui_error("clay.ui.registration_failed"))?;
+        .map_err(ui_error("ui.registration_failed"))?;
     serde_json::to_string(&panel_result(&registered))
-        .map_err(serialize_error("clay.ui.registration_failed"))
+        .map_err(serialize_error("ui.registration_failed"))
 }
 
 #[op2]
@@ -42,13 +42,13 @@ pub(super) fn op_clay_ui_register_component_contribution(
     let package = state
         .borrow::<Arc<ClayOpState>>()
         .current_package_record()?;
-    let declaration = parse_json(&declaration_json, "clay.ui.invalid_component_contribution")?;
+    let declaration = parse_json(&declaration_json, "ui.invalid_component_contribution")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
         .register_component_contribution(&package.manifest, &declaration)
-        .map_err(ui_error("clay.ui.registration_failed"))?;
+        .map_err(ui_error("ui.registration_failed"))?;
     serde_json::to_string(&component_result(&registered))
-        .map_err(serialize_error("clay.ui.registration_failed"))
+        .map_err(serialize_error("ui.registration_failed"))
 }
 
 #[op2]
@@ -63,14 +63,14 @@ pub(super) fn op_clay_ui_register_transient_overlay_contribution(
         .current_package_record()?;
     let declaration = parse_json(
         &declaration_json,
-        "clay.ui.invalid_transient_overlay_contribution",
+        "ui.invalid_transient_overlay_contribution",
     )?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
         .register_transient_overlay_contribution(&package.manifest, &declaration)
-        .map_err(ui_error("clay.ui.registration_failed"))?;
+        .map_err(ui_error("ui.registration_failed"))?;
     serde_json::to_string(&overlay_result(&registered))
-        .map_err(serialize_error("clay.ui.registration_failed"))
+        .map_err(serialize_error("ui.registration_failed"))
 }
 
 #[op2]
@@ -83,13 +83,13 @@ pub(super) fn op_clay_ui_register_input_contribution(
     let package = state
         .borrow::<Arc<ClayOpState>>()
         .current_package_record()?;
-    let declaration = parse_json(&declaration_json, "clay.ui.invalid_input_contribution")?;
+    let declaration = parse_json(&declaration_json, "ui.invalid_input_contribution")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
         .register_input_contribution(&package.manifest, &declaration)
-        .map_err(ui_error("clay.ui.registration_failed"))?;
+        .map_err(ui_error("ui.registration_failed"))?;
     serde_json::to_string(&input_result(&registered))
-        .map_err(serialize_error("clay.ui.registration_failed"))
+        .map_err(serialize_error("ui.registration_failed"))
 }
 
 #[op2]
@@ -102,13 +102,13 @@ pub(super) fn op_clay_ui_register_ui_state_scope(
     let package = state
         .borrow::<Arc<ClayOpState>>()
         .current_package_record()?;
-    let declaration = parse_json(&declaration_json, "clay.ui.invalid_ui_state_scope")?;
+    let declaration = parse_json(&declaration_json, "ui.invalid_ui_state_scope")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
         .register_ui_state_scope(&package.manifest, &declaration)
-        .map_err(ui_error("clay.ui.registration_failed"))?;
+        .map_err(ui_error("ui.registration_failed"))?;
     serde_json::to_string(&ui_state_scope_result(&registered))
-        .map_err(serialize_error("clay.ui.registration_failed"))
+        .map_err(serialize_error("ui.registration_failed"))
 }
 
 #[op2]
@@ -117,13 +117,13 @@ pub(super) fn op_clay_ui_set_layout_override(
     state: &mut OpState,
     #[string] declaration_json: String,
 ) -> Result<String, JsErrorBox> {
-    let declaration = parse_json(&declaration_json, "clay.ui.invalid_layout_override")?;
+    let declaration = parse_json(&declaration_json, "ui.invalid_layout_override")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
         .set_layout_override(&declaration)
-        .map_err(ui_error("clay.ui.layout_override_failed"))?;
+        .map_err(ui_error("ui.layout_override_failed"))?;
     serde_json::to_string(&layout_override_result(&registered))
-        .map_err(serialize_error("clay.ui.layout_override_failed"))
+        .map_err(serialize_error("ui.layout_override_failed"))
 }
 
 #[op2]
@@ -135,13 +135,13 @@ pub(super) fn op_clay_ui_request_layout_intent(
     let package = state
         .borrow::<Arc<ClayOpState>>()
         .current_package_record()?;
-    let declaration = parse_json(&declaration_json, "clay.ui.invalid_layout_intent")?;
+    let declaration = parse_json(&declaration_json, "ui.invalid_layout_intent")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
         .request_layout_intent(&package.manifest, &declaration)
-        .map_err(ui_error("clay.ui.layout_intent_failed"))?;
+        .map_err(ui_error("ui.layout_intent_failed"))?;
     serde_json::to_string(&layout_intent_result(&registered))
-        .map_err(serialize_error("clay.ui.layout_intent_failed"))
+        .map_err(serialize_error("ui.layout_intent_failed"))
 }
 
 #[op2]
@@ -154,13 +154,13 @@ pub(super) fn op_clay_ui_register_theme_token(
     let package = state
         .borrow::<Arc<ClayOpState>>()
         .current_package_record()?;
-    let declaration = parse_json(&declaration_json, "clay.ui.invalid_theme_token")?;
+    let declaration = parse_json(&declaration_json, "ui.invalid_theme_token")?;
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let registered = op_state
         .register_theme_token(&package.manifest, &declaration)
-        .map_err(ui_error("clay.ui.registration_failed"))?;
+        .map_err(ui_error("ui.registration_failed"))?;
     serde_json::to_string(&theme_token_result(&registered))
-        .map_err(serialize_error("clay.ui.registration_failed"))
+        .map_err(serialize_error("ui.registration_failed"))
 }
 
 fn parse_json(json_text: &str, code: &str) -> Result<Value, JsErrorBox> {

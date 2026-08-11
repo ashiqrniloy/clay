@@ -40,7 +40,7 @@ pub(super) async fn op_clay_git_refresh_status(
     }
     .ok_or_else(|| {
         JsErrorBox::generic(format!(
-            "clay.git.refresh_status_failed: unknown workspace root `{root_id}`"
+            "git.refresh_status_failed: unknown workspace root `{root_id}`"
         ))
     })?;
 
@@ -64,7 +64,7 @@ pub(super) fn git_cached_status_json(status: &GitCachedStatus) -> Value {
 fn parse_workspace_root_id(json_text: &str) -> Result<WorkspaceRootId, JsErrorBox> {
     let value: Value = serde_json::from_str(json_text).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.git.refresh_status_failed: invalid request JSON: {error}"
+            "git.refresh_status_failed: invalid request JSON: {error}"
         ))
     })?;
     value
@@ -74,7 +74,7 @@ fn parse_workspace_root_id(json_text: &str) -> Result<WorkspaceRootId, JsErrorBo
         .or_else(|| value.get("workspaceRootId").and_then(Value::as_u64))
         .ok_or_else(|| {
             JsErrorBox::generic(
-                "clay.git.refresh_status_failed: workspaceRootId must be a string or integer",
+                "git.refresh_status_failed: workspaceRootId must be a string or integer",
             )
         })
 }
@@ -83,12 +83,12 @@ fn serialize_statuses(statuses: Vec<GitCachedStatus>) -> Result<String, JsErrorB
     serde_json::to_string(&Value::Array(
         statuses.iter().map(git_cached_status_json).collect(),
     ))
-    .map_err(serialize_error("clay.git.list_statuses_failed"))
+    .map_err(serialize_error("git.list_statuses_failed"))
 }
 
 fn serialize_status(status: GitCachedStatus) -> Result<String, JsErrorBox> {
     serde_json::to_string(&git_cached_status_json(&status))
-        .map_err(serialize_error("clay.git.refresh_status_failed"))
+        .map_err(serialize_error("git.refresh_status_failed"))
 }
 
 fn git_snapshot_json(snapshot: &crate::server::git::GitStatusSnapshot) -> Value {

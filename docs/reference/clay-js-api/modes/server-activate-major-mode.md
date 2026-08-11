@@ -1,5 +1,5 @@
 ---
-id: clay.modes.serverActivateMajorMode
+id: modes.serverActivateMajorMode
 kind: clay-js-api
 js_module: "clay:modes"
 js_export: serverActivateMajorMode
@@ -37,7 +37,7 @@ custom_properties:
     default: generated
     description: Behavior-changing setting `behaviorVersion` for this primitive gate API.
 security: Requires mode-activation permission and server validation that the mode was registered and matches the target document metadata; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, or arbitrary client behavior authority.
-agent_guidance: Use `clay.modes.serverActivateMajorMode` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `modes.serverActivateMajorMode` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [js-api, modeactivation, modes]
 app_visible: true
 help_visible: true
@@ -84,7 +84,7 @@ const activation = serverActivateMajorMode(manifest, { documentId: 5, path: "REA
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.modes.serverActivateMajorMode` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `modes.serverActivateMajorMode` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -113,7 +113,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.modes.serverActivateMajorMode` when the user asks for Activate Major Mode through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `modes.serverActivateMajorMode` when the user asks for Activate Major Mode through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -124,7 +124,7 @@ Use `clay.modes.serverActivateMajorMode` when the user asks for Activate Major M
 
 ## Lookup metadata
 
-- Stable ID: `clay.modes.serverActivateMajorMode`
+- Stable ID: `modes.serverActivateMajorMode`
 - User-facing name: Activate Major Mode
 - Kind: `clay-js-api`
 - Module/export: `clay:modes` / `serverActivateMajorMode`

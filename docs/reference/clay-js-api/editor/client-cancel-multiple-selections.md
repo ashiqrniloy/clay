@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientCancelMultipleSelections
+id: editor.clientCancelMultipleSelections
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientCancelMultipleSelections
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Escape"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientCancelMultipleSelections` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
+agent_guidance: Use `editor.clientCancelMultipleSelections` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
 lookup_tags: [editor, js-api, multi-cursor, selection]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Collapse the selection set to the primary caret.
 
 ## Description
 
-`clientCancelMultipleSelections` returns the stable bindable command ID `clay.editor.clientCancelMultipleSelections` for **Cancel Multiple Selections** (Plan 071 task 9). Escape drops every secondary caret and collapses the primary selection to its caret. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientCancelMultipleSelections` returns the stable bindable command ID `editor.clientCancelMultipleSelections` for **Cancel Multiple Selections** (Plan 071 task 9). Escape drops every secondary caret and collapses the primary selection to its caret. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -50,7 +50,7 @@ bindKey("ctrl+k ctrl+n", clientCancelMultipleSelections());
 ## Example
 
 ```ts
-const commandId = clientCancelMultipleSelections(); // "clay.editor.clientCancelMultipleSelections"
+const commandId = clientCancelMultipleSelections(); // "editor.clientCancelMultipleSelections"
 ```
 
 ## Options
@@ -69,7 +69,7 @@ None.
 
 ## Return and async behavior
 
-Returns the stable command ID string `clay.editor.clientCancelMultipleSelections` synchronously. The facade is synchronous, side-effect free, and local.
+Returns the stable command ID string `editor.clientCancelMultipleSelections` synchronously. The facade is synchronous, side-effect free, and local.
 
 ## Errors
 
@@ -85,7 +85,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientCancelMultipleSelections` when the user asks for Cancel Multiple Selections through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientCancelMultipleSelections` when the user asks for Cancel Multiple Selections through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.editor.clientCancelMultipleSelections` when the user asks for Cancel M
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientCancelMultipleSelections`
+- Stable ID: `editor.clientCancelMultipleSelections`
 - User-facing name: Cancel Multiple Selections
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientCancelMultipleSelections`

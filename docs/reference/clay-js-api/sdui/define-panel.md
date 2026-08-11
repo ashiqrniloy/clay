@@ -1,5 +1,5 @@
 ---
-id: clay.sdui.definePanel
+id: sdui.definePanel
 kind: clay-js-api
 js_module: "clay:sdui"
 js_export: definePanel
@@ -29,7 +29,7 @@ custom_properties:
     default: "optional"
     description: Optional stable SDUI node identifier used for reconciliation.
 security: Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.sdui.definePanel` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.
+agent_guidance: Use `sdui.definePanel` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.
 lookup_tags: [sdui, server-driven-ui, js-api, phase12, phase13, runtime-backed]
 app_visible: true
 help_visible: true
@@ -75,7 +75,7 @@ const node = definePanel({ title: "Workspace", children: [defineEditorView({ doc
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.sdui.definePanel` in `~/.config/clay/init.js` only if a future command surface explicitly supports invoking SDUI helper APIs; normal use is from startup/reload configuration modules before `publishTree`.
+No default key binding is assigned. Users may bind a key to `sdui.definePanel` in `~/.config/clay/init.js` only if a future command surface explicitly supports invoking SDUI helper APIs; normal use is from startup/reload configuration modules before `publishTree`.
 
 ## Custom properties
 
@@ -102,7 +102,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.sdui.definePanel` when the user asks for runtime-backed Clay SDUI schema helpers. Avoid raw `SduiNodeKind` construction in user-facing docs, arbitrary command IDs, filesystem effects, network effects, shell commands, extension loading, AI mutation, package loading, WASM, or client-side JavaScript execution.
+Use `sdui.definePanel` when the user asks for runtime-backed Clay SDUI schema helpers. Avoid raw `SduiNodeKind` construction in user-facing docs, arbitrary command IDs, filesystem effects, network effects, shell commands, extension loading, AI mutation, package loading, WASM, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -113,7 +113,7 @@ Use `clay.sdui.definePanel` when the user asks for runtime-backed Clay SDUI sche
 
 ## Lookup metadata
 
-- Stable ID: `clay.sdui.definePanel`
+- Stable ID: `sdui.definePanel`
 - User-facing name: Define Panel
 - Kind: `clay-js-api`
 - Module/export: `clay:sdui` / `definePanel`

@@ -3,7 +3,7 @@
   "source": "docs/index.md#Clay JS API Registry Source Files",
   "entries": [
     {
-      "id": "clay.application.quit",
+      "id": "application.quit",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/application/quit.md",
       "js_module": "clay:application",
@@ -22,7 +22,7 @@
       "key_bindings": ["Escape"],
       "custom_properties": [],
       "security": "Requests application shutdown only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.application.quit` only for its documented application responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `application.quit` only for its documented application responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["application", "escapequitapplicationactions", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -30,7 +30,7 @@
       "async": false
     },
     {
-      "id": "clay.behavior.buildCodeEditingManifest",
+      "id": "behavior.buildCodeEditingManifest",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/behavior/build-code-editing-manifest.md",
       "js_module": "clay:behavior",
@@ -118,7 +118,7 @@
       "async": false
     },
     {
-      "id": "clay.behavior.getActiveBehaviorManifest",
+      "id": "behavior.getActiveBehaviorManifest",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/behavior/get-active-behavior-manifest.md",
       "js_module": "clay:behavior",
@@ -137,7 +137,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Exposes behavior metadata, not executable JavaScript; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.behavior.getActiveBehaviorManifest` only for its documented behavior responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `behavior.getActiveBehaviorManifest` only for its documented behavior responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["behavior", "behaviormanifestrouting", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -145,7 +145,7 @@
       "async": true
     },
     {
-      "id": "clay.behavior.listBehaviorRoutes",
+      "id": "behavior.listBehaviorRoutes",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/behavior/list-behavior-routes.md",
       "js_module": "clay:behavior",
@@ -164,7 +164,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Returns inert routing metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.behavior.listBehaviorRoutes` only for its documented behavior responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `behavior.listBehaviorRoutes` only for its documented behavior responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["behavior", "behaviormanifestrouting", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -172,7 +172,7 @@
       "async": true
     },
     {
-      "id": "clay.commands.serverExecuteCommand",
+      "id": "commands.serverExecuteCommand",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/commands/server-execute-command.md",
       "js_module": "clay:commands",
@@ -191,7 +191,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Revalidates command id, routing policy, provenance, permissions, target context, and argument budget before side effects; workspace commands re-check roots and selected-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.commands.serverExecuteCommand` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `commands.serverExecuteCommand` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
       "lookup_tags": ["commands", "execution", "workspace", "file-browser", "phase18.12", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -199,7 +199,7 @@
       "async": true
     },
     {
-      "id": "clay.commands.serverListCommands",
+      "id": "commands.serverListCommands",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/commands/server-list-commands.md",
       "js_module": "clay:commands",
@@ -231,7 +231,7 @@
         }
       ],
       "security": "Returns command metadata only after server validation of registry visibility; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, command execution, or command handler authority.",
-      "agent_guidance": "Use `clay.commands.serverListCommands` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `commands.serverListCommands` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["js-api", "commandregistryquery", "commands"],
       "app_visible": true,
       "help_visible": true,
@@ -239,7 +239,7 @@
       "async": false
     },
     {
-      "id": "clay.commands.serverOpenDirectory",
+      "id": "commands.serverOpenDirectory",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/commands/server-open-directory.md",
       "js_module": "clay:commands",
@@ -257,8 +257,8 @@
       "permissions": ["workspace-read"],
       "key_bindings": [],
       "custom_properties": [],
-      "security": "Routes through clay.workspace.openDirectory and server workspace APIs; directory paths are root-relative and validated inside a known workspace root, and this API does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard authority, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.commands.serverOpenDirectory` only through the documented Clay JS facade or Clay-owned SDUI file-browser actions; do not bind it as a global key without root-relative arguments, call raw Rust/protocol/ops, or invent broader filesystem/workspace authority.",
+      "security": "Routes through workspace.openDirectory and server workspace APIs; directory paths are root-relative and validated inside a known workspace root, and this API does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard authority, or client-side JavaScript authority.",
+      "agent_guidance": "Use `commands.serverOpenDirectory` only through the documented Clay JS facade or Clay-owned SDUI file-browser actions; do not bind it as a global key without root-relative arguments, call raw Rust/protocol/ops, or invent broader filesystem/workspace authority.",
       "lookup_tags": ["commands", "workspace", "open-directory", "file-browser", "navigation", "phase19", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -266,7 +266,7 @@
       "async": true
     },
     {
-      "id": "clay.commands.serverOpenFile",
+      "id": "commands.serverOpenFile",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/commands/server-open-file.md",
       "js_module": "clay:commands",
@@ -284,8 +284,8 @@
       "permissions": ["workspace-read"],
       "key_bindings": [],
       "custom_properties": [],
-      "security": "Routes through clay.workspace.openFile and server workspace APIs; in-root paths are root-relative and out-of-root paths use selected-file single-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.commands.serverOpenFile` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
+      "security": "Routes through workspace.openFile and server workspace APIs; in-root paths are root-relative and out-of-root paths use selected-file single-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `commands.serverOpenFile` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
       "lookup_tags": ["commands", "workspace", "open-file", "selected-file-grant", "phase18.12", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -293,7 +293,7 @@
       "async": true
     },
     {
-      "id": "clay.commands.serverRegisterCommand",
+      "id": "commands.serverRegisterCommand",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/commands/server-register-command.md",
       "js_module": "clay:commands",
@@ -343,7 +343,7 @@
         }
       ],
       "security": "Requires command-registration permission and server validation of package-prefixed command IDs, routing policy, key binding metadata, and declared handler permissions; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, or command handler authority by registration alone.",
-      "agent_guidance": "Use `clay.commands.serverRegisterCommand` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `commands.serverRegisterCommand` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["js-api", "commandregistry", "commands"],
       "app_visible": true,
       "help_visible": true,
@@ -351,7 +351,7 @@
       "async": false
     },
     {
-      "id": "clay.commands.serverRevealInTree",
+      "id": "commands.serverRevealInTree",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/commands/server-reveal-in-tree.md",
       "js_module": "clay:commands",
@@ -370,7 +370,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Validates the document id against open server workspace metadata and only affects Clay-owned file-browser focus state; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.commands.serverRevealInTree` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `commands.serverRevealInTree` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
       "lookup_tags": ["commands", "workspace", "file-browser", "reveal", "phase18.12", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -378,7 +378,7 @@
       "async": true
     },
     {
-      "id": "clay.completion.completionTriggerCharactersFromEditorRules",
+      "id": "completion.completionTriggerCharactersFromEditorRules",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/completion/completion-trigger-characters-from-editor-rules.md",
       "js_module": "clay:completion",
@@ -400,7 +400,7 @@
           "name": "editorRules",
           "type": "object",
           "default": "required",
-          "description": "Editor rules object with an autocompleteTriggers array of { trigger: string } entries, such as the value returned by clay.behavior.buildCodeEditingManifest."
+          "description": "Editor rules object with an autocompleteTriggers array of { trigger: string } entries, such as the value returned by behavior.buildCodeEditingManifest."
         }
       ],
       "security": "Pure helper; returns inert strings only. Does not execute code, read files, access the network, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
@@ -412,7 +412,7 @@
       "async": false
     },
     {
-      "id": "clay.completion.serverDisableCompletion",
+      "id": "completion.serverDisableCompletion",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/completion/server-disable-completion.md",
       "js_module": "clay:completion",
@@ -452,7 +452,7 @@
       "async": false
     },
     {
-      "id": "clay.completion.serverListCompletionProvidersForTrigger",
+      "id": "completion.serverListCompletionProvidersForTrigger",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md",
       "js_module": "clay:completion",
@@ -486,7 +486,7 @@
       "async": false
     },
     {
-      "id": "clay.completion.serverRegisterCompletionProvider",
+      "id": "completion.serverRegisterCompletionProvider",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/completion/server-register-completion-provider.md",
       "js_module": "clay:completion",
@@ -590,7 +590,7 @@
         }
       ],
       "security": "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs/items, trigger metadata, static item/result bounds, timeout/item budgets, and inert load-time metadata. The public API registers inert keyword/snippet items only; JS provider execution tokens are intentionally not exposed. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.",
-      "agent_guidance": "Use `clay.completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage(\"@vendor/provider\")` from user configuration; do not pass callbacks, raw Deno ops, modules, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.",
+      "agent_guidance": "Use `completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage(\"@vendor/provider\")` from user configuration; do not pass callbacks, raw Deno ops, modules, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.",
       "lookup_tags": ["js-api", "completion", "provider", "package", "phase18.19"],
       "app_visible": true,
       "help_visible": true,
@@ -598,7 +598,7 @@
       "async": false
     },
     {
-      "id": "clay.configuration.getConfigurationState",
+      "id": "configuration.getConfigurationState",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/configuration/get-configuration-state.md",
       "js_module": "clay:configuration",
@@ -630,7 +630,7 @@
         }
       ],
       "security": "Returns configuration metadata only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.configuration.getConfigurationState` only for read-only configuration metadata and discovery; do not invent configuration execution, filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `configuration.getConfigurationState` only for read-only configuration metadata and discovery; do not invent configuration execution, filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
       "lookup_tags": ["configuration", "entrypoint", "initjs", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -638,7 +638,7 @@
       "async": false
     },
     {
-      "id": "clay.configuration.loadConfigurationModule",
+      "id": "configuration.loadConfigurationModule",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/configuration/load-configuration-module.md",
       "js_module": "clay:configuration",
@@ -660,11 +660,17 @@
           "name": "path",
           "type": "string",
           "default": "none",
-          "description": "Local configuration module path relative to `~/.config/clay/init.js`."
+          "description": "Local configuration module path relative to the configuration root (e.g. `~/.config/clay/init.js`)."
+        },
+        {
+          "name": "optional",
+          "type": "boolean",
+          "default": "false",
+          "description": "When true, a failing or missing module is isolated: it records a bounded `configuration.module_failed` warning and returns `{ loaded: false, error }` instead of failing configuration evaluation."
         }
       ],
       "security": "Local modular configuration contract only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.configuration.loadConfigurationModule` only to describe modular local Clay configuration from `~/.config/clay/init.js`; do not invent filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `configuration.loadConfigurationModule` only to describe modular local Clay configuration from `~/.config/clay/init.js`; do not invent filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
       "lookup_tags": ["configuration", "entrypoint", "initjs", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -672,7 +678,7 @@
       "async": true
     },
     {
-      "id": "clay.configuration.setPackageOption",
+      "id": "configuration.setPackageOption",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/configuration/set-package-option.md",
       "js_module": "clay:configuration",
@@ -724,7 +730,7 @@
       "async": false
     },
     {
-      "id": "clay.decorations.serverPublishDecorations",
+      "id": "decorations.serverPublishDecorations",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/decorations/server-publish-decorations.md",
       "js_module": "clay:decorations",
@@ -774,7 +780,7 @@
         }
       ],
       "security": "Requires render-decorations permission plus server validation of package provenance, current document version, byte ranges, viewport bounds, known style tokens, known kinds, and DECORATION_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary CSS, draw callbacks, GPU commands, or native widget mutation authority.",
-      "agent_guidance": "Use `clay.decorations.serverPublishDecorations` from server-side package code only. Publish inert spans; never invent renderer callbacks, CSS, raw ops, or client-side JavaScript hooks.",
+      "agent_guidance": "Use `decorations.serverPublishDecorations` from server-side package code only. Publish inert spans; never invent renderer callbacks, CSS, raw ops, or client-side JavaScript hooks.",
       "lookup_tags": ["js-api", "decorations", "markdown", "decorationrange", "syntax-highlighting"],
       "app_visible": true,
       "help_visible": true,
@@ -782,7 +788,7 @@
       "async": false
     },
     {
-      "id": "clay.diagnostics.serverPublishDiagnostics",
+      "id": "diagnostics.serverPublishDiagnostics",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/diagnostics/server-publish-diagnostics.md",
       "js_module": "clay:diagnostics",
@@ -838,7 +844,7 @@
         }
       ],
       "security": "Requires render-decorations permission plus server validation of package provenance, current document version, byte ranges, viewport bounds, source/code/message bounds, and DIAGNOSTIC_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, language-server process, client-side JavaScript, raw Deno ops, arbitrary CSS, draw callbacks, GPU commands, or native widget mutation authority.",
-      "agent_guidance": "Use `clay.diagnostics.serverPublishDiagnostics` from server-side package code only. Publish inert DiagnosticSpan records; never invent renderer callbacks, CSS, raw ops, LSP process spawning, or client-side JavaScript hooks. Prefer this over stuffing diagnostic metadata into `serverPublishDecorations`.",
+      "agent_guidance": "Use `diagnostics.serverPublishDiagnostics` from server-side package code only. Publish inert DiagnosticSpan records; never invent renderer callbacks, CSS, raw ops, LSP process spawning, or client-side JavaScript hooks. Prefer this over stuffing diagnostic metadata into `serverPublishDecorations`.",
       "lookup_tags": ["js-api", "diagnostics", "syntax-error", "range-diagnostic", "lsp-ready", "phase18.17"],
       "app_visible": true,
       "help_visible": true,
@@ -846,7 +852,7 @@
       "async": false
     },
     {
-      "id": "clay.documents.clientOpenFileDialog",
+      "id": "documents.clientOpenFileDialog",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/documents/client-open-file-dialog.md",
       "js_module": "clay:documents",
@@ -865,7 +871,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; native dialog execution requires explicit user key routing, selected files are server-validated as single-file grants, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, broad filesystem/workspace authority, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.documents.clientOpenFileDialog` as a documented command ID for `bindKey`; do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`, and do not invent dialog options, broad filesystem access, workspace expansion, package loading, shell/network effects, WASM, AI mutation, or client-side JavaScript execution.",
+      "agent_guidance": "Use `documents.clientOpenFileDialog` as a documented command ID for `bindKey`; do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`, and do not invent dialog options, broad filesystem access, workspace expansion, package loading, shell/network effects, WASM, AI mutation, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "open-dialog", "file-dialog", "windows", "linux", "macos", "markdown", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -873,7 +879,7 @@
       "async": false
     },
     {
-      "id": "clay.documents.serverGetDocumentLease",
+      "id": "documents.serverGetDocumentLease",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/documents/server-get-document-lease.md",
       "js_module": "clay:documents",
@@ -892,7 +898,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Reports or requests lease metadata according to server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.documents.serverGetDocumentLease` only for its documented documents responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `documents.serverGetDocumentLease` only for its documented documents responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["documents", "js-api", "leasereadonlystate"],
       "app_visible": true,
       "help_visible": true,
@@ -900,7 +906,7 @@
       "async": true
     },
     {
-      "id": "clay.documents.serverGetDocumentSnapshot",
+      "id": "documents.serverGetDocumentSnapshot",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/documents/server-get-document-snapshot.md",
       "js_module": "clay:documents",
@@ -919,7 +925,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Requires read access to the document; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.documents.serverGetDocumentSnapshot` only for its documented documents responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `documents.serverGetDocumentSnapshot` only for its documented documents responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["documents", "js-api", "leasereadonlystate"],
       "app_visible": true,
       "help_visible": true,
@@ -927,7 +933,7 @@
       "async": true
     },
     {
-      "id": "clay.documents.serverGetDocumentStatus",
+      "id": "documents.serverGetDocumentStatus",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/documents/server-get-document-status.md",
       "js_module": "clay:documents",
@@ -946,7 +952,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.documents.serverGetDocumentStatus` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
+      "agent_guidance": "Use `documents.serverGetDocumentStatus` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "workspace", "metadata", "dirty-state", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -954,7 +960,7 @@
       "async": true
     },
     {
-      "id": "clay.documents.serverListDocuments",
+      "id": "documents.serverListDocuments",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/documents/server-list-documents.md",
       "js_module": "clay:documents",
@@ -973,7 +979,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.documents.serverListDocuments` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
+      "agent_guidance": "Use `documents.serverListDocuments` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "workspace", "metadata", "list", "dirty-state", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -981,7 +987,7 @@
       "async": true
     },
     {
-      "id": "clay.documents.serverOpenDocument",
+      "id": "documents.serverOpenDocument",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/documents/server-open-document.md",
       "js_module": "clay:documents",
@@ -1000,7 +1006,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.documents.serverOpenDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
+      "agent_guidance": "Use `documents.serverOpenDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "workspace", "file", "open", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1008,7 +1014,7 @@
       "async": true
     },
     {
-      "id": "clay.documents.serverReloadDocument",
+      "id": "documents.serverReloadDocument",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/documents/server-reload-document.md",
       "js_module": "clay:documents",
@@ -1027,7 +1033,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.documents.serverReloadDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
+      "agent_guidance": "Use `documents.serverReloadDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "workspace", "file", "reload", "dirty-state", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1035,7 +1041,7 @@
       "async": true
     },
     {
-      "id": "clay.documents.serverSaveDocument",
+      "id": "documents.serverSaveDocument",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/documents/server-save-document.md",
       "js_module": "clay:documents",
@@ -1054,7 +1060,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "The trusted-only documents facade uses server-internal save authority, validates any explicit knownVersion against canonical server state, confines writes to an already-authorized open workspace document with path traversal rejection, and performs exclusive same-directory atomic replacement with target-identity revalidation; it is absent from the third-party package runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.documents.serverSaveDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
+      "agent_guidance": "Use `documents.serverSaveDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "workspace", "file", "save", "dirty-state", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1062,7 +1068,7 @@
       "async": true
     },
     {
-      "id": "clay.editor.clientAddCursor",
+      "id": "editor.clientAddCursor",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-add-cursor.md",
       "js_module": "clay:editor",
@@ -1088,7 +1094,7 @@
         }
       ],
       "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientAddCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.clientAddCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
       "app_visible": true,
       "help_visible": true,
@@ -1096,7 +1102,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientCancelMultipleSelections",
+      "id": "editor.clientCancelMultipleSelections",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-cancel-multiple-selections.md",
       "js_module": "clay:editor",
@@ -1115,7 +1121,7 @@
       "key_bindings": ["Escape"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientCancelMultipleSelections` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "agent_guidance": "Use `editor.clientCancelMultipleSelections` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
       "app_visible": true,
       "help_visible": true,
@@ -1123,7 +1129,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientColumnSelect",
+      "id": "editor.clientColumnSelect",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-column-select.md",
       "js_module": "clay:editor",
@@ -1149,7 +1155,7 @@
         }
       ],
       "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientColumnSelect` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.clientColumnSelect` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "multi-cursor", "column-select", "selection"],
       "app_visible": true,
       "help_visible": true,
@@ -1157,7 +1163,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientCopySelection",
+      "id": "editor.clientCopySelection",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-copy-selection.md",
       "js_module": "clay:editor",
@@ -1176,7 +1182,7 @@
       "key_bindings": ["Ctrl+C", "Cmd+C"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it writes only the current non-empty native editor selection to the OS clipboard, and this API does not grant filesystem/workspace authority, arbitrary clipboard text writes, package/configuration/AI clipboard-contents APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority. Cut and paste are separate documented command IDs.",
-      "agent_guidance": "Use `clay.editor.clientCopySelection` only as a documented command ID for `bindKey`; do not expose raw clipboard text APIs, server/package clipboard access, raw Rust calls, protocol DTOs, or `Deno.core.ops`. Prefer `clientCutSelection` / `clientPasteClipboard` for cut/paste chords.",
+      "agent_guidance": "Use `editor.clientCopySelection` only as a documented command ID for `bindKey`; do not expose raw clipboard text APIs, server/package clipboard access, raw Rust calls, protocol DTOs, or `Deno.core.ops`. Prefer `clientCutSelection` / `clientPasteClipboard` for cut/paste chords.",
       "lookup_tags": ["editor", "clipboard", "copy", "selection", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1184,7 +1190,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientCutSelection",
+      "id": "editor.clientCutSelection",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-cut-selection.md",
       "js_module": "clay:editor",
@@ -1203,7 +1209,7 @@
       "key_bindings": ["Ctrl+X", "Cmd+X"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it writes only the current non-empty native editor selection to the OS clipboard and then deletes that selection through the ordinary local edit path, and this API does not grant filesystem/workspace authority, arbitrary clipboard text writes, clipboard inspection APIs for packages/configuration/AI, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientCutSelection` only as a documented command ID for `bindKey`; do not expose raw clipboard text APIs, server/package clipboard access, raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "agent_guidance": "Use `editor.clientCutSelection` only as a documented command ID for `bindKey`; do not expose raw clipboard text APIs, server/package clipboard access, raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "clipboard", "cut", "selection", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1211,7 +1217,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientDismissRecovery",
+      "id": "editor.clientDismissRecovery",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-dismiss-recovery.md",
       "js_module": "clay:editor",
@@ -1230,7 +1236,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it clears recovery menus and sanitized runtime diagnostics only and does not grant filesystem/workspace expansion, package/configuration/AI mutation authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientDismissRecovery` only as a documented command ID for `bindKey` or recovery menus; do not invent package-owned modal stacks or raw Deno ops.",
+      "agent_guidance": "Use `editor.clientDismissRecovery` only as a documented command ID for `bindKey` or recovery menus; do not invent package-owned modal stacks or raw Deno ops.",
       "lookup_tags": ["editor", "recovery", "dismiss", "sync", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1238,7 +1244,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientExecuteEditorCommand",
+      "id": "editor.clientExecuteEditorCommand",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-execute-editor-command.md",
       "js_module": "clay:editor",
@@ -1260,11 +1266,11 @@
           "name": "commandId",
           "type": "string",
           "default": "none",
-          "description": "Known direction-specific argless editor command ID to execute (e.g. `clay.editor.clientMoveCursor.nextWordStart`)."
+          "description": "Known direction-specific argless editor command ID to execute (e.g. `editor.clientMoveCursor.nextWordStart`)."
         }
       ],
       "security": "Changes only transient client cursor/selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientExecuteEditorCommand` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.clientExecuteEditorCommand` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "editor-control", "execution-channel"],
       "app_visible": true,
       "help_visible": true,
@@ -1272,7 +1278,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientKeepSelection",
+      "id": "editor.clientKeepSelection",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-keep-selection.md",
       "js_module": "clay:editor",
@@ -1291,7 +1297,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientKeepSelection` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "agent_guidance": "Use `editor.clientKeepSelection` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
       "app_visible": true,
       "help_visible": true,
@@ -1299,7 +1305,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientMoveCursor",
+      "id": "editor.clientMoveCursor",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-move-cursor.md",
       "js_module": "clay:editor",
@@ -1343,7 +1349,7 @@
         }
       ],
       "security": "Changes only client-local caret/selection/viewport state and grants no document mutation or external authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientMoveCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.clientMoveCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["cursormovement", "editor", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1351,7 +1357,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientPasteClipboard",
+      "id": "editor.clientPasteClipboard",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-paste-clipboard.md",
       "js_module": "clay:editor",
@@ -1370,7 +1376,7 @@
       "key_bindings": ["Ctrl+V", "Cmd+V"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it reads OS clipboard text once and inserts or replaces through the ordinary local edit path, and this API does not grant filesystem/workspace authority, package/configuration/AI clipboard-contents inspection APIs, arbitrary clipboard writes, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientPasteClipboard` only as a documented command ID for `bindKey`; do not expose raw clipboard text return values, server/package clipboard access, raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "agent_guidance": "Use `editor.clientPasteClipboard` only as a documented command ID for `bindKey`; do not expose raw clipboard text return values, server/package clipboard access, raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "clipboard", "paste", "selection", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1378,7 +1384,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientRedo",
+      "id": "editor.clientRedo",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-redo.md",
       "js_module": "clay:editor",
@@ -1397,7 +1403,7 @@
       "key_bindings": ["Ctrl+Shift+Z", "Cmd+Shift+Z", "Ctrl+Y"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it reapplies a client-local ordinary inverse edit under the editable lease through the ordinary local edit path, and this API does not grant filesystem/workspace authority, package/configuration/AI history mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientRedo` only as a documented command ID for `bindKey`; do not expose raw history stacks, server undo protocols, raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "agent_guidance": "Use `editor.clientRedo` only as a documented command ID for `bindKey`; do not expose raw history stacks, server undo protocols, raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "redo", "history", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1405,7 +1411,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientRemoveSelection",
+      "id": "editor.clientRemoveSelection",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-remove-selection.md",
       "js_module": "clay:editor",
@@ -1424,7 +1430,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientRemoveSelection` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "agent_guidance": "Use `editor.clientRemoveSelection` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
       "app_visible": true,
       "help_visible": true,
@@ -1432,7 +1438,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientRequestResync",
+      "id": "editor.clientRequestResync",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-request-resync.md",
       "js_module": "clay:editor",
@@ -1451,7 +1457,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it enqueues ClientMessage::RequestResync for the active document under an ordinary inverse edit recovery path and does not grant filesystem/workspace expansion, package/configuration/AI mutation authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientRequestResync` only as a documented command ID for `bindKey` or recovery menus; do not invent client reconnect sockets, package-owned resync loops, or raw Deno ops.",
+      "agent_guidance": "Use `editor.clientRequestResync` only as a documented command ID for `bindKey` or recovery menus; do not invent client reconnect sockets, package-owned resync loops, or raw Deno ops.",
       "lookup_tags": ["editor", "resync", "recovery", "sync", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1459,7 +1465,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientScrollTo",
+      "id": "editor.clientScrollTo",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-scroll-to.md",
       "js_module": "clay:editor",
@@ -1497,7 +1503,7 @@
         }
       ],
       "security": "Changes only client viewport/visual scroll state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientScrollTo` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.clientScrollTo` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "scrolling"],
       "app_visible": true,
       "help_visible": true,
@@ -1505,7 +1511,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientSelectAllMatches",
+      "id": "editor.clientSelectAllMatches",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-select-all-matches.md",
       "js_module": "clay:editor",
@@ -1524,7 +1530,7 @@
       "key_bindings": ["Ctrl+Shift+L"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientSelectAllMatches` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "agent_guidance": "Use `editor.clientSelectAllMatches` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
       "app_visible": true,
       "help_visible": true,
@@ -1532,7 +1538,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientSelectNextMatch",
+      "id": "editor.clientSelectNextMatch",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-select-next-match.md",
       "js_module": "clay:editor",
@@ -1551,7 +1557,7 @@
       "key_bindings": ["Ctrl+D"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientSelectNextMatch` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "agent_guidance": "Use `editor.clientSelectNextMatch` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
       "app_visible": true,
       "help_visible": true,
@@ -1559,7 +1565,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientSelectPrevMatch",
+      "id": "editor.clientSelectPrevMatch",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-select-prev-match.md",
       "js_module": "clay:editor",
@@ -1578,7 +1584,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientSelectPrevMatch` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "agent_guidance": "Use `editor.clientSelectPrevMatch` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "js-api", "multi-cursor", "selection"],
       "app_visible": true,
       "help_visible": true,
@@ -1586,7 +1592,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientSelectTextobject",
+      "id": "editor.clientSelectTextobject",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-select-textobject.md",
       "js_module": "clay:editor",
@@ -1624,7 +1630,7 @@
         }
       ],
       "security": "Changes only transient client selection state from a read-only server grammar query; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientSelectTextobject` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.clientSelectTextobject` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "textobjects", "tree-sitter", "selection"],
       "app_visible": true,
       "help_visible": true,
@@ -1632,7 +1638,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientSetCursorStyle",
+      "id": "editor.clientSetCursorStyle",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-set-cursor-style.md",
       "js_module": "clay:editor",
@@ -1688,7 +1694,7 @@
         }
       ],
       "security": "Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.",
-      "agent_guidance": "Use `clay.editor.clientSetCursorStyle` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.clientSetCursorStyle` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["cursorstylecustomization", "editor", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1696,7 +1702,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientSetSelection",
+      "id": "editor.clientSetSelection",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-set-selection.md",
       "js_module": "clay:editor",
@@ -1734,7 +1740,7 @@
         }
       ],
       "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientSetSelection` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.clientSetSelection` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "selection"],
       "app_visible": true,
       "help_visible": true,
@@ -1742,7 +1748,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientSetViewport",
+      "id": "editor.clientSetViewport",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-set-viewport.md",
       "js_module": "clay:editor",
@@ -1774,7 +1780,7 @@
         }
       ],
       "security": "Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.",
-      "agent_guidance": "Use `clay.editor.clientSetViewport` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.clientSetViewport` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "resizeviewport"],
       "app_visible": true,
       "help_visible": true,
@@ -1782,7 +1788,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientShowOpenDocuments",
+      "id": "editor.clientShowOpenDocuments",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-show-open-documents.md",
       "js_module": "clay:editor",
@@ -1801,7 +1807,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it opens a transient menu over already-retained client sessions on the focused pane (plus other panes' sessions for focus-and-switch activation) and activates a chosen DocumentId locally, and this API does not grant filesystem/workspace expansion, package/configuration/AI document mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority. Cross-pane activation stays capability/workspace-grant gated: it only focuses a pane the server already authorized for that document.",
-      "agent_guidance": "Use `clay.editor.clientShowOpenDocuments` only as a documented command ID for `bindKey`; do not invent client filesystem authority, tab hosts with package-owned native widgets, or raw Deno ops. Prefer `serverListDocuments` for server-authoritative open-registry metadata.",
+      "agent_guidance": "Use `editor.clientShowOpenDocuments` only as a documented command ID for `bindKey`; do not invent client filesystem authority, tab hosts with package-owned native widgets, or raw Deno ops. Prefer `serverListDocuments` for server-authoritative open-registry metadata.",
       "lookup_tags": ["editor", "multi-document", "sessions", "documents", "panes", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1809,7 +1815,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientSmartSelect",
+      "id": "editor.clientSmartSelect",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-smart-select.md",
       "js_module": "clay:editor",
@@ -1835,7 +1841,7 @@
         }
       ],
       "security": "Changes only transient client selection state from a read-only server tree walk; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientSmartSelect` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.clientSmartSelect` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "smart-select", "tree-sitter", "selection"],
       "app_visible": true,
       "help_visible": true,
@@ -1843,7 +1849,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientUndo",
+      "id": "editor.clientUndo",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-undo.md",
       "js_module": "clay:editor",
@@ -1862,7 +1868,7 @@
       "key_bindings": ["Ctrl+Z", "Cmd+Z"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it applies a client-local ordinary inverse edit under the editable lease through the ordinary local edit path, and this API does not grant filesystem/workspace authority, package/configuration/AI history mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientUndo` only as a documented command ID for `bindKey`; do not expose raw history stacks, server undo protocols, raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "agent_guidance": "Use `editor.clientUndo` only as a documented command ID for `bindKey`; do not expose raw history stacks, server undo protocols, raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "undo", "history", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1870,7 +1876,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.clientUndoCursorMove",
+      "id": "editor.clientUndoCursorMove",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-undo-cursor-move.md",
       "js_module": "clay:editor",
@@ -1889,7 +1895,7 @@
       "key_bindings": ["Ctrl+U"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.clientUndoCursorMove` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
+      "agent_guidance": "Use `editor.clientUndoCursorMove` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "js-api", "multi-cursor", "selection", "undo"],
       "app_visible": true,
       "help_visible": true,
@@ -1897,7 +1903,7 @@
       "async": false
     },
     {
-      "id": "clay.editor.serverDeleteRange",
+      "id": "editor.serverDeleteRange",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/server-delete-range.md",
       "js_module": "clay:editor",
@@ -1916,7 +1922,7 @@
       "key_bindings": ["Backspace", "Delete"],
       "custom_properties": [],
       "security": "Requires document edit authority, valid byte/scalar boundaries, and an editable lease; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.serverDeleteRange` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.serverDeleteRange` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["backspacedelete", "editor", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1924,7 +1930,7 @@
       "async": true
     },
     {
-      "id": "clay.editor.serverInsertNewline",
+      "id": "editor.serverInsertNewline",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/server-insert-newline.md",
       "js_module": "clay:editor",
@@ -1956,7 +1962,7 @@
         }
       ],
       "security": "Uses inert behavior manifest rules for hot-path newline shaping and still requires document edit authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.serverInsertNewline` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.serverInsertNewline` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "newline"],
       "app_visible": true,
       "help_visible": true,
@@ -1964,7 +1970,7 @@
       "async": true
     },
     {
-      "id": "clay.editor.serverInsertText",
+      "id": "editor.serverInsertText",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/server-insert-text.md",
       "js_module": "clay:editor",
@@ -1990,7 +1996,7 @@
         }
       ],
       "security": "Requires edit authority for the target document and a valid lease once runtime permission checks exist; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.editor.serverInsertText` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `editor.serverInsertText` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["editor", "js-api", "textinsertion"],
       "app_visible": true,
       "help_visible": true,
@@ -1998,7 +2004,7 @@
       "async": true
     },
     {
-      "id": "clay.git.serverListGitStatuses",
+      "id": "git.serverListGitStatuses",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/git/server-list-git-statuses.md",
       "js_module": "clay:git",
@@ -2017,7 +2023,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Reads the server-owned Git status cache for authorized workspace roots only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.git.serverListGitStatuses` only through the documented `clay:git` facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not spawn Git, invent shell arguments, mutate repositories, or bypass workspace roots.",
+      "agent_guidance": "Use `git.serverListGitStatuses` only through the documented `clay:git` facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not spawn Git, invent shell arguments, mutate repositories, or bypass workspace roots.",
       "lookup_tags": ["git", "status", "branch", "workspace", "phase18.13", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -2025,7 +2031,7 @@
       "async": true
     },
     {
-      "id": "clay.git.serverRefreshGitStatus",
+      "id": "git.serverRefreshGitStatus",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/git/server-refresh-git-status.md",
       "js_module": "clay:git",
@@ -2051,7 +2057,7 @@
         }
       ],
       "security": "Runs only Clay's closed read-only Git discovery commands under the selected workspace root; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.git.serverRefreshGitStatus` only through the documented `clay:git` facade for explicit refresh of a known workspace root. Do not expose arbitrary Git subcommands, shell arguments, repository mutation, or path traversal.",
+      "agent_guidance": "Use `git.serverRefreshGitStatus` only through the documented `clay:git` facade for explicit refresh of a known workspace root. Do not expose arbitrary Git subcommands, shell arguments, repository mutation, or path traversal.",
       "lookup_tags": ["git", "refresh", "status", "branch", "workspace", "phase18.13", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -2059,7 +2065,7 @@
       "async": true
     },
     {
-      "id": "clay.keybindings.bindKey",
+      "id": "keybindings.bindKey",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/keybindings/bind-key.md",
       "js_module": "clay:keybindings",
@@ -2103,7 +2109,7 @@
         }
       ],
       "security": "May bind only documented Clay command/API IDs unless a future permissioned extension command is registered; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.keybindings.bindKey` only for its documented keybindings responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `keybindings.bindKey` only for its documented keybindings responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["js-api", "keybindingmanagement", "keybindings"],
       "app_visible": true,
       "help_visible": true,
@@ -2111,7 +2117,7 @@
       "async": false
     },
     {
-      "id": "clay.keybindings.listKeyBindings",
+      "id": "keybindings.listKeyBindings",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/keybindings/list-key-bindings.md",
       "js_module": "clay:keybindings",
@@ -2137,7 +2143,7 @@
         }
       ],
       "security": "Returns documented key binding metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.keybindings.listKeyBindings` only for its documented keybindings responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `keybindings.listKeyBindings` only for its documented keybindings responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["js-api", "keybindingmanagement", "keybindings"],
       "app_visible": true,
       "help_visible": true,
@@ -2145,7 +2151,7 @@
       "async": false
     },
     {
-      "id": "clay.keybindings.unbindKey",
+      "id": "keybindings.unbindKey",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/keybindings/unbind-key.md",
       "js_module": "clay:keybindings",
@@ -2183,7 +2189,7 @@
         }
       ],
       "security": "Changes documented key routing only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.keybindings.unbindKey` only for its documented keybindings responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `keybindings.unbindKey` only for its documented keybindings responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["js-api", "keybindingmanagement", "keybindings"],
       "app_visible": true,
       "help_visible": true,
@@ -2191,7 +2197,7 @@
       "async": false
     },
     {
-      "id": "clay.language-server.authorizeLanguageServer",
+      "id": "language-server.authorizeLanguageServer",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/language-server/authorize-language-server.md",
       "js_module": "clay:language-server",
@@ -2237,7 +2243,7 @@
       "async": true
     },
     {
-      "id": "clay.language-server.startLanguageServerSession",
+      "id": "language-server.startLanguageServerSession",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/language-server/start-language-server-session.md",
       "js_module": "clay:language-server",
@@ -2283,7 +2289,7 @@
       "async": true
     },
     {
-      "id": "clay.language.serverRegisterDocumentAnalyzer",
+      "id": "language.serverRegisterDocumentAnalyzer",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/language/server-register-document-analyzer.md",
       "js_module": "clay:language",
@@ -2347,7 +2353,7 @@
       "async": false
     },
     {
-      "id": "clay.language.serverRegisterLanguageIntelligenceProvider",
+      "id": "language.serverRegisterLanguageIntelligenceProvider",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/language/server-register-language-intelligence-provider.md",
       "js_module": "clay:language",
@@ -2441,7 +2447,7 @@
       "async": false
     },
     {
-      "id": "clay.modes.serverActivateMajorMode",
+      "id": "modes.serverActivateMajorMode",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/modes/server-activate-major-mode.md",
       "js_module": "clay:modes",
@@ -2491,7 +2497,7 @@
         }
       ],
       "security": "Requires mode-activation permission and server validation that the mode was registered and matches the target document metadata; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, or arbitrary client behavior authority.",
-      "agent_guidance": "Use `clay.modes.serverActivateMajorMode` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `modes.serverActivateMajorMode` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["js-api", "modeactivation", "modes"],
       "app_visible": true,
       "help_visible": true,
@@ -2499,7 +2505,7 @@
       "async": false
     },
     {
-      "id": "clay.modes.serverClassifyDocument",
+      "id": "modes.serverClassifyDocument",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/modes/server-classify-document.md",
       "js_module": "clay:modes",
@@ -2537,7 +2543,7 @@
         }
       ],
       "security": "Returns mode classification metadata from already registered static patterns through server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority.",
-      "agent_guidance": "Use `clay.modes.serverClassifyDocument` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `modes.serverClassifyDocument` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["js-api", "modedocumentclassificationquery", "modes"],
       "app_visible": true,
       "help_visible": true,
@@ -2545,7 +2551,7 @@
       "async": false
     },
     {
-      "id": "clay.modes.serverRegisterModePattern",
+      "id": "modes.serverRegisterModePattern",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/modes/server-register-mode-pattern.md",
       "js_module": "clay:modes",
@@ -2603,11 +2609,11 @@
           "name": "editorRules",
           "type": "object | undefined",
           "default": "built-in code-editing defaults",
-          "description": "Optional declarative editor rules stored with the mode declaration and applied at activation. Generic rule fields (enter, tab, pairs, comments, electricCharacters, autocompleteTriggers) plus per-mode movement and caretStyle (Plan 071 tasks 4/6/11). Optional movement policy (Plan 071 task 4/11), validated by the server. Fields — wordSeparators ('code', 'prose', or { custom: string[] }), treatUnderscoreAsWord, camelCaseSubWord, paragraphStyle ('blankLine' | 'blankLineOrWhitespace'), stopAtEolWordEnd, lineMovement ('character' | 'screenLine'), stickyColumn. Absent fields fall back to the code-editing defaults. Optional caret appearance override (Plan 071 task 6/11), validated by the server. Fields — shape ('bar' | 'line' | 'block' | 'underline'), widthPx, heightPct, hollow, blink ('solid' | 'blink' | 'phase' | 'smooth'), smoothAnimationMs, stopBlinkOnTyping. Absent means the reduced-motion-safe editor default bar; clientSetCursorStyle overrides it at runtime. Every field is validated server-side; unknown keys and values are rejected deny-by-default. Build the object with clay.behavior.buildCodeEditingManifest."
+          "description": "Optional declarative editor rules stored with the mode declaration and applied at activation. Generic rule fields (enter, tab, pairs, comments, electricCharacters, autocompleteTriggers) plus per-mode movement and caretStyle (Plan 071 tasks 4/6/11). Optional movement policy (Plan 071 task 4/11), validated by the server. Fields — wordSeparators ('code', 'prose', or { custom: string[] }), treatUnderscoreAsWord, camelCaseSubWord, paragraphStyle ('blankLine' | 'blankLineOrWhitespace'), stopAtEolWordEnd, lineMovement ('character' | 'screenLine'), stickyColumn. Absent fields fall back to the code-editing defaults. Optional caret appearance override (Plan 071 task 6/11), validated by the server. Fields — shape ('bar' | 'line' | 'block' | 'underline'), widthPx, heightPct, hollow, blink ('solid' | 'blink' | 'phase' | 'smooth'), smoothAnimationMs, stopBlinkOnTyping. Absent means the reduced-motion-safe editor default bar; clientSetCursorStyle overrides it at runtime. Every field is validated server-side; unknown keys and values are rejected deny-by-default. Build the object with behavior.buildCodeEditingManifest."
         }
       ],
       "security": "Requires mode-registration permission and server validation of package prefix, static pattern schema, duplicate modes, and bounded open-document metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority.",
-      "agent_guidance": "Use `clay.modes.serverRegisterModePattern` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `modes.serverRegisterModePattern` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["js-api", "modedocumentclassification", "modes"],
       "app_visible": true,
       "help_visible": true,
@@ -2615,7 +2621,7 @@
       "async": false
     },
     {
-      "id": "clay.packages.loadPackage",
+      "id": "packages.loadPackage",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/packages/load-package.md",
       "js_module": "clay:packages",
@@ -2649,7 +2655,7 @@
       "async": true
     },
     {
-      "id": "clay.packages.serverLoadPackage",
+      "id": "packages.serverLoadPackage",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/packages/server-load-package.md",
       "js_module": "clay:packages",
@@ -2701,7 +2707,7 @@
       "async": false
     },
     {
-      "id": "clay.packages.serverValidatePackageManifest",
+      "id": "packages.serverValidatePackageManifest",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/packages/server-validate-package-manifest.md",
       "js_module": "clay:packages",
@@ -2745,7 +2751,7 @@
         }
       ],
       "security": "Validates package identity, semver, apiPrefix, permissions, modes, entry metadata, and prohibited authority metadata through server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, package installation, enable/disable, or package execution authority.",
-      "agent_guidance": "Use `clay.packages.serverValidatePackageManifest` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `packages.serverValidatePackageManifest` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["js-api", "packagemanifestvalidation", "packages"],
       "app_visible": true,
       "help_visible": true,
@@ -2753,7 +2759,7 @@
       "async": false
     },
     {
-      "id": "clay.packages.serverValidatePackagePermissions",
+      "id": "packages.serverValidatePackagePermissions",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/packages/server-validate-package-permissions.md",
       "js_module": "clay:packages",
@@ -2779,7 +2785,7 @@
         }
       ],
       "security": "Validates declared package permissions and grants no authority by itself; rejects unknown, undeclared, prohibited, or unapproved scopes through server validation and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, package installation, enable/disable, or package execution authority.",
-      "agent_guidance": "Use `clay.packages.serverValidatePackagePermissions` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "agent_guidance": "Use `packages.serverValidatePackagePermissions` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["js-api", "packagepermissionvalidation", "packages"],
       "app_visible": true,
       "help_visible": true,
@@ -2787,7 +2793,7 @@
       "async": false
     },
     {
-      "id": "clay.parse.serverRegisterParseHandler",
+      "id": "parse.serverRegisterParseHandler",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/parse/server-register-parse-handler.md",
       "js_module": "clay:parse",
@@ -2867,7 +2873,7 @@
         }
       ],
       "security": "Requires parse-document permission and server validation of package provenance, mode, parse unit, timeout, cancellation/stale-version behavior, bounded parse-window snapshots, syntax memory budget, and bounded parse result publication; handler functions stay in the persistent server runtime behind a server-issued token and executable handler/callback/onParse/function payload keys are rejected; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond Clay-provided open document content.",
-      "agent_guidance": "Use `clay.parse.serverRegisterParseHandler` to declare a package-owned background parser with `{ module, exportName }`. Do not pass executable callbacks in registration payloads or put parse work on the client hot path. Treat `clay.runtime.timeout` as the diagnostic for a handler/runtime evaluation that exceeds its validated timeout budget.",
+      "agent_guidance": "Use `parse.serverRegisterParseHandler` to declare a package-owned background parser with `{ module, exportName }`. Do not pass executable callbacks in registration payloads or put parse work on the client hot path. Treat `runtime.timeout` as the diagnostic for a handler/runtime evaluation that exceeds its validated timeout budget.",
       "lookup_tags": ["js-api", "parse", "markdown", "incrementalparseupdate", "parser"],
       "app_visible": true,
       "help_visible": true,
@@ -2875,7 +2881,7 @@
       "async": false
     },
     {
-      "id": "clay.sdui.defineButton",
+      "id": "sdui.defineButton",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/sdui/define-button.md",
       "js_module": "clay:sdui",
@@ -2913,7 +2919,7 @@
         }
       ],
       "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.sdui.defineButton` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "agent_guidance": "Use `sdui.defineButton` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
       "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -2921,7 +2927,7 @@
       "async": false
     },
     {
-      "id": "clay.sdui.defineEditorView",
+      "id": "sdui.defineEditorView",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/sdui/define-editor-view.md",
       "js_module": "clay:sdui",
@@ -2959,7 +2965,7 @@
         }
       ],
       "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.sdui.defineEditorView` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "agent_guidance": "Use `sdui.defineEditorView` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
       "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -2967,7 +2973,7 @@
       "async": false
     },
     {
-      "id": "clay.sdui.defineFlex",
+      "id": "sdui.defineFlex",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/sdui/define-flex.md",
       "js_module": "clay:sdui",
@@ -3005,7 +3011,7 @@
         }
       ],
       "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.sdui.defineFlex` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "agent_guidance": "Use `sdui.defineFlex` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
       "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -3013,7 +3019,7 @@
       "async": false
     },
     {
-      "id": "clay.sdui.defineLabel",
+      "id": "sdui.defineLabel",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/sdui/define-label.md",
       "js_module": "clay:sdui",
@@ -3045,7 +3051,7 @@
         }
       ],
       "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.sdui.defineLabel` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "agent_guidance": "Use `sdui.defineLabel` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
       "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -3053,7 +3059,7 @@
       "async": false
     },
     {
-      "id": "clay.sdui.defineList",
+      "id": "sdui.defineList",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/sdui/define-list.md",
       "js_module": "clay:sdui",
@@ -3085,7 +3091,7 @@
         }
       ],
       "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.sdui.defineList` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "agent_guidance": "Use `sdui.defineList` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
       "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -3093,7 +3099,7 @@
       "async": false
     },
     {
-      "id": "clay.sdui.definePanel",
+      "id": "sdui.definePanel",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/sdui/define-panel.md",
       "js_module": "clay:sdui",
@@ -3131,7 +3137,7 @@
         }
       ],
       "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.sdui.definePanel` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "agent_guidance": "Use `sdui.definePanel` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
       "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -3139,7 +3145,7 @@
       "async": false
     },
     {
-      "id": "clay.sdui.defineStack",
+      "id": "sdui.defineStack",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/sdui/define-stack.md",
       "js_module": "clay:sdui",
@@ -3171,7 +3177,7 @@
         }
       ],
       "security": "Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.sdui.defineStack` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
+      "agent_guidance": "Use `sdui.defineStack` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.",
       "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase12", "phase13", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -3179,7 +3185,7 @@
       "async": false
     },
     {
-      "id": "clay.sdui.publishTree",
+      "id": "sdui.publishTree",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/sdui/publish-tree.md",
       "js_module": "clay:sdui",
@@ -3205,7 +3211,7 @@
         }
       ],
       "security": "Publishes inert declarative UI metadata only after server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.sdui.publishTree` only from server-side configuration or extension code after building inert SDUI nodes with documented helpers; never call raw ops or embed executable client script.",
+      "agent_guidance": "Use `sdui.publishTree` only from server-side configuration or extension code after building inert SDUI nodes with documented helpers; never call raw ops or embed executable client script.",
       "lookup_tags": ["sdui", "server-driven-ui", "js-api", "phase13", "runtime-backed", "configuration"],
       "app_visible": true,
       "help_visible": true,
@@ -3213,7 +3219,7 @@
       "async": true
     },
     {
-      "id": "clay.shell.clientAddEqualPane",
+      "id": "shell.clientAddEqualPane",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-add-equal-pane.md",
       "js_module": "clay:shell",
@@ -3232,7 +3238,7 @@
       "key_bindings": ["Ctrl+Shift+\\\\"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientAddEqualPane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientAddEqualPane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3240,7 +3246,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientClosePane",
+      "id": "shell.clientClosePane",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-close-pane.md",
       "js_module": "clay:shell",
@@ -3259,7 +3265,7 @@
       "key_bindings": ["Ctrl+Alt+W"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no package JavaScript, no IPC for topology). Since Phase 22.2, closing a pane with a dirty document is blocked, and closing a clean pane releases its document lease only through the server's existing capability-gated close path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. This command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientClosePane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientClosePane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3267,7 +3273,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientFocusPaneNext",
+      "id": "shell.clientFocusPaneNext",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-focus-pane-next.md",
       "js_module": "clay:shell",
@@ -3286,7 +3292,7 @@
       "key_bindings": ["Ctrl+Alt+Right"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientFocusPaneNext` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientFocusPaneNext` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3294,7 +3300,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientFocusPanePrev",
+      "id": "shell.clientFocusPanePrev",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-focus-pane-prev.md",
       "js_module": "clay:shell",
@@ -3313,7 +3319,7 @@
       "key_bindings": ["Ctrl+Alt+Left"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientFocusPanePrev` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientFocusPanePrev` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3321,7 +3327,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientMovePaneNext",
+      "id": "shell.clientMovePaneNext",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-move-pane-next.md",
       "js_module": "clay:shell",
@@ -3340,7 +3346,7 @@
       "key_bindings": ["Ctrl+Alt+]"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientMovePaneNext` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientMovePaneNext` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3348,7 +3354,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientMovePanePrev",
+      "id": "shell.clientMovePanePrev",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-move-pane-prev.md",
       "js_module": "clay:shell",
@@ -3367,7 +3373,7 @@
       "key_bindings": ["Ctrl+Alt+["],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientMovePanePrev` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientMovePanePrev` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3375,7 +3381,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientResizePaneDown",
+      "id": "shell.clientResizePaneDown",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-resize-pane-down.md",
       "js_module": "clay:shell",
@@ -3394,7 +3400,7 @@
       "key_bindings": ["Ctrl+Alt+Shift+Down"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientResizePaneDown` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientResizePaneDown` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3402,7 +3408,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientResizePaneLeft",
+      "id": "shell.clientResizePaneLeft",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-resize-pane-left.md",
       "js_module": "clay:shell",
@@ -3421,7 +3427,7 @@
       "key_bindings": ["Ctrl+Alt+Shift+Left"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientResizePaneLeft` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientResizePaneLeft` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3429,7 +3435,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientResizePaneRight",
+      "id": "shell.clientResizePaneRight",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-resize-pane-right.md",
       "js_module": "clay:shell",
@@ -3448,7 +3454,7 @@
       "key_bindings": ["Ctrl+Alt+Shift+Right"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientResizePaneRight` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientResizePaneRight` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3456,7 +3462,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientResizePaneUp",
+      "id": "shell.clientResizePaneUp",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-resize-pane-up.md",
       "js_module": "clay:shell",
@@ -3475,7 +3481,7 @@
       "key_bindings": ["Ctrl+Alt+Shift+Up"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientResizePaneUp` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientResizePaneUp` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3483,7 +3489,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientSplitPaneDown",
+      "id": "shell.clientSplitPaneDown",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-split-pane-down.md",
       "js_module": "clay:shell",
@@ -3502,7 +3508,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientSplitPaneDown` only as a documented command ID for `bindKey` to name the down-split direction. It is an alias of `clay.shell.clientSplitPaneHorizontal` (canonical ID, unchanged default `Ctrl+-` chord); prefer the canonical ID in new configuration. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientSplitPaneDown` only as a documented command ID for `bindKey` to name the down-split direction. It is an alias of `shell.clientSplitPaneHorizontal` (canonical ID, unchanged default `Ctrl+-` chord); prefer the canonical ID in new configuration. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "aliases", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3510,7 +3516,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientSplitPaneHorizontal",
+      "id": "shell.clientSplitPaneHorizontal",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-split-pane-horizontal.md",
       "js_module": "clay:shell",
@@ -3529,7 +3535,7 @@
       "key_bindings": ["Ctrl+-"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientSplitPaneHorizontal` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientSplitPaneHorizontal` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3537,7 +3543,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientSplitPaneRight",
+      "id": "shell.clientSplitPaneRight",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-split-pane-right.md",
       "js_module": "clay:shell",
@@ -3556,7 +3562,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientSplitPaneRight` only as a documented command ID for `bindKey` to name the right-split direction. It is an alias of `clay.shell.clientSplitPaneVertical` (canonical ID, unchanged default `Ctrl+\\\\` chord); prefer the canonical ID in new configuration. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientSplitPaneRight` only as a documented command ID for `bindKey` to name the right-split direction. It is an alias of `shell.clientSplitPaneVertical` (canonical ID, unchanged default `Ctrl+\\\\` chord); prefer the canonical ID in new configuration. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "aliases", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3564,7 +3570,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientSplitPaneVertical",
+      "id": "shell.clientSplitPaneVertical",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-split-pane-vertical.md",
       "js_module": "clay:shell",
@@ -3583,7 +3589,7 @@
       "key_bindings": ["Ctrl+\\\\"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientSplitPaneVertical` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientSplitPaneVertical` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "panes", "splits", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3591,7 +3597,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientTabActivate",
+      "id": "shell.clientTabActivate",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-tab-activate.md",
       "js_module": "clay:shell",
@@ -3610,7 +3616,7 @@
       "key_bindings": ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned tab state via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientTabActivate` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientTabActivate` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "tabs", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3618,7 +3624,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientTabClose",
+      "id": "shell.clientTabClose",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-tab-close.md",
       "js_module": "clay:shell",
@@ -3637,7 +3643,7 @@
       "key_bindings": ["Ctrl+Shift+W"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it switches the active tab via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientTabClose` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientTabClose` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "tabs", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3645,7 +3651,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientTabMoveLeft",
+      "id": "shell.clientTabMoveLeft",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-tab-move-left.md",
       "js_module": "clay:shell",
@@ -3664,7 +3670,7 @@
       "key_bindings": ["Ctrl+Shift+["],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it switches the active tab via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientTabMoveLeft` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientTabMoveLeft` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "tabs", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3672,7 +3678,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientTabMoveRight",
+      "id": "shell.clientTabMoveRight",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-tab-move-right.md",
       "js_module": "clay:shell",
@@ -3691,7 +3697,7 @@
       "key_bindings": ["Ctrl+Shift+]"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it switches the active tab via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientTabMoveRight` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientTabMoveRight` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "tabs", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3699,7 +3705,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientTabMoveTo",
+      "id": "shell.clientTabMoveTo",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-tab-move-to.md",
       "js_module": "clay:shell",
@@ -3718,7 +3724,7 @@
       "key_bindings": ["Ctrl+Shift+1", "Ctrl+Shift+2", "Ctrl+Shift+3", "Ctrl+Shift+4", "Ctrl+Shift+5", "Ctrl+Shift+6", "Ctrl+Shift+7", "Ctrl+Shift+8", "Ctrl+Shift+9"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned tab order via TabCommand::MoveTo with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientTabMoveTo` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientTabMoveTo` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "tabs", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3726,7 +3732,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientTabNew",
+      "id": "shell.clientTabNew",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-tab-new.md",
       "js_module": "clay:shell",
@@ -3745,7 +3751,7 @@
       "key_bindings": ["Ctrl+T"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it switches the active tab via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientTabNew` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientTabNew` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "tabs", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3753,7 +3759,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientTabNext",
+      "id": "shell.clientTabNext",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-tab-next.md",
       "js_module": "clay:shell",
@@ -3772,7 +3778,7 @@
       "key_bindings": ["Ctrl+Tab"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it switches the active tab via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientTabNext` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientTabNext` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "tabs", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3780,7 +3786,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.clientTabPrev",
+      "id": "shell.clientTabPrev",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-tab-prev.md",
       "js_module": "clay:shell",
@@ -3799,7 +3805,7 @@
       "key_bindings": ["Ctrl+Shift+Tab"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it switches the active tab via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.",
-      "agent_guidance": "Use `clay.shell.clientTabPrev` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
+      "agent_guidance": "Use `shell.clientTabPrev` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
       "lookup_tags": ["shell", "tabs", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -3807,7 +3813,7 @@
       "async": false
     },
     {
-      "id": "clay.shell.setPaneFocusPolicy",
+      "id": "shell.setPaneFocusPolicy",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/set-pane-focus-policy.md",
       "js_module": "clay:shell",
@@ -3841,7 +3847,7 @@
       "async": false
     },
     {
-      "id": "clay.syntax.serverRegisterSyntaxGrammar",
+      "id": "syntax.serverRegisterSyntaxGrammar",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/syntax/server-register-syntax-grammar.md",
       "js_module": "clay:syntax",
@@ -3927,7 +3933,7 @@
         }
       ],
       "security": "Requires parse-document and render-decorations permissions with server-side validation of first-party @clay/* package provenance, compiled-in native source IDs or package-root-confined tree-sitter-wasm paths, confined .scm paths, closed vocabulary/validated legacy style maps, duplicate registry conflicts, and Background/no-hot-path parse/decor scheduling. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, arbitrary native/WASM loading, or client-side JavaScript authority; rejects raw ops, executable callbacks, arbitrary artifact paths, URLs, parent traversal, native handles/libraries, raw CSS/colors, package-manager/download fields, and third-party native grammar loading.",
-      "agent_guidance": "Use `clay.syntax.serverRegisterSyntaxGrammar` only from first-party grammar package load entries after manifest validation. Prefer `loadPackage(\"@clay/rust\")`, `loadPackage(\"@clay/typescript\")`, or `loadPackage(\"@clay/javascript\")` for ordinary user setup. Do not expose raw Deno ops or register arbitrary third-party/native grammars in this phase.",
+      "agent_guidance": "Use `syntax.serverRegisterSyntaxGrammar` only from first-party grammar package load entries after manifest validation. Prefer `loadPackage(\"@clay/rust\")`, `loadPackage(\"@clay/typescript\")`, or `loadPackage(\"@clay/javascript\")` for ordinary user setup. Do not expose raw Deno ops or register arbitrary third-party/native grammars in this phase.",
       "lookup_tags": ["js-api", "syntax", "tree-sitter", "grammar", "highlighting"],
       "app_visible": true,
       "help_visible": true,
@@ -3935,7 +3941,7 @@
       "async": false
     },
     {
-      "id": "clay.syntax.setSyntaxEnginePreference",
+      "id": "syntax.setSyntaxEnginePreference",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/syntax/set-syntax-engine-preference.md",
       "js_module": "clay:syntax",
@@ -3975,7 +3981,7 @@
       "async": false
     },
     {
-      "id": "clay.theme.setAppearance",
+      "id": "theme.setAppearance",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/theme/set-appearance.md",
       "js_module": "clay:theme",
@@ -4009,7 +4015,7 @@
       "async": false
     },
     {
-      "id": "clay.theme.setTheme",
+      "id": "theme.setTheme",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/theme/set-theme.md",
       "js_module": "clay:theme",
@@ -4043,7 +4049,7 @@
       "async": false
     },
     {
-      "id": "clay.theme.setTypography",
+      "id": "theme.setTypography",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/theme/set-typography.md",
       "js_module": "clay:theme",
@@ -4173,7 +4179,7 @@
       "async": false
     },
     {
-      "id": "clay.ui.serverRegisterComponentContribution",
+      "id": "ui.serverRegisterComponentContribution",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/ui/server-register-component-contribution.md",
       "js_module": "clay:ui",
@@ -4241,7 +4247,7 @@
         }
       ],
       "security": "Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.",
-      "agent_guidance": "Use `clay.ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, Masonry names, CSS strings, or executable client hooks.",
+      "agent_guidance": "Use `ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, Masonry names, CSS strings, or executable client hooks.",
       "lookup_tags": ["ui", "package-ui", "component-catalog", "style-tokens", "clay-js-api", "phase18.3", "phase20.5", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -4249,7 +4255,7 @@
       "async": false
     },
     {
-      "id": "clay.ui.serverRegisterInputContribution",
+      "id": "ui.serverRegisterInputContribution",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/ui/server-register-input-contribution.md",
       "js_module": "clay:ui",
@@ -4329,7 +4335,7 @@
         }
       ],
       "security": "Validates package-prefixed input IDs, supported pointer/focus/selection policies, manifest-declared modes, registered action targets, provenance, and payload ceilings; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, raw native event callbacks, or key-routing authority.",
-      "agent_guidance": "Use `clay.ui.serverRegisterInputContribution` for inert pointer/focus/action metadata only; keep keys in behavior manifests/keybindings and never expose raw event callbacks, native handles, raw ops, CSS, or client-side JavaScript hooks.",
+      "agent_guidance": "Use `ui.serverRegisterInputContribution` for inert pointer/focus/action metadata only; keep keys in behavior manifests/keybindings and never expose raw event callbacks, native handles, raw ops, CSS, or client-side JavaScript hooks.",
       "lookup_tags": ["ui", "package-ui", "input", "focus", "action-routing", "clay-js-api", "phase18.4", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -4337,7 +4343,7 @@
       "async": false
     },
     {
-      "id": "clay.ui.serverRegisterPanelContribution",
+      "id": "ui.serverRegisterPanelContribution",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/ui/server-register-panel-contribution.md",
       "js_module": "clay:ui",
@@ -4393,7 +4399,7 @@
         }
       ],
       "security": "Validates package-prefixed panel IDs, supported slots, bounded component payloads, registered action targets, provenance, and conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.",
-      "agent_guidance": "Use `clay.ui.serverRegisterPanelContribution` for inert fixed package panels only; do not invent raw ops, native widget handles, Masonry APIs, raw CSS, client-side JavaScript hooks, or hidden layout configuration keys.",
+      "agent_guidance": "Use `ui.serverRegisterPanelContribution` for inert fixed package panels only; do not invent raw ops, native widget handles, Masonry APIs, raw CSS, client-side JavaScript hooks, or hidden layout configuration keys.",
       "lookup_tags": ["ui", "package-ui", "panel", "slot-layout", "clay-js-api", "phase18.3", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -4401,7 +4407,7 @@
       "async": false
     },
     {
-      "id": "clay.ui.serverRegisterThemeToken",
+      "id": "ui.serverRegisterThemeToken",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/ui/server-register-theme-token.md",
       "js_module": "clay:ui",
@@ -4451,7 +4457,7 @@
         }
       ],
       "security": "Validates package-prefixed semantic token names, token types, same-type Clay core fallbacks, descriptions, provenance, and token conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, raw CSS, raw style strings, arbitrary raw colors, direct Masonry widgets, native widget handles, Vello callbacks, Parley callbacks, renderer callbacks, arbitrary GPU draw authority, or external authority.",
-      "agent_guidance": "Use `clay.ui.serverRegisterThemeToken` for semantic package theme tokens only; do not expose raw colors, CSS, renderer callbacks, native handles, raw ops, hidden theme override keys, or client-side JavaScript style hooks.",
+      "agent_guidance": "Use `ui.serverRegisterThemeToken` for semantic package theme tokens only; do not expose raw colors, CSS, renderer callbacks, native handles, raw ops, hidden theme override keys, or client-side JavaScript style hooks.",
       "lookup_tags": ["ui", "package-ui", "theme-token", "style-tokens", "clay-js-api", "phase18.3", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -4459,7 +4465,7 @@
       "async": false
     },
     {
-      "id": "clay.ui.serverRegisterTransientOverlayContribution",
+      "id": "ui.serverRegisterTransientOverlayContribution",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/ui/server-register-transient-overlay-contribution.md",
       "js_module": "clay:ui",
@@ -4515,7 +4521,7 @@
         }
       ],
       "security": "Validates package-prefixed overlay IDs, anchors, focus and dismissal policy, bounded component payloads, registered action targets, provenance, and conflicts while Clay owns z-order, focus, accessibility, and native overlay rendering; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.",
-      "agent_guidance": "Use `clay.ui.serverRegisterTransientOverlayContribution` for declarative dismissible package overlays only; avoid fixed-slot panels, raw ops, native widget handles, direct Masonry APIs, raw CSS, renderer callbacks, client-side JavaScript hooks, and hidden focus/z-order settings.",
+      "agent_guidance": "Use `ui.serverRegisterTransientOverlayContribution` for declarative dismissible package overlays only; avoid fixed-slot panels, raw ops, native widget handles, direct Masonry APIs, raw CSS, renderer callbacks, client-side JavaScript hooks, and hidden focus/z-order settings.",
       "lookup_tags": ["ui", "package-ui", "overlay", "focus-policy", "clay-js-api", "phase18.3", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -4523,7 +4529,7 @@
       "async": false
     },
     {
-      "id": "clay.ui.serverRegisterUiStateScope",
+      "id": "ui.serverRegisterUiStateScope",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/ui/server-register-ui-state-scope.md",
       "js_module": "clay:ui",
@@ -4591,7 +4597,7 @@
         }
       ],
       "security": "Validates package-prefixed IDs, supported state scopes, lifecycle metadata, schema kind, target IDs, provenance, hidden-key rejection, prohibited authority fields, and payload ceilings; registers schemas only and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, state-value mutation, hidden globals, or raw JSON blob authority.",
-      "agent_guidance": "Use `clay.ui.serverRegisterUiStateScope` for inert state schema and lifecycle declarations only. Do not store package state values, raw documents, hidden configuration, native handles, callbacks, raw ops, CSS, or client-side JavaScript through this API.",
+      "agent_guidance": "Use `ui.serverRegisterUiStateScope` for inert state schema and lifecycle declarations only. Do not store package state values, raw documents, hidden configuration, native handles, callbacks, raw ops, CSS, or client-side JavaScript through this API.",
       "lookup_tags": ["ui", "package-ui", "state", "lifecycle", "clay-js-api", "phase18.4", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -4599,7 +4605,7 @@
       "async": false
     },
     {
-      "id": "clay.ui.serverRequestLayoutIntent",
+      "id": "ui.serverRequestLayoutIntent",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/ui/server-request-layout-intent.md",
       "js_module": "clay:ui",
@@ -4657,7 +4663,7 @@
       "async": false
     },
     {
-      "id": "clay.ui.serverSetLayoutOverride",
+      "id": "ui.serverSetLayoutOverride",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/ui/server-set-layout-override.md",
       "js_module": "clay:ui",
@@ -4709,7 +4715,7 @@
       "async": false
     },
     {
-      "id": "clay.workspace.clientOpenFolderDialog",
+      "id": "workspace.clientOpenFolderDialog",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/workspace/client-open-folder-dialog.md",
       "js_module": "clay:workspace",
@@ -4728,7 +4734,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; native folder selection requires explicit user key routing, selected folders are sent through the server selected-path capability flow before becoming workspace roots, and this API does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard read/write, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.workspace.clientOpenFolderDialog` as a documented command ID for `bindKey`; do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`, and do not invent dialog options, broad filesystem access, workspace expansion without server validation, package loading, shell/network effects, WASM, AI mutation, clipboard access, or client-side JavaScript execution.",
+      "agent_guidance": "Use `workspace.clientOpenFolderDialog` as a documented command ID for `bindKey`; do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`, and do not invent dialog options, broad filesystem access, workspace expansion without server validation, package loading, shell/network effects, WASM, AI mutation, clipboard access, or client-side JavaScript execution.",
       "lookup_tags": ["workspace", "open-folder", "folder-dialog", "xdg-desktop-portal", "windows", "macos", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -4736,7 +4742,7 @@
       "async": false
     },
     {
-      "id": "clay.workspace.serverAddWorkspaceRoot",
+      "id": "workspace.serverAddWorkspaceRoot",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/workspace/server-add-workspace-root.md",
       "js_module": "clay:workspace",
@@ -4755,7 +4761,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Requires explicit user workspace approval and server canonicalization; directories become bounded workspace roots and files become selected-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.workspace.serverAddWorkspaceRoot` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `workspace.serverAddWorkspaceRoot` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
       "lookup_tags": ["workspace", "roots", "grants", "file-browser", "phase18.12", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -4763,7 +4769,7 @@
       "async": true
     },
     {
-      "id": "clay.workspace.serverCancelListing",
+      "id": "workspace.serverCancelListing",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/workspace/server-cancel-listing.md",
       "js_module": "clay:workspace",
@@ -4782,7 +4788,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Cancels only server-owned listing work for an opaque token and does not grant filesystem, workspace, file, root, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.workspace.serverCancelListing` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `workspace.serverCancelListing` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
       "lookup_tags": ["workspace", "directory-listing", "cancellation", "phase18.12", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -4790,7 +4796,7 @@
       "async": true
     },
     {
-      "id": "clay.workspace.serverCreateListingCancelToken",
+      "id": "workspace.serverCreateListingCancelToken",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/workspace/server-create-listing-cancel-token.md",
       "js_module": "clay:workspace",
@@ -4809,7 +4815,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Creates only an opaque cancellation token for workspace listing work and does not grant filesystem, workspace, file, root, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.workspace.serverCreateListingCancelToken` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `workspace.serverCreateListingCancelToken` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
       "lookup_tags": ["workspace", "directory-listing", "cancellation", "phase18.12", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -4817,7 +4823,7 @@
       "async": true
     },
     {
-      "id": "clay.workspace.serverDiscoverWorkspaceRootForPath",
+      "id": "workspace.serverDiscoverWorkspaceRootForPath",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/workspace/server-discover-workspace-root-for-path.md",
       "js_module": "clay:workspace",
@@ -4836,7 +4842,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Uses a closed Clay-owned marker set and bounded ancestry scan over an already-authorized path; packages cannot add marker names or root rules; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.workspace.serverDiscoverWorkspaceRootForPath` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `workspace.serverDiscoverWorkspaceRootForPath` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
       "lookup_tags": ["workspace", "discovery", "roots", "markers", "phase18.12", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -4844,7 +4850,7 @@
       "async": true
     },
     {
-      "id": "clay.workspace.serverListDirectory",
+      "id": "workspace.serverListDirectory",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/workspace/server-list-directory.md",
       "js_module": "clay:workspace",
@@ -4882,7 +4888,7 @@
         }
       ],
       "security": "Uses server validation to list only paths inside a known workspace root after traversal checks and bounded ignore/depth/count rules using the component grammar; malformed, unsupported, or oversized root .gitignore input aborts with a bounded diagnostic instead of broadening traversal. Packages cannot list arbitrary paths or bypass diagnostics; the API does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.workspace.serverListDirectory` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `workspace.serverListDirectory` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.",
       "lookup_tags": ["workspace", "directory-listing", "file-browser", "cancellation", "phase18.12", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -4890,7 +4896,7 @@
       "async": true
     },
     {
-      "id": "clay.workspace.serverListWorkspaceRoots",
+      "id": "workspace.serverListWorkspaceRoots",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/workspace/server-list-workspace-roots.md",
       "js_module": "clay:workspace",
@@ -4909,7 +4915,7 @@
       "key_bindings": [],
       "custom_properties": [],
       "security": "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `clay.workspace.serverListWorkspaceRoots` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
+      "agent_guidance": "Use `workspace.serverListWorkspaceRoots` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["workspace", "roots", "metadata", "file", "js-api"],
       "app_visible": true,
       "help_visible": true,

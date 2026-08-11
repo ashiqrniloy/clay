@@ -20,13 +20,13 @@ The Clay JS documentation registry turns the Markdown files linked under `docs/i
 - Parse Clay JS API Markdown frontmatter from the explicit master-index link list.
 - Validate required registry metadata, including stable IDs, JS facade mapping, future op mapping, key bindings, custom properties, lookup tags, and no-authority security notes.
 - Statically enforce no-authority-by-default security language for configuration-relevant APIs in source docs, inventory metadata, and generated registry entries.
-- Include Phase 8 configuration entry point APIs (`clay.configuration.loadConfigurationModule` and `clay.configuration.getConfigurationState`) so app/help/agent lookup can discover `~/.config/clay/init.js` and local modular configuration semantics without executing user code.
-- Include Phase 9 file/workspace APIs (`clay.documents.serverOpenDocument`, `serverSaveDocument`, `serverReloadDocument`, `serverGetDocumentStatus`, `serverListDocuments`, and `clay.workspace.serverListWorkspaceRoots`) so app/help/agent lookup can discover server-owned file IO and workspace metadata capabilities without exposing raw protocol messages or filesystem authority.
-- Verify key binding configuration APIs (`clay.keybindings.bindKey`, `clay.keybindings.unbindKey`, and `clay.keybindings.listKeyBindings`) as planned server-side configuration/query APIs with empty default key-binding lists, queryable `key`/`command`/`scope`/`when` custom properties, command ID validation notes, and no external authority.
-- Verify initial editor customization metadata for `clay.editor.clientSetCursorStyle`, including generated `color`, `blinking`, and `type` custom properties with types, defaults, allowed values where relevant, lookup coverage, and no document-mutation or external authority.
+- Include Phase 8 configuration entry point APIs (`configuration.loadConfigurationModule` and `configuration.getConfigurationState`) so app/help/agent lookup can discover `~/.config/clay/init.js` and local modular configuration semantics without executing user code.
+- Include Phase 9 file/workspace APIs (`documents.serverOpenDocument`, `serverSaveDocument`, `serverReloadDocument`, `serverGetDocumentStatus`, `serverListDocuments`, and `workspace.serverListWorkspaceRoots`) so app/help/agent lookup can discover server-owned file IO and workspace metadata capabilities without exposing raw protocol messages or filesystem authority.
+- Verify key binding configuration APIs (`keybindings.bindKey`, `keybindings.unbindKey`, and `keybindings.listKeyBindings`) as planned server-side configuration/query APIs with empty default key-binding lists, queryable `key`/`command`/`scope`/`when` custom properties, command ID validation notes, and no external authority.
+- Verify initial editor customization metadata for `editor.clientSetCursorStyle`, including generated `color`, `blinking`, and `type` custom properties with types, defaults, allowed values where relevant, lookup coverage, and no document-mutation or external authority.
 - Include Phase 13 SDUI schema helper/publication APIs under `clay:sdui` (`definePanel`, `defineLabel`, `defineButton`, `defineList`, `defineEditorView`, `defineFlex`, `defineStack`, and `publishTree`) so app/help/agent lookup can discover runtime-backed inert server-driven UI construction without exposing raw protocol DTOs, native observability internals, or client-side script authority.
 - Include Phase 18.3 package UI contribution APIs under `clay:ui` (`serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterTransientOverlayContribution`, and `serverRegisterThemeToken`) so app/help/agent lookup can discover runtime-backed inert fixed panel, component, transient overlay, and theme-token declarations without exposing raw ops, Masonry widgets, native handles, raw CSS, or client-side JavaScript authority.
-- Include Phase 18.4 public programmatic APIs (`clay.ui.serverRegisterInputContribution`, `clay.ui.serverRegisterUiStateScope`, `clay.ui.serverSetLayoutOverride`, and `clay.configuration.setPackageOption`) with Markdown docs, docs-index links, inventory rows, generated registry entries, custom-property lookup, app/help visibility, facade/op/Rust metadata, and security notes while keeping working-area, pane-split, and direct pane-slot mutation APIs planned and absent from the generated registry.
+- Include Phase 18.4 public programmatic APIs (`ui.serverRegisterInputContribution`, `ui.serverRegisterUiStateScope`, `ui.serverSetLayoutOverride`, and `configuration.setPackageOption`) with Markdown docs, docs-index links, inventory rows, generated registry entries, custom-property lookup, app/help visibility, facade/op/Rust metadata, and security notes while keeping working-area, pane-split, and direct pane-slot mutation APIs planned and absent from the generated registry.
 - Keep Phase 15 SDUI observability helpers (`SduiObservableSnapshot`, `SduiStatusObservation`, and their extraction methods) crate-internal unless a future dedicated Clay JS API adds docs, facade, op, inventory, and generated-registry metadata.
 - Produce deterministic JSON ordered by stable API ID.
 - Load the checked-in generated JSON with `ClayJsApiRegistry::from_generated` for app/help/agent discovery without reading source Markdown during normal lookup.
@@ -61,7 +61,7 @@ let root = clay::docs::registry::repository_root();
 clay::docs::registry::check_generated_registry_current(&root)?;
 
 let registry = clay::docs::registry::ClayJsApiRegistry::from_generated()?;
-let cursor_style = registry.by_id("clay.editor.clientSetCursorStyle");
+let cursor_style = registry.by_id("editor.clientSetCursorStyle");
 let configurable_color_apis = registry.by_custom_property("color");
 ```
 
@@ -119,8 +119,8 @@ let configurable_color_apis = registry.by_custom_property("color");
 
 ## Phase 22.7: Split-Alias Entries
 
-Phase 22.7 added `clay.shell.clientSplitPaneRight` and
-`clay.shell.clientSplitPaneDown` as registry-public entries (123 total,
+Phase 22.7 added `shell.clientSplitPaneRight` and
+`shell.clientSplitPaneDown` as registry-public entries (123 total,
 all public) with `key_bindings: []` (aliases — the canonical
 `Ctrl+\`/`Ctrl+-` defaults stay on the vertical/horizontal entries) and
 `phase: Phase 22.7`. They ride the same validation surface as every other
@@ -142,14 +142,14 @@ routing (`route_connection_tab_state`, `document_for_message`, and workspace
 command result handling) remains private. The client reconnect/restore helpers
 are native client plumbing, not server-side JavaScript APIs.
 
-Existing documented APIs remain the public boundary: `clay.shell.clientTabNew`
+Existing documented APIs remain the public boundary: `shell.clientTabNew`
 starts a picker-backed connection-bound `TabCommand::New`,
-`clay.documents.serverOpenDocument` and `clay.workspace` APIs operate through
-server-owned workspace validation, and `clay.commands.serverOpenFile`/
+`documents.serverOpenDocument` and `clay.workspace` APIs operate through
+server-owned workspace validation, and `commands.serverOpenFile`/
 `serverOpenDirectory` reuse the command boundary. None accepts an arbitrary
-`TabId` or exposes a `TabServerState` handle. `clay.workspace.toggleFileBrowser`
+`TabId` or exposes a `TabServerState` handle. `workspace.toggleFileBrowser`
 is a fixed built-in command ID routed through the existing
-`clay.keybindings.bindKey` API, so it is documented in the keybinding/configuration
+`keybindings.bindKey` API, so it is documented in the keybinding/configuration
 reference but is deliberately not a second callable facade or registry entry.
 This keeps the per-tab workspace pane flag server-authoritative without adding
 hidden configuration keys or implicit filesystem authority.

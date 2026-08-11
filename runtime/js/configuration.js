@@ -7,6 +7,7 @@
 function configurationOps() {
     const ops = Deno?.core?.ops;
     if (typeof ops?.op_clay_configuration_load_module !== "function" ||
+        typeof ops?.op_clay_configuration_record_module_error !== "function" ||
         typeof ops?.op_clay_configuration_get_state !== "function" ||
         typeof ops?.op_clay_configuration_set_package_option !== "function") {
         throw new Error("clay.configuration runtime ops are unavailable in this context");
@@ -22,10 +23,22 @@ function plannedConfigurationApi(api) {
 }
 export async function loadConfigurationModule(options) {
     if (options === null || typeof options !== "object" || typeof options.path !== "string") {
-        throw new Error("clay.configuration.invalid_module: loadConfigurationModule requires { path: string }");
+        throw new Error("configuration.invalid_module: loadConfigurationModule requires { path: string }");
     }
-    const path = configurationOps().op_clay_configuration_load_module(options.path);
-    await import(path);
+    const ops = configurationOps();
+    const optional = options.optional === true;
+    const path = ops.op_clay_configuration_load_module(options.path, optional);
+    try {
+        await import(path);
+        return { loaded: true };
+    } catch (error) {
+        if (options.optional !== true) {
+            throw error;
+        }
+        const message = String(error?.message ?? error).slice(0, 1024);
+        ops.op_clay_configuration_record_module_error(path, message);
+        return { loaded: false, error: message };
+    }
 }
 export function getConfigurationState() {
     return JSON.parse(configurationOps().op_clay_configuration_get_state());
@@ -35,13 +48,13 @@ export function setPackageOption(options) {
 }
 export function setModePreference(options) {
     void options;
-    return plannedConfigurationApi("clay.configuration.setModePreference");
+    return plannedConfigurationApi("configuration.setModePreference");
 }
 export function setDecorationTheme(options) {
     void options;
-    return plannedConfigurationApi("clay.configuration.setDecorationTheme");
+    return plannedConfigurationApi("configuration.setDecorationTheme");
 }
 export function setParsePolicy(options) {
     void options;
-    return plannedConfigurationApi("clay.configuration.setParsePolicy");
+    return plannedConfigurationApi("configuration.setParsePolicy");
 }

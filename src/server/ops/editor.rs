@@ -4,8 +4,8 @@
 //! programmatic Clay JS API surface for client-local caret/selection state.
 //! They validate typed arguments with a deny-by-default enum policy (unknown
 //! values error) and return the validated payload. Key-driven movement is
-//! served client-local by the direction-specific `clay.editor.clientMoveCursor.*`
-//! / `clay.editor.clientSetSelection.*` command IDs (allowlisted in
+//! served client-local by the direction-specific `editor.clientMoveCursor.*`
+//! / `editor.clientSetSelection.*` command IDs (allowlisted in
 //! `keybindings.rs`, routed `ClientUiCommand`, dispatched in `EditorWidget`).
 //!
 //! `ponytail:` these ops validate + return the command descriptor; live
@@ -46,7 +46,7 @@ pub(super) fn require_editor_control(state: &OpState) -> Result<(), JsErrorBox> 
             return Ok(());
         }
         return Err(JsErrorBox::generic(
-            "clay.editor.missing_permission: editor ops require an active package context",
+            "editor.missing_permission: editor ops require an active package context",
         ));
     }
     let record = op_state.require_current_package_capability(
@@ -54,7 +54,7 @@ pub(super) fn require_editor_control(state: &OpState) -> Result<(), JsErrorBox> 
     )?;
     let Some(active_mode) = op_state.active_editor_mode_id() else {
         return Err(JsErrorBox::generic(format!(
-            "clay.editor.mode_not_active: package `{}` cannot use editor ops without an active document major mode",
+            "editor.mode_not_active: package `{}` cannot use editor ops without an active document major mode",
             record.manifest.name
         )));
     };
@@ -65,7 +65,7 @@ pub(super) fn require_editor_control(state: &OpState) -> Result<(), JsErrorBox> 
         .contains(&active_mode)
     {
         return Err(JsErrorBox::generic(format!(
-            "clay.editor.mode_not_declared: package `{}` declared editor-control for {:?}, not active mode `{active_mode}`",
+            "editor.mode_not_declared: package `{}` declared editor-control for {:?}, not active mode `{active_mode}`",
             record.manifest.name, record.manifest.clay.editor_control_modes
         )));
     }
@@ -205,18 +205,18 @@ fn optional_string_strict(
 /// validated descriptor as a JSON object string. Plain (non-`op2`) so it is
 /// unit-testable.
 pub(super) fn validate_move_cursor(options_json: &str) -> Result<String, JsErrorBox> {
-    let value = parse_options(options_json, "clay.editor.invalid_move_cursor")?;
+    let value = parse_options(options_json, "editor.invalid_move_cursor")?;
     let direction = require_string(
         &value,
         "direction",
         MOVE_DIRECTIONS,
-        "clay.editor.invalid_move_cursor",
+        "editor.invalid_move_cursor",
     )?;
     let granularity = optional_string(&value, "granularity", MOVE_GRANULARITIES);
     let extend = optional_bool(&value, "extend", false);
     let count = optional_count(&value, "count");
     serde_json::to_string(&json!({
-        "commandId": "clay.editor.clientMoveCursor",
+        "commandId": "editor.clientMoveCursor",
         "direction": direction,
         "granularity": granularity,
         "extend": extend,
@@ -224,31 +224,31 @@ pub(super) fn validate_move_cursor(options_json: &str) -> Result<String, JsError
     }))
     .map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.editor.invalid_move_cursor: failed to serialize result ({error})"
+            "editor.invalid_move_cursor: failed to serialize result ({error})"
         ))
     })
 }
 
 /// Validate `clientSetSelection` options (deny-by-default enum).
 pub(super) fn validate_set_selection(options_json: &str) -> Result<String, JsErrorBox> {
-    let value = parse_options(options_json, "clay.editor.invalid_set_selection")?;
+    let value = parse_options(options_json, "editor.invalid_set_selection")?;
     let action = require_string(
         &value,
         "action",
         SELECTION_ACTIONS,
-        "clay.editor.invalid_set_selection",
+        "editor.invalid_set_selection",
     )?;
     let extend = optional_bool(&value, "extend", false);
     let direction = optional_string(&value, "direction", SELECTION_DIRECTIONS);
     serde_json::to_string(&json!({
-        "commandId": "clay.editor.clientSetSelection",
+        "commandId": "editor.clientSetSelection",
         "action": action,
         "extend": extend,
         "direction": direction,
     }))
     .map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.editor.invalid_set_selection: failed to serialize result ({error})"
+            "editor.invalid_set_selection: failed to serialize result ({error})"
         ))
     })
 }
@@ -256,7 +256,7 @@ pub(super) fn validate_set_selection(options_json: &str) -> Result<String, JsErr
 /// Validate `clientSetCursorStyle` options (deny-by-default enum). All fields
 /// are optional; present-but-unknown `shape`/`blink` values error.
 pub(super) fn validate_set_cursor_style(options_json: &str) -> Result<String, JsErrorBox> {
-    let value = parse_options(options_json, "clay.editor.invalid_set_cursor_style")?;
+    let value = parse_options(options_json, "editor.invalid_set_cursor_style")?;
     validate_set_cursor_style_value(&value)
 }
 
@@ -265,20 +265,20 @@ fn validate_set_cursor_style_value(value: &Value) -> Result<String, JsErrorBox> 
         value,
         "shape",
         CURSOR_SHAPES,
-        "clay.editor.invalid_set_cursor_style",
+        "editor.invalid_set_cursor_style",
     )?;
     let blink = optional_string_strict(
         value,
         "blink",
         CURSOR_BLINKS,
-        "clay.editor.invalid_set_cursor_style",
+        "editor.invalid_set_cursor_style",
     )?;
     let width_px = value.get("widthPx").and_then(Value::as_f64);
     let height_pct = value.get("heightPct").and_then(Value::as_f64);
     let hollow = optional_bool(value, "hollow", false);
     let stop_blink_on_typing = optional_bool(value, "stopBlinkOnTyping", true);
     serde_json::to_string(&json!({
-        "commandId": "clay.editor.clientSetCursorStyle",
+        "commandId": "editor.clientSetCursorStyle",
         "shape": shape,
         "blink": blink,
         "widthPx": width_px,
@@ -288,7 +288,7 @@ fn validate_set_cursor_style_value(value: &Value) -> Result<String, JsErrorBox> 
     }))
     .map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.editor.invalid_set_cursor_style: failed to serialize result ({error})"
+            "editor.invalid_set_cursor_style: failed to serialize result ({error})"
         ))
     })
 }
@@ -321,9 +321,7 @@ fn build_cursor_style_override(
         .unwrap_or_default();
     let style = super::modes::merge_caret_style(base, value);
     style.validate().map_err(|_| {
-        JsErrorBox::generic(
-            "clay.editor.invalid_set_cursor_style: caret style fields out of bounds",
-        )
+        JsErrorBox::generic("editor.invalid_set_cursor_style: caret style fields out of bounds")
     })?;
     Ok(Some(style))
 }
@@ -355,7 +353,7 @@ pub(super) fn op_clay_editor_set_cursor_style(
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
     require_editor_control(state)?;
-    let value = parse_options(&options_json, "clay.editor.invalid_set_cursor_style")?;
+    let value = parse_options(&options_json, "editor.invalid_set_cursor_style")?;
     let descriptor = validate_set_cursor_style_value(&value)?;
     // Plan 071 caret-transport fix: validation alone never reached the
     // client; publish the merged override (or `None` to clear) so the
@@ -370,42 +368,42 @@ pub(super) fn op_clay_editor_set_cursor_style(
 /// Validate `clientAddCursor` options (deny-by-default enum). Returns the
 /// direction-specific command ID descriptor (Plan 071 task 9).
 pub(super) fn validate_add_cursor(options_json: &str) -> Result<String, JsErrorBox> {
-    let value = parse_options(options_json, "clay.editor.invalid_add_cursor")?;
+    let value = parse_options(options_json, "editor.invalid_add_cursor")?;
     let direction = require_string(
         &value,
         "direction",
         ADD_CURSOR_DIRECTIONS,
-        "clay.editor.invalid_add_cursor",
+        "editor.invalid_add_cursor",
     )?;
-    let command_id = format!("clay.editor.clientAddCursor.{direction}");
+    let command_id = format!("editor.clientAddCursor.{direction}");
     serde_json::to_string(&json!({
         "commandId": command_id,
         "direction": direction,
     }))
     .map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.editor.invalid_add_cursor: failed to serialize result ({error})"
+            "editor.invalid_add_cursor: failed to serialize result ({error})"
         ))
     })
 }
 
 /// Validate `clientColumnSelect` options (deny-by-default enum).
 pub(super) fn validate_column_select(options_json: &str) -> Result<String, JsErrorBox> {
-    let value = parse_options(options_json, "clay.editor.invalid_column_select")?;
+    let value = parse_options(options_json, "editor.invalid_column_select")?;
     let direction = require_string(
         &value,
         "direction",
         COLUMN_SELECT_DIRECTIONS,
-        "clay.editor.invalid_column_select",
+        "editor.invalid_column_select",
     )?;
-    let command_id = format!("clay.editor.clientColumnSelect.{direction}");
+    let command_id = format!("editor.clientColumnSelect.{direction}");
     serde_json::to_string(&json!({
         "commandId": command_id,
         "direction": direction,
     }))
     .map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.editor.invalid_column_select: failed to serialize result ({error})"
+            "editor.invalid_column_select: failed to serialize result ({error})"
         ))
     })
 }
@@ -467,17 +465,17 @@ pub(super) fn op_clay_editor_execute_command(
         .borrow::<Arc<crate::server::ops::ClayOpState>>()
         .clone();
 
-    let value = parse_options(&options_json, "clay.editor.invalid_execute_command")?;
+    let value = parse_options(&options_json, "editor.invalid_execute_command")?;
     let Some(command_id) = value.get("commandId").and_then(Value::as_str) else {
         return Err(JsErrorBox::generic(
-            "clay.editor.invalid_execute_command: commandId must be a string",
+            "editor.invalid_execute_command: commandId must be a string",
         ));
     };
     if command_id.is_empty()
         || command_id.len() > crate::protocol::MAX_EDITOR_COMMAND_REQUEST_ID_BYTES
     {
         return Err(JsErrorBox::generic(
-            "clay.editor.invalid_execute_command: commandId must be a bounded string",
+            "editor.invalid_execute_command: commandId must be a bounded string",
         ));
     }
     // Known-command allowlist: only IDs the client can dispatch as editor
@@ -486,7 +484,7 @@ pub(super) fn op_clay_editor_execute_command(
         || crate::protocol::SelectionQuery::from_command_id(command_id).is_some();
     if !known {
         return Err(JsErrorBox::generic(format!(
-            "clay.editor.invalid_execute_command: `{command_id}` is not a known editor command ID"
+            "editor.invalid_execute_command: `{command_id}` is not a known editor command ID"
         )));
     }
 
@@ -495,7 +493,7 @@ pub(super) fn op_clay_editor_execute_command(
             .current_package_record()
             .map_err(|_| {
                 JsErrorBox::generic(
-                    "clay.editor.invalid_execute_command: executing package is no longer enabled",
+                    "editor.invalid_execute_command: executing package is no longer enabled",
                 )
             })?
             .manifest
@@ -520,7 +518,7 @@ pub(super) fn op_clay_editor_execute_command(
     }))
     .map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.editor.invalid_execute_command: failed to serialize result ({error})"
+            "editor.invalid_execute_command: failed to serialize result ({error})"
         ))
     })
 }
@@ -529,7 +527,7 @@ pub(super) fn op_clay_editor_execute_command(
 /// return the direction-specific command ID for `bindKey` (Plan 071 task 10).
 /// `around` defaults to `false` (inner), `direction` to `current`.
 pub(super) fn validate_select_textobject(options_json: &str) -> Result<String, JsErrorBox> {
-    const CODE: &str = "clay.editor.invalid_select_textobject";
+    const CODE: &str = "editor.invalid_select_textobject";
     let value = parse_options(options_json, CODE)?;
     let object = require_string(&value, "object", TEXTOBJECT_KINDS, CODE)?;
     let around = optional_bool(&value, "around", false);
@@ -556,7 +554,7 @@ pub(super) fn validate_select_textobject(options_json: &str) -> Result<String, J
 /// Validate `clientSmartSelect` options (deny-by-default enum) and return the
 /// action-specific command ID for `bindKey` (Plan 071 task 10).
 pub(super) fn validate_smart_select(options_json: &str) -> Result<String, JsErrorBox> {
-    const CODE: &str = "clay.editor.invalid_smart_select";
+    const CODE: &str = "editor.invalid_smart_select";
     let value = parse_options(options_json, CODE)?;
     let action = require_string(&value, "action", SMART_SELECT_ACTIONS, CODE)?;
     let parsed_action =
@@ -585,7 +583,7 @@ mod tests {
         assert_eq!(parsed["direction"], "nextWordStart");
         assert_eq!(parsed["extend"], true);
         assert_eq!(parsed["count"], 3);
-        assert_eq!(parsed["commandId"], "clay.editor.clientMoveCursor");
+        assert_eq!(parsed["commandId"], "editor.clientMoveCursor");
     }
 
     #[test]
@@ -626,7 +624,7 @@ mod tests {
         let result = validate_set_selection(r#"{"action":"selectLine"}"#).unwrap();
         let parsed: Value = serde_json::from_str(&result).unwrap();
         assert_eq!(parsed["action"], "selectLine");
-        assert_eq!(parsed["commandId"], "clay.editor.clientSetSelection");
+        assert_eq!(parsed["commandId"], "editor.clientSetSelection");
     }
 
     #[test]
@@ -647,7 +645,7 @@ mod tests {
         assert_eq!(parsed["shape"], "block");
         assert_eq!(parsed["blink"], "solid");
         assert_eq!(parsed["hollow"], true);
-        assert_eq!(parsed["commandId"], "clay.editor.clientSetCursorStyle");
+        assert_eq!(parsed["commandId"], "editor.clientSetCursorStyle");
     }
 
     #[test]
@@ -676,11 +674,11 @@ mod tests {
     fn add_cursor_maps_direction_to_command_id() {
         let below = validate_add_cursor(r#"{"direction":"below"}"#).unwrap();
         let parsed: Value = serde_json::from_str(&below).unwrap();
-        assert_eq!(parsed["commandId"], "clay.editor.clientAddCursor.below");
+        assert_eq!(parsed["commandId"], "editor.clientAddCursor.below");
 
         let above = validate_add_cursor(r#"{"direction":"above"}"#).unwrap();
         let parsed: Value = serde_json::from_str(&above).unwrap();
-        assert_eq!(parsed["commandId"], "clay.editor.clientAddCursor.above");
+        assert_eq!(parsed["commandId"], "editor.clientAddCursor.above");
     }
 
     #[test]
@@ -700,7 +698,7 @@ mod tests {
             let parsed: Value = serde_json::from_str(&result).unwrap();
             assert_eq!(
                 parsed["commandId"],
-                format!("clay.editor.clientColumnSelect.{direction}")
+                format!("editor.clientColumnSelect.{direction}")
             );
         }
     }
@@ -722,14 +720,14 @@ mod tests {
         let parsed: Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["commandId"],
-            "clay.editor.clientSelectTextobject.function.around.next"
+            "editor.clientSelectTextobject.function.around.next"
         );
         // Defaults: inner + current.
         let result = validate_select_textobject(r#"{"object":"comment"}"#).unwrap();
         let parsed: Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["commandId"],
-            "clay.editor.clientSelectTextobject.comment.inner"
+            "editor.clientSelectTextobject.comment.inner"
         );
         assert_eq!(parsed["around"], false);
         assert_eq!(parsed["direction"], "current");
@@ -752,8 +750,8 @@ mod tests {
     #[test]
     fn smart_select_maps_action_to_command_id() {
         for (action, expected) in [
-            ("expand", "clay.editor.clientSmartSelect.expand"),
-            ("shrink", "clay.editor.clientSmartSelect.shrink"),
+            ("expand", "editor.clientSmartSelect.expand"),
+            ("shrink", "editor.clientSmartSelect.shrink"),
         ] {
             let result = validate_smart_select(&format!(r#"{{"action":"{action}"}}"#)).unwrap();
             let parsed: Value = serde_json::from_str(&result).unwrap();

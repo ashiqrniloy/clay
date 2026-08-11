@@ -2121,7 +2121,7 @@ mod tests {
             .enqueue_sdui_action(
                 1,
                 SduiActionIntent {
-                    command_id: "clay.workspace.openDirectory".to_string(),
+                    command_id: "workspace.openDirectory".to_string(),
                     source: SduiActionSource::Button {
                         node_id: SduiNodeId(5),
                     },
@@ -2411,7 +2411,7 @@ mod tests {
         let queue = queue.with_authority(42, &DocumentAccess::ReadOnly);
 
         queue
-            .enqueue_command_intent(7, 3, "clay.controlCenter.open".to_string())
+            .enqueue_command_intent(7, 3, "controlCenter.open".to_string())
             .unwrap();
 
         assert_eq!(
@@ -2420,7 +2420,7 @@ mod tests {
                 client_id: 42,
                 document_id: 7,
                 behavior_version: 3,
-                command_id: "clay.controlCenter.open".to_string(),
+                command_id: "controlCenter.open".to_string(),
             }
         );
     }
@@ -2429,11 +2429,11 @@ mod tests {
     async fn command_intent_hot_path_uses_try_send_backpressure() {
         let (queue, _receiver) = ClientEditQueue::bounded(1);
         queue
-            .enqueue_command_intent(7, 3, "clay.controlCenter.open".to_string())
+            .enqueue_command_intent(7, 3, "controlCenter.open".to_string())
             .unwrap();
 
         let error = queue
-            .enqueue_command_intent(7, 3, "clay.controlCenter.open".to_string())
+            .enqueue_command_intent(7, 3, "controlCenter.open".to_string())
             .unwrap_err();
 
         assert!(matches!(
@@ -3318,7 +3318,7 @@ mod tests {
         let (client, mut server) = duplex(4096);
         let codec = Codec::default();
         let expected = RuntimeDiagnostic::error(
-            "clay.runtime.syntax_error",
+            "runtime.syntax_error",
             "JavaScript syntax error while evaluating server-side configuration.",
         );
         let mut live_typography = ActiveTypography {
@@ -3882,7 +3882,7 @@ mod tests {
             config_root.join("init.js"),
             r#"
 import { bindKey } from "clay:keybindings";
-bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 "#,
         )
         .unwrap();
@@ -3936,7 +3936,7 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
             behavior_manifest
                 .keymaps
                 .iter()
-                .any(|rule| { rule.command_id == "clay.documents.serverSaveDocument" }),
+                .any(|rule| { rule.command_id == "documents.serverSaveDocument" }),
             "selected-file activation must preserve configured save binding"
         );
         let behavior_version = behavior_manifest.behavior_version;
@@ -4693,7 +4693,7 @@ bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
             .enqueue_command_intent(
                 alpha.initial_state.document_id,
                 alpha.initial_state.behavior_manifest.behavior_version,
-                "clay.workspace.toggleFileBrowser".to_string(),
+                "workspace.toggleFileBrowser".to_string(),
             )
             .unwrap();
         let mut registry_snapshot = None;

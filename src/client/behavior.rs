@@ -208,16 +208,16 @@ pub(crate) struct LanguageIntelligenceTriggerRoute {
     pub(crate) routing_policy: RoutingPolicy,
 }
 
-/// Maps built-in `clay.language.*` command IDs to language-intelligence features.
+/// Maps built-in `language.*` command IDs to language-intelligence features.
 pub fn language_intelligence_feature_for_command(
     command_id: &str,
 ) -> Option<crate::protocol::LanguageIntelligenceFeature> {
     use crate::protocol::LanguageIntelligenceFeature;
     match command_id {
-        "clay.language.hover" => Some(LanguageIntelligenceFeature::Hover),
-        "clay.language.goToDefinition" => Some(LanguageIntelligenceFeature::GoToDefinition),
-        "clay.language.codeActions" => Some(LanguageIntelligenceFeature::CodeAction),
-        "clay.language.signatureHelp" => Some(LanguageIntelligenceFeature::SignatureHelp),
+        "language.hover" => Some(LanguageIntelligenceFeature::Hover),
+        "language.goToDefinition" => Some(LanguageIntelligenceFeature::GoToDefinition),
+        "language.codeActions" => Some(LanguageIntelligenceFeature::CodeAction),
+        "language.signatureHelp" => Some(LanguageIntelligenceFeature::SignatureHelp),
         _ => None,
     }
 }
@@ -433,7 +433,7 @@ mod tests {
         let mut manifest = BehaviorManifest::minimal_text_editing(1);
         // Commands are already discoverable via default_commands(); only bind a key.
         manifest.keymaps.push(KeyBindingRule {
-            command_id: "clay.language.goToDefinition".to_string(),
+            command_id: "language.goToDefinition".to_string(),
             sequence: vec![KeyStroke {
                 key: KeyCode::Character("d".to_string()),
                 modifiers: KeyModifiers {
@@ -462,7 +462,7 @@ mod tests {
             })
         );
         assert_eq!(
-            language_intelligence_feature_for_command("clay.language.hover"),
+            language_intelligence_feature_for_command("language.hover"),
             Some(LanguageIntelligenceFeature::Hover)
         );
     }
@@ -497,11 +497,11 @@ mod tests {
     fn client_routes_open_file_dialog_as_client_ui_intent() {
         let mut manifest = BehaviorManifest::minimal_text_editing(1);
         manifest.commands.push(CommandDeclaration::client_ui(
-            "clay.documents.clientOpenFileDialog",
+            "documents.clientOpenFileDialog",
             "Open File Dialog",
         ));
         manifest.keymaps.push(KeyBindingRule {
-            command_id: "clay.documents.clientOpenFileDialog".to_string(),
+            command_id: "documents.clientOpenFileDialog".to_string(),
             sequence: vec![KeyStroke {
                 key: KeyCode::Character("o".to_string()),
                 modifiers: KeyModifiers {
@@ -525,7 +525,7 @@ mod tests {
         assert_eq!(
             routed,
             RoutedBehavior::ClientUiCommand(ClientUiCommandRoute {
-                command_id: "clay.documents.clientOpenFileDialog".to_string(),
+                command_id: "documents.clientOpenFileDialog".to_string(),
                 routing_policy: RoutingPolicy::ClientUiCommand,
             })
         );
@@ -535,11 +535,11 @@ mod tests {
     fn shifted_character_key_binding_matches_lowercase_manifest_rule() {
         let mut manifest = BehaviorManifest::minimal_text_editing(1);
         manifest.commands.push(CommandDeclaration::client_ui(
-            "clay.workspace.clientOpenFolderDialog",
+            "workspace.clientOpenFolderDialog",
             "Open Folder Dialog",
         ));
         manifest.keymaps.push(KeyBindingRule {
-            command_id: "clay.workspace.clientOpenFolderDialog".to_string(),
+            command_id: "workspace.clientOpenFolderDialog".to_string(),
             sequence: vec![KeyStroke {
                 key: KeyCode::Character("o".to_string()),
                 modifiers: KeyModifiers {
@@ -565,7 +565,7 @@ mod tests {
         assert_eq!(
             routed,
             RoutedBehavior::ClientUiCommand(ClientUiCommandRoute {
-                command_id: "clay.workspace.clientOpenFolderDialog".to_string(),
+                command_id: "workspace.clientOpenFolderDialog".to_string(),
                 routing_policy: RoutingPolicy::ClientUiCommand,
             })
         );
@@ -581,11 +581,11 @@ mod tests {
         // clientOpenFolderDialog())` contract.
         let mut manifest = BehaviorManifest::minimal_text_editing(1);
         manifest.commands.push(CommandDeclaration::client_ui(
-            "clay.workspace.clientOpenFolderDialog",
+            "workspace.clientOpenFolderDialog",
             "Open Folder Dialog",
         ));
         manifest.keymaps.push(KeyBindingRule {
-            command_id: "clay.workspace.clientOpenFolderDialog".to_string(),
+            command_id: "workspace.clientOpenFolderDialog".to_string(),
             sequence: vec![KeyStroke {
                 key: KeyCode::Character("o".to_string()),
                 modifiers: KeyModifiers {
@@ -611,7 +611,7 @@ mod tests {
         assert_eq!(
             routed,
             RoutedBehavior::ClientUiCommand(ClientUiCommandRoute {
-                command_id: "clay.workspace.clientOpenFolderDialog".to_string(),
+                command_id: "workspace.clientOpenFolderDialog".to_string(),
                 routing_policy: RoutingPolicy::ClientUiCommand,
             })
         );

@@ -30,7 +30,7 @@ checkout | switch | add | stage | commit | reset | rebase | stash | push | pull 
 
 Bringing any of these to Clay will require its own authority UX, not a flag on this package:
 
-- **Explicit server-owned command IDs** (e.g. `clay.git.stageFile`) added to a closed command table, each validated against the workspace root — never arbitrary argv, never a generic shell escape hatch. The current `GitDiscoveryCommand` enum is the model: a variant per operation, fixed argv, no caller-supplied subcommand.
+- **Explicit server-owned command IDs** (e.g. `git.stageFile`) added to a closed command table, each validated against the workspace root — never arbitrary argv, never a generic shell escape hatch. The current `GitDiscoveryCommand` enum is the model: a variant per operation, fixed argv, no caller-supplied subcommand.
 - **A new permission grant** surfaced through explicit user approval (the package's current `permissions: []` is the read-only ceiling; `@clay/git` must not silently gain mutation authority).
 - **Conflict/state handling**: staging areas, index/worktree divergence, merge conflicts, detached-HEAD safety, and upstream/remote concerns (push/pull/fetch) need dedicated flows, including network authority for remote operations — which is explicitly out of scope here.
 - **No speculative abstractions**: do not add half-wired mutation plumbing in advance. Each operation lands with its command, validation, tests, and docs together.
@@ -41,8 +41,8 @@ Until that work exists, `@clay/git` reads cached status and renders a sanitized 
 
 Branch/status commands are server-owned built-ins, available regardless of package load:
 
-- `clay.git.listStatuses` — List Git Statuses
-- `clay.git.refreshStatus` — Refresh Git Status
+- `git.listStatuses` — List Git Statuses
+- `git.refreshStatus` — Refresh Git Status
 
 Loading `@clay/git` adds the read-only status panel on top of these always-available commands. Without the package, the commands and `clay:git` facade remain usable; only the package-owned status UI is absent.
 
@@ -66,7 +66,7 @@ On load, the load entry calls `serverListGitStatuses()` from `clay:git` and publ
 - dirty state (clean, `N changed`, or dirty)
 - refresh state (idle, refreshing, current, or the typed last-error kind)
 
-Control characters and path-like substrings are stripped/collapsed. The tree has no action targets and no callbacks: it is display-only. Refresh happens through the server-owned `clay.git.refreshStatus` command; the package re-publishes cached state at load/update time and runs no JavaScript in paint, layout, pointer, scroll, keypress, or text-event hot paths.
+Control characters and path-like substrings are stripped/collapsed. The tree has no action targets and no callbacks: it is display-only. Refresh happens through the server-owned `git.refreshStatus` command; the package re-publishes cached state at load/update time and runs no JavaScript in paint, layout, pointer, scroll, keypress, or text-event hot paths.
 
 ## Validation
 

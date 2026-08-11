@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientSelectTextobject
+id: editor.clientSelectTextobject
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSelectTextobject
@@ -29,7 +29,7 @@ custom_properties:
     default: current
     description: current selects the innermost object at the caret; next/previous walk to the nearest object after/before the caret (no wrap).
 security: Changes only transient client selection state from a read-only server grammar query; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientSelectTextobject` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `editor.clientSelectTextobject` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, textobjects, tree-sitter, selection]
 app_visible: true
 help_visible: true
@@ -45,7 +45,7 @@ Select the tree-sitter text object (function, class, argument, comment, ...) aro
 
 ## Description
 
-`clientSelectTextobject` is the public API for **Select Textobject** (Plan 071 task 10, Helix-style `select_textobject`). The `op_clay_editor_select_textobject` deno op validates the `object`/`around`/`direction` arguments (deny-by-default enums) and returns the direction-specific command ID (`clay.editor.clientSelectTextobject.<object>.<inner|around>[.next|.previous]`). Key-driven execution captures the client selection set locally, sends one bounded read-only request to the server, and the server runs the active grammar's `textobjects.scm` (captures named `textobject.<kind>.<inner|around>`) against the parsed tree. Returned byte ranges are applied as selections — one per requested caret, multi-cursor aware; carets with no matching object keep their selection. Grammars without a textobject query (or documents without a grammar) degrade to "no ranges" without error. Built-in query files ship for Rust, TypeScript/TSX, and JavaScript under `packages/*/queries/textobjects.scm`.
+`clientSelectTextobject` is the public API for **Select Textobject** (Plan 071 task 10, Helix-style `select_textobject`). The `op_clay_editor_select_textobject` deno op validates the `object`/`around`/`direction` arguments (deny-by-default enums) and returns the direction-specific command ID (`editor.clientSelectTextobject.<object>.<inner|around>[.next|.previous]`). Key-driven execution captures the client selection set locally, sends one bounded read-only request to the server, and the server runs the active grammar's `textobjects.scm` (captures named `textobject.<kind>.<inner|around>`) against the parsed tree. Returned byte ranges are applied as selections — one per requested caret, multi-cursor aware; carets with no matching object keep their selection. Grammars without a textobject query (or documents without a grammar) degrade to "no ranges" without error. Built-in query files ship for Rust, TypeScript/TSX, and JavaScript under `packages/*/queries/textobjects.scm`.
 
 Authority: `client-local-ui-state` (result data is server-computed and read-only). Runtime path: `ui-reactive-server-query`.
 
@@ -76,7 +76,7 @@ bindKey("Ctrl+]", clientSelectTextobject({ object: "function", around: true, dir
 
 ## Key bindings
 
-No default key bindings. The command IDs are bindable through documented key binding APIs in `~/.config/clay/init.js` (for example `clay.editor.clientSelectTextobject.function.inner`, `clay.editor.clientSelectTextobject.function.around`, `clay.editor.clientSelectTextobject.function.around.next`).
+No default key bindings. The command IDs are bindable through documented key binding APIs in `~/.config/clay/init.js` (for example `editor.clientSelectTextobject.function.inner`, `editor.clientSelectTextobject.function.around`, `editor.clientSelectTextobject.function.around.next`).
 
 ## Custom properties
 
@@ -102,7 +102,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientSelectTextobject` when the user asks for structural/text-object selections through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientSelectTextobject` when the user asks for structural/text-object selections through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -114,7 +114,7 @@ Use `clay.editor.clientSelectTextobject` when the user asks for structural/text-
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientSelectTextobject`
+- Stable ID: `editor.clientSelectTextobject`
 - User-facing name: Select Textobject
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientSelectTextobject`

@@ -80,3 +80,4 @@ A wiki update is good enough when:
 - Writing vague summaries that do not explain how the code works.
 - Letting generated docs or comments replace the educational code wiki unless the project explicitly uses those generated artifacts as wiki pages.
 - Adding or changing primitive implementations without corresponding wiki/reference coverage and deterministic tests that keep the primitive recorded.
+- Using the retired `clay.<domain>.*` spelling for core Clay command/API IDs in wiki prose or examples. Core IDs are bare `<domain>.<name>` (e.g. `shell.clientClosePane`, `runtime.reloadConfiguration`); package-owned IDs start with the package prefix (`<package>.<name>`); only `clay:` import specifiers and `package.json` `clay.*` manifest key paths keep the `clay` prefix. See `.agents/skills/project-patterns/references/clay-js-api-naming.md`.

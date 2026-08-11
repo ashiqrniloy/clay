@@ -32,7 +32,7 @@ pub(super) fn op_clay_modes_register_pattern(
         .require_current_package_capability(
             crate::packages::permissions::PackagePermission::ModeRegistration,
         )?;
-    let declaration_value = parse_json(&declaration_json, "clay.modes.invalid_declaration")?;
+    let declaration_value = parse_json(&declaration_json, "modes.invalid_declaration")?;
     let declaration = parse_declaration(&declaration_value, &package.manifest)?;
     let response_identity = json!({
         "registered": true,
@@ -42,9 +42,8 @@ pub(super) fn op_clay_modes_register_pattern(
     state
         .borrow::<Arc<ClayOpState>>()
         .register_mode(&package.manifest, declaration)
-        .map_err(mode_error("clay.modes.registration_failed"))?;
-    serde_json::to_string(&response_identity)
-        .map_err(serialize_error("clay.modes.registration_failed"))
+        .map_err(mode_error("modes.registration_failed"))?;
+    serde_json::to_string(&response_identity).map_err(serialize_error("modes.registration_failed"))
 }
 
 #[op2]
@@ -53,15 +52,13 @@ pub(super) fn op_clay_modes_classify_document(
     state: &mut OpState,
     #[string] input_json: String,
 ) -> Result<String, JsErrorBox> {
-    let value = parse_json(&input_json, "clay.modes.invalid_classification")?;
+    let value = parse_json(&input_json, "modes.invalid_classification")?;
     let input = DocumentClassificationInput {
         document_id: value
             .get("documentId")
             .and_then(Value::as_u64)
             .ok_or_else(|| {
-                JsErrorBox::generic(
-                    "clay.modes.invalid_classification: documentId must be a number",
-                )
+                JsErrorBox::generic("modes.invalid_classification: documentId must be a number")
             })?,
         path: value
             .get("path")
@@ -87,7 +84,7 @@ pub(super) fn op_clay_modes_classify_document(
     let classification = state
         .borrow::<Arc<ClayOpState>>()
         .classify_document(&input)
-        .map_err(mode_error("clay.modes.classification_failed"))?;
+        .map_err(mode_error("modes.classification_failed"))?;
     serde_json::to_string(&json!({
         "documentId": classification.document_id,
         "packageName": classification.package_name,
@@ -96,7 +93,7 @@ pub(super) fn op_clay_modes_classify_document(
         "modeId": classification.mode_id,
         "matchedBy": format!("{:?}", classification.matched_by),
     }))
-    .map_err(serialize_error("clay.modes.classification_failed"))
+    .map_err(serialize_error("modes.classification_failed"))
 }
 
 /// Activate a major mode for a document, optionally installing package-supplied
@@ -141,13 +138,13 @@ pub(super) fn op_clay_modes_activate_major_mode(
 ) -> Result<String, JsErrorBox> {
     // The mode owner is resolved host-side from the classification (registered
     // declaration provenance + enabled set), never from a caller manifest.
-    let value = parse_json(&input_json, "clay.modes.invalid_activation")?;
+    let value = parse_json(&input_json, "modes.invalid_activation")?;
     let input = DocumentClassificationInput {
         document_id: value
             .get("documentId")
             .and_then(Value::as_u64)
             .ok_or_else(|| {
-                JsErrorBox::generic("clay.modes.invalid_activation: documentId must be a number")
+                JsErrorBox::generic("modes.invalid_activation: documentId must be a number")
             })?,
         path: value
             .get("path")
@@ -178,7 +175,7 @@ pub(super) fn op_clay_modes_activate_major_mode(
     let op_state = state.borrow::<Arc<ClayOpState>>();
     let activation = op_state
         .activate_major_mode(&input)
-        .map_err(mode_error("clay.modes.activation_failed"))?;
+        .map_err(mode_error("modes.activation_failed"))?;
 
     // If the package supplied editor rules, publish an updated behavior manifest
     // with those rules applied.  This is mode-agnostic: any package for any mode
@@ -224,7 +221,7 @@ pub(super) fn op_clay_modes_activate_major_mode(
             )
             .map_err(|e| {
                 JsErrorBox::generic(format!(
-                    "clay.modes.activation_failed: manifest validation: {e:?}"
+                    "modes.activation_failed: manifest validation: {e:?}"
                 ))
             })?;
     }
@@ -237,7 +234,7 @@ pub(super) fn op_clay_modes_activate_major_mode(
         "modeId": activation.mode_id,
         "behaviorVersion": activation.behavior_version,
     }))
-    .map_err(serialize_error("clay.modes.activation_failed"))
+    .map_err(serialize_error("modes.activation_failed"))
 }
 
 // ── Editor-rules JSON deserializer ────────────────────────────────────────────
@@ -259,9 +256,7 @@ fn parse_editor_rules(value: &Value) -> Result<EditorBehaviorRules, String> {
             .map(parse_pair_rule)
             .collect::<Result<Vec<_>, _>>()?,
         _ => {
-            return Err(
-                "clay.modes.invalid_activation: editorRules.pairs must be an array".to_string(),
-            );
+            return Err("modes.invalid_activation: editorRules.pairs must be an array".to_string());
         }
     };
 
@@ -273,7 +268,7 @@ fn parse_editor_rules(value: &Value) -> Result<EditorBehaviorRules, String> {
             .collect::<Result<Vec<_>, _>>()?,
         _ => {
             return Err(
-                "clay.modes.invalid_activation: editorRules.comments must be an array".to_string(),
+                "modes.invalid_activation: editorRules.comments must be an array".to_string(),
             );
         }
     };
@@ -452,7 +447,10 @@ fn parse_enter_rule(value: &Value) -> Result<EnterRule, String> {
         "continueLineMarkers" => {
             let markers = string_array_field(value, "markers")?;
             if markers.is_empty() {
-                return Err("clay.modes.invalid_activation: continueLineMarkers requires at least one marker".to_string());
+                return Err(
+                    "modes.invalid_activation: continueLineMarkers requires at least one marker"
+                        .to_string(),
+                );
             }
             let exit_on_empty_item = value
                 .get("exitOnEmptyItem")
@@ -466,12 +464,12 @@ fn parse_enter_rule(value: &Value) -> Result<EnterRule, String> {
         "preserveFenceBodyIndent" => {
             let fence_markers = string_array_field(value, "fenceMarkers")?;
             if fence_markers.is_empty() {
-                return Err("clay.modes.invalid_activation: preserveFenceBodyIndent requires at least one fenceMarker".to_string());
+                return Err("modes.invalid_activation: preserveFenceBodyIndent requires at least one fenceMarker".to_string());
             }
             Ok(EnterRule::PreserveFenceBodyIndent { fence_markers })
         }
         other => Err(format!(
-            "clay.modes.invalid_activation: unknown enter rule kind '{other}'; \
+            "modes.invalid_activation: unknown enter rule kind '{other}'; \
              valid kinds: preserveLeadingWhitespace, insertNewlineOnly, \
              continueLineMarkers, preserveFenceBodyIndent"
         )),
@@ -484,20 +482,20 @@ fn parse_pair_rule(value: &Value) -> Result<PairRule, String> {
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| {
-            "clay.modes.invalid_activation: pair rule requires non-empty 'open'".to_string()
+            "modes.invalid_activation: pair rule requires non-empty 'open'".to_string()
         })?;
     let close = value
         .get("close")
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| {
-            "clay.modes.invalid_activation: pair rule requires non-empty 'close'".to_string()
+            "modes.invalid_activation: pair rule requires non-empty 'close'".to_string()
         })?;
     // Reject executable-sounding field names.
     for forbidden in &["callback", "code", "javascript", "hook"] {
         if value.get(forbidden).is_some() {
             return Err(format!(
-                "clay.modes.invalid_activation: pair rule must not include executable field '{forbidden}'"
+                "modes.invalid_activation: pair rule must not include executable field '{forbidden}'"
             ));
         }
     }
@@ -514,8 +512,7 @@ fn parse_comment_rule(value: &Value) -> Result<CommentContinuationRule, String> 
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| {
-            "clay.modes.invalid_activation: comment rule requires non-empty 'linePrefix'"
-                .to_string()
+            "modes.invalid_activation: comment rule requires non-empty 'linePrefix'".to_string()
         })?;
     let continue_prefix = value
         .get("continuePrefix")
@@ -534,12 +531,12 @@ fn string_array_field(value: &Value, key: &str) -> Result<Vec<String>, String> {
             .iter()
             .map(|v| {
                 v.as_str().map(ToOwned::to_owned).ok_or_else(|| {
-                    format!("clay.modes.invalid_activation: '{key}' entries must be strings")
+                    format!("modes.invalid_activation: '{key}' entries must be strings")
                 })
             })
             .collect(),
         _ => Err(format!(
-            "clay.modes.invalid_activation: '{key}' must be an array"
+            "modes.invalid_activation: '{key}' must be an array"
         )),
     }
 }
@@ -549,17 +546,17 @@ fn parse_keymap(value: &Value) -> Result<crate::protocol::KeyBindingRule, String
     let command_id = value
         .get("commandId")
         .and_then(Value::as_str)
-        .ok_or_else(|| "clay.modes.invalid_activation: keymap requires 'commandId'".to_string())?;
+        .ok_or_else(|| "modes.invalid_activation: keymap requires 'commandId'".to_string())?;
     let key_str = value
         .get("key")
         .and_then(Value::as_str)
-        .ok_or_else(|| "clay.modes.invalid_activation: keymap requires 'key'".to_string())?;
+        .ok_or_else(|| "modes.invalid_activation: keymap requires 'key'".to_string())?;
     let routing = value
         .get("routingPolicy")
         .and_then(Value::as_str)
         .unwrap_or("server-first");
     let routing_policy = parse_routing_policy_str(routing)
-        .map_err(|e| format!("clay.modes.invalid_activation: keymap {e}"))?;
+        .map_err(|e| format!("modes.invalid_activation: keymap {e}"))?;
     Ok(KeyBindingRule {
         command_id: command_id.to_string(),
         sequence: vec![KeyStroke {
@@ -588,7 +585,7 @@ fn parse_declaration(
         package_name: package.name.clone(),
         package_version: package.version.clone(),
         api_prefix: package.clay.api_prefix.clone(),
-        mode_id: required_string(value, "modeId", "clay.modes.invalid_declaration")?,
+        mode_id: required_string(value, "modeId", "modes.invalid_declaration")?,
         display_name: string_or(value, "displayName", "Mode"),
         document_font_role: match value
             .get("defaultFontRole")
@@ -599,39 +596,39 @@ fn parse_declaration(
             "proportional" => crate::protocol::DocumentFontRole::Proportional,
             _ => {
                 return Err(JsErrorBox::generic(
-                    "clay.modes.invalid_declaration: defaultFontRole must be `monospace` or `proportional`",
+                    "modes.invalid_declaration: defaultFontRole must be `monospace` or `proportional`",
                 ));
             }
         },
         extensions: string_array(
             value.get("extensions"),
             "extensions",
-            "clay.modes.invalid_declaration",
+            "modes.invalid_declaration",
         )?,
         mime_types: string_array(
             value.get("mimeTypes"),
             "mimeTypes",
-            "clay.modes.invalid_declaration",
+            "modes.invalid_declaration",
         )?,
         file_names: string_array(
             value.get("fileNames"),
             "fileNames",
-            "clay.modes.invalid_declaration",
+            "modes.invalid_declaration",
         )?,
         file_name_patterns: string_array(
             value.get("fileNamePatterns"),
             "fileNamePatterns",
-            "clay.modes.invalid_declaration",
+            "modes.invalid_declaration",
         )?,
         shebang_patterns: string_array(
             value.get("shebangPatterns"),
             "shebangPatterns",
-            "clay.modes.invalid_declaration",
+            "modes.invalid_declaration",
         )?,
         content_probes: string_array(
             value.get("contentProbes"),
             "contentProbes",
-            "clay.modes.invalid_declaration",
+            "modes.invalid_declaration",
         )?,
     })
 }

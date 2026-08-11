@@ -1,5 +1,5 @@
 ---
-id: clay.behavior.buildCodeEditingManifest
+id: behavior.buildCodeEditingManifest
 kind: clay-js-api
 js_module: "clay:behavior"
 js_export: buildCodeEditingManifest
@@ -79,7 +79,7 @@ The helper is intentionally declarative: it emits only inert metadata and never 
 
 ## When to use
 
-Use this helper inside a language package load entry to build the `editorRules` passed to `clay.modes.serverRegisterModePattern`. It keeps the package's behavior manifest aligned with the server-side validator and reduces hand-rolled rule drift. Prose modes pass `movement: { wordSeparators: "prose", treatUnderscoreAsWord: false, camelCaseSubWord: false }`; ligatures are not configured here — they follow the mode's font-role typography profile via `clay.theme.setTypography`.
+Use this helper inside a language package load entry to build the `editorRules` passed to `modes.serverRegisterModePattern`. It keeps the package's behavior manifest aligned with the server-side validator and reduces hand-rolled rule drift. Prose modes pass `movement: { wordSeparators: "prose", treatUnderscoreAsWord: false, camelCaseSubWord: false }`; ligatures are not configured here — they follow the mode's font-role typography profile via `theme.setTypography`.
 
 ## JavaScript usage
 
@@ -166,7 +166,7 @@ No permission required. Pure helper returning inert declarative rules. Does not 
 
 ## Agent guidance
 
-Prefer `clay.behavior.buildCodeEditingManifest` when authoring a language package. Do not hand-roll `editorRules` objects that duplicate this shape; if a language needs rules outside the helper's scope, extend the helper rather than bypassing it.
+Prefer `behavior.buildCodeEditingManifest` when authoring a language package. Do not hand-roll `editorRules` objects that duplicate this shape; if a language needs rules outside the helper's scope, extend the helper rather than bypassing it.
 
 ## Backing implementation
 

@@ -30,7 +30,7 @@ Proposed first-party activation API shape, for planning only:
 
 ```ts
 // clay:modes, planned Phase 17/18 surface
-await clay.modes.serverRegisterModePattern({
+await modes.serverRegisterModePattern({
   packageName: "@clay/markdown",
   apiPrefix: "markdown",
   mode: "markdown",
@@ -38,7 +38,7 @@ await clay.modes.serverRegisterModePattern({
   mimeTypes: ["text/markdown"],
 });
 
-await clay.modes.serverActivateMajorMode({
+await modes.serverActivateMajorMode({
   documentId,
   mode: "markdown",
   packageName: "@clay/markdown",
@@ -133,7 +133,7 @@ Commands are package-prefixed and registered through Clay JS APIs. Key bindings 
 Proposed command registration sketch, for planning only:
 
 ```ts
-await clay.commands.serverRegisterCommand({
+await commands.serverRegisterCommand({
   id: "markdown.togglePreview",
   packageName: "@clay/markdown",
   apiPrefix: "markdown",
@@ -147,15 +147,15 @@ await clay.commands.serverRegisterCommand({
 
 | API Stub | Registry Entry | Status | Risk | Why Markdown Needs It |
 | --- | --- | --- | --- | --- |
-| `clay.modes.serverRegisterModePattern` | `DocumentClassification` | New | Medium | Bind file extensions and MIME hints to Markdown mode. |
-| `clay.modes.serverActivateMajorMode` | `MajorModeActivation` | New | Medium | Activate Markdown for an open document and publish behavior version. |
-| `clay.commands.serverRegisterCommand` | `CommandDeclaration` | New | Medium | Register package-prefixed Markdown commands. |
-| `clay.keybindings.bindKey` | `KeyRoutingOverride` | Exists/Extend | Low | Bind Markdown command shortcuts. |
-| `clay.behavior.getActiveBehaviorManifest` | `TextTransform` | Exists/Extend | Low | Verify installed Enter/list/code-block transform manifest. |
-| `clay.decorations.serverPublishDecorations` | `DecorationRange` | New | Medium | Publish syntax/emphasis/code spans for local rendering. |
-| `clay.parse.serverRegisterParseHandler` | `IncrementalParseUpdate` | New | High | Register server-side Markdown parse/update handler. |
-| `clay.sdui.definePanel` and `clay.sdui.publishTree` | `SduiPanelStatusContribution` | Exists/Extend | Low | Publish preview/decoration toggle panel. |
-| `clay.folding.serverPublishFoldingRanges` | `FoldingRange` | Deferred | Low | Optional heading/code block folding; not a Phase 18 readiness gate. |
+| `modes.serverRegisterModePattern` | `DocumentClassification` | New | Medium | Bind file extensions and MIME hints to Markdown mode. |
+| `modes.serverActivateMajorMode` | `MajorModeActivation` | New | Medium | Activate Markdown for an open document and publish behavior version. |
+| `commands.serverRegisterCommand` | `CommandDeclaration` | New | Medium | Register package-prefixed Markdown commands. |
+| `keybindings.bindKey` | `KeyRoutingOverride` | Exists/Extend | Low | Bind Markdown command shortcuts. |
+| `behavior.getActiveBehaviorManifest` | `TextTransform` | Exists/Extend | Low | Verify installed Enter/list/code-block transform manifest. |
+| `decorations.serverPublishDecorations` | `DecorationRange` | New | Medium | Publish syntax/emphasis/code spans for local rendering. |
+| `parse.serverRegisterParseHandler` | `IncrementalParseUpdate` | New | High | Register server-side Markdown parse/update handler. |
+| `sdui.definePanel` and `sdui.publishTree` | `SduiPanelStatusContribution` | Exists/Extend | Low | Publish preview/decoration toggle panel. |
+| `folding.serverPublishFoldingRanges` | `FoldingRange` | Deferred | Low | Optional heading/code block folding; not a Phase 18 readiness gate. |
 
 ## Performance Targets
 

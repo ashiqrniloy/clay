@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientSelectNextMatch
+id: editor.clientSelectNextMatch
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSelectNextMatch
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+D"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientSelectNextMatch` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
+agent_guidance: Use `editor.clientSelectNextMatch` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
 lookup_tags: [editor, js-api, multi-cursor, selection]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Select the next occurrence of the current selection or word as a new primary car
 
 ## Description
 
-`clientSelectNextMatch` returns the stable bindable command ID `clay.editor.clientSelectNextMatch` for **Select Next Match** (Plan 071 task 9). On a collapsed caret the first press selects the word under the caret; each further press adds the next occurrence as a new caret. Search wraps once around the document and stops when every occurrence is selected. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientSelectNextMatch` returns the stable bindable command ID `editor.clientSelectNextMatch` for **Select Next Match** (Plan 071 task 9). On a collapsed caret the first press selects the word under the caret; each further press adds the next occurrence as a new caret. Search wraps once around the document and stops when every occurrence is selected. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -50,7 +50,7 @@ bindKey("ctrl+k ctrl+n", clientSelectNextMatch());
 ## Example
 
 ```ts
-const commandId = clientSelectNextMatch(); // "clay.editor.clientSelectNextMatch"
+const commandId = clientSelectNextMatch(); // "editor.clientSelectNextMatch"
 ```
 
 ## Options
@@ -69,7 +69,7 @@ None.
 
 ## Return and async behavior
 
-Returns the stable command ID string `clay.editor.clientSelectNextMatch` synchronously. The facade is synchronous, side-effect free, and local.
+Returns the stable command ID string `editor.clientSelectNextMatch` synchronously. The facade is synchronous, side-effect free, and local.
 
 ## Errors
 
@@ -85,7 +85,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientSelectNextMatch` when the user asks for Select Next Match through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientSelectNextMatch` when the user asks for Select Next Match through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.editor.clientSelectNextMatch` when the user asks for Select Next Match
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientSelectNextMatch`
+- Stable ID: `editor.clientSelectNextMatch`
 - User-facing name: Select Next Match
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientSelectNextMatch`

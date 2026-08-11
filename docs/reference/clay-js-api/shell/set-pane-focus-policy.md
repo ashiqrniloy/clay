@@ -1,5 +1,5 @@
 ---
-id: clay.shell.setPaneFocusPolicy
+id: shell.setPaneFocusPolicy
 kind: clay-js-api
 js_module: "clay:shell"
 js_export: setPaneFocusPolicy
@@ -82,7 +82,7 @@ Synchronous. Returns `{ paneFocusPolicy: "click" | "cursor" }`. The helper calls
 
 ## Errors
 
-Throws `clay.shell.invalid_pane_focus_policy` for:
+Throws `shell.invalid_pane_focus_policy` for:
 
 - input that is not valid JSON or not an object with a `paneFocusPolicy` string;
 - unknown values (anything outside the closed `click` | `cursor` enum) with a diagnostic naming the offending value and the two valid options.
@@ -109,7 +109,7 @@ Only the bounded `click` | `cursor` enum is accepted. The setting grants no auth
 
 ## Denied
 
-Authority not granted: no filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, client-side JavaScript, WASM authority, or promotion-by-naming. Out-of-enum values are rejected with `clay.shell.invalid_pane_focus_policy`.
+Authority not granted: no filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, client-side JavaScript, WASM authority, or promotion-by-naming. Out-of-enum values are rejected with `shell.invalid_pane_focus_policy`.
 
 ## Key bindings
 

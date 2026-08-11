@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientSetCursorStyle
+id: editor.clientSetCursorStyle
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSetCursorStyle
@@ -41,7 +41,7 @@ custom_properties:
     default: true
     description: Restart the blink to visible on typing; defaults to true.
 security: Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.
-agent_guidance: Use `clay.editor.clientSetCursorStyle` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `editor.clientSetCursorStyle` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [cursorstylecustomization, editor, js-api]
 app_visible: true
 help_visible: true
@@ -119,7 +119,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientSetCursorStyle` when the user asks for set cursor style through the Clay JS API or `~/.config/clay/init.js` customization. Avoid inventing direct Rust calls, raw op names, document mutation, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientSetCursorStyle` when the user asks for set cursor style through the Clay JS API or `~/.config/clay/init.js` customization. Avoid inventing direct Rust calls, raw op names, document mutation, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -130,7 +130,7 @@ Use `clay.editor.clientSetCursorStyle` when the user asks for set cursor style t
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientSetCursorStyle`
+- Stable ID: `editor.clientSetCursorStyle`
 - User-facing name: Set Cursor Style
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientSetCursorStyle`

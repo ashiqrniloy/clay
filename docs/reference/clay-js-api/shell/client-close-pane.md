@@ -1,5 +1,5 @@
 ---
-id: clay.shell.clientClosePane
+id: shell.clientClosePane
 kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientClosePane
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+Alt+W"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no package JavaScript, no IPC for topology). Since Phase 22.2, closing a pane with a dirty document is blocked, and closing a clean pane releases its document lease only through the server's existing capability-gated close path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. This command does not open files or grant document authority.
-agent_guidance: "Use `clay.shell.clientClosePane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
+agent_guidance: "Use `shell.clientClosePane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
 lookup_tags: [shell, panes, splits, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for closing the focused pane. Since Phase 
 
 ## Description
 
-`clientClosePane` is the public Clay JS API descriptor for **Close Pane**. It returns the stable command ID `clay.shell.clientClosePane` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
+`clientClosePane` is the public Clay JS API descriptor for **Close Pane**. It returns the stable command ID `shell.clientClosePane` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
 
 Close Pane removes the focused leaf and promotes its sibling subtree. The last pane is protected (no-op). The active pane becomes the sibling's first leaf.
 
@@ -60,7 +60,7 @@ bindKey("Ctrl+Alt+W", clientClosePane(), { scope: "global" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+Alt+W", "clay.shell.clientClosePane", { scope: "global" });
+bindKey("Ctrl+Alt+W", "shell.clientClosePane", { scope: "global" });
 ```
 
 ## Example
@@ -89,7 +89,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.shell.clientClosePane"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
+Returns the string literal command ID `"shell.clientClosePane"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -103,7 +103,7 @@ Bindable client UI command ID only; after explicit user routing it mutates only 
 
 ## Agent guidance
 
-Use `clay.shell.clientClosePane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
+Use `shell.clientClosePane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
 
 ## Backing implementation
 
@@ -113,7 +113,7 @@ Use `clay.shell.clientClosePane` only as a documented command ID for `bindKey` t
 
 ## Lookup metadata
 
-- Stable ID: `clay.shell.clientClosePane`
+- Stable ID: `shell.clientClosePane`
 - User-facing name: Close Pane
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientClosePane`

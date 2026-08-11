@@ -1,5 +1,5 @@
 ---
-id: clay.sdui.publishTree
+id: sdui.publishTree
 kind: clay-js-api
 js_module: "clay:sdui"
 js_export: publishTree
@@ -21,7 +21,7 @@ custom_properties:
     default: "required"
     description: Root node definition previously built with `clay:sdui` helpers.
 security: Publishes inert declarative UI metadata only after server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.sdui.publishTree` only from server-side configuration or extension code after building inert SDUI nodes with documented helpers; never call raw ops or embed executable client script.
+agent_guidance: Use `sdui.publishTree` only from server-side configuration or extension code after building inert SDUI nodes with documented helpers; never call raw ops or embed executable client script.
 lookup_tags: [sdui, server-driven-ui, js-api, phase13, runtime-backed, configuration]
 app_visible: true
 help_visible: true
@@ -102,7 +102,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.sdui.publishTree` only with documented SDUI node helpers and only in server-side configuration/runtime contexts. Avoid raw `Deno.core.ops`, raw Rust/protocol construction, executable action payloads, arbitrary command IDs, filesystem effects, network effects, shell commands, extension loading, AI mutation, package loading, WASM, or client-side JavaScript execution.
+Use `sdui.publishTree` only with documented SDUI node helpers and only in server-side configuration/runtime contexts. Avoid raw `Deno.core.ops`, raw Rust/protocol construction, executable action payloads, arbitrary command IDs, filesystem effects, network effects, shell commands, extension loading, AI mutation, package loading, WASM, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -113,7 +113,7 @@ Use `clay.sdui.publishTree` only with documented SDUI node helpers and only in s
 
 ## Lookup metadata
 
-- Stable ID: `clay.sdui.publishTree`
+- Stable ID: `sdui.publishTree`
 - User-facing name: Publish SDUI Tree
 - Kind: `clay-js-api`
 - Module/export: `clay:sdui` / `publishTree`

@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     Ok(value) => json!({ "kind": "evaluation", "value": value }),
                     Err(error) => json!({
                         "kind": "diagnostic",
-                        "code": "clay.runtime.sandbox_child",
+                        "code": "runtime.sandbox_child",
                         "message": sanitize(&error),
                     }),
                 };
@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     max_payload_bytes,
                     json!({
                         "kind": "diagnostic",
-                        "code": "clay.runtime.sandbox_protocol",
+                        "code": "runtime.sandbox_protocol",
                         "message": "unsupported sandbox request",
                     }),
                 )

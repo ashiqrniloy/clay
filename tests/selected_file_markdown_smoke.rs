@@ -116,10 +116,7 @@ async fn run_smoke(endpoint: &IpcEndpoint, selected: &Path) {
     match read_message(&codec, &mut stream).await {
         ServerMessage::RuntimeDiagnostic(diagnostic) => {
             assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
-            assert_eq!(
-                diagnostic.code,
-                "clay.client.selected_file_open.unauthorized"
-            );
+            assert_eq!(diagnostic.code, "client.selected_file_open.unauthorized");
         }
         message => panic!("expected unauthorized RuntimeDiagnostic, got {message:?}"),
     }

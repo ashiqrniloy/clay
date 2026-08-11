@@ -1,5 +1,5 @@
 ---
-id: clay.completion.serverRegisterCompletionProvider
+id: completion.serverRegisterCompletionProvider
 kind: clay-js-api
 js_module: "clay:completion"
 js_export: serverRegisterCompletionProvider
@@ -73,7 +73,7 @@ custom_properties:
     default: 64
     description: Per-provider item cap bounded by COMPLETION_RESULT_MAX_ITEMS.
 security: Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs/items, trigger metadata, static item/result bounds, timeout/item budgets, and inert load-time metadata. The public API registers inert keyword/snippet items only; JS provider execution tokens are intentionally not exposed. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.
-agent_guidance: Use `clay.completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage("@vendor/provider")` from user configuration; do not pass callbacks, raw Deno ops, modules, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.
+agent_guidance: Use `completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage("@vendor/provider")` from user configuration; do not pass callbacks, raw Deno ops, modules, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.
 lookup_tags: [js-api, completion, provider, package, phase18.19]
 app_visible: true
 help_visible: true
@@ -162,8 +162,8 @@ Returns a synchronous registration summary with `packageName`, `packageVersion`,
 
 ## Errors
 
-- `clay.completion.invalid_provider`: options are malformed, missing `completion-provider`, use a non-package-owned provider ID, duplicate or exceed static item bounds, exceed budgets, or include prohibited authority fields.
-- `clay.completion.registration_failed`: duplicate provider metadata was already registered in the current runtime evaluation state.
+- `completion.invalid_provider`: options are malformed, missing `completion-provider`, use a non-package-owned provider ID, duplicate or exceed static item bounds, exceed budgets, or include prohibited authority fields.
+- `completion.registration_failed`: duplicate provider metadata was already registered in the current runtime evaluation state.
 
 ## Permissions and security
 

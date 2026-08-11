@@ -8,7 +8,7 @@
 const ops = globalThis.Deno?.core?.ops;
 function requireOps() {
     if (!ops) {
-        throw new Error("clay.language.runtime_unavailable: Clay language APIs require the server runtime");
+        throw new Error("language.runtime_unavailable: Clay language APIs require the server runtime");
     }
     return ops;
 }
@@ -31,7 +31,7 @@ export function serverRegisterLanguageIntelligenceProvider(options) {
         "languageServer",
     ]) {
         if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
-            throw new Error(`clay.language.invalid_provider: executable or process authority field ${key} is not accepted by the public registration contract`);
+            throw new Error(`language.invalid_provider: executable or process authority field ${key} is not accepted by the public registration contract`);
         }
     }
     const { module, exportName = "provideLanguageIntelligence", ...opOptions } = options ?? {};
@@ -43,7 +43,7 @@ export function serverRegisterLanguageIntelligenceProvider(options) {
     if (module !== undefined) {
         const handler = module[exportName];
         if (typeof handler !== "function") {
-            throw new Error(`clay.language.invalid_provider: module export ${exportName} must be a function`);
+            throw new Error(`language.invalid_provider: module export ${exportName} must be a function`);
         }
         globalThis.__clayLanguageIntelligenceHandlers ??= Object.create(null);
         globalThis.__clayLanguageIntelligenceHandlers[registration.token ?? ""] = handler;

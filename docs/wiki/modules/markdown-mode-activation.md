@@ -35,7 +35,7 @@ generic protocol primitives — **with zero mode-specific logic in Rust**.
 │    pairs: [{open:"**", close:"**"}, ...]    │  ← Markdown-specific delimiters
 │  }                                          │
 │                                             │
-│  clay.modes.serverActivateMajorMode({       │
+│  modes.serverActivateMajorMode({       │
 │    editorRules: MARKDOWN_EDITOR_RULES,      │  ← passed as inert JSON
 │    commands: [...], keymaps: [...]          │
 │  })                                         │

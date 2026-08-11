@@ -172,7 +172,7 @@ With the inventory above, `@clay/rust`, `@clay/typescript`, and `@clay/javascrip
 - Semantic decorations, folding ranges, diagnostics, and outline data via `serverRegisterParseHandler` + `serverPublishDecorations`.
 - Keyword/snippet completion providers via `serverRegisterCompletionProvider`.
 - Package UI panels (outline, symbols, diagnostics), transient overlays (hover/help), status items, and theme tokens via `clay:ui` contribution APIs.
-- Configuration options and layout overrides via `clay.configuration.setPackageOption` and `clay.ui.serverSetLayoutOverride`.
+- Configuration options and layout overrides via `configuration.setPackageOption` and `ui.serverSetLayoutOverride`.
 - One-line default loading via `loadPackage("@clay/rust")`, `loadPackage("@clay/typescript")`, or `loadPackage("@clay/javascript")`.
 
 ## Hot-Path Classification

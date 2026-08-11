@@ -1,5 +1,5 @@
 ---
-id: clay.commands.serverOpenFile
+id: commands.serverOpenFile
 kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverOpenFile
@@ -16,8 +16,8 @@ visibility: public
 permissions: ["workspace-read"]
 key_bindings: []
 custom_properties: []
-security: Routes through clay.workspace.openFile and server workspace APIs; in-root paths are root-relative and out-of-root paths use selected-file single-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.commands.serverOpenFile` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
+security: Routes through workspace.openFile and server workspace APIs; in-root paths are root-relative and out-of-root paths use selected-file single-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
+agent_guidance: Use `commands.serverOpenFile` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
 lookup_tags: [commands, workspace, open-file, selected-file-grant, phase18.12, js-api]
 app_visible: true
 help_visible: true
@@ -61,7 +61,7 @@ Either `workspaceRootId` + `relativePath` for in-root opens, or `absolutePath` f
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.commands.serverOpenFile` through documented keybinding/configuration APIs where appropriate.
+No default key binding is assigned. Users may bind a key to `commands.serverOpenFile` through documented keybinding/configuration APIs where appropriate.
 
 ## Custom properties
 
@@ -81,11 +81,11 @@ The runtime rejects malformed arguments, unavailable runtime ops, unknown comman
 
 Requires: ["workspace-read"].
 
-Routes through clay.workspace.openFile and server workspace APIs; in-root paths are root-relative and out-of-root paths use selected-file single-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
+Routes through workspace.openFile and server workspace APIs; in-root paths are root-relative and out-of-root paths use selected-file single-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
 
 ## Agent guidance
 
-Use `clay.commands.serverOpenFile` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
+Use `commands.serverOpenFile` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.commands.serverOpenFile` only through the documented Clay JS facade. D
 
 ## Lookup metadata
 
-- Stable ID: `clay.commands.serverOpenFile`
+- Stable ID: `commands.serverOpenFile`
 - User-facing name: Open File
 - Kind: `clay-js-api`
 - Module/export: `clay:commands` / `serverOpenFile`

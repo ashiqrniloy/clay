@@ -8,5 +8,5 @@ function plannedApi(name) {
 }
 export async function quit(options = {}) {
     void options;
-    plannedApi("clay.application.quit");
+    plannedApi("application.quit");
 }

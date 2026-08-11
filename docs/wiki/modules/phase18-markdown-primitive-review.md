@@ -54,8 +54,8 @@ Proceed with package work using existing generic primitives first:
 
 - Build the `markdown-it` token-stream adapter entirely in `packages/markdown/dist/parser.js` and matching source files.
 - Use package-owned source scanning and line-start tables for token-to-byte-range mapping.
-- Publish only Clay `DecorationSpan` data through `clay.decorations.serverPublishDecorations`.
-- Register parse behavior through `clay.parse.serverRegisterParseHandler` without executable callback fields in registration payloads.
+- Publish only Clay `DecorationSpan` data through `decorations.serverPublishDecorations`.
+- Register parse behavior through `parse.serverRegisterParseHandler` without executable callback fields in registration payloads.
 - Keep SDUI and commands package-prefixed and inert.
 - Update primitive docs/tests only if a generic primitive contract changes.
 

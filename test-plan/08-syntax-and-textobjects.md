@@ -11,12 +11,12 @@ tier preference, advisory degradation. Deep reference:
 - Textobject/smart-select keys are bound via init.js (no defaults ship):
 
 ```js
-bindKey("Alt+I", "clay.editor.clientSelectTextobject.function.inner.current", { scope: "editor" });
-bindKey("Alt+O", "clay.editor.clientSelectTextobject.function.around.current", { scope: "editor" });
-bindKey("Alt+A", "clay.editor.clientSelectTextobject.argument.inner.current", { scope: "editor" });
-bindKey("Alt+C", "clay.editor.clientSelectTextobject.comment.around.current", { scope: "editor" });
-bindKey("Alt+E", "clay.editor.clientSmartSelect.expand", { scope: "editor" });
-bindKey("Alt+R", "clay.editor.clientSmartSelect.shrink", { scope: "editor" });
+bindKey("Alt+I", "editor.clientSelectTextobject.function.inner.current", { scope: "editor" });
+bindKey("Alt+O", "editor.clientSelectTextobject.function.around.current", { scope: "editor" });
+bindKey("Alt+A", "editor.clientSelectTextobject.argument.inner.current", { scope: "editor" });
+bindKey("Alt+C", "editor.clientSelectTextobject.comment.around.current", { scope: "editor" });
+bindKey("Alt+E", "editor.clientSmartSelect.expand", { scope: "editor" });
+bindKey("Alt+R", "editor.clientSmartSelect.shrink", { scope: "editor" });
 ```
 
 Open `/tmp/clay-manual/test.rs` (from module 05 setup).

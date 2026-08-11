@@ -30,7 +30,7 @@ pub(super) fn op_clay_completion_store_result(
 ) -> Result<(), JsErrorBox> {
     if result_json.len() > crate::perf::budgets::COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES {
         return Err(clay_error(
-            "clay.completion.invalid_result: result exceeds payload budget",
+            "completion.invalid_result: result exceeds payload budget",
         ));
     }
     // Bridge ingress revalidation (Plan 061 task 7): the executing package
@@ -52,16 +52,16 @@ pub(super) fn op_clay_completion_disable(
     state: &mut OpState,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let value = parse_json(&options_json, "clay.completion.invalid_disable")?;
+    let value = parse_json(&options_json, "completion.invalid_disable")?;
     let options = value
         .as_object()
-        .ok_or_else(|| clay_error("clay.completion.invalid_disable: options must be an object"))?;
+        .ok_or_else(|| clay_error("completion.invalid_disable: options must be an object"))?;
     if options
         .keys()
         .any(|key| key != "provider" && key != "packagePrefix")
     {
         return Err(clay_error(
-            "clay.completion.invalid_disable: only provider or packagePrefix is accepted",
+            "completion.invalid_disable: only provider or packagePrefix is accepted",
         ));
     }
     let provider = optional_disable_target(options, "provider")?;
@@ -70,7 +70,7 @@ pub(super) fn op_clay_completion_disable(
         (Some(target), None) | (None, Some(target)) => target,
         _ => {
             return Err(clay_error(
-                "clay.completion.invalid_disable: provide exactly one non-empty provider or packagePrefix",
+                "completion.invalid_disable: provide exactly one non-empty provider or packagePrefix",
             ));
         }
     };
@@ -82,7 +82,7 @@ pub(super) fn op_clay_completion_disable(
         "disabled": disabled,
         "providerGeneration": generation,
     }))
-    .map_err(serialize_error("clay.completion.disable_failed"))
+    .map_err(serialize_error("completion.disable_failed"))
 }
 
 fn optional_disable_target<'a>(
@@ -98,12 +98,12 @@ fn optional_disable_target<'a>(
         .filter(|target| !target.is_empty())
         .ok_or_else(|| {
             clay_error(format!(
-                "clay.completion.invalid_disable: {key} must be a non-empty string"
+                "completion.invalid_disable: {key} must be a non-empty string"
             ))
         })?;
     if target.chars().count() > COMPLETION_DISABLE_TARGET_MAX_CHARS {
         return Err(clay_error(format!(
-            "clay.completion.invalid_disable: {key} exceeds {COMPLETION_DISABLE_TARGET_MAX_CHARS} characters"
+            "completion.invalid_disable: {key} exceeds {COMPLETION_DISABLE_TARGET_MAX_CHARS} characters"
         )));
     }
     Ok(Some(target))
@@ -115,10 +115,10 @@ pub(super) fn op_clay_completion_register_completion_provider(
     state: &mut OpState,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let options_value = parse_json(&options_json, "clay.completion.invalid_provider")?;
+    let options_value = parse_json(&options_json, "completion.invalid_provider")?;
     let options = options_value
         .as_object()
-        .ok_or_else(|| clay_error("clay.completion.invalid_provider: options must be an object"))?;
+        .ok_or_else(|| clay_error("completion.invalid_provider: options must be an object"))?;
     reject_prohibited_authority(options)?;
     let runtime_bridge = options
         .get("runtimeBridge")
@@ -140,7 +140,7 @@ pub(super) fn op_clay_completion_register_completion_provider(
         )?;
     if package.contributions.completion_providers.is_empty() {
         return Err(clay_error(
-            "clay.completion.invalid_provider: package must declare a completionProviders contribution",
+            "completion.invalid_provider: package must declare a completionProviders contribution",
         ));
     }
 
@@ -148,7 +148,7 @@ pub(super) fn op_clay_completion_register_completion_provider(
     let clay = state.borrow::<Arc<ClayOpState>>();
     let registered = clay
         .register_completion_provider_metadata(metas)
-        .map_err(|message| clay_error(format!("clay.completion.registration_failed: {message}")))?;
+        .map_err(|message| clay_error(format!("completion.registration_failed: {message}")))?;
     let registrations = if runtime_bridge {
         registered
             .iter()
@@ -183,7 +183,7 @@ pub(super) fn op_clay_completion_register_completion_provider(
     }))
     .map_err(|error| {
         clay_error(format!(
-            "clay.completion.registration_failed: failed to serialize result ({error})"
+            "completion.registration_failed: failed to serialize result ({error})"
         ))
     })
 }
@@ -274,7 +274,7 @@ pub(super) fn op_clay_completion_providers_for_trigger(
             "maxItems": meta.max_items,
         })).collect::<Vec<_>>(),
     }))
-    .map_err(serialize_error("clay.completion.list_failed"))
+    .map_err(serialize_error("completion.list_failed"))
 }
 
 fn reject_prohibited_authority(options: &Map<String, Value>) -> Result<(), JsErrorBox> {
@@ -289,13 +289,13 @@ fn reject_prohibited_authority(options: &Map<String, Value>) -> Result<(), JsErr
     ] {
         if options.contains_key(key) {
             return Err(clay_error(format!(
-                "clay.completion.invalid_provider: executable or raw authority field `{key}` is not accepted by the public registration contract"
+                "completion.invalid_provider: executable or raw authority field `{key}` is not accepted by the public registration contract"
             )));
         }
     }
     if optional_u64(options.get("timeoutMs"))?.is_some_and(|value| value == 0 || value > 5_000) {
         return Err(clay_error(
-            "clay.completion.invalid_provider: timeoutMs must be between 1 and 5000",
+            "completion.invalid_provider: timeoutMs must be between 1 and 5000",
         ));
     }
     Ok(())

@@ -23,10 +23,10 @@ export function lspRustPackageManifest() {
       modes: [],
       docs: "./docs/index.md",
       apiDependencies: [
-        "clay.language.serverRegisterDocumentAnalyzer",
-        "clay.language-server.startLanguageServerSession",
-        "clay.decorations.serverPublishDecorations",
-        "clay.diagnostics.serverPublishDiagnostics",
+        "language.serverRegisterDocumentAnalyzer",
+        "language-server.startLanguageServerSession",
+        "decorations.serverPublishDecorations",
+        "diagnostics.serverPublishDiagnostics",
       ],
       performance: {
         estimatedManifestBytes: 1500,

@@ -1531,7 +1531,7 @@ mod tests {
                 label: format!("Row {index}"),
                 detail: None,
                 action: Some(SduiActionIntent::command(
-                    "clay.workspace.openFile",
+                    "workspace.openFile",
                     SduiActionSource::ListItem {
                         node_id: list,
                         item_id: format!("item-{index}"),
@@ -1858,7 +1858,7 @@ mod tests {
             .observable_snapshot(Size::new(900.0, 600.0))
             .package_transient_overlays;
         assert_eq!(overlays.len(), 1);
-        assert_eq!(overlays[0].id, "clay.menu.3");
+        assert_eq!(overlays[0].id, "menu.3");
         assert_eq!(overlays[0].anchor, PackageOverlayAnchor::Bottom);
         assert_eq!(overlays[0].component_kind, "stack");
     }

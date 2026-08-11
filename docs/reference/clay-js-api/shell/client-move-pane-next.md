@@ -1,5 +1,5 @@
 ---
-id: clay.shell.clientMovePaneNext
+id: shell.clientMovePaneNext
 kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientMovePaneNext
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+Alt+]"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.
-agent_guidance: "Use `clay.shell.clientMovePaneNext` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
+agent_guidance: "Use `shell.clientMovePaneNext` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
 lookup_tags: [shell, panes, splits, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for swapping the focused pane with the nex
 
 ## Description
 
-`clientMovePaneNext` is the public Clay JS API descriptor for **Move Pane Next**. It returns the stable command ID `clay.shell.clientMovePaneNext` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
+`clientMovePaneNext` is the public Clay JS API descriptor for **Move Pane Next**. It returns the stable command ID `shell.clientMovePaneNext` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
 
 Move Pane Next swaps the focused pane's leaf ID with the next pane in reading order, preserving tree shape and split ratios. The active pane follows the moved ID. No-op at the end of reading order.
 
@@ -55,7 +55,7 @@ bindKey("Ctrl+Alt+]", clientMovePaneNext(), { scope: "global" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+Alt+]", "clay.shell.clientMovePaneNext", { scope: "global" });
+bindKey("Ctrl+Alt+]", "shell.clientMovePaneNext", { scope: "global" });
 ```
 
 ## Example
@@ -84,7 +84,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.shell.clientMovePaneNext"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
+Returns the string literal command ID `"shell.clientMovePaneNext"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ Bindable client UI command ID only; after explicit user routing it mutates only 
 
 ## Agent guidance
 
-Use `clay.shell.clientMovePaneNext` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
+Use `shell.clientMovePaneNext` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.shell.clientMovePaneNext` only as a documented command ID for `bindKey
 
 ## Lookup metadata
 
-- Stable ID: `clay.shell.clientMovePaneNext`
+- Stable ID: `shell.clientMovePaneNext`
 - User-facing name: Move Pane Next
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientMovePaneNext`

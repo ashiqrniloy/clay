@@ -15,7 +15,7 @@ Phase 20.5 promoted `dropdown`, `collapse`, and `modal` from reserved to impleme
 | Kind | Accessibility role | Paint | Keyboard |
 |------|-------------------|-------|----------|
 | `dropdown` | `Role::ComboBox` | Button-like trigger; selected item label from `dropdown_selected_index`; children painted when focused | ArrowUp/Down cycles, Enter/Space confirms |
-| `collapse` | `Role::Group` | Title row with `clay.ui.collapseToggle` action; children painted only when `is_collapse_expanded` | Enter/Space toggles |
+| `collapse` | `Role::Group` | Title row with `ui.collapseToggle` action; children painted only when `is_collapse_expanded` | Enter/Space toggles |
 | `modal` | `Role::Dialog` | `paint_tooltip_shell` chrome + title + children | Tab/Shift+Tab focus-trap via `modal_focusable_intents` |
 | `textInput` | `Role::TextInput` | Bordered field, `surface.control` fill, validation-state border, placeholder in `text.muted`, focus ring | Focus routing via action intent |
 
@@ -61,8 +61,8 @@ Node hash is `stable_package_source_id(component_id)` (FNV-1a, same as `SduiNode
 
 `route_package_component_key` (`src/masonry_editor.rs`) is called before `route_menu_key` in `local_key`:
 
-- `clay.ui.dropdownToggle` focused: ArrowUp/Down → `dropdown_cycle`, Enter/Space → clear focus (confirm)
-- `clay.ui.collapseToggle` focused: Enter/Space → `collapse_toggle`
+- `ui.dropdownToggle` focused: ArrowUp/Down → `dropdown_cycle`, Enter/Space → clear focus (confirm)
+- `ui.collapseToggle` focused: Enter/Space → `collapse_toggle`
 - Any other focused action + Tab: modal focus-trap cycles `modal_focusable_intents()`
 
 ## Compatibility

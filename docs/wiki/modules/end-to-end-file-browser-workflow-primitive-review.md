@@ -37,12 +37,12 @@ Most of the workflow already maps to generic Clay primitives. The remaining gaps
 
 - `FileBrowserState::from_workspace` and `FileBrowserState::to_sdui_tree` build a Clay-owned left Workspace panel from server listing data and project it through inert SDUI primitives.
 - `CommandExecutor::execute_workspace` validates built-in workspace command IDs and routes file opens through `WorkspaceState::open_existing_file` or selected-file grants.
-- Existing commands include `clay.workspace.openFile`, `clay.workspace.openFuzzyFile`, `clay.workspace.revealInTree`, and `clay.workspace.toggleFileBrowser`.
+- Existing commands include `workspace.openFile`, `workspace.openFuzzyFile`, `workspace.revealInTree`, and `workspace.toggleFileBrowser`.
 - `TransientMenuSession` already backs bounded fuzzy-open style interactions from installed metadata.
 
 ### Client UI prompts and selected-file authority
 
-- `clay.documents.clientOpenFileDialog` is a bindable `ClientUiCommand` route. The native client owns the modal prompt; the server owns validation and the selected-file grant.
+- `documents.clientOpenFileDialog` is a bindable `ClientUiCommand` route. The native client owns the modal prompt; the server owns validation and the selected-file grant.
 - `FileOpenCapabilityPool` issues single-use tokens for selected-file opens, and `ClientMessage::OpenSelectedFile` is rejected without a valid token.
 - Historical note: the Phase 19 Windows Markdown-file-only backend initially returned `Unsupported` on non-Windows; Phase 20 added Linux portal and macOS `NSOpenPanel` file-open backends while keeping selected-path grant consumption unchanged.
 
@@ -64,7 +64,7 @@ Most of the workflow already maps to generic Clay primitives. The remaining gaps
 
 Add a generic selected-folder flow, not a file-browser-only shortcut:
 
-- A bindable `ClientUiCommand` such as `clay.workspace.clientOpenFolderDialog` asks the native client to prompt the user for a directory.
+- A bindable `ClientUiCommand` such as `workspace.clientOpenFolderDialog` asks the native client to prompt the user for a directory.
 - The server receives a selected directory only with a single-use selected-path capability, canonicalizes it, verifies it is a directory, deduplicates it through `WorkspaceState::add_root` / `add_explicit_user_grant`, and returns refreshed Workspace SDUI.
 - The Linux path should use a native portal/DBus API or equivalent native backend; it must not shell out to `zenity`, `kdialog`, `xdg-open`, or scripts.
 
@@ -72,7 +72,7 @@ Add a generic selected-folder flow, not a file-browser-only shortcut:
 
 Add generic directory navigation state on top of existing bounded listing:
 
-- Directory rows must route to a directory-navigation command, not `clay.workspace.openFile`.
+- Directory rows must route to a directory-navigation command, not `workspace.openFile`.
 - Navigation accepts only `{ workspaceRootId, relativePath }`, must reuse `WorkspaceState::list_directory`, and emits a refreshed bounded SDUI tree.
 - A single-current-directory model with a parent row is enough; a full expand/collapse tree is deferred until needed.
 

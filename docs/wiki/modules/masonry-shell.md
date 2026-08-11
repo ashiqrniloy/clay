@@ -74,15 +74,15 @@ The examples are internal Rust-only. They are not public `clay:ui` JavaScript AP
 - `WorkingAreaLayout`
   - Owner/source: `src/shell/layout.rs`.
   - Runtime status: internal Rust state installed by the shell root for the default one-editor working area.
-  - Public API status: planned `clay.ui.serverRegisterWorkingAreaLayout` inventory stub only; no callable `clay:ui` facade/op is exposed in Phase 18.2.
+  - Public API status: planned `ui.serverRegisterWorkingAreaLayout` inventory stub only; no callable `clay:ui` facade/op is exposed in Phase 18.2.
 - `PaneSplitTree`
   - Owner/source: `src/shell/layout.rs`.
   - Runtime status: internal Rust state with leaf/split nodes, active pane metadata, bounded ratios, duplicate-ID rejection, node-count bound, and deterministic geometry helpers.
-  - Public API status: planned `clay.ui.serverRegisterPaneSplitTree` inventory stub only; packages cannot mutate Masonry children or provide split callbacks.
+  - Public API status: planned `ui.serverRegisterPaneSplitTree` inventory stub only; packages cannot mutate Masonry children or provide split callbacks.
 - `PaneSlotLayout`
   - Owner/source: `src/shell/layout.rs`.
   - Runtime status: internal Rust state with mandatory `main`, optional fixed `left`/`right`/`top`/`bottom` slots, finite size validation, min/max clamps, visibility, collapse state, user-resize metadata, and deterministic main/fixed-slot geometry.
-  - Public API status: planned `clay.ui.serverSetPaneSlotLayout` inventory stub only; package-facing panel contributions and user layout overrides remain deferred.
+  - Public API status: planned `ui.serverSetPaneSlotLayout` inventory stub only; package-facing panel contributions and user layout overrides remain deferred.
 
 Current and future modes/packages should reuse these generic shell primitives through documented Clay APIs when those APIs are implemented. They must not add Markdown-specific Rust shell branches or depend on Masonry widget IDs/types.
 
@@ -228,7 +228,7 @@ Tab/Shift+Tab pane cycling (Phase 20.3) remains: with more than one pane, `Tab` 
 
 ### Shell Commands and Key Routing
 
-`ShellClientCommand` (20 variants, `src/masonry_shell.rs`) parses the `clay.shell.client*` command IDs: the 12 pane commands (`clientSplitPaneVertical/Horizontal`, `clientAddEqualPane`, `clientClosePane`, `clientFocusPaneNext/Prev`, `clientResizePaneLeft/Right/Up/Down`, `clientMovePaneNext/Prev`) plus the 8 Phase 22.4 tab commands (`clientTabNext/Prev/New/Close/MoveLeft/MoveRight`, `clientTabActivate(u32)`, `clientTabMoveTo(u32)` — 1-based card positions). Command names follow the vim convention: a "vertical" split places panes side by side (`SplitOrientation::Horizontal`), a "horizontal" split stacks them.
+`ShellClientCommand` (20 variants, `src/masonry_shell.rs`) parses the `shell.client*` command IDs: the 12 pane commands (`clientSplitPaneVertical/Horizontal`, `clientAddEqualPane`, `clientClosePane`, `clientFocusPaneNext/Prev`, `clientResizePaneLeft/Right/Up/Down`, `clientMovePaneNext/Prev`) plus the 8 Phase 22.4 tab commands (`clientTabNext/Prev/New/Close/MoveLeft/MoveRight`, `clientTabActivate(u32)`, `clientTabMoveTo(u32)` — 1-based card positions). Command names follow the vim convention: a "vertical" split places panes side by side (`SplitOrientation::Horizontal`), a "horizontal" split stacks them.
 
 Dispatch path: `main.rs` resolves `ClientUiCommandResult::ShellCommand`; tab commands are intercepted by the driver's `apply_tab_command` **before** the widget (the widget's tab arms stay inert) — the driver resolves card positions from its `tab_order` policy and routes through the shared execution paths the tab bar also uses (activate/close/new/move), so chords and clicks share one code path. Pane commands reach `render_root.edit_widget(shell_widget_id).apply_shell_client_command(...)` — tree ops go through `WorkingAreaLayout::replace_pane_tree` (new in 22.1; bumps the layout version) + `reconcile_pane_hosts`; resize goes through `keyboard_resize` + `commit_split_drag`. No server round-trip, no JS runtime, no IPC in the dispatch path (guarded by `shell_command_dispatch_requires_no_server_or_js_runtime`).
 
@@ -238,7 +238,7 @@ Known 22.1 ceiling: `Global` rules route through the editor's key path, so the c
 
 ### Shell Preferences Transport
 
-`setPaneFocusPolicy({ paneFocusPolicy: "click" | "cursor" })` (`clay:shell` facade, `runtime/js/shell.js`) calls `op_clay_shell_set_pane_focus_policy` (admin-only op), which validates the closed enum and publishes through `ClayOpState::publish_shell_preferences`. The value travels the same broadcast-lane pattern as `CaretStyleOverride`: service-level channel + store (`ClayJsRuntimeService`), connection handler forwards it as `ServerMessage::ShellPreferences` (protocol v10; also sent during the initial handshake), and the client applies it as `ClientConnectionEvent::ShellPreferences` → `ClayShellWidget::set_pane_focus_policy` live. Unknown values fail evaluation with a `clay.shell.invalid_pane_focus_policy` diagnostic.
+`setPaneFocusPolicy({ paneFocusPolicy: "click" | "cursor" })` (`clay:shell` facade, `runtime/js/shell.js`) calls `op_clay_shell_set_pane_focus_policy` (admin-only op), which validates the closed enum and publishes through `ClayOpState::publish_shell_preferences`. The value travels the same broadcast-lane pattern as `CaretStyleOverride`: service-level channel + store (`ClayJsRuntimeService`), connection handler forwards it as `ServerMessage::ShellPreferences` (protocol v10; also sent during the initial handshake), and the client applies it as `ClientConnectionEvent::ShellPreferences` → `ClayShellWidget::set_pane_focus_policy` live. Unknown values fail evaluation with a `shell.invalid_pane_focus_policy` diagnostic.
 
 ## Phase 22.2: Pane Document Views and Focus Routing
 
@@ -278,7 +278,7 @@ Phase 22.2 (2026-08-05) wires document views into the pane hosts and makes the s
 - `src/shell/layout.rs`: cap rejection, equal-area redivision (2/3/4 panes, area equality), close/merge/focus-handoff, move swaps + end no-ops + ratio preservation, keyboard resize bordering/deepest/clamp/no-divider. Command: `cargo test --lib shell::layout --quiet`.
 - `src/masonry_shell.rs`: host identity stability across tree mutations, orphan detachment, placeholder hosting, per-pane placement, click-to-focus on placeholders, focus-policy behavior (default, follows-cursor, drag-skip), all 12 command dispatches, 4-pane cap enforcement, the no-server/no-JS hot-path guard, and (22.2) independent per-pane document views with document-scoped routing, typing-isolation hot-path guard, routing-target cleanup on pane close, and concurrent per-pane major modes isolated across behavior manifests. Phase 22.8 verification re-runs this matrix with per-tab server roots/document sets, per-document lease/version reservations, retained-session switching, duplicate-open ownership, and the four-pane cap; no split or hot-path implementation changes were needed. Command: `cargo test --lib masonry_shell --quiet`.
 - `src/server/js_runtime.rs`: policy publish/reject/default-unset through real init.js evaluation.
-- `src/server/ops/keybindings.rs`: all 12 shell IDs bindable + `ClientUiCommand`-routed; unknown `clay.shell.*` rejected.
+- `src/server/ops/keybindings.rs`: all 12 shell IDs bindable + `ClientUiCommand`-routed; unknown `shell.*` rejected.
 - `src/protocol/mod.rs`: defaults present with `Global` context and `ClientUi` authority.
 
 ## Phase 22.3: Tabs as Independent Client Views (multi-connection model)
@@ -305,7 +305,7 @@ Phase 22.3 (2026-08-06) makes each tab an independent client view with its own s
 
 ### Lifecycle (22.3 task 7: open / close / switch / reconnect)
 
-- **Open tab**: the tab bar's `+` affordance (`TabBarAction::NewTab`, right edge of the bar, present whenever the bar is) opens the native folder picker; the picked folder becomes the new tab's workspace root. The driver connects a fresh session with `TabCommand::New(workspace_root)` during the handshake; the server returns that tab's initial document/browser state, then `mount_tab` mounts a new chrome + default single-pane split tree, spawns its event bridge, and switches to it. Connection failures (`OpenTabFailed` — e.g. the `MAX_ACTIVE_CONNECTIONS` cap) surface a `clay.tabs.open_failed` diagnostic on the active tab's chrome and never mount a tab. `Ctrl+T` (22.4) routes to the same `open_new_tab_dialog` path as `+` — same flow, same in-flight guard (a second request while the picker is open is ignored).
+- **Open tab**: the tab bar's `+` affordance (`TabBarAction::NewTab`, right edge of the bar, present whenever the bar is) opens the native folder picker; the picked folder becomes the new tab's workspace root. The driver connects a fresh session with `TabCommand::New(workspace_root)` during the handshake; the server returns that tab's initial document/browser state, then `mount_tab` mounts a new chrome + default single-pane split tree, spawns its event bridge, and switches to it. Connection failures (`OpenTabFailed` — e.g. the `MAX_ACTIVE_CONNECTIONS` cap) surface a `tabs.open_failed` diagnostic on the active tab's chrome and never mount a tab. `Ctrl+T` (22.4) routes to the same `open_new_tab_dialog` path as `+` — same flow, same in-flight guard (a second request while the picker is open is ignored).
 - **Close tab**: the driver's `close_tab` (shared by card `✕` and `Ctrl+Shift+W`) first passes `tab_close_allowed` (never the last tab — the window never goes to zero tabs) and then the 22.4 dirty inventory `dirty_documents_in_tab` (replaces the 22.3 `guard_tab_close` first-dirty-view walk): a clean tab enqueues `TabCommand::Close` directly; a dirty tab gets the driver-owned confirm session (`clay::shell::tab_close_confirm_session` — Save all and close / Discard and close / Cancel) hosted on the active pane view + chrome overlay, with `pending_close_after_saves`/`advance_pending_close_after_saves` counting `DocumentSaved` acks before the close enqueues (cancelled on `FileOperationFailed`/disconnect). A clean close is server-authoritative: the server removes the registry entry and ends the connection, so the permit + leases release through the existing disconnect cleanup; the removal snapshot (observed on the other tabs' connections — the closing connection never reads its own broadcast update) drives `apply_registry_reconcile` uninstall.
 - **Switch tab**: card click → optimistic `switch_tab` + `TabCommand::Activate`; the server registry reconciles rejections.
 - **Reconnect**: on `Disconnected`/`ConnectionError` for a tab, `start_tab_reconnect` spawns a per-tab task that retries `client::connect_for_reclaim_or_new(tab_id, workspace_root)` with the existing backoff until it succeeds or the tab is removed (per-tab `Arc<AtomicBool>` cancellation flag set by `apply_registry_reconcile`). The fresh session already owns the reclaimed tab's initial document/browser state when `Reclaim` succeeds; after a server reset or TTL eviction, the same persisted root is bound through `New`. The driver swaps its queue into the chrome and every pane view (`reconnect`), re-keys the tab, and re-opens every document it holds through plain `OpenDocument` because the fresh connection has no selected-file capability. It spawns a new event bridge to the same chrome and restores focus when the tab was active. In-flight `pending_opens` are cleared. Split trees and per-pane document state restore from retained `TabChrome`/sessions; a full client process restart selects each persisted root before handshake-bound `New`. Multi-client reclamation remains a 21 ceiling.
@@ -650,8 +650,8 @@ Tests: `tab_bar_cards_never_below_min_width`, `tab_bar_wheel_scroll_clamps`,
 
 ### Split direction aliases (finding F3)
 
-`clay.shell.clientSplitPaneRight` → `SplitPaneVertical` (side-by-side) and
-`clay.shell.clientSplitPaneDown` → `SplitPaneHorizontal` (stacked) map in
+`shell.clientSplitPaneRight` → `SplitPaneVertical` (side-by-side) and
+`shell.clientSplitPaneDown` → `SplitPaneHorizontal` (stacked) map in
 `ShellClientCommand::from_command_id` (src/masonry_shell.rs), were added to
 both keybinding allowlists (`is_runtime_bindable_command` and the
 `ClientUiCommand` routing branch, `src/server/ops/keybindings.rs`), and are

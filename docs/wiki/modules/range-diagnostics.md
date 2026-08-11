@@ -19,7 +19,7 @@
 - `src/perf/budgets.rs` — `DIAGNOSTIC_*` budgets.
 - `runtime/js/diagnostics.js`, `runtime/js/web-tree-sitter-host.ts::collectWebTreeSitterDiagnostics`.
 - Tests: `tests/range_diagnostics.rs`, `tests/syntax_grammar.rs`, `tests/parse_coordinator.rs`, `tests/performance_protocol.rs`, `tests/editor_performance_invariants.rs`, `tests/primitives_docs.rs`, `tests/clay_js_doc_registry.rs`, `tests/rust_visibility_api_mapping.rs`, `tests/manual_smoke_docs.rs`.
-- Authoritative public API: [`clay.diagnostics.serverPublishDiagnostics`](../../reference/clay-js-api/diagnostics/server-publish-diagnostics.md).
+- Authoritative public API: [`diagnostics.serverPublishDiagnostics`](../../reference/clay-js-api/diagnostics/server-publish-diagnostics.md).
 - Authoritative primitive contract: [Diagnostics](../../reference/primitives/diagnostics.md).
 - Primitive review: [Phase 18.17 Range Diagnostics Primitive Review](phase18.17-range-diagnostics-primitive-review.md).
 

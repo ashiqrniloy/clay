@@ -13,7 +13,7 @@ Phase 18.16.5 defines one reusable typography contract for document modes, synta
 
 One role selects both ordered family fallback stack and logical-pixel size. Packages cannot split family and size ownership.
 
-User configuration is documented by [`clay.theme.setTypography`](../clay-js-api/theme/set-typography.md). Its `monospace`, `proportional`, and `ui` profiles are complete user-owned values. No package permission allows overriding them.
+User configuration is documented by [`theme.setTypography`](../clay-js-api/theme/set-typography.md). Its `monospace`, `proportional`, and `ui` profiles are complete user-owned values. No package permission allows overriding them.
 
 ## Ligature Policy
 
@@ -95,7 +95,7 @@ Text-bearing `panel`, `label`, `button`, `list`, and `statusItem` components may
 
 ## UI Typography Hierarchy
 
-The seven semantic variants (`display`, `title`, `section`, `body`, `status`, `detail`, `caption`) are scale ratios over the selected role's base size. The complete hierarchy is user-owned and travels atomically with `ActiveTypography` via [`clay.theme.setTypography`](../clay-js-api/theme/set-typography.md). Defaults preserve the legacy scales (`title = 14/12`, `body/status = 1`, `detail = 10/12`) and add restrained defaults for `display` (1.5), `section` (13/12), and `caption` (0.75). Each scale must be finite, positive, and at most 4.
+The seven semantic variants (`display`, `title`, `section`, `body`, `status`, `detail`, `caption`) are scale ratios over the selected role's base size. The complete hierarchy is user-owned and travels atomically with `ActiveTypography` via [`theme.setTypography`](../clay-js-api/theme/set-typography.md). Defaults preserve the legacy scales (`title = 14/12`, `body/status = 1`, `detail = 10/12`) and add restrained defaults for `display` (1.5), `section` (13/12), and `caption` (0.75). Each scale must be finite, positive, and at most 4.
 
 Packages and components select a semantic variant name only; they cannot supply concrete scale ratios. A `clay.contributions.designTokens` entry targeting any `typography.*` token is rejected as a typography (variant) override, not a scale value. A changed hierarchy increments the typography revision and invalidates editor/UI layout once; an unchanged hierarchy does not churn layout.
 

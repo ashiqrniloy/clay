@@ -1,5 +1,5 @@
 ---
-id: clay.shell.clientSplitPaneRight
+id: shell.clientSplitPaneRight
 kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientSplitPaneRight
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.
-agent_guidance: "Use `clay.shell.clientSplitPaneRight` only as a documented command ID for `bindKey` to name the right-split direction. It is an alias of `clay.shell.clientSplitPaneVertical` (canonical ID, unchanged default `Ctrl+\\` chord); prefer the canonical ID in new configuration. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
+agent_guidance: "Use `shell.clientSplitPaneRight` only as a documented command ID for `bindKey` to name the right-split direction. It is an alias of `shell.clientSplitPaneVertical` (canonical ID, unchanged default `Ctrl+\\` chord); prefer the canonical ID in new configuration. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
 lookup_tags: [shell, panes, splits, aliases, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,15 +33,15 @@ Return the stable bindable command ID for the right-split alias: resolves to the
 
 ## Description
 
-`clientSplitPaneRight` is the public Clay JS API descriptor for **Split Pane Right** (Phase 22.7 alias). It returns the stable command ID `clay.shell.clientSplitPaneRight` so configuration, help, key-binding discovery, and agents can name the direction without hard-coding Rust shortcuts.
+`clientSplitPaneRight` is the public Clay JS API descriptor for **Split Pane Right** (Phase 22.7 alias). It returns the stable command ID `shell.clientSplitPaneRight` so configuration, help, key-binding discovery, and agents can name the direction without hard-coding Rust shortcuts.
 
-The alias resolves to the existing `SplitPaneVertical` handler — the same side-by-side layout (`SplitOrientation::Horizontal`) as `clay.shell.clientSplitPaneVertical`: the focused pane keeps its left half and a new pane occupies the right half. The pane cap is `MAX_PANES_PER_TAB = 4`; the split is a no-op at cap.
+The alias resolves to the existing `SplitPaneVertical` handler — the same side-by-side layout (`SplitOrientation::Horizontal`) as `shell.clientSplitPaneVertical`: the focused pane keeps its left half and a new pane occupies the right half. The pane cap is `MAX_PANES_PER_TAB = 4`; the split is a no-op at cap.
 
 Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Pane topology mutation happens later only after an explicit user key/command route reaches `ClayShellWidget::apply_shell_client_command`. The command operates purely client-side: bounded `PaneSplitTree` rebuild + `reconcile_pane_hosts`, no server round-trip, no package JavaScript, no IPC.
 
 ## When to use
 
-Use this API when a user wants to bind a direction-named pane-management chord in `~/.config/clay/init.js`. New configuration should prefer the canonical `clay.shell.clientSplitPaneVertical`; the alias exists for direction-named bindings and help discovery.
+Use this API when a user wants to bind a direction-named pane-management chord in `~/.config/clay/init.js`. New configuration should prefer the canonical `shell.clientSplitPaneVertical`; the alias exists for direction-named bindings and help discovery.
 
 ## JavaScript usage
 
@@ -55,7 +55,7 @@ bindKey("Ctrl+Shift+Right", clientSplitPaneRight(), { scope: "global" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+Shift+Right", "clay.shell.clientSplitPaneRight", { scope: "global" });
+bindKey("Ctrl+Shift+Right", "shell.clientSplitPaneRight", { scope: "global" });
 ```
 
 ## Example
@@ -68,7 +68,7 @@ import { bindKey } from "clay:keybindings";
 bindKey("Ctrl+Shift+Right", clientSplitPaneRight(), { scope: "global" });
 ```
 
-The alias carries no default chord; the canonical `Ctrl+\\` binding for `clay.shell.clientSplitPaneVertical` is unchanged.
+The alias carries no default chord; the canonical `Ctrl+\\` binding for `shell.clientSplitPaneVertical` is unchanged.
 
 ## Options
 
@@ -76,7 +76,7 @@ No options are accepted. The command takes no arguments; pane topology is Clay-o
 
 ## Key bindings
 
-Default: none (alias — the canonical `clay.shell.clientSplitPaneVertical` keeps its `Ctrl+\\` default). Additional bindings may be configured with `bindKey`.
+Default: none (alias — the canonical `shell.clientSplitPaneVertical` keeps its `Ctrl+\\` default). Additional bindings may be configured with `bindKey`.
 
 ## Custom properties
 
@@ -84,7 +84,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.shell.clientSplitPaneRight"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
+Returns the string literal command ID `"shell.clientSplitPaneRight"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ Bindable client UI command ID only; after explicit user routing it mutates only 
 
 ## Agent guidance
 
-Use `clay.shell.clientSplitPaneRight` only as a documented command ID for `bindKey` to name the right-split direction. It is an alias of `clay.shell.clientSplitPaneVertical` (canonical ID, unchanged default `Ctrl+\\` chord); prefer the canonical ID in new configuration. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
+Use `shell.clientSplitPaneRight` only as a documented command ID for `bindKey` to name the right-split direction. It is an alias of `shell.clientSplitPaneVertical` (canonical ID, unchanged default `Ctrl+\\` chord); prefer the canonical ID in new configuration. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.shell.clientSplitPaneRight` only as a documented command ID for `bindK
 
 ## Lookup metadata
 
-- Stable ID: `clay.shell.clientSplitPaneRight`
+- Stable ID: `shell.clientSplitPaneRight`
 - User-facing name: Split Pane Right
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientSplitPaneRight`

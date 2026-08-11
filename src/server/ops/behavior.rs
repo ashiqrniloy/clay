@@ -23,7 +23,7 @@ pub(super) fn op_clay_behavior_get_active_manifest(
             .map(|command| command.command_id.clone())
             .collect::<Vec<_>>(),
     }))
-    .map_err(serialize_error("clay.behavior.manifest_failed"))
+    .map_err(serialize_error("behavior.manifest_failed"))
 }
 
 #[op2]
@@ -40,7 +40,9 @@ pub(super) fn op_clay_behavior_list_routes(
             json!({
                 "input": key_chord_string(&rule.sequence[0]),
                 "runtimePath": runtime_path(&rule.routing_policy),
-                "apiId": if rule.command_id.starts_with("clay.") { Some(rule.command_id.clone()) } else { None },
+                // Core Clay commands use bare `<domain>.<name>` IDs; package
+                // commands use the package prefix and carry no core apiId.
+                "apiId": if crate::packages::manifest::RESERVED_CORE_API_DOMAINS.contains(&rule.command_id.split('.').next().unwrap_or_default()) { Some(rule.command_id.clone()) } else { None },
                 "commandId": rule.command_id,
                 "authority": manifest.commands.iter()
                     .find(|command| command.command_id == rule.command_id)
@@ -48,8 +50,7 @@ pub(super) fn op_clay_behavior_list_routes(
             })
         })
         .collect::<Vec<Value>>();
-    serde_json::to_string(&Value::Array(routes))
-        .map_err(serialize_error("clay.behavior.routes_failed"))
+    serde_json::to_string(&Value::Array(routes)).map_err(serialize_error("behavior.routes_failed"))
 }
 
 fn runtime_path(policy: &RoutingPolicy) -> &'static str {

@@ -1,5 +1,5 @@
 ---
-id: clay.workspace.serverCreateListingCancelToken
+id: workspace.serverCreateListingCancelToken
 kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverCreateListingCancelToken
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Creates only an opaque cancellation token for workspace listing work and does not grant filesystem, workspace, file, root, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.workspace.serverCreateListingCancelToken` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
+agent_guidance: Use `workspace.serverCreateListingCancelToken` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
 lookup_tags: [workspace, directory-listing, cancellation, phase18.12, js-api]
 app_visible: true
 help_visible: true
@@ -61,7 +61,7 @@ No options.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.workspace.serverCreateListingCancelToken` through documented keybinding/configuration APIs where appropriate.
+No default key binding is assigned. Users may bind a key to `workspace.serverCreateListingCancelToken` through documented keybinding/configuration APIs where appropriate.
 
 ## Custom properties
 
@@ -85,7 +85,7 @@ Creates only an opaque cancellation token for workspace listing work and does no
 
 ## Agent guidance
 
-Use `clay.workspace.serverCreateListingCancelToken` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
+Use `workspace.serverCreateListingCancelToken` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.workspace.serverCreateListingCancelToken` only through the documented 
 
 ## Lookup metadata
 
-- Stable ID: `clay.workspace.serverCreateListingCancelToken`
+- Stable ID: `workspace.serverCreateListingCancelToken`
 - User-facing name: Create Listing Cancel Token
 - Kind: `clay-js-api`
 - Module/export: `clay:workspace` / `serverCreateListingCancelToken`

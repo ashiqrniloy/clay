@@ -1,5 +1,5 @@
 ---
-id: clay.theme.setAppearance
+id: theme.setAppearance
 kind: clay-js-api
 js_module: "clay:theme"
 js_export: setAppearance
@@ -77,7 +77,7 @@ Synchronous. Returns `{ appearance, resolvedTheme }`. `appearance` is the stored
 
 ## Errors
 
-Throws `clay.theme.invalid_request` for a missing `appearance` field and for unknown appearance values (anything outside `light` | `dark` | `system`).
+Throws `theme.invalid_request` for a missing `appearance` field and for unknown appearance values (anything outside `light` | `dark` | `system`).
 
 ## Permissions and security
 
@@ -101,7 +101,7 @@ Only the bounded `light` | `dark` | `system` enum is accepted. Canonical-default
 
 ## Denied
 
-Authority not granted: no raw CSS, renderer callbacks, client hooks, raw `Deno.core.ops`, arbitrary package theme loading, filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, native widget, client-side JavaScript, WASM authority, or promotion-by-naming. The `appearance` input is bounded to the closed `light` | `dark` | `system` enum; out-of-enum values are rejected with `clay.theme.invalid_request`.
+Authority not granted: no raw CSS, renderer callbacks, client hooks, raw `Deno.core.ops`, arbitrary package theme loading, filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, native widget, client-side JavaScript, WASM authority, or promotion-by-naming. The `appearance` input is bounded to the closed `light` | `dark` | `system` enum; out-of-enum values are rejected with `theme.invalid_request`.
 
 ## Key bindings
 

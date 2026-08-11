@@ -1,6 +1,7 @@
 mod behavior;
 pub mod command_execution;
 pub mod completion;
+mod config_watch;
 mod configuration;
 mod connection;
 pub(crate) mod control_center;
@@ -91,6 +92,8 @@ use crate::{
 
 use self::{
     behavior::{ActiveBehaviorManifest, BehaviorGraceState},
+    config_watch::watch_configuration_root,
+    configuration::ConfigurationRuntime,
     connection::handle_connection_with_analysis,
     document::DocumentState,
     js_runtime::ClayJsRuntimeService,
@@ -754,6 +757,36 @@ impl IpcServer {
         self.tab_states.lock().await.remove(&tab_id);
     }
 
+    fn effective_configuration_root(&self) -> Option<PathBuf> {
+        let root = if let Some(root) = &self.config.configuration_root {
+            root.clone()
+        } else {
+            let root = ConfigurationRuntime::default_config_root()?;
+            if !root.join("init.js").is_file() {
+                return None;
+            }
+            root
+        };
+        let root = std::fs::canonicalize(root).ok()?;
+        root.is_dir().then_some(root)
+    }
+
+    fn spawn_configuration_watcher(&self, tasks: &mut JoinSet<()>) {
+        let Some(root) = self.effective_configuration_root() else {
+            return;
+        };
+        let server = self.clone();
+        tasks.spawn(async move {
+            watch_configuration_root(root, move || {
+                let server = server.clone();
+                async move {
+                    let _ = server.reload_runtime_generation().await;
+                }
+            })
+            .await;
+        });
+    }
+
     #[cfg(unix)]
     pub async fn run(self) -> Result<(), ServerError> {
         let listener = bind_unix_listener(self.config.endpoint.as_unix_socket_path())?;
@@ -764,6 +797,7 @@ impl IpcServer {
     #[cfg(unix)]
     async fn accept_unix_loop(self, listener: UnixListener) -> Result<(), ServerError> {
         let mut connections = JoinSet::new();
+        self.spawn_configuration_watcher(&mut connections);
         loop {
             tokio::select! {
                 accepted = listener.accept() => {
@@ -787,6 +821,7 @@ impl IpcServer {
             .map_err(ServerError::InvalidEndpoint)?;
         self.load_default_configuration().await;
         let mut connections = JoinSet::new();
+        self.spawn_configuration_watcher(&mut connections);
         loop {
             let pipe = create_named_pipe_server(self.config.endpoint.as_windows_named_pipe())?;
             tokio::select! {
@@ -816,6 +851,8 @@ impl IpcServer {
         let service = self.runtime_generation.current_service().await;
         match self.load_configuration_for_service(&service).await {
             Ok(Some(evaluation)) => {
+                self.record_configuration_diagnostics(&evaluation.configuration_diagnostics)
+                    .await;
                 match self
                     .prepare_runtime_generation_candidate(
                         generation_id,
@@ -877,12 +914,22 @@ impl IpcServer {
             .await;
     }
 
+    async fn record_configuration_diagnostics(&self, diagnostics: &[RuntimeDiagnostic]) {
+        for diagnostic in diagnostics {
+            self.record_runtime_diagnostic(
+                "clay server optional configuration module failed",
+                diagnostic.clone(),
+            )
+            .await;
+        }
+    }
+
     async fn record_runtime_diagnostic(&self, context: &str, diagnostic: RuntimeDiagnostic) {
         eprintln!("{context} [{}]: {}", diagnostic.code, diagnostic.message);
         self.runtime_generation
             .push_diagnostic(diagnostic.clone())
             .await;
-        self.runtime_diagnostics.lock().await.push(diagnostic);
+        self.runtime_diagnostics.lock().await.publish(diagnostic);
     }
 
     #[doc(hidden)]
@@ -942,7 +989,7 @@ impl IpcServer {
                     active_generation_id: generation_id,
                     reloaded: false,
                     diagnostics: vec![RuntimeDiagnostic::error(
-                        "clay.runtime.reload_in_progress",
+                        "runtime.reload_in_progress",
                         error.message,
                     )],
                     refreshed_documents: Vec::new(),
@@ -963,21 +1010,27 @@ impl IpcServer {
         let current_service = self.runtime_generation.current_service().await;
         let next_service = ClayJsRuntimeService::production_reload(&current_service);
 
-        let evaluation = match self.load_configuration_for_service(&next_service).await {
-            Ok(evaluation) => evaluation.unwrap_or_default(),
-            Err(error) => {
-                let diagnostic = error.diagnostic();
-                self.record_runtime_error("clay server runtime reload failed", error)
-                    .await;
-                return RuntimeReloadOutcome {
-                    previous_generation_id,
-                    active_generation_id: previous_generation_id,
-                    reloaded: false,
-                    diagnostics: vec![diagnostic],
-                    refreshed_documents: Vec::new(),
-                };
-            }
-        };
+        let (evaluation, configuration_diagnostics) =
+            match self.load_configuration_for_service(&next_service).await {
+                Ok(evaluation) => {
+                    let evaluation = evaluation.unwrap_or_default();
+                    let diagnostics = evaluation.configuration_diagnostics.clone();
+                    self.record_configuration_diagnostics(&diagnostics).await;
+                    (evaluation, diagnostics)
+                }
+                Err(error) => {
+                    let diagnostic = error.diagnostic();
+                    self.record_runtime_error("clay server runtime reload failed", error)
+                        .await;
+                    return RuntimeReloadOutcome {
+                        previous_generation_id,
+                        active_generation_id: previous_generation_id,
+                        reloaded: false,
+                        diagnostics: vec![diagnostic],
+                        refreshed_documents: Vec::new(),
+                    };
+                }
+            };
 
         let candidate = match self
             .prepare_runtime_generation_candidate(
@@ -1010,7 +1063,7 @@ impl IpcServer {
                 previous_generation_id,
                 active_generation_id: next_generation_id,
                 reloaded: true,
-                diagnostics: Vec::new(),
+                diagnostics: configuration_diagnostics,
                 refreshed_documents,
             },
             Err(diagnostic) => {
@@ -1042,7 +1095,7 @@ impl IpcServer {
         if let Some(manifest) = evaluation.behavior_manifest.clone() {
             let staged = behavior.stage_replacement(manifest).map_err(|_| {
                 runtime_candidate_error(
-                    "clay.behavior.invalid_manifest",
+                    "behavior.invalid_manifest",
                     "Runtime behavior manifest failed server validation.",
                 )
             })?;
@@ -1055,7 +1108,7 @@ impl IpcServer {
             sdui.replace_for_document_with_runtime_tree(sdui.document_id(), tree)
                 .map_err(|_| {
                     runtime_candidate_error(
-                        "clay.sdui.invalid_tree",
+                        "sdui.invalid_tree",
                         "Runtime SDUI tree failed server validation.",
                     )
                 })?;
@@ -1063,7 +1116,7 @@ impl IpcServer {
 
         evaluation.ui_contributions.validate().map_err(|_| {
             runtime_candidate_error(
-                "clay.ui.invalid_snapshot",
+                "ui.invalid_snapshot",
                 "Runtime package UI contributions failed server validation.",
             )
         })?;
@@ -1073,7 +1126,7 @@ impl IpcServer {
         )
         .map_err(|_| {
             runtime_candidate_error(
-                "clay.syntax.invalid_snapshot",
+                "syntax.invalid_snapshot",
                 "Runtime syntax grammar contributions failed server validation.",
             )
         })?;
@@ -1081,7 +1134,7 @@ impl IpcServer {
             decorations::validate_decoration_set(set.document_version, set.clone(), None).map_err(
                 |_| {
                     runtime_candidate_error(
-                        "clay.decorations.invalid_set",
+                        "decorations.invalid_set",
                         "Runtime decoration set failed server validation.",
                     )
                 },
@@ -1091,7 +1144,7 @@ impl IpcServer {
             diagnostics::validate_diagnostic_set(set.document_version, set.clone(), None).map_err(
                 |_| {
                     runtime_candidate_error(
-                        "clay.diagnostics.invalid_set",
+                        "diagnostics.invalid_set",
                         "Runtime diagnostic set failed server validation.",
                     )
                 },
@@ -1114,7 +1167,7 @@ impl IpcServer {
             .await
             .map_err(|_| {
                 runtime_candidate_error(
-                    "clay.runtime.reload_refresh_failed",
+                    "runtime.reload_refresh_failed",
                     "Reload open-document refresh metadata could not be prepared.",
                 )
             })?;
@@ -1148,7 +1201,7 @@ impl IpcServer {
             )))
             .map_err(|_| {
                 runtime_candidate_error(
-                    "clay.runtime.snapshot_too_large",
+                    "runtime.snapshot_too_large",
                     "Runtime state snapshot exceeds the 1 MiB IPC frame ceiling.",
                 )
             })?;
@@ -1205,13 +1258,13 @@ impl IpcServer {
             .try_acquire(ScopedLockTarget::Behavior, LockOwner::Server)
             .map_err(|_| {
                 runtime_candidate_error(
-                    "clay.runtime.behavior_locked",
+                    "runtime.behavior_locked",
                     "Runtime behavior state is locked by another server operation.",
                 )
             })?;
         if self.runtime_generation.generation_id().await != candidate.expected_generation_id {
             return Err(runtime_candidate_error(
-                "clay.runtime.generation_conflict",
+                "runtime.generation_conflict",
                 "Runtime generation changed before the prepared candidate could commit.",
             ));
         }
@@ -1226,14 +1279,14 @@ impl IpcServer {
             || *active_typography != candidate.expected_typography
         {
             return Err(runtime_candidate_error(
-                "clay.runtime.active_state_conflict",
+                "runtime.active_state_conflict",
                 "Active runtime state changed before the prepared candidate could commit.",
             ));
         }
 
         let Some(evaluation) = candidate.generation.evaluation.as_deref() else {
             return Err(runtime_candidate_error(
-                "clay.runtime.incomplete_candidate",
+                "runtime.incomplete_candidate",
                 "Prepared runtime generation is missing validated evaluation state.",
             ));
         };
@@ -1520,7 +1573,7 @@ fn register_runtime_contributions(
         .register_parse_handlers(parse, generation_id, evaluation)
         .map_err(|_| {
             runtime_candidate_error(
-                "clay.parse.registration_failed",
+                "parse.registration_failed",
                 "Runtime parse handler registration failed validation.",
             )
         })?;
@@ -1528,14 +1581,14 @@ fn register_runtime_contributions(
         .register_completion_providers(completion, generation_id, evaluation)
         .map_err(|_| {
             runtime_candidate_error(
-                "clay.completion.registration_failed",
+                "completion.registration_failed",
                 "Runtime completion provider registration failed validation.",
             )
         })?;
     for registration in &evaluation.document_analyzers {
         if !service.document_analysis_registration_authorized(registration) {
             return Err(runtime_candidate_error(
-                "clay.analysis.unauthorized",
+                "analysis.unauthorized",
                 "Runtime document analyzer lacks an exact current package/process grant.",
             ));
         }
@@ -1549,7 +1602,7 @@ fn register_runtime_contributions(
             )
             .map_err(|_| {
                 runtime_candidate_error(
-                    "clay.analysis.registration_failed",
+                    "analysis.registration_failed",
                     "Runtime document analyzer registration failed validation.",
                 )
             })?;
@@ -1558,7 +1611,7 @@ fn register_runtime_contributions(
         .register_language_intelligence_providers(language_intelligence, generation_id, evaluation)
         .map_err(|_| {
             runtime_candidate_error(
-                "clay.language.registration_failed",
+                "language.registration_failed",
                 "Runtime language-intelligence provider registration failed validation.",
             )
         })?;
@@ -1611,7 +1664,7 @@ fn stage_typography(
 ) -> Result<crate::protocol::ActiveTypography, RuntimeDiagnostic> {
     requested.validate().map_err(|_| {
         runtime_candidate_error(
-            "clay.typography.invalid_configuration",
+            "typography.invalid_configuration",
             "Runtime typography failed server validation.",
         )
     })?;
@@ -1689,7 +1742,7 @@ fn build_runtime_state_snapshot(
     };
     snapshot.validate().map_err(|_| {
         runtime_candidate_error(
-            "clay.runtime.invalid_snapshot",
+            "runtime.invalid_snapshot",
             "Runtime state snapshot failed validation before commit.",
         )
     })?;
@@ -1745,19 +1798,19 @@ pub(crate) struct RuntimeOutputApplication {
 impl RuntimeOutputApplication {
     /// Unified diagnostics for outputs that failed validation. Both call sites
     /// surface these so the diagnostic codes stay identical across flows
-    /// (`clay.behavior.invalid_manifest`, `clay.sdui.invalid_tree`).
+    /// (`behavior.invalid_manifest`, `sdui.invalid_tree`).
     #[cfg(test)]
     pub(crate) fn diagnostics(&self) -> Vec<RuntimeDiagnostic> {
         let mut diagnostics = Vec::new();
         if matches!(self.behavior, Some(Err(()))) {
             diagnostics.push(RuntimeDiagnostic::error(
-                "clay.behavior.invalid_manifest",
+                "behavior.invalid_manifest",
                 "Runtime behavior manifest failed server validation.",
             ));
         }
         if matches!(self.sdui, Some(Err(()))) {
             diagnostics.push(RuntimeDiagnostic::error(
-                "clay.sdui.invalid_tree",
+                "sdui.invalid_tree",
                 "Published SDUI tree failed server validation.",
             ));
         }
@@ -2217,7 +2270,7 @@ mod runtime_outputs_tests {
 
     fn valid_manifest() -> BehaviorManifest {
         let mut manifest = BehaviorManifest::minimal_text_editing(99);
-        manifest.manifest_id = "clay.test.manifest".to_string();
+        manifest.manifest_id = "test.manifest".to_string();
         manifest
     }
 
@@ -2268,6 +2321,7 @@ mod runtime_outputs_tests {
             document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
+            configuration_diagnostics: Vec::new(),
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
@@ -2310,6 +2364,7 @@ mod runtime_outputs_tests {
             document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
+            configuration_diagnostics: Vec::new(),
         };
 
         let application = apply_runtime_outputs_without_sdui(&evaluation, &behavior).await;
@@ -2329,7 +2384,7 @@ mod runtime_outputs_tests {
     }
 
     /// An SDUI tree bound to a different document fails per-document
-    /// validation and surfaces the unified `clay.sdui.invalid_tree` diagnostic
+    /// validation and surfaces the unified `sdui.invalid_tree` diagnostic
     /// regardless of which flow called the primitive.
     #[tokio::test]
     async fn apply_runtime_outputs_reports_unified_diagnostic_for_invalid_sdui() {
@@ -2354,6 +2409,7 @@ mod runtime_outputs_tests {
             document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
+            configuration_diagnostics: Vec::new(),
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
@@ -2364,7 +2420,7 @@ mod runtime_outputs_tests {
         );
         let diagnostics = application.diagnostics();
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].code, "clay.sdui.invalid_tree");
+        assert_eq!(diagnostics[0].code, "sdui.invalid_tree");
         assert_eq!(
             behavior.lock().await.version(),
             1,
@@ -2397,6 +2453,7 @@ mod runtime_outputs_tests {
             document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
+            configuration_diagnostics: Vec::new(),
         };
 
         let application = apply_runtime_outputs(&evaluation, 1, &behavior, &sdui).await;
@@ -2453,6 +2510,36 @@ mod runtime_generation_tests {
         ));
         fs::create_dir(&root).unwrap();
         fs::write(root.join("init.js"), init_js).unwrap();
+        root
+    }
+
+    /// Copy the canonical example tree (init.js + packages/) into a fresh
+    /// temp config root, mirroring the `cp -r examples/. ~/.config/clay/`
+    /// setup from test-plan/02.
+    fn temp_example_config_root(name: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clay-runtime-generation-{name}-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+        for entry in fs::read_dir(&examples).unwrap() {
+            let entry = entry.unwrap();
+            let target = root.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                fs::create_dir(&target).unwrap();
+                for file in fs::read_dir(entry.path()).unwrap() {
+                    let file = file.unwrap();
+                    fs::copy(file.path(), target.join(file.file_name())).unwrap();
+                }
+            } else {
+                fs::copy(entry.path(), target).unwrap();
+            }
+        }
         root
     }
 
@@ -2625,7 +2712,7 @@ mod runtime_generation_tests {
 
         let mut evaluation = ClayRuntimeEvaluation::default();
         let mut manifest = BehaviorManifest::minimal_text_editing(99);
-        manifest.manifest_id = "clay.test.candidate".to_string();
+        manifest.manifest_id = "test.candidate".to_string();
         evaluation.behavior_manifest = Some(manifest);
         evaluation.published_sdui_tree = Some(default_document_tree(2, 1));
 
@@ -2664,7 +2751,7 @@ mod runtime_generation_tests {
         )));
         let mut evaluation = ClayRuntimeEvaluation::default();
         let mut manifest = BehaviorManifest::minimal_text_editing(99);
-        manifest.manifest_id = "clay.test.committed".to_string();
+        manifest.manifest_id = "test.committed".to_string();
         evaluation.behavior_manifest = Some(manifest);
         evaluation.published_sdui_tree = Some(default_document_tree(1, 1));
         evaluation.active_theme = Some(ActiveTheme {
@@ -2711,7 +2798,7 @@ mod runtime_generation_tests {
         assert_eq!(server.behavior.lock().await.version(), 2);
         assert_eq!(
             server.behavior.lock().await.manifest().manifest_id,
-            "clay.test.committed"
+            "test.committed"
         );
         assert!(server.sdui.lock().await.snapshot_message(1).is_some());
         assert_eq!(
@@ -2732,25 +2819,31 @@ mod runtime_generation_tests {
 
     #[tokio::test]
     async fn example_configuration_loads_cleanly_and_applies_effects() {
-        // examples/init.js is the canonical user-facing configuration. Any
-        // edit to it — or to the APIs it calls — must keep it loading through
-        // the real runtime-generation path: syntax, package specifiers,
-        // language-server contribution ids, grant-before-loadPackage ordering,
-        // theme/typography/keybinding effects. Language-server grants degrade
-        // independently when tooling is absent (see the grantLanguageServer
-        // helper in the file), so this test is environment-independent.
-        let example = fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/init.js"),
-        )
-        .expect("examples/init.js ships in the repository");
-        let root = temp_config_root("example-configuration", &example);
-        let server = server_with_config(root);
+        // The examples/ tree (init.js + packages/) is the canonical
+        // user-facing configuration. Any edit to it — or to the APIs it
+        // calls — must keep it loading through the real runtime-generation
+        // path: syntax, package specifiers, language-server contribution
+        // ids, grant-before-loadPackage ordering, theme/typography/keybinding
+        // effects, and the fault-isolated optional module loads. Language-
+        // server grants degrade independently when tooling is absent (see
+        // the grantLanguageServer helper in packages/first-party.js), so
+        // this test is environment-independent.
+        let root = temp_example_config_root("example-configuration");
+        let server = server_with_config(root.clone());
 
         let outcome = server.reload_runtime_generation().await;
 
         assert!(
             outcome.reloaded,
-            "examples/init.js must load cleanly; diagnostics: {:?}",
+            "examples tree must load cleanly; diagnostics: {:?}",
+            outcome.diagnostics
+        );
+        assert!(
+            !outcome
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "configuration.module_failed"),
+            "example optional modules must load; diagnostics: {:?}",
             outcome.diagnostics
         );
         // Observable proof the configuration actually executed: the example's
@@ -2766,6 +2859,146 @@ mod runtime_generation_tests {
             "example typography families missing: {:?}",
             typography.monospace.families
         );
+        // And the first-party package module actually loaded: the markdown
+        // package registers a mode (grant-before-loadPackage ordering held).
+        let current = server.runtime_generation.current().await;
+        let evaluation = current
+            .evaluation
+            .as_ref()
+            .expect("committed generation must retain evaluation snapshot");
+        assert!(
+            evaluation.behavior_manifest.is_some(),
+            "example must publish a behavior manifest from its package loads"
+        );
+        // The one-line loads inside packages/first-party.js produced the
+        // same package outcomes as an equivalent flat init.js: parse
+        // handlers, syntax grammars, and completion providers for every
+        // loaded grammar package, and nothing third-party.
+        assert!(
+            evaluation
+                .js_parse_handlers
+                .iter()
+                .any(|handler| handler.package.manifest.name == "@clay/markdown"),
+            "markdown parse handler must load from packages/first-party.js"
+        );
+        for language in ["rust", "typescript", "javascript", "markdown"] {
+            assert!(
+                evaluation
+                    .syntax_grammars
+                    .iter()
+                    .any(|grammar| grammar.language_id == language),
+                "{language} syntax grammar must load from packages/first-party.js"
+            );
+        }
+        assert!(
+            evaluation.js_parse_handlers.iter().all(|handler| handler
+                .package
+                .manifest
+                .name
+                .starts_with("@clay/")),
+            "the commented third-party template must cause zero package activity"
+        );
+        assert!(
+            !outcome
+                .diagnostics
+                .iter()
+                .any(|d| d.code.starts_with("packages.")),
+            "no package diagnostics from the example tree; diagnostics: {:?}",
+            outcome.diagnostics
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn alternate_configuration_layout_loads_identical_packages() {
+        // The three-file example layout is a convention, not a requirement:
+        // any local module layout under the config root drives the same
+        // one-line loadPackage calls. Regression: a nested folder plus a
+        // static-import chain must produce identical package outcomes to the
+        // shipped examples/ tree.
+        let root = temp_config_root(
+            "alternate-layout",
+            r#"import { loadConfigurationModule } from "clay:configuration";
+await loadConfigurationModule({ path: "./a/b.js" });"#,
+        );
+        fs::create_dir_all(root.join("a")).unwrap();
+        // b.js static-imports its sibling c.js (evaluated first), then runs
+        // its own one-line load; c.js loads its own package the same way.
+        fs::write(
+            root.join("a/b.js"),
+            r#"import "./c.js";
+import { loadPackage } from "clay:packages";
+await loadPackage("@clay/markdown");"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("a/c.js"),
+            r#"import { loadPackage } from "clay:packages";
+await loadPackage("@clay/rust");"#,
+        )
+        .unwrap();
+        let server = server_with_config(root.clone());
+
+        let outcome = server.reload_runtime_generation().await;
+
+        assert!(
+            outcome.reloaded,
+            "alternate layout must load cleanly; diagnostics: {:?}",
+            outcome.diagnostics
+        );
+        let evaluation = server
+            .runtime_generation
+            .current()
+            .await
+            .evaluation
+            .expect("committed generation must retain evaluation snapshot");
+        assert!(
+            evaluation
+                .js_parse_handlers
+                .iter()
+                .any(|handler| handler.package.manifest.name == "@clay/markdown"),
+            "markdown parse handler must load from the alternate layout"
+        );
+        for language in ["rust", "markdown"] {
+            assert!(
+                evaluation
+                    .syntax_grammars
+                    .iter()
+                    .any(|grammar| grammar.language_id == language),
+                "{language} syntax grammar must load from the alternate layout"
+            );
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn example_configuration_survives_broken_package_module() {
+        // The "use Clay to fix Clay" requirement: a broken optional package
+        // module must not block the base configuration or reload — it records
+        // a bounded configuration.module_failed diagnostic instead.
+        let root = temp_example_config_root("example-configuration-broken-module");
+        fs::write(root.join("packages/first-party.js"), "export const = ;").unwrap();
+        let server = server_with_config(root.clone());
+
+        let outcome = server.reload_runtime_generation().await;
+
+        assert!(
+            outcome.reloaded,
+            "base config must still reload with a broken optional module; diagnostics: {:?}",
+            outcome.diagnostics
+        );
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "configuration.module_failed"),
+            "broken optional module must be recorded; diagnostics: {:?}",
+            outcome.diagnostics
+        );
+        // Base-config effects still applied.
+        let typography = server.runtime_generation.active_typography().await;
+        assert_eq!(typography.monospace.size, 16.0);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
@@ -2871,6 +3104,205 @@ mod runtime_generation_tests {
     }
 
     #[tokio::test]
+    async fn optional_configuration_module_warning_survives_successful_reload() {
+        let root = temp_config_root(
+            "optional-module-reload",
+            r#"
+            import { loadConfigurationModule } from "clay:configuration";
+            await loadConfigurationModule({ path: "./missing.js", optional: true });
+            "#,
+        );
+        let server = server_with_config(root);
+
+        let outcome = server.reload_runtime_generation().await;
+
+        assert!(outcome.reloaded);
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(outcome.diagnostics[0].code, "configuration.module_failed");
+        assert!(outcome.diagnostics[0].message.contains("./missing.js"));
+        assert!(
+            server
+                .runtime_diagnostics
+                .lock()
+                .await
+                .snapshot()
+                .iter()
+                .any(|diagnostic| diagnostic.code == "configuration.module_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn configuration_watcher_reloads_changed_root_without_command_intent() {
+        let root = temp_config_root(
+            "watcher-reload",
+            r#"Deno.core.ops.op_clay_runtime_record("initial");"#,
+        );
+        let server = server_with_config(root.clone());
+        assert!(server.reload_runtime_generation().await.reloaded);
+
+        let watcher_server = server.clone();
+        let watcher = tokio::spawn(
+            super::config_watch::watch_configuration_root_with_intervals(
+                root.clone(),
+                move || {
+                    let watcher_server = watcher_server.clone();
+                    async move {
+                        let _ = watcher_server.reload_runtime_generation().await;
+                    }
+                },
+                std::time::Duration::from_millis(10),
+                std::time::Duration::from_millis(20),
+            ),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        fs::write(
+            root.join("init.js"),
+            r#"Deno.core.ops.op_clay_runtime_record("reloaded");"#,
+        )
+        .unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if server.runtime_generation.generation_id().await >= 3 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("watcher reloads changed configuration");
+        watcher.abort();
+
+        let current = server.runtime_generation.current().await;
+        assert!(
+            current
+                .evaluation
+                .as_ref()
+                .is_some_and(|evaluation| evaluation.op_records == ["reloaded"])
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn configuration_watcher_preserves_generation_on_failure_and_recovers() {
+        let root = temp_config_root(
+            "watcher-recovery",
+            r#"Deno.core.ops.op_clay_runtime_record("working");"#,
+        );
+        let server = server_with_config(root.clone());
+        assert!(server.reload_runtime_generation().await.reloaded);
+
+        let watcher_server = server.clone();
+        let watcher = tokio::spawn(
+            super::config_watch::watch_configuration_root_with_intervals(
+                root.clone(),
+                move || {
+                    let watcher_server = watcher_server.clone();
+                    async move {
+                        let _ = watcher_server.reload_runtime_generation().await;
+                    }
+                },
+                std::time::Duration::from_millis(10),
+                std::time::Duration::from_millis(20),
+            ),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        fs::write(root.join("init.js"), "export const = ;").unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if server
+                    .runtime_diagnostics
+                    .lock()
+                    .await
+                    .snapshot()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "runtime.syntax_error")
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("watcher records failed reload diagnostic");
+        assert_eq!(server.runtime_generation.generation_id().await, 2);
+
+        fs::write(
+            root.join("init.js"),
+            r#"Deno.core.ops.op_clay_runtime_record("recovered");"#,
+        )
+        .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if server.runtime_generation.generation_id().await >= 3 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("watcher reloads after fixing configuration");
+        watcher.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn configuration_watcher_detects_new_optional_module() {
+        let root = temp_config_root(
+            "watcher-new-module",
+            r#"
+            import { loadConfigurationModule } from "clay:configuration";
+            await loadConfigurationModule({ path: "./new.js", optional: true });
+            "#,
+        );
+        let server = server_with_config(root.clone());
+        assert!(server.reload_runtime_generation().await.reloaded);
+
+        let watcher_server = server.clone();
+        let watcher = tokio::spawn(
+            super::config_watch::watch_configuration_root_with_intervals(
+                root.clone(),
+                move || {
+                    let watcher_server = watcher_server.clone();
+                    async move {
+                        let _ = watcher_server.reload_runtime_generation().await;
+                    }
+                },
+                std::time::Duration::from_millis(10),
+                std::time::Duration::from_millis(20),
+            ),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        fs::write(
+            root.join("new.js"),
+            r#"Deno.core.ops.op_clay_runtime_record("new module");"#,
+        )
+        .unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let current = server.runtime_generation.current().await;
+                if current.id >= 3
+                    && current.evaluation.as_ref().is_some_and(|evaluation| {
+                        evaluation
+                            .op_records
+                            .iter()
+                            .any(|record| record == "new module")
+                    })
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("watcher reloads a newly created module");
+        watcher.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn tab_command_bindings_work_and_survive_configuration_reload() {
         let root = temp_config_root(
             "tab-bindings",
@@ -2891,7 +3323,7 @@ mod runtime_generation_tests {
                     r#"
                     import { listKeyBindings } from "clay:keybindings";
                     const matches = listKeyBindings("global")
-                        .filter((candidate) => candidate.command === "clay.shell.clientTabNew")
+                        .filter((candidate) => candidate.command === "shell.clientTabNew")
                         .map((candidate) => `${candidate.key}:${candidate.command}`)
                         .join(",");
                     Deno.core.ops.op_clay_runtime_record(matches);
@@ -2905,7 +3337,7 @@ mod runtime_generation_tests {
         assert!(
             bound_tab_records(&server)
                 .await
-                .contains("Ctrl+Alt+T:clay.shell.clientTabNew"),
+                .contains("Ctrl+Alt+T:shell.clientTabNew"),
             "init.js tab binding must be live after configuration load"
         );
 
@@ -2914,7 +3346,7 @@ mod runtime_generation_tests {
         assert!(
             bound_tab_records(&server)
                 .await
-                .contains("Ctrl+Alt+T:clay.shell.clientTabNew"),
+                .contains("Ctrl+Alt+T:shell.clientTabNew"),
             "init.js tab binding must survive a configuration reload"
         );
     }
@@ -3052,7 +3484,7 @@ Deno.core.ops.op_clay_runtime_record("still-cached");"#,
                 .await
                 .snapshot()
                 .iter()
-                .any(|diagnostic| diagnostic.code == "clay.packages.not_installed")
+                .any(|diagnostic| diagnostic.code == "packages.not_installed")
         );
     }
 
@@ -3197,7 +3629,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 .await
                 .snapshot()
                 .iter()
-                .any(|diagnostic| diagnostic.code == "clay.runtime.syntax_error")
+                .any(|diagnostic| diagnostic.code == "runtime.syntax_error")
         );
     }
 
@@ -3849,7 +4281,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             "grace-accept",
             r#"
             import { bindKey } from "clay:keybindings";
-            bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+            bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
             Deno.core.ops.op_clay_runtime_record("grace accept");
             "#,
         );
@@ -3958,7 +4390,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             "grace-reject",
             r#"
             import { bindKey } from "clay:keybindings";
-            bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+            bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
             Deno.core.ops.op_clay_runtime_record("grace reject");
             "#,
         );
@@ -4108,7 +4540,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             "grace-lease",
             r#"
             import { bindKey } from "clay:keybindings";
-            bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+            bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
             Deno.core.ops.op_clay_runtime_record("grace lease");
             "#,
         );
@@ -4388,7 +4820,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             outcome
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code == "clay.runtime.syntax_error")
+                .any(|diagnostic| diagnostic.code == "runtime.syntax_error")
         );
         assert!(
             server
@@ -4397,7 +4829,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 .await
                 .snapshot()
                 .iter()
-                .any(|diagnostic| diagnostic.code == "clay.runtime.syntax_error")
+                .any(|diagnostic| diagnostic.code == "runtime.syntax_error")
         );
         assert!(
             server
@@ -4426,7 +4858,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 panic!("failed reload must not fan out a generation snapshot")
             }
             Ok(Ok(ServerMessage::RuntimeDiagnostic(diagnostic))) => {
-                assert_ne!(diagnostic.code, "clay.runtime.reload_succeeded");
+                assert_ne!(diagnostic.code, "runtime.reload_succeeded");
             }
             Ok(Ok(other)) => panic!("unexpected live message after failed reload: {other:?}"),
             Ok(Err(error)) => panic!("client read failed: {error}"),
@@ -4446,7 +4878,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             "one-generation",
             r#"
             import { bindKey } from "clay:keybindings";
-            bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+            bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
             Deno.core.ops.op_clay_runtime_record("one generation");
             "#,
         );
@@ -4653,7 +5085,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
         assert!(!denied.reloaded);
         assert_eq!(denied.active_generation_id, 2);
         let diagnostic = denied.diagnostics.last().expect("denial diagnostic");
-        assert_eq!(diagnostic.code, "clay.configuration.invalid_module");
+        assert_eq!(diagnostic.code, "configuration.invalid_module");
         assert!(
             !diagnostic
                 .message
@@ -5003,7 +5435,7 @@ mod tests {
                     client_id,
                     document_id,
                     behavior_version,
-                    command_id: "clay.workspace.toggleFileBrowser".to_string(),
+                    command_id: "workspace.toggleFileBrowser".to_string(),
                 },
             )
             .await
@@ -5027,7 +5459,7 @@ mod tests {
                     client_id,
                     document_id,
                     behavior_version,
-                    command_id: "clay.workspace.toggleFileBrowser".to_string(),
+                    command_id: "workspace.toggleFileBrowser".to_string(),
                 },
             )
             .await

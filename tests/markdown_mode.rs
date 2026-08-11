@@ -738,7 +738,7 @@ fn windows_markdown_open_fixture_binds_ctrl_o_without_hardcoding() {
 
     assert!(fixture.contains("import { bindKey } from \"clay:keybindings\";"));
     assert!(fixture.contains(
-        "bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\", { scope: \"editor\" });"
+        "bindKey(\"Ctrl+O\", \"documents.clientOpenFileDialog\", { scope: \"editor\" });"
     ));
     assert!(
         !fixture.contains("Deno.core.ops") && !fixture.contains("clientOpenFileDialog("),
@@ -765,7 +765,7 @@ fn windows_markdown_open_fixture_loads_markdown_package() {
         "@clay/markdown",
         "loadPackage",
         "serverActivateClassifiedMode(classification",
-        "bindKey(\"Ctrl+O\", \"clay.documents.clientOpenFileDialog\", { scope: \"editor\" });",
+        "bindKey(\"Ctrl+O\", \"documents.clientOpenFileDialog\", { scope: \"editor\" });",
     ] {
         assert!(
             fixture.contains(expected),

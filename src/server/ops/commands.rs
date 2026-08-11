@@ -30,12 +30,12 @@ pub(super) fn op_clay_commands_register_command(
         .require_current_package_capability(
             crate::packages::permissions::PackagePermission::CommandRegistration,
         )?;
-    let value = parse_json(&declaration_json, "clay.commands.invalid_declaration")?;
+    let value = parse_json(&declaration_json, "commands.invalid_declaration")?;
     let declaration = parse_declaration(&value, &package.manifest)?;
     let registered = state
         .borrow::<Arc<ClayOpState>>()
         .register_command(&package.manifest, declaration)
-        .map_err(command_error("clay.commands.registration_failed"))?;
+        .map_err(command_error("commands.registration_failed"))?;
     serde_json::to_string(&json!({
         "packageName": registered.package_name,
         "packageVersion": registered.package_version,
@@ -45,7 +45,7 @@ pub(super) fn op_clay_commands_register_command(
         "routingPolicy": routing_policy_name(&registered.routing_policy),
         "permissions": registered.permissions.iter().map(|permission| permission.as_str()).collect::<Vec<_>>(),
     }))
-    .map_err(serialize_error("clay.commands.registration_failed"))
+    .map_err(serialize_error("commands.registration_failed"))
 }
 
 #[op2]
@@ -59,48 +59,50 @@ pub(super) async fn op_clay_commands_execute_command(
     let result = op_state
         .execute_command(request)
         .await
-        .map_err(command_execution_error("clay.commands.execute_failed"))?;
+        .map_err(command_execution_error("commands.execute_failed"))?;
     serde_json::to_string(&json!({
         "commandId": result.command_id,
         "routingPolicy": routing_policy_name(&result.routing_policy),
         "target": command_target_json(&result.target),
         "status": command_status_json(&result.status),
     }))
-    .map_err(serialize_error("clay.commands.execute_failed"))
+    .map_err(serialize_error("commands.execute_failed"))
 }
 
 #[op2]
 #[string]
 pub(super) fn op_clay_commands_list_commands(state: &mut OpState) -> Result<String, JsErrorBox> {
     let commands = state.borrow::<Arc<ClayOpState>>().list_package_commands();
-    serde_json::to_string(&Value::Array(commands))
-        .map_err(serialize_error("clay.commands.list_failed"))
+    serde_json::to_string(&Value::Array(commands)).map_err(serialize_error("commands.list_failed"))
 }
 
 fn parse_declaration(
     value: &Value,
     package: &ClayPackageManifest,
 ) -> Result<PackageCommandDeclaration, JsErrorBox> {
-    let permissions =
-        match value.get("permissions") {
-            None | Some(Value::Null) => Vec::new(),
-            Some(Value::Array(values)) => values
-                .iter()
-                .map(|value| {
-                    let permission = value.as_str().ok_or_else(|| JsErrorBox::generic(
-                    "clay.commands.invalid_declaration: permissions entries must be strings",
-                ))?;
-                    parse_permission(permission).map_err(|_| JsErrorBox::generic(format!(
-                    "clay.commands.invalid_declaration: unsupported permission `{permission}`"
-                )))
+    let permissions = match value.get("permissions") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| {
+                let permission = value.as_str().ok_or_else(|| {
+                    JsErrorBox::generic(
+                        "commands.invalid_declaration: permissions entries must be strings",
+                    )
+                })?;
+                parse_permission(permission).map_err(|_| {
+                    JsErrorBox::generic(format!(
+                        "commands.invalid_declaration: unsupported permission `{permission}`"
+                    ))
                 })
-                .collect::<Result<Vec<_>, _>>()?,
-            _ => {
-                return Err(JsErrorBox::generic(
-                    "clay.commands.invalid_declaration: permissions must be an array",
-                ));
-            }
-        };
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => {
+            return Err(JsErrorBox::generic(
+                "commands.invalid_declaration: permissions must be an array",
+            ));
+        }
+    };
 
     Ok(PackageCommandDeclaration {
         package_name: package.name.clone(),
@@ -126,13 +128,13 @@ fn parse_routing_policy(value: &str) -> Result<RoutingPolicy, JsErrorBox> {
         "background" | "Background" => Ok(RoutingPolicy::Background),
         "ui-reactive-priority" | "UiReactivePriority" => Ok(RoutingPolicy::UiReactivePriority),
         other => Err(JsErrorBox::generic(format!(
-            "clay.commands.invalid_declaration: unsupported routingPolicy `{other}`"
+            "commands.invalid_declaration: unsupported routingPolicy `{other}`"
         ))),
     }
 }
 
 fn parse_execute_request(json_text: &str) -> Result<CommandExecutionRequest, JsErrorBox> {
-    let value = parse_json(json_text, "clay.commands.invalid_execute_request")?;
+    let value = parse_json(json_text, "commands.invalid_execute_request")?;
     let command_id = required_string(&value, "commandId")?;
     let arguments = value.get("arguments").cloned().unwrap_or(Value::Null);
     let target = value
@@ -152,19 +154,19 @@ fn parse_execute_request(json_text: &str) -> Result<CommandExecutionRequest, JsE
             .map(|value| {
                 let permission = value.as_str().ok_or_else(|| {
                     JsErrorBox::generic(
-                        "clay.commands.invalid_execute_request: expectedPermissions entries must be strings",
+                        "commands.invalid_execute_request: expectedPermissions entries must be strings",
                     )
                 })?;
                 parse_permission(permission).map_err(|_| {
                     JsErrorBox::generic(format!(
-                        "clay.commands.invalid_execute_request: unsupported permission `{permission}`"
+                        "commands.invalid_execute_request: unsupported permission `{permission}`"
                     ))
                 })
             })
             .collect::<Result<Vec<_>, _>>()?,
         _ => {
             return Err(JsErrorBox::generic(
-                "clay.commands.invalid_execute_request: expectedPermissions must be an array",
+                "commands.invalid_execute_request: expectedPermissions must be an array",
             ));
         }
     };
@@ -192,7 +194,7 @@ fn parse_execute_target(value: &Value) -> Result<CommandExecutionTarget, JsError
         return Ok(CommandExecutionTarget::Global);
     }
     Err(JsErrorBox::generic(
-        "clay.commands.invalid_execute_request: unsupported command target",
+        "commands.invalid_execute_request: unsupported command target",
     ))
 }
 
@@ -279,7 +281,7 @@ fn required_string(value: &Value, key: &str) -> Result<String, JsErrorBox> {
         .map(ToOwned::to_owned)
         .ok_or_else(|| {
             JsErrorBox::generic(format!(
-                "clay.commands.invalid_declaration: {key} must be a string"
+                "commands.invalid_declaration: {key} must be a string"
             ))
         })
 }

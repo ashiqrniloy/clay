@@ -1,5 +1,5 @@
 ---
-id: clay.packages.serverLoadPackage
+id: packages.serverLoadPackage
 kind: clay-js-api
 js_module: "clay:packages"
 js_export: serverLoadPackage
@@ -79,7 +79,7 @@ const loaded = serverLoadPackage({
     modes: ["markdown"],
     docs: "./docs/index.md",
     performance: { estimatedManifestBytes: 1024 },
-    apiDependencies: ["clay.modes.serverRegisterModePattern"],
+    apiDependencies: ["modes.serverRegisterModePattern"],
     contributions: { commands: [] },
   },
 });
@@ -94,7 +94,7 @@ const loaded = serverLoadPackage({
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.packages.serverLoadPackage` in `~/.config/clay/init.js`, but package loading itself is intended for package/load tooling rather than ordinary editor commands.
+No default key binding is assigned. Users may bind a key to `packages.serverLoadPackage` in `~/.config/clay/init.js`, but package loading itself is intended for package/load tooling rather than ordinary editor commands.
 
 ## Custom properties
 
@@ -119,7 +119,7 @@ Validation is server-side. The facade hides raw op names from callers; users sho
 
 ## Agent guidance
 
-Use `clay.packages.serverLoadPackage` only for package metadata validation and load-contract inspection. Do not infer that a successful result means the package is installed, enabled, trusted, or executed. Prefer documented Clay JS facades over direct Rust paths or raw op calls.
+Use `packages.serverLoadPackage` only for package metadata validation and load-contract inspection. Do not infer that a successful result means the package is installed, enabled, trusted, or executed. Prefer documented Clay JS facades over direct Rust paths or raw op calls.
 
 ## Backing implementation
 
@@ -130,7 +130,7 @@ Use `clay.packages.serverLoadPackage` only for package metadata validation and l
 
 ## Lookup metadata
 
-- Stable ID: `clay.packages.serverLoadPackage`
+- Stable ID: `packages.serverLoadPackage`
 - User-facing name: Load Package
 - Kind: `clay-js-api`
 - Module/export: `clay:packages` / `serverLoadPackage`

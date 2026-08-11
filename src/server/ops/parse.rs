@@ -17,16 +17,16 @@ pub(super) fn op_clay_parse_register_parse_handler(
     state: &mut OpState,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let options_value = parse_json(&options_json, "clay.parse.invalid_handler")?;
+    let options_value = parse_json(&options_json, "parse.invalid_handler")?;
     let options = options_value
         .as_object()
-        .ok_or_else(|| clay_error("clay.parse.invalid_handler: options must be an object"))?;
+        .ok_or_else(|| clay_error("parse.invalid_handler: options must be an object"))?;
     let package = state
         .borrow::<Arc<ClayOpState>>()
         .require_current_package_capability(
             crate::packages::permissions::PackagePermission::ParseDocument,
         )?;
-    let mode_id = required_str(options, "mode", "clay.parse.invalid_handler")?.to_string();
+    let mode_id = required_str(options, "mode", "parse.invalid_handler")?.to_string();
     let parse_unit = parse_unit(
         options
             .get("parseUnit")
@@ -41,7 +41,7 @@ pub(super) fn op_clay_parse_register_parse_handler(
     let timeout_ms = optional_u64(options.get("timeoutMs"))?.unwrap_or(50);
     if timeout_ms == 0 || timeout_ms > 5_000 {
         return Err(clay_error(
-            "clay.parse.invalid_handler: timeoutMs must be between 1 and 5000",
+            "parse.invalid_handler: timeoutMs must be between 1 and 5000",
         ));
     }
     let max_window_bytes = optional_u64(
@@ -59,7 +59,7 @@ pub(super) fn op_clay_parse_register_parse_handler(
         || memory_budget_bytes > SYNTAX_CACHE_BUDGET_BYTES as u64
     {
         return Err(clay_error(
-            "clay.parse.invalid_handler: window and memory budgets must be non-zero, bounded, and within the syntax cache budget",
+            "parse.invalid_handler: window and memory budgets must be non-zero, bounded, and within the syntax cache budget",
         ));
     }
     reject_executable_handler(options)?;
@@ -112,7 +112,7 @@ pub(super) fn op_clay_parse_register_parse_handler(
     }))
     .map_err(|error| {
         clay_error(format!(
-            "clay.parse.registration_failed: failed to serialize result ({error})"
+            "parse.registration_failed: failed to serialize result ({error})"
         ))
     })
 }
@@ -122,11 +122,9 @@ pub(super) fn op_clay_parse_store_update(
     state: &mut OpState,
     #[string] update_json: String,
 ) -> Result<(), JsErrorBox> {
-    let value = parse_json(&update_json, "clay.parse.invalid_update")?;
+    let value = parse_json(&update_json, "parse.invalid_update")?;
     if !value.is_object() {
-        return Err(clay_error(
-            "clay.parse.invalid_update: update must be an object",
-        ));
+        return Err(clay_error("parse.invalid_update: update must be an object"));
     }
     // Bridge ingress revalidation (Plan 061 task 7): reject stale/revoked
     // provider results before they reach host state.
@@ -142,7 +140,7 @@ fn parse_unit(value: &str) -> Result<ParseUnit, JsErrorBox> {
         "region" | "Region" => Ok(ParseUnit::Region),
         "line-group" | "lineGroup" | "LineGroup" => Ok(ParseUnit::LineGroup),
         other => Err(clay_error(format!(
-            "clay.parse.invalid_handler: unsupported parseUnit `{other}`"
+            "parse.invalid_handler: unsupported parseUnit `{other}`"
         ))),
     }
 }
@@ -159,7 +157,7 @@ fn reject_executable_handler(options: &Map<String, Value>) -> Result<(), JsError
     for key in ["handler", "callback", "onParse", "function"] {
         if options.contains_key(key) {
             return Err(clay_error(format!(
-                "clay.parse.invalid_handler: executable `{key}` callbacks are not accepted by the public registration contract"
+                "parse.invalid_handler: executable `{key}` callbacks are not accepted by the public registration contract"
             )));
         }
     }

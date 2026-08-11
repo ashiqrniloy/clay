@@ -29,11 +29,11 @@ const MAX_LEFT_PANEL_ENTRIES: usize = 256;
 /// Maximum number of fuzzy-open items shown at once.
 const MAX_FUZZY_ITEMS: usize = 64;
 
-pub(crate) const OPEN_FILE_COMMAND_ID: &str = "clay.workspace.openFile";
-pub(crate) const REVEAL_IN_TREE_COMMAND_ID: &str = "clay.workspace.revealInTree";
-pub(crate) const OPEN_FUZZY_FILE_COMMAND_ID: &str = "clay.workspace.openFuzzyFile";
-pub(crate) const OPEN_DIRECTORY_COMMAND_ID: &str = "clay.workspace.openDirectory";
-pub(crate) const TOGGLE_FILE_BROWSER_COMMAND_ID: &str = "clay.workspace.toggleFileBrowser";
+pub(crate) const OPEN_FILE_COMMAND_ID: &str = "workspace.openFile";
+pub(crate) const REVEAL_IN_TREE_COMMAND_ID: &str = "workspace.revealInTree";
+pub(crate) const OPEN_FUZZY_FILE_COMMAND_ID: &str = "workspace.openFuzzyFile";
+pub(crate) const OPEN_DIRECTORY_COMMAND_ID: &str = "workspace.openDirectory";
+pub(crate) const TOGGLE_FILE_BROWSER_COMMAND_ID: &str = "workspace.toggleFileBrowser";
 
 /// Inert snapshot of file listing data used to render the file browser.
 #[derive(Debug, Clone, PartialEq, Eq)]

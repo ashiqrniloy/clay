@@ -1,5 +1,5 @@
 ---
-id: clay.ui.serverRegisterInputContribution
+id: ui.serverRegisterInputContribution
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterInputContribution
@@ -57,7 +57,7 @@ custom_properties:
     default: []
     description: Registered package command IDs allowed for component-scoped actions.
 security: Validates package-prefixed input IDs, supported pointer/focus/selection policies, manifest-declared modes, registered action targets, provenance, and payload ceilings; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, raw native event callbacks, or key-routing authority.
-agent_guidance: Use `clay.ui.serverRegisterInputContribution` for inert pointer/focus/action metadata only; keep keys in behavior manifests/keybindings and never expose raw event callbacks, native handles, raw ops, CSS, or client-side JavaScript hooks.
+agent_guidance: Use `ui.serverRegisterInputContribution` for inert pointer/focus/action metadata only; keep keys in behavior manifests/keybindings and never expose raw event callbacks, native handles, raw ops, CSS, or client-side JavaScript hooks.
 lookup_tags: [ui, package-ui, input, focus, action-routing, clay-js-api, phase18.4, runtime-backed]
 app_visible: true
 help_visible: true
@@ -173,7 +173,7 @@ The public facade is `runtime/js/ui.js::serverRegisterInputContribution`. The ru
 
 ## Lookup metadata
 
-- Stable ID: `clay.ui.serverRegisterInputContribution`
+- Stable ID: `ui.serverRegisterInputContribution`
 - Module: `clay:ui`
 - Export: `serverRegisterInputContribution`
 - Phase: Phase 18.4

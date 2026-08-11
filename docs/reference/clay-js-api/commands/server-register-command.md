@@ -1,5 +1,5 @@
 ---
-id: clay.commands.serverRegisterCommand
+id: commands.serverRegisterCommand
 kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverRegisterCommand
@@ -37,7 +37,7 @@ custom_properties:
     default: []
     description: Behavior-changing setting `requiredPermissions` for this primitive gate API.
 security: Requires command-registration permission and server validation of package-prefixed command IDs, routing policy, key binding metadata, and declared handler permissions; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, or command handler authority by registration alone.
-agent_guidance: Use `clay.commands.serverRegisterCommand` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `commands.serverRegisterCommand` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [js-api, commandregistry, commands]
 app_visible: true
 help_visible: true
@@ -85,7 +85,7 @@ const command = serverRegisterCommand(manifest, { commandId: "markdown.togglePre
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.commands.serverRegisterCommand` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `commands.serverRegisterCommand` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -115,7 +115,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.commands.serverRegisterCommand` when the user asks for Register Command through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `commands.serverRegisterCommand` when the user asks for Register Command through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -128,9 +128,9 @@ Use `clay.commands.serverRegisterCommand` when the user asks for Register Comman
 
 Phase 18.8 added the server-owned `CommandExecutor` (`src/server/command_execution.rs`) as the single normalization boundary for command execution. The following surfaces are intentionally **not** public Clay JS APIs and have no JavaScript facade, `Deno.core.ops` op, or inventory entry:
 
-- **Command execution from JavaScript** — Phase 18.12 exposes `clay.commands.serverExecuteCommand` for server-side controlled runtime code and first-party workspace surfaces. It still routes through `CommandExecutor` (command id, routing policy, package provenance, declared permissions, target context, argument budget, and session/action freshness) before any side effect. Workspace file-browser commands additionally route through `CommandExecutor::execute_workspace`, which re-checks roots and selected-file grants server-side. Packages still cannot bypass this with callbacks, raw paths, or raw `Deno.core.ops` names.
-- **Transient menu sessions** — `TransientMenuSession` and related types (`src/shell/transient_menu.rs`) are `pub(crate)` Clay-owned session state (prompt, query, bounded items, selection, status, focus policy, inert activation actions). There is no `clay.ui.serverOpenTransientMenu` facade/op; transient menu requests differ from fixed `PanelContribution`/`TransientOverlayContribution` panels because the menu owns dynamic query/selection state and is projected onto existing shell overlay primitives.
-- **Control Center** — the Control Center (`src/server/control_center.rs`, `pub(crate)`) is a built-in command-palette workflow reached by binding a key to the built-in server-first command `clay.controlCenter.open` through [`clay.keybindings.bindKey`](../keybindings/bind-key.md); it has no callable Clay JS facade of its own.
+- **Command execution from JavaScript** — Phase 18.12 exposes `commands.serverExecuteCommand` for server-side controlled runtime code and first-party workspace surfaces. It still routes through `CommandExecutor` (command id, routing policy, package provenance, declared permissions, target context, argument budget, and session/action freshness) before any side effect. Workspace file-browser commands additionally route through `CommandExecutor::execute_workspace`, which re-checks roots and selected-file grants server-side. Packages still cannot bypass this with callbacks, raw paths, or raw `Deno.core.ops` names.
+- **Transient menu sessions** — `TransientMenuSession` and related types (`src/shell/transient_menu.rs`) are `pub(crate)` Clay-owned session state (prompt, query, bounded items, selection, status, focus policy, inert activation actions). There is no `ui.serverOpenTransientMenu` facade/op; transient menu requests differ from fixed `PanelContribution`/`TransientOverlayContribution` panels because the menu owns dynamic query/selection state and is projected onto existing shell overlay primitives.
+- **Control Center** — the Control Center (`src/server/control_center.rs`, `pub(crate)`) is a built-in command-palette workflow reached by binding a key to the built-in server-first command `controlCenter.open` through [`keybindings.bindKey`](../keybindings/bind-key.md); it has no callable Clay JS facade of its own.
 
 Command registration through this API declares metadata only — routing policy, permissions, key bindings, custom properties, and lookup tags — at package-load time. It grants **no execution authority**: execution authority is re-derived per activation through `CommandExecutor` from the registered routing policy, declared permissions, and provenance. Command execution and transient menu query/filter/selection updates are server-first or UI-reactive (local bounded filtering) and are not part of the ordinary keypress-to-paint, layout, scroll, text-event, edit acknowledgement, parse-result publication, or decoration rendering hot paths.
 
@@ -138,7 +138,7 @@ See `docs/reference/clay-js-api/configuration.md` (Phase 18.8 configuration revi
 
 ## Phase 19 built-in reload command boundary
 
-`clay.runtime.reloadConfiguration` (**Reload Configuration and Packages**) is a Clay-owned built-in global command registered through `builtin_server_command`. It is intentionally **not** a Clay JS API facade: there is no `clay:runtime`, no `clay:configuration.reloadConfiguration` export, no `clay.commands.serverExecuteCommand("clay.runtime.reloadConfiguration")` path, and no `Deno.core.ops` op for direct JavaScript invocation.
+`runtime.reloadConfiguration` (**Reload Configuration and Packages**) is a Clay-owned built-in global command registered through `builtin_server_command`. It is intentionally **not** a Clay JS API facade: there is no `clay:runtime`, no `clay:configuration.reloadConfiguration` export, no `commands.serverExecuteCommand("runtime.reloadConfiguration")` path, and no `Deno.core.ops` op for direct JavaScript invocation.
 
 ### Boundary
 
@@ -148,8 +148,8 @@ See `docs/reference/clay-js-api/configuration.md` (Phase 18.8 configuration revi
 | `serverListCommands` output | Not listed (built-in commands are separate from package commands) |
 | `builtin_server_command_ids` | Included — `pub(crate)` Rust-only lookup |
 | Control Center | Discoverable (`ControlCenter::open` appends built-in commands) |
-| `bindKey` | Bindable — `bindKey("Ctrl+Shift+R", "clay.runtime.reloadConfiguration", { scope: "global" })` |
-| SDUI action | Routable — `SduiActionIntent { commandId: "clay.runtime.reloadConfiguration" }` |
+| `bindKey` | Bindable with shipped global `Ctrl+Shift+R` default; override or restore with `bindKey`, remove with `unbindKey` |
+| SDUI action | Routable — `SduiActionIntent { commandId: "runtime.reloadConfiguration" }` |
 | Package JS via `serverExecuteCommand` | Rejected with `UnauthorizedTarget` ("runtime reload requires a user command intent") |
 | Direct Rust call (`IpcServer::reload_runtime_generation`) | `pub(crate)` — exposed only to the command execution path and tests; `trigger_developer_hot_reload` is `#[doc(hidden)]` |
 
@@ -161,13 +161,13 @@ Activating the command routes through `CommandExecutor` with `ServerFirstWithLoc
 
 | Diagnostic code | Condition |
 |---|---|
-| `clay.runtime.reload_succeeded` | Commit succeeded; G2 is active |
+| `runtime.reload_succeeded` | Commit succeeded; G2 is active |
 | `ReloadInProgress` | A concurrent reload is already evaluating/committing |
-| `clay.runtime.behavior_locked` | Behavior lock acquisition failed (another mutation in progress) |
-| `clay.runtime.snapshot_too_large` | Candidate snapshot exceeds the 1 MiB IPC frame ceiling |
-| `clay.packages.not_installed` | A configured package is not installed |
-| `clay.runtime.evaluation_failed` | Candidate JS evaluation threw an error |
-| `clay.runtime.incomplete_candidate` | Candidate evaluation produced no `ClayRuntimeEvaluation` |
+| `runtime.behavior_locked` | Behavior lock acquisition failed (another mutation in progress) |
+| `runtime.snapshot_too_large` | Candidate snapshot exceeds the 1 MiB IPC frame ceiling |
+| `packages.not_installed` | A configured package is not installed |
+| `runtime.evaluation_failed` | Candidate JS evaluation threw an error |
+| `runtime.incomplete_candidate` | Candidate evaluation produced no `ClayRuntimeEvaluation` |
 
 All diagnostics are sanitized — they contain no raw source text, file paths, package internals, or token payloads.
 
@@ -177,7 +177,7 @@ Reload does not broaden package source trust, process grants, filesystem access,
 
 ## Lookup metadata
 
-- Stable ID: `clay.commands.serverRegisterCommand`
+- Stable ID: `commands.serverRegisterCommand`
 - User-facing name: Register Command
 - Kind: `clay-js-api`
 - Module/export: `clay:commands` / `serverRegisterCommand`

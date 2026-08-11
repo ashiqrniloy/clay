@@ -1,5 +1,5 @@
 ---
-id: clay.shell.clientAddEqualPane
+id: shell.clientAddEqualPane
 kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientAddEqualPane
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+Shift+\\"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.
-agent_guidance: "Use `clay.shell.clientAddEqualPane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
+agent_guidance: "Use `shell.clientAddEqualPane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
 lookup_tags: [shell, panes, splits, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for redividing the active tab’s working 
 
 ## Description
 
-`clientAddEqualPane` is the public Clay JS API descriptor for **Add Equal Pane**. It returns the stable command ID `clay.shell.clientAddEqualPane` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
+`clientAddEqualPane` is the public Clay JS API descriptor for **Add Equal Pane**. It returns the stable command ID `shell.clientAddEqualPane` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
 
 Add Equal Pane builds a right-leaning comb tree with ratios `1/(N+1)`, `1/N`, ..., `1/2` so each leaf gets exactly `1/(N+1)` of the active tab’s working area. Existing panes retain their reading order; the new pane is appended. No-op at `MAX_PANES_PER_TAB = 4`.
 
@@ -55,7 +55,7 @@ bindKey("Ctrl+Shift+\\", clientAddEqualPane(), { scope: "global" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+Shift+\\", "clay.shell.clientAddEqualPane", { scope: "global" });
+bindKey("Ctrl+Shift+\\", "shell.clientAddEqualPane", { scope: "global" });
 ```
 
 ## Example
@@ -84,7 +84,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.shell.clientAddEqualPane"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
+Returns the string literal command ID `"shell.clientAddEqualPane"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ Bindable client UI command ID only; after explicit user routing it mutates only 
 
 ## Agent guidance
 
-Use `clay.shell.clientAddEqualPane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
+Use `shell.clientAddEqualPane` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.shell.clientAddEqualPane` only as a documented command ID for `bindKey
 
 ## Lookup metadata
 
-- Stable ID: `clay.shell.clientAddEqualPane`
+- Stable ID: `shell.clientAddEqualPane`
 - User-facing name: Add Equal Pane
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientAddEqualPane`

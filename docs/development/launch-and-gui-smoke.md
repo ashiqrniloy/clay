@@ -52,7 +52,7 @@ import { bindKey } from "clay:keybindings";
 import { loadPackage } from "clay:packages";
 
 await loadPackage("@clay/markdown");
-bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
 This is the Markdown product baseline. It is deliberately distinct from the smoke fixtures under `tests/fixtures/configuration/`:
@@ -65,7 +65,7 @@ Markdown end-user baseline invariants:
 - **Editor-only Markdown main slot.** The Markdown package occupies the mandatory `main` slot of `PaneSlotLayout` and does not publish a package-owned default `PanelContribution` (side panel, preview panel, or status panel) on load. This invariant is about package-published Markdown panels only; it does not forbid the Clay-owned Workspace file browser used by the app-level file-browser workflow.
 - **Fixed panels resize the editor.** Any accepted visible fixed panel in `left`, `right`, `top`, or `bottom` consumes `PaneSlotLayout` geometry and reduces/clips the editor `main` rect; transient overlays may cover content by design and do not consume fixed slot geometry.
 - **Optional preview only on demand.** An optional Markdown preview/status panel is a `clay:ui` `PanelContribution` targeting a slot such as `right` with `defaultVisibility: "hidden"`; it appears only through `setPackageOption`, `serverSetLayoutOverride`, or `markdown.togglePreview`.
-- **Selected-file open supports save/conflict UX.** `Ctrl+O` opens a selected file and activates Markdown behavior/decorations through generic `MajorModeActivation` + `DocumentClassification`. Dirty edits surface in status/accessibility; bind `Ctrl+S` to `clay.documents.serverSaveDocument` for server-first save. Stale on-disk metadata and dirty-reload conflicts open a recovery menu (reload / keep edits / compare later) instead of silently overwriting.
+- **Selected-file open supports save/conflict UX.** `Ctrl+O` opens a selected file and activates Markdown behavior/decorations through generic `MajorModeActivation` + `DocumentClassification`. Dirty edits surface in status/accessibility; bind `Ctrl+S` to `documents.serverSaveDocument` for server-first save. Stale on-disk metadata and dirty-reload conflicts open a recovery menu (reload / keep edits / compare later) instead of silently overwriting.
 
 Timing and authority boundaries for the baseline:
 
@@ -83,7 +83,7 @@ The GUI status line and accessibility label should make the connection state vis
 - Version text such as `v12`: the latest known server-confirmed document version after a snapshot, resync, or edit acknowledgement.
 - `Pending edits: N`: outbound optimistic edits not yet acknowledged; increments on local enqueue and decrements after ack/rejection/resync.
 - `Recovery: …`: sanitized recovery summary from an active recovery menu or actionable sync/file diagnostic (edit rejection, disconnect, save conflict).
-- `Runtime clay.runtime.<code>: <safe message>`: server-side JavaScript configuration/runtime diagnostics reached the GUI status path. The message should be actionable but must not include absolute local paths, source snippets, secrets, tokens, or environment dumps.
+- `Runtime runtime.<code>: <safe message>`: server-side JavaScript configuration/runtime diagnostics reached the GUI status path. The message should be actionable but must not include absolute local paths, source snippets, secrets, tokens, or environment dumps.
 
 Typing remains local and optimistic. Editor input must not wait for IPC acknowledgements, server work, runtime diagnostics, or full-document synchronization; acknowledgements, resyncs, and runtime diagnostic status updates arrive asynchronously and update status when available.
 
@@ -117,7 +117,7 @@ The fixture does not publish a default side panel; the optional preview is a `Pa
 
 ### `cargo run -- smoke-gui --config-fixture windows-markdown-open`
 
-The Windows Markdown open-dialog smoke path uses `tests/fixtures/configuration/windows-markdown-open/init.js`. The fixture loads `@clay/markdown`, registers the Markdown mode/parser/decorations workflow, and binds `Ctrl+O` to `clay.documents.clientOpenFileDialog` through the normal `bindKey` configuration API. It does not add a Rust shortcut, install packages, fetch network resources, execute shell commands, or broaden workspace authority.
+The Windows Markdown open-dialog smoke path uses `tests/fixtures/configuration/windows-markdown-open/init.js`. The fixture loads `@clay/markdown`, registers the Markdown mode/parser/decorations workflow, and binds `Ctrl+O` to `documents.clientOpenFileDialog` through the normal `bindKey` configuration API. It does not add a Rust shortcut, install packages, fetch network resources, execute shell commands, or broaden workspace authority.
 
 Manual Windows 11 verification:
 
@@ -128,7 +128,7 @@ Manual Windows 11 verification:
 
 ### Phase 18.8 Control Center manual smoke
 
-Phase 18.8 adds the server-owned `CommandExecutor` validation boundary, the generic `TransientMenuSession` state model, and the built-in `clay.controlCenter.open` command-palette workflow. The Control Center has no default Rust key binding and no dedicated smoke fixture; it is reached only by binding a key to the built-in command through the existing `clay.keybindings.bindKey` configuration API. Because pixel snapshots are unavailable, manual validation is required.
+Phase 18.8 adds the server-owned `CommandExecutor` validation boundary, the generic `TransientMenuSession` state model, and the built-in `controlCenter.open` command-palette workflow. The Control Center has no default Rust key binding and no dedicated smoke fixture; it is reached only by binding a key to the built-in command through the existing `keybindings.bindKey` configuration API. Because pixel snapshots are unavailable, manual validation is required.
 
 Manual Control Center smoke:
 
@@ -137,11 +137,11 @@ Manual Control Center smoke:
    ```js
    import { bindKey } from "clay:keybindings";
 
-   bindKey("Ctrl+Shift+P", "clay.controlCenter.open", { scope: "editor" });
+   bindKey("Ctrl+Shift+P", "controlCenter.open", { scope: "editor" });
    ```
 
 2. Launch Clay with the normal command-first GUI path (`cargo run` or `cargo run -- smoke-gui`).
-3. Press the configured `Ctrl+Shift+P` (or chosen chord). The bottom-pane Control Center transient overlay should appear with a bounded list of executable commands (registered package commands with `server-first`/`background`/`ui-reactive-priority` routing plus built-in commands such as `clay.controlCenter.open` and `workspace.refresh`); client-first/client-ui commands must not appear.
+3. Press the configured `Ctrl+Shift+P` (or chosen chord). The bottom-pane Control Center transient overlay should appear with a bounded list of executable commands (registered package commands with `server-first`/`background`/`ui-reactive-priority` routing plus built-in commands such as `controlCenter.open` and `workspace.refresh`); client-first/client-ui commands must not appear.
 4. Type a filter query and confirm the list narrows by label, command id, key binding, or package provenance; item count stays within `MAX_ITEMS` (256) and the query is truncated at `MAX_QUERY_CHARS` (256).
 5. Move the selection with `Up`/`Down` (wraps at boundaries) and confirm the selected item stays within bounds.
 6. Press `Enter` on a selected safe command (for example `workspace.refresh` or a registered `server-first` command). The activation should enqueue an inert command intent that the server-owned `CommandExecutor` re-validates (command id, routing policy, package provenance, declared permissions, argument budget, target context) before any side effect; the menu should close on successful activation.
@@ -149,7 +149,7 @@ Manual Control Center smoke:
 8. Type in the editor and confirm ordinary typing remains responsive, local, and optimistic; the transient menu / command execution path must not run on the keypress-to-paint, layout, scroll, text-event, edit acknowledgement, parse-result publication, or decoration rendering hot paths.
 9. Open the Control Center again with an empty registry-only filter (no package commands registered in a bare install) and confirm the built-in commands still appear and the menu handles the empty/no-match state without panicking.
 
-Automated coverage (no manual execution needed): `CommandExecutor` validation (unknown command, invalid routing policy, invalid provenance, undeclared permission, malformed/oversize arguments, unauthorized target) is covered by `tests/command_execution.rs` and the `command_execution` module unit tests; Control Center open/filter/execute/empty-reject/client-first-exclusion/item-detail are covered by the `control_center` module unit tests; transient menu session bounds/selection/cancel/stale-rejection are covered by the `transient_menu` module unit tests; built-in command membership is covered by `builtin_server_command`/`builtin_server_command_ids`; internal-vs-public API boundary (no public `serverExecuteCommand`/`serverOpenTransientMenu`/`clay.controlCenter.open` facade) is covered by `tests/rust_visibility_api_mapping.rs::phase18_8_command_execution_and_transient_menu_surfaces_are_internal`; configuration-via-`bindKey` and no-hidden-keys contracts are covered by `tests/clay_js_api_inventory.rs` and `tests/primitives_docs.rs`.
+Automated coverage (no manual execution needed): `CommandExecutor` validation (unknown command, invalid routing policy, invalid provenance, undeclared permission, malformed/oversize arguments, unauthorized target) is covered by `tests/command_execution.rs` and the `command_execution` module unit tests; Control Center open/filter/execute/empty-reject/client-first-exclusion/item-detail are covered by the `control_center` module unit tests; transient menu session bounds/selection/cancel/stale-rejection are covered by the `transient_menu` module unit tests; built-in command membership is covered by `builtin_server_command`/`builtin_server_command_ids`; internal-vs-public API boundary (no public `serverExecuteCommand`/`serverOpenTransientMenu`/`controlCenter.open` facade) is covered by `tests/rust_visibility_api_mapping.rs::phase18_8_command_execution_and_transient_menu_surfaces_are_internal`; configuration-via-`bindKey` and no-hidden-keys contracts are covered by `tests/clay_js_api_inventory.rs` and `tests/primitives_docs.rs`.
 
 What the manual smoke adds on top of automated tests: the rendered bottom-pane overlay geometry, real keyboard focus restore after `Escape`, and perceptual confirmation that typing stays responsive while the Control Center is open — none of which pixel-free automated tests can assert.
 
@@ -160,7 +160,7 @@ Phase 18.9 ships always-on built-in Clay-owned fallback modes `core.text` and `c
 Manual fallback smoke:
 
 1. Launch Clay with **no `~/.config/clay/init.js`** (or an empty one) using the normal command-first GUI path (`cargo run` or `cargo run -- smoke-gui`). No language package is loaded.
-2. Open a plain-text file such as a `README.txt` (or any file whose extension no package claims). Confirm the document opens editable with generic Tab/Enter/backspace behavior — its active major mode is the built-in `core.text` universal fallback (`clay.modes.explainActiveMode` reports `fallbackUsed: true`).
+2. Open a plain-text file such as a `README.txt` (or any file whose extension no package claims). Confirm the document opens editable with generic Tab/Enter/backspace behavior — its active major mode is the built-in `core.text` universal fallback (`modes.explainActiveMode` reports `fallbackUsed: true`).
 3. Open a code-like file such as `main.rs` (or any file with one of the curated built-in `core.code` extensions). Confirm the document opens editable with code-oriented behavior — its active major mode is the built-in `core.code` fallback, and closing braces/brackets/parens reflow via electric outdent rules shipped by the `core_code_editing` manifest.
 4. Confirm ordinary typing stays local and optimistic and that no synchronous JavaScript round trip occurs before local paint (built-in mode manifests are inert `ClientFirstPredictable` data executed by Rust-known engines).
 5. (Optional) Add the one-line default loader to `~/.config/clay/init.js` and relaunch:
@@ -229,7 +229,7 @@ Manual verification:
 2. Confirm syntax selection does not replace the active `core.code`/`core.text` or package major mode, and small edits remain local while background decorations refresh.
 3. Select `wasm` for one language. If no `*.wasm` binary is committed, confirm `packages/*/grammars/PROVENANCE.md` documents the reproducible build and SHA-256 step; do not build or fetch artifacts during the smoke run.
 4. Select `javascript` for Markdown and confirm the existing package parser remains usable as Tier 3 fallback. Remove the preference and return to the native default.
-5. If a parse handler fails, confirm a sanitized `clay.parse.open_failed` runtime diagnostic appears asynchronously while the document remains editable. No absolute path, source text, or token data should appear in the diagnostic.
+5. If a parse handler fails, confirm a sanitized `parse.open_failed` runtime diagnostic appears asynchronously while the document remains editable. No absolute path, source text, or token data should appear in the diagnostic.
 
 Representative checks:
 
@@ -394,9 +394,9 @@ await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
 
 bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
-bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
-bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
-bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+bindKey("Ctrl+P", "workspace.openFuzzyFile", { scope: "editor" });
+bindKey("Ctrl+B", "workspace.toggleFileBrowser", { scope: "editor" });
+bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
 bindKey("Ctrl+Shift+X", clientCutSelection(), { scope: "editor" });
 bindKey("Ctrl+Shift+V", clientPasteClipboard(), { scope: "editor" });
@@ -410,7 +410,7 @@ The smoke fixture above is the checked-in equivalent of the real end-user config
 ```bash
 cargo run
 # with ~/.config/clay/init.js binding Ctrl+Shift+O to clientOpenFolderDialog(),
-# Ctrl+B to clay.workspace.toggleFileBrowser, and native Ctrl+C / Ctrl+Shift+C to copy
+# Ctrl+B to workspace.toggleFileBrowser, and native Ctrl+C / Ctrl+Shift+C to copy
 ```
 
 This is the regression-checked product path on Linux/GNOME. The shifted-character binding fix means `Ctrl+Shift+O` (manifest chord stored lowercase as `o`) now routes when the GNOME key event reports uppercase `O`. Manual verification mirrors the steps below but also covers the Plan 044 regressions:
@@ -418,10 +418,10 @@ This is the regression-checked product path on Linux/GNOME. The shifted-characte
 - `Ctrl+Shift+O` opens the native folder picker (shifted-character case-insensitive routing).
 - Selecting a folder adds it as a server-validated workspace root and refreshes the file browser.
 - Clicking nested files such as `src/main.rs` (`.rs`), `main.ts` (`.ts`), `main.js` (`.js`), and `.md` opens them through the generic open-document path; the row identity and action source now match for nested paths.
-- Opening a second file retains the prior document session; use `clay.editor.clientShowOpenDocuments` to switch with dirty/active markers.
-- Dirty edits show a `Dirty` marker in status/accessibility; configured `Ctrl+S` (`clay.documents.serverSaveDocument`) saves through server file IO and clears dirty on success.
+- Opening a second file retains the prior document session; use `editor.clientShowOpenDocuments` to switch with dirty/active markers.
+- Dirty edits show a `Dirty` marker in status/accessibility; configured `Ctrl+S` (`documents.serverSaveDocument`) saves through server file IO and clears dirty on success.
 - Stale on-disk save conflicts and dirty-reload conflicts open a recovery menu (reload / keep edits / compare later or save first) rather than silently overwriting.
-- The file browser keeps working after opening a Markdown file and after any `clay.parse.open_activation_timeout` diagnostic (Clay-owned workspace browser state is no longer replaced by open-time runtime SDUI).
+- The file browser keeps working after opening a Markdown file and after any `parse.open_activation_timeout` diagnostic (Clay-owned workspace browser state is no longer replaced by open-time runtime SDUI).
 - The file browser scrolls when there are many rows and the scroll direction matches wheel/trackpad intent (positive deltas reveal later rows; no inversion).
 - The editor shows a slim vertical scrollbar thumb for long files, scrolls through them without snapping back to the caret after each wheel event, and stays non-overlapping with the file browser.
 - Rust/TypeScript/JavaScript/Markdown files show visible syntax highlighting as distinct token-family background tints (keyword, string, comment, punctuation, markup).
@@ -437,10 +437,10 @@ Manual Linux verification:
 3. Press `Ctrl+O` (or the configured open-file binding) and choose a Markdown file in the native file picker. On Linux this uses xdg-desktop-portal `OpenFile` with Markdown/all-files filters; cancellation is a non-error no-op. Confirm the selected file opens through the existing selected-file grant path without expanding sibling-directory authority.
 4. Press `Ctrl+Shift+O` and choose a regular folder in the native folder picker. On Linux this uses xdg-desktop-portal with `directory=true`; cancellation is a non-error no-op.
 5. Confirm Clay adds only the selected folder as a server-validated workspace root and refreshes the Workspace browser. The selected-folder path is protected by the same selected-path capability family as selected-file opens.
-6. Click directory rows such as `workspace/` or `src/` and confirm the browser navigates with `clay.workspace.openDirectory`, shows a `../` parent row for non-root directories, and stays inside the selected workspace root.
+6. Click directory rows such as `workspace/` or `src/` and confirm the browser navigates with `workspace.openDirectory`, shows a `../` parent row for non-root directories, and stays inside the selected workspace root.
 7. Open `tests/fixtures/configuration/file-browser-workflow/workspace/main.rs`, `main.ts`, and `main.js` (or equivalent files under the selected folder). The file opens through the generic open-document path, activates the Rust/TypeScript/JavaScript language package when matched, and decorations/status/completions may arrive asynchronously. Confirm visible syntax highlighting appears as distinct token-family background tints.
 8. Select text in an opened file and press the native copy shortcut (`Ctrl+C` on Linux/Windows, `Cmd+C` on macOS) or the configured `Ctrl+Shift+C` route. Confirm only the selected UTF-8 text is copied to the OS clipboard; a collapsed selection is a no-op. Then verify cut (`Ctrl+X`) deletes after copying and paste (`Ctrl+V`) inserts or replaces as an ordinary local edit. Where an input method is available (for example ibus/fcitx on Linux), confirm IME preedit paints as an underlined overlay without changing saved document text until commit, and that Escape/focus loss cancels unfinished composition.
-9. Type a small edit and confirm the status chrome shows `Dirty`. While the edit is still outbound, status may also show `Pending edits: N` until acknowledgement. Press configured `Ctrl+S` (`clay.documents.serverSaveDocument`) and confirm dirty clears after a successful save. To exercise conflict UX, change the on-disk file externally while the buffer is dirty, then save again: Clay must keep the dirty buffer and open a recovery menu with reload / keep edits / compare later (no silent overwrite). A dirty reload without force must offer save-first / discard-and-reload / keep edits. Sync recovery is GUI-visible: edit rejections and disconnects update status/accessibility (not stderr-only); bindable `clay.editor.clientRequestResync` / `clay.editor.clientDismissRecovery` cover explicit resync and dismiss.
+9. Type a small edit and confirm the status chrome shows `Dirty`. While the edit is still outbound, status may also show `Pending edits: N` until acknowledgement. Press configured `Ctrl+S` (`documents.serverSaveDocument`) and confirm dirty clears after a successful save. To exercise conflict UX, change the on-disk file externally while the buffer is dirty, then save again: Clay must keep the dirty buffer and open a recovery menu with reload / keep edits / compare later (no silent overwrite). A dirty reload without force must offer save-first / discard-and-reload / keep edits. Sync recovery is GUI-visible: edit rejections and disconnects update status/accessibility (not stderr-only); bindable `editor.clientRequestResync` / `editor.clientDismissRecovery` cover explicit resync and dismiss.
 10. Type another small edit and scroll. File-browser and editor scroll directions must match wheel/trackpad intent, long files must scroll without snapping back to the caret, and ordinary typing, paint, layout, pointer, and scroll must remain client-local/non-blocking; directory listing, folder dialogs, file opens, language parsing/decorations, clipboard writes, and save/reload IO happen only after explicit user action or background scheduling.
 
 Security and authority contract: folder selection grants only the selected directory after server validation; file opens remain root-relative or selected-file validated; packages cannot scan arbitrary paths, add root markers, override ignore/listing budgets, call raw `Deno.core.ops`, run shell commands, fetch network/package-manager resources, access AI/WASM/native widgets, execute client-side JavaScript, or invent package clipboard-contents APIs. Copy selection is write-only and limited to the current native editor selection; cut/paste are separate Clay-owned user-mediated client commands.
@@ -531,8 +531,8 @@ The Phase 19 Windows Markdown open-dialog smoke still documents the Windows nati
 
 Phase 19 starts from this baseline:
 
-- Working today: command-first launch, `smoke-gui`, foreground server/client validation, local optimistic typing, server-owned workspace/file opens for configured roots, the `markdown-mode` fixture that loads `@clay/markdown`, activates `sample.md`/document `1`, publishes representative Markdown decorations, shows inert Markdown status SDUI, the bindable `clay.documents.clientOpenFileDialog` client UI command, native file-open backends on Windows (Shell COM), Linux (xdg-desktop-portal), and macOS (`NSOpenPanel`) that filter for `.md`, `.markdown`, and `.mdown` plus an all-files fallback, explicit selected-file IPC, server single-file grants for files outside configured workspace roots, buffer replacement from the selected-file open response, and live selected-file Markdown activation/decorations/status when `@clay/markdown` is loaded.
-- Save exists for Phase 9 workspace documents. Phase 20 selected-file save/conflict UX (dirty chrome, `Ctrl+S` → `clay.documents.serverSaveDocument`, recovery menus) is covered in the end-to-end file-browser workflow smoke above; this Phase 19 Windows matrix remains focused on dialog open + edit.
+- Working today: command-first launch, `smoke-gui`, foreground server/client validation, local optimistic typing, server-owned workspace/file opens for configured roots, the `markdown-mode` fixture that loads `@clay/markdown`, activates `sample.md`/document `1`, publishes representative Markdown decorations, shows inert Markdown status SDUI, the bindable `documents.clientOpenFileDialog` client UI command, native file-open backends on Windows (Shell COM), Linux (xdg-desktop-portal), and macOS (`NSOpenPanel`) that filter for `.md`, `.markdown`, and `.mdown` plus an all-files fallback, explicit selected-file IPC, server single-file grants for files outside configured workspace roots, buffer replacement from the selected-file open response, and live selected-file Markdown activation/decorations/status when `@clay/markdown` is loaded.
+- Save exists for Phase 9 workspace documents. Phase 20 selected-file save/conflict UX (dirty chrome, `Ctrl+S` → `documents.serverSaveDocument`, recovery menus) is covered in the end-to-end file-browser workflow smoke above; this Phase 19 Windows matrix remains focused on dialog open + edit.
 
 The in-scope manual Windows 11 smoke scenario is edit-only:
 
@@ -541,7 +541,7 @@ The in-scope manual Windows 11 smoke scenario is edit-only:
    ```js
    import { bindKey } from "clay:keybindings";
 
-   bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+   bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
    ```
 
 2. Launch Clay with the normal command-first GUI path or the fixture command above.
@@ -555,11 +555,11 @@ Out of scope for the Phase 19 Windows Markdown open-dialog smoke only: saving th
 
 Performance and security contract: the explicit open-dialog command may perform modal native UI and server file-open work. Ordinary typing, paint, scroll, layout, and text-event paths must remain client-local/non-blocking and must not wait on JavaScript, IPC, file IO, parser work, or full-document serialization. A selected path is an explicit user-mediated open request only; it is not unrestricted client filesystem authority and must not broaden workspace access beyond the selected regular UTF-8 file.
 
-The Phase 19 Windows Markdown file-dialog smoke remains the Windows matrix. On Linux and macOS, `clay.documents.clientOpenFileDialog` opens the native file picker (xdg-desktop-portal / `NSOpenPanel`) and still routes through selected-file capability grants; unsupported platforms report a diagnostic/status without panics. Linux native folder selection remains validated by the `clay.workspace.clientOpenFolderDialog` workflow smoke; macOS folder selection uses the same `NSOpenPanel` backend in directory mode.
+The Phase 19 Windows Markdown file-dialog smoke remains the Windows matrix. On Linux and macOS, `documents.clientOpenFileDialog` opens the native file picker (xdg-desktop-portal / `NSOpenPanel`) and still routes through selected-file capability grants; unsupported platforms report a diagnostic/status without panics. Linux native folder selection remains validated by the `workspace.clientOpenFolderDialog` workflow smoke; macOS folder selection uses the same `NSOpenPanel` backend in directory mode.
 
 ### Phase 18.11 completion provider smoke
 
-Phase 18.11 adds the `CompletionTriggerAndResult` primitive, the server-side completion provider framework, the built-in `core.bufferWords` provider, and `TransientMenuSession`-based completion display/acceptance. The built-in buffer-word provider is always available; package providers are metadata-only opt-ins registered through `clay.completion.serverRegisterCompletionProvider` and loaded with one explicit `loadPackage` call. No default manual completion key binding exists in Rust, so manual completion is only reachable when `init.js` binds a key.
+Phase 18.11 adds the `CompletionTriggerAndResult` primitive, the server-side completion provider framework, the built-in `core.bufferWords` provider, and `TransientMenuSession`-based completion display/acceptance. The built-in buffer-word provider is always available; package providers are metadata-only opt-ins registered through `completion.serverRegisterCompletionProvider` and loaded with one explicit `loadPackage` call. No default manual completion key binding exists in Rust, so manual completion is only reachable when `init.js` binds a key.
 
 Manual completion smoke:
 
@@ -592,17 +592,17 @@ Phase 18.20 ships engine-neutral hover, go-to-definition, code-action, and signa
 
 Phase 18.20 discoverable commands (empty default key bindings):
 
-- `clay.language.hover`
-- `clay.language.goToDefinition`
-- `clay.language.codeActions`
-- `clay.language.signatureHelp`
+- `language.hover`
+- `language.goToDefinition`
+- `language.codeActions`
+- `language.signatureHelp`
 
 Manual Phase 18.20 smoke (fake analyzer / no language-server required):
 
-1. Bind one command in `~/.config/clay/init.js`, for example `bindKey("Alt+H", "clay.language.hover", { scope: "editor" })`. Runtime keybindings currently accept one key stroke; multi-stroke chords and function keys remain unsupported.
+1. Bind one command in `~/.config/clay/init.js`, for example `bindKey("Alt+H", "language.hover", { scope: "editor" })`. Runtime keybindings currently accept one key stroke; multi-stroke chords and function keys remain unsupported.
 2. Launch Clay and place the caret in an editable document.
 3. Invoke the binding. A bottom `TransientMenuSession` should show bounded plain-text hover/signature content or a selectable definitions/code-actions list. Raw HTML must not render as native markup.
-4. For multiple definitions, select a current-document target and confirm caret navigation. Workspace-file targets open through `clay.workspace.openFile` after root/relative-path revalidation; external/traversing targets are not navigable.
+4. For multiple definitions, select a current-document target and confirm caret navigation. Workspace-file targets open through `workspace.openFile` after root/relative-path revalidation; external/traversing targets are not navigable.
 5. For code actions, command-backed items reuse `CommandExecution`; direct edit previews display only and must not mutate text in Phase 18.20.
 6. Edit or move the caret before a late result arrives. Stale results must not install a menu.
 
@@ -679,7 +679,7 @@ cargo run -- client
 
 Expected behavior:
 
-- The server logs a `clay.runtime.*` or `clay.configuration.*` diagnostic code with safe detail.
+- The server logs a `runtime.*` or `configuration.*` diagnostic code with safe detail.
 - The GUI status line includes `Runtime <code>: <message>` after connection.
 - The status message omits raw absolute paths and source snippets.
 - Typing and native rendering remain responsive; diagnostics are status events, not synchronous input/rendering work.

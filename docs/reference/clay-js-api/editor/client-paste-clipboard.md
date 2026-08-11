@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientPasteClipboard
+id: editor.clientPasteClipboard
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientPasteClipboard
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+V", "Cmd+V"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it reads OS clipboard text once and inserts or replaces through the ordinary local edit path, and this API does not grant filesystem/workspace authority, package/configuration/AI clipboard-contents inspection APIs, arbitrary clipboard writes, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientPasteClipboard` only as a documented command ID for `bindKey`; do not expose raw clipboard text return values, server/package clipboard access, raw Rust calls, protocol DTOs, or `Deno.core.ops`.
+agent_guidance: Use `editor.clientPasteClipboard` only as a documented command ID for `bindKey`; do not expose raw clipboard text return values, server/package clipboard access, raw Rust calls, protocol DTOs, or `Deno.core.ops`.
 lookup_tags: [editor, clipboard, paste, selection, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for pasting OS clipboard UTF-8 text into t
 
 ## Description
 
-`clientPasteClipboard` is the public Clay JS API descriptor for **Paste Clipboard**. It returns the stable command ID `clay.editor.clientPasteClipboard` so configuration, help, key-binding discovery, and agents can name the paste route without hard-coding Rust shortcuts or raw clipboard operations.
+`clientPasteClipboard` is the public Clay JS API descriptor for **Paste Clipboard**. It returns the stable command ID `editor.clientPasteClipboard` so configuration, help, key-binding discovery, and agents can name the paste route without hard-coding Rust shortcuts or raw clipboard operations.
 
 Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Paste happens later only after an explicit user key/command route reaches the native editor widget. The command reads OS clipboard text through the client-owned clipboard sink, normalizes line endings, and inserts at the caret or replaces the current selection through the ordinary local edit enqueue path. Empty clipboard text is a no-op. Clipboard read failures become sanitized runtime diagnostics that never include full clipboard contents.
 
@@ -53,7 +53,7 @@ bindKey("Ctrl+Shift+V", clientPasteClipboard(), { scope: "editor" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+Shift+V", "clay.editor.clientPasteClipboard", { scope: "editor" });
+bindKey("Ctrl+Shift+V", "editor.clientPasteClipboard", { scope: "editor" });
 ```
 
 ## Example
@@ -82,11 +82,11 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.editor.clientPasteClipboard"` synchronously. The helper does not touch the clipboard, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
+Returns the string literal command ID `"editor.clientPasteClipboard"` synchronously. The helper does not touch the clipboard, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
 
 ## Errors
 
-The helper has no runtime errors. `bindKey` can reject malformed key chords, unsupported scopes, unsupported `when` clauses, or undocumented command IDs. The native command path can report a sanitized `clay.client.clipboard.read_failed` diagnostic if the OS clipboard backend fails.
+The helper has no runtime errors. `bindKey` can reject malformed key chords, unsupported scopes, unsupported `when` clauses, or undocumented command IDs. The native command path can report a sanitized `client.clipboard.read_failed` diagnostic if the OS clipboard backend fails.
 
 ## Permissions and security
 
@@ -98,7 +98,7 @@ Clipboard reads happen only on the explicit paste command path and stay off Maso
 
 ## Agent guidance
 
-Use `clay.editor.clientPasteClipboard` only as a documented command ID for `bindKey`. Avoid raw clipboard APIs that return clipboard text to JavaScript, server/package clipboard authority, shell commands, network effects, WASM, AI mutation, raw ops, or client-side JavaScript execution.
+Use `editor.clientPasteClipboard` only as a documented command ID for `bindKey`. Avoid raw clipboard APIs that return clipboard text to JavaScript, server/package clipboard authority, shell commands, network effects, WASM, AI mutation, raw ops, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.editor.clientPasteClipboard` only as a documented command ID for `bind
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientPasteClipboard`
+- Stable ID: `editor.clientPasteClipboard`
 - User-facing name: Paste Clipboard
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientPasteClipboard`

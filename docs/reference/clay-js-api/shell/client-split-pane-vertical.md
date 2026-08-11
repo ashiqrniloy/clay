@@ -1,5 +1,5 @@
 ---
-id: clay.shell.clientSplitPaneVertical
+id: shell.clientSplitPaneVertical
 kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientSplitPaneVertical
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+\\"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Panes are generic content hosts; this command does not open files or grant document authority.
-agent_guidance: "Use `clay.shell.clientSplitPaneVertical` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
+agent_guidance: "Use `shell.clientSplitPaneVertical` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only."
 lookup_tags: [shell, panes, splits, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for splitting the focused pane side by sid
 
 ## Description
 
-`clientSplitPaneVertical` is the public Clay JS API descriptor for **Split Pane Vertical**. It returns the stable command ID `clay.shell.clientSplitPaneVertical` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
+`clientSplitPaneVertical` is the public Clay JS API descriptor for **Split Pane Vertical**. It returns the stable command ID `shell.clientSplitPaneVertical` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
 
 Splitting vertical creates a side-by-side layout (`SplitOrientation::Horizontal`): the focused pane keeps its left half and a new pane occupies the right half. The pane cap is `MAX_PANES_PER_TAB = 4`; the split is a no-op at cap.
 
@@ -55,7 +55,7 @@ bindKey("Ctrl+\\", clientSplitPaneVertical(), { scope: "global" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+\\", "clay.shell.clientSplitPaneVertical", { scope: "global" });
+bindKey("Ctrl+\\", "shell.clientSplitPaneVertical", { scope: "global" });
 ```
 
 ## Example
@@ -84,7 +84,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.shell.clientSplitPaneVertical"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
+Returns the string literal command ID `"shell.clientSplitPaneVertical"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ Bindable client UI command ID only; after explicit user routing it mutates only 
 
 ## Agent guidance
 
-Use `clay.shell.clientSplitPaneVertical` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
+Use `shell.clientSplitPaneVertical` only as a documented command ID for `bindKey` to remap the default Phase 22.1 pane-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Pane topology mutation is Clay-owned; packages interact through inert `serverRequestLayoutIntent` only.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.shell.clientSplitPaneVertical` only as a documented command ID for `bi
 
 ## Lookup metadata
 
-- Stable ID: `clay.shell.clientSplitPaneVertical`
+- Stable ID: `shell.clientSplitPaneVertical`
 - User-facing name: Split Pane Vertical
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientSplitPaneVertical`

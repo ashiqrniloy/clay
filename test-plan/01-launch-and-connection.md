@@ -29,7 +29,7 @@ cargo build
 | L7 | After L1 | Status shows `Connected — Editable`; version text like `vN` |
 | L8 | Type text | `Pending edits: N` increments then decrements after ack |
 | L9 | Kill the server process while GUI open | `Disconnected` + recovery/dismiss menu; no raw paths/host strings leaked |
-| L10 | Put a syntax error in `~/.config/clay/init.js`, restart | GUI still opens; status/terminal shows `clay.runtime.syntax_error` diagnostic, previous generation behavior retained as documented |
+| L10 | Put a syntax error in `~/.config/clay/init.js`, restart | GUI still opens; status/terminal shows `runtime.syntax_error` diagnostic, previous generation behavior retained as documented |
 | L11 | No server reachable for a client-only invocation | `Local Fallback` state |
 
 ## Negative checks

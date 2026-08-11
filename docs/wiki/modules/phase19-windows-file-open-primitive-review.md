@@ -61,7 +61,7 @@ The Phase 19 implementation should add only reusable primitives:
 
 1. **`ClientUiCommandIntent` / client UI command route**
    - Add a manifest route for commands that must be handled by the native client before any server request exists.
-   - `clay.documents.clientOpenFileDialog` should bind through `init.js` and route to this generic intent, not to a hard-coded `Ctrl+O` branch and not to a server-first command.
+   - `documents.clientOpenFileDialog` should bind through `init.js` and route to this generic intent, not to a hard-coded `Ctrl+O` branch and not to a server-first command.
    - The route grants only a user-mediated native UI prompt. It must not grant filesystem scanning, package loading, shell, network, AI, WASM, raw ops, or client-side JavaScript.
 
 2. **`SelectedFileOpenRequest` / `SelectedFileGrant`**

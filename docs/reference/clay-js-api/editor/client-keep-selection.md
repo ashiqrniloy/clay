@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientKeepSelection
+id: editor.clientKeepSelection
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientKeepSelection
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientKeepSelection` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
+agent_guidance: Use `editor.clientKeepSelection` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
 lookup_tags: [editor, js-api, multi-cursor, selection]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Keep only the primary selection, dropping every other caret.
 
 ## Description
 
-`clientKeepSelection` returns the stable bindable command ID `clay.editor.clientKeepSelection` for **Keep Selection** (Plan 071 task 9). Helix keep_primary_selection semantics: the primary selection keeps its range; all secondary carets are removed. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientKeepSelection` returns the stable bindable command ID `editor.clientKeepSelection` for **Keep Selection** (Plan 071 task 9). Helix keep_primary_selection semantics: the primary selection keeps its range; all secondary carets are removed. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -50,7 +50,7 @@ bindKey("ctrl+k ctrl+n", clientKeepSelection());
 ## Example
 
 ```ts
-const commandId = clientKeepSelection(); // "clay.editor.clientKeepSelection"
+const commandId = clientKeepSelection(); // "editor.clientKeepSelection"
 ```
 
 ## Options
@@ -69,7 +69,7 @@ None.
 
 ## Return and async behavior
 
-Returns the stable command ID string `clay.editor.clientKeepSelection` synchronously. The facade is synchronous, side-effect free, and local.
+Returns the stable command ID string `editor.clientKeepSelection` synchronously. The facade is synchronous, side-effect free, and local.
 
 ## Errors
 
@@ -85,7 +85,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientKeepSelection` when the user asks for Keep Selection through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientKeepSelection` when the user asks for Keep Selection through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.editor.clientKeepSelection` when the user asks for Keep Selection thro
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientKeepSelection`
+- Stable ID: `editor.clientKeepSelection`
 - User-facing name: Keep Selection
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientKeepSelection`

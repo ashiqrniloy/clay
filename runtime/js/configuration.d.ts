@@ -1,6 +1,10 @@
 export interface ConfigurationModuleOptions {
     path: string;
+    optional?: boolean;
 }
+export type ConfigurationModuleLoadResult =
+    | { loaded: true }
+    | { loaded: false; error: string };
 export interface ConfigurationState {
     entryPoint: "~/.config/clay/init.js";
     loadedModules: string[];
@@ -21,7 +25,7 @@ export interface PackageOptionResult {
     source: PackageOptionSource;
     estimatedPayloadBytes: number;
 }
-export declare function loadConfigurationModule(options: ConfigurationModuleOptions): Promise<void>;
+export declare function loadConfigurationModule(options: ConfigurationModuleOptions): Promise<ConfigurationModuleLoadResult>;
 export declare function getConfigurationState(): ConfigurationState;
 export declare function setPackageOption(options: PackageOptionDefinition): PackageOptionResult;
 export declare function setModePreference(options: unknown): never;

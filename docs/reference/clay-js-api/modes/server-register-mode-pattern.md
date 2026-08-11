@@ -1,5 +1,5 @@
 ---
-id: clay.modes.serverRegisterModePattern
+id: modes.serverRegisterModePattern
 kind: clay-js-api
 js_module: "clay:modes"
 js_export: serverRegisterModePattern
@@ -43,9 +43,9 @@ custom_properties:
   - name: editorRules
     type: 'object | undefined'
     default: built-in code-editing defaults
-    description: Optional declarative editor rules stored with the mode declaration and applied at activation. Generic rule fields (enter, tab, pairs, comments, electricCharacters, autocompleteTriggers) plus per-mode movement and caretStyle (Plan 071 tasks 4/6/11). Optional movement policy (Plan 071 task 4/11), validated by the server. Fields — wordSeparators ('code', 'prose', or { custom: string[] }), treatUnderscoreAsWord, camelCaseSubWord, paragraphStyle ('blankLine' | 'blankLineOrWhitespace'), stopAtEolWordEnd, lineMovement ('character' | 'screenLine'), stickyColumn. Absent fields fall back to the code-editing defaults. Optional caret appearance override (Plan 071 task 6/11), validated by the server. Fields — shape ('bar' | 'line' | 'block' | 'underline'), widthPx, heightPct, hollow, blink ('solid' | 'blink' | 'phase' | 'smooth'), smoothAnimationMs, stopBlinkOnTyping. Absent means the reduced-motion-safe editor default bar; clientSetCursorStyle overrides it at runtime. Every field is validated server-side; unknown keys and values are rejected deny-by-default. Build the object with clay.behavior.buildCodeEditingManifest.
+    description: Optional declarative editor rules stored with the mode declaration and applied at activation. Generic rule fields (enter, tab, pairs, comments, electricCharacters, autocompleteTriggers) plus per-mode movement and caretStyle (Plan 071 tasks 4/6/11). Optional movement policy (Plan 071 task 4/11), validated by the server. Fields — wordSeparators ('code', 'prose', or { custom: string[] }), treatUnderscoreAsWord, camelCaseSubWord, paragraphStyle ('blankLine' | 'blankLineOrWhitespace'), stopAtEolWordEnd, lineMovement ('character' | 'screenLine'), stickyColumn. Absent fields fall back to the code-editing defaults. Optional caret appearance override (Plan 071 task 6/11), validated by the server. Fields — shape ('bar' | 'line' | 'block' | 'underline'), widthPx, heightPct, hollow, blink ('solid' | 'blink' | 'phase' | 'smooth'), smoothAnimationMs, stopBlinkOnTyping. Absent means the reduced-motion-safe editor default bar; clientSetCursorStyle overrides it at runtime. Every field is validated server-side; unknown keys and values are rejected deny-by-default. Build the object with behavior.buildCodeEditingManifest.
 security: Requires mode-registration permission and server validation of package prefix, static pattern schema, duplicate modes, and bounded open-document metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority.
-agent_guidance: Use `clay.modes.serverRegisterModePattern` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `modes.serverRegisterModePattern` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [js-api, modedocumentclassification, modes]
 app_visible: true
 help_visible: true
@@ -94,7 +94,7 @@ serverRegisterModePattern(manifest, { modeId: "markdown", displayName: "Markdown
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.modes.serverRegisterModePattern` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `modes.serverRegisterModePattern` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -125,7 +125,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.modes.serverRegisterModePattern` when the user asks for Register Mode Pattern through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `modes.serverRegisterModePattern` when the user asks for Register Mode Pattern through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -136,7 +136,7 @@ Use `clay.modes.serverRegisterModePattern` when the user asks for Register Mode 
 
 ## Lookup metadata
 
-- Stable ID: `clay.modes.serverRegisterModePattern`
+- Stable ID: `modes.serverRegisterModePattern`
 - User-facing name: Register Mode Pattern
 - Kind: `clay-js-api`
 - Module/export: `clay:modes` / `serverRegisterModePattern`

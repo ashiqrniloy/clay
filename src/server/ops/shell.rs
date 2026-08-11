@@ -28,7 +28,7 @@ pub(super) fn op_clay_shell_set_pane_focus_policy(
 ) -> Result<String, JsErrorBox> {
     let value: Value = serde_json::from_str(&options_json).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.shell.invalid_pane_focus_policy: input must be valid JSON ({error})"
+            "shell.invalid_pane_focus_policy: input must be valid JSON ({error})"
         ))
     })?;
     let policy = value
@@ -36,12 +36,12 @@ pub(super) fn op_clay_shell_set_pane_focus_policy(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             JsErrorBox::generic(
-                "clay.shell.invalid_pane_focus_policy: requires { paneFocusPolicy: \"click\" | \"cursor\" }",
+                "shell.invalid_pane_focus_policy: requires { paneFocusPolicy: \"click\" | \"cursor\" }",
             )
         })?;
     if !VALID_PANE_FOCUS_POLICIES.contains(&policy) {
         return Err(JsErrorBox::generic(format!(
-            "clay.shell.invalid_pane_focus_policy: unknown value `{policy}`; expected \"click\" or \"cursor\""
+            "shell.invalid_pane_focus_policy: unknown value `{policy}`; expected \"click\" or \"cursor\""
         )));
     }
     let preferences = ShellPreferences {
@@ -52,7 +52,7 @@ pub(super) fn op_clay_shell_set_pane_focus_policy(
     serde_json::to_string(&json!({ "paneFocusPolicy": preferences.pane_focus_policy })).map_err(
         |error| {
             JsErrorBox::generic(format!(
-                "clay.shell.invalid_pane_focus_policy: failed to serialize result ({error})"
+                "shell.invalid_pane_focus_policy: failed to serialize result ({error})"
             ))
         },
     )

@@ -1,5 +1,5 @@
 ---
-id: clay.shell.clientTabMoveRight
+id: shell.clientTabMoveRight
 kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientTabMoveRight
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+Shift+]"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it switches the active tab via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.
-agent_guidance: "Use `clay.shell.clientTabMoveRight` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only."
+agent_guidance: "Use `shell.clientTabMoveRight` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only."
 lookup_tags: [shell, tabs, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for moving the active tab one position rig
 
 ## Description
 
-`clientTabMoveRight` is the public Clay JS API descriptor for **Move Tab Right**. It returns the stable command ID `clay.shell.clientTabMoveRight` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
+`clientTabMoveRight` is the public Clay JS API descriptor for **Move Tab Right**. It returns the stable command ID `shell.clientTabMoveRight` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
 
 Move Tab Right Move Tab Right moves the active tab one card position later in the user-visible order via the server-validated `TabCommand::MoveRight`; the server's `TabRegistry` reorder preserves the active-tab status by `TabId` and every mutation broadcasts a fresh snapshot (including rejections). At the last position it is a silent no-op — moves never wrap around.
 
@@ -55,7 +55,7 @@ bindKey("Ctrl+Shift+]", clientTabMoveRight(), { scope: "global" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+Shift+]", "clay.shell.clientTabMoveRight", { scope: "global" });
+bindKey("Ctrl+Shift+]", "shell.clientTabMoveRight", { scope: "global" });
 ```
 
 ## Example
@@ -84,7 +84,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.shell.clientTabMoveRight"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
+Returns the string literal command ID `"shell.clientTabMoveRight"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ Bindable client UI command ID only; after explicit user routing it switches the 
 
 ## Agent guidance
 
-Use `clay.shell.clientTabMoveRight` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.
+Use `shell.clientTabMoveRight` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.shell.clientTabMoveRight` only as a documented command ID for `bindKey
 
 ## Lookup metadata
 
-- Stable ID: `clay.shell.clientTabMoveRight`
+- Stable ID: `shell.clientTabMoveRight`
 - User-facing name: Move Tab Right
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientTabMoveRight`

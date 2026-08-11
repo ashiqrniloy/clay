@@ -1,5 +1,5 @@
 ---
-id: clay.shell.clientTabPrev
+id: shell.clientTabPrev
 kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientTabPrev
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+Shift+Tab"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it switches the active tab via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.
-agent_guidance: "Use `clay.shell.clientTabPrev` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only."
+agent_guidance: "Use `shell.clientTabPrev` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only."
 lookup_tags: [shell, tabs, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for switching to the previous tab.
 
 ## Description
 
-`clientTabPrev` is the public Clay JS API descriptor for **Previous Tab**. It returns the stable command ID `clay.shell.clientTabPrev` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
+`clientTabPrev` is the public Clay JS API descriptor for **Previous Tab**. It returns the stable command ID `shell.clientTabPrev` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
 
 Previous Tab Previous Tab activates the tab before the active tab in the user-visible card order (the server-authoritative `TabRegistry` order, entry-less mounted tabs appended), wrapping from the first tab back to the last. With fewer than two tabs it is a silent no-op. The tab switch is optimistic client-side and reconciles against the server's pushed `TabRegistrySnapshot`.
 
@@ -55,7 +55,7 @@ bindKey("Ctrl+Shift+Tab", clientTabPrev(), { scope: "global" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+Shift+Tab", "clay.shell.clientTabPrev", { scope: "global" });
+bindKey("Ctrl+Shift+Tab", "shell.clientTabPrev", { scope: "global" });
 ```
 
 ## Example
@@ -84,7 +84,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.shell.clientTabPrev"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
+Returns the string literal command ID `"shell.clientTabPrev"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ Bindable client UI command ID only; after explicit user routing it switches the 
 
 ## Agent guidance
 
-Use `clay.shell.clientTabPrev` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.
+Use `shell.clientTabPrev` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.shell.clientTabPrev` only as a documented command ID for `bindKey` to 
 
 ## Lookup metadata
 
-- Stable ID: `clay.shell.clientTabPrev`
+- Stable ID: `shell.clientTabPrev`
 - User-facing name: Previous Tab
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientTabPrev`

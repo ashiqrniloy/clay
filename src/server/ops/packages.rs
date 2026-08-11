@@ -181,9 +181,9 @@ pub(super) fn op_clay_packages_validate_manifest(
     _state: &mut OpState,
     #[string] manifest_json: String,
 ) -> Result<String, JsErrorBox> {
-    let value = parse_json(&manifest_json, "clay.packages.invalid_manifest")?;
+    let value = parse_json(&manifest_json, "packages.invalid_manifest")?;
     let manifest =
-        validate_manifest_value(&value).map_err(package_error("clay.packages.invalid_manifest"))?;
+        validate_manifest_value(&value).map_err(package_error("packages.invalid_manifest"))?;
     serde_json::to_string(&json!({
         "name": manifest.name,
         "version": manifest.version,
@@ -194,7 +194,7 @@ pub(super) fn op_clay_packages_validate_manifest(
         "entry": manifest.clay.entry,
         "loadEntry": manifest.clay.load_entry,
     }))
-    .map_err(serialize_error("clay.packages.validation_failed"))
+    .map_err(serialize_error("packages.validation_failed"))
 }
 
 #[op2]
@@ -203,9 +203,8 @@ pub(super) fn op_clay_packages_load_package(
     _state: &mut OpState,
     #[string] package_json: String,
 ) -> Result<String, JsErrorBox> {
-    let value = parse_json(&package_json, "clay.packages.invalid_package")?;
-    let record =
-        assemble_package_record(&value).map_err(record_error("clay.packages.load_failed"))?;
+    let value = parse_json(&package_json, "packages.invalid_package")?;
+    let record = assemble_package_record(&value).map_err(record_error("packages.load_failed"))?;
     serde_json::to_string(&json!({
         "name": record.manifest.name,
         "version": record.manifest.version,
@@ -233,7 +232,7 @@ pub(super) fn op_clay_packages_load_package(
             "packageOptions": record.contributions.package_options.len(),
         }
     }))
-    .map_err(serialize_error("clay.packages.load_failed"))
+    .map_err(serialize_error("packages.load_failed"))
 }
 
 #[op2]
@@ -245,7 +244,7 @@ pub(super) fn op_clay_packages_list_first_party_specifiers(
     let mut specifiers = Vec::new();
     let entries = std::fs::read_dir(packages_root).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.packages.list_failed: failed to read first-party package root ({error})"
+            "packages.list_failed: failed to read first-party package root ({error})"
         ))
     })?;
     for entry in entries.flatten() {
@@ -265,7 +264,7 @@ pub(super) fn op_clay_packages_list_first_party_specifiers(
     }
     specifiers.sort();
     serde_json::to_string(&json!({ "specifiers": specifiers }))
-        .map_err(serialize_error("clay.packages.list_failed"))
+        .map_err(serialize_error("packages.list_failed"))
 }
 
 #[op2]
@@ -274,41 +273,41 @@ pub(super) fn op_clay_packages_validate_permissions(
     _state: &mut OpState,
     #[string] permissions_json: String,
 ) -> Result<String, JsErrorBox> {
-    let value = parse_json(&permissions_json, "clay.packages.invalid_permissions")?;
+    let value = parse_json(&permissions_json, "packages.invalid_permissions")?;
     let Some(values) = value.as_array() else {
         return Err(JsErrorBox::generic(
-            "clay.packages.invalid_permissions: permissions must be an array of strings",
+            "packages.invalid_permissions: permissions must be an array of strings",
         ));
     };
     let mut permissions = Vec::new();
     for value in values {
         let Some(permission) = value.as_str() else {
             return Err(JsErrorBox::generic(
-                "clay.packages.invalid_permissions: permissions must be an array of strings",
+                "packages.invalid_permissions: permissions must be an array of strings",
             ));
         };
         if is_prohibited_authority(permission) {
             return Err(JsErrorBox::generic(format!(
-                "clay.packages.prohibited_authority: prohibited authority `{permission}` cannot be requested by default"
+                "packages.prohibited_authority: prohibited authority `{permission}` cannot be requested by default"
             )));
         }
         match parse_permission(permission) {
             Ok(permission) => permissions.push(permission.as_str()),
             Err(PermissionValidationError::UnknownPermission { .. }) => {
                 return Err(JsErrorBox::generic(format!(
-                    "clay.packages.unknown_permission: unknown Clay package permission `{permission}`"
+                    "packages.unknown_permission: unknown Clay package permission `{permission}`"
                 )));
             }
             Err(PermissionValidationError::ProhibitedAuthority { .. }) => {
                 return Err(JsErrorBox::generic(format!(
-                    "clay.packages.prohibited_authority: prohibited authority `{permission}` cannot be requested by default"
+                    "packages.prohibited_authority: prohibited authority `{permission}` cannot be requested by default"
                 )));
             }
         }
     }
 
     serde_json::to_string(&json!({ "permissions": permissions }))
-        .map_err(serialize_error("clay.packages.validation_failed"))
+        .map_err(serialize_error("packages.validation_failed"))
 }
 
 fn parse_json(json_text: &str, code: &str) -> Result<Value, JsErrorBox> {
@@ -329,7 +328,7 @@ fn serialize_error(code: &'static str) -> impl Fn(serde_json::Error) -> JsErrorB
 }
 
 fn invalid_specifier(message: impl std::fmt::Display) -> JsErrorBox {
-    JsErrorBox::generic(format!("clay.packages.invalid_specifier: {message}"))
+    JsErrorBox::generic(format!("packages.invalid_specifier: {message}"))
 }
 
 /// Resolve an installed, authorized package specifier, validate + enable it
@@ -368,7 +367,7 @@ fn ensure_first_party_record_locked(
         service
             .authorize_bundled_defaults(&resolved_name, "clay-bundled-default")
             .map_err(|error| {
-                JsErrorBox::generic(format!("clay.packages.authorization_failed: {error}"))
+                JsErrorBox::generic(format!("packages.authorization_failed: {error}"))
             })?;
     }
 
@@ -385,7 +384,7 @@ fn ensure_first_party_record_locked(
             .clone(),
         Err(error) => {
             return Err(JsErrorBox::generic(format!(
-                "clay.packages.load_failed: {error}"
+                "packages.load_failed: {error}"
             )));
         }
     };
@@ -406,7 +405,7 @@ pub(super) fn ensure_package_installed_locked(
 
     let Some(package_name) = specifier.strip_prefix("@clay/") else {
         return Err(JsErrorBox::generic(format!(
-            "clay.packages.not_installed: package `{specifier}` is not installed or authorized"
+            "packages.not_installed: package `{specifier}` is not installed or authorized"
         )));
     };
     if !is_valid_first_party_package_segment(package_name) {
@@ -420,12 +419,12 @@ pub(super) fn ensure_package_installed_locked(
     let package_json_text =
         std::fs::read_to_string(package_root.join("package.json")).map_err(|_| {
             JsErrorBox::generic(format!(
-                "clay.packages.not_installed: bundled package `{specifier}` is not installed"
+                "packages.not_installed: bundled package `{specifier}` is not installed"
             ))
         })?;
     let package_json: Value = serde_json::from_str(&package_json_text).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.packages.load_failed: invalid package.json for `{specifier}` ({error})"
+            "packages.load_failed: invalid package.json for `{specifier}` ({error})"
         ))
     })?;
     let resolved_name = package_json
@@ -435,7 +434,7 @@ pub(super) fn ensure_package_installed_locked(
         .to_string();
     service
         .install_from_value_at_root(package_json, package_root.clone())
-        .map_err(|error| JsErrorBox::generic(format!("clay.packages.load_failed: {error}")))?;
+        .map_err(|error| JsErrorBox::generic(format!("packages.load_failed: {error}")))?;
     Ok((resolved_name, package_root, true))
 }
 
@@ -451,7 +450,7 @@ pub(super) async fn op_clay_packages_load_in_package_domain(
     state: Rc<RefCell<OpState>>,
     #[string] request_json: String,
 ) -> Result<String, JsErrorBox> {
-    let request = parse_json(&request_json, "clay.packages.invalid_request")?;
+    let request = parse_json(&request_json, "packages.invalid_request")?;
     let name = request
         .get("name")
         .and_then(Value::as_str)
@@ -476,12 +475,12 @@ pub(super) async fn op_clay_packages_load_in_package_domain(
             .expect("package service mutex poisoned");
         let record = service.enabled_record(&name, &version).ok_or_else(|| {
             JsErrorBox::generic(format!(
-                "clay.packages.package_not_enabled: package `{name}` is not enabled"
+                "packages.package_not_enabled: package `{name}` is not enabled"
             ))
         })?;
         if record.runtime_domain != crate::packages::bundled::RuntimeDomain::ThirdParty {
             return Err(JsErrorBox::generic(format!(
-                "clay.packages.load_failed: package `{name}` is not a third-party package"
+                "packages.load_failed: package `{name}` is not a third-party package"
             )));
         }
         (
@@ -491,11 +490,11 @@ pub(super) async fn op_clay_packages_load_in_package_domain(
     };
     if allowlisted.is_none() {
         return Err(JsErrorBox::generic(format!(
-            "clay.packages.load_failed: load entry `{specifier}` is not in the module allowlist"
+            "packages.load_failed: load entry `{specifier}` is not in the module allowlist"
         )));
     }
     let sender = clay_state.third_party_commands().ok_or_else(|| {
-        JsErrorBox::generic("clay.packages.load_failed: third-party runtime is not available")
+        JsErrorBox::generic("packages.load_failed: third-party runtime is not available")
     })?;
 
     let source = format!(
@@ -512,16 +511,16 @@ pub(super) async fn op_clay_packages_load_in_package_domain(
             response,
         })
         .map_err(|_| {
-            JsErrorBox::generic("clay.packages.load_failed: third-party runtime worker stopped")
+            JsErrorBox::generic("packages.load_failed: third-party runtime worker stopped")
         })?;
     let evaluation = receiver
         .await
         .map_err(|_| {
-            JsErrorBox::generic("clay.packages.load_failed: third-party runtime worker stopped")
+            JsErrorBox::generic("packages.load_failed: third-party runtime worker stopped")
         })?
         .map_err(|error| {
             JsErrorBox::generic(format!(
-                "clay.packages.load_failed: third-party load entry failed: {error}"
+                "packages.load_failed: third-party load entry failed: {error}"
             ))
         })?;
     clay_state.absorb_cross_domain_evaluation(&evaluation);
@@ -530,7 +529,7 @@ pub(super) async fn op_clay_packages_load_in_package_domain(
         "version": version,
         "domain": "third-party",
     }))
-    .map_err(serialize_error("clay.packages.load_failed"))
+    .map_err(serialize_error("packages.load_failed"))
 }
 
 #[op2]
@@ -539,7 +538,7 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
     state: &mut OpState,
     #[string] request_json: String,
 ) -> Result<String, JsErrorBox> {
-    let request = parse_json(&request_json, "clay.packages.invalid_request")?;
+    let request = parse_json(&request_json, "packages.invalid_request")?;
     let Some(specifier) = request.get("specifier").and_then(Value::as_str) else {
         return Err(invalid_specifier(
             "loadPackage requires a `specifier` string",
@@ -569,7 +568,7 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
         // lookup plus file read.
         let load_entry = record.manifest.clay.load_entry.as_deref().ok_or_else(|| {
             JsErrorBox::generic(format!(
-                "clay.packages.load_failed: package `{specifier}` declares no loadEntry"
+                "packages.load_failed: package `{specifier}` declares no loadEntry"
             ))
         })?;
         let normalized_load_entry = load_entry
@@ -633,7 +632,7 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
         })
     };
 
-    serde_json::to_string(&summary).map_err(serialize_error("clay.packages.load_failed"))
+    serde_json::to_string(&summary).map_err(serialize_error("packages.load_failed"))
 }
 
 /// End the package-activation scope once a `loadPackage` activation finishes.
@@ -663,18 +662,18 @@ fn canonical_load_entry_paths(
 ) -> Result<(PathBuf, PathBuf), JsErrorBox> {
     let canonical_package_root = std::fs::canonicalize(package_root).map_err(|error| {
         JsErrorBox::generic(format!(
-            "clay.packages.load_failed: package `{specifier}` root could not be canonicalized ({error})"
+            "packages.load_failed: package `{specifier}` root could not be canonicalized ({error})"
         ))
     })?;
     let absolute_load_entry =
         std::fs::canonicalize(package_root.join(normalized_load_entry)).map_err(|error| {
             JsErrorBox::generic(format!(
-                "clay.packages.load_failed: package `{specifier}` loadEntry could not be canonicalized ({error})"
+                "packages.load_failed: package `{specifier}` loadEntry could not be canonicalized ({error})"
             ))
         })?;
     if !absolute_load_entry.starts_with(&canonical_package_root) {
         return Err(JsErrorBox::generic(format!(
-            "clay.packages.load_failed: package `{specifier}` loadEntry escapes its package root"
+            "packages.load_failed: package `{specifier}` loadEntry escapes its package root"
         )));
     }
     Ok((absolute_load_entry, canonical_package_root))

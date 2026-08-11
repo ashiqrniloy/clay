@@ -198,7 +198,7 @@ pub(crate) fn ordered_tab_clients(
 pub(crate) fn open_intent_pending_request(intent: &SduiActionIntent) -> Option<PendingOpenRequest> {
     if !matches!(
         intent.command_id.as_str(),
-        "clay.workspace.openFile" | "clay.workspace.openFuzzyFile"
+        "workspace.openFile" | "workspace.openFuzzyFile"
     ) {
         return None;
     }
@@ -787,7 +787,7 @@ pub(crate) mod tests {
             }
         }
         // File browser and fuzzy open both carry (workspaceRootId, relativePath).
-        for command_id in ["clay.workspace.openFile", "clay.workspace.openFuzzyFile"] {
+        for command_id in ["workspace.openFile", "workspace.openFuzzyFile"] {
             let request = open_intent_pending_request(&intent(command_id, Some(3), Some("a.md")))
                 .expect("workspace open intent records a pending request");
             assert_eq!(request.path, None);
@@ -796,20 +796,15 @@ pub(crate) mod tests {
         }
         // Non-open intents and malformed arguments record nothing.
         assert!(
-            open_intent_pending_request(&intent(
-                "clay.workspace.revealInTree",
-                Some(3),
-                Some("a.md")
-            ))
-            .is_none()
-        );
-        assert!(
-            open_intent_pending_request(&intent("clay.workspace.openFile", None, Some("a.md")))
+            open_intent_pending_request(&intent("workspace.revealInTree", Some(3), Some("a.md")))
                 .is_none()
         );
         assert!(
-            open_intent_pending_request(&intent("clay.workspace.openFile", Some(3), None))
+            open_intent_pending_request(&intent("workspace.openFile", None, Some("a.md")))
                 .is_none()
+        );
+        assert!(
+            open_intent_pending_request(&intent("workspace.openFile", Some(3), None)).is_none()
         );
     }
 

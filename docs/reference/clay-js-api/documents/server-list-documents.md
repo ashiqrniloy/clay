@@ -1,5 +1,5 @@
 ---
-id: clay.documents.serverListDocuments
+id: documents.serverListDocuments
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverListDocuments
@@ -17,7 +17,7 @@ permissions: ["document-read"]
 key_bindings: []
 custom_properties: []
 security: Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.documents.serverListDocuments` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
+agent_guidance: Use `documents.serverListDocuments` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 lookup_tags: [documents, workspace, metadata, list, dirty-state, js-api]
 app_visible: true
 help_visible: true
@@ -62,7 +62,7 @@ No options.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.documents.serverListDocuments` in `~/.config/clay/init.js` once configuration execution exists.
+No default key binding is assigned. Users may bind a key to `documents.serverListDocuments` in `~/.config/clay/init.js` once configuration execution exists.
 
 ## Custom properties
 
@@ -90,7 +90,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.documents.serverListDocuments` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
+Use `documents.serverListDocuments` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -101,7 +101,7 @@ Use `clay.documents.serverListDocuments` only through the documented Clay JS fac
 
 ## Lookup metadata
 
-- Stable ID: `clay.documents.serverListDocuments`
+- Stable ID: `documents.serverListDocuments`
 - User-facing name: List Open Documents
 - Kind: `clay-js-api`
 - Module/export: `clay:documents` / `serverListDocuments`

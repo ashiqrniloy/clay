@@ -20,7 +20,7 @@ ligature glyphs, IME feel, native dialogs, focus, timing.
 ## Prerequisites (all modules)
 
 - Linux host (primary platform), Rust toolchain, `cargo`.
-- Optional: `~/.config/clay/init.js` (canonical example: `examples/init.js`).
+- Optional: `~/.config/clay/` config tree (canonical example: `examples/` — copy with `cp -r examples/. ~/.config/clay/`).
 - Scratch workspace: `mkdir -p /tmp/clay-manual` with sample files (each
   module file lists the files it needs, or points at a shared setup).
 - Font for ligature checks: Fira Code (`FiraCode Nerd Font Mono` works).
@@ -30,7 +30,7 @@ ligature glyphs, IME feel, native dialogs, focus, timing.
 | # | Module file | Covers | Deep-reference doc |
 |---|-------------|--------|-------------------|
 | 01 | [Launch and connection](01-launch-and-connection.md) | server/client lifecycle, lease, read-only observer, restart, status line | `docs/development/launch-and-gui-smoke.md` |
-| 02 | [Configuration (init.js)](02-configuration-init-js.md) | init.js evaluation, modular loading, diagnostics, live reload, planned-API denial | `docs/reference/clay-js-api/configuration.md`, `examples/init.js` |
+| 02 | [Configuration (init.js)](02-configuration-init-js.md) | init.js evaluation, modular loading, diagnostics, live reload, watcher auto-reload, default reload chord, planned-API denial | `docs/reference/clay-js-api/configuration.md`, `examples/` tree, `tests/fixtures/configuration/plan080-manual/` |
 | 03 | [Files and workspace](03-files-and-workspace.md) | open/save/reload, dirty state, conflicts, file browser, hidden-pane toggle, `Ctrl+O` while hidden, multi-document (incl. pane-scoped switcher, duplicate-open focus routing) | `docs/development/file-open-save-reload-workflow.md` |
 | 04 | [Core editing](04-core-editing.md) | typing, undo/redo, clipboard, newline/indent rules, IME preedit | — |
 | 05 | [Movement and selection](05-movement-and-selection.md) | word/paragraph/line movement, sticky column, line/word selection, prose vs code | `docs/development/manual-editor-capabilities-test-plan.md` |

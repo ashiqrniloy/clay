@@ -1,33 +1,33 @@
 export type DocumentId = string;
-export type ClientCopySelectionCommandId = "clay.editor.clientCopySelection";
-export type ClientCutSelectionCommandId = "clay.editor.clientCutSelection";
-export type ClientPasteClipboardCommandId = "clay.editor.clientPasteClipboard";
-export type ClientUndoCommandId = "clay.editor.clientUndo";
-export type ClientRedoCommandId = "clay.editor.clientRedo";
-export type ClientShowOpenDocumentsCommandId = "clay.editor.clientShowOpenDocuments";
-export type ClientRequestResyncCommandId = "clay.editor.clientRequestResync";
-export type ClientDismissRecoveryCommandId = "clay.editor.clientDismissRecovery";
-export type ClientMoveCursorWordStartForwardCommandId = "clay.editor.clientMoveCursor.nextWordStart";
-export type ClientMoveCursorWordStartBackwardCommandId = "clay.editor.clientMoveCursor.prevWordStart";
-export type ClientMoveCursorParagraphForwardCommandId = "clay.editor.clientMoveCursor.nextParagraph";
-export type ClientMoveCursorParagraphBackwardCommandId = "clay.editor.clientMoveCursor.prevParagraph";
-export type ClientSetSelectionSelectWordCommandId = "clay.editor.clientSetSelection.selectWord";
-export type ClientSetSelectionSelectLineCommandId = "clay.editor.clientSetSelection.selectLine";
-export type ClientAddCursorBelowCommandId = "clay.editor.clientAddCursor.below";
-export type ClientAddCursorAboveCommandId = "clay.editor.clientAddCursor.above";
-export type ClientColumnSelectDownCommandId = "clay.editor.clientColumnSelect.down";
-export type ClientColumnSelectUpCommandId = "clay.editor.clientColumnSelect.up";
-export type ClientColumnSelectLeftCommandId = "clay.editor.clientColumnSelect.left";
-export type ClientColumnSelectRightCommandId = "clay.editor.clientColumnSelect.right";
-export type ClientSelectNextMatchCommandId = "clay.editor.clientSelectNextMatch";
-export type ClientSelectPrevMatchCommandId = "clay.editor.clientSelectPrevMatch";
-export type ClientSelectAllMatchesCommandId = "clay.editor.clientSelectAllMatches";
-export type ClientCancelMultipleSelectionsCommandId = "clay.editor.clientCancelMultipleSelections";
-export type ClientKeepSelectionCommandId = "clay.editor.clientKeepSelection";
-export type ClientRemoveSelectionCommandId = "clay.editor.clientRemoveSelection";
-export type ClientUndoCursorMoveCommandId = "clay.editor.clientUndoCursorMove";
-export type ClientSmartSelectExpandCommandId = "clay.editor.clientSmartSelect.expand";
-export type ClientSmartSelectShrinkCommandId = "clay.editor.clientSmartSelect.shrink";
+export type ClientCopySelectionCommandId = "editor.clientCopySelection";
+export type ClientCutSelectionCommandId = "editor.clientCutSelection";
+export type ClientPasteClipboardCommandId = "editor.clientPasteClipboard";
+export type ClientUndoCommandId = "editor.clientUndo";
+export type ClientRedoCommandId = "editor.clientRedo";
+export type ClientShowOpenDocumentsCommandId = "editor.clientShowOpenDocuments";
+export type ClientRequestResyncCommandId = "editor.clientRequestResync";
+export type ClientDismissRecoveryCommandId = "editor.clientDismissRecovery";
+export type ClientMoveCursorWordStartForwardCommandId = "editor.clientMoveCursor.nextWordStart";
+export type ClientMoveCursorWordStartBackwardCommandId = "editor.clientMoveCursor.prevWordStart";
+export type ClientMoveCursorParagraphForwardCommandId = "editor.clientMoveCursor.nextParagraph";
+export type ClientMoveCursorParagraphBackwardCommandId = "editor.clientMoveCursor.prevParagraph";
+export type ClientSetSelectionSelectWordCommandId = "editor.clientSetSelection.selectWord";
+export type ClientSetSelectionSelectLineCommandId = "editor.clientSetSelection.selectLine";
+export type ClientAddCursorBelowCommandId = "editor.clientAddCursor.below";
+export type ClientAddCursorAboveCommandId = "editor.clientAddCursor.above";
+export type ClientColumnSelectDownCommandId = "editor.clientColumnSelect.down";
+export type ClientColumnSelectUpCommandId = "editor.clientColumnSelect.up";
+export type ClientColumnSelectLeftCommandId = "editor.clientColumnSelect.left";
+export type ClientColumnSelectRightCommandId = "editor.clientColumnSelect.right";
+export type ClientSelectNextMatchCommandId = "editor.clientSelectNextMatch";
+export type ClientSelectPrevMatchCommandId = "editor.clientSelectPrevMatch";
+export type ClientSelectAllMatchesCommandId = "editor.clientSelectAllMatches";
+export type ClientCancelMultipleSelectionsCommandId = "editor.clientCancelMultipleSelections";
+export type ClientKeepSelectionCommandId = "editor.clientKeepSelection";
+export type ClientRemoveSelectionCommandId = "editor.clientRemoveSelection";
+export type ClientUndoCursorMoveCommandId = "editor.clientUndoCursorMove";
+export type ClientSmartSelectExpandCommandId = "editor.clientSmartSelect.expand";
+export type ClientSmartSelectShrinkCommandId = "editor.clientSmartSelect.shrink";
 export type TextobjectKind =
     | "function"
     | "class"
@@ -121,14 +121,14 @@ export interface ClientSmartSelectOptions {
     action: SmartSelectAction;
 }
 export interface CursorMoveResult {
-    commandId: "clay.editor.clientMoveCursor";
+    commandId: "editor.clientMoveCursor";
     direction: string;
     granularity?: string;
     extend: boolean;
     count: number;
 }
 export interface SelectionResult {
-    commandId: "clay.editor.clientSetSelection";
+    commandId: "editor.clientSetSelection";
     action: string;
     extend: boolean;
     direction?: string;
@@ -139,7 +139,7 @@ export interface ScrollResult {
     column?: number;
 }
 export interface CursorStyleResult {
-    commandId: "clay.editor.clientSetCursorStyle";
+    commandId: "editor.clientSetCursorStyle";
     shape?: "bar" | "line" | "block" | "underline";
     blink?: "solid" | "blink" | "phase" | "smooth";
     widthPx?: number;
@@ -181,14 +181,14 @@ export declare function clientDismissRecovery(): ClientDismissRecoveryCommandId;
 export declare function clientAddCursor(options: ClientAddCursorOptions): AddCursorResult;
 export declare function clientColumnSelect(options: ClientColumnSelectOptions): ColumnSelectResult;
 export interface SelectTextobjectResult {
-    /** clay.editor.clientSelectTextobject.<object>.<inner|around>[.next|.previous] */
+    /** editor.clientSelectTextobject.<object>.<inner|around>[.next|.previous] */
     commandId: string;
     object: TextobjectKind;
     around: boolean;
     direction: TextobjectDirection;
 }
 export interface SmartSelectResult {
-    /** clay.editor.clientSmartSelect.<action> */
+    /** editor.clientSmartSelect.<action> */
     commandId: string;
     action: SmartSelectAction;
 }
@@ -198,7 +198,7 @@ export interface SmartSelectResult {
  * argless editor command ID; unknown IDs are rejected deny-by-default.
  */
 export interface ClientExecuteEditorCommandOptions {
-    /** e.g. `clay.editor.clientMoveCursor.nextWordStart`. */
+    /** e.g. `editor.clientMoveCursor.nextWordStart`. */
     commandId: string;
 }
 export interface ExecuteEditorCommandResult {

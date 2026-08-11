@@ -1,5 +1,5 @@
 ---
-id: clay.documents.serverSaveDocument
+id: documents.serverSaveDocument
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverSaveDocument
@@ -17,7 +17,7 @@ permissions: ["workspace-write", "document-read"]
 key_bindings: []
 custom_properties: []
 security: The trusted-only documents facade uses server-internal save authority, validates any explicit knownVersion against canonical server state, confines writes to an already-authorized open workspace document with path traversal rejection, and performs exclusive same-directory atomic replacement with target-identity revalidation; it is absent from the third-party package runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.documents.serverSaveDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
+agent_guidance: Use `documents.serverSaveDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 lookup_tags: [documents, workspace, file, save, dirty-state, js-api]
 app_visible: true
 help_visible: true
@@ -68,7 +68,7 @@ Recommended default chord for daily editing:
 ```js
 import { bindKey } from "clay:keybindings";
 
-bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 ```
 
 No built-in Rust shortcut is hardcoded; without an `init.js` (or fixture) binding, save is reachable through Control Center only if the command is listed there, or through the Clay JS facade. The client routes the bound command as a non-blocking `SaveDocument` protocol request for the active document. Stale on-disk metadata keeps the document dirty and opens a recovery menu instead of overwriting silently.
@@ -99,7 +99,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.documents.serverSaveDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
+Use `documents.serverSaveDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -110,7 +110,7 @@ Use `clay.documents.serverSaveDocument` only through the documented Clay JS faca
 
 ## Lookup metadata
 
-- Stable ID: `clay.documents.serverSaveDocument`
+- Stable ID: `documents.serverSaveDocument`
 - User-facing name: Save Document
 - Kind: `clay-js-api`
 - Module/export: `clay:documents` / `serverSaveDocument`

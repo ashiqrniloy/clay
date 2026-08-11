@@ -10,7 +10,7 @@ const ops = globalThis.Deno?.core?.ops;
 const loadedPackages = (globalThis.__clayLoadedPackages ??= Object.create(null));
 function requireOps() {
     if (!ops) {
-        throw new Error("clay.packages.runtime_unavailable: Clay package APIs require the server runtime");
+        throw new Error("packages.runtime_unavailable: Clay package APIs require the server runtime");
     }
     return ops;
 }
@@ -39,37 +39,37 @@ function plannedPackageApi(name) {
 /** Install a package from an npm-compatible specifier and record provenance.
  * Planned: not callable until the op wiring and authorization flow ship. */
 export function install(_options) {
-    return plannedPackageApi("clay.packages.install");
+    return plannedPackageApi("packages.install");
 }
 /** Enable an installed, authorized package and evaluate its package graph.
  * Planned: not callable until the op wiring ships. */
 export function enable(_options) {
-    return plannedPackageApi("clay.packages.enable");
+    return plannedPackageApi("packages.enable");
 }
 /** Disable an enabled package and withdraw its contributions.
  * Planned: not callable until the op wiring ships. */
 export function disable(_options) {
-    return plannedPackageApi("clay.packages.disable");
+    return plannedPackageApi("packages.disable");
 }
 /** Inspect package metadata, provenance, capabilities, and authorization state.
  * Planned: not callable until the op wiring ships. */
 export function inspect(_options) {
-    return plannedPackageApi("clay.packages.inspect");
+    return plannedPackageApi("packages.inspect");
 }
 /** List installed/bundled packages with provenance and authorization status.
  * Planned: not callable until the op wiring ships. */
 export function list() {
-    return plannedPackageApi("clay.packages.list");
+    return plannedPackageApi("packages.list");
 }
 /** Authorize capabilities and a runtime profile for a package.
  * Planned: not callable until the op wiring ships. */
 export function authorize(_options) {
-    return plannedPackageApi("clay.packages.authorize");
+    return plannedPackageApi("packages.authorize");
 }
 /** Set an explicit user-selected winner for a package contribution conflict.
  * Planned: not callable until the op wiring ships. */
 export function setConflictOverride(_options) {
-    return plannedPackageApi("clay.packages.setConflictOverride");
+    return plannedPackageApi("packages.setConflictOverride");
 }
 /** Load and activate an installed, user-authorized package by specifier.
  *
@@ -90,7 +90,7 @@ export function setConflictOverride(_options) {
  * package root. */
 export async function loadPackage(specifier) {
     if (typeof specifier !== "string") {
-        throw new Error("clay.packages.invalid_specifier: loadPackage requires a string specifier");
+        throw new Error("packages.invalid_specifier: loadPackage requires a string specifier");
     }
     if (loadedPackages[specifier]) {
         return loadedPackages[specifier];

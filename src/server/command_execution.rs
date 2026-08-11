@@ -7,7 +7,7 @@ use crate::{
         permissions::PackagePermission,
     },
     perf::budgets::COMMAND_ARGUMENT_BUDGET_BYTES,
-    protocol::{ClientId, DocumentId, RoutingPolicy, WorkspaceRootId},
+    protocol::{ClientId, DocumentId, KeyBindingRule, RoutingPolicy, WorkspaceRootId},
     server::{
         git::{GitCachedStatus, GitStatusCache},
         workspace::{WorkspaceError, WorkspaceState},
@@ -51,7 +51,7 @@ pub struct CommandExecutionResult {
 pub enum CommandExecutionStatus {
     Accepted,
     /// Phase 18.9 mode-discovery result payload. Built-in discovery commands
-    /// (`clay.modes.listActiveModes`, `clay.modes.explainActiveMode`) resolve
+    /// (`modes.listActiveModes`, `modes.explainActiveMode`) resolve
     /// through [`CommandExecutor::execute_discovery`] by reading installed
     /// `ModeRegistry` state; the payload carries no execution, document, or
     /// workspace authority.
@@ -397,15 +397,15 @@ pub(crate) fn is_settings_command(command_id: &str) -> bool {
     command_id.starts_with("settings.")
 }
 
-/// Bounded appearance values accepted by `clay.settings.setAppearance`.
+/// Bounded appearance values accepted by `settings.setAppearance`.
 const SETTINGS_APPEARANCE_VALUES: &[&str] = &["light", "dark", "system"];
 
 impl CommandExecutor {
-    /// Validate a settings intent. `clay.settings.setTheme` requires a
+    /// Validate a settings intent. `settings.setTheme` requires a
     /// first-party `@clay/theme-*` bundled specifier (carried as
     /// `arguments.item_id` from the dropdown list source);
-    /// `clay.settings.setAppearance` requires a bounded light/dark/system
-    /// value; other `clay.settings.*` intents (open, close, reset,
+    /// `settings.setAppearance` requires a bounded light/dark/system
+    /// value; other `settings.*` intents (open, close, reset,
     /// setTypography) are accepted — typography bounds are enforced at apply
     /// time by the existing `setTypography` op.
     pub fn execute_settings(
@@ -691,27 +691,27 @@ macro_rules! builtin_commands {
 }
 
 builtin_commands! {
-    CONTROL_CENTER_COMMAND_ID => ("clay.controlCenter.open", "Open Control Center", General),
-    RELOAD_CONFIGURATION_COMMAND_ID => ("clay.runtime.reloadConfiguration", "Reload Configuration and Packages", Reload),
+    CONTROL_CENTER_COMMAND_ID => ("controlCenter.open", "Open Control Center", General),
+    RELOAD_CONFIGURATION_COMMAND_ID => ("runtime.reloadConfiguration", "Reload Configuration and Packages", Reload),
     REFRESH_WORKSPACE_COMMAND_ID => ("workspace.refresh", "Refresh Workspace", General),
     FOCUS_ACTIVE_DOCUMENT_COMMAND_ID => ("document.focus_active", "Focus Active Document", General),
     OPEN_RECENT_DOCUMENT_COMMAND_ID => ("document.open_recent", "Open Recent Document", General),
-    LIST_ACTIVE_MODES_COMMAND_ID => ("clay.modes.listActiveModes", "List Active Modes", ModeDiscovery),
-    EXPLAIN_ACTIVE_MODE_COMMAND_ID => ("clay.modes.explainActiveMode", "Explain Active Mode", ModeDiscovery),
-    OPEN_FILE_COMMAND_ID => ("clay.workspace.openFile", "Open File", Workspace),
-    REVEAL_IN_TREE_COMMAND_ID => ("clay.workspace.revealInTree", "Reveal in File Tree", Workspace),
-    OPEN_FUZZY_FILE_COMMAND_ID => ("clay.workspace.openFuzzyFile", "Open File by Name", Workspace),
-    OPEN_DIRECTORY_COMMAND_ID => ("clay.workspace.openDirectory", "Open Directory", Workspace),
-    TOGGLE_FILE_BROWSER_COMMAND_ID => ("clay.workspace.toggleFileBrowser", "Toggle File Browser", Workspace),
-    LIST_GIT_STATUSES_COMMAND_ID => ("clay.git.listStatuses", "List Git Statuses", Git),
-    REFRESH_GIT_STATUS_COMMAND_ID => ("clay.git.refreshStatus", "Refresh Git Status", Git),
-    HOVER_COMMAND_ID => ("clay.language.hover", "Hover", General),
-    GO_TO_DEFINITION_COMMAND_ID => ("clay.language.goToDefinition", "Go to Definition", General),
-    CODE_ACTIONS_COMMAND_ID => ("clay.language.codeActions", "Code Actions", General),
-    SIGNATURE_HELP_COMMAND_ID => ("clay.language.signatureHelp", "Signature Help", General),
-    PREVIEW_EDIT_COMMAND_ID => ("clay.language.previewEdit", "Preview Edit (Deferred)", General),
-    DISMISS_LANGUAGE_RESULT_COMMAND_ID => ("clay.language.dismissResult", "Dismiss Language Result", General),
-    NAVIGATE_DEFINITION_COMMAND_ID => ("clay.language.navigateDefinition", "Navigate Definition", General),
+    LIST_ACTIVE_MODES_COMMAND_ID => ("modes.listActiveModes", "List Active Modes", ModeDiscovery),
+    EXPLAIN_ACTIVE_MODE_COMMAND_ID => ("modes.explainActiveMode", "Explain Active Mode", ModeDiscovery),
+    OPEN_FILE_COMMAND_ID => ("workspace.openFile", "Open File", Workspace),
+    REVEAL_IN_TREE_COMMAND_ID => ("workspace.revealInTree", "Reveal in File Tree", Workspace),
+    OPEN_FUZZY_FILE_COMMAND_ID => ("workspace.openFuzzyFile", "Open File by Name", Workspace),
+    OPEN_DIRECTORY_COMMAND_ID => ("workspace.openDirectory", "Open Directory", Workspace),
+    TOGGLE_FILE_BROWSER_COMMAND_ID => ("workspace.toggleFileBrowser", "Toggle File Browser", Workspace),
+    LIST_GIT_STATUSES_COMMAND_ID => ("git.listStatuses", "List Git Statuses", Git),
+    REFRESH_GIT_STATUS_COMMAND_ID => ("git.refreshStatus", "Refresh Git Status", Git),
+    HOVER_COMMAND_ID => ("language.hover", "Hover", General),
+    GO_TO_DEFINITION_COMMAND_ID => ("language.goToDefinition", "Go to Definition", General),
+    CODE_ACTIONS_COMMAND_ID => ("language.codeActions", "Code Actions", General),
+    SIGNATURE_HELP_COMMAND_ID => ("language.signatureHelp", "Signature Help", General),
+    PREVIEW_EDIT_COMMAND_ID => ("language.previewEdit", "Preview Edit (Deferred)", General),
+    DISMISS_LANGUAGE_RESULT_COMMAND_ID => ("language.dismissResult", "Dismiss Language Result", General),
+    NAVIGATE_DEFINITION_COMMAND_ID => ("language.navigateDefinition", "Navigate Definition", General),
 }
 
 fn builtin_definition(command_id: &str) -> Option<&'static BuiltinCommandDefinition> {
@@ -725,7 +725,7 @@ pub(crate) fn is_mode_discovery_command(command_id: &str) -> bool {
         .is_some_and(|command| command.kind == BuiltinCommandKind::ModeDiscovery)
 }
 
-/// Extract the `documentId` argument for `clay.modes.explainActiveMode`.
+/// Extract the `documentId` argument for `modes.explainActiveMode`.
 /// Accepts an optional `{ "documentId": <non-negative integer> }` object;
 /// missing or invalid arguments are rejected with `InvalidArguments`.
 fn discovery_document_id(
@@ -736,7 +736,7 @@ fn discovery_document_id(
         return Err(diagnostic(
             command_id,
             CommandExecutionRule::InvalidArguments,
-            "clay.modes.explainActiveMode requires a non-negative integer `documentId` argument",
+            "modes.explainActiveMode requires a non-negative integer `documentId` argument",
         ));
     };
     Ok(document_id)
@@ -765,7 +765,11 @@ pub fn builtin_server_command(command_id: &str) -> Option<RegisteredCommand> {
         } else {
             RoutingPolicy::ServerFirst
         },
-        key_bindings: Vec::new(),
+        key_bindings: if definition.kind == BuiltinCommandKind::Reload {
+            vec![KeyBindingRule::default_reload_configuration()]
+        } else {
+            Vec::new()
+        },
         custom_properties: Default::default(),
         permissions: Vec::new(),
     })
@@ -1302,7 +1306,7 @@ mod tests {
                     &mut workspace,
                     1,
                     CommandExecutionRequest {
-                        command_id: "clay.workspace.saveFile".to_string(),
+                        command_id: "workspace.saveFile".to_string(),
                         arguments: Value::Null,
                         target: CommandExecutionTarget::Global,
                         provenance: None,
@@ -1412,7 +1416,7 @@ mod tests {
     fn is_settings_command_recognizes_prefix() {
         assert!(is_settings_command("settings.setTheme"));
         assert!(is_settings_command("settings.open"));
-        assert!(!is_settings_command("clay.controlCenter.open"));
+        assert!(!is_settings_command("controlCenter.open"));
         assert!(!is_settings_command("markdown.togglePreview"));
     }
 }

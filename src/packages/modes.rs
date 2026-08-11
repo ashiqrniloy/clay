@@ -788,7 +788,7 @@ impl ModeRegistry {
     /// selected it. Reads installed registry state only: no filesystem scan,
     /// network call, shell, AI, WASM, package evaluation, or any other
     /// authority. Bounded by the number of open documents. Crate-internal: the
-    /// user-facing surface is the built-in `clay.modes.listActiveModes` command
+    /// user-facing surface is the built-in `modes.listActiveModes` command
     /// (resolved via [`CommandExecutor::execute_discovery`]), not this method.
     pub(crate) fn list_active_modes(&self) -> Vec<ActiveModeSummary> {
         self.active_major_modes
@@ -811,7 +811,7 @@ impl ModeRegistry {
     /// installed registry state only; carries no execution, document, or
     /// workspace authority and triggers no filesystem scans or package
     /// evaluation. Crate-internal: the user-facing surface is the built-in
-    /// `clay.modes.explainActiveMode` command (resolved via
+    /// `modes.explainActiveMode` command (resolved via
     /// [`CommandExecutor::execute_discovery`]), not this method.
     pub(crate) fn explain_active_mode(&self, document_id: DocumentId) -> Option<ModeExplanation> {
         let activation = self.active_major_modes.get(&document_id)?;

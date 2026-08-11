@@ -89,7 +89,7 @@ export async function initializeWebTreeSitter(Parser: { init(options?: unknown):
   initPromise ??= Parser.init({
     locateFile(file: string) {
       if (file !== "tree-sitter.wasm") {
-        throw new Error("clay.syntax.web_tree_sitter.invalid_runtime_asset");
+        throw new Error("syntax.web_tree_sitter.invalid_runtime_asset");
       }
       return "clay://runtime/tree-sitter.wasm";
     },
@@ -126,6 +126,6 @@ function assertPackageAsset(path: string, prefix: string, suffix: string): void 
     path.includes("://") ||
     path.startsWith("/")
   ) {
-    throw new Error(`clay.syntax.web_tree_sitter.invalid_artifact_path: ${path}`);
+    throw new Error(`syntax.web_tree_sitter.invalid_artifact_path: ${path}`);
   }
 }

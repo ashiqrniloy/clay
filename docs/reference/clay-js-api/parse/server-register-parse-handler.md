@@ -1,5 +1,5 @@
 ---
-id: clay.parse.serverRegisterParseHandler
+id: parse.serverRegisterParseHandler
 kind: clay-js-api
 js_module: "clay:parse"
 js_export: serverRegisterParseHandler
@@ -57,7 +57,7 @@ custom_properties:
     default: 4096
     description: Incremental parse result budget enforced before publication.
 security: Requires parse-document permission and server validation of package provenance, mode, parse unit, timeout, cancellation/stale-version behavior, bounded parse-window snapshots, syntax memory budget, and bounded parse result publication; handler functions stay in the persistent server runtime behind a server-issued token and executable handler/callback/onParse/function payload keys are rejected; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond Clay-provided open document content.
-agent_guidance: Use `clay.parse.serverRegisterParseHandler` to declare a package-owned background parser with `{ module, exportName }`. Do not pass executable callbacks in registration payloads or put parse work on the client hot path. Treat `clay.runtime.timeout` as the diagnostic for a handler/runtime evaluation that exceeds its validated timeout budget.
+agent_guidance: Use `parse.serverRegisterParseHandler` to declare a package-owned background parser with `{ module, exportName }`. Do not pass executable callbacks in registration payloads or put parse work on the client hot path. Treat `runtime.timeout` as the diagnostic for a handler/runtime evaluation that exceeds its validated timeout budget.
 lookup_tags: [js-api, parse, markdown, incrementalparseupdate, parser]
 app_visible: true
 help_visible: true
@@ -164,7 +164,7 @@ Returns JSON-serializable registration metadata synchronously from the server ru
 
 ## Errors
 
-Fails with Clay error codes when permissions are missing, package identity is malformed, mode is empty, parse unit is unsupported, timeout/window/memory budgets are out of bounds, executable callback fields are supplied, `module[exportName]` is not a function, or handler execution exceeds the smaller of the registered `timeoutMs` and the service runtime guard. Timeout failures surface through the `clay.runtime.timeout` diagnostic.
+Fails with Clay error codes when permissions are missing, package identity is malformed, mode is empty, parse unit is unsupported, timeout/window/memory budgets are out of bounds, executable callback fields are supplied, `module[exportName]` is not a function, or handler execution exceeds the smaller of the registered `timeoutMs` and the service runtime guard. Timeout failures surface through the `runtime.timeout` diagnostic.
 
 ## Permissions and security
 
@@ -174,7 +174,7 @@ The API does not grant filesystem, network, shell, AI mutation, workspace mutati
 
 ## Agent guidance
 
-Prefer this facade over raw ops or direct Rust calls. Keep parse work cancellable, viewport-prioritized, and separate from document mutation. Do not expose internal parse-window snapshot structs or scheduler methods as package APIs unless a later phase promotes them with their own Clay JS facade, docs, registry entry, and validators. Use `clay.decorations.serverPublishDecorations` for validated decoration publication.
+Prefer this facade over raw ops or direct Rust calls. Keep parse work cancellable, viewport-prioritized, and separate from document mutation. Do not expose internal parse-window snapshot structs or scheduler methods as package APIs unless a later phase promotes them with their own Clay JS facade, docs, registry entry, and validators. Use `decorations.serverPublishDecorations` for validated decoration publication.
 
 ## Backing implementation
 
@@ -186,7 +186,7 @@ Prefer this facade over raw ops or direct Rust calls. Keep parse work cancellabl
 
 ## Lookup metadata
 
-- Stable ID: `clay.parse.serverRegisterParseHandler`
+- Stable ID: `parse.serverRegisterParseHandler`
 - User-facing name: Register Parse Handler
 - Lookup tags: `js-api`, `parse`, `markdown`, `incrementalparseupdate`, `parser`
 - App/help visible: true

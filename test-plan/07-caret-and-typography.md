@@ -38,7 +38,7 @@ Apply caret changes via `clientSetCursorStyle` in init.js, then reload
 | T7 | Multi-caret session (module 06) | Primary carets blink per config; secondaries render solid |
 | T8 | IME preedit (if IME available) | Preedit caret matches active shape |
 
-Negative: `clientSetCursorStyle({ shape: "triangle" })` → `clay.editor.invalid_set_cursor_style`
+Negative: `clientSetCursorStyle({ shape: "triangle" })` → `editor.invalid_set_cursor_style`
 diagnostic, editor unaffected (deny-by-default enum).
 
 ## Ligatures

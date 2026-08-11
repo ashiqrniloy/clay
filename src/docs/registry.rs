@@ -617,9 +617,12 @@ fn validate_entry(entry: &RegistryEntry) -> RegistryResult<()> {
             entry.documentation_path, entry.kind
         )));
     }
-    if !entry.id.starts_with("clay.") {
+    let domain = entry.id.split('.').next().unwrap_or_default();
+    if entry.id.starts_with("clay.")
+        || !crate::packages::manifest::RESERVED_CORE_API_DOMAINS.contains(&domain)
+    {
         return Err(RegistryError::new(format!(
-            "{} id must use clay.* namespace, got {}",
+            "{} id must use a bare Clay core API domain (`<domain>.<name>`, e.g. shell.*, editor.*), got {}",
             entry.documentation_path, entry.id
         )));
     }

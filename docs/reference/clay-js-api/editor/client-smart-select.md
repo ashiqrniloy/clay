@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientSmartSelect
+id: editor.clientSmartSelect
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSmartSelect
@@ -21,7 +21,7 @@ custom_properties:
     default: none
     description: expand grows each selection to the smallest enclosing syntax-node range; shrink returns to the largest node range strictly inside the current selection.
 security: Changes only transient client selection state from a read-only server tree walk; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientSmartSelect` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `editor.clientSmartSelect` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, smart-select, tree-sitter, selection]
 app_visible: true
 help_visible: true
@@ -37,7 +37,7 @@ Expand or shrink the selection along the document's syntax tree (AST-aware grow/
 
 ## Description
 
-`clientSmartSelect` is the public API for **Smart Select** (Plan 071 task 10, VSCode `smartSelect.expand`/`smartSelect.shrink`). The `op_clay_editor_smart_select` deno op validates the `action` argument (deny-by-default enum) and returns the action-specific command ID (`clay.editor.clientSmartSelect.expand` or `.shrink`). Key-driven execution captures the client selection set locally, sends one bounded read-only request to the server, and the server walks the parsed tree: **expand** grows each selection to the smallest node range strictly larger than it (the parent chain, up to the whole document), **shrink** returns to the largest node range strictly contained in the current selection. Works for any grammar with a native parser even when no `textobjects.scm` ships for it (e.g. Markdown). Multi-cursor aware: every selection expands/shrinks independently. Results apply as selections on the client.
+`clientSmartSelect` is the public API for **Smart Select** (Plan 071 task 10, VSCode `smartSelect.expand`/`smartSelect.shrink`). The `op_clay_editor_smart_select` deno op validates the `action` argument (deny-by-default enum) and returns the action-specific command ID (`editor.clientSmartSelect.expand` or `.shrink`). Key-driven execution captures the client selection set locally, sends one bounded read-only request to the server, and the server walks the parsed tree: **expand** grows each selection to the smallest node range strictly larger than it (the parent chain, up to the whole document), **shrink** returns to the largest node range strictly contained in the current selection. Works for any grammar with a native parser even when no `textobjects.scm` ships for it (e.g. Markdown). Multi-cursor aware: every selection expands/shrinks independently. Results apply as selections on the client.
 
 Authority: `client-local-ui-state` (result data is server-computed and read-only). Runtime path: `ui-reactive-server-query`.
 
@@ -67,7 +67,7 @@ bindKey("Ctrl+Shift+Alt+\\", clientSmartSelect({ action: "shrink" }).commandId);
 
 ## Key bindings
 
-No default key bindings. The command IDs are bindable through documented key binding APIs in `~/.config/clay/init.js` (`clay.editor.clientSmartSelect.expand`, `clay.editor.clientSmartSelect.shrink`).
+No default key bindings. The command IDs are bindable through documented key binding APIs in `~/.config/clay/init.js` (`editor.clientSmartSelect.expand`, `editor.clientSmartSelect.shrink`).
 
 ## Custom properties
 
@@ -91,7 +91,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientSmartSelect` when the user asks for AST-aware expand/shrink selection through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientSmartSelect` when the user asks for AST-aware expand/shrink selection through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -102,7 +102,7 @@ Use `clay.editor.clientSmartSelect` when the user asks for AST-aware expand/shri
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientSmartSelect`
+- Stable ID: `editor.clientSmartSelect`
 - User-facing name: Smart Select
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientSmartSelect`

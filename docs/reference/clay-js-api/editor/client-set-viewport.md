@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientSetViewport
+id: editor.clientSetViewport
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSetViewport
@@ -25,7 +25,7 @@ custom_properties:
     default: 4
     description: Behavior-changing setting `overscanLines` for this API.
 security: Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.
-agent_guidance: Use `clay.editor.clientSetViewport` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `editor.clientSetViewport` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, resizeviewport]
 app_visible: true
 help_visible: true
@@ -71,7 +71,7 @@ clientSetViewport({ documentId: "current", visibleLineCount: 40, overscanLines: 
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.editor.clientSetViewport` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `editor.clientSetViewport` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -98,7 +98,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientSetViewport` when the user asks for set editor viewport through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientSetViewport` when the user asks for set editor viewport through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -109,7 +109,7 @@ Use `clay.editor.clientSetViewport` when the user asks for set editor viewport t
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientSetViewport`
+- Stable ID: `editor.clientSetViewport`
 - User-facing name: Set Editor Viewport
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientSetViewport`

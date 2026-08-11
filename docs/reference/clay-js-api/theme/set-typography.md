@@ -1,5 +1,5 @@
 ---
-id: clay.theme.setTypography
+id: theme.setTypography
 kind: clay-js-api
 js_module: "clay:theme"
 js_export: setTypography
@@ -221,7 +221,7 @@ A successful configuration reload atomically replaces all three profiles. If pro
 
 ## Errors
 
-Throws `clay.theme.invalid_typography` when the value is not one complete object, contains missing or unknown fields, exceeds the bounded payload, has an invalid family stack, lacks a final generic fallback, uses a non-finite/out-of-range size, omits or adds extra hierarchy fields, or supplies a non-finite/out-of-range hierarchy scale. The operation does not partially install valid profiles or scales from a rejected object.
+Throws `theme.invalid_typography` when the value is not one complete object, contains missing or unknown fields, exceeds the bounded payload, has an invalid family stack, lacks a final generic fallback, uses a non-finite/out-of-range size, omits or adds extra hierarchy fields, or supplies a non-finite/out-of-range hierarchy scale. The operation does not partially install valid profiles or scales from a rejected object.
 
 ## Permissions and security
 
@@ -242,7 +242,7 @@ Prefer one complete call and preserve a generic fallback at the end of every sta
 
 ## Lookup metadata
 
-- id: `clay.theme.setTypography`
+- id: `theme.setTypography`
 - module: `clay:theme`
 - export: `setTypography`
 - lookup tags: `js-api`, `typography`, `fonts`, `monospace`, `proportional`, `ui`, `configuration`, `init`, `phase18.16.5`

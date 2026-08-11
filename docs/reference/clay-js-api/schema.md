@@ -14,7 +14,7 @@ Every Clay JS API distinguishes four naming layers:
 
 - `js_module`: the import context, such as `clay:editor`.
 - `js_export` / `name`: the concise callable JavaScript export, such as `serverInsertText`.
-- `id`: the globally namespaced stable registry identifier, such as `clay.editor.serverInsertText`.
+- `id`: the globally namespaced stable registry identifier, such as `editor.serverInsertText`.
 - `user_facing_name`: the English help/search label, such as `Insert Text`.
 
 Clay-owned callable exports should be flat, lower camel case, behavior-oriented names. Do not repeat `clay`, the module/domain name, raw Rust paths, or raw `op_*` names in callable exports when the surrounding module and registry metadata already provide that context. For Clay-owned editor-core APIs, include `server*` or `client*` authority prefixes when the API touches document state, UI state, or behavior state. Pure-JS package APIs must begin with the package name or registered package prefix. See `.agents/skills/project-patterns/references/clay-js-api-naming.md` for the reusable project pattern.
@@ -27,7 +27,7 @@ Every Clay JS API Markdown file that participates in registry generation must be
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `id` | string | yes | Stable lookup ID, using dotted namespace form such as `clay.editor.serverInsertText`. |
+| `id` | string | yes | Stable lookup ID, using dotted namespace form such as `editor.serverInsertText`. |
 | `kind` | string enum | yes | Documentation surface kind. Use `clay-js-api` for Clay JS API pages. |
 | `js_module` | string | yes | Public Clay JS module specifier, such as `clay:editor`. |
 | `js_export` | string | yes | Named export exposed by the JS/TS facade, such as `serverInsertText`. |
@@ -80,7 +80,7 @@ The body should explain what the API does, why and when to use it, configuration
 
 ````markdown
 ---
-id: clay.editor.serverInsertText
+id: editor.serverInsertText
 kind: clay-js-api
 js_module: clay:editor
 js_export: serverInsertText
@@ -150,7 +150,7 @@ await serverInsertText({
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.editor.serverInsertText` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `editor.serverInsertText` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -180,7 +180,7 @@ Prefer this API over lower-level protocol or op access. Do not use it for file I
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.serverInsertText`
+- Stable ID: `editor.serverInsertText`
 - User-facing name: Insert Text
 - Kind: `clay-js-api`
 - Default key bindings: none

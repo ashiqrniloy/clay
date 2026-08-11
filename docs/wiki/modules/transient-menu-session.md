@@ -56,7 +56,7 @@ let session = TransientMenuSession::new(TransientMenuSessionId(1), "Control Cent
     ]);
 ```
 
-Packages reach a transient menu only through server-owned workflows such as the Control Center, and package commands become menu items only by being registered through `clay.commands.serverRegisterCommand`; packages cannot open, populate, or drive a transient menu session directly.
+Packages reach a transient menu only through server-owned workflows such as the Control Center, and package commands become menu items only by being registered through `commands.serverRegisterCommand`; packages cannot open, populate, or drive a transient menu session directly.
 
 ## Integration with Shell, Control Center, and Command Execution
 

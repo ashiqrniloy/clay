@@ -91,7 +91,7 @@ Implementation implications:
 - Reject unknown command IDs, stale package provenance, unsupported routing policies, malformed or oversize arguments, undeclared permissions, unauthorized document/workspace targets, and package commands that claim client-first authority.
 - Accept intents from SDUI actions, package UI actions, behavior-manifest keybindings, and transient-menu selections through the same request type.
 - Keep raw op names internal. A public `clay:commands.serverExecuteCommand` facade should be added only if Phase 18.8 chooses a public programmatic surface and supplies full Clay JS API docs, inventory, generated registry, facade/op, and tests.
-- Built-in commands such as `clay.controlCenter.open` may be first-party `clay.*` IDs; package commands must remain package-prefixed.
+- Built-in commands such as `controlCenter.open` may be first-party `clay.*` IDs; package commands must remain package-prefixed.
 
 ### `TransientMenuSession`
 

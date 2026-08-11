@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientSelectAllMatches
+id: editor.clientSelectAllMatches
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSelectAllMatches
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+Shift+L"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientSelectAllMatches` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
+agent_guidance: Use `editor.clientSelectAllMatches` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
 lookup_tags: [editor, js-api, multi-cursor, selection]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Replace the selection set with every occurrence of the current selection or word
 
 ## Description
 
-`clientSelectAllMatches` returns the stable bindable command ID `clay.editor.clientSelectAllMatches` for **Select All Matches** (Plan 071 task 9). All occurrences become selections; the occurrence containing the original caret stays primary. Copy unions every range in document order. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientSelectAllMatches` returns the stable bindable command ID `editor.clientSelectAllMatches` for **Select All Matches** (Plan 071 task 9). All occurrences become selections; the occurrence containing the original caret stays primary. Copy unions every range in document order. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -50,7 +50,7 @@ bindKey("ctrl+k ctrl+n", clientSelectAllMatches());
 ## Example
 
 ```ts
-const commandId = clientSelectAllMatches(); // "clay.editor.clientSelectAllMatches"
+const commandId = clientSelectAllMatches(); // "editor.clientSelectAllMatches"
 ```
 
 ## Options
@@ -69,7 +69,7 @@ None.
 
 ## Return and async behavior
 
-Returns the stable command ID string `clay.editor.clientSelectAllMatches` synchronously. The facade is synchronous, side-effect free, and local.
+Returns the stable command ID string `editor.clientSelectAllMatches` synchronously. The facade is synchronous, side-effect free, and local.
 
 ## Errors
 
@@ -85,7 +85,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientSelectAllMatches` when the user asks for Select All Matches through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientSelectAllMatches` when the user asks for Select All Matches through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.editor.clientSelectAllMatches` when the user asks for Select All Match
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientSelectAllMatches`
+- Stable ID: `editor.clientSelectAllMatches`
 - User-facing name: Select All Matches
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientSelectAllMatches`

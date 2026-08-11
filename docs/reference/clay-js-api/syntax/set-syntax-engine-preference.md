@@ -1,5 +1,5 @@
 ---
-id: clay.syntax.setSyntaxEnginePreference
+id: syntax.setSyntaxEnginePreference
 kind: clay-js-api
 js_module: "clay:syntax"
 js_export: setSyntaxEnginePreference
@@ -108,7 +108,7 @@ Preferences are applied during startup, package load, document open, reload, or 
 
 ## Errors
 
-Throws `clay.syntax.invalid_engine_preference` when `target` is empty/unsafe or `tier` is not `native`, `wasm`, `javascript`, or `js`.
+Throws `syntax.invalid_engine_preference` when `target` is empty/unsafe or `tier` is not `native`, `wasm`, `javascript`, or `js`.
 
 ## Permissions and security
 
@@ -126,7 +126,7 @@ Prefer zero-config Tier 1 native defaults. Use this only when a user explicitly 
 
 ## Lookup metadata
 
-- id: `clay.syntax.setSyntaxEnginePreference`
+- id: `syntax.setSyntaxEnginePreference`
 - module: `clay:syntax`
 - export: `setSyntaxEnginePreference`
 - lookup tags: `js-api`, `syntax`, `tree-sitter`, `engine`, `configuration`, `init`, `phase18.16`

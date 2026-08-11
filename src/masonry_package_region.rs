@@ -1768,7 +1768,7 @@ pub struct PackageDropdownSelect {
 
 /// A retained package `dropdown` (plan 070 step 13d): a real ComboBox-role
 /// widget replacing the client-local `dropdown_selected` map + the hand-rolled
-/// `clay.ui.dropdownToggle` keyboard route. The closed trigger shows the
+/// `ui.dropdownToggle` keyboard route. The closed trigger shows the
 /// selected item's label; clicking (or Enter/Space) opens the inline item list
 /// below the trigger; ArrowUp/Down cycles the highlight; Enter/Space confirms
 /// (emitting the item's command); Escape closes. Selection + open state are
@@ -2480,7 +2480,7 @@ impl PackageTextInput {
                 component
                     .action_command_id
                     .as_deref()
-                    .unwrap_or("clay.ui.textInputCommit"),
+                    .unwrap_or("ui.textInputCommit"),
                 &component.id,
             ))
         }
@@ -4382,13 +4382,13 @@ mod tests {
                 TransientMenuItem::new(
                     "reload",
                     "Reload",
-                    TransientMenuAction::new("clay.documents.serverReloadDocument"),
+                    TransientMenuAction::new("documents.serverReloadDocument"),
                 )
                 .with_accessibility_label("Reload from disk"),
                 TransientMenuItem::new(
                     "keep",
                     "Keep editing",
-                    TransientMenuAction::new("clay.documents.dismissConflict"),
+                    TransientMenuAction::new("documents.dismissConflict"),
                 )
                 .with_accessibility_label("Keep dirty buffer"),
             ]);

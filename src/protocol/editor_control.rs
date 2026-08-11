@@ -19,7 +19,7 @@ pub const MAX_EDITOR_COMMAND_MODE_ID_BYTES: usize = 128;
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct EditorCommandRequest {
     /// Direction-specific argless editor command ID, e.g.
-    /// `clay.editor.clientMoveCursor.nextWordStart`.
+    /// `editor.clientMoveCursor.nextWordStart`.
     pub command_id: String,
     /// Host-stamped apiPrefix of the package that requested execution
     /// (`clay.config` for trusted user-configuration callers).
@@ -57,15 +57,15 @@ mod tests {
     fn editor_command_request_validate_is_bounded() {
         assert!(
             request(
-                "clay.editor.clientMoveCursor.nextWordStart",
+                "editor.clientMoveCursor.nextWordStart",
                 "markdown",
                 "markdown"
             )
             .validate()
         );
         assert!(!request("", "markdown", "markdown").validate());
-        assert!(!request("clay.editor.clientMoveCursor.nextWordStart", "", "markdown").validate());
-        assert!(!request("clay.editor.clientMoveCursor.nextWordStart", "markdown", "").validate());
+        assert!(!request("editor.clientMoveCursor.nextWordStart", "", "markdown").validate());
+        assert!(!request("editor.clientMoveCursor.nextWordStart", "markdown", "").validate());
         assert!(
             !request(
                 &"x".repeat(MAX_EDITOR_COMMAND_REQUEST_ID_BYTES + 1),

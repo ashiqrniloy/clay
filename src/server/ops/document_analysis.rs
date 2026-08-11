@@ -20,10 +20,10 @@ pub(super) fn op_clay_language_register_document_analyzer(
     state: &mut OpState,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let value = parse_json(&options_json, "clay.language.invalid_analyzer")?;
+    let value = parse_json(&options_json, "language.invalid_analyzer")?;
     let options = value
         .as_object()
-        .ok_or_else(|| clay_error("clay.language.invalid_analyzer: options must be an object"))?;
+        .ok_or_else(|| clay_error("language.invalid_analyzer: options must be an object"))?;
     for key in [
         "handler",
         "callback",
@@ -37,7 +37,7 @@ pub(super) fn op_clay_language_register_document_analyzer(
     ] {
         if options.contains_key(key) {
             return Err(clay_error(format!(
-                "clay.language.invalid_analyzer: authority field `{key}` is not accepted"
+                "language.invalid_analyzer: authority field `{key}` is not accepted"
             )));
         }
     }
@@ -52,7 +52,7 @@ pub(super) fn op_clay_language_register_document_analyzer(
         .has_approved_capability(&package.manifest.name, PackagePermission::LanguageServer)
     {
         return Err(clay_error(
-            "clay.language.invalid_analyzer: language-server permission is required",
+            "language.invalid_analyzer: language-server permission is required",
         ));
     }
     let analyzer = options
@@ -72,11 +72,11 @@ pub(super) fn op_clay_language_register_document_analyzer(
     ] {
         if analyzer.contains_key(key) {
             return Err(clay_error(format!(
-                "clay.language.invalid_analyzer: authority field `{key}` is not accepted"
+                "language.invalid_analyzer: authority field `{key}` is not accepted"
             )));
         }
     }
-    let id = required_str(analyzer, "id", "clay.language.invalid_analyzer")?.to_string();
+    let id = required_str(analyzer, "id", "language.invalid_analyzer")?.to_string();
     let api_prefix = package.manifest.clay.api_prefix.as_str();
     if id.starts_with("clay.")
         || !(id == api_prefix
@@ -85,11 +85,11 @@ pub(super) fn op_clay_language_register_document_analyzer(
                 .is_some_and(|suffix| suffix.starts_with('.')))
     {
         return Err(clay_error(format!(
-            "clay.language.invalid_analyzer: id `{id}` must use package apiPrefix `{api_prefix}`"
+            "language.invalid_analyzer: id `{id}` must use package apiPrefix `{api_prefix}`"
         )));
     }
     let contribution =
-        required_str(analyzer, "contribution", "clay.language.invalid_analyzer")?.to_string();
+        required_str(analyzer, "contribution", "language.invalid_analyzer")?.to_string();
     let Some(descriptor) = package
         .contributions
         .language_servers
@@ -97,15 +97,11 @@ pub(super) fn op_clay_language_register_document_analyzer(
         .find(|descriptor| descriptor.id == contribution)
     else {
         return Err(clay_error(
-            "clay.language.invalid_analyzer: contribution must name a fixed package language server",
+            "language.invalid_analyzer: contribution must name a fixed package language server",
         ));
     };
-    let module_specifier = required_str(
-        analyzer,
-        "moduleSpecifier",
-        "clay.language.invalid_analyzer",
-    )?
-    .to_string();
+    let module_specifier =
+        required_str(analyzer, "moduleSpecifier", "language.invalid_analyzer")?.to_string();
     let export_name = analyzer
         .get("exportName")
         .and_then(Value::as_str)
@@ -122,15 +118,13 @@ pub(super) fn op_clay_language_register_document_analyzer(
                     .filter(|mode| !mode.is_empty() && mode.len() <= 128)
                     .map(str::to_string)
                     .ok_or_else(|| {
-                        clay_error(
-                            "clay.language.invalid_analyzer: modes must contain bounded strings",
-                        )
+                        clay_error("language.invalid_analyzer: modes must contain bounded strings")
                     })
             })
             .collect::<Result<Vec<_>, _>>()?,
         Some(_) => {
             return Err(clay_error(
-                "clay.language.invalid_analyzer: modes must be an array with at most 32 entries",
+                "language.invalid_analyzer: modes must be an array with at most 32 entries",
             ));
         }
     };
@@ -141,7 +135,7 @@ pub(super) fn op_clay_language_register_document_analyzer(
         .is_package_module(&module_specifier, &package.manifest.name)
     {
         return Err(clay_error(
-            "clay.language.invalid_analyzer: moduleSpecifier must resolve to a loaded module owned by the package",
+            "language.invalid_analyzer: moduleSpecifier must resolve to a loaded module owned by the package",
         ));
     }
     let service = clay
@@ -161,7 +155,7 @@ pub(super) fn op_clay_language_register_document_analyzer(
     drop(service);
     if !enabled || !current_grant {
         return Err(clay_error(
-            "clay.language.invalid_analyzer: package must be enabled with a current exact language-server grant before analyzer registration",
+            "language.invalid_analyzer: package must be enabled with a current exact language-server grant before analyzer registration",
         ));
     }
     let registration = JsDocumentAnalyzerRegistration {
@@ -173,7 +167,7 @@ pub(super) fn op_clay_language_register_document_analyzer(
         export_name: export_name.clone(),
     };
     clay.register_document_analyzer(registration)
-        .map_err(|message| clay_error(format!("clay.language.registration_failed: {message}")))?;
+        .map_err(|message| clay_error(format!("language.registration_failed: {message}")))?;
 
     serde_json::to_string(&json!({
         "packageName": package.manifest.name,
@@ -186,7 +180,7 @@ pub(super) fn op_clay_language_register_document_analyzer(
     }))
     .map_err(|error| {
         clay_error(format!(
-            "clay.language.registration_failed: failed to serialize analyzer registration ({error})"
+            "language.registration_failed: failed to serialize analyzer registration ({error})"
         ))
     })
 }

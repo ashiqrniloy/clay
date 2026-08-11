@@ -72,11 +72,11 @@ fn full_markdown_fixture() -> Value {
             "modes": ["markdown"],
             "docs": "./docs/index.md",
             "apiDependencies": [
-                "clay.modes.serverRegisterModePattern",
-                "clay.modes.serverActivateMajorMode",
-                "clay.commands.serverRegisterCommand",
-                "clay.parse.serverRegisterParseHandler",
-                "clay.decorations.serverPublishDecorations"
+                "modes.serverRegisterModePattern",
+                "modes.serverActivateMajorMode",
+                "commands.serverRegisterCommand",
+                "parse.serverRegisterParseHandler",
+                "decorations.serverPublishDecorations"
             ],
             "contributions": {
                 "commands": [{
@@ -122,11 +122,11 @@ fn phase18_3_slot_ui_fixture(package_name: &str, prefix: &str, slot: &str) -> Va
             "modes": [prefix],
             "docs": "./docs/index.md",
             "apiDependencies": [
-                "clay.commands.serverRegisterCommand",
-                "clay.ui.serverRegisterPanelContribution",
-                "clay.ui.serverRegisterComponentContribution",
-                "clay.ui.serverRegisterTransientOverlayContribution",
-                "clay.ui.serverRegisterThemeToken"
+                "commands.serverRegisterCommand",
+                "ui.serverRegisterPanelContribution",
+                "ui.serverRegisterComponentContribution",
+                "ui.serverRegisterTransientOverlayContribution",
+                "ui.serverRegisterThemeToken"
             ],
             "contributions": {
                 "commands": [{
@@ -198,11 +198,11 @@ fn phase18_4_input_state_config_fixture(package_name: &str, prefix: &str) -> Val
             "modes": [prefix],
             "docs": "./docs/index.md",
             "apiDependencies": [
-                "clay.commands.serverRegisterCommand",
-                "clay.ui.serverRegisterInputContribution",
-                "clay.ui.serverRegisterUiStateScope",
-                "clay.ui.serverSetLayoutOverride",
-                "clay.configuration.setPackageOption"
+                "commands.serverRegisterCommand",
+                "ui.serverRegisterInputContribution",
+                "ui.serverRegisterUiStateScope",
+                "ui.serverSetLayoutOverride",
+                "configuration.setPackageOption"
             ],
             "contributions": {
                 "commands": [{
@@ -281,13 +281,13 @@ fn package_record_accepts_full_markdown_contract() {
     assert_eq!(record.api_dependencies.len(), 5);
     assert_eq!(
         record.api_dependencies[0].api_id,
-        "clay.modes.serverRegisterModePattern"
+        "modes.serverRegisterModePattern"
     );
     assert!(
         record
             .api_dependencies
             .iter()
-            .any(|dependency| dependency.api_id == "clay.commands.serverRegisterCommand")
+            .any(|dependency| dependency.api_id == "commands.serverRegisterCommand")
     );
     assert_eq!(record.contributions.commands.len(), 1);
     let cmd = &record.contributions.commands[0];
@@ -383,17 +383,11 @@ fn markdown_package_contract_validates_with_required_metadata() {
 #[test]
 fn markdown_package_rejects_missing_required_permissions() {
     for (api_id, missing_permission) in [
-        ("clay.modes.serverRegisterModePattern", "mode-registration"),
-        ("clay.modes.serverActivateMajorMode", "mode-activation"),
-        (
-            "clay.commands.serverRegisterCommand",
-            "command-registration",
-        ),
-        ("clay.parse.serverRegisterParseHandler", "parse-document"),
-        (
-            "clay.decorations.serverPublishDecorations",
-            "render-decorations",
-        ),
+        ("modes.serverRegisterModePattern", "mode-registration"),
+        ("modes.serverActivateMajorMode", "mode-activation"),
+        ("commands.serverRegisterCommand", "command-registration"),
+        ("parse.serverRegisterParseHandler", "parse-document"),
+        ("decorations.serverPublishDecorations", "render-decorations"),
     ] {
         let mut package = first_party_markdown_package_json();
         let permissions = package["clay"]["permissions"].as_array_mut().unwrap();
@@ -631,7 +625,7 @@ fn package_manifest_accepts_phase18_3_ui_contribution_metadata() {
         record
             .api_dependencies
             .iter()
-            .any(|dependency| dependency.api_id == "clay.ui.serverRegisterPanelContribution")
+            .any(|dependency| dependency.api_id == "ui.serverRegisterPanelContribution")
     );
     assert_eq!(record.contributions.theme_tokens.len(), 1);
     assert_eq!(
@@ -660,12 +654,12 @@ fn package_manifest_rejects_invalid_slot_ui_contribution_metadata() {
     unknown_dependency["clay"]["apiDependencies"]
         .as_array_mut()
         .unwrap()
-        .push(json!("clay.ui.serverMutateMasonryWidget"));
+        .push(json!("ui.serverMutateMasonryWidget"));
     let err = assemble_package_record(&unknown_dependency).unwrap_err();
     assert_eq!(err.rule, PackageRecordRule::InvalidApiDependency);
     assert_eq!(
         err.contribution_id.as_deref(),
-        Some("clay.ui.serverMutateMasonryWidget")
+        Some("ui.serverMutateMasonryWidget")
     );
 
     let mut duplicate_slot = phase18_3_slot_ui_fixture("@clay/markdown", "markdown", "right");
@@ -752,7 +746,7 @@ fn package_manifest_accepts_phase18_4_input_state_config_metadata() {
         record
             .api_dependencies
             .iter()
-            .any(|dependency| dependency.api_id == "clay.ui.serverRegisterInputContribution")
+            .any(|dependency| dependency.api_id == "ui.serverRegisterInputContribution")
     );
     assert_eq!(record.contributions.input_contributions.len(), 1);
     assert_eq!(
@@ -1019,14 +1013,10 @@ fn package_record_rejects_package_claiming_clay_reserved_ids() {
     // Configuration key using reserved clay.* namespace
     {
         let mut fixture = full_markdown_fixture();
-        fixture["clay"]["contributions"]["configuration"][0]["key"] =
-            json!("clay.internal.setting");
+        fixture["clay"]["contributions"]["configuration"][0]["key"] = json!("clay.internalSetting");
         let err = assemble_package_record(&fixture).unwrap_err();
         assert_eq!(err.rule, PackageRecordRule::ReservedClayIdInContribution);
-        assert_eq!(
-            err.contribution_id.as_deref(),
-            Some("clay.internal.setting")
-        );
+        assert_eq!(err.contribution_id.as_deref(), Some("clay.internalSetting"));
     }
 
     // Text transform ID using reserved clay.* namespace
@@ -2005,8 +1995,8 @@ fn keypress_routing_uses_manifest_without_javascript() {
                 // management, editor client commands) are allowed in the base
                 // manifest; packages must not declare their own.
                 assert!(
-                    cmd.command_id.starts_with("clay.shell.client")
-                        || cmd.command_id.starts_with("clay.editor.client"),
+                    cmd.command_id.starts_with("shell.client")
+                        || cmd.command_id.starts_with("editor.client"),
                     "package manifest command `{}` must not request native client UI authority",
                     cmd.command_id
                 );

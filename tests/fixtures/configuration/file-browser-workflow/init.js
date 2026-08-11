@@ -20,9 +20,9 @@ await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
 
 bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
-bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
-bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
-bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+bindKey("Ctrl+P", "workspace.openFuzzyFile", { scope: "editor" });
+bindKey("Ctrl+B", "workspace.toggleFileBrowser", { scope: "editor" });
+bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
 bindKey("Ctrl+Shift+X", clientCutSelection(), { scope: "editor" });
 bindKey("Ctrl+Shift+V", clientPasteClipboard(), { scope: "editor" });

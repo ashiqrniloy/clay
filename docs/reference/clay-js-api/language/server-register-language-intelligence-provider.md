@@ -1,5 +1,5 @@
 ---
-id: clay.language.serverRegisterLanguageIntelligenceProvider
+id: language.serverRegisterLanguageIntelligenceProvider
 kind: clay-js-api
 js_module: "clay:language"
 js_export: serverRegisterLanguageIntelligenceProvider
@@ -82,7 +82,7 @@ Registers a feature-tagged language-intelligence provider under `parse-document`
 
 JS-backed providers register a `module` object with an `exportName` export. The handler receives `(request, window)` where `request` is the typed `LanguageIntelligenceRequest` and `window` is a bounded 64 KB document text slice around the cursor byte offset. Results are returned as JSON and validated/stamped by the coordinator before publication. No raw `Deno.core.ops`, process handles, or inter-package module references cross the boundary.
 
-Package-owned keyword/snippet completion uses the separate `clay.completion.serverRegisterCompletionProvider` API. Semantic decoration and diagnostic publication require `render-decorations` in addition to this provider registration.
+Package-owned keyword/snippet completion uses the separate `completion.serverRegisterCompletionProvider` API. Semantic decoration and diagnostic publication require `render-decorations` in addition to this provider registration.
 
 ## When to use
 
@@ -153,7 +153,7 @@ serverRegisterLanguageIntelligenceProvider({
 
 ## Key bindings
 
-No key bindings are registered by this API. Language intelligence commands (`clay.language.hover`, `clay.language.goToDefinition`, `clay.language.codeActions`, `clay.language.signatureHelp`) have empty default bindings configurable via `clay.keybindings.bindKey`.
+No key bindings are registered by this API. Language intelligence commands (`language.hover`, `language.goToDefinition`, `language.codeActions`, `language.signatureHelp`) have empty default bindings configurable via `keybindings.bindKey`.
 
 ## Custom properties
 
@@ -175,10 +175,10 @@ Returns a synchronous registration record with a `token` string for module-backe
 
 ## Errors
 
-- `clay.language.invalid_provider` — missing/invalid options, duplicate/reserved ID, missing required fields, unsupported features.
-- `clay.language.unauthorized` — missing `parse-document` permission.
-- `clay.language.prohibited_authority` — handler/callback/function/clientJavaScript/nativeHandle/rawOps/executable/process/languageServer field detected.
-- `clay.language.invalid_module` — `exportName` not a function on `module`.
+- `language.invalid_provider` — missing/invalid options, duplicate/reserved ID, missing required fields, unsupported features.
+- `language.unauthorized` — missing `parse-document` permission.
+- `language.prohibited_authority` — handler/callback/function/clientJavaScript/nativeHandle/rawOps/executable/process/languageServer field detected.
+- `language.invalid_module` — `exportName` not a function on `module`.
 
 ## Permissions and security
 

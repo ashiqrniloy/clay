@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     error::Error,
     fmt, fs, io,
     path::{Path, PathBuf},
@@ -12,6 +13,8 @@ use serde_json::Value;
 use crate::packages::manifest::is_valid_api_prefix;
 
 const PACKAGE_OPTION_PAYLOAD_BUDGET_BYTES: usize = 16 * 1024;
+const MODULE_ERROR_CAPACITY: usize = 64;
+const MODULE_ERROR_MESSAGE_BUDGET_BYTES: usize = 1024;
 const PACKAGE_OPTION_SOURCES: &[&str] =
     &["init-js", "package-default", "clay-default", "ui-session"];
 /// Bounded persisted user preferences (`~/.config/clay/preferences.json`). The
@@ -32,7 +35,14 @@ pub(crate) struct ConfigurationRuntime {
     config_root: PathBuf,
     entry_point: PathBuf,
     loaded_modules: Mutex<Vec<PathBuf>>,
+    module_errors: Mutex<VecDeque<ConfigurationModuleError>>,
     package_options: Mutex<Vec<RegisteredPackageOption>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfigurationModuleError {
+    pub(crate) path: String,
+    pub(crate) message: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +72,7 @@ impl ConfigurationRuntime {
             config_root,
             entry_point,
             loaded_modules: Mutex::new(Vec::new()),
+            module_errors: Mutex::new(VecDeque::new()),
             package_options: Mutex::new(Vec::new()),
         })
     }
@@ -82,8 +93,50 @@ impl ConfigurationRuntime {
         })
     }
 
-    pub(crate) fn validate_module_path(&self, path: &str) -> Result<(), ConfigurationError> {
-        self.resolve_from_entry(path).map(|_| ())
+    pub(crate) fn validate_module_path(
+        &self,
+        path: &str,
+        allow_missing: bool,
+    ) -> Result<(), ConfigurationError> {
+        if !allow_missing {
+            return self.resolve_from_entry(path).map(|_| ());
+        }
+        reject_non_local_specifier(path)?;
+        validate_local_module_path_allow_missing(&self.config_root, &self.config_root.join(path))
+            .map(|_| ())
+    }
+
+    pub(crate) fn record_module_error(
+        &self,
+        path: &str,
+        message: &str,
+    ) -> Result<(), ConfigurationError> {
+        reject_non_local_specifier(path)?;
+        let module_path = validate_local_module_path_allow_missing(
+            &self.config_root,
+            &self.config_root.join(path),
+        )?;
+        let error = ConfigurationModuleError {
+            path: display_relative_to(&self.config_root, &module_path),
+            message: truncate_utf8(message, MODULE_ERROR_MESSAGE_BUDGET_BYTES),
+        };
+        let mut errors = self
+            .module_errors
+            .lock()
+            .expect("configuration module error mutex poisoned");
+        if errors.len() >= MODULE_ERROR_CAPACITY {
+            errors.pop_front();
+        }
+        errors.push_back(error);
+        Ok(())
+    }
+
+    pub(crate) fn take_module_errors(&self) -> Vec<ConfigurationModuleError> {
+        self.module_errors
+            .lock()
+            .expect("configuration module error mutex poisoned")
+            .drain(..)
+            .collect()
     }
 
     pub(crate) fn resolve_module(
@@ -406,9 +459,9 @@ impl ConfigurationError {
     pub(crate) fn to_js_error(&self) -> JsErrorBox {
         match self {
             Self::InvalidPackageOption(_) => {
-                JsErrorBox::generic(format!("clay.configuration.invalid_package_option: {self}"))
+                JsErrorBox::generic(format!("configuration.invalid_package_option: {self}"))
             }
-            _ => JsErrorBox::generic(format!("clay.configuration.invalid_module: {self}")),
+            _ => JsErrorBox::generic(format!("configuration.invalid_module: {self}")),
         }
     }
 }
@@ -544,9 +597,15 @@ fn validate_package_option_value(
                 ));
             }
             let fallback = required_string(object, "fallback")?;
-            if !fallback.starts_with("clay.") {
+            // Core theme tokens are bare `<domain>.<name>` (e.g.
+            // `surface.panel`); a fallback must not be the remapping
+            // package's own token or a retired `clay.*` spelling.
+            if fallback.starts_with("clay.")
+                || fallback.starts_with(&format!("{package_prefix}."))
+                || !fallback.contains('.')
+            {
                 return Err(ConfigurationError::InvalidPackageOption(
-                    "themeTokenRemap.fallback must reference a Clay core theme token; same-type checks happen when a registered theme token is remapped through clay:ui".to_string(),
+                    "themeTokenRemap.fallback must reference a Clay core theme token (bare `<domain>.<name>`, e.g. surface.panel); same-type checks happen when a registered theme token is remapped through clay:ui".to_string(),
                 ));
             }
             Ok(())
@@ -669,6 +728,53 @@ fn canonical_local_file(config_root: &Path, path: &Path) -> Result<PathBuf, Conf
     Ok(path)
 }
 
+/// Validate optional-load containment without requiring the final file to
+/// exist. Import still performs the authoritative read/canonical-file check;
+/// this only lets an optional missing module become a caught import failure.
+fn validate_local_module_path_allow_missing(
+    config_root: &Path,
+    path: &Path,
+) -> Result<PathBuf, ConfigurationError> {
+    let mut existing = path;
+    let mut missing = Vec::new();
+    while !existing.exists() {
+        let component = existing.file_name().ok_or_else(|| {
+            ConfigurationError::InvalidModule(
+                "configuration module path has no local file name".to_string(),
+            )
+        })?;
+        missing.push(component.to_os_string());
+        existing = existing.parent().ok_or_else(|| {
+            ConfigurationError::InvalidModule(
+                "configuration module path has no local parent".to_string(),
+            )
+        })?;
+    }
+
+    let canonical_existing = fs::canonicalize(existing).map_err(ConfigurationError::ReadModule)?;
+    let mut candidate = canonical_existing;
+    for component in missing.iter().rev() {
+        candidate.push(component);
+    }
+    if !candidate.starts_with(config_root) {
+        return Err(ConfigurationError::InvalidModule(
+            "configuration module must stay inside the Clay configuration directory".to_string(),
+        ));
+    }
+    Ok(candidate)
+}
+
+fn truncate_utf8(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_string()
+}
+
 fn display_relative_to(root: &Path, path: &Path) -> String {
     let relative = path.strip_prefix(root).unwrap_or(path);
     format!("./{}", relative.to_string_lossy().replace('\\', "/"))
@@ -757,6 +863,20 @@ mod tests {
     }
 
     #[test]
+    fn module_error_storage_is_relative_bounded_and_drained() {
+        let runtime = runtime();
+        runtime
+            .record_module_error("./missing.js", &"x".repeat(2048))
+            .expect("optional module path stays inside configuration root");
+
+        let errors = runtime.take_module_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "./missing.js");
+        assert_eq!(errors[0].message.len(), MODULE_ERROR_MESSAGE_BUDGET_BYTES);
+        assert!(runtime.take_module_errors().is_empty());
+    }
+
+    #[test]
     fn package_option_configuration_accepts_supported_typed_options_only() {
         let runtime = runtime();
         let option = runtime
@@ -779,7 +899,7 @@ mod tests {
             .set_package_option(&json!({
                 "packagePrefix": "markdown",
                 "option": "markdown.themeTokenRemap",
-                "value": { "token": "markdown.preview.background", "fallback": "clay.surface.panel" }
+                "value": { "token": "markdown.preview.background", "fallback": "surface.panel" }
             }))
             .unwrap();
         assert_eq!(token_remap.option, "markdown.themeTokenRemap");
@@ -814,6 +934,33 @@ mod tests {
             }))
             .unwrap_err();
         assert!(raw.to_string().contains("raw ops"));
+    }
+
+    #[test]
+    fn configuration_rejects_watcher_control_keys() {
+        // Plan 080: the configuration-root watcher is fixed automatic server
+        // behavior. Interval, debounce, and enable/disable stay compiled
+        // constants; any `core.watch.*` style key a user tries from
+        // `~/.config/clay/init.js` is rejected by the closed package-option
+        // allowlist — never a hidden configuration key.
+        let runtime = runtime();
+        for option in [
+            "core.watch.intervalMs",
+            "core.watch.debounceMs",
+            "core.watch.enabled",
+        ] {
+            let error = runtime
+                .set_package_option(&json!({
+                    "packagePrefix": "core",
+                    "option": option,
+                    "value": 1
+                }))
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("unsupported package option"),
+                "watcher key {option} must fail closed: {error}"
+            );
+        }
     }
 
     #[test]

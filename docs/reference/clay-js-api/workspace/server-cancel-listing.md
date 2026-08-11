@@ -1,5 +1,5 @@
 ---
-id: clay.workspace.serverCancelListing
+id: workspace.serverCancelListing
 kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverCancelListing
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Cancels only server-owned listing work for an opaque token and does not grant filesystem, workspace, file, root, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.workspace.serverCancelListing` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
+agent_guidance: Use `workspace.serverCancelListing` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
 lookup_tags: [workspace, directory-listing, cancellation, phase18.12, js-api]
 app_visible: true
 help_visible: true
@@ -61,7 +61,7 @@ await serverCancelListing(tokenId);
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.workspace.serverCancelListing` through documented keybinding/configuration APIs where appropriate.
+No default key binding is assigned. Users may bind a key to `workspace.serverCancelListing` through documented keybinding/configuration APIs where appropriate.
 
 ## Custom properties
 
@@ -85,7 +85,7 @@ Cancels only server-owned listing work for an opaque token and does not grant fi
 
 ## Agent guidance
 
-Use `clay.workspace.serverCancelListing` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
+Use `workspace.serverCancelListing` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.workspace.serverCancelListing` only through the documented Clay JS fac
 
 ## Lookup metadata
 
-- Stable ID: `clay.workspace.serverCancelListing`
+- Stable ID: `workspace.serverCancelListing`
 - User-facing name: Cancel Listing
 - Kind: `clay-js-api`
 - Module/export: `clay:workspace` / `serverCancelListing`

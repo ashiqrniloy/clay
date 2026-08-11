@@ -305,18 +305,18 @@ fn shell_tab_facade_helpers_lock_stable_command_ids() {
     // exact strings so the facade and the client cannot drift.
     let source = fs::read_to_string("runtime/js/shell.js").unwrap();
     for id in [
-        "clay.shell.clientTabNext",
-        "clay.shell.clientTabPrev",
-        "clay.shell.clientTabNew",
-        "clay.shell.clientTabClose",
-        "clay.shell.clientTabMoveLeft",
-        "clay.shell.clientTabMoveRight",
+        "shell.clientTabNext",
+        "shell.clientTabPrev",
+        "shell.clientTabNew",
+        "shell.clientTabClose",
+        "shell.clientTabMoveLeft",
+        "shell.clientTabMoveRight",
     ] {
         assert!(source.contains(id), "shell.js must reference {id}");
     }
     assert!(source.contains("`${family}.${n}`"));
-    assert!(source.contains("clay.shell.clientTabActivate"));
-    assert!(source.contains("clay.shell.clientTabMoveTo"));
+    assert!(source.contains("shell.clientTabActivate"));
+    assert!(source.contains("shell.clientTabMoveTo"));
     assert!(
         source.contains("n > 9"),
         "the facade must cap positions at 9"

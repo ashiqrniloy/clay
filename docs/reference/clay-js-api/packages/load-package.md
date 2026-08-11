@@ -1,5 +1,5 @@
 ---
-id: clay.packages.loadPackage
+id: packages.loadPackage
 kind: clay-js-api
 js_module: "clay:packages"
 js_export: loadPackage
@@ -71,7 +71,7 @@ await loadPackage("@clay/markdown");
 await loadPackage("@clay/rust");
 await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
-bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
 ## Options
@@ -80,7 +80,7 @@ bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.packages.loadPackage` in `~/.config/clay/init.js` if they need a reload command, but reloading is not a default hot key.
+No default key binding is assigned. Users may bind a key to `packages.loadPackage` in `~/.config/clay/init.js` if they need a reload command, but reloading is not a default hot key.
 
 ## Custom properties
 
@@ -92,10 +92,10 @@ Returns a promise that resolves to the resolver's typed summary, including exact
 
 ## Errors
 
-- `clay.packages.invalid_specifier`: The specifier is not a non-empty string or an invalid bundled `@clay/*` shape.
-- `clay.packages.not_installed`: The specifier is not present in the installed/source registry and is not a bundled package on disk.
-- `clay.packages.load_failed`: Package metadata/provenance/integrity is invalid, a capability grant is missing, third-party adoption is pending/stale/revoked, a relation/replacement lacks owner scope or user approval, the load entry escapes its canonical root, or contributions are malformed. No package code executes before these gates pass.
-- `clay.packages.conflict`: The package graph has a duplicate/cycle/unapproved conflict. Enable is transactional; the prior enabled set remains intact.
+- `packages.invalid_specifier`: The specifier is not a non-empty string or an invalid bundled `@clay/*` shape.
+- `packages.not_installed`: The specifier is not present in the installed/source registry and is not a bundled package on disk.
+- `packages.load_failed`: Package metadata/provenance/integrity is invalid, a capability grant is missing, third-party adoption is pending/stale/revoked, a relation/replacement lacks owner scope or user approval, the load entry escapes its canonical root, or contributions are malformed. No package code executes before these gates pass.
+- `packages.conflict`: The package graph has a duplicate/cycle/unapproved conflict. Enable is transactional; the prior enabled set remains intact.
 
 ## Permissions and security
 
@@ -127,7 +127,7 @@ Use this API as the one-line default when a user or script needs to load a packa
 
 ## Lookup metadata
 
-- Stable ID: `clay.packages.loadPackage`
+- Stable ID: `packages.loadPackage`
 - User-facing name: Load Package by Specifier
 - Kind: `clay-js-api`
 - Default key bindings: none

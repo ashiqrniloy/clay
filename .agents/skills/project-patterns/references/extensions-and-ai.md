@@ -14,8 +14,8 @@
 - Commit all generation-owned server contributions once, then broadcast one bounded complete snapshot per affected connection. Clients validate and atomically install the whole snapshot before acknowledging its runtime generation.
 - The commit is the rollback boundary: pre-commit failure preserves the old generation; post-commit fan-out/cleanup failure recovers from latest state and must not restore revoked authority.
 - Revoke old executable authority logically at commit and terminate old workers/sessions afterward under their existing bounded cleanup rules.
-- Use the explicit built-in `clay.runtime.reloadConfiguration` command through normal command execution, with no default keybinding. Add no watcher, reload-specific IPC, or diff protocol until measured need justifies it.
-- Decision log source: `decision-logs/2026-07-16-1825-phase19-hot-reload-transaction-and-stale-edit-semantics.md`.
+- Use the built-in `runtime.reloadConfiguration` command through normal command execution. Per plan 080 (user decision), it ships with a default global `Ctrl+Shift+R` chord and a config-root watcher triggers the same serialized reload service on configuration changes; still no reload-specific IPC or diff protocol.
+- Decision log sources: `decision-logs/2026-07-16-1825-phase19-hot-reload-transaction-and-stale-edit-semantics.md` (runtime-generation transaction) and `decision-logs/2026-08-11-0352-configuration-watch-auto-reload-and-modular-structure.md` (watcher/default-chord decision that supersedes its trigger deferral).
 
 ## AI Mutation
 

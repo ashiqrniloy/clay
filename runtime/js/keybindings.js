@@ -6,7 +6,7 @@
 const ops = globalThis.Deno?.core?.ops;
 function requireOps() {
     if (!ops) {
-        throw new Error("clay.keybindings.runtime_unavailable: Clay key binding APIs require the server runtime");
+        throw new Error("keybindings.runtime_unavailable: Clay key binding APIs require the server runtime");
     }
     return ops;
 }

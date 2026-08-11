@@ -5,14 +5,14 @@ const ops = globalThis.Deno?.core?.ops;
  * authority mutation for this runtime generation. */
 export async function authorizeLanguageServer(options) {
     if (!ops) {
-        throw new Error("clay.language_server.runtime_unavailable: API requires the server runtime");
+        throw new Error("language_server.runtime_unavailable: API requires the server runtime");
     }
     return JSON.parse(await ops.op_clay_language_server_authorize(JSON.stringify(options ?? null)));
 }
 /** Start an authorized language-server session for one contribution + root. */
 export async function startLanguageServerSession(options) {
     if (!ops) {
-        throw new Error("clay.language_server.runtime_unavailable: API requires the server runtime");
+        throw new Error("language_server.runtime_unavailable: API requires the server runtime");
     }
     // The session owner is the host-stamped executing package; the op response
     // carries the host-resolved package/contribution identity used by the
@@ -28,7 +28,7 @@ export async function startLanguageServerSession(options) {
         sessionId,
         sendBytes: (bytes) => {
             if (!(bytes instanceof Uint8Array)) {
-                throw new Error("clay.language_server.invalid_bytes: bytes must be a Uint8Array");
+                throw new Error("language_server.invalid_bytes: bytes must be a Uint8Array");
             }
             return ops.op_clay_language_server_send_bytes(identity, bytes);
         },

@@ -1,5 +1,5 @@
 ---
-id: clay.completion.serverListCompletionProvidersForTrigger
+id: completion.serverListCompletionProvidersForTrigger
 kind: clay-js-api
 js_module: "clay:completion"
 js_export: serverListCompletionProvidersForTrigger
@@ -98,7 +98,7 @@ Returns a synchronous object with:
 
 ## Errors
 
-- `clay.completion.invalid_trigger`: `trigger` is missing, not a string, or empty.
+- `completion.invalid_trigger`: `trigger` is missing, not a string, or empty.
 
 ## Permissions and security
 
@@ -106,7 +106,7 @@ No permission required. Returns only inert metadata. Does not execute provider h
 
 ## Agent guidance
 
-Use `clay.completion.serverListCompletionProvidersForTrigger` only for trigger-provider inspection. Do not use it to bypass registration or pass executable callbacks.
+Use `completion.serverListCompletionProvidersForTrigger` only for trigger-provider inspection. Do not use it to bypass registration or pass executable callbacks.
 
 ## Backing implementation
 

@@ -56,21 +56,21 @@ pub fn tab_close_confirm_session(
         TransientMenuItem::new(
             "tabclose.saveall",
             "Save all and close",
-            TransientMenuAction::new("clay.shell.clientTabCloseSaveAll")
+            TransientMenuAction::new("shell.clientTabCloseSaveAll")
                 .with_arguments(arguments.clone()),
         )
         .with_accessibility_label("Save all unsaved documents in this tab, then close the tab"),
         TransientMenuItem::new(
             "tabclose.discard",
             "Discard and close",
-            TransientMenuAction::new("clay.shell.clientTabCloseDiscard")
+            TransientMenuAction::new("shell.clientTabCloseDiscard")
                 .with_arguments(arguments.clone()),
         )
         .with_accessibility_label("Discard all unsaved edits in this tab, then close the tab"),
         TransientMenuItem::new(
             "tabclose.cancel",
             "Cancel",
-            TransientMenuAction::new("clay.shell.clientTabCloseCancel").with_arguments(arguments),
+            TransientMenuAction::new("shell.clientTabCloseCancel").with_arguments(arguments),
         )
         .with_accessibility_label("Keep the tab open and cancel closing"),
     ];

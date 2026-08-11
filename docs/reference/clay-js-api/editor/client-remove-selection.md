@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientRemoveSelection
+id: editor.clientRemoveSelection
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientRemoveSelection
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientRemoveSelection` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
+agent_guidance: Use `editor.clientRemoveSelection` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
 lookup_tags: [editor, js-api, multi-cursor, selection]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Remove the primary selection, keeping the rest.
 
 ## Description
 
-`clientRemoveSelection` returns the stable bindable command ID `clay.editor.clientRemoveSelection` for **Remove Selection** (Plan 071 task 9). Helix remove_primary_selection semantics: the primary is dropped and a remaining selection becomes primary; a no-op for a single selection. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientRemoveSelection` returns the stable bindable command ID `editor.clientRemoveSelection` for **Remove Selection** (Plan 071 task 9). Helix remove_primary_selection semantics: the primary is dropped and a remaining selection becomes primary; a no-op for a single selection. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -50,7 +50,7 @@ bindKey("ctrl+k ctrl+n", clientRemoveSelection());
 ## Example
 
 ```ts
-const commandId = clientRemoveSelection(); // "clay.editor.clientRemoveSelection"
+const commandId = clientRemoveSelection(); // "editor.clientRemoveSelection"
 ```
 
 ## Options
@@ -69,7 +69,7 @@ None.
 
 ## Return and async behavior
 
-Returns the stable command ID string `clay.editor.clientRemoveSelection` synchronously. The facade is synchronous, side-effect free, and local.
+Returns the stable command ID string `editor.clientRemoveSelection` synchronously. The facade is synchronous, side-effect free, and local.
 
 ## Errors
 
@@ -85,7 +85,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientRemoveSelection` when the user asks for Remove Selection through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientRemoveSelection` when the user asks for Remove Selection through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.editor.clientRemoveSelection` when the user asks for Remove Selection 
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientRemoveSelection`
+- Stable ID: `editor.clientRemoveSelection`
 - User-facing name: Remove Selection
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientRemoveSelection`

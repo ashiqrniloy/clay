@@ -225,7 +225,7 @@ impl Driver {
     }
 
     /// Phase 22.5: surface collected skip diagnostics on the active chrome
-    /// (`clay.tabs.open_failed` family, as the new-tab failure path).
+    /// (`tabs.open_failed` family, as the new-tab failure path).
     pub(crate) fn flush_restore_diagnostics(
         &mut self,
         ctx: &mut DriverCtx<'_, '_>,
@@ -238,7 +238,7 @@ impl Driver {
                 window_id,
                 self.editor_widget_id,
                 ClientConnectionEvent::RuntimeDiagnostic(clay::protocol::RuntimeDiagnostic::error(
-                    "clay.tabs.open_failed",
+                    "tabs.open_failed",
                     message,
                 )),
             );

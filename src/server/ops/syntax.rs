@@ -24,14 +24,14 @@ pub(super) fn op_clay_syntax_set_engine_preference(
         .set_syntax_engine_preference(&target, tier)
         .map_err(|error| {
             clay_error(format!(
-                "clay.syntax.invalid_engine_preference: syntax engine preference rejected: {error:?}"
+                "syntax.invalid_engine_preference: syntax engine preference rejected: {error:?}"
             ))
         })?;
     serde_json::to_string(&json!({
         "target": target,
         "tier": tier.as_str(),
     }))
-    .map_err(|error| clay_error(format!("clay.syntax.invalid_engine_preference: {error}")))
+    .map_err(|error| clay_error(format!("syntax.invalid_engine_preference: {error}")))
 }
 
 #[op2]
@@ -40,10 +40,10 @@ pub(super) fn op_clay_syntax_register_syntax_grammar(
     state: &mut OpState,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let options_value = parse_json(&options_json, "clay.syntax.invalid_grammar")?;
+    let options_value = parse_json(&options_json, "syntax.invalid_grammar")?;
     let options = options_value
         .as_object()
-        .ok_or_else(|| clay_error("clay.syntax.invalid_grammar: options must be an object"))?;
+        .ok_or_else(|| clay_error("syntax.invalid_grammar: options must be an object"))?;
     reject_prohibited_authority(options)?;
 
     // Grammar contributions come from the host-enabled record of the
@@ -56,7 +56,7 @@ pub(super) fn op_clay_syntax_register_syntax_grammar(
         )?;
     if package.contributions.syntax_grammars.is_empty() {
         return Err(clay_error(
-            "clay.syntax.invalid_grammar: package must declare a syntaxGrammars contribution",
+            "syntax.invalid_grammar: package must declare a syntaxGrammars contribution",
         ));
     }
 
@@ -65,7 +65,7 @@ pub(super) fn op_clay_syntax_register_syntax_grammar(
         .register_syntax_grammar_package(&package)
         .map_err(|error| {
             clay_error(format!(
-                "clay.syntax.registration_failed: syntax grammar registry rejected contribution: {error:?}"
+                "syntax.registration_failed: syntax grammar registry rejected contribution: {error:?}"
             ))
         })?;
 
@@ -83,7 +83,7 @@ pub(super) fn op_clay_syntax_register_syntax_grammar(
     }))
     .map_err(|error| {
         clay_error(format!(
-            "clay.syntax.registration_failed: failed to serialize result ({error})"
+            "syntax.registration_failed: failed to serialize result ({error})"
         ))
     })
 }
@@ -94,7 +94,7 @@ fn parse_engine_tier(tier: &str) -> Result<SyntaxEngineTier, JsErrorBox> {
         "wasm" => Ok(SyntaxEngineTier::Wasm),
         "javascript" | "js" => Ok(SyntaxEngineTier::JavaScriptFallback),
         _ => Err(clay_error(
-            "clay.syntax.invalid_engine_preference: tier must be native, wasm, or javascript",
+            "syntax.invalid_engine_preference: tier must be native, wasm, or javascript",
         )),
     }
 }
@@ -111,7 +111,7 @@ fn reject_prohibited_authority(options: &Map<String, Value>) -> Result<(), JsErr
     ] {
         if options.contains_key(key) {
             return Err(clay_error(format!(
-                "clay.syntax.invalid_grammar: executable or raw authority field `{key}` is not accepted by the public registration contract"
+                "syntax.invalid_grammar: executable or raw authority field `{key}` is not accepted by the public registration contract"
             )));
         }
     }

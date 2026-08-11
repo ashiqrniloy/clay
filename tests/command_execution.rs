@@ -1,7 +1,9 @@
 use clay::packages::commands::{CommandRegistry, CommandValidationRule, PackageCommandDeclaration};
 use clay::packages::manifest::validate_manifest_value;
 use clay::packages::permissions::PackagePermission;
-use clay::protocol::{KeyBindingRule, LockScope, RoutingPolicy};
+use clay::protocol::{
+    KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers, LockScope, RoutingPolicy,
+};
 use clay::server::command_execution::{
     CommandExecutionProvenance, CommandExecutionRequest, CommandExecutionRule,
     CommandExecutionStatus, CommandExecutionTarget, CommandExecutor,
@@ -86,7 +88,7 @@ fn registered_server_command_executes_with_accepted_status() {
 #[test]
 fn reload_command_is_server_first_behavior_locked_and_discoverable() {
     let command =
-        clay::server::command_execution::builtin_server_command("clay.runtime.reloadConfiguration")
+        clay::server::command_execution::builtin_server_command("runtime.reloadConfiguration")
             .expect("reload command is built in");
 
     assert_eq!(command.display_name, "Reload Configuration and Packages");
@@ -96,11 +98,23 @@ fn reload_command_is_server_first_behavior_locked_and_discoverable() {
             lock_scope: LockScope::Behavior,
         }
     );
-    assert!(command.key_bindings.is_empty());
+    assert_eq!(command.key_bindings.len(), 1);
+    let binding = &command.key_bindings[0];
+    assert_eq!(binding.command_id, "runtime.reloadConfiguration");
+    assert_eq!(binding.context, KeyBindingContext::Global);
+    assert_eq!(binding.sequence[0].key, KeyCode::Character("r".to_string()));
+    assert_eq!(
+        binding.sequence[0].modifiers,
+        KeyModifiers {
+            control: true,
+            shift: true,
+            ..KeyModifiers::NONE
+        }
+    );
     assert!(command.permissions.is_empty());
     assert!(
         clay::server::command_execution::builtin_server_command_ids()
-            .contains(&"clay.runtime.reloadConfiguration")
+            .contains(&"runtime.reloadConfiguration")
     );
 
     let result = CommandExecutor::new()
@@ -444,7 +458,7 @@ fn explain_active_mode_returns_core_code_fallback_rationale_without_language_pac
     let result = CommandExecutor::new()
         .execute_discovery(
             &registry,
-            discovery_request("clay.modes.explainActiveMode", json!({ "documentId": 7 })),
+            discovery_request("modes.explainActiveMode", json!({ "documentId": 7 })),
         )
         .expect("explainActiveMode resolves");
 
@@ -507,7 +521,7 @@ fn explain_active_mode_reports_core_text_universal_fallback_for_plain_text() {
     let result = CommandExecutor::new()
         .execute_discovery(
             &registry,
-            discovery_request("clay.modes.explainActiveMode", json!({ "documentId": 9 })),
+            discovery_request("modes.explainActiveMode", json!({ "documentId": 9 })),
         )
         .expect("explainActiveMode resolves");
 
@@ -544,7 +558,7 @@ fn list_active_modes_reports_package_and_built_in_provenance_with_classification
     let result = CommandExecutor::new()
         .execute_discovery(
             &registry,
-            discovery_request("clay.modes.listActiveModes", serde_json::Value::Null),
+            discovery_request("modes.listActiveModes", serde_json::Value::Null),
         )
         .expect("listActiveModes resolves");
 
@@ -575,7 +589,7 @@ fn explain_active_mode_for_unknown_document_returns_none_explanation() {
     let result = CommandExecutor::new()
         .execute_discovery(
             &registry,
-            discovery_request("clay.modes.explainActiveMode", json!({ "documentId": 404 })),
+            discovery_request("modes.explainActiveMode", json!({ "documentId": 404 })),
         )
         .expect("explainActiveMode resolves for unknown document");
 
@@ -591,10 +605,10 @@ fn discovery_commands_are_reachable_from_control_center_listing() {
     // Control Center surfaces them (reachable through the Phase 18.8 command
     // execution path). They are server-first with no permissions.
     let ids = clay::server::command_execution::builtin_server_command_ids();
-    assert!(ids.contains(&"clay.modes.listActiveModes"));
-    assert!(ids.contains(&"clay.modes.explainActiveMode"));
+    assert!(ids.contains(&"modes.listActiveModes"));
+    assert!(ids.contains(&"modes.explainActiveMode"));
 
-    for command_id in ["clay.modes.listActiveModes", "clay.modes.explainActiveMode"] {
+    for command_id in ["modes.listActiveModes", "modes.explainActiveMode"] {
         let command = clay::server::command_execution::builtin_server_command(command_id)
             .expect("discovery command is built-in");
         assert_eq!(command.routing_policy, RoutingPolicy::ServerFirst);
@@ -614,10 +628,7 @@ fn discovery_commands_reject_no_authority_violations() {
     let err = CommandExecutor::new()
         .execute_discovery(
             &registry,
-            discovery_request(
-                "clay.modes.explainActiveMode",
-                json!({ "notDocumentId": 1 }),
-            ),
+            discovery_request("modes.explainActiveMode", json!({ "notDocumentId": 1 })),
         )
         .expect_err("missing documentId rejected");
     assert_eq!(err.rule, CommandExecutionRule::InvalidArguments);
@@ -626,7 +637,7 @@ fn discovery_commands_reject_no_authority_violations() {
     // workspace-mutation permission declared): the shared target validator
     // rejects it the same as any other command.
     let mut workspace_request =
-        discovery_request("clay.modes.explainActiveMode", json!({ "documentId": 1 }));
+        discovery_request("modes.explainActiveMode", json!({ "documentId": 1 }));
     workspace_request.target = CommandExecutionTarget::Workspace;
     let err = CommandExecutor::new()
         .execute_discovery(&registry, workspace_request)
@@ -647,7 +658,7 @@ fn discovery_commands_reject_no_authority_violations() {
     let err = CommandExecutor::new()
         .execute_discovery(
             &registry,
-            discovery_request("clay.modes.bogus", serde_json::Value::Null),
+            discovery_request("modes.bogus", serde_json::Value::Null),
         )
         .expect_err("unknown discovery command rejected");
     assert_eq!(err.rule, CommandExecutionRule::UnknownCommand);

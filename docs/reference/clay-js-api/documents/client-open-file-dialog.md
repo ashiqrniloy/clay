@@ -1,5 +1,5 @@
 ---
-id: clay.documents.clientOpenFileDialog
+id: documents.clientOpenFileDialog
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: clientOpenFileDialog
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Bindable client UI command ID only; native dialog execution requires explicit user key routing, selected files are server-validated as single-file grants, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, broad filesystem/workspace authority, or client-side JavaScript authority.
-agent_guidance: Use `clay.documents.clientOpenFileDialog` as a documented command ID for `bindKey`; do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`, and do not invent dialog options, broad filesystem access, workspace expansion, package loading, shell/network effects, WASM, AI mutation, or client-side JavaScript execution.
+agent_guidance: Use `documents.clientOpenFileDialog` as a documented command ID for `bindKey`; do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`, and do not invent dialog options, broad filesystem access, workspace expansion, package loading, shell/network effects, WASM, AI mutation, or client-side JavaScript execution.
 lookup_tags: [documents, open-dialog, file-dialog, windows, linux, macos, markdown, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for Clay's native client file-open dialog 
 
 ## Description
 
-`clientOpenFileDialog` is the public Clay JS API descriptor for **Open File Dialog**. It returns the stable command ID `clay.documents.clientOpenFileDialog` so configuration, help, key-binding discovery, and agents can refer to the native file-open command without hard-coding Rust shortcuts, raw protocol messages, or raw `Deno.core.ops` names.
+`clientOpenFileDialog` is the public Clay JS API descriptor for **Open File Dialog**. It returns the stable command ID `documents.clientOpenFileDialog` so configuration, help, key-binding discovery, and agents can refer to the native file-open command without hard-coding Rust shortcuts, raw protocol messages, or raw `Deno.core.ops` names.
 
 Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. Binding/routing is a local inert behavior-manifest lookup; the native dialog and selected-file open happen only after an explicit user command. Opening reads one initial UTF-8 snapshot through the server-selected-file path; ordinary editing remains delta-based, and Markdown parse/decorations run as background, viewport-bounded work rather than keypress, paint, scroll, layout, or text-event JavaScript.
 
@@ -53,7 +53,7 @@ bindKey("Ctrl+O", clientOpenFileDialog(), { scope: "editor" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
 ## Example
@@ -74,10 +74,10 @@ No options are accepted by `clientOpenFileDialog`. Dialog filters, default direc
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.documents.clientOpenFileDialog` in `~/.config/clay/init.js`, for example:
+No default key binding is assigned. Users may bind a key to `documents.clientOpenFileDialog` in `~/.config/clay/init.js`, for example:
 
 ```ts
-bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
 ## Custom properties
@@ -86,7 +86,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.documents.clientOpenFileDialog"` synchronously. The helper itself does not open a dialog, read files, call the server, or execute client-side JavaScript. The actual file dialog is reached later through an inert behavior manifest route after a user presses a configured key.
+Returns the string literal command ID `"documents.clientOpenFileDialog"` synchronously. The helper itself does not open a dialog, read files, call the server, or execute client-side JavaScript. The actual file dialog is reached later through an inert behavior manifest route after a user presses a configured key.
 
 ## Errors
 
@@ -104,7 +104,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.documents.clientOpenFileDialog` as a documented command ID for `bindKey`. Avoid inventing direct Rust calls, raw op names, dialog filter options, default-directory keys, filesystem scanning, workspace expansion, shell commands, network effects, package loading, WASM, AI mutation, or client-side JavaScript execution for this operation.
+Use `documents.clientOpenFileDialog` as a documented command ID for `bindKey`. Avoid inventing direct Rust calls, raw op names, dialog filter options, default-directory keys, filesystem scanning, workspace expansion, shell commands, network effects, package loading, WASM, AI mutation, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -115,7 +115,7 @@ Use `clay.documents.clientOpenFileDialog` as a documented command ID for `bindKe
 
 ## Lookup metadata
 
-- Stable ID: `clay.documents.clientOpenFileDialog`
+- Stable ID: `documents.clientOpenFileDialog`
 - User-facing name: Open File Dialog
 - Kind: `clay-js-api`
 - Module/export: `clay:documents` / `clientOpenFileDialog`

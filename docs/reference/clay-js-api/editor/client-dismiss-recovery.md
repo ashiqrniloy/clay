@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientDismissRecovery
+id: editor.clientDismissRecovery
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientDismissRecovery
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it clears recovery menus and sanitized runtime diagnostics only and does not grant filesystem/workspace expansion, package/configuration/AI mutation authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientDismissRecovery` only as a documented command ID for `bindKey` or recovery menus; do not invent package-owned modal stacks or raw Deno ops.
+agent_guidance: Use `editor.clientDismissRecovery` only as a documented command ID for `bindKey` or recovery menus; do not invent package-owned modal stacks or raw Deno ops.
 lookup_tags: [editor, recovery, dismiss, sync, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for dismissing pending-edit / disconnect /
 
 ## Description
 
-`clientDismissRecovery` is the public Clay JS API descriptor for **Dismiss Recovery**. It returns the stable command ID `clay.editor.clientDismissRecovery` so configuration and recovery menus can clear actionable sync chrome without touching the rope or server state.
+`clientDismissRecovery` is the public Clay JS API descriptor for **Dismiss Recovery**. It returns the stable command ID `editor.clientDismissRecovery` so configuration and recovery menus can clear actionable sync chrome without touching the rope or server state.
 
 Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. After an explicit user route, the editor clears the active recovery transient menu (when present) and drops the current runtime diagnostic used for disconnect/rejection/server-error recovery summaries. It does not reconnect, resync, save, reload, or discard local edits.
 
@@ -75,7 +75,7 @@ None.
 
 ## Return and async behavior
 
-Returns the string `"clay.editor.clientDismissRecovery"`. Synchronous. No IPC.
+Returns the string `"editor.clientDismissRecovery"`. Synchronous. No IPC.
 
 ## Errors
 
@@ -87,7 +87,7 @@ Bindable client UI command ID only. Clears recovery menus and sanitized runtime 
 
 ## Agent guidance
 
-Use `clay.editor.clientDismissRecovery` only as a documented command ID for `bindKey` or recovery menus. Do not invent package-owned modal stacks or raw Deno ops.
+Use `editor.clientDismissRecovery` only as a documented command ID for `bindKey` or recovery menus. Do not invent package-owned modal stacks or raw Deno ops.
 
 ## Backing implementation
 
@@ -101,7 +101,7 @@ Runtime-backed Phase 20 client UI command for sync recovery chrome.
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientDismissRecovery`
+- Stable ID: `editor.clientDismissRecovery`
 - User-facing name: Dismiss Recovery
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientDismissRecovery`

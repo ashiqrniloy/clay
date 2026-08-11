@@ -1,5 +1,5 @@
 ---
-id: clay.syntax.serverRegisterSyntaxGrammar
+id: syntax.serverRegisterSyntaxGrammar
 kind: clay-js-api
 js_module: "clay:syntax"
 js_export: serverRegisterSyntaxGrammar
@@ -61,7 +61,7 @@ custom_properties:
     default: optional
     description: timeoutMs and maxWindowBytes metadata bounded by shared syntax budgets.
 security: Requires parse-document and render-decorations permissions with server-side validation of first-party @clay/* package provenance, compiled-in native source IDs or package-root-confined tree-sitter-wasm paths, confined .scm paths, closed vocabulary/validated legacy style maps, duplicate registry conflicts, and Background/no-hot-path parse/decor scheduling. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, arbitrary native/WASM loading, or client-side JavaScript authority; rejects raw ops, executable callbacks, arbitrary artifact paths, URLs, parent traversal, native handles/libraries, raw CSS/colors, package-manager/download fields, and third-party native grammar loading.
-agent_guidance: Use `clay.syntax.serverRegisterSyntaxGrammar` only from first-party grammar package load entries after manifest validation. Prefer `loadPackage("@clay/rust")`, `loadPackage("@clay/typescript")`, or `loadPackage("@clay/javascript")` for ordinary user setup. Do not expose raw Deno ops or register arbitrary third-party/native grammars in this phase.
+agent_guidance: Use `syntax.serverRegisterSyntaxGrammar` only from first-party grammar package load entries after manifest validation. Prefer `loadPackage("@clay/rust")`, `loadPackage("@clay/typescript")`, or `loadPackage("@clay/javascript")` for ordinary user setup. Do not expose raw Deno ops or register arbitrary third-party/native grammars in this phase.
 lookup_tags: [js-api, syntax, tree-sitter, grammar, highlighting]
 app_visible: true
 help_visible: true
@@ -194,7 +194,7 @@ Prefer one-line `loadPackage("@clay/<language>")` for user setup. Package author
 
 ## Lookup metadata
 
-- Stable ID: `clay.syntax.serverRegisterSyntaxGrammar`
+- Stable ID: `syntax.serverRegisterSyntaxGrammar`
 - Module/export: `clay:syntax` / `serverRegisterSyntaxGrammar`
 - User-facing name: Register Syntax Grammar
 - Tags: `js-api`, `syntax`, `tree-sitter`, `grammar`, `highlighting`

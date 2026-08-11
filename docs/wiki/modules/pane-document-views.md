@@ -51,7 +51,7 @@ The chrome's own `apply_connection_event` handles SDUI/panels/overlays/shell-pre
 
 ### Pending-open attribution
 
-`route_document_opened` cannot pre-map a path to a document_id (path canonicalization is server authority), so the driver records pending opens at the three interception points (`ClientUiCommandResult::SelectedFile` native dialogs, `apply_native_dialog_completion`, `route_sdui_intent` for `clay.workspace.openFile`/`openFuzzyFile`, and server-side keybindings via `RecordPendingOpenIntent`). `PendingOpenRequest` matches in-root browser/fuzzy opens by `(workspace_root_id, relative_path)` and native-dialog opens by absolute canonical path; `take_pending_open_for` consumes the match when `DocumentOpened` arrives. Pending entries are removed when their pane closes. The pure decision function `decide_open_route` (Owner > Pending > Active) is unit-tested without a window harness.
+`route_document_opened` cannot pre-map a path to a document_id (path canonicalization is server authority), so the driver records pending opens at the three interception points (`ClientUiCommandResult::SelectedFile` native dialogs, `apply_native_dialog_completion`, `route_sdui_intent` for `workspace.openFile`/`openFuzzyFile`, and server-side keybindings via `RecordPendingOpenIntent`). `PendingOpenRequest` matches in-root browser/fuzzy opens by `(workspace_root_id, relative_path)` and native-dialog opens by absolute canonical path; `take_pending_open_for` consumes the match when `DocumentOpened` arrives. Pending entries are removed when their pane closes. The pure decision function `decide_open_route` (Owner > Pending > Active) is unit-tested without a window harness.
 
 ### Duplicate-open no-op and cross-pane switcher
 

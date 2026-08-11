@@ -98,12 +98,12 @@ Implement structural shell snapshots for tests and future agent inspection.
 
 Phase 18.2 should not implement package-facing `clay:ui` public APIs unless a later task explicitly promotes them with facade/op/docs/registry/test coverage. These surfaces remain planned for Phase 18.3 or Phase 18.4:
 
-- `PanelContribution` and `clay.ui.serverRegisterPanelContribution`
-- `ComponentContribution` and `clay.ui.serverRegisterComponentContribution`
-- `TransientOverlayContribution` and `clay.ui.serverRegisterTransientOverlayContribution`
-- `PackageThemeTokenDeclaration` and `clay.ui.serverRegisterThemeToken`
-- `PackageUiStateScope` and `clay.ui.serverRegisterUiStateScope`
-- `PackageLayoutOverride` and `clay.ui.serverSetLayoutOverride`
+- `PanelContribution` and `ui.serverRegisterPanelContribution`
+- `ComponentContribution` and `ui.serverRegisterComponentContribution`
+- `TransientOverlayContribution` and `ui.serverRegisterTransientOverlayContribution`
+- `PackageThemeTokenDeclaration` and `ui.serverRegisterThemeToken`
+- `PackageUiStateScope` and `ui.serverRegisterUiStateScope`
+- `PackageLayoutOverride` and `ui.serverSetLayoutOverride`
 - User-visible split/slot/sidebar configuration keys through `~/.config/clay/init.js`
 - Persisted layout overrides, multi-panel ordering inside one slot, cross-window layout sync, overlay z-order buckets, and package priority fields
 - Public `clay:ui` configuration APIs remain planned until full facade/op/reference docs/registry/test coverage exists

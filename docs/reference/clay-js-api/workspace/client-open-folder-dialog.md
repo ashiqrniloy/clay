@@ -1,5 +1,5 @@
 ---
-id: clay.workspace.clientOpenFolderDialog
+id: workspace.clientOpenFolderDialog
 kind: clay-js-api
 js_module: "clay:workspace"
 js_export: clientOpenFolderDialog
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Bindable client UI command ID only; native folder selection requires explicit user key routing, selected folders are sent through the server selected-path capability flow before becoming workspace roots, and this API does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard read/write, or client-side JavaScript authority.
-agent_guidance: Use `clay.workspace.clientOpenFolderDialog` as a documented command ID for `bindKey`; do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`, and do not invent dialog options, broad filesystem access, workspace expansion without server validation, package loading, shell/network effects, WASM, AI mutation, clipboard access, or client-side JavaScript execution.
+agent_guidance: Use `workspace.clientOpenFolderDialog` as a documented command ID for `bindKey`; do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`, and do not invent dialog options, broad filesystem access, workspace expansion without server validation, package loading, shell/network effects, WASM, AI mutation, clipboard access, or client-side JavaScript execution.
 lookup_tags: [workspace, open-folder, folder-dialog, xdg-desktop-portal, windows, macos, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for Clay's native client folder-picker rou
 
 ## Description
 
-`clientOpenFolderDialog` is the public Clay JS API descriptor for **Open Folder Dialog**. It returns the stable command ID `clay.workspace.clientOpenFolderDialog` so configuration, help, key-binding discovery, and agents can refer to the native folder picker without hard-coding Rust shortcuts, protocol messages, or raw `Deno.core.ops` names.
+`clientOpenFolderDialog` is the public Clay JS API descriptor for **Open Folder Dialog**. It returns the stable command ID `workspace.clientOpenFolderDialog` so configuration, help, key-binding discovery, and agents can refer to the native folder picker without hard-coding Rust shortcuts, protocol messages, or raw `Deno.core.ops` names.
 
 Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. The native dialog opens only after an explicit user command. The selected path is then sent to the server with the current selected-path capability; the server validates it before adding a workspace root and publishing a refreshed file-browser SDUI snapshot.
 
@@ -53,7 +53,7 @@ bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+Shift+O", "clay.workspace.clientOpenFolderDialog", { scope: "editor" });
+bindKey("Ctrl+Shift+O", "workspace.clientOpenFolderDialog", { scope: "editor" });
 ```
 
 ## Example
@@ -82,7 +82,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.workspace.clientOpenFolderDialog"` synchronously. The helper does not open a dialog, scan files, call the server, mutate workspace state, or execute client-side JavaScript.
+Returns the string literal command ID `"workspace.clientOpenFolderDialog"` synchronously. The helper does not open a dialog, scan files, call the server, mutate workspace state, or execute client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ The client owns the native prompt. The server owns workspace roots, canonicalize
 
 ## Agent guidance
 
-Use `clay.workspace.clientOpenFolderDialog` as a documented command ID for `bindKey`. Avoid raw ops, direct Rust calls, ad hoc dialog options, shell commands, path passthrough, hidden workspace grants, network effects, package-manager actions, WASM, AI mutation, clipboard access, or client-side JavaScript execution.
+Use `workspace.clientOpenFolderDialog` as a documented command ID for `bindKey`. Avoid raw ops, direct Rust calls, ad hoc dialog options, shell commands, path passthrough, hidden workspace grants, network effects, package-manager actions, WASM, AI mutation, clipboard access, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.workspace.clientOpenFolderDialog` as a documented command ID for `bind
 
 ## Lookup metadata
 
-- Stable ID: `clay.workspace.clientOpenFolderDialog`
+- Stable ID: `workspace.clientOpenFolderDialog`
 - User-facing name: Open Folder Dialog
 - Kind: `clay-js-api`
 - Module/export: `clay:workspace` / `clientOpenFolderDialog`

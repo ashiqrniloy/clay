@@ -1,5 +1,6 @@
 # Configuration System Pattern
 
+- Dotted-ID convention: core Clay command/API/option IDs are bare `<domain>.<name>` (`shell.*`, `editor.*`, `documents.*`, `workspace.*`, `runtime.*`, …), NEVER `clay.<domain>.*`. Package configuration and package command IDs always start with the package's own `apiPrefix` (`<package>.<name>`, e.g. `markdown.layout.defaultVisibility`); `setPackageOption` rejects `clay.`-prefixed and non-package-prefixed options. Third-party packages cannot claim a reserved core domain as their prefix (`RESERVED_CORE_API_DOMAINS`, `src/packages/manifest.rs`). `clay:` module specifiers and `package.json` `clay.*` manifest key paths are the only surviving `clay` prefixes. See `clay-js-api-naming.md`.
 - Clay user configuration is loaded from `~/.config/clay/init.js`.
 - `init.js` may load other local configuration files so users can keep configuration modular.
 - Each configuration option is a Clay JS API, not a separate undocumented configuration key system.
@@ -7,4 +8,6 @@
 - Plans that add configurable behavior must include a configuration task: review the phase implementation, propose necessary configuration APIs for extensibility/customization/key binding, implement or document them, update `docs/reference/clay-js-api/**`, update `docs/index.md`, regenerate registry artifacts, and add coverage tests.
 - Configuration must not implicitly grant filesystem, network, shell, extension loading, AI mutation, or workspace authority. Permission-bearing configuration APIs need explicit documented permissions and server-side validation.
 - Keymaps registered during configuration evaluation are durable overlays: package/mode activation applies mode bindings first, then configuration bindings, so user chords survive document classification and win same-chord conflicts without carrying old mode-only bindings forward.
-- Decision log sources: `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`, `decision-logs/2026-07-19-0328-configuration-keymaps-survive-mode-activation.md`.
+- Configuration-root changes use a bounded polling watcher that delegates to serialized `runtime.reloadConfiguration`; optional module failures become bounded diagnostics, while required module failures preserve the previous generation.
+- `runtime.reloadConfiguration` ships with default global `Ctrl+Shift+R`; users can unbind or override it through normal configuration keymap overlays.
+- Decision log sources: `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`, `decision-logs/2026-07-19-0328-configuration-keymaps-survive-mode-activation.md`, `decision-logs/2026-08-11-0352-configuration-watch-auto-reload-and-modular-structure.md`.

@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientExecuteEditorCommand
+id: editor.clientExecuteEditorCommand
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientExecuteEditorCommand
@@ -19,9 +19,9 @@ custom_properties:
   - name: commandId
     type: string
     default: none
-    description: Known direction-specific argless editor command ID to execute (e.g. `clay.editor.clientMoveCursor.nextWordStart`).
+    description: Known direction-specific argless editor command ID to execute (e.g. `editor.clientMoveCursor.nextWordStart`).
 security: Changes only transient client cursor/selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientExecuteEditorCommand` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `editor.clientExecuteEditorCommand` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, editor-control, execution-channel]
 app_visible: true
 help_visible: true
@@ -50,13 +50,13 @@ Use this API when an activated package (or user configuration) needs to move the
 ```ts
 import { clientExecuteEditorCommand } from "clay:editor";
 
-clientExecuteEditorCommand({ commandId: "clay.editor.clientMoveCursor.nextWordStart" });
+clientExecuteEditorCommand({ commandId: "editor.clientMoveCursor.nextWordStart" });
 ```
 
 ## Example
 
 ```ts
-clientExecuteEditorCommand({ commandId: "clay.editor.clientSetSelection.selectLine" });
+clientExecuteEditorCommand({ commandId: "editor.clientSetSelection.selectLine" });
 ```
 
 ## Options
@@ -89,7 +89,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientExecuteEditorCommand` when the user asks for programmatic cursor/selection control through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientExecuteEditorCommand` when the user asks for programmatic cursor/selection control through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -100,7 +100,7 @@ Use `clay.editor.clientExecuteEditorCommand` when the user asks for programmatic
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientExecuteEditorCommand`
+- Stable ID: `editor.clientExecuteEditorCommand`
 - User-facing name: Execute Editor Command
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientExecuteEditorCommand`

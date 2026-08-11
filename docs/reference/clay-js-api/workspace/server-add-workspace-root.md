@@ -1,5 +1,5 @@
 ---
-id: clay.workspace.serverAddWorkspaceRoot
+id: workspace.serverAddWorkspaceRoot
 kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverAddWorkspaceRoot
@@ -17,7 +17,7 @@ permissions: ["workspace-write"]
 key_bindings: []
 custom_properties: []
 security: Requires explicit user workspace approval and server canonicalization; directories become bounded workspace roots and files become selected-file grants; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.workspace.serverAddWorkspaceRoot` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
+agent_guidance: Use `workspace.serverAddWorkspaceRoot` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
 lookup_tags: [workspace, roots, grants, file-browser, phase18.12, js-api]
 app_visible: true
 help_visible: true
@@ -61,7 +61,7 @@ const rootId = await serverAddWorkspaceRoot("/home/me/project");
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.workspace.serverAddWorkspaceRoot` through documented keybinding/configuration APIs where appropriate.
+No default key binding is assigned. Users may bind a key to `workspace.serverAddWorkspaceRoot` through documented keybinding/configuration APIs where appropriate.
 
 ## Custom properties
 
@@ -85,7 +85,7 @@ Requires explicit user workspace approval and server canonicalization; directori
 
 ## Agent guidance
 
-Use `clay.workspace.serverAddWorkspaceRoot` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
+Use `workspace.serverAddWorkspaceRoot` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.workspace.serverAddWorkspaceRoot` only through the documented Clay JS 
 
 ## Lookup metadata
 
-- Stable ID: `clay.workspace.serverAddWorkspaceRoot`
+- Stable ID: `workspace.serverAddWorkspaceRoot`
 - User-facing name: Add Workspace Root
 - Kind: `clay-js-api`
 - Module/export: `clay:workspace` / `serverAddWorkspaceRoot`

@@ -84,18 +84,18 @@ setTypography({
 // clientSetCursorStyle({ shape: "bar", blink: "solid", widthPx: 2.5 });
 
 // --- Text objects + smart select (no default bindings by design) ---
-bindKey("Alt+I", "clay.editor.clientSelectTextobject.function.inner.current", { scope: "editor" });
-bindKey("Alt+O", "clay.editor.clientSelectTextobject.function.around.current", { scope: "editor" });
-bindKey("Alt+A", "clay.editor.clientSelectTextobject.argument.inner.current", { scope: "editor" });
-bindKey("Alt+C", "clay.editor.clientSelectTextobject.comment.around.current", { scope: "editor" });
-bindKey("Alt+E", "clay.editor.clientSmartSelect.expand", { scope: "editor" });
-bindKey("Alt+R", "clay.editor.clientSmartSelect.shrink", { scope: "editor" });
+bindKey("Alt+I", "editor.clientSelectTextobject.function.inner.current", { scope: "editor" });
+bindKey("Alt+O", "editor.clientSelectTextobject.function.around.current", { scope: "editor" });
+bindKey("Alt+A", "editor.clientSelectTextobject.argument.inner.current", { scope: "editor" });
+bindKey("Alt+C", "editor.clientSelectTextobject.comment.around.current", { scope: "editor" });
+bindKey("Alt+E", "editor.clientSmartSelect.expand", { scope: "editor" });
+bindKey("Alt+R", "editor.clientSmartSelect.shrink", { scope: "editor" });
 
 // --- Task G: user rebinding of a movement default ---
-bindKey("Ctrl+B", "clay.editor.clientMoveCursor.prevWordStart", { scope: "editor" });
+bindKey("Ctrl+B", "editor.clientMoveCursor.prevWordStart", { scope: "editor" });
 
 // --- Task H: execution push channel (observable after a live reload) ---
-clientExecuteEditorCommand({ commandId: "clay.editor.clientSetSelection.selectLine" });
+clientExecuteEditorCommand({ commandId: "editor.clientSetSelection.selectLine" });
 ```
 
 ### 0.3 Launch
@@ -107,7 +107,7 @@ cargo run            # or: cargo run --release
 
 Open `/tmp/clay-manual` as the workspace, open `test.rs`.
 Watch the launching terminal: init.js evaluation errors print there as
-`clay.runtime.*` diagnostics.
+`runtime.*` diagnostics.
 
 ## A. Movement primitives (test.rs)
 
@@ -151,7 +151,7 @@ connected client without restart.
 | C6 | IME/preedit (optional, if an IME is configured) | Preedit caret matches the active shape |
 
 Negative: `clientSetCursorStyle({ shape: "triangle" })` → init.js diagnostic
-`clay.editor.invalid_set_cursor_style` in the terminal, editor unaffected
+`editor.invalid_set_cursor_style` in the terminal, editor unaffected
 (deny-by-default enum).
 
 ## D. Font ligatures (task 7)
@@ -208,8 +208,8 @@ In `test.rs`, caret inside `compute_total_value` body.
 | # | Action | Expected |
 |---|--------|----------|
 | G1 | `Ctrl+B` in any file | Moves one word back (bound in init.js — already proven in A8) |
-| G2 | Add `bindKey("Ctrl+B", "clay.editor.clientMoveCursor.nextWordStart", { scope: "editor" })` below the first, reload | Last binding wins — `Ctrl+B` now moves forward |
-| G3 | Negative: `bindKey("Ctrl+G", "clay.application.quit", …)` | Rejected — non-editor/undeclared IDs are deny-by-default; diagnostic in terminal |
+| G2 | Add `bindKey("Ctrl+B", "editor.clientMoveCursor.nextWordStart", { scope: "editor" })` below the first, reload | Last binding wins — `Ctrl+B` now moves forward |
+| G3 | Negative: `bindKey("Ctrl+G", "application.quit", …)` | Rejected — non-editor/undeclared IDs are deny-by-default; diagnostic in terminal |
 
 ## H. `editor-control` execution push channel (task 20, protocol v8)
 
@@ -239,7 +239,7 @@ third-party package and is covered by automated tests
 `editor_control_execute_publishes_gated_known_commands_only`) — not reachable
 from `init.js` by design.
 
-Negative: change the call to `commandId: "clay.application.quit"` → op rejects
+Negative: change the call to `commandId: "application.quit"` → op rejects
 with "not a known editor command" diagnostic; nothing is published.
 
 ## I. Cleanup

@@ -38,7 +38,7 @@ fn set_typography_api_doc_has_required_configuration_metadata() {
     let root = repository_root();
     let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
     let typography = registry
-        .by_id("clay.theme.setTypography")
+        .by_id("theme.setTypography")
         .expect("setTypography API is generated from docs");
 
     assert_eq!(typography.js_module, "clay:theme");
@@ -84,7 +84,7 @@ fn invalid_init_typography_reports_actionable_validation_error() {
         std::fs::read_to_string(root.join("docs/reference/clay-js-api/theme/set-typography.md"))
             .expect("read setTypography API doc");
     for phrase in [
-        "clay.theme.invalid_typography",
+        "theme.invalid_typography",
         "does not partially install",
         "previous complete server state active",
         "generic fallback",
@@ -134,9 +134,9 @@ fn planned_shell_layout_apis_are_not_generated_registry_entries() {
     let docs_index = std::fs::read_to_string(root.join("docs/index.md")).expect("read docs index");
 
     for id in [
-        "clay.ui.serverRegisterWorkingAreaLayout",
-        "clay.ui.serverRegisterPaneSplitTree",
-        "clay.ui.serverSetPaneSlotLayout",
+        "ui.serverRegisterWorkingAreaLayout",
+        "ui.serverRegisterPaneSplitTree",
+        "ui.serverSetPaneSlotLayout",
     ] {
         assert!(
             registry.by_id(id).is_none(),
@@ -145,13 +145,13 @@ fn planned_shell_layout_apis_are_not_generated_registry_entries() {
     }
 
     for id in [
-        "clay.ui.serverRegisterPanelContribution",
-        "clay.ui.serverRegisterComponentContribution",
-        "clay.ui.serverRegisterTransientOverlayContribution",
-        "clay.ui.serverRegisterInputContribution",
-        "clay.ui.serverRegisterUiStateScope",
-        "clay.ui.serverRegisterThemeToken",
-        "clay.ui.serverSetLayoutOverride",
+        "ui.serverRegisterPanelContribution",
+        "ui.serverRegisterComponentContribution",
+        "ui.serverRegisterTransientOverlayContribution",
+        "ui.serverRegisterInputContribution",
+        "ui.serverRegisterUiStateScope",
+        "ui.serverRegisterThemeToken",
+        "ui.serverSetLayoutOverride",
     ] {
         let entry = registry.by_id(id).unwrap_or_else(|| {
             panic!(
@@ -192,7 +192,7 @@ fn syntax_engine_api_docs_registry_are_fresh() {
 
     for (id, export, docs_path, required_properties) in [
         (
-            "clay.syntax.serverRegisterSyntaxGrammar",
+            "syntax.serverRegisterSyntaxGrammar",
             "serverRegisterSyntaxGrammar",
             "docs/reference/clay-js-api/syntax/server-register-syntax-grammar.md",
             [
@@ -205,7 +205,7 @@ fn syntax_engine_api_docs_registry_are_fresh() {
             .as_slice(),
         ),
         (
-            "clay.syntax.setSyntaxEnginePreference",
+            "syntax.setSyntaxEnginePreference",
             "setSyntaxEnginePreference",
             "docs/reference/clay-js-api/syntax/set-syntax-engine-preference.md",
             ["target", "tier"].as_slice(),
@@ -265,7 +265,7 @@ fn generated_registry_contains_phase18_4_public_apis() {
 
     for (id, module, export, docs_path, required_properties, required_tags) in [
         (
-            "clay.ui.serverRegisterInputContribution",
+            "ui.serverRegisterInputContribution",
             "clay:ui",
             "serverRegisterInputContribution",
             "docs/reference/clay-js-api/ui/server-register-input-contribution.md",
@@ -280,7 +280,7 @@ fn generated_registry_contains_phase18_4_public_apis() {
             ["input", "action-routing", "phase18.4"].as_slice(),
         ),
         (
-            "clay.ui.serverRegisterUiStateScope",
+            "ui.serverRegisterUiStateScope",
             "clay:ui",
             "serverRegisterUiStateScope",
             "docs/reference/clay-js-api/ui/server-register-ui-state-scope.md",
@@ -296,7 +296,7 @@ fn generated_registry_contains_phase18_4_public_apis() {
             ["state", "lifecycle", "phase18.4"].as_slice(),
         ),
         (
-            "clay.ui.serverSetLayoutOverride",
+            "ui.serverSetLayoutOverride",
             "clay:ui",
             "serverSetLayoutOverride",
             "docs/reference/clay-js-api/ui/server-set-layout-override.md",
@@ -304,7 +304,7 @@ fn generated_registry_contains_phase18_4_public_apis() {
             ["layout-overrides", "configuration", "phase18.4"].as_slice(),
         ),
         (
-            "clay.configuration.setPackageOption",
+            "configuration.setPackageOption",
             "clay:configuration",
             "setPackageOption",
             "docs/reference/clay-js-api/configuration/set-package-option.md",
@@ -370,9 +370,9 @@ fn generated_registry_contains_phase18_4_public_apis() {
     }
 
     for planned_id in [
-        "clay.ui.serverRegisterWorkingAreaLayout",
-        "clay.ui.serverRegisterPaneSplitTree",
-        "clay.ui.serverSetPaneSlotLayout",
+        "ui.serverRegisterWorkingAreaLayout",
+        "ui.serverRegisterPaneSplitTree",
+        "ui.serverSetPaneSlotLayout",
     ] {
         assert!(
             registry.by_id(planned_id).is_none(),
@@ -387,7 +387,7 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 
     let parse = registry
-        .by_id("clay.parse.serverRegisterParseHandler")
+        .by_id("parse.serverRegisterParseHandler")
         .expect("large-file parse handler API is generated");
     assert_eq!(parse.js_module, "clay:parse");
     assert_eq!(parse.js_export, "serverRegisterParseHandler");
@@ -420,7 +420,7 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
     }
 
     let decorations = registry
-        .by_id("clay.decorations.serverPublishDecorations")
+        .by_id("decorations.serverPublishDecorations")
         .expect("large-file decoration publication API is generated");
     assert_eq!(decorations.js_module, "clay:decorations");
     assert_eq!(decorations.js_export, "serverPublishDecorations");
@@ -448,7 +448,7 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
     }
 
     let diagnostics = registry
-        .by_id("clay.diagnostics.serverPublishDiagnostics")
+        .by_id("diagnostics.serverPublishDiagnostics")
         .expect("range diagnostic publication API is generated");
     assert_eq!(diagnostics.js_module, "clay:diagnostics");
     assert_eq!(diagnostics.js_export, "serverPublishDiagnostics");
@@ -485,7 +485,7 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
                 "viewport-prioritized",
                 "memoryBudgetBytes",
                 "server-issued token",
-                "clay.runtime.timeout",
+                "runtime.timeout",
                 "Do not expose internal parse-window snapshot structs",
             ],
         ),
@@ -539,7 +539,7 @@ fn syntax_grammar_public_api_has_docs_registry_and_security_metadata() {
 
     let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
     let syntax = registry
-        .by_id("clay.syntax.serverRegisterSyntaxGrammar")
+        .by_id("syntax.serverRegisterSyntaxGrammar")
         .expect("syntax grammar API is generated from docs");
     assert_eq!(syntax.js_module, "clay:syntax");
     assert_eq!(syntax.js_export, "serverRegisterSyntaxGrammar");
@@ -619,9 +619,9 @@ fn large_file_generated_registry_is_fresh() {
 
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
     for id in [
-        "clay.parse.serverRegisterParseHandler",
-        "clay.decorations.serverPublishDecorations",
-        "clay.diagnostics.serverPublishDiagnostics",
+        "parse.serverRegisterParseHandler",
+        "decorations.serverPublishDecorations",
+        "diagnostics.serverPublishDiagnostics",
     ] {
         assert!(
             registry.by_id(id).is_some(),
@@ -638,7 +638,7 @@ fn generated_registry_preserves_configuration_metadata() {
     let cursor_style = registry
         .entries
         .iter()
-        .find(|entry| entry.id == "clay.editor.clientSetCursorStyle")
+        .find(|entry| entry.id == "editor.clientSetCursorStyle")
         .expect("cursor style configuration API is generated");
     assert_eq!(cursor_style.js_module, "clay:editor");
     assert_eq!(cursor_style.js_export, "clientSetCursorStyle");
@@ -668,7 +668,7 @@ fn generated_registry_preserves_configuration_metadata() {
     let bind_key = registry
         .entries
         .iter()
-        .find(|entry| entry.id == "clay.keybindings.bindKey")
+        .find(|entry| entry.id == "keybindings.bindKey")
         .expect("bindKey configuration API is generated");
     assert_eq!(bind_key.js_module, "clay:keybindings");
     assert_eq!(bind_key.js_export, "bindKey");
@@ -686,7 +686,7 @@ fn generated_registry_preserves_configuration_metadata() {
     let quit = registry
         .entries
         .iter()
-        .find(|entry| entry.id == "clay.application.quit")
+        .find(|entry| entry.id == "application.quit")
         .expect("quit API is generated");
     assert_eq!(quit.key_bindings, vec!["Escape".to_string()]);
 }
@@ -696,32 +696,32 @@ fn generated_registry_contains_phase9_file_workspace_apis() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
     let expected = [
         (
-            "clay.documents.serverOpenDocument",
+            "documents.serverOpenDocument",
             "clay:documents",
             "serverOpenDocument",
         ),
         (
-            "clay.documents.serverSaveDocument",
+            "documents.serverSaveDocument",
             "clay:documents",
             "serverSaveDocument",
         ),
         (
-            "clay.documents.serverReloadDocument",
+            "documents.serverReloadDocument",
             "clay:documents",
             "serverReloadDocument",
         ),
         (
-            "clay.documents.serverGetDocumentStatus",
+            "documents.serverGetDocumentStatus",
             "clay:documents",
             "serverGetDocumentStatus",
         ),
         (
-            "clay.documents.serverListDocuments",
+            "documents.serverListDocuments",
             "clay:documents",
             "serverListDocuments",
         ),
         (
-            "clay.workspace.serverListWorkspaceRoots",
+            "workspace.serverListWorkspaceRoots",
             "clay:workspace",
             "serverListWorkspaceRoots",
         ),
@@ -742,7 +742,7 @@ fn generated_registry_contains_phase9_file_workspace_apis() {
         registry
             .by_lookup_tag("dirty-state")
             .iter()
-            .any(|entry| entry.id == "clay.documents.serverSaveDocument"),
+            .any(|entry| entry.id == "documents.serverSaveDocument"),
         "dirty-state lookup should find Phase 9 save/status/reload APIs"
     );
 }
@@ -752,49 +752,49 @@ fn generated_registry_contains_phase18_12_workspace_file_browser_apis() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
     for (id, js_module, js_export, security_needle) in [
         (
-            "clay.workspace.serverAddWorkspaceRoot",
+            "workspace.serverAddWorkspaceRoot",
             "clay:workspace",
             "serverAddWorkspaceRoot",
             "selected-file grants",
         ),
         (
-            "clay.workspace.serverDiscoverWorkspaceRootForPath",
+            "workspace.serverDiscoverWorkspaceRootForPath",
             "clay:workspace",
             "serverDiscoverWorkspaceRootForPath",
             "closed Clay-owned marker set",
         ),
         (
-            "clay.workspace.serverListDirectory",
+            "workspace.serverListDirectory",
             "clay:workspace",
             "serverListDirectory",
             "bounded ignore/depth/count rules",
         ),
         (
-            "clay.workspace.serverCreateListingCancelToken",
+            "workspace.serverCreateListingCancelToken",
             "clay:workspace",
             "serverCreateListingCancelToken",
             "opaque cancellation token",
         ),
         (
-            "clay.workspace.serverCancelListing",
+            "workspace.serverCancelListing",
             "clay:workspace",
             "serverCancelListing",
             "opaque token",
         ),
         (
-            "clay.commands.serverExecuteCommand",
+            "commands.serverExecuteCommand",
             "clay:commands",
             "serverExecuteCommand",
             "selected-file grants",
         ),
         (
-            "clay.commands.serverOpenFile",
+            "commands.serverOpenFile",
             "clay:commands",
             "serverOpenFile",
             "selected-file single-file grants",
         ),
         (
-            "clay.commands.serverRevealInTree",
+            "commands.serverRevealInTree",
             "clay:commands",
             "serverRevealInTree",
             "open server workspace metadata",
@@ -819,7 +819,7 @@ fn generated_registry_contains_phase18_12_workspace_file_browser_apis() {
 fn generated_registry_contains_client_open_file_dialog_command_api() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
     let entry = registry
-        .by_id("clay.documents.clientOpenFileDialog")
+        .by_id("documents.clientOpenFileDialog")
         .expect("generated registry is missing clientOpenFileDialog");
 
     assert_eq!(entry.js_module, "clay:documents");
@@ -853,14 +853,14 @@ fn generated_registry_contains_client_open_file_dialog_command_api() {
         registry
             .by_lookup_tag("open-dialog")
             .iter()
-            .any(|entry| entry.id == "clay.documents.clientOpenFileDialog"),
+            .any(|entry| entry.id == "documents.clientOpenFileDialog"),
         "open-dialog lookup should find the file dialog command API"
     );
     assert!(
         registry
             .by_lookup_tag("keybindings")
             .iter()
-            .any(|entry| entry.id == "clay.documents.clientOpenFileDialog"),
+            .any(|entry| entry.id == "documents.clientOpenFileDialog"),
         "keybinding lookup should find the bindable file dialog command API"
     );
 }
@@ -871,7 +871,7 @@ fn generated_registry_contains_file_browser_workflow_command_apis() {
 
     for (id, module, export, tag, security_needles) in [
         (
-            "clay.workspace.clientOpenFolderDialog",
+            "workspace.clientOpenFolderDialog",
             "clay:workspace",
             "clientOpenFolderDialog",
             "open-folder",
@@ -882,7 +882,7 @@ fn generated_registry_contains_file_browser_workflow_command_apis() {
             ],
         ),
         (
-            "clay.editor.clientCopySelection",
+            "editor.clientCopySelection",
             "clay:editor",
             "clientCopySelection",
             "clipboard",
@@ -893,7 +893,7 @@ fn generated_registry_contains_file_browser_workflow_command_apis() {
             ],
         ),
         (
-            "clay.editor.clientCutSelection",
+            "editor.clientCutSelection",
             "clay:editor",
             "clientCutSelection",
             "clipboard",
@@ -904,7 +904,7 @@ fn generated_registry_contains_file_browser_workflow_command_apis() {
             ],
         ),
         (
-            "clay.editor.clientPasteClipboard",
+            "editor.clientPasteClipboard",
             "clay:editor",
             "clientPasteClipboard",
             "clipboard",
@@ -915,21 +915,21 @@ fn generated_registry_contains_file_browser_workflow_command_apis() {
             ],
         ),
         (
-            "clay.editor.clientUndo",
+            "editor.clientUndo",
             "clay:editor",
             "clientUndo",
             "undo",
             ["ordinary inverse edit", "editable lease", "raw Deno ops"],
         ),
         (
-            "clay.editor.clientRedo",
+            "editor.clientRedo",
             "clay:editor",
             "clientRedo",
             "redo",
             ["ordinary inverse edit", "editable lease", "raw Deno ops"],
         ),
         (
-            "clay.editor.clientShowOpenDocuments",
+            "editor.clientShowOpenDocuments",
             "clay:editor",
             "clientShowOpenDocuments",
             "multi-document",
@@ -940,7 +940,7 @@ fn generated_registry_contains_file_browser_workflow_command_apis() {
             ],
         ),
         (
-            "clay.editor.clientRequestResync",
+            "editor.clientRequestResync",
             "clay:editor",
             "clientRequestResync",
             "resync",
@@ -951,7 +951,7 @@ fn generated_registry_contains_file_browser_workflow_command_apis() {
             ],
         ),
         (
-            "clay.editor.clientDismissRecovery",
+            "editor.clientDismissRecovery",
             "clay:editor",
             "clientDismissRecovery",
             "recovery",
@@ -962,7 +962,7 @@ fn generated_registry_contains_file_browser_workflow_command_apis() {
             ],
         ),
         (
-            "clay.commands.serverOpenDirectory",
+            "commands.serverOpenDirectory",
             "clay:commands",
             "serverOpenDirectory",
             "open-directory",
@@ -1000,49 +1000,49 @@ fn generated_registry_contains_primitive_gate_runtime_apis() {
 
     for (id, module, export, permission) in [
         (
-            "clay.packages.serverValidatePackageManifest",
+            "packages.serverValidatePackageManifest",
             "clay:packages",
             "serverValidatePackageManifest",
             None,
         ),
         (
-            "clay.packages.serverValidatePackagePermissions",
+            "packages.serverValidatePackagePermissions",
             "clay:packages",
             "serverValidatePackagePermissions",
             None,
         ),
         (
-            "clay.packages.serverLoadPackage",
+            "packages.serverLoadPackage",
             "clay:packages",
             "serverLoadPackage",
             None,
         ),
         (
-            "clay.modes.serverRegisterModePattern",
+            "modes.serverRegisterModePattern",
             "clay:modes",
             "serverRegisterModePattern",
             Some("mode-registration"),
         ),
         (
-            "clay.modes.serverClassifyDocument",
+            "modes.serverClassifyDocument",
             "clay:modes",
             "serverClassifyDocument",
             None,
         ),
         (
-            "clay.modes.serverActivateMajorMode",
+            "modes.serverActivateMajorMode",
             "clay:modes",
             "serverActivateMajorMode",
             Some("mode-activation"),
         ),
         (
-            "clay.commands.serverRegisterCommand",
+            "commands.serverRegisterCommand",
             "clay:commands",
             "serverRegisterCommand",
             Some("command-registration"),
         ),
         (
-            "clay.commands.serverListCommands",
+            "commands.serverListCommands",
             "clay:commands",
             "serverListCommands",
             None,
@@ -1067,14 +1067,14 @@ fn generated_registry_contains_primitive_gate_runtime_apis() {
 
     assert!(
         registry
-            .by_id("clay.modes.serverSelectDocumentManifest")
+            .by_id("modes.serverSelectDocumentManifest")
             .is_none()
     );
     assert!(
         registry
             .by_lookup_tag("packages")
             .iter()
-            .any(|entry| entry.id == "clay.packages.serverValidatePackageManifest")
+            .any(|entry| entry.id == "packages.serverValidatePackageManifest")
     );
 }
 
@@ -1082,14 +1082,14 @@ fn generated_registry_contains_primitive_gate_runtime_apis() {
 fn generated_registry_contains_phase13_sdui_runtime_apis() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
     let expected = [
-        ("clay.sdui.definePanel", "definePanel", false),
-        ("clay.sdui.defineLabel", "defineLabel", false),
-        ("clay.sdui.defineButton", "defineButton", false),
-        ("clay.sdui.defineList", "defineList", false),
-        ("clay.sdui.defineEditorView", "defineEditorView", false),
-        ("clay.sdui.defineFlex", "defineFlex", false),
-        ("clay.sdui.defineStack", "defineStack", false),
-        ("clay.sdui.publishTree", "publishTree", true),
+        ("sdui.definePanel", "definePanel", false),
+        ("sdui.defineLabel", "defineLabel", false),
+        ("sdui.defineButton", "defineButton", false),
+        ("sdui.defineList", "defineList", false),
+        ("sdui.defineEditorView", "defineEditorView", false),
+        ("sdui.defineFlex", "defineFlex", false),
+        ("sdui.defineStack", "defineStack", false),
+        ("sdui.publishTree", "publishTree", true),
     ];
 
     for (id, js_export, is_async) in expected {
@@ -1115,21 +1115,21 @@ fn generated_registry_contains_phase13_sdui_runtime_apis() {
         registry
             .by_lookup_tag("server-driven-ui")
             .iter()
-            .any(|entry| entry.id == "clay.sdui.defineEditorView"),
+            .any(|entry| entry.id == "sdui.defineEditorView"),
         "SDUI helpers should be discoverable by server-driven-ui lookup tag"
     );
     assert!(
         registry
             .by_custom_property("documentId")
             .iter()
-            .any(|entry| entry.id == "clay.sdui.defineEditorView"),
+            .any(|entry| entry.id == "sdui.defineEditorView"),
         "editor-view helper should be discoverable by documentId custom property"
     );
     assert!(
         registry
             .by_custom_property("tree")
             .iter()
-            .any(|entry| entry.id == "clay.sdui.publishTree"),
+            .any(|entry| entry.id == "sdui.publishTree"),
         "publishTree should be discoverable by tree custom property"
     );
 }
@@ -1139,7 +1139,7 @@ fn lookup_finds_api_by_stable_id_and_export() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 
     let by_id = registry
-        .by_id("clay.editor.clientSetCursorStyle")
+        .by_id("editor.clientSetCursorStyle")
         .expect("lookup by stable id");
     assert_eq!(by_id.js_module, "clay:editor");
     assert_eq!(by_id.js_export, "clientSetCursorStyle");
@@ -1151,13 +1151,13 @@ fn lookup_finds_api_by_stable_id_and_export() {
 
     let by_name = registry.by_user_facing_name("set cursor style");
     assert_eq!(by_name.len(), 1);
-    assert_eq!(by_name[0].id, "clay.editor.clientSetCursorStyle");
+    assert_eq!(by_name[0].id, "editor.clientSetCursorStyle");
 
     let server_owned = registry.by_kind_owner(Some("clay-js-api"), Some("server"));
     assert!(
         server_owned
             .iter()
-            .any(|entry| entry.id == "clay.keybindings.bindKey"),
+            .any(|entry| entry.id == "keybindings.bindKey"),
         "kind/owner lookup should include server-owned key binding configuration APIs"
     );
 
@@ -1165,7 +1165,7 @@ fn lookup_finds_api_by_stable_id_and_export() {
     assert!(
         editor_tagged
             .iter()
-            .any(|entry| entry.id == "clay.editor.clientSetCursorStyle"),
+            .any(|entry| entry.id == "editor.clientSetCursorStyle"),
         "lookup tag search should find editor configuration APIs"
     );
 }
@@ -1179,7 +1179,7 @@ fn lookup_finds_configuration_by_custom_property() {
         assert!(
             matches
                 .iter()
-                .any(|entry| entry.id == "clay.editor.clientSetCursorStyle"),
+                .any(|entry| entry.id == "editor.clientSetCursorStyle"),
             "custom property lookup should find cursor style by {property}"
         );
     }
@@ -1189,7 +1189,7 @@ fn lookup_finds_configuration_by_custom_property() {
 fn cursor_style_custom_properties_are_complete() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
     let cursor_style = registry
-        .by_id("clay.editor.clientSetCursorStyle")
+        .by_id("editor.clientSetCursorStyle")
         .expect("cursor style customization API");
 
     let shape = cursor_style
@@ -1243,10 +1243,7 @@ fn cursor_style_custom_properties_are_complete() {
 fn editor_customization_has_no_external_authority() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 
-    for id in [
-        "clay.editor.clientSetCursorStyle",
-        "clay.editor.clientSetViewport",
-    ] {
+    for id in ["editor.clientSetCursorStyle", "editor.clientSetViewport"] {
         let entry = registry.by_id(id).expect("editor customization entry");
         assert!(
             entry.security.contains("document mutation"),
@@ -1279,7 +1276,7 @@ fn configuration_lookup_finds_cursor_customization() {
         registry
             .by_lookup_tag("cursorstylecustomization")
             .iter()
-            .any(|entry| entry.id == "clay.editor.clientSetCursorStyle"),
+            .any(|entry| entry.id == "editor.clientSetCursorStyle"),
         "cursor style customization should be discoverable by lookup tag"
     );
     for property in ["shape", "blink", "stopBlinkOnTyping"] {
@@ -1287,7 +1284,7 @@ fn configuration_lookup_finds_cursor_customization() {
             registry
                 .by_custom_property(property)
                 .iter()
-                .any(|entry| entry.id == "clay.editor.clientSetCursorStyle"),
+                .any(|entry| entry.id == "editor.clientSetCursorStyle"),
             "cursor style customization should be discoverable by {property} custom property"
         );
     }
@@ -1298,13 +1295,13 @@ fn lookup_lists_empty_default_key_bindings() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 
     for id in [
-        "clay.keybindings.bindKey",
-        "clay.keybindings.unbindKey",
-        "clay.keybindings.listKeyBindings",
-        "clay.editor.clientSetCursorStyle",
-        "clay.editor.clientSelectPrevMatch",
-        "clay.editor.clientKeepSelection",
-        "clay.editor.clientRemoveSelection",
+        "keybindings.bindKey",
+        "keybindings.unbindKey",
+        "keybindings.listKeyBindings",
+        "editor.clientSetCursorStyle",
+        "editor.clientSelectPrevMatch",
+        "editor.clientKeepSelection",
+        "editor.clientRemoveSelection",
     ] {
         let entry = registry
             .by_id(id)
@@ -1318,10 +1315,10 @@ fn lookup_lists_empty_default_key_bindings() {
     let escape = registry.by_key_binding("Escape");
     assert_eq!(escape.len(), 2);
     let escape_ids: Vec<&str> = escape.iter().map(|entry| entry.id.as_str()).collect();
-    assert!(escape_ids.contains(&"clay.application.quit"));
+    assert!(escape_ids.contains(&"application.quit"));
     // Plan 071 task 9: the editor consumes Escape first (menu > snippet >
     // cancel multiple selections); app-level quit remains the fallback.
-    assert!(escape_ids.contains(&"clay.editor.clientCancelMultipleSelections"));
+    assert!(escape_ids.contains(&"editor.clientCancelMultipleSelections"));
 }
 
 #[test]
@@ -1329,9 +1326,9 @@ fn keybinding_configuration_apis_have_empty_defaults() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 
     for (id, export) in [
-        ("clay.keybindings.bindKey", "bindKey"),
-        ("clay.keybindings.unbindKey", "unbindKey"),
-        ("clay.keybindings.listKeyBindings", "listKeyBindings"),
+        ("keybindings.bindKey", "bindKey"),
+        ("keybindings.unbindKey", "unbindKey"),
+        ("keybindings.listKeyBindings", "listKeyBindings"),
     ] {
         let entry = registry.by_id(id).expect("key binding API is generated");
         assert_eq!(entry.js_module, "clay:keybindings");
@@ -1356,7 +1353,7 @@ fn keybinding_configuration_custom_properties_are_queryable() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 
     let bind_key = registry
-        .by_id("clay.keybindings.bindKey")
+        .by_id("keybindings.bindKey")
         .expect("bindKey registry entry");
     let bind_key_properties: BTreeSet<_> = bind_key
         .custom_properties
@@ -1373,7 +1370,7 @@ fn keybinding_configuration_custom_properties_are_queryable() {
         assert!(
             matches
                 .iter()
-                .any(|entry| entry.id == "clay.keybindings.bindKey"),
+                .any(|entry| entry.id == "keybindings.bindKey"),
             "custom property lookup should find bindKey by {property}"
         );
     }
@@ -1381,7 +1378,7 @@ fn keybinding_configuration_custom_properties_are_queryable() {
         registry
             .by_custom_property("scope")
             .iter()
-            .any(|entry| entry.id == "clay.keybindings.listKeyBindings"),
+            .any(|entry| entry.id == "keybindings.listKeyBindings"),
         "scope lookup should include listKeyBindings"
     );
 }
@@ -1444,10 +1441,10 @@ fn configuration_entrypoint_is_documented_and_indexed() {
 
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
     let load_module = registry
-        .by_id("clay.configuration.loadConfigurationModule")
+        .by_id("configuration.loadConfigurationModule")
         .expect("loadConfigurationModule generated entry");
     let state = registry
-        .by_id("clay.configuration.getConfigurationState")
+        .by_id("configuration.getConfigurationState")
         .expect("getConfigurationState generated entry");
 
     assert_eq!(load_module.js_module, "clay:configuration");
@@ -1502,13 +1499,20 @@ fn configuration_module_loading_is_runtime_backed_no_external_authority() {
         registry
             .by_lookup_tag("configuration")
             .iter()
-            .any(|entry| entry.id == "clay.configuration.loadConfigurationModule")
+            .any(|entry| entry.id == "configuration.loadConfigurationModule")
     );
     assert!(
         registry
             .by_custom_property("path")
             .iter()
-            .any(|entry| entry.id == "clay.configuration.loadConfigurationModule")
+            .any(|entry| entry.id == "configuration.loadConfigurationModule")
+    );
+    assert!(
+        registry
+            .by_custom_property("optional")
+            .iter()
+            .any(|entry| entry.id == "configuration.loadConfigurationModule"),
+        "loadConfigurationModule must document the optional custom property"
     );
 }
 
@@ -1516,10 +1520,10 @@ fn configuration_module_loading_is_runtime_backed_no_external_authority() {
 fn lookup_is_read_only() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 
-    assert!(registry.by_id("clay.keybindings.bindKey").is_some());
+    assert!(registry.by_id("keybindings.bindKey").is_some());
     assert!(
         registry
-            .by_id("clay.configuration.loadConfigurationModule")
+            .by_id("configuration.loadConfigurationModule")
             .is_some()
     );
     assert!(
@@ -1605,7 +1609,7 @@ fn diagnostics_api_docs_and_generated_registry_are_fresh() {
 
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
     let diagnostics = registry
-        .by_id("clay.diagnostics.serverPublishDiagnostics")
+        .by_id("diagnostics.serverPublishDiagnostics")
         .expect("serverPublishDiagnostics is generated");
     assert_eq!(diagnostics.js_module, "clay:diagnostics");
     assert_eq!(diagnostics.js_export, "serverPublishDiagnostics");
@@ -1700,21 +1704,21 @@ fn configuration_api_covers_phase20_4_needs_or_defers() {
         std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
             .expect("read configuration doc");
     assert!(
-        configuration.contains("clay.theme.setTheme"),
+        configuration.contains("theme.setTheme"),
         "configuration.md must link setTheme"
     );
     assert!(
-        configuration.contains("clay.theme.setTypography"),
+        configuration.contains("theme.setTypography"),
         "configuration.md must link setTypography"
     );
 
     // No new Phase 20.4 configuration API was introduced.
     let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
     for deferred_id in [
-        "clay.theme.setDensity",
-        "clay.ui.setComponentState",
-        "clay.theme.setComponentState",
-        "clay.ui.setSpacingRhythm",
+        "theme.setDensity",
+        "ui.setComponentState",
+        "theme.setComponentState",
+        "ui.setSpacingRhythm",
     ] {
         assert!(
             registry.by_id(deferred_id).is_none(),
@@ -1730,7 +1734,7 @@ fn configuration_api_no_authority_grant() {
     // workspace authority. Their security metadata must deny each authority.
     let root = repository_root();
     let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
-    for id in ["clay.theme.setTheme", "clay.theme.setTypography"] {
+    for id in ["theme.setTheme", "theme.setTypography"] {
         let entry = registry
             .by_id(id)
             .unwrap_or_else(|| panic!("{id} must be a registered configuration API"));
@@ -1752,17 +1756,17 @@ fn clay_js_api_inventory_unchanged_or_documented() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
     // No Phase 20.4 helper or interaction primitive may appear as a public API id.
     for absent_id in [
-        "clay.ui.componentStateColor",
-        "clay.ui.interactionState",
-        "clay.theme.spacingRhythm",
-        "clay.ui.spacingRhythm",
-        "clay.editor.scrollbarState",
-        "clay.ui.scrollbarState",
-        "clay.ui.focusedAction",
-        "clay.ui.pointerState",
-        "clay.theme.fromUiTheme",
-        "clay.ui.themeStyle",
-        "clay.ui.disabled",
+        "ui.componentStateColor",
+        "ui.interactionState",
+        "theme.spacingRhythm",
+        "ui.spacingRhythm",
+        "editor.scrollbarState",
+        "ui.scrollbarState",
+        "ui.focusedAction",
+        "ui.pointerState",
+        "theme.fromUiTheme",
+        "ui.themeStyle",
+        "ui.disabled",
     ] {
         assert!(
             registry.by_id(absent_id).is_none(),
@@ -1800,16 +1804,16 @@ fn phase22_8_programmatic_surface_inventory_is_closed() {
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
 
     for id in [
-        "clay.commands.serverExecuteCommand",
-        "clay.commands.serverOpenFile",
-        "clay.commands.serverOpenDirectory",
-        "clay.documents.serverOpenDocument",
-        "clay.documents.serverListDocuments",
-        "clay.workspace.serverListWorkspaceRoots",
-        "clay.workspace.serverAddWorkspaceRoot",
-        "clay.workspace.clientOpenFolderDialog",
-        "clay.shell.clientTabNew",
-        "clay.keybindings.bindKey",
+        "commands.serverExecuteCommand",
+        "commands.serverOpenFile",
+        "commands.serverOpenDirectory",
+        "documents.serverOpenDocument",
+        "documents.serverListDocuments",
+        "workspace.serverListWorkspaceRoots",
+        "workspace.serverAddWorkspaceRoot",
+        "workspace.clientOpenFolderDialog",
+        "shell.clientTabNew",
+        "keybindings.bindKey",
     ] {
         let entry = registry
             .by_id(id)
@@ -1829,15 +1833,15 @@ fn phase22_8_programmatic_surface_inventory_is_closed() {
     }
 
     for absent_id in [
-        "clay.tabs.serverCreateTab",
-        "clay.tabs.serverSelectTabWorkspace",
-        "clay.workspace.serverOpenDocumentInTab",
-        "clay.documents.serverOpenDocumentInTab",
-        "clay.documents.serverListDocumentsForTab",
-        "clay.workspace.serverToggleFileBrowser",
+        "tabs.serverCreateTab",
+        "tabs.serverSelectTabWorkspace",
+        "workspace.serverOpenDocumentInTab",
+        "documents.serverOpenDocumentInTab",
+        "documents.serverListDocumentsForTab",
+        "workspace.serverToggleFileBrowser",
         // This is a fixed built-in command ID routed through bindKey, not a
         // callable facade API or a second configuration surface.
-        "clay.workspace.toggleFileBrowser",
+        "workspace.toggleFileBrowser",
     ] {
         assert!(
             registry.by_id(absent_id).is_none(),
@@ -1849,7 +1853,7 @@ fn phase22_8_programmatic_surface_inventory_is_closed() {
         std::fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
             .expect("read bindKey API doc");
     assert!(
-        keybindings.contains("clay.workspace.toggleFileBrowser"),
+        keybindings.contains("workspace.toggleFileBrowser"),
         "bindKey docs must document the fixed workspace toggle command"
     );
     let configuration =
@@ -1868,11 +1872,11 @@ fn configuration_api_documents_phase22_8_workspace_surface_without_new_keys() {
     let root = repository_root();
     let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
     let bind_key = registry
-        .by_id("clay.keybindings.bindKey")
+        .by_id("keybindings.bindKey")
         .expect("bindKey must remain a public configuration API");
     assert!(bind_key.key_bindings.is_empty());
     let client_tab_new = registry
-        .by_id("clay.shell.clientTabNew")
+        .by_id("shell.clientTabNew")
         .expect("clientTabNew must remain a public configuration API");
     assert_eq!(client_tab_new.key_bindings, vec!["Ctrl+T".to_string()]);
     let client_tab_new_doc =
@@ -1894,8 +1898,8 @@ fn configuration_api_documents_phase22_8_workspace_surface_without_new_keys() {
     for required in [
         "Phase 22.8 per-tab workspace configuration verification",
         "adds no new `clay:configuration` export",
-        "clay.shell.clientTabNew",
-        "clay.workspace.toggleFileBrowser",
+        "shell.clientTabNew",
+        "workspace.toggleFileBrowser",
         "fileBrowser.visible",
         "layout.json",
         "Configuration evaluation remains startup/reload work",
@@ -1910,7 +1914,7 @@ fn configuration_api_documents_phase22_8_workspace_surface_without_new_keys() {
         .expect("read canonical init.js example");
     assert_eq!(
         example
-            .matches("bindKey(\"Ctrl+B\", \"clay.workspace.toggleFileBrowser\"")
+            .matches("bindKey(\"Ctrl+B\", \"workspace.toggleFileBrowser\"")
             .count(),
         1,
         "canonical init.js must contain one active Ctrl+B workspace-toggle example"
@@ -1937,8 +1941,8 @@ fn configuration_api_documents_phase20_6_appearance_and_precedence() {
     // setAppearance is registry-public, in clay:theme, with `appearance` in
     // custom_properties (behavior-changing setting present in custom_properties).
     let appearance = registry
-        .by_id("clay.theme.setAppearance")
-        .expect("clay.theme.setAppearance must be a registered public configuration API");
+        .by_id("theme.setAppearance")
+        .expect("theme.setAppearance must be a registered public configuration API");
     assert_eq!(appearance.visibility, "public");
     assert_eq!(appearance.js_module, "clay:theme");
     assert_eq!(appearance.phase, "Phase 20.6");
@@ -1961,7 +1965,7 @@ fn configuration_api_documents_phase20_6_appearance_and_precedence() {
     for denied in denied_configuration_authorities() {
         assert!(
             appearance.security.contains(denied),
-            "clay.theme.setAppearance must deny {denied} authority"
+            "theme.setAppearance must deny {denied} authority"
         );
     }
 
@@ -1970,7 +1974,7 @@ fn configuration_api_documents_phase20_6_appearance_and_precedence() {
         std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
             .expect("read configuration doc");
     assert!(
-        configuration.contains("clay.theme.setAppearance"),
+        configuration.contains("theme.setAppearance"),
         "configuration.md must link setAppearance"
     );
     assert!(
@@ -2003,7 +2007,7 @@ fn configuration_api_documents_phase20_6_appearance_and_precedence() {
     // is a clay:theme API, and clay:configuration stays closed (setPackageOption
     // + loadConfigurationModule + getConfigurationState only).
     assert!(
-        registry.by_id("clay.configuration.setAppearance").is_none(),
+        registry.by_id("configuration.setAppearance").is_none(),
         "appearance must not be a clay:configuration API; it lives in clay:theme"
     );
 }

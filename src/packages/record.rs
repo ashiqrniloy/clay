@@ -521,7 +521,7 @@ pub struct PackagePerformanceMetadata {
 /// A declared Clay JS API dependency of the package.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageApiDependency {
-    /// Stable Clay JS API ID (e.g. `clay.modes.serverRegisterModePattern`).
+    /// Stable Clay JS API ID (e.g. `modes.serverRegisterModePattern`).
     pub api_id: String,
 }
 
@@ -812,42 +812,36 @@ fn validate_api_dependency_permissions(
 ) -> Result<(), PackageRecordError> {
     for dependency in dependencies {
         let required = match dependency.api_id.as_str() {
-            "clay.packages.serverLoadPackage" => None,
-            "clay.behavior.buildCodeEditingManifest" => None,
-            "clay.modes.serverRegisterModePattern" => Some(PackagePermission::ModeRegistration),
-            "clay.modes.serverActivateMajorMode" => Some(PackagePermission::ModeActivation),
-            "clay.commands.serverRegisterCommand" => Some(PackagePermission::CommandRegistration),
-            "clay.completion.serverRegisterCompletionProvider" => {
+            "packages.serverLoadPackage" => None,
+            "behavior.buildCodeEditingManifest" => None,
+            "modes.serverRegisterModePattern" => Some(PackagePermission::ModeRegistration),
+            "modes.serverActivateMajorMode" => Some(PackagePermission::ModeActivation),
+            "commands.serverRegisterCommand" => Some(PackagePermission::CommandRegistration),
+            "completion.serverRegisterCompletionProvider" => {
                 Some(PackagePermission::CompletionProvider)
             }
-            "clay.completion.completionTriggerCharactersFromEditorRules" => None,
-            "clay.parse.serverRegisterParseHandler"
-            | "clay.language.serverRegisterDocumentAnalyzer" => {
+            "completion.completionTriggerCharactersFromEditorRules" => None,
+            "parse.serverRegisterParseHandler" | "language.serverRegisterDocumentAnalyzer" => {
                 Some(PackagePermission::ParseDocument)
             }
-            "clay.language-server.startLanguageServerSession" => {
-                Some(PackagePermission::LanguageServer)
-            }
-            "clay.decorations.serverPublishDecorations"
-            | "clay.diagnostics.serverPublishDiagnostics" => {
+            "language-server.startLanguageServerSession" => Some(PackagePermission::LanguageServer),
+            "decorations.serverPublishDecorations" | "diagnostics.serverPublishDiagnostics" => {
                 Some(PackagePermission::RenderDecorations)
             }
-            "clay.syntax.serverRegisterSyntaxGrammar" => Some(PackagePermission::ParseDocument),
-            "clay.ui.serverRegisterPanelContribution"
-            | "clay.ui.serverRegisterComponentContribution"
-            | "clay.ui.serverRegisterTransientOverlayContribution"
-            | "clay.ui.serverRegisterThemeToken"
-            | "clay.ui.serverRegisterInputContribution"
-            | "clay.ui.serverRegisterUiStateScope" => None,
-            "clay.ui.serverSetLayoutOverride" | "clay.configuration.setPackageOption" => {
+            "syntax.serverRegisterSyntaxGrammar" => Some(PackagePermission::ParseDocument),
+            "ui.serverRegisterPanelContribution"
+            | "ui.serverRegisterComponentContribution"
+            | "ui.serverRegisterTransientOverlayContribution"
+            | "ui.serverRegisterThemeToken"
+            | "ui.serverRegisterInputContribution"
+            | "ui.serverRegisterUiStateScope" => None,
+            "ui.serverSetLayoutOverride" | "configuration.setPackageOption" => {
                 Some(PackagePermission::PackageConfiguration)
             }
             // Read-only Git discovery and inert SDUI publication are
             // server-owned: they require no package permission because Git
             // authority never reaches package code.
-            "clay.git.serverListGitStatuses"
-            | "clay.git.serverRefreshGitStatus"
-            | "clay.sdui.publishTree" => None,
+            "git.serverListGitStatuses" | "git.serverRefreshGitStatus" | "sdui.publishTree" => None,
             _ => {
                 return Err(ctx.error(
                     PackageRecordRule::InvalidApiDependency,
@@ -4971,8 +4965,8 @@ mod tests {
                 "modes": ["markdown"],
                 "docs": "./docs/index.md",
                 "apiDependencies": [
-                    "clay.modes.serverRegisterModePattern",
-                    "clay.commands.serverRegisterCommand"
+                    "modes.serverRegisterModePattern",
+                    "commands.serverRegisterCommand"
                 ],
                 "contributions": {
                     "commands": [{
@@ -5002,7 +4996,7 @@ mod tests {
         assert_eq!(record.api_dependencies.len(), 2);
         assert_eq!(
             record.api_dependencies[0].api_id,
-            "clay.modes.serverRegisterModePattern"
+            "modes.serverRegisterModePattern"
         );
         assert_eq!(record.contributions.commands.len(), 1);
         assert_eq!(

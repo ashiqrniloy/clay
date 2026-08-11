@@ -272,13 +272,13 @@ pub(crate) enum ApprovalMismatch {
 impl ApprovalMismatch {
     pub fn code(&self) -> &'static str {
         match self {
-            Self::NotFound => "clay.package_approval.missing",
-            Self::Revoked => "clay.package_approval.revoked",
-            Self::IdentityChanged { .. } => "clay.package_approval.identity_changed",
-            Self::CapabilityExpansion { .. } => "clay.package_approval.capability_expansion",
-            Self::ProcessExpansion { .. } => "clay.package_approval.process_expansion",
-            Self::RelationExpansion { .. } => "clay.package_approval.relation_expansion",
-            Self::ReplacementExpansion { .. } => "clay.package_approval.replacement_expansion",
+            Self::NotFound => "package_approval.missing",
+            Self::Revoked => "package_approval.revoked",
+            Self::IdentityChanged { .. } => "package_approval.identity_changed",
+            Self::CapabilityExpansion { .. } => "package_approval.capability_expansion",
+            Self::ProcessExpansion { .. } => "package_approval.process_expansion",
+            Self::RelationExpansion { .. } => "package_approval.relation_expansion",
+            Self::ReplacementExpansion { .. } => "package_approval.replacement_expansion",
         }
     }
 }
@@ -296,13 +296,13 @@ impl std::fmt::Display for ApprovalStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Corrupt { reason } => {
-                write!(f, "clay.package_approval_store.corrupt: {reason}")
+                write!(f, "package_approval_store.corrupt: {reason}")
             }
             Self::UnsafePermissions => write!(
                 f,
-                "clay.package_approval_store.unsafe_permissions: approval store must be owner-only"
+                "package_approval_store.unsafe_permissions: approval store must be owner-only"
             ),
-            Self::Io(error) => write!(f, "clay.package_approval_store.io: {error}"),
+            Self::Io(error) => write!(f, "package_approval_store.io: {error}"),
         }
     }
 }

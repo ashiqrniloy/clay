@@ -59,7 +59,7 @@ fn grammar_package(prefix: &str, language_id: &str, extension: &str) -> Value {
             "permissions": ["parse-document", "render-decorations"],
             "modes": [],
             "docs": "./docs/index.md",
-            "apiDependencies": ["clay.syntax.serverRegisterSyntaxGrammar"],
+            "apiDependencies": ["syntax.serverRegisterSyntaxGrammar"],
             "contributions": {
                 "syntaxGrammars": [{
                     "languageId": language_id,
@@ -4144,10 +4144,10 @@ fn first_party_language_packages_load_with_required_assets() {
         assert!(contributions.package_options.is_empty());
 
         for api_id in [
-            "clay.syntax.serverRegisterSyntaxGrammar",
-            "clay.modes.serverRegisterModePattern",
-            "clay.commands.serverRegisterCommand",
-            "clay.completion.serverRegisterCompletionProvider",
+            "syntax.serverRegisterSyntaxGrammar",
+            "modes.serverRegisterModePattern",
+            "commands.serverRegisterCommand",
+            "completion.serverRegisterCompletionProvider",
         ] {
             assert!(
                 record

@@ -18,8 +18,8 @@ mkdir sub && echo "nested" > sub/c.txt
 Minimal init.js additions (or use `examples/init.js`):
 
 ```js
-bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
-bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
+bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 ```
 
 Open `/tmp/clay-manual` as the workspace.

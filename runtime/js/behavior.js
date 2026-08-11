@@ -6,7 +6,7 @@
 const ops = globalThis.Deno?.core?.ops;
 function requireOps() {
     if (!ops) {
-        throw new Error("clay.behavior.runtime_unavailable: Clay behavior APIs require the server runtime");
+        throw new Error("behavior.runtime_unavailable: Clay behavior APIs require the server runtime");
     }
     return ops;
 }

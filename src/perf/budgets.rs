@@ -255,11 +255,11 @@ pub const SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS: u64 = 16;
 // evaluation (configuration loading, controlled module evaluation, package
 // loadEntry). A `while (true) {}` or runaway init.js cannot hang startup beyond
 // this; the isolate is terminated via `v8::IsolateHandle::terminate_execution`
-// and surfaced as a `clay.runtime.timeout` diagnostic.
+// and surfaced as a `runtime.timeout` diagnostic.
 pub const JS_RUNTIME_EVALUATION_TIMEOUT_MS: u64 = 5000;
 // Hard V8 heap ceiling for Clay's in-process first-party JavaScript runtime.
 // Server-owned security budget, not user configuration. Near-limit callback
-// terminates execution and surfaces `clay.runtime.heap_limit`.
+// terminates execution and surfaces `runtime.heap_limit`.
 pub const JS_RUNTIME_HEAP_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 pub const RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS: u64 = 25;
 pub const MODE_ACTIVATION_P95_BUDGET_MS: u64 = 100;

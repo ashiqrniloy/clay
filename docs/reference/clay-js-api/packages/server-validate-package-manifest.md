@@ -1,5 +1,5 @@
 ---
-id: clay.packages.serverValidatePackageManifest
+id: packages.serverValidatePackageManifest
 kind: clay-js-api
 js_module: "clay:packages"
 js_export: serverValidatePackageManifest
@@ -33,7 +33,7 @@ custom_properties:
     default: optional
     description: Behavior-changing setting `loadEntry` for this primitive gate API.
 security: Validates package identity, semver, apiPrefix, permissions, modes, entry metadata, and prohibited authority metadata through server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, package installation, enable/disable, or package execution authority.
-agent_guidance: Use `clay.packages.serverValidatePackageManifest` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `packages.serverValidatePackageManifest` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [js-api, packagemanifestvalidation, packages]
 app_visible: true
 help_visible: true
@@ -80,7 +80,7 @@ const validated = serverValidatePackageManifest({ name: "@clay/markdown", versio
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.packages.serverValidatePackageManifest` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `packages.serverValidatePackageManifest` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -109,7 +109,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.packages.serverValidatePackageManifest` when the user asks for Validate Package Manifest through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `packages.serverValidatePackageManifest` when the user asks for Validate Package Manifest through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -120,7 +120,7 @@ Use `clay.packages.serverValidatePackageManifest` when the user asks for Validat
 
 ## Lookup metadata
 
-- Stable ID: `clay.packages.serverValidatePackageManifest`
+- Stable ID: `packages.serverValidatePackageManifest`
 - User-facing name: Validate Package Manifest
 - Kind: `clay-js-api`
 - Module/export: `clay:packages` / `serverValidatePackageManifest`

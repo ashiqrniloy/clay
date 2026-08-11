@@ -61,7 +61,7 @@ The headline finding is that most of the file browser can be built without new R
 
 - `runtime/js/ui.js` exposes `serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterTransientOverlayContribution`, and related `clay:ui` facades. The component catalog includes `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, and `statusItem`.
 - Tree-like rendering can be composed from generic `list`, `flex`/`stack`, and `label`/`button` components; no file-browser-specific Rust tree widget is required for the smallest working product.
-- `UiActionIntent` carries only a registered command ID and bounded primitive arguments. File browser actions (open, reveal) will normalize to registered commands such as `clay.workspace.openFile` and `clay.workspace.revealInTree`.
+- `UiActionIntent` carries only a registered command ID and bounded primitive arguments. File browser actions (open, reveal) will normalize to registered commands such as `workspace.openFile` and `workspace.revealInTree`.
 - `docs/wiki/modules/slot-aware-package-ui.md` documents the runtime-backed contribution registry, component catalog, fixed panel and transient overlay composition, action validation, and security boundaries.
 
 ### Document classification and fallback modes
@@ -135,7 +135,7 @@ Implementation implications:
 The file browser UI is Clay-owned, and the left fixed-panel file tree and the bottom transient fuzzy-open workflow do not require new primitive categories. They are compositions of existing primitives:
 
 - **Left fixed panel:** `FixedSlotId::Left` + a Clay-owned fixed panel populated by inert `FileListEntry` data rendered through the component catalog (`list`, `flex`/`stack`, `label`, `button`). No file-browser-specific Rust tree widget.
-- **Bottom fuzzy-open:** `TransientMenuSession` whose items are bounded file-path metadata. Query filtering runs locally on already-installed metadata. Activation emits a `CommandExecution` request for `clay.workspace.openFile` or `clay.workspace.revealInTree`.
+- **Bottom fuzzy-open:** `TransientMenuSession` whose items are bounded file-path metadata. Query filtering runs locally on already-installed metadata. Activation emits a `CommandExecution` request for `workspace.openFile` or `workspace.revealInTree`.
 - **Open/reveal actions:** registered commands validated by `CommandExecutor`, resolving through `WorkspaceState::open_existing_file` for in-root files and `open_selected_file` for out-of-root picks.
 
 This matches the roadmap's "Clay-owned file browser UI" requirement while preserving the primitive-first rule.

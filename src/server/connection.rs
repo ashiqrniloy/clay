@@ -42,6 +42,7 @@ use super::{
         LanguageIntelligenceCoordinator, LanguageIntelligenceCoordinatorError,
         LanguageIntelligenceDocumentWindow,
     },
+    output_router::OutputRouter,
     parse_coordinator::{ParseCoordinator, ParseCoordinatorError, ParseScheduleRequest},
     sdui::{StaticSduiState, sdui_action_response},
     tab_registry::TabRegistry,
@@ -61,6 +62,7 @@ use crate::shell::file_browser::FileBrowserState;
 pub(crate) struct RuntimeDiagnosticStore {
     entries: std::collections::VecDeque<RuntimeDiagnostic>,
     dropped: u64,
+    live_router: Arc<std::sync::Mutex<OutputRouter<RuntimeDiagnostic>>>,
 }
 
 impl RuntimeDiagnosticStore {
@@ -73,6 +75,21 @@ impl RuntimeDiagnosticStore {
             self.dropped = self.dropped.saturating_add(1);
         }
         self.entries.push_back(diagnostic);
+    }
+
+    pub(crate) fn publish(&mut self, diagnostic: RuntimeDiagnostic) {
+        if self.entries.back() == Some(&diagnostic) {
+            return;
+        }
+        self.push(diagnostic.clone());
+        self.live_router
+            .lock()
+            .expect("runtime diagnostic router lock poisoned")
+            .broadcast(&diagnostic);
+    }
+
+    pub(crate) fn live_router(&self) -> Arc<std::sync::Mutex<OutputRouter<RuntimeDiagnostic>>> {
+        Arc::clone(&self.live_router)
     }
 
     pub(crate) fn snapshot(&self) -> Vec<RuntimeDiagnostic> {
@@ -91,6 +108,7 @@ impl RuntimeDiagnosticStore {
 struct ConnectionOutputSubscriptions {
     parse_coordinator: ParseCoordinator,
     document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
+    runtime_diagnostic_router: Arc<std::sync::Mutex<OutputRouter<RuntimeDiagnostic>>>,
     client_id: ClientId,
 }
 
@@ -98,6 +116,10 @@ impl Drop for ConnectionOutputSubscriptions {
     fn drop(&mut self) {
         self.parse_coordinator.unsubscribe_client(self.client_id);
         self.document_analysis.unsubscribe_client(self.client_id);
+        self.runtime_diagnostic_router
+            .lock()
+            .expect("runtime diagnostic router lock poisoned")
+            .unsubscribe_client(self.client_id);
     }
 }
 
@@ -440,9 +462,15 @@ where
     let (mut parse_updates_rx, mut parse_diagnostics_rx) =
         parse_coordinator.subscribe_client(client_id);
     let mut analysis_rx = document_analysis.subscribe_client(client_id);
+    let runtime_diagnostic_router = runtime_diagnostics.lock().await.live_router();
+    let mut runtime_diagnostics_rx = runtime_diagnostic_router
+        .lock()
+        .expect("runtime diagnostic router lock poisoned")
+        .subscribe_client(client_id);
     let _subscriptions = ConnectionOutputSubscriptions {
         parse_coordinator: parse_coordinator.clone(),
         document_analysis: document_analysis.clone(),
+        runtime_diagnostic_router,
         client_id,
     };
     let bootstrap_document = Arc::clone(&document);
@@ -688,6 +716,17 @@ where
                 continue;
             }
             diagnostic = parse_diagnostics_rx.recv() => {
+                if let Some(diagnostic) = diagnostic {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::RuntimeDiagnostic(diagnostic),
+                        )
+                        .await?;
+                }
+                continue;
+            }
+            diagnostic = runtime_diagnostics_rx.recv() => {
                 if let Some(diagnostic) = diagnostic {
                     codec
                         .write_server_message(
@@ -961,7 +1000,7 @@ where
                             &mut stream,
                             &ServerMessage::RuntimeDiagnostic(
                                 RuntimeDiagnostic::error(
-                                    "clay.client.selected_file_open.unauthorized",
+                                    "client.selected_file_open.unauthorized",
                                     "OpenSelectedFile requires a valid server-issued file-open capability token.",
                                 ),
                             ),
@@ -1001,7 +1040,7 @@ where
                         .write_server_message(
                             &mut stream,
                             &ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                                "clay.client.selected_folder_open.unauthorized",
+                                "client.selected_folder_open.unauthorized",
                                 "AddSelectedWorkspaceRoot requires a valid server-issued selected-path capability token.",
                             )),
                         )
@@ -1985,6 +2024,9 @@ async fn execute_command_intent(
                             .next()
                             .map(ServerMessage::RuntimeDiagnostic);
                     }
+                    if let Some(diagnostic) = outcome.diagnostics.into_iter().next() {
+                        return Some(ServerMessage::RuntimeDiagnostic(diagnostic));
+                    }
                 }
                 Ok(PersistOutcome::Acknowledged) => {}
                 Err(message) => {
@@ -2006,16 +2048,22 @@ async fn execute_command_intent(
             });
         };
         return match server.execute_reload_command(request).await {
-            Ok(outcome) if outcome.reloaded => Some(ServerMessage::RuntimeDiagnostic(
-                crate::protocol::RuntimeDiagnostic {
-                    severity: crate::protocol::DiagnosticSeverity::Info,
-                    code: "clay.runtime.reload_succeeded".to_string(),
-                    message: format!(
-                        "Runtime configuration reloaded as generation {}.",
-                        outcome.active_generation_id
-                    ),
-                },
-            )),
+            Ok(outcome) if outcome.reloaded => {
+                if let Some(diagnostic) = outcome.diagnostics.into_iter().next() {
+                    Some(ServerMessage::RuntimeDiagnostic(diagnostic))
+                } else {
+                    Some(ServerMessage::RuntimeDiagnostic(
+                        crate::protocol::RuntimeDiagnostic {
+                            severity: crate::protocol::DiagnosticSeverity::Info,
+                            code: "runtime.reload_succeeded".to_string(),
+                            message: format!(
+                                "Runtime configuration reloaded as generation {}.",
+                                outcome.active_generation_id
+                            ),
+                        },
+                    ))
+                }
+            }
             Ok(outcome) => outcome
                 .diagnostics
                 .into_iter()
@@ -3290,7 +3338,7 @@ async fn refresh_native_syntax_after_edit(
         .parse_window_after_edit(&meta.package_prefix, &meta.mode_id, policy, accepted_edit)
         .map_err(|message| {
             RuntimeDiagnostic::error(
-                "clay.parse.window_failed",
+                "parse.window_failed",
                 format!("Parse window failed: {message}"),
             )
         })?;
@@ -3436,7 +3484,7 @@ fn schedule_parse_snapshot(
     match parse_coordinator.schedule_parse_with_windows(request, vec![window], Some(policy)) {
         Ok(_) | Err(ParseCoordinatorError::HandlerNotRegistered { .. }) => Ok(None),
         Err(error) => Err(RuntimeDiagnostic::error(
-            "clay.parse.viewport_activation_failed",
+            "parse.viewport_activation_failed",
             format!("Viewport parse scheduling failed: {error:?}"),
         )),
     }
@@ -3779,13 +3827,13 @@ await loadPackage("@clay/markdown");"#,
     #[tokio::test]
     async fn sdui_actions_and_keybinding_intents_share_command_execution_path() {
         let sdui_request = sdui_command_request(&SduiActionIntent::command(
-            "clay.controlCenter.open",
+            "controlCenter.open",
             SduiActionSource::Button {
                 node_id: SduiNodeId(5),
             },
         ));
         let keybinding_request = CommandExecutionRequest {
-            command_id: "clay.controlCenter.open".to_string(),
+            command_id: "controlCenter.open".to_string(),
             arguments: serde_json::Value::Null,
             target: CommandExecutionTarget::ActiveDocument { document_id: 1 },
             provenance: None,
@@ -3825,7 +3873,7 @@ await loadPackage("@clay/markdown");"#,
 
         let response = execute_command_intent(
             CommandExecutionRequest {
-                command_id: "clay.runtime.reloadConfiguration".to_string(),
+                command_id: "runtime.reloadConfiguration".to_string(),
                 arguments: serde_json::Value::Null,
                 target: CommandExecutionTarget::Global,
                 provenance: None,
@@ -3843,7 +3891,7 @@ await loadPackage("@clay/markdown");"#,
         assert!(matches!(
             response,
             ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic { code, .. })
-                if code == "clay.runtime.reload_succeeded"
+                if code == "runtime.reload_succeeded"
         ));
         assert_eq!(server.runtime_generation.generation_id().await, 2);
         let _ = fs::remove_dir_all(root);
@@ -3997,7 +4045,7 @@ await loadPackage("@clay/markdown");"#,
         let document = document_state();
         let sdui = sdui_state();
         let mut intent = SduiActionIntent::command(
-            "clay.workspace.openDirectory",
+            "workspace.openDirectory",
             SduiActionSource::ListItem {
                 node_id: SduiNodeId(5),
                 item_id: "src".to_string(),
@@ -4826,7 +4874,7 @@ await loadPackage("@clay/markdown");"#,
         assert!(matches!(
             capability_rejection,
             ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic { ref code, .. })
-                if code == "clay.client.selected_file_open.unauthorized"
+                if code == "client.selected_file_open.unauthorized"
         ));
 
         connection_b
@@ -5186,7 +5234,7 @@ await loadPackage("@clay/markdown");"#,
                     client_id: 1,
                     ui_version: 1,
                     intent: SduiActionIntent::command(
-                        "clay.controlCenter.open",
+                        "controlCenter.open",
                         SduiActionSource::Button {
                             node_id: SduiNodeId(1),
                         },
@@ -5199,7 +5247,7 @@ await loadPackage("@clay/markdown");"#,
                     client_id: 1,
                     document_id: 7,
                     behavior_version: 1,
-                    command_id: "clay.controlCenter.open".to_string(),
+                    command_id: "controlCenter.open".to_string(),
                 },
             ),
             (
@@ -5889,7 +5937,7 @@ await loadPackage("@clay/markdown");"#,
         let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
         let diagnostics = Arc::new(Mutex::new(RuntimeDiagnosticStore::default()));
         diagnostics.lock().await.push(RuntimeDiagnostic::error(
-            "clay.runtime.invalid_import",
+            "runtime.invalid_import",
             "Only clay:* facades and relative local configuration modules are allowed.",
         ));
         let server_task = tokio::spawn(handle_connection(
@@ -5900,7 +5948,7 @@ await loadPackage("@clay/markdown");"#,
             workspace_state(),
             sdui_state(),
             active_theme_state(),
-            diagnostics,
+            Arc::clone(&diagnostics),
             runtime_generation(),
             parse_coordinator(),
             language_intelligence_coordinator(),
@@ -5929,11 +5977,20 @@ await loadPackage("@clay/markdown");"#,
         assert_eq!(
             codec.read_server_message(&mut client).await.unwrap(),
             ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                "clay.runtime.invalid_import",
+                "runtime.invalid_import",
                 "Only clay:* facades and relative local configuration modules are allowed.",
             ))
         );
         let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
+        let _capability = codec.read_server_message(&mut client).await.unwrap();
+
+        let live_diagnostic =
+            RuntimeDiagnostic::warning("runtime.live_update", "configuration reload failed");
+        diagnostics.lock().await.publish(live_diagnostic.clone());
+        assert_eq!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::RuntimeDiagnostic(live_diagnostic)
+        );
 
         drop(client);
         server_task.await.unwrap().unwrap();
@@ -7463,7 +7520,7 @@ await loadPackage("@clay/markdown");"#,
         assert!(matches!(
             codec.read_server_message(&mut client).await.unwrap(),
             ServerMessage::RuntimeDiagnostic(diagnostic)
-                if diagnostic.code == "clay.client.selected_folder_open.unauthorized"
+                if diagnostic.code == "client.selected_folder_open.unauthorized"
         ));
         assert!(workspace.lock().await.list_root_metadata().is_empty());
 
@@ -7754,10 +7811,7 @@ await loadPackage("@clay/markdown");"#,
         ));
         match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::RuntimeDiagnostic(diagnostic) => {
-                assert_eq!(
-                    diagnostic.code,
-                    "clay.client.selected_file_open.unauthorized"
-                );
+                assert_eq!(diagnostic.code, "client.selected_file_open.unauthorized");
             }
             message => panic!("expected unauthorized RuntimeDiagnostic, got {message:?}"),
         }
@@ -8108,7 +8162,7 @@ await loadPackage("@clay/markdown");"#,
     #[test]
     fn runtime_diagnostic_store_deduplicates_and_bounds() {
         let mut store = RuntimeDiagnosticStore::default();
-        let duplicate = RuntimeDiagnostic::warning("clay.test.dup", "same");
+        let duplicate = RuntimeDiagnostic::warning("test.dup", "same");
         store.push(duplicate.clone());
         store.push(duplicate);
         assert_eq!(
@@ -8120,7 +8174,7 @@ await loadPackage("@clay/markdown");"#,
 
         for index in 0..crate::perf::budgets::RUNTIME_DIAGNOSTIC_CAPACITY + 8 {
             store.push(RuntimeDiagnostic::warning(
-                "clay.test.flood",
+                "test.flood",
                 format!("diagnostic {index}"),
             ));
         }
@@ -8173,7 +8227,7 @@ await loadPackage("@clay/markdown");"#,
     #[test]
     fn sdui_command_request_preserves_explicit_arguments() {
         let intent = SduiActionIntent {
-            command_id: "clay.workspace.openFile".to_string(),
+            command_id: "workspace.openFile".to_string(),
             source: SduiActionSource::Button {
                 node_id: SduiNodeId(1),
             },

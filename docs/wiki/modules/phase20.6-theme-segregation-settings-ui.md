@@ -18,7 +18,7 @@
 - `docs/reference/clay-js-api/theme/set-appearance.md`
 - `docs/reference/clay-js-api/configuration.md` (Phase 20.6 precedence section)
 - `docs/reference/packages/creating-packages.md` (canonical defaults + override APIs subsections)
-- `docs/reference/clay-js-api/api-inventory.toml` (`clay.theme.setAppearance` entry)
+- `docs/reference/clay-js-api/api-inventory.toml` (`theme.setAppearance` entry)
 - `docs/generated/clay-js-api-registry.json`
 - Tests: `tests/theme_packages.rs`, `src/server/js_runtime.rs`, `src/server/ops/theme.rs`, `src/server/configuration.rs`, `src/server/command_execution.rs`, `src/server/connection.rs`, `tests/clay_js_doc_registry.rs`
 
@@ -32,7 +32,7 @@ The authoritative public API docs live in `docs/reference/clay-js-api/` (`set-th
 
 - Ship Modus Operandi and Modus Vivendi as inert first-party theme packages (`@clay/theme-modus-operandi`, `@clay/theme-modus-vivendi`) alongside the existing Gruvbox packages, with faithful upstream palettes and GPL-3.0-or-later attribution.
 - Make Modus Operandi the canonical light-mode default and Modus Vivendi the canonical dark-mode default, resolved from the `appearance` preference without any `loadPackage` call in `init.js`.
-- Expose a bounded `light` | `dark` | `system` appearance preference through a new registry-public `clay.theme.setAppearance` API; `system` follows the OS color-scheme signal with a dark fallback.
+- Expose a bounded `light` | `dark` | `system` appearance preference through a new registry-public `theme.setAppearance` API; `system` follows the OS color-scheme signal with a dark fallback.
 - Ensure an explicit `setTheme` always wins over the appearance-derived canonical default.
 - Ship `@clay/settings`, a first-party package that registers a right-slot settings panel built only from catalog components (`panel`, `scroll`, `flex`, `collapse`, `dropdown`, `textInput`, `label`, `button`) emitting inert `settings.*` command intents.
 - Validate settings commands server-side (`setTheme` requires a bundled first-party `@clay/theme-*` specifier; `setAppearance` requires the bounded enum), persist `setTheme`/`setAppearance`/`reset` to `~/.config/clay/preferences.json`, and trigger a runtime reload so changes apply live without restart.
@@ -55,7 +55,7 @@ Packages are registered in `src/packages/bundled.rs` as `BundledPackageEntry` ro
 
 - `canonical_default_specifier(ResolvedAppearance)` → `@clay/theme-modus-operandi` (Light) / `@clay/theme-modus-vivendi` (Dark).
 - `resolve_canonical_default_theme(clay_state, appearance)` → `ensure_first_party_record` + `build_active_theme_from_record` to produce an `ActiveTheme` snapshot from the bundled inventory, without any `loadPackage` call.
-- `op_clay_theme_set_appearance` → parses the bounded enum (rejects unknown values with `clay.theme.invalid_request`), stores the preference in `ClayOpState`, and returns `{ appearance, resolvedTheme }`.
+- `op_clay_theme_set_appearance` → parses the bounded enum (rejects unknown values with `theme.invalid_request`), stores the preference in `ClayOpState`, and returns `{ appearance, resolvedTheme }`.
 - `apply_theme` / `apply_appearance` / `apply_typography` — `pub(crate)` shared primitives extracted from the ops so the persisted-preference harvest and the JS ops use one code path.
 
 `ClayOpState` gains an `appearance` preference and an `explicit_theme_active` flag. `op_clay_theme_set_theme` sets `explicit_theme_active = true` so an explicit theme always overrides the appearance-derived default.
@@ -96,7 +96,7 @@ Precedence (highest wins):
 
 ### 7. `setAppearance` Clay JS API
 
-`clay.theme.setAppearance` is a registry-public `clay:theme` facade (id `clay.theme.setAppearance`, phase Phase 20.6, owner `server`, `custom_properties: [appearance:enum=required]`). It is NOT a `clay:configuration` API — `clay:configuration` stays closed (`setPackageOption` + `loadConfigurationModule` + `getConfigurationState` only). Docs: `docs/reference/clay-js-api/theme/set-appearance.md`; inventory entry in `docs/reference/clay-js-api/api-inventory.toml`; generated registry in `docs/generated/clay-js-api-registry.json` (regenerated via `cargo run --bin update-doc-registry`).
+`theme.setAppearance` is a registry-public `clay:theme` facade (id `theme.setAppearance`, phase Phase 20.6, owner `server`, `custom_properties: [appearance:enum=required]`). It is NOT a `clay:configuration` API — `clay:configuration` stays closed (`setPackageOption` + `loadConfigurationModule` + `getConfigurationState` only). Docs: `docs/reference/clay-js-api/theme/set-appearance.md`; inventory entry in `docs/reference/clay-js-api/api-inventory.toml`; generated registry in `docs/generated/clay-js-api-registry.json` (regenerated via `cargo run --bin update-doc-registry`).
 
 ## Code Examples
 
@@ -125,7 +125,7 @@ settings.reset
 
 ## Primitive Coverage
 
-- **Appearance preference + canonical default resolution:** owning module `src/server/ops/theme.rs`; JS facade `clay.theme.setAppearance` (`runtime/js/theme.js`); Deno op `op_clay_theme_set_appearance`; protocol `Appearance`/`ResolvedAppearance` (`src/protocol/mod.rs`); `pub(crate)` apply primitives (`apply_theme`/`apply_appearance`/`apply_typography`) reused by the harvest. Permissions: none beyond resolving bundled first-party themes. Hot path: configuration/reload only. Validation: bounded enum, first-party specifier, manifest payload budget.
+- **Appearance preference + canonical default resolution:** owning module `src/server/ops/theme.rs`; JS facade `theme.setAppearance` (`runtime/js/theme.js`); Deno op `op_clay_theme_set_appearance`; protocol `Appearance`/`ResolvedAppearance` (`src/protocol/mod.rs`); `pub(crate)` apply primitives (`apply_theme`/`apply_appearance`/`apply_typography`) reused by the harvest. Permissions: none beyond resolving bundled first-party themes. Hot path: configuration/reload only. Validation: bounded enum, first-party specifier, manifest payload budget.
 - **Persisted user preferences:** owning module `src/server/configuration.rs::PersistedPreferences`; closed three-key store, 8 KiB budget, atomic tmp+rename, field-by-field corruption drop. No JS facade — written by the Rust settings command executor, not callable from `init.js`.
 - **Settings SDUI surface:** owning package `@clay/settings`; catalog-only composition (no new `ComponentKind`/token/style variable). Command intents validated by `execute_settings`; live apply via reload→fanout.
 - **Reuse rule:** future themes ship as inert `textStyles` packages and become canonical defaults only by editing `canonical_default_specifier`; future settings controls compose existing catalog kinds and emit `settings.*` intents — no per-surface Rust branches.
@@ -160,8 +160,8 @@ settings.reset
 - [Slot-Aware Package UI](slot-aware-package-ui.md) — `clay:ui` contribution registry, catalog kinds, fixed panel composition.
 - [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — `RuntimeStateSnapshot` fanout, reload lifecycle.
 - [Package Loading](package-loading.md) — bundled package registration, FNV-1a-64 fingerprints.
-- [`clay.theme.setAppearance`](../../reference/clay-js-api/theme/set-appearance.md)
-- [`clay.theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md)
+- [`theme.setAppearance`](../../reference/clay-js-api/theme/set-appearance.md)
+- [`theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md)
 - [Clay Configuration System](../../reference/clay-js-api/configuration.md)
 - [Canonical defaults vs opt-in themes (authoring guide)](../../reference/packages/creating-packages.md)
 - `plans/067-Phase20.6-Theme-Package-Segregation-and-User-Theme-Font-UI.md`

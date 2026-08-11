@@ -1,5 +1,5 @@
 ---
-id: clay.shell.clientTabClose
+id: shell.clientTabClose
 kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientTabClose
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+Shift+W"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it switches the active tab via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.
-agent_guidance: "Use `clay.shell.clientTabClose` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only."
+agent_guidance: "Use `shell.clientTabClose` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only."
 lookup_tags: [shell, tabs, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for closing the active tab.
 
 ## Description
 
-`clientTabClose` is the public Clay JS API descriptor for **Close Tab**. It returns the stable command ID `clay.shell.clientTabClose` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
+`clientTabClose` is the public Clay JS API descriptor for **Close Tab**. It returns the stable command ID `shell.clientTabClose` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
 
 Close Tab Close Tab closes the active tab through the shared close path: the last tab cannot close; a tab with unsaved documents gets the driver-owned confirm menu (Save all and close / Discard and close / Cancel) that names every dirty document; a clean tab (or a resolved confirm flow) sends `TabCommand::Close`, and the server-confirmed removal reconciles every connection.
 
@@ -55,7 +55,7 @@ bindKey("Ctrl+Shift+W", clientTabClose(), { scope: "global" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+Shift+W", "clay.shell.clientTabClose", { scope: "global" });
+bindKey("Ctrl+Shift+W", "shell.clientTabClose", { scope: "global" });
 ```
 
 ## Example
@@ -84,7 +84,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.shell.clientTabClose"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
+Returns the string literal command ID `"shell.clientTabClose"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ Bindable client UI command ID only; after explicit user routing it switches the 
 
 ## Agent guidance
 
-Use `clay.shell.clientTabClose` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.
+Use `shell.clientTabClose` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.shell.clientTabClose` only as a documented command ID for `bindKey` to
 
 ## Lookup metadata
 
-- Stable ID: `clay.shell.clientTabClose`
+- Stable ID: `shell.clientTabClose`
 - User-facing name: Close Tab
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientTabClose`

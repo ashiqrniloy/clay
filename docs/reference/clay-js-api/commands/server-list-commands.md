@@ -1,5 +1,5 @@
 ---
-id: clay.commands.serverListCommands
+id: commands.serverListCommands
 kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverListCommands
@@ -25,7 +25,7 @@ custom_properties:
     default: true
     description: Behavior-changing setting `includePackageCommands` for this primitive gate API.
 security: Returns command metadata only after server validation of registry visibility; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, package installation, enable/disable, command execution, or command handler authority.
-agent_guidance: Use `clay.commands.serverListCommands` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `commands.serverListCommands` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [js-api, commandregistryquery, commands]
 app_visible: true
 help_visible: true
@@ -70,7 +70,7 @@ const commands = serverListCommands();
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.commands.serverListCommands` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `commands.serverListCommands` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -97,7 +97,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.commands.serverListCommands` when the user asks for List Commands through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `commands.serverListCommands` when the user asks for List Commands through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -108,15 +108,15 @@ Use `clay.commands.serverListCommands` when the user asks for List Commands thro
 
 ## Phase 18.8 control-center reuse note
 
-Phase 18.8 reuses this listing API to populate the built-in Control Center command palette: the internal `ControlCenter` workflow (`src/server/control_center.rs`, `pub(crate)`) takes a snapshot of the registered command list, filters out client-first/client-ui commands, and appends built-in server commands such as `clay.controlCenter.open`. Because listing returns only validated command metadata, it grants no execution authority; activating a listed command from a transient menu enqueues an inert `CommandIntent` that the server-owned `CommandExecutor` re-validates before any side effect. There is no public `clay.commands.serverExecuteCommand` JS facade/op — see [`serverRegisterCommand`](server-register-command.md#phase-188-command-execution-boundary) for the full Phase 18.8 command execution and transient menu boundary.
+Phase 18.8 reuses this listing API to populate the built-in Control Center command palette: the internal `ControlCenter` workflow (`src/server/control_center.rs`, `pub(crate)`) takes a snapshot of the registered command list, filters out client-first/client-ui commands, and appends built-in server commands such as `controlCenter.open`. Because listing returns only validated command metadata, it grants no execution authority; activating a listed command from a transient menu enqueues an inert `CommandIntent` that the server-owned `CommandExecutor` re-validates before any side effect. There is no public `commands.serverExecuteCommand` JS facade/op — see [`serverRegisterCommand`](server-register-command.md#phase-188-command-execution-boundary) for the full Phase 18.8 command execution and transient menu boundary.
 
 ## Phase 19 built-in command discovery note
 
-`serverListCommands` returns package-registered commands only. Built-in Clay-owned commands (such as `clay.runtime.reloadConfiguration`, `clay.controlCenter.open`, `clay.workspace.openFuzzyFile`, `clay.workspace.toggleFileBrowser`) are not listed by this API. The Control Center (`clay.controlCenter.open`) discovers built-in commands from the Rust `builtin_server_command_ids` table and merges them with the package command list for the transient command palette. User configuration can bind built-in commands through [`bindKey`](../keybindings/bind-key.md) or invoke them through SDUI actions; discovery is through documentation and the Control Center, not through this listing API.
+`serverListCommands` returns package-registered commands only. Built-in Clay-owned commands (such as `runtime.reloadConfiguration`, `controlCenter.open`, `workspace.openFuzzyFile`, `workspace.toggleFileBrowser`) are not listed by this API. The Control Center (`controlCenter.open`) discovers built-in commands from the Rust `builtin_server_command_ids` table and merges them with the package command list for the transient command palette. User configuration can bind built-in commands through [`bindKey`](../keybindings/bind-key.md) or invoke them through SDUI actions; discovery is through documentation and the Control Center, not through this listing API.
 
 ## Lookup metadata
 
-- Stable ID: `clay.commands.serverListCommands`
+- Stable ID: `commands.serverListCommands`
 - User-facing name: List Commands
 - Kind: `clay-js-api`
 - Module/export: `clay:commands` / `serverListCommands`

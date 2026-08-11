@@ -75,7 +75,7 @@ Tier 1 is native compiled-in first-party Tree-sitter grammar data, Tier 2 is a h
 
 - `loadPackage("@clay/*")` already provides explicit user opt-in loading from `~/.config/clay/init.js` for first-party packages.
 - `runtime/js/syntax.js` and `src/server/ops/syntax.rs` expose `clay:syntax.serverRegisterSyntaxGrammar` for inert grammar metadata registration.
-- `runtime/js/parse.js` and `src/server/ops/parse.rs` expose `clay.parse.serverRegisterParseHandler`; Rust stores a handler token, not a JavaScript function value.
+- `runtime/js/parse.js` and `src/server/ops/parse.rs` expose `parse.serverRegisterParseHandler`; Rust stores a handler token, not a JavaScript function value.
 - Existing Tier 3 package-JS parser fallback is represented by package parse handlers and should remain the fallback for grammar-less packages.
 
 ## Existing Achievements Reused As-Is
@@ -159,7 +159,7 @@ Plan 047 completed the generic gaps recorded here without adding language-specif
 - `SyntaxGrammarContribution::web_tree_sitter_artifact_contract()` and `runtime/js/web-tree-sitter-host.ts` define the package-confined, local-only Tier 2 boundary with cached runtime/language/query initialization.
 - `setSyntaxEnginePreference` provides explicit `native`, `wasm`, and `javascript` selection; ordinary package registration cannot silently replace native descriptors, and Tier 3 remains the existing package parse-handler route.
 - `SyntaxCapture` and `map_capture_to_vocabulary` feed all Tree-sitter captures into `TokenType` + `Modifiers` `DecorationSpan` output with fail-closed unmapped captures.
-- `ParseCoordinator` keeps parse work background and enqueue-only for open, publishes bounded updates through `next_update()`, and publishes sanitized `clay.parse.open_failed` diagnostics through `next_diagnostic()`.
+- `ParseCoordinator` keeps parse work background and enqueue-only for open, publishes bounded updates through `next_update()`, and publishes sanitized `parse.open_failed` diagnostics through `next_diagnostic()`.
 
 The implementation uses the existing `DecorationSet`, `StyleRegistry`, package permissions, provenance validation, parse budgets, and docs/API registry boundaries. Public usage remains documented in the package authoring guide and [`setSyntaxEnginePreference`](../../reference/clay-js-api/syntax/set-syntax-engine-preference.md); this page remains the primitive rationale and reuse guide.
 

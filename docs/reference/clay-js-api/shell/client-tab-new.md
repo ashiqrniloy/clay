@@ -1,5 +1,5 @@
 ---
-id: clay.shell.clientTabNew
+id: shell.clientTabNew
 kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientTabNew
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+T"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it switches the active tab via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.
-agent_guidance: "Use `clay.shell.clientTabNew` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only."
+agent_guidance: "Use `shell.clientTabNew` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only."
 lookup_tags: [shell, tabs, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for opening a new tab.
 
 ## Description
 
-`clientTabNew` is the public Clay JS API descriptor for **New Tab**. It returns the stable command ID `clay.shell.clientTabNew` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
+`clientTabNew` is the public Clay JS API descriptor for **New Tab**. It returns the stable command ID `shell.clientTabNew` so configuration, help, key-binding discovery, and agents can name the route without hard-coding Rust shortcuts.
 
 New Tab New Tab runs the same flow as the tab bar's `+` affordance: the native folder picker opens, the picked folder connects as a new independent client view, and the server registers the tab (server-validated `TabCommand::New`). A second new-tab request while one is in flight is ignored. Phase 22.8 binds the picked folder during the connection handshake with `TabCommand::New`; the server then owns that tab's workspace and welcome document. This API does not expose a `TabId`, workspace handle, or arbitrary-tab selector.
 
@@ -55,7 +55,7 @@ bindKey("Ctrl+T", clientTabNew(), { scope: "global" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+T", "clay.shell.clientTabNew", { scope: "global" });
+bindKey("Ctrl+T", "shell.clientTabNew", { scope: "global" });
 ```
 
 ## Example
@@ -84,7 +84,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.shell.clientTabNew"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
+Returns the string literal command ID `"shell.clientTabNew"` synchronously. The helper does not touch the shell, call the server, execute package code, mutate document text, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ Bindable client UI command ID only; after explicit user routing it switches the 
 
 ## Agent guidance
 
-Use `clay.shell.clientTabNew` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.
+Use `shell.clientTabNew` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.shell.clientTabNew` only as a documented command ID for `bindKey` to r
 
 ## Lookup metadata
 
-- Stable ID: `clay.shell.clientTabNew`
+- Stable ID: `shell.clientTabNew`
 - User-facing name: New Tab
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientTabNew`

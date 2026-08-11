@@ -1,5 +1,5 @@
 ---
-id: clay.keybindings.listKeyBindings
+id: keybindings.listKeyBindings
 kind: clay-js-api
 js_module: "clay:keybindings"
 js_export: listKeyBindings
@@ -21,7 +21,7 @@ custom_properties:
     default: all
     description: Behavior-changing setting `scope` for this API.
 security: Returns documented key binding metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.keybindings.listKeyBindings` only for its documented keybindings responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `keybindings.listKeyBindings` only for its documented keybindings responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [js-api, keybindingmanagement, keybindings]
 app_visible: true
 help_visible: true
@@ -65,7 +65,7 @@ const bindings = listKeyBindings("editor");
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.keybindings.listKeyBindings` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `keybindings.listKeyBindings` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -91,7 +91,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.keybindings.listKeyBindings` when the user asks for list key bindings through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `keybindings.listKeyBindings` when the user asks for list key bindings through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -102,7 +102,7 @@ Use `clay.keybindings.listKeyBindings` when the user asks for list key bindings 
 
 ## Lookup metadata
 
-- Stable ID: `clay.keybindings.listKeyBindings`
+- Stable ID: `keybindings.listKeyBindings`
 - User-facing name: List Key Bindings
 - Kind: `clay-js-api`
 - Module/export: `clay:keybindings` / `listKeyBindings`

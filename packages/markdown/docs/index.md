@@ -22,7 +22,7 @@
 - Status item: inert `markdown.status.mode` component
 - Documentation entry: `./docs/index.md`
 - Parse bounds: Tier 1 native contribution windows are capped at `4 KiB`; Tier 3 fallback policy uses `64 KiB` windows, `4 KiB` guards, a `30 MiB` retained syntax/decor budget, and `5000 ms` timeout with `plain-text-fallback` under budget pressure.
-- Configuration status: Phase 18.5 verifies these values as fixed package-owned defaults. `@clay/markdown` declares no `contributions.configuration` entries, does not request `package-configuration`, and does not expose Markdown large-file tuning through `~/.config/clay/init.js` yet. The bounded parse-window values it passes to `clay.parse.serverRegisterParseHandler` are covered by that API's `custom_properties` and server validation; file-size thresholds and status labels remain package constants until a later configuration API is implemented.
+- Configuration status: Phase 18.5 verifies these values as fixed package-owned defaults. `@clay/markdown` declares no `contributions.configuration` entries, does not request `package-configuration`, and does not expose Markdown large-file tuning through `~/.config/clay/init.js` yet. The bounded parse-window values it passes to `parse.serverRegisterParseHandler` are covered by that API's `custom_properties` and server validation; file-size thresholds and status labels remain package constants until a later configuration API is implemented.
 
 ## Permissions
 
@@ -73,7 +73,7 @@ import { markdownLoadMode } from "@clay/markdown";
 await markdownLoadMode();
 ```
 
-The explicit `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" })` separation is preserved — file-open is app/editor configuration, not Markdown mode behavior.
+The explicit `bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" })` separation is preserved — file-open is app/editor configuration, not Markdown mode behavior.
 
 ## Engine tiers
 
@@ -81,7 +81,7 @@ The explicit `bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: 
 - **Tier 2 web-tree-sitter WASM** remains available to an explicitly selected package that actually supplies a confined WASM artifact; `@clay/markdown` itself ships native metadata only.
 - **Tier 3 JavaScript fallback** remains the package-owned `markdown-it`/scanner parser for decorations when no native handler is selected; `setSyntaxEnginePreference("markdown", "javascript")` suppresses native selection. Preview remains independently package-JS in `./dist/sdui.js`; it never routes through Tree-sitter.
 
-Tree-sitter captures use one direct `TokenType`/`Modifiers` vocabulary mapper; validated legacy style-token inputs remain a compatibility path for older packages. Open returns before background parsing finishes; later failures publish sanitized `clay.parse.open_failed` diagnostics. Parse/query work remains outside keypress, paint, layout, scroll, pointer, or text-event hot paths. The package cannot use network, shell, AI mutation, remote listeners, raw `Deno.core.ops`, direct Masonry/widget mutation, or client-side JavaScript authority. The package keeps arbitrary third-party/native grammar artifact loading deferred to Phase 23 and a separate trust decision. See the [tiered syntax engine package-author contract](../../../docs/reference/packages/creating-packages.md#phase-1816-authoring-contract-tiered-syntax-engine).
+Tree-sitter captures use one direct `TokenType`/`Modifiers` vocabulary mapper; validated legacy style-token inputs remain a compatibility path for older packages. Open returns before background parsing finishes; later failures publish sanitized `parse.open_failed` diagnostics. Parse/query work remains outside keypress, paint, layout, scroll, pointer, or text-event hot paths. The package cannot use network, shell, AI mutation, remote listeners, raw `Deno.core.ops`, direct Masonry/widget mutation, or client-side JavaScript authority. The package keeps arbitrary third-party/native grammar artifact loading deferred to Phase 23 and a separate trust decision. See the [tiered syntax engine package-author contract](../../../docs/reference/packages/creating-packages.md#phase-1816-authoring-contract-tiered-syntax-engine).
 
 All first-party language packages are implemented through generic primitives (syntax grammars, behavior manifests, completion providers, commands, and status items) without requiring per-language Rust branches. This generic approach ensures Phase 18.21 LSP enrichment can be added uniformly across all packages without architectural changes.
 

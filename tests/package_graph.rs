@@ -262,7 +262,7 @@ fn structured_relation_fails_without_owner_extension_point() {
     let error = service.enable("@vendor/ext").unwrap_err();
     let message = error.to_string();
     assert!(
-        message.contains("clay.package_relation.unknown_extension_point"),
+        message.contains("package_relation.unknown_extension_point"),
         "missing owner declaration must fail closed, got {message}"
     );
     assert!(!service.inspect("@vendor/ext").unwrap().is_enabled);
@@ -286,7 +286,7 @@ fn structured_relation_fails_on_operation_not_offered_by_owner() {
     assert!(
         error
             .to_string()
-            .contains("clay.package_relation.operation_not_offered"),
+            .contains("package_relation.operation_not_offered"),
         "operation outside the owner declaration must fail, got {error}"
     );
 }
@@ -309,7 +309,7 @@ fn third_party_relation_requires_exact_durable_user_approval() {
     // No durable approval: fail closed before the requester enables.
     let error = service.enable("@vendor/ext").unwrap_err();
     assert!(
-        error.to_string().contains("clay.package_approval.missing"),
+        error.to_string().contains("package_approval.missing"),
         "missing approval must fail closed, got {error}"
     );
     assert!(!service.inspect("@vendor/ext").unwrap().is_enabled);
@@ -322,7 +322,7 @@ fn third_party_relation_requires_exact_durable_user_approval() {
     assert!(
         error
             .to_string()
-            .contains("clay.package_approval.relation_expansion"),
+            .contains("package_approval.relation_expansion"),
         "stale approval must not cover the request, got {error}"
     );
 
@@ -373,9 +373,7 @@ fn service_open_fails_closed_on_corrupt_approval_store() {
         Err(error) => error,
     };
     assert!(
-        error
-            .to_string()
-            .contains("clay.package_approval_store.corrupt"),
+        error.to_string().contains("package_approval_store.corrupt"),
         "corrupt store must fail closed at service construction, got {error}"
     );
     let _ = std::fs::remove_dir_all(&root);
@@ -437,7 +435,7 @@ fn third_party_enable_requires_exact_durable_adoption() {
     assert!(
         matches!(
             error,
-            PackageServiceError::AdoptionRequired { code, .. } if code == "clay.package_approval.missing"
+            PackageServiceError::AdoptionRequired { code, .. } if code == "package_approval.missing"
         ),
         "unapproved third-party enable must fail closed, got {error}"
     );
@@ -465,7 +463,7 @@ fn third_party_enable_requires_exact_durable_adoption() {
     assert!(
         matches!(
             error,
-            PackageServiceError::AdoptionRequired { code, .. } if code == "clay.package_approval.revoked"
+            PackageServiceError::AdoptionRequired { code, .. } if code == "package_approval.revoked"
         ),
         "revoked approval must fail closed, got {error}"
     );
@@ -539,7 +537,7 @@ fn package_update_stales_adoption() {
     assert!(
         matches!(
             error,
-            PackageServiceError::AdoptionRequired { code, .. } if code == "clay.package_approval.identity_changed"
+            PackageServiceError::AdoptionRequired { code, .. } if code == "package_approval.identity_changed"
         ),
         "updated package must require re-adoption, got {error}"
     );
@@ -581,7 +579,7 @@ fn replacement_edge_requires_approval_and_stales_target_on_commit() {
         matches!(
             error,
             PackageServiceError::AdoptionRequired { code, .. }
-                if code == "clay.package_approval.replacement_expansion"
+                if code == "package_approval.replacement_expansion"
         ),
         "unapproved replacement edge must fail closed, got {error}"
     );
@@ -703,7 +701,7 @@ fn dependency_cannot_silently_restore_replaced_target() {
         matches!(
             error,
             PackageServiceError::RelationDenied { code, .. }
-                if code == "clay.package_replacement.target_replaced"
+                if code == "package_replacement.target_replaced"
         ),
         "dependency on a replaced target must fail closed, got {error}"
     );

@@ -37,7 +37,7 @@ The implemented parse flow operates after the server accepts an edit/open, not b
 3. The coordinator enqueues a `ParseEditNotification` for the active `(document_id, package_prefix, mode)` stream with the current document version, optional exact accepted edit, invalidated byte ranges, latest viewport range, and bounded `ParseWindowSnapshot`s carrying a stable `window_id` when parse text is needed.
 4. The coordinator start-gates a background task that invokes a registered native or runtime-backed package parse handler. JS-backed handlers are looked up by a server-issued token stored during package load; the public op payload still rejects executable callback fields. Native task identity includes runtime generation, document, package/mode grammar stream, and stable parse-window identity—not decoration destination ranges. Duplicate same-version/window requests coalesce before spawn.
 5. If a newer edit, viewport request, runtime generation replacement, or package-scoped revocation arrives, the coordinator aborts superseded tasks for the affected stream and keeps only the latest active package/generation authoritative. Newer versions supersede older work even when stable window identity changes; other documents and grammars remain independent. `ParseCoordinator::cancel_older_generations` is the post-commit reload cleanup path; `ParseCoordinator::cancel_package` withdraws package-owned handlers and active tasks through the same abort path as `cancel_generation`. Queued updates are drained so late old-generation results cannot publish.
-6. If the handler exceeds its timeout, `RuntimeCommand::Parse` uses the smaller of the runtime service timeout and the handler's registered `timeoutMs`, terminates the isolate, returns `clay.runtime.timeout`, increments `ParseCoordinatorStats.failed_tasks`, and publishes no partial update.
+6. If the handler exceeds its timeout, `RuntimeCommand::Parse` uses the smaller of the runtime service timeout and the handler's registered `timeoutMs`, terminates the isolate, returns `runtime.timeout`, increments `ParseCoordinatorStats.failed_tasks`, and publishes no partial update.
 7. Returned parse data is validated for active runtime generation, package provenance, declared permission, version, byte ranges, known schema values, payload size, viewport filtering, and parse-produced decoration payload budgets.
 8. The server publishes validated inert results through implemented decoration publication (`DecorationSet`) or future folding, diagnostic, or related protocol messages. The client applies those updates outside paint/text-event handlers.
 
@@ -102,7 +102,7 @@ Relevant budgets:
 - `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`: compact parse notifications/results.
 - `DECORATION_PAYLOAD_BUDGET_BYTES`: parse-produced decoration payloads after validation and viewport filtering.
 - `SYNTAX_CACHE_BUDGET_BYTES`: retained parse-window text across snapshots.
-- Per-handler `timeoutMs`: package-declared parse timeout, capped by the runtime service timeout and surfaced as `clay.runtime.timeout` on expiration.
+- Per-handler `timeoutMs`: package-declared parse timeout, capped by the runtime service timeout and surfaced as `runtime.timeout` on expiration.
 
 ## Fallback Behavior
 

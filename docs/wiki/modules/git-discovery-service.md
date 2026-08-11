@@ -36,7 +36,7 @@ Packages do not run Git. They consume `clay:git` APIs backed by this service/cac
 9. Concurrent refreshes for the same root wait on a per-entry `Notify`; refreshes for different roots run independently.
 10. `GitStatusCache::refresh_stale_workspace()` refreshes only roots whose last success/error is older than `GIT_STATUS_POLL_INTERVAL`.
 11. `src/server/ops/git.rs` serializes cache snapshots into the public `clay:git` facade shape.
-12. Built-in command IDs `clay.git.listStatuses` and `clay.git.refreshStatus` expose the same read-only data through server-first command execution.
+12. Built-in command IDs `git.listStatuses` and `git.refreshStatus` expose the same read-only data through server-first command execution.
 
 ## Boundaries
 

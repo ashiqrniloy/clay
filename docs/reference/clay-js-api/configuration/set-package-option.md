@@ -1,5 +1,5 @@
 ---
-id: clay.configuration.setPackageOption
+id: configuration.setPackageOption
 kind: clay-js-api
 js_module: "clay:configuration"
 js_export: setPackageOption
@@ -92,7 +92,7 @@ Returns a synchronous registration record; `async: false`.
 
 ## Errors
 
-Throws `clay.configuration.invalid_package_option` for hidden keys, ad hoc keys, invalid values, oversize payloads, raw ops, raw CSS, native handles, callbacks, state values, or client-side JavaScript.
+Throws `configuration.invalid_package_option` for hidden keys, ad hoc keys, invalid values, oversize payloads, raw ops, raw CSS, native handles, callbacks, state values, or client-side JavaScript.
 
 ## Permissions and security
 

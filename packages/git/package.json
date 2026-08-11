@@ -15,8 +15,8 @@
     "modes": [],
     "docs": "./docs/index.md",
     "apiDependencies": [
-      "clay.git.serverListGitStatuses",
-      "clay.sdui.publishTree"
+      "git.serverListGitStatuses",
+      "sdui.publishTree"
     ],
     "performance": {
       "estimatedManifestBytes": 1500,

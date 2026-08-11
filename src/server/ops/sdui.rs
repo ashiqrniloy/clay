@@ -42,7 +42,7 @@ pub(super) fn op_clay_sdui_define_node(
 ) -> Result<String, JsErrorBox> {
     if !SUPPORTED_NODE_KINDS.contains(&kind.as_str()) {
         return Err(sdui_error(format!(
-            "clay.sdui.invalid_node: unsupported SDUI node kind `{kind}`"
+            "sdui.invalid_node: unsupported SDUI node kind `{kind}`"
         )));
     }
 
@@ -51,7 +51,7 @@ pub(super) fn op_clay_sdui_define_node(
     } else {
         serde_json::from_str::<Value>(&options_json).map_err(|error| {
             sdui_error(format!(
-                "clay.sdui.invalid_node: options must be JSON-serializable ({error})"
+                "sdui.invalid_node: options must be JSON-serializable ({error})"
             ))
         })?
     };
@@ -60,7 +60,7 @@ pub(super) fn op_clay_sdui_define_node(
         Value::Object(object) => object,
         _ => {
             return Err(sdui_error(
-                "clay.sdui.invalid_node: node options must be an object",
+                "sdui.invalid_node: node options must be an object",
             ));
         }
     };
@@ -68,7 +68,7 @@ pub(super) fn op_clay_sdui_define_node(
 
     serde_json::to_string(&Value::Object(object)).map_err(|error| {
         sdui_error(format!(
-            "clay.sdui.invalid_node: failed to encode node definition ({error})"
+            "sdui.invalid_node: failed to encode node definition ({error})"
         ))
     })
 }
@@ -97,14 +97,14 @@ fn runtime_tree_from_json(
     // `Value` tree.
     if tree_json.len() > RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES {
         return Err(sdui_error(format!(
-            "clay.sdui.invalid_tree: published tree payload ({} bytes) exceeds the {} byte budget",
+            "sdui.invalid_tree: published tree payload ({} bytes) exceeds the {} byte budget",
             tree_json.len(),
             RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES
         )));
     }
     let root = serde_json::from_str::<Value>(tree_json).map_err(|error| {
         sdui_error(format!(
-            "clay.sdui.invalid_tree: published tree must be valid JSON ({error})"
+            "sdui.invalid_tree: published tree must be valid JSON ({error})"
         ))
     })?;
     let mut builder = RuntimeTreeBuilder {
@@ -133,13 +133,13 @@ impl RuntimeTreeBuilder {
     fn convert_node(&mut self, value: &Value, depth: usize) -> Result<SduiNodeId, JsErrorBox> {
         if depth > RUNTIME_SDUI_TREE_MAX_DEPTH {
             return Err(sdui_error(format!(
-                "clay.sdui.invalid_tree: SDUI node nesting depth {depth} exceeds the {} limit",
+                "sdui.invalid_tree: SDUI node nesting depth {depth} exceeds the {} limit",
                 RUNTIME_SDUI_TREE_MAX_DEPTH
             )));
         }
-        let object = value.as_object().ok_or_else(|| {
-            sdui_error("clay.sdui.invalid_node: each SDUI node must be an object")
-        })?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| sdui_error("sdui.invalid_node: each SDUI node must be an object"))?;
         let kind = required_str(object, "kind")?;
         let id = self.node_id(object.get("id"))?;
         let node_kind = match kind {
@@ -172,7 +172,7 @@ impl RuntimeTreeBuilder {
                     "column" => SduiFlexDirection::Column,
                     other => {
                         return Err(sdui_error(format!(
-                            "clay.sdui.invalid_node: unsupported flex direction `{other}`"
+                            "sdui.invalid_node: unsupported flex direction `{other}`"
                         )));
                     }
                 },
@@ -183,14 +183,14 @@ impl RuntimeTreeBuilder {
             },
             other => {
                 return Err(sdui_error(format!(
-                    "clay.sdui.invalid_node: unsupported SDUI node kind `{other}`"
+                    "sdui.invalid_node: unsupported SDUI node kind `{other}`"
                 )));
             }
         };
         self.nodes.push(SduiNode::new(id, node_kind));
         if self.nodes.len() > RUNTIME_SDUI_TREE_MAX_NODES {
             return Err(sdui_error(format!(
-                "clay.sdui.invalid_tree: SDUI node count ({}) exceeds the {} limit",
+                "sdui.invalid_tree: SDUI node count ({}) exceeds the {} limit",
                 self.nodes.len(),
                 RUNTIME_SDUI_TREE_MAX_NODES
             )));
@@ -205,12 +205,12 @@ impl RuntimeTreeBuilder {
                 .filter(|id| *id > 0)
                 .map(SduiNodeId)
                 .ok_or_else(|| {
-                    sdui_error("clay.sdui.invalid_node: numeric node id must be a positive integer")
+                    sdui_error("sdui.invalid_node: numeric node id must be a positive integer")
                 }),
             Some(Value::String(name)) => {
                 if name.trim().is_empty() {
                     return Err(sdui_error(
-                        "clay.sdui.invalid_node: string node id must not be empty",
+                        "sdui.invalid_node: string node id must not be empty",
                     ));
                 }
                 if let Some(id) = self.named_ids.get(name) {
@@ -222,7 +222,7 @@ impl RuntimeTreeBuilder {
                 }
             }
             Some(_) => Err(sdui_error(
-                "clay.sdui.invalid_node: node id must be a string or positive integer",
+                "sdui.invalid_node: node id must be a string or positive integer",
             )),
             None => Ok(self.allocate_id()),
         }
@@ -243,7 +243,7 @@ impl RuntimeTreeBuilder {
         };
         let children = value
             .as_array()
-            .ok_or_else(|| sdui_error("clay.sdui.invalid_node: children must be an array"))?;
+            .ok_or_else(|| sdui_error("sdui.invalid_node: children must be an array"))?;
         children
             .iter()
             .map(|child| self.convert_node(child, parent_depth + 1))
@@ -260,13 +260,13 @@ impl RuntimeTreeBuilder {
         };
         let items = value
             .as_array()
-            .ok_or_else(|| sdui_error("clay.sdui.invalid_node: list items must be an array"))?;
+            .ok_or_else(|| sdui_error("sdui.invalid_node: list items must be an array"))?;
         items
             .iter()
             .map(|item| {
-                let object = item.as_object().ok_or_else(|| {
-                    sdui_error("clay.sdui.invalid_node: list items must be objects")
-                })?;
+                let object = item
+                    .as_object()
+                    .ok_or_else(|| sdui_error("sdui.invalid_node: list items must be objects"))?;
                 let item_id = required_str(object, "id")?.to_string();
                 Ok(SduiListItem {
                     id: item_id.clone(),
@@ -283,7 +283,7 @@ impl RuntimeTreeBuilder {
                         )?),
                         Some(_) => {
                             return Err(sdui_error(
-                                "clay.sdui.invalid_action: list item action must be an object",
+                                "sdui.invalid_action: list item action must be an object",
                             ));
                         }
                     },
@@ -302,7 +302,7 @@ impl RuntimeTreeBuilder {
             && !self.registered_command_ids.contains(&command_id)
         {
             return Err(sdui_error(format!(
-                "clay.sdui.invalid_action: command `{command_id}` is not allowed for SDUI actions; register package commands before publishing package-owned SDUI"
+                "sdui.invalid_action: command `{command_id}` is not allowed for SDUI actions; register package commands before publishing package-owned SDUI"
             )));
         }
         let arguments = match object.get("arguments") {
@@ -318,7 +318,7 @@ impl RuntimeTreeBuilder {
                 .collect::<Result<Vec<_>, JsErrorBox>>()?,
             Some(_) => {
                 return Err(sdui_error(
-                    "clay.sdui.invalid_action: action arguments must be an object",
+                    "sdui.invalid_action: action arguments must be an object",
                 ));
             }
         };
@@ -341,11 +341,10 @@ fn required_object<'a>(
     object: &'a Map<String, Value>,
     field: &str,
 ) -> Result<&'a Map<String, Value>, JsErrorBox> {
-    object.get(field).and_then(Value::as_object).ok_or_else(|| {
-        sdui_error(format!(
-            "clay.sdui.invalid_node: `{field}` must be an object"
-        ))
-    })
+    object
+        .get(field)
+        .and_then(Value::as_object)
+        .ok_or_else(|| sdui_error(format!("sdui.invalid_node: `{field}` must be an object")))
 }
 
 fn required_str<'a>(object: &'a Map<String, Value>, field: &str) -> Result<&'a str, JsErrorBox> {
@@ -355,7 +354,7 @@ fn required_str<'a>(object: &'a Map<String, Value>, field: &str) -> Result<&'a s
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
             sdui_error(format!(
-                "clay.sdui.invalid_node: `{field}` must be a non-empty string"
+                "sdui.invalid_node: `{field}` must be a non-empty string"
             ))
         })
 }
@@ -363,7 +362,7 @@ fn required_str<'a>(object: &'a Map<String, Value>, field: &str) -> Result<&'a s
 fn required_u64(object: &Map<String, Value>, field: &str) -> Result<u64, JsErrorBox> {
     object.get(field).and_then(Value::as_u64).ok_or_else(|| {
         sdui_error(format!(
-            "clay.sdui.invalid_node: `{field}` must be an unsigned integer"
+            "sdui.invalid_node: `{field}` must be an unsigned integer"
         ))
     })
 }
@@ -372,7 +371,7 @@ fn optional_u64(value: Option<&Value>) -> Result<Option<u64>, JsErrorBox> {
     match value {
         Some(Value::Null) | None => Ok(None),
         Some(value) => value.as_u64().map(Some).ok_or_else(|| {
-            sdui_error("clay.sdui.invalid_node: optional version must be an unsigned integer")
+            sdui_error("sdui.invalid_node: optional version must be an unsigned integer")
         }),
     }
 }
@@ -383,7 +382,7 @@ fn bounded_text<'a>(object: &'a Map<String, Value>, field: &str) -> Result<&'a s
     let value = required_str(object, field)?;
     if value.chars().count() > RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS {
         return Err(sdui_error(format!(
-            "clay.sdui.invalid_node: `{field}` must be at most {} characters",
+            "sdui.invalid_node: `{field}` must be at most {} characters",
             RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS
         )));
     }
@@ -398,14 +397,14 @@ fn bounded_optional_string(value: Option<&Value>) -> Result<Option<String>, JsEr
         Some(Value::String(value)) => {
             if value.chars().count() > RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS {
                 return Err(sdui_error(format!(
-                    "clay.sdui.invalid_node: optional detail must be at most {} characters",
+                    "sdui.invalid_node: optional detail must be at most {} characters",
                     RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS
                 )));
             }
             Ok(Some(value.clone()))
         }
         Some(_) => Err(sdui_error(
-            "clay.sdui.invalid_node: optional string fields must be strings",
+            "sdui.invalid_node: optional string fields must be strings",
         )),
     }
 }
@@ -421,19 +420,19 @@ fn action_value(value: &Value) -> Result<SduiActionValue, JsErrorBox> {
                 Ok(SduiActionValue::U64(value))
             } else {
                 Err(sdui_error(
-                    "clay.sdui.invalid_action: numeric action arguments must be integers",
+                    "sdui.invalid_action: numeric action arguments must be integers",
                 ))
             }
         }
         Value::Null | Value::Array(_) | Value::Object(_) => Err(sdui_error(
-            "clay.sdui.invalid_action: action arguments must be primitive string, boolean, or integer values",
+            "sdui.invalid_action: action arguments must be primitive string, boolean, or integer values",
         )),
     }
 }
 
 fn runtime_validation_error(error: SduiValidationError) -> JsErrorBox {
     sdui_error(format!(
-        "clay.sdui.invalid_tree: published tree failed validation ({error:?})"
+        "sdui.invalid_tree: published tree failed validation ({error:?})"
     ))
 }
 
@@ -462,7 +461,7 @@ mod tests {
         let error = convert(&tree_json).unwrap_err();
         let message = error.to_string();
         assert!(
-            message.contains("clay.sdui.invalid_tree") && message.contains("exceeds"),
+            message.contains("sdui.invalid_tree") && message.contains("exceeds"),
             "expected budget-rejection, got: {message}"
         );
     }
@@ -517,7 +516,7 @@ mod tests {
         let error = convert(&tree_json).unwrap_err();
         let message = error.to_string();
         assert!(
-            message.contains("clay.sdui.invalid_node") && message.contains("at most"),
+            message.contains("sdui.invalid_node") && message.contains("at most"),
             "expected text-length-rejection, got: {message}"
         );
     }

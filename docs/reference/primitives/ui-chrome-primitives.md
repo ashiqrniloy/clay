@@ -105,7 +105,7 @@ Enforced by `tests/ui_primitive_conformance.rs`:
 Packages **cannot** call primitives directly. Packages declare inert `ComponentKind` components only; Clay renders them through native code and primitives.
 
 Primitive customization flows through token contributions:
-- `clay.ui.serverRegisterThemeToken` (register new tokens)
+- `ui.serverRegisterThemeToken` (register new tokens)
 - `clay.contributions.themeTokens` / `designTokens` (override token values)
 
 Editor chrome is **not** SDUI chrome (Plan 071 task 12): caret shape/blink and the font-ligature baseline are editor/typography chrome, not `ComponentKind` components or theme tokens. Packages cannot register a caret style, blink policy, or ligature policy through `serverRegisterThemeToken`, `designTokens`, or any component contribution. The only package surfaces are:

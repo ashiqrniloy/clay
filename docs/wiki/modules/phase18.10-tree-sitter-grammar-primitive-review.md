@@ -52,14 +52,14 @@ The target primitive is `SyntaxGrammarContribution`: package metadata that names
 
 - `src/server/parse_coordinator.rs` owns cancellable background parse scheduling, handler registration, generation replacement, stale-version rejection, parse-window validation, and syntax memory budgets.
 - `src/protocol/parse.rs` defines `ParseWindowSnapshot`, `ParsePolicy`, `ParseWindowRequest`, `ParseEditNotification`, and `IncrementalParseUpdate`.
-- `runtime/js/parse.js` exposes `clay.parse.serverRegisterParseHandler` for server-side package parse handlers and rejects callback-shaped executable options.
+- `runtime/js/parse.js` exposes `parse.serverRegisterParseHandler` for server-side package parse handlers and rejects callback-shaped executable options.
 - Phase 18.10 should reuse this lifecycle for Tree-sitter parse/highlight work as `Background` work. It should not add a second scheduler.
 
 ### Decoration transport and style-token validation
 
 - `src/protocol/decorations.rs` defines `DecorationSpan`, `DecorationKind::Syntax`, `DecorationSet`, and package provenance.
 - `src/server/decorations.rs` validates document versions, byte ranges, style tokens, permissions, provenance, and `DECORATION_PAYLOAD_BUDGET_BYTES`, then stores chunks under `SYNTAX_CACHE_BUDGET_BYTES`.
-- `runtime/js/decorations.js` exposes `clay.decorations.serverPublishDecorations` for bounded server-side publication.
+- `runtime/js/decorations.js` exposes `decorations.serverPublishDecorations` for bounded server-side publication.
 - Known generic code tokens already include `keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`, and `text`.
 - Tree-sitter captures must be mapped to Clay-known style tokens before publication; capture names and query files must not become raw CSS or renderer callbacks.
 

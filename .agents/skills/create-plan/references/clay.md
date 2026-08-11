@@ -123,6 +123,7 @@ Each Clay plan document must include a separate task near the end of the plan to
 The task should require:
 
 - Review the phase implementation and propose the Clay JS APIs needed for extensibility, configuration, customization, user search/help, key binding, AI-agent discovery, and future public programmatic use.
+- Follow the dotted-ID naming convention: core Clay command/API/option IDs are bare `<domain>.<name>` (e.g. `shell.clientClosePane`, `editor.clientUndo`, `runtime.reloadConfiguration`) and must never use the retired `clay.<domain>.*` spelling; package-owned IDs always start with the package's own `apiPrefix` (`<package>.<name>`); new core domains must be added to `RESERVED_CORE_API_DOMAINS` in `src/packages/manifest.rs`. `clay:` import specifiers and `package.json` `clay.*` manifest key paths are exempt. See `.agents/skills/project-patterns/references/clay-js-api-naming.md`.
 - Inventory all server-side Rust public functions introduced or changed by the plan.
 - For each server-side Rust public function that is a public programmatic capability, expose it through an explicit `deno_core` op wrapper and stable Clay JS/TS facade API.
 - Do not expose arbitrary Rust public functions directly to JavaScript.

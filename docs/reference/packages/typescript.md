@@ -32,11 +32,11 @@ Phase 19 hot reload reruns the same one-line `await loadPackage("@clay/typescrip
 - Vocabulary styleMap: TypeScript/TSX captures map directly to closed `TokenType` + `Modifiers`, including `Function + Declaration` and `Type`
 - Budgets: `timeoutMs = 5000`, `maxWindowBytes = 4096`; published decorations remain bounded by `DECORATION_PAYLOAD_BUDGET_BYTES` and cached syntax chunks by `SYNTAX_CACHE_BUDGET_BYTES`
 - API dependencies:
-  - `clay.syntax.serverRegisterSyntaxGrammar`
-  - `clay.modes.serverRegisterModePattern`
-  - `clay.commands.serverRegisterCommand`
-  - `clay.completion.serverRegisterCompletionProvider`
-  - `clay.ui.serverRegisterComponentContribution`
+  - `syntax.serverRegisterSyntaxGrammar`
+  - `modes.serverRegisterModePattern`
+  - `commands.serverRegisterCommand`
+  - `completion.serverRegisterCompletionProvider`
+  - `ui.serverRegisterComponentContribution`
 
 ## Phase 18.14 Language Package Surfaces
 
@@ -53,7 +53,7 @@ Active syntax grammar remains selectable independently of active major mode, so 
 
 ## Configuration
 
-Phase 18.18 keeps TypeScript editing defaults (2-space indentation, `//` line comments, bracket/quote/template-literal pairs, electric `}`/`)`/`]` outdent, and `.` autocomplete trigger) as package-defined values. No new user-tunable configuration keys are introduced in this phase. Future phases may expose documented, package-prefixed options through `clay.configuration.setPackageOption` (for example, `typescript.indentSize`) after they are declared in `clay.contributions.packageOptions`.
+Phase 18.18 keeps TypeScript editing defaults (2-space indentation, `//` line comments, bracket/quote/template-literal pairs, electric `}`/`)`/`]` outdent, and `.` autocomplete trigger) as package-defined values. No new user-tunable configuration keys are introduced in this phase. Future phases may expose documented, package-prefixed options through `configuration.setPackageOption` (for example, `typescript.indentSize`) after they are declared in `clay.contributions.packageOptions`.
 
 ## Phase 18.16 syntax engine artifacts
 
@@ -67,6 +67,6 @@ TypeScript mode declares semantic `defaultFontRole: "monospace"`. User typograph
 
 Permissions are limited to `mode-registration`, `command-registration`, `completion-provider`, `parse-document`, and `render-decorations`. The package does not request filesystem, network, shell, AI, WASM-authority, raw-op, native-ui, client-runtime, package-manager, package-control, or workspace mutation authority.
 
-Grammar metadata, mode patterns, commands, completion provider metadata, and UI component trees are validated at package load/reload time. Open returns before parse completion; background failures publish sanitized `clay.parse.open_failed` diagnostics and do not block editing. Parse/highlight work runs as background, cancellable, viewport-prioritized server work and never in keypress, paint, layout, scroll, pointer, or text-event hot paths. Phase 18.16 retains the Phase 18.10 first-party-only policy and rejects arbitrary third-party/native grammar artifact loading; broader third-party trust is deferred to Phase 23 and a separate security decision. The same package-root confinement and no-runtime-download/no-shell rule applies to every Tree-sitter grammar asset used by this language package.
+Grammar metadata, mode patterns, commands, completion provider metadata, and UI component trees are validated at package load/reload time. Open returns before parse completion; background failures publish sanitized `parse.open_failed` diagnostics and do not block editing. Parse/highlight work runs as background, cancellable, viewport-prioritized server work and never in keypress, paint, layout, scroll, pointer, or text-event hot paths. Phase 18.16 retains the Phase 18.10 first-party-only policy and rejects arbitrary third-party/native grammar artifact loading; broader third-party trust is deferred to Phase 23 and a separate security decision. The same package-root confinement and no-runtime-download/no-shell rule applies to every Tree-sitter grammar asset used by this language package.
 
 LSP, full language-server protocol integration, workspace-wide symbol indexes, AI completions, network-backed completions, and mutating toolchain execution are out of scope for Phase 18.14.

@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientUndo
+id: editor.clientUndo
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientUndo
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+Z", "Cmd+Z"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it applies a client-local ordinary inverse edit under the editable lease through the ordinary local edit path, and this API does not grant filesystem/workspace authority, package/configuration/AI history mutation APIs, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientUndo` only as a documented command ID for `bindKey`; do not expose raw history stacks, server undo protocols, raw Rust calls, protocol DTOs, or `Deno.core.ops`.
+agent_guidance: Use `editor.clientUndo` only as a documented command ID for `bindKey`; do not expose raw history stacks, server undo protocols, raw Rust calls, protocol DTOs, or `Deno.core.ops`.
 lookup_tags: [editor, undo, history, keybindings, js-api]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Return the stable bindable command ID for undoing the latest local edit on the a
 
 ## Description
 
-`clientUndo` is the public Clay JS API descriptor for **Undo**. It returns the stable command ID `clay.editor.clientUndo` so configuration, help, key-binding discovery, and agents can name the undo route without hard-coding Rust shortcuts or inventing a server undo protocol.
+`clientUndo` is the public Clay JS API descriptor for **Undo**. It returns the stable command ID `editor.clientUndo` so configuration, help, key-binding discovery, and agents can name the undo route without hard-coding Rust shortcuts or inventing a server undo protocol.
 
 Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Undo happens later only after an explicit user key/command route reaches the native editor widget. The command pops the per-document client history stack, applies the inverse insert/delete/replace locally, restores caret/selection, and enqueues a normal optimistic `Edit` under the editable lease. Read-only observers are a no-op. Empty undo stacks are a no-op. Rejected inverse edits recover through the existing resync path.
 
@@ -53,7 +53,7 @@ bindKey("Ctrl+Shift+Z", clientUndo(), { scope: "editor" });
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Alt+Backspace", "clay.editor.clientUndo", { scope: "editor" });
+bindKey("Alt+Backspace", "editor.clientUndo", { scope: "editor" });
 ```
 
 ## Example
@@ -82,7 +82,7 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns the string literal command ID `"clay.editor.clientUndo"` synchronously. The helper does not mutate history, call the server, execute package code, read files, or run client-side JavaScript.
+Returns the string literal command ID `"editor.clientUndo"` synchronously. The helper does not mutate history, call the server, execute package code, read files, or run client-side JavaScript.
 
 ## Errors
 
@@ -98,7 +98,7 @@ Undo applies locally first and enqueues through the existing bounded edit queue.
 
 ## Agent guidance
 
-Use `clay.editor.clientUndo` only as a documented command ID for `bindKey`. Avoid raw history inspection APIs, server undo protocols, shell commands, network effects, WASM, AI mutation, raw ops, or client-side JavaScript execution.
+Use `editor.clientUndo` only as a documented command ID for `bindKey`. Avoid raw history inspection APIs, server undo protocols, shell commands, network effects, WASM, AI mutation, raw ops, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -108,7 +108,7 @@ Use `clay.editor.clientUndo` only as a documented command ID for `bindKey`. Avoi
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientUndo`
+- Stable ID: `editor.clientUndo`
 - User-facing name: Undo
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientUndo`

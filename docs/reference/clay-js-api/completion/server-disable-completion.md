@@ -1,5 +1,5 @@
 ---
-id: clay.completion.serverDisableCompletion
+id: completion.serverDisableCompletion
 kind: clay-js-api
 js_module: "clay:completion"
 js_export: serverDisableCompletion
@@ -92,7 +92,7 @@ Returns a synchronous JSON result with `{ target, disabled, providerGeneration }
 
 ## Errors
 
-- `clay.completion.invalid_disable`: options are missing, pass both provider and packagePrefix, pass a key other than provider/packagePrefix, pass a target exceeding 128 characters, or pass empty strings.
+- `completion.invalid_disable`: options are missing, pass both provider and packagePrefix, pass a key other than provider/packagePrefix, pass a target exceeding 128 characters, or pass empty strings.
 
 ## Permissions and security
 

@@ -98,7 +98,7 @@ workspace grants; the registry only binds already-authorized connections.
   receiver re-subscribes and re-reads the current state.
 - Connection cap: the existing `MAX_ACTIVE_CONNECTIONS = 64` permit gate
   applies to tabs too — the 65th tab's `connect` fails cleanly
-  (`TransportUnavailable`), surfaced as a `clay.tabs.open_failed`
+  (`TransportUnavailable`), surfaced as a `tabs.open_failed`
   diagnostic; no half-mounted tabs.
 - **Registry TTL sweep (Phase 22.7)**: entries carry an internal
   `last_activity: Instant` (wrapped as `RegistryEntry { entry, last_activity }`
@@ -150,7 +150,7 @@ after a server registry reset. `TabCommand::New`/`Reclaim` installs the bound
 `TabServerState`; the server sends
 that state's `InitialDocument` and workspace-pane `SduiSnapshot` before returning
 the client session. New tabs start with an editor-only snapshot because the
-workspace pane is hidden by default; `clay.workspace.toggleFileBrowser` later
+workspace pane is hidden by default; `workspace.toggleFileBrowser` later
 publishes the bound tab's file tree. A blank new-tab root selects the server
 bootstrap root.
 Legacy scripted unit transports retain their pre-bind fixture only under
@@ -184,11 +184,11 @@ reads; the shared resolver requires the bound client's access holder.
 ### Clay JS boundary
 
 Per-tab server state is not a public Rust or raw-op surface. The existing
-`clay.shell.clientTabNew` facade drives folder selection and handshake-bound
+`shell.clientTabNew` facade drives folder selection and handshake-bound
 `TabCommand::New`; existing `clay.documents`, `clay.workspace`, and
 `clay.commands` facades retain their documented server validation. They expose
-no arbitrary `TabId` or `TabServerState` handle. `clay.workspace.toggleFileBrowser`
-is a fixed command ID bound through `clay.keybindings.bindKey`, not a new
+no arbitrary `TabId` or `TabServerState` handle. `workspace.toggleFileBrowser`
+is a fixed command ID bound through `keybindings.bindKey`, not a new
 callable facade; its visibility flag is flipped only by the bound connection.
 The API/visibility audit lives in
 `tests/clay_js_doc_registry.rs::phase22_8_programmatic_surface_inventory_is_closed`
@@ -277,7 +277,7 @@ The driver lives in `src/driver/` (Phase 22.7 extraction — see the
 - **Driver dispatch**: `handle_client_ui_command` returns `ShellCommand`; the driver's `apply_tab_command` intercepts tab commands before the shell widget (whose tab arms stay inert), resolving positions from the card order (`tab_order`/`tab_position_of`/`tab_at_position`/`tab_at_offset`) and routing through the shared execution paths the tab bar also uses.
 - **Policies**: 1-based card numbering; `Activate.N` silent no-op beyond tab count; no variants beyond 9 (`Ctrl+0` unbound); next/prev wrap around; move left/right no-op at ends (no wrap); `MoveTo.N` no-op beyond count; last tab cannot close; `+` and `Ctrl+T` share the new-tab flow (in-flight guard).
 - **Server reorder**: `TabCommand::MoveLeft/MoveRight/MoveTo` → `TabRegistry::move_left/move_right/move_to` (protocol v15); every mutation broadcasts a snapshot on acceptance **and** rejection; active-tab status is preserved by `TabId`.
-- **Dirty close**: `close_tab` inventories dirty panes (`dirty_documents_in_tab`) instead of the old `guard_tab_close` walk; a dirty tab gets a driver-owned confirm session (`clay::shell::tab_close_confirm_session` — Save all and close / Discard and close / Cancel) hosted on the active pane view + chrome overlay. Save all tracks awaited `DocumentId`s in `pending_close_after_saves`; `advance_pending_close_after_saves` counts `DocumentSaved` acks and enqueues `TabCommand::Close` only after all ack, cancelling on `FileOperationFailed`/disconnect. Discard enqueues close immediately; Cancel clears the session. The menu action IDs (`clay.shell.clientTabClose*`) are driver-local, never declared/routed, so they cannot cross-route with per-view save-conflict menus.
+- **Dirty close**: `close_tab` inventories dirty panes (`dirty_documents_in_tab`) instead of the old `guard_tab_close` walk; a dirty tab gets a driver-owned confirm session (`clay::shell::tab_close_confirm_session` — Save all and close / Discard and close / Cancel) hosted on the active pane view + chrome overlay. Save all tracks awaited `DocumentId`s in `pending_close_after_saves`; `advance_pending_close_after_saves` counts `DocumentSaved` acks and enqueues `TabCommand::Close` only after all ack, cancelling on `FileOperationFailed`/disconnect. Discard enqueues close immediately; Cancel clears the session. The menu action IDs (`shell.clientTabClose*`) are driver-local, never declared/routed, so they cannot cross-route with per-view save-conflict menus.
 
 ## Window-State Persistence (Phase 22.5)
 
@@ -356,7 +356,7 @@ needed: mounting in persisted order reproduces it exactly.
 ### Failure policy
 
 - **Invalid/missing workspace root** (client pre-checks `is_dir`): that ONE
-tab is skipped with a diagnostic (`clay.tabs.open_failed` via
+tab is skipped with a diagnostic (`tabs.open_failed` via
 `flush_restore_diagnostics`) and the queue continues — a stale file
 degrades to fewer tabs, never a stall.
 - **Server-rejected mount**: `TabCommand::New` answers `FileOperationFailed`
@@ -596,7 +596,7 @@ rejected-close fix:
   helpers replacing the `edit_widget` + `try_downcast` boilerplate — see
   the [driver module map](driver.md). No logic changed; the bin test set is
   identical to the pre-move baseline.
-- **Split aliases**: `clay.shell.clientSplitPaneRight`/`Down` joined the
+- **Split aliases**: `shell.clientSplitPaneRight`/`Down` joined the
   bindable `client_ui` surface, resolving to the canonical split handlers
   (see the masonry-shell page).
 - **Tests added**: `sweep_removes_only_expired_entries`,

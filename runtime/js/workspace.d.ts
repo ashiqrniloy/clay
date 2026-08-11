@@ -1,5 +1,5 @@
 export type WorkspaceRootId = string;
-export type ClientOpenFolderDialogCommandId = "clay.workspace.clientOpenFolderDialog";
+export type ClientOpenFolderDialogCommandId = "workspace.clientOpenFolderDialog";
 export interface WorkspaceRootMetadata {
     workspaceRootId: WorkspaceRootId;
     displayName: string;

@@ -87,7 +87,7 @@ Reuse: open-time activation can read only already-open canonical document text/w
 
 - `ClayJsRuntimeService` owns constrained `deno_core` execution, curated `clay:*` facades, timeout diagnostics, raw-op hiding, and sanitized runtime errors.
 - `ClayModuleLoader` accepts curated facades, configuration-root relative modules, and resolver-validated package load entries recorded in the allowlist.
-- `JS_RUNTIME_EVALUATION_TIMEOUT_MS` and `clay.runtime.timeout` already bound runaway evaluation.
+- `JS_RUNTIME_EVALUATION_TIMEOUT_MS` and `runtime.timeout` already bound runaway evaluation.
 - Current runtime evaluations run on `spawn_blocking`, keeping V8 work away from async protocol tasks and UI paths.
 
 Reuse: the persistent runtime should preserve `ClayModuleLoader`, facades, diagnostics, timeout behavior, and blocking-worker isolation. It should change lifecycle, not authority.

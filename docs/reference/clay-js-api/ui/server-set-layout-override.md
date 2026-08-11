@@ -1,5 +1,5 @@
 ---
-id: clay.ui.serverSetLayoutOverride
+id: ui.serverSetLayoutOverride
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverSetLayoutOverride
@@ -92,7 +92,7 @@ Returns a synchronous registration record; `async: false`.
 
 ## Errors
 
-Throws `clay.ui.layout_override_failed` for hidden target IDs, unsupported properties, invalid slots/visibility/ratios, unknown or type-incompatible theme-token remaps, unregistered input/action defaults, raw ops, raw CSS, callbacks, native handles, or client-side JavaScript.
+Throws `ui.layout_override_failed` for hidden target IDs, unsupported properties, invalid slots/visibility/ratios, unknown or type-incompatible theme-token remaps, unregistered input/action defaults, raw ops, raw CSS, callbacks, native handles, or client-side JavaScript.
 
 ## Permissions and security
 

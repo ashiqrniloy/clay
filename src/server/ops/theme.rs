@@ -87,7 +87,7 @@ pub(crate) fn resolve_canonical_default_theme(
     // theme rather than installing a low-contrast palette at startup.
     if let Err(failure) = validate_active_theme_contrast(&snapshot) {
         clay_state.record(format!(
-            "clay.theme.contrast: canonical default {specifier} pair {}/{} ratio {:.2} below {:.1}",
+            "theme.contrast: canonical default {specifier} pair {}/{} ratio {:.2} below {:.1}",
             failure.foreground, failure.background, failure.ratio, failure.threshold
         ));
         return None;
@@ -106,12 +106,12 @@ pub(crate) fn apply_theme(
 ) -> Result<ActiveTheme, JsErrorBox> {
     if specifier.trim().is_empty() {
         return Err(JsErrorBox::generic(
-            "clay.theme.invalid_request: setTheme requires a non-empty `specifier`",
+            "theme.invalid_request: setTheme requires a non-empty `specifier`",
         ));
     }
     if !specifier.starts_with("@clay/") {
         return Err(JsErrorBox::generic(format!(
-            "clay.theme.unauthorized: setTheme denies non-first-party specifier `{specifier}`"
+            "theme.unauthorized: setTheme denies non-first-party specifier `{specifier}`"
         )));
     }
     let (record, _package_root, _resolved_name) = ensure_first_party_record(clay_state, specifier)?;
@@ -124,7 +124,7 @@ pub(crate) fn apply_theme(
 }
 
 /// Enforce the WCAG AA contrast floor for a candidate theme snapshot. On
-/// failure, records a `clay.theme.contrast` diagnostic naming the failing pair,
+/// failure, records a `theme.contrast` diagnostic naming the failing pair,
 /// ratio, and threshold, and denies the install. Active theme state is left
 /// untouched on rejection so a previously valid theme remains installed.
 fn enforce_contrast(
@@ -140,11 +140,11 @@ fn enforce_contrast(
     Ok(())
 }
 
-/// Render a contrast failure as a stable `clay.theme.contrast` diagnostic
+/// Render a contrast failure as a stable `theme.contrast` diagnostic
 /// string naming the specifier, pair, ratio, and threshold.
 fn format_contrast_failure(specifier: &str, failure: &ContrastFailure) -> String {
     format!(
-        "clay.theme.contrast: {} pair {}/{} ratio {:.2} below {:.1}",
+        "theme.contrast: {} pair {}/{} ratio {:.2} below {:.1}",
         specifier, failure.foreground, failure.background, failure.ratio, failure.threshold
     )
 }
@@ -182,11 +182,11 @@ pub(super) fn op_clay_theme_set_theme(
     #[string] request_json: String,
 ) -> Result<String, JsErrorBox> {
     let request: Value = serde_json::from_str(&request_json).map_err(|_| {
-        JsErrorBox::generic("clay.theme.invalid_request: setTheme requires { specifier: string }")
+        JsErrorBox::generic("theme.invalid_request: setTheme requires { specifier: string }")
     })?;
     let Some(specifier) = request.get("specifier").and_then(Value::as_str) else {
         return Err(JsErrorBox::generic(
-            "clay.theme.invalid_request: setTheme requires a `specifier` string",
+            "theme.invalid_request: setTheme requires a `specifier` string",
         ));
     };
     let clay_state = state.borrow::<std::sync::Arc<ClayOpState>>();
@@ -198,7 +198,7 @@ pub(super) fn op_clay_theme_set_theme(
         "overrideCount": override_count,
         "designTokenCount": design_token_count,
     }))
-    .map_err(|_| JsErrorBox::generic("clay.theme.invalid_request: serialization failed"))
+    .map_err(|_| JsErrorBox::generic("theme.invalid_request: serialization failed"))
 }
 
 /// `setAppearance` Clay JS op (Phase 20.6). Sets the bounded appearance
@@ -214,18 +214,16 @@ pub(super) fn op_clay_theme_set_appearance(
     #[string] request_json: String,
 ) -> Result<String, JsErrorBox> {
     let request: Value = serde_json::from_str(&request_json).map_err(|_| {
-        JsErrorBox::generic(
-            "clay.theme.invalid_request: setAppearance requires { appearance: string }",
-        )
+        JsErrorBox::generic("theme.invalid_request: setAppearance requires { appearance: string }")
     })?;
     let Some(appearance_str) = request.get("appearance").and_then(Value::as_str) else {
         return Err(JsErrorBox::generic(
-            "clay.theme.invalid_request: setAppearance requires an `appearance` string",
+            "theme.invalid_request: setAppearance requires an `appearance` string",
         ));
     };
     let appearance = Appearance::parse(appearance_str).ok_or_else(|| {
         JsErrorBox::generic(format!(
-            "clay.theme.invalid_request: setAppearance rejects unknown appearance `{appearance_str}`"
+            "theme.invalid_request: setAppearance rejects unknown appearance `{appearance_str}`"
         ))
     })?;
 
@@ -238,7 +236,7 @@ pub(super) fn op_clay_theme_set_appearance(
         "appearance": appearance.as_str(),
         "resolvedTheme": resolved_specifier,
     }))
-    .map_err(|_| JsErrorBox::generic("clay.theme.invalid_request: serialization failed"))
+    .map_err(|_| JsErrorBox::generic("theme.invalid_request: serialization failed"))
 }
 
 #[cfg(test)]
@@ -321,10 +319,7 @@ mod tests {
         let err = enforce_contrast(&clay_state, "@clay/theme-low-contrast", &low_contrast)
             .expect_err("low-contrast snapshot must be rejected");
         let message = err.to_string();
-        assert!(
-            message.contains("clay.theme.contrast"),
-            "message: {message}"
-        );
+        assert!(message.contains("theme.contrast"), "message: {message}");
         assert!(
             message.contains("@clay/theme-low-contrast"),
             "message: {message}"

@@ -25,38 +25,29 @@ pub(super) fn op_clay_diagnostics_publish_diagnostics(
     state: &mut OpState,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let options_value = parse_json(&options_json, "clay.diagnostics.invalid_publication")?;
-    let options = options_value.as_object().ok_or_else(|| {
-        clay_error("clay.diagnostics.invalid_publication: options must be an object")
-    })?;
+    let options_value = parse_json(&options_json, "diagnostics.invalid_publication")?;
+    let options = options_value
+        .as_object()
+        .ok_or_else(|| clay_error("diagnostics.invalid_publication: options must be an object"))?;
     reject_forbidden_keys(options)?;
     let package = state
         .borrow::<Arc<ClayOpState>>()
         .require_current_package_capability(
             crate::packages::permissions::PackagePermission::RenderDecorations,
         )?;
-    let document_id = required_u64(
-        options,
-        "documentId",
-        "clay.diagnostics.invalid_publication",
-    )?;
+    let document_id = required_u64(options, "documentId", "diagnostics.invalid_publication")?;
     let document_version = required_u64(
         options,
         "documentVersion",
-        "clay.diagnostics.invalid_publication",
+        "diagnostics.invalid_publication",
     )?;
     let current_document_version =
         optional_u64(options.get("currentDocumentVersion"))?.unwrap_or(document_version);
-    let viewport = required_object(options, "viewport", "clay.diagnostics.invalid_publication")?;
-    let viewport_byte_start = required_u64(
-        viewport,
-        "byteStart",
-        "clay.diagnostics.invalid_publication",
-    )?;
-    let viewport_byte_end =
-        required_u64(viewport, "byteEnd", "clay.diagnostics.invalid_publication")?;
-    let source =
-        required_str(options, "source", "clay.diagnostics.invalid_publication")?.to_string();
+    let viewport = required_object(options, "viewport", "diagnostics.invalid_publication")?;
+    let viewport_byte_start =
+        required_u64(viewport, "byteStart", "diagnostics.invalid_publication")?;
+    let viewport_byte_end = required_u64(viewport, "byteEnd", "diagnostics.invalid_publication")?;
+    let source = required_str(options, "source", "diagnostics.invalid_publication")?.to_string();
     let provenance = DecorationProvenance {
         package_name: package.manifest.name.clone(),
         package_version: package.manifest.version.clone(),
@@ -65,7 +56,7 @@ pub(super) fn op_clay_diagnostics_publish_diagnostics(
     let spans = options
         .get("spans")
         .and_then(Value::as_array)
-        .ok_or_else(|| clay_error("clay.diagnostics.invalid_publication: spans must be an array"))?
+        .ok_or_else(|| clay_error("diagnostics.invalid_publication: spans must be an array"))?
         .iter()
         .enumerate()
         .map(|(index, span)| span_from_value(index, span, &source, &provenance))
@@ -96,7 +87,7 @@ pub(super) fn op_clay_diagnostics_publish_diagnostics(
     }))
     .map_err(|error| {
         clay_error(format!(
-            "clay.diagnostics.publish_failed: failed to serialize result ({error})"
+            "diagnostics.publish_failed: failed to serialize result ({error})"
         ))
     })
 }
@@ -109,17 +100,17 @@ fn span_from_value(
 ) -> Result<DiagnosticSpan, JsErrorBox> {
     let object = value.as_object().ok_or_else(|| {
         clay_error(format!(
-            "clay.diagnostics.invalid_span: span {index} must be an object"
+            "diagnostics.invalid_span: span {index} must be an object"
         ))
     })?;
     reject_forbidden_keys(object)?;
-    let severity = match required_str(object, "severity", "clay.diagnostics.invalid_span")? {
+    let severity = match required_str(object, "severity", "diagnostics.invalid_span")? {
         "error" | "Error" => DiagnosticSeverity::Error,
         "warning" | "Warning" => DiagnosticSeverity::Warning,
         "info" | "Info" => DiagnosticSeverity::Info,
         other => {
             return Err(clay_error(format!(
-                "clay.diagnostics.invalid_span: unsupported severity `{other}`"
+                "diagnostics.invalid_span: unsupported severity `{other}`"
             )));
         }
     };
@@ -128,16 +119,16 @@ fn span_from_value(
         Some(Value::String(value)) if !value.trim().is_empty() => value.clone(),
         _ => {
             return Err(clay_error(format!(
-                "clay.diagnostics.invalid_span: span {index} source must be a non-empty string"
+                "diagnostics.invalid_span: span {index} source must be a non-empty string"
             )));
         }
     };
     Ok(DiagnosticSpan {
-        byte_start: required_u64(object, "byteStart", "clay.diagnostics.invalid_span")?,
-        byte_end: required_u64(object, "byteEnd", "clay.diagnostics.invalid_span")?,
+        byte_start: required_u64(object, "byteStart", "diagnostics.invalid_span")?,
+        byte_end: required_u64(object, "byteEnd", "diagnostics.invalid_span")?,
         severity,
-        code: required_str(object, "code", "clay.diagnostics.invalid_span")?.to_string(),
-        message: required_str(object, "message", "clay.diagnostics.invalid_span")?.to_string(),
+        code: required_str(object, "code", "diagnostics.invalid_span")?.to_string(),
+        message: required_str(object, "message", "diagnostics.invalid_span")?.to_string(),
         source,
         provenance: provenance.clone(),
     })
@@ -158,7 +149,7 @@ fn reject_forbidden_keys(object: &Map<String, Value>) -> Result<(), JsErrorBox> 
     ] {
         if object.contains_key(key) {
             return Err(clay_error(format!(
-                "clay.diagnostics.invalid_publication: executable or raw authority field {key} is not accepted"
+                "diagnostics.invalid_publication: executable or raw authority field {key} is not accepted"
             )));
         }
     }
@@ -166,5 +157,5 @@ fn reject_forbidden_keys(object: &Map<String, Value>) -> Result<(), JsErrorBox> 
 }
 
 fn diagnostic_error(error: DiagnosticValidationError) -> JsErrorBox {
-    clay_error(format!("clay.diagnostics.publish_failed: {error:?}"))
+    clay_error(format!("diagnostics.publish_failed: {error:?}"))
 }

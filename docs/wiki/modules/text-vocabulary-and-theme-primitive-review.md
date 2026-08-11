@@ -91,7 +91,7 @@ Plan 046 completed the generic primitives described by this review:
 - `src/editor/theme.rs::StyleRegistry` is the paint-time style source. It stores base UI colors, layer colors, a per-`TokenType` `[Color; 35]` syntax table, and per-token text-attribute defaults.
 - `clay.contributions.textStyles` is parsed as inert `TextStyleOverrideDescriptor` data in `src/packages/record.rs`; `reject_ui_prohibited_authority` rejects raw CSS, raw ops, callbacks, native handles, and client JavaScript.
 - `@clay/theme-gruvbox-material-dark` and `@clay/theme-gruvbox-material-light` ship as first-party inert packages with full 48-entry mappings (13 base UI keys + 35 token types).
-- `clay.theme.setTheme` selects one active first-party theme from `init.js`, stores an `ActiveTheme` snapshot, and the client converts it to `StyleRegistry` before first paint.
+- `theme.setTheme` selects one active first-party theme from `init.js`, stores an `ActiveTheme` snapshot, and the client converts it to `StyleRegistry` before first paint.
 
 Implementation details live in [Editor Theme Registry](editor-theme-registry.md). Public authoring docs live in [Text Vocabulary and Two-Axis Decoration Contract](../../reference/primitives/syntax-vocabulary.md) and [Phase 18.15 theme authoring](../../reference/packages/creating-packages.md#phase-1815-theme-authoring-textstyles-and-settheme).
 

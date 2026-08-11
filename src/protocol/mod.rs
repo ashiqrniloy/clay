@@ -180,7 +180,7 @@ pub struct BehaviorManifest {
 impl BehaviorManifest {
     pub fn minimal_text_editing(behavior_version: BehaviorVersion) -> Self {
         Self {
-            manifest_id: "clay.default.text".to_string(),
+            manifest_id: "default.text".to_string(),
             behavior_version,
             scope: BehaviorScope::GlobalDefault,
             document_font_role: DocumentFontRole::Proportional,
@@ -197,7 +197,7 @@ impl BehaviorManifest {
     /// reflow) so generic code editing works with no package loaded.
     pub fn core_code_editing(behavior_version: BehaviorVersion) -> Self {
         Self {
-            manifest_id: "clay.default.code".to_string(),
+            manifest_id: "default.code".to_string(),
             behavior_version,
             scope: BehaviorScope::GlobalDefault,
             document_font_role: DocumentFontRole::Monospace,
@@ -223,55 +223,56 @@ fn default_keymaps() -> Vec<KeyBindingRule> {
     let mut rules = vec![
         KeyBindingRule::single("text.insert_newline", KeyCode::Enter),
         KeyBindingRule::single("text.insert_tab", KeyCode::Tab),
+        KeyBindingRule::default_reload_configuration(),
         // Phase 22.1: shell pane-management defaults (all overridable via bindKey
         // in init.js with { scope: "global" }). "vertical" = side by side,
         // "horizontal" = stacked (vim-style vsplit / split).
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientSplitPaneVertical",
+            "shell.clientSplitPaneVertical",
             ctrl_key(KeyCode::Character("\\".to_string())),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientSplitPaneHorizontal",
+            "shell.clientSplitPaneHorizontal",
             ctrl_key(KeyCode::Character("-".to_string())),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientAddEqualPane",
+            "shell.clientAddEqualPane",
             ctrl_shift_key(KeyCode::Character("\\".to_string())),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientClosePane",
+            "shell.clientClosePane",
             ctrl_alt_key(KeyCode::Character("w".to_string())),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientFocusPanePrev",
+            "shell.clientFocusPanePrev",
             ctrl_alt_key(KeyCode::ArrowLeft),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientFocusPaneNext",
+            "shell.clientFocusPaneNext",
             ctrl_alt_key(KeyCode::ArrowRight),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientResizePaneLeft",
+            "shell.clientResizePaneLeft",
             ctrl_alt_shift_key(KeyCode::ArrowLeft),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientResizePaneRight",
+            "shell.clientResizePaneRight",
             ctrl_alt_shift_key(KeyCode::ArrowRight),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientResizePaneUp",
+            "shell.clientResizePaneUp",
             ctrl_alt_shift_key(KeyCode::ArrowUp),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientResizePaneDown",
+            "shell.clientResizePaneDown",
             ctrl_alt_shift_key(KeyCode::ArrowDown),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientMovePanePrev",
+            "shell.clientMovePanePrev",
             ctrl_alt_key(KeyCode::Character("[".to_string())),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientMovePaneNext",
+            "shell.clientMovePaneNext",
             ctrl_alt_key(KeyCode::Character("]".to_string())),
         ),
         // Phase 22.4: shell tab-management defaults (all overridable via
@@ -283,32 +284,32 @@ fn default_keymaps() -> Vec<KeyBindingRule> {
         // exist for 1..=9 only — "beyond 9" is not a command ID. Chords are
         // the parseable set (single characters + Tab + arrows; the chord
         // parser has no PageUp/PageDown/F-keys).
-        KeyBindingRule::global_client_ui("clay.shell.clientTabNext", ctrl_key(KeyCode::Tab)),
-        KeyBindingRule::global_client_ui("clay.shell.clientTabPrev", ctrl_shift_key(KeyCode::Tab)),
+        KeyBindingRule::global_client_ui("shell.clientTabNext", ctrl_key(KeyCode::Tab)),
+        KeyBindingRule::global_client_ui("shell.clientTabPrev", ctrl_shift_key(KeyCode::Tab)),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientTabNew",
+            "shell.clientTabNew",
             ctrl_key(KeyCode::Character("t".to_string())),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientTabClose",
+            "shell.clientTabClose",
             ctrl_shift_key(KeyCode::Character("w".to_string())),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientTabMoveLeft",
+            "shell.clientTabMoveLeft",
             ctrl_shift_key(KeyCode::Character("[".to_string())),
         ),
         KeyBindingRule::global_client_ui(
-            "clay.shell.clientTabMoveRight",
+            "shell.clientTabMoveRight",
             ctrl_shift_key(KeyCode::Character("]".to_string())),
         ),
     ];
     for n in 1..=9 {
         rules.push(KeyBindingRule::global_client_ui(
-            format!("clay.shell.clientTabActivate.{n}"),
+            format!("shell.clientTabActivate.{n}"),
             ctrl_key(KeyCode::Character(n.to_string())),
         ));
         rules.push(KeyBindingRule::global_client_ui(
-            format!("clay.shell.clientTabMoveTo.{n}"),
+            format!("shell.clientTabMoveTo.{n}"),
             ctrl_shift_key(KeyCode::Character(n.to_string())),
         ));
     }
@@ -370,47 +371,52 @@ fn default_commands() -> Vec<CommandDeclaration> {
         CommandDeclaration::client_edit("text.replace", "Replace Text"),
         CommandDeclaration::client_edit("text.insert_newline", "Insert Newline"),
         CommandDeclaration::client_edit("text.insert_tab", "Insert Tab"),
+        CommandDeclaration {
+            command_id: "runtime.reloadConfiguration".to_string(),
+            display_name: "Reload Configuration and Packages".to_string(),
+            routing_policy: RoutingPolicy::ServerFirstWithLock {
+                lock_scope: LockScope::Behavior,
+            },
+            authority: CommandAuthority::ServerIntent,
+        },
         CommandDeclaration::ui_reactive("completion.trigger", "Trigger Completion"),
         // Phase 18.20: discoverable language-intelligence commands with empty
         // default key bindings. Client captures cursor/version locally and
         // enqueues LanguageIntelligenceRequest (UI-reactive, like completion).
-        CommandDeclaration::ui_reactive("clay.language.hover", "Hover"),
-        CommandDeclaration::ui_reactive("clay.language.goToDefinition", "Go to Definition"),
-        CommandDeclaration::ui_reactive("clay.language.codeActions", "Code Actions"),
-        CommandDeclaration::ui_reactive("clay.language.signatureHelp", "Signature Help"),
+        CommandDeclaration::ui_reactive("language.hover", "Hover"),
+        CommandDeclaration::ui_reactive("language.goToDefinition", "Go to Definition"),
+        CommandDeclaration::ui_reactive("language.codeActions", "Code Actions"),
+        CommandDeclaration::ui_reactive("language.signatureHelp", "Signature Help"),
         // Phase 22.1: shell pane-management commands (ClientUi authority).
-        CommandDeclaration::client_ui("clay.shell.clientSplitPaneVertical", "Split Pane Vertical"),
-        CommandDeclaration::client_ui(
-            "clay.shell.clientSplitPaneHorizontal",
-            "Split Pane Horizontal",
-        ),
-        CommandDeclaration::client_ui("clay.shell.clientAddEqualPane", "Add Equal Pane"),
-        CommandDeclaration::client_ui("clay.shell.clientClosePane", "Close Pane"),
-        CommandDeclaration::client_ui("clay.shell.clientFocusPaneNext", "Focus Next Pane"),
-        CommandDeclaration::client_ui("clay.shell.clientFocusPanePrev", "Focus Previous Pane"),
-        CommandDeclaration::client_ui("clay.shell.clientResizePaneLeft", "Resize Pane Left"),
-        CommandDeclaration::client_ui("clay.shell.clientResizePaneRight", "Resize Pane Right"),
-        CommandDeclaration::client_ui("clay.shell.clientResizePaneUp", "Resize Pane Up"),
-        CommandDeclaration::client_ui("clay.shell.clientResizePaneDown", "Resize Pane Down"),
-        CommandDeclaration::client_ui("clay.shell.clientMovePaneNext", "Move Pane Next"),
-        CommandDeclaration::client_ui("clay.shell.clientMovePanePrev", "Move Pane Previous"),
+        CommandDeclaration::client_ui("shell.clientSplitPaneVertical", "Split Pane Vertical"),
+        CommandDeclaration::client_ui("shell.clientSplitPaneHorizontal", "Split Pane Horizontal"),
+        CommandDeclaration::client_ui("shell.clientAddEqualPane", "Add Equal Pane"),
+        CommandDeclaration::client_ui("shell.clientClosePane", "Close Pane"),
+        CommandDeclaration::client_ui("shell.clientFocusPaneNext", "Focus Next Pane"),
+        CommandDeclaration::client_ui("shell.clientFocusPanePrev", "Focus Previous Pane"),
+        CommandDeclaration::client_ui("shell.clientResizePaneLeft", "Resize Pane Left"),
+        CommandDeclaration::client_ui("shell.clientResizePaneRight", "Resize Pane Right"),
+        CommandDeclaration::client_ui("shell.clientResizePaneUp", "Resize Pane Up"),
+        CommandDeclaration::client_ui("shell.clientResizePaneDown", "Resize Pane Down"),
+        CommandDeclaration::client_ui("shell.clientMovePaneNext", "Move Pane Next"),
+        CommandDeclaration::client_ui("shell.clientMovePanePrev", "Move Pane Previous"),
         // Phase 22.4: shell tab-management commands (ClientUi authority; Global
         // keybindings in default_keymaps). Numbered families are 1-based
         // positions in the current tab order; only 1..=9 exist.
-        CommandDeclaration::client_ui("clay.shell.clientTabNext", "Next Tab"),
-        CommandDeclaration::client_ui("clay.shell.clientTabPrev", "Previous Tab"),
-        CommandDeclaration::client_ui("clay.shell.clientTabNew", "New Tab"),
-        CommandDeclaration::client_ui("clay.shell.clientTabClose", "Close Tab"),
-        CommandDeclaration::client_ui("clay.shell.clientTabMoveLeft", "Move Tab Left"),
-        CommandDeclaration::client_ui("clay.shell.clientTabMoveRight", "Move Tab Right"),
+        CommandDeclaration::client_ui("shell.clientTabNext", "Next Tab"),
+        CommandDeclaration::client_ui("shell.clientTabPrev", "Previous Tab"),
+        CommandDeclaration::client_ui("shell.clientTabNew", "New Tab"),
+        CommandDeclaration::client_ui("shell.clientTabClose", "Close Tab"),
+        CommandDeclaration::client_ui("shell.clientTabMoveLeft", "Move Tab Left"),
+        CommandDeclaration::client_ui("shell.clientTabMoveRight", "Move Tab Right"),
     ];
     for n in 1..=9 {
         commands.push(CommandDeclaration::client_ui(
-            format!("clay.shell.clientTabActivate.{n}"),
+            format!("shell.clientTabActivate.{n}"),
             format!("Activate Tab {n}"),
         ));
         commands.push(CommandDeclaration::client_ui(
-            format!("clay.shell.clientTabMoveTo.{n}"),
+            format!("shell.clientTabMoveTo.{n}"),
             format!("Move Tab to Position {n}"),
         ));
     }
@@ -439,6 +445,26 @@ impl KeyBindingRule {
             sequence: vec![KeyStroke::new(key)],
             context: KeyBindingContext::EditorTextFocus,
             routing_policy: RoutingPolicy::ClientFirstPredictable,
+        }
+    }
+
+    /// Phase 23: the built-in global configuration reload binding. It uses
+    /// the same behavior lock as the command's server-side routing policy.
+    pub(crate) fn default_reload_configuration() -> Self {
+        Self {
+            command_id: "runtime.reloadConfiguration".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::Character("r".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    shift: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::Global,
+            routing_policy: RoutingPolicy::ServerFirstWithLock {
+                lock_scope: LockScope::Behavior,
+            },
         }
     }
 
@@ -1910,22 +1936,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn default_keymaps_contain_configuration_reload_binding() {
+        let rule = default_keymaps()
+            .into_iter()
+            .find(|rule| rule.command_id == "runtime.reloadConfiguration")
+            .expect("default keymap missing configuration reload");
+
+        assert_eq!(
+            rule.sequence,
+            vec![KeyStroke {
+                key: KeyCode::Character("r".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    shift: true,
+                    ..KeyModifiers::NONE
+                },
+            }]
+        );
+        assert_eq!(rule.context, KeyBindingContext::Global);
+        assert_eq!(
+            rule.routing_policy,
+            RoutingPolicy::ServerFirstWithLock {
+                lock_scope: LockScope::Behavior,
+            }
+        );
+    }
+
+    #[test]
     fn default_keymaps_contain_phase_22_1_shell_defaults() {
         let keymaps = default_keymaps();
         // Each shell command has a Global-scope, ClientUiCommand-routed default.
         let shell_ids = [
-            "clay.shell.clientSplitPaneVertical",
-            "clay.shell.clientSplitPaneHorizontal",
-            "clay.shell.clientAddEqualPane",
-            "clay.shell.clientClosePane",
-            "clay.shell.clientFocusPaneNext",
-            "clay.shell.clientFocusPanePrev",
-            "clay.shell.clientResizePaneLeft",
-            "clay.shell.clientResizePaneRight",
-            "clay.shell.clientResizePaneUp",
-            "clay.shell.clientResizePaneDown",
-            "clay.shell.clientMovePaneNext",
-            "clay.shell.clientMovePanePrev",
+            "shell.clientSplitPaneVertical",
+            "shell.clientSplitPaneHorizontal",
+            "shell.clientAddEqualPane",
+            "shell.clientClosePane",
+            "shell.clientFocusPaneNext",
+            "shell.clientFocusPanePrev",
+            "shell.clientResizePaneLeft",
+            "shell.clientResizePaneRight",
+            "shell.clientResizePaneUp",
+            "shell.clientResizePaneDown",
+            "shell.clientMovePaneNext",
+            "shell.clientMovePanePrev",
         ];
         for id in shell_ids {
             let rule = keymaps
@@ -1949,18 +2002,18 @@ mod tests {
     fn default_commands_contain_phase_22_1_shell_commands() {
         let commands = default_commands();
         let shell_ids = [
-            "clay.shell.clientSplitPaneVertical",
-            "clay.shell.clientSplitPaneHorizontal",
-            "clay.shell.clientAddEqualPane",
-            "clay.shell.clientClosePane",
-            "clay.shell.clientFocusPaneNext",
-            "clay.shell.clientFocusPanePrev",
-            "clay.shell.clientResizePaneLeft",
-            "clay.shell.clientResizePaneRight",
-            "clay.shell.clientResizePaneUp",
-            "clay.shell.clientResizePaneDown",
-            "clay.shell.clientMovePaneNext",
-            "clay.shell.clientMovePanePrev",
+            "shell.clientSplitPaneVertical",
+            "shell.clientSplitPaneHorizontal",
+            "shell.clientAddEqualPane",
+            "shell.clientClosePane",
+            "shell.clientFocusPaneNext",
+            "shell.clientFocusPanePrev",
+            "shell.clientResizePaneLeft",
+            "shell.clientResizePaneRight",
+            "shell.clientResizePaneUp",
+            "shell.clientResizePaneDown",
+            "shell.clientMovePaneNext",
+            "shell.clientMovePanePrev",
         ];
         for id in shell_ids {
             let cmd = commands
@@ -1979,19 +2032,19 @@ mod tests {
     fn default_keymaps_contain_phase_22_4_tab_defaults() {
         let keymaps = default_keymaps();
         let mut tab_ids: Vec<String> = [
-            "clay.shell.clientTabNext",
-            "clay.shell.clientTabPrev",
-            "clay.shell.clientTabNew",
-            "clay.shell.clientTabClose",
-            "clay.shell.clientTabMoveLeft",
-            "clay.shell.clientTabMoveRight",
+            "shell.clientTabNext",
+            "shell.clientTabPrev",
+            "shell.clientTabNew",
+            "shell.clientTabClose",
+            "shell.clientTabMoveLeft",
+            "shell.clientTabMoveRight",
         ]
         .iter()
         .map(|id| id.to_string())
         .collect();
         for n in 1..=9 {
-            tab_ids.push(format!("clay.shell.clientTabActivate.{n}"));
-            tab_ids.push(format!("clay.shell.clientTabMoveTo.{n}"));
+            tab_ids.push(format!("shell.clientTabActivate.{n}"));
+            tab_ids.push(format!("shell.clientTabMoveTo.{n}"));
         }
         for id in tab_ids {
             let rule = keymaps
@@ -2014,13 +2067,13 @@ mod tests {
         for n in 1..=9 {
             let activate = keymaps
                 .iter()
-                .find(|r| r.command_id == format!("clay.shell.clientTabActivate.{n}"))
+                .find(|r| r.command_id == format!("shell.clientTabActivate.{n}"))
                 .unwrap();
             assert!(activate.sequence[0].modifiers.control);
             assert!(!activate.sequence[0].modifiers.shift);
             let move_to = keymaps
                 .iter()
-                .find(|r| r.command_id == format!("clay.shell.clientTabMoveTo.{n}"))
+                .find(|r| r.command_id == format!("shell.clientTabMoveTo.{n}"))
                 .unwrap();
             assert!(move_to.sequence[0].modifiers.control);
             assert!(move_to.sequence[0].modifiers.shift);
@@ -2047,19 +2100,19 @@ mod tests {
     fn default_commands_contain_phase_22_4_tab_commands() {
         let commands = default_commands();
         let mut tab_ids: Vec<String> = [
-            "clay.shell.clientTabNext",
-            "clay.shell.clientTabPrev",
-            "clay.shell.clientTabNew",
-            "clay.shell.clientTabClose",
-            "clay.shell.clientTabMoveLeft",
-            "clay.shell.clientTabMoveRight",
+            "shell.clientTabNext",
+            "shell.clientTabPrev",
+            "shell.clientTabNew",
+            "shell.clientTabClose",
+            "shell.clientTabMoveLeft",
+            "shell.clientTabMoveRight",
         ]
         .iter()
         .map(|id| id.to_string())
         .collect();
         for n in 1..=9 {
-            tab_ids.push(format!("clay.shell.clientTabActivate.{n}"));
-            tab_ids.push(format!("clay.shell.clientTabMoveTo.{n}"));
+            tab_ids.push(format!("shell.clientTabActivate.{n}"));
+            tab_ids.push(format!("shell.clientTabMoveTo.{n}"));
         }
         for id in tab_ids {
             let cmd = commands

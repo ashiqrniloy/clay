@@ -127,8 +127,8 @@ fn package_reference_docs_match_structured_manifest_contracts() {
 fn package_author_guide_uses_public_facades_not_raw_ops() {
     let guide = read("docs/reference/packages/creating-packages.md");
     let api_ids = api_inventory_ids();
-    assert!(api_ids.contains("clay.packages.loadPackage"));
-    assert!(guide.contains("`clay.packages.loadPackage`"));
+    assert!(api_ids.contains("packages.loadPackage"));
+    assert!(guide.contains("`packages.loadPackage`"));
     assert!(
         guide.contains("raw `Deno.core.ops`"),
         "package author guide must retain raw-op boundary marker"
@@ -150,7 +150,7 @@ fn language_package_docs_have_no_hidden_configuration_surface() {
     for name in package_names {
         let prefix = name.trim_start_matches("@clay/");
         assert!(
-            !inventory.contains(&format!("clay.configuration.{prefix}")),
+            !inventory.contains(&format!("configuration.{prefix}")),
             "{name}: package-specific hidden configuration API found; use generic documented APIs"
         );
     }

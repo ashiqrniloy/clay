@@ -69,7 +69,7 @@ The key finding is boring: Git needs one new reusable server primitive, not a cu
 
 ### Configuration and documentation registry
 
-- `clay.configuration.setPackageOption` is available for package-owned user-visible settings when a real behavior-changing option is needed.
+- `configuration.setPackageOption` is available for package-owned user-visible settings when a real behavior-changing option is needed.
 - Fixed internal safe defaults are preferable for Phase 18.13 unless refresh interval/timeout/status visibility genuinely needs user customization.
 - Public programmatic Git behavior must go through Clay JS facades, Markdown docs, `docs/index.md`, generated registry artifacts, inventory entries, lookup tests, and Rust visibility/API-boundary tests.
 
@@ -156,7 +156,7 @@ await serverRefreshGitStatus({ workspaceRootId: statuses[0].workspaceRootId });
 
 Docs/registry requirements:
 
-- Stable IDs such as `clay.git.serverListGitStatuses` and `clay.git.serverRefreshGitStatus`.
+- Stable IDs such as `git.serverListGitStatuses` and `git.serverRefreshGitStatus`.
 - Backing Rust path, op wrapper path/name, JS facade path/export, user-facing name, key binding metadata, custom properties, permission/security notes, lookup tags, and examples.
 - Tests that fail if docs/index/generated registry/facade/inventory entries drift.
 

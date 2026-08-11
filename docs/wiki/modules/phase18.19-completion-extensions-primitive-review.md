@@ -77,7 +77,7 @@ Rejected implementation: a per-language or mode-specific Rust branch; adding an 
 
 ### `serverDisableCompletion` Clay JS API and disabled-provider set (implemented in task 7)
 
-`ClayOpState` now owns `disabled_completion_providers: Mutex<BTreeSet<String>>` plus a monotonically increasing completion-provider generation. `clay.completion.serverDisableCompletion` (op `op_clay_completion_disable`) accepts exactly one provider ID or package prefix, records it idempotently, and bumps the generation only on first insertion. Existing and subsequently registered metadata is stamped with the current generation. Shared `completion_provider_is_disabled` filtering matches exact IDs, `provenance.package_prefix` (for example `rust`), or `provenance.package_name` (for example `@clay/rust`) before listing/runtime snapshot publication. Disabling `core.bufferWords` or `@clay/rust` therefore removes the targeted metadata without deleting registration records.
+`ClayOpState` now owns `disabled_completion_providers: Mutex<BTreeSet<String>>` plus a monotonically increasing completion-provider generation. `completion.serverDisableCompletion` (op `op_clay_completion_disable`) accepts exactly one provider ID or package prefix, records it idempotently, and bumps the generation only on first insertion. Existing and subsequently registered metadata is stamped with the current generation. Shared `completion_provider_is_disabled` filtering matches exact IDs, `provenance.package_prefix` (for example `rust`), or `provenance.package_name` (for example `@clay/rust`) before listing/runtime snapshot publication. Disabling `core.bufferWords` or `@clay/rust` therefore removes the targeted metadata without deleting registration records.
 
 The coordinator-owned registry keeps the same disabled-target set semantics. `CompletionCoordinator::disable_completion(target, generation)` prevents trigger selection and direct scheduling of disabled providers, advances known document generations, and aborts older in-flight tasks through the existing cancellation path. Reload creates a fresh runtime/registry generation, which is the intentionally minimal re-enable path. The API follows the `server*` naming convention of sibling completion APIs because it mutates server-authoritative provider state.
 
@@ -156,7 +156,7 @@ No new `PackagePermission` and no new decision log are required for this phase (
 - Do not add a separate snippet provider subsystem, snippet registry, or snippet-specific Masonry widget; snippets are a `CompletionProvider` variant riding the existing `CompletionItem`/accept path.
 - Do not expand snippets server-side or run provider code on accept; expansion is a bounded client-local Rust text op.
 - Do not add a per-language or mode-specific Rust branch for exclusive suppression or disable filtering; one shared helper over the priority-ordered list serves all providers.
-- Do not overload `setPackageOption` for completion disabling; use a dedicated `clay.completion.serverDisableCompletion` API.
+- Do not overload `setPackageOption` for completion disabling; use a dedicated `completion.serverDisableCompletion` API.
 - Do not grant `exclusive` or `disableCompletion` any authority beyond suppressing already-registered metadata.
 - Do not run package JavaScript, snippet parsing, IPC, server validation, completion computation, or configuration evaluation in Masonry paint/layout/input paths.
 - Do not implement LSP process spawning, hover, go-to-definition, code actions, or rename in Phase 18.19; those are Phase 18.20/18.21.

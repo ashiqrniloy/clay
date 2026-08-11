@@ -173,9 +173,9 @@ pub(crate) enum RelationVerificationError {
 impl RelationVerificationError {
     pub fn code(&self) -> &'static str {
         match self {
-            Self::UnknownExtensionPoint { .. } => "clay.package_relation.unknown_extension_point",
-            Self::VersionMismatch { .. } => "clay.package_relation.version_mismatch",
-            Self::OperationNotOffered { .. } => "clay.package_relation.operation_not_offered",
+            Self::UnknownExtensionPoint { .. } => "package_relation.unknown_extension_point",
+            Self::VersionMismatch { .. } => "package_relation.version_mismatch",
+            Self::OperationNotOffered { .. } => "package_relation.operation_not_offered",
         }
     }
 }
@@ -767,7 +767,7 @@ mod tests {
             relation_key: "extends".to_string(),
         };
         let error = verify_relation_request(&points, &request).unwrap_err();
-        assert_eq!(error.code(), "clay.package_relation.version_mismatch");
+        assert_eq!(error.code(), "package_relation.version_mismatch");
         let request = StructuredRelationRequest {
             version: 2,
             ..request
@@ -778,6 +778,6 @@ mod tests {
             ..request
         };
         let error = verify_relation_request(&points, &request).unwrap_err();
-        assert_eq!(error.code(), "clay.package_relation.operation_not_offered");
+        assert_eq!(error.code(), "package_relation.operation_not_offered");
     }
 }

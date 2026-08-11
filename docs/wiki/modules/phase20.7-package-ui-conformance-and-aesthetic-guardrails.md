@@ -19,13 +19,13 @@
 
 ## Overview
 
-Phase 20.7 (plan `plans/068-…`) hardens the host-authority validation boundary for package UI so a package cannot destroy Clay's established aesthetics or usability. It adds: an active-theme contrast/legibility floor (WCAG-AA 4.5 text / 3.0 non-text), a per-`ComponentKind` state-completeness contract (`applicable_states`), enriched author diagnostics that name the rejected value + expected type + field, four code-vs-catalog drift guards, three package-runtime trust-domain invariant tests, and a `catalog × state × theme` conformance matrix. **No new `ComponentKind`, typed style variable, token, Clay JS op, JS facade, or configuration key was introduced.** Every conformance helper is `pub(crate)` or a test-re-export; conformance is host authority, not package-facing — no `clay.ui.validate*` op or `clay:*` facade exists for it.
+Phase 20.7 (plan `plans/068-…`) hardens the host-authority validation boundary for package UI so a package cannot destroy Clay's established aesthetics or usability. It adds: an active-theme contrast/legibility floor (WCAG-AA 4.5 text / 3.0 non-text), a per-`ComponentKind` state-completeness contract (`applicable_states`), enriched author diagnostics that name the rejected value + expected type + field, four code-vs-catalog drift guards, three package-runtime trust-domain invariant tests, and a `catalog × state × theme` conformance matrix. **No new `ComponentKind`, typed style variable, token, Clay JS op, JS facade, or configuration key was introduced.** Every conformance helper is `pub(crate)` or a test-re-export; conformance is host authority, not package-facing — no `ui.validate*` op or `clay:*` facade exists for it.
 
 The authoritative public API docs (`docs/reference/clay-js-api/`, `docs/reference/packages/creating-packages.md`) and the clay-ui skill references (`components.md`, `tokens.md`) document the authoring contract; this page explains the implementation behind the guardrails.
 
 ## Responsibilities
 
-- Reject an active theme whose status-chrome token pairs fall below `TEXT_CONTRAST_MIN` (4.5) or `UI_CONTRAST_MIN` (3.0); a below-AA theme is not activated and records a `clay.theme.contrast` diagnostic. Startup stays safe: a sub-contrast canonical default falls back to the Clay core default.
+- Reject an active theme whose status-chrome token pairs fall below `TEXT_CONTRAST_MIN` (4.5) or `UI_CONTRAST_MIN` (3.0); a below-AA theme is not activated and records a `theme.contrast` diagnostic. Startup stays safe: a sub-contrast canonical default falls back to the Clay core default.
 - Pin the per-`ComponentKind` interaction-state contract (`applicable_states`) and tie it to the SDUI paint path (`component_state_palette`) so a catalog↔paint drift fails CI.
 - Enrich every component-catalog and design-token rejection to name the rejected value, expected type, and field via a single stable diagnostic shape, sanitized so an author string cannot break the message.
 - Lint code-vs-catalog drift in four directions: `ComponentKind` enum ↔ `component_state_palette` match arms ↔ `components.md` `Package-Facing Component Kinds` table; typed-style-variable match arms ↔ `components.md` `Typed Style Variables` table; `core_theme_value` match arms ↔ `tokens.md` Core Tokens tables.
@@ -53,7 +53,7 @@ fn enforce_contrast(…, specifier) -> Result<(), ContrastFailure>;
 fn format_contrast_failure(specifier, failure) -> String;
 ```
 
-`apply_theme` calls `enforce_contrast` **before** `set_active_theme`/`set_explicit_theme_active`: on failure it records a `clay.theme.contrast` diagnostic and returns a `JsErrorBox` **without mutating the active theme** — the prior valid theme stays active. `resolve_canonical_default_theme` calls `validate_active_theme_contrast` and on failure records the diagnostic and returns `None`, so a sub-contrast canonical default at startup falls back to the Clay core default rather than bricking startup.
+`apply_theme` calls `enforce_contrast` **before** `set_active_theme`/`set_explicit_theme_active`: on failure it records a `theme.contrast` diagnostic and returns a `JsErrorBox` **without mutating the active theme** — the prior valid theme stays active. `resolve_canonical_default_theme` calls `validate_active_theme_contrast` and on failure records the diagnostic and returns `None`, so a sub-contrast canonical default at startup falls back to the Clay core default rather than bricking startup.
 
 The contrast check reads resolved token pairs from the active theme; it runs at theme-apply time only (configuration/reload), never in a paint/layout/pointer/scroll/keypress hot path.
 
@@ -143,7 +143,7 @@ Below-AA theme is not activated (server path):
 // src/server/ops/theme.rs::apply_theme
 enforce_contrast(&clay_state, specifier, &active_theme)
     .map_err(|f| {
-        record_diagnostic(&clay_state, "clay.theme.contrast", format_contrast_failure(specifier, &f));
+        record_diagnostic(&clay_state, "theme.contrast", format_contrast_failure(specifier, &f));
         JsErrorBox::from(format_contrast_failure(specifier, &f))
     })?;
 set_active_theme(&clay_state, active_theme);  // reached only on Ok
@@ -177,7 +177,7 @@ assert!(conformance_ops.is_empty(), "no conformance helper may be exposed as a d
 
 ## Invariants and Constraints
 
-- Conformance is host authority, not package-facing: no `clay.ui.validate*` op, no `clay:*` facade, no new `clay.configuration.*` key. `validate_active_theme_contrast`/`ContrastFailure` are `pub` only as a test-facing re-export via `clay::editor::theme`; they are not wired to any op or facade (no trust path).
+- Conformance is host authority, not package-facing: no `ui.validate*` op, no `clay:*` facade, no new `configuration.*` key. `validate_active_theme_contrast`/`ContrastFailure` are `pub` only as a test-facing re-export via `clay::editor::theme`; they are not wired to any op or facade (no trust path).
 - A below-AA theme is never activated; the prior valid theme stays active on `apply_theme` failure, and a sub-contrast canonical default falls back to the Clay core default at startup (`resolve_canonical_default_theme` returns `None`).
 - Guardrails are non-user-disableable (no config toggle to relax contrast thresholds).
 - `applicable_states` is the per-kind state contract; `InteractionState` is derived from pointer/focus hit-testing, never from package descriptors — packages declare no interaction states.

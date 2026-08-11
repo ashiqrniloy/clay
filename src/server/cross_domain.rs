@@ -144,7 +144,7 @@ pub(crate) fn validate_cross_domain_request(
     if payload_bytes > CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES {
         return Err(CrossDomainDenial::new(
             CrossDomainStatus::Denied,
-            "clay.cross_domain.payload_too_large",
+            "cross_domain.payload_too_large",
             format!(
                 "payload is {payload_bytes} bytes (budget {CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES})"
             ),
@@ -153,7 +153,7 @@ pub(crate) fn validate_cross_domain_request(
     if envelope.deadline_ms == 0 || envelope.deadline_ms > CROSS_DOMAIN_MAX_DEADLINE_MS {
         return Err(CrossDomainDenial::new(
             CrossDomainStatus::Denied,
-            "clay.cross_domain.invalid_deadline",
+            "cross_domain.invalid_deadline",
             format!(
                 "deadline {}ms outside 1..={CROSS_DOMAIN_MAX_DEADLINE_MS}",
                 envelope.deadline_ms
@@ -163,7 +163,7 @@ pub(crate) fn validate_cross_domain_request(
     if envelope.target.extension_point.chars().count() > MAX_ENVELOPE_POINT_CHARS {
         return Err(CrossDomainDenial::new(
             CrossDomainStatus::Denied,
-            "clay.cross_domain.invalid_target",
+            "cross_domain.invalid_target",
             "extension point id exceeds bounds",
         ));
     }
@@ -175,7 +175,7 @@ pub(crate) fn validate_cross_domain_request(
         .ok_or_else(|| {
             CrossDomainDenial::new(
                 CrossDomainStatus::Stale,
-                "clay.cross_domain.requester_stale",
+                "cross_domain.requester_stale",
                 format!(
                     "requester `{}@{}` is not enabled at that version",
                     envelope.requester.package, envelope.requester.version
@@ -185,7 +185,7 @@ pub(crate) fn validate_cross_domain_request(
     if requester_record.runtime_domain != RuntimeDomain::ThirdParty {
         return Err(CrossDomainDenial::new(
             CrossDomainStatus::Denied,
-            "clay.cross_domain.requester_not_third_party",
+            "cross_domain.requester_not_third_party",
             "cross-domain requests originate only from the third-party domain",
         ));
     }
@@ -200,7 +200,7 @@ pub(crate) fn validate_cross_domain_request(
     {
         return Err(CrossDomainDenial::new(
             CrossDomainStatus::Denied,
-            "clay.cross_domain.approval_ref_mismatch",
+            "cross_domain.approval_ref_mismatch",
             "approvalRef does not bind the requester identity",
         ));
     }
@@ -212,7 +212,7 @@ pub(crate) fn validate_cross_domain_request(
         .ok_or_else(|| {
             CrossDomainDenial::new(
                 CrossDomainStatus::Denied,
-                "clay.cross_domain.target_not_enabled",
+                "cross_domain.target_not_enabled",
                 format!("target `{}` is not enabled", envelope.target.package),
             )
         })?;
@@ -246,7 +246,7 @@ pub(crate) fn validate_cross_domain_request(
         .ok_or_else(|| {
             CrossDomainDenial::new(
                 CrossDomainStatus::Stale,
-                "clay.cross_domain.requester_stale",
+                "cross_domain.requester_stale",
                 "requester is no longer installed",
             )
         })?;
@@ -264,7 +264,7 @@ pub(crate) fn validate_cross_domain_request(
         .map_err(|mismatch| {
             let (status, code) = match &mismatch {
                 ApprovalMismatch::Revoked => {
-                    (CrossDomainStatus::Revoked, "clay.package_approval.revoked")
+                    (CrossDomainStatus::Revoked, "package_approval.revoked")
                 }
                 ApprovalMismatch::IdentityChanged { .. } => {
                     (CrossDomainStatus::Stale, mismatch.code())
@@ -406,17 +406,17 @@ mod tests {
         bad_point.target.extension_point = "base.other".to_string();
         let denial = validate_cross_domain_request(&service, &bad_point).unwrap_err();
         assert_eq!(denial.status, CrossDomainStatus::Denied);
-        assert_eq!(denial.code, "clay.package_relation.unknown_extension_point");
+        assert_eq!(denial.code, "package_relation.unknown_extension_point");
 
         let mut bad_op = envelope();
         bad_op.operation = RelationOperation::Replace;
         let denial = validate_cross_domain_request(&service, &bad_op).unwrap_err();
-        assert_eq!(denial.code, "clay.package_relation.operation_not_offered");
+        assert_eq!(denial.code, "package_relation.operation_not_offered");
 
         let mut bad_version = envelope();
         bad_version.target.version = 2;
         let denial = validate_cross_domain_request(&service, &bad_version).unwrap_err();
-        assert_eq!(denial.code, "clay.package_relation.version_mismatch");
+        assert_eq!(denial.code, "package_relation.version_mismatch");
     }
 
     #[test]
@@ -440,12 +440,12 @@ mod tests {
         oversize.payload = json!({ "blob": "x".repeat(CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES) });
         oversize.target.extension_point = "nonexistent.point".to_string();
         let denial = validate_cross_domain_request(&service, &oversize).unwrap_err();
-        assert_eq!(denial.code, "clay.cross_domain.payload_too_large");
+        assert_eq!(denial.code, "cross_domain.payload_too_large");
 
         let mut bad_deadline = envelope();
         bad_deadline.deadline_ms = 0;
         let denial = validate_cross_domain_request(&service, &bad_deadline).unwrap_err();
-        assert_eq!(denial.code, "clay.cross_domain.invalid_deadline");
+        assert_eq!(denial.code, "cross_domain.invalid_deadline");
     }
 
     #[test]
@@ -454,7 +454,7 @@ mod tests {
         let mut forged = envelope();
         forged.approval_ref = "@vendor/other@0.1.0".to_string();
         let denial = validate_cross_domain_request(&service, &forged).unwrap_err();
-        assert_eq!(denial.code, "clay.cross_domain.approval_ref_mismatch");
+        assert_eq!(denial.code, "cross_domain.approval_ref_mismatch");
     }
 
     #[test]
@@ -463,6 +463,6 @@ mod tests {
         let mut expanded = envelope();
         expanded.scopes.push("ext.other".to_string());
         let denial = validate_cross_domain_request(&service, &expanded).unwrap_err();
-        assert_eq!(denial.code, "clay.package_approval.relation_expansion");
+        assert_eq!(denial.code, "package_approval.relation_expansion");
     }
 }

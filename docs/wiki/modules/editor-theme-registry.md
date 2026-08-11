@@ -30,7 +30,7 @@
 
 Phase 18.15 moves editor text styling from scattered paint constants and free-form decoration style strings to one resolved `StyleRegistry`. The registry is the client-side single source of color and text attributes for editor chrome, syntax/prose decorations, diagnostics, search matches, caret, selection, scrollbars, and status chrome.
 
-The public configuration surface is [`clay.theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md). Theme packages are inert first-party packages that declare static `clay.contributions.textStyles` entries. `setTheme("@clay/theme-gruvbox-material-dark")` selects one active theme during `init.js`; server bootstrap sends an inert `ActiveTheme` snapshot; the client resolves that snapshot into a `StyleRegistry` before first paint.
+The public configuration surface is [`theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md). Theme packages are inert first-party packages that declare static `clay.contributions.textStyles` entries. `setTheme("@clay/theme-gruvbox-material-dark")` selects one active theme during `init.js`; server bootstrap sends an inert `ActiveTheme` snapshot; the client resolves that snapshot into a `StyleRegistry` before first paint.
 
 The authoritative package authoring and vocabulary references are:
 
@@ -160,7 +160,7 @@ let color = style.color;
 
 - **Primitive/category:** editor text theme registry and two-axis decoration styling.
 - **Owner:** `src/editor/theme.rs` plus protocol vocabulary in `src/protocol/decorations.rs`.
-- **Public JS API:** `clay.theme.setTheme` in `runtime/js/theme.js`; authoritative docs in `docs/reference/clay-js-api/theme/set-theme.md`.
+- **Public JS API:** `theme.setTheme` in `runtime/js/theme.js`; authoritative docs in `docs/reference/clay-js-api/theme/set-theme.md`.
 - **Deno op:** `op_clay_theme_set_theme` in `src/server/ops/theme.rs`.
 - **Protocol shape:** `TextThemeOverride` and `ActiveTheme` in `src/protocol/mod.rs`; sent as `ServerMessage::ActiveTheme`.
 - **Package contribution:** `clay.contributions.textStyles` parsed by `src/packages/record.rs`.
@@ -235,7 +235,7 @@ Commands: `cargo test --lib shell::theme`, `cargo test --test editor editor_perf
 
 ## Phase 20.6 canonical Modus defaults and appearance
 
-Phase 20.6 segregates the canonical default themes into dedicated first-party packages `@clay/theme-modus-operandi` (canonical light default) and `@clay/theme-modus-vivendi` (canonical dark default), shipped alongside the existing Gruvbox packages using the same inert `textStyles` + no-op ESM structure. A bounded `light` | `dark` | `system` appearance preference (`src/protocol/mod.rs::Appearance`) resolves these canonical defaults without any `loadPackage` call: `src/server/ops/theme.rs::canonical_default_specifier` + `resolve_canonical_default_theme` build the `ActiveTheme` snapshot from the bundled inventory, injected into the evaluation harvest in `src/server/js_runtime.rs` when no explicit theme was set. `System` falls back to dark (Modus Vivendi) when no OS signal is present. An explicit `setTheme` sets `explicit_theme_active = true` and always wins over the appearance-derived default. The new `clay.theme.setAppearance` facade (`op_clay_theme_set_appearance`) exposes the preference; `settings.setTheme`/`settings.setAppearance` from the `@clay/settings` panel persist to `~/.config/clay/preferences.json` and reload the runtime so changes apply live via the existing `ServerMessage::ActiveTheme` / `RuntimeStateSnapshot` fanout. Full implementation, persistence/precedence, and settings surface details: [Phase 20.6 Theme Package Segregation and Settings UI](phase20.6-theme-segregation-settings-ui.md).
+Phase 20.6 segregates the canonical default themes into dedicated first-party packages `@clay/theme-modus-operandi` (canonical light default) and `@clay/theme-modus-vivendi` (canonical dark default), shipped alongside the existing Gruvbox packages using the same inert `textStyles` + no-op ESM structure. A bounded `light` | `dark` | `system` appearance preference (`src/protocol/mod.rs::Appearance`) resolves these canonical defaults without any `loadPackage` call: `src/server/ops/theme.rs::canonical_default_specifier` + `resolve_canonical_default_theme` build the `ActiveTheme` snapshot from the bundled inventory, injected into the evaluation harvest in `src/server/js_runtime.rs` when no explicit theme was set. `System` falls back to dark (Modus Vivendi) when no OS signal is present. An explicit `setTheme` sets `explicit_theme_active = true` and always wins over the appearance-derived default. The new `theme.setAppearance` facade (`op_clay_theme_set_appearance`) exposes the preference; `settings.setTheme`/`settings.setAppearance` from the `@clay/settings` panel persist to `~/.config/clay/preferences.json` and reload the runtime so changes apply live via the existing `ServerMessage::ActiveTheme` / `RuntimeStateSnapshot` fanout. Full implementation, persistence/precedence, and settings surface details: [Phase 20.6 Theme Package Segregation and Settings UI](phase20.6-theme-segregation-settings-ui.md).
 
 ## Plan 071 caret styling
 
@@ -254,4 +254,4 @@ Plan 071 (task 6) adds caret **shape and blink** as editor chrome resolved throu
 - [Package styleMap authoring (vocabulary captures)](../../reference/primitives/syntax-vocabulary.md#package-stylemap-authoring)
 - [Theme authoring guide](../../reference/packages/creating-packages.md#phase-1815-theme-authoring-textstyles-and-settheme)
 - [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md)
-- [`clay.theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md)
+- [`theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md)

@@ -1,5 +1,5 @@
 ---
-id: clay.editor.serverDeleteRange
+id: editor.serverDeleteRange
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: serverDeleteRange
@@ -17,7 +17,7 @@ permissions: [document-edit]
 key_bindings: [Backspace, Delete]
 custom_properties: []
 security: Requires document edit authority, valid byte/scalar boundaries, and an editable lease; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.serverDeleteRange` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `editor.serverDeleteRange` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [backspacedelete, editor, js-api]
 app_visible: true
 help_visible: true
@@ -94,7 +94,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.serverDeleteRange` when the user asks for delete text range through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.serverDeleteRange` when the user asks for delete text range through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -105,7 +105,7 @@ Use `clay.editor.serverDeleteRange` when the user asks for delete text range thr
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.serverDeleteRange`
+- Stable ID: `editor.serverDeleteRange`
 - User-facing name: Delete Text Range
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `serverDeleteRange`

@@ -188,6 +188,29 @@ fn package_manifest_rejects_invalid_prefix_and_reserved_clay_ids() {
     assert!(error.message.contains("clay.*"));
 }
 
+/// Third-party packages must not claim a reserved core API domain (e.g.
+/// `shell`, `editor`) as their `clay.apiPrefix` — core IDs are bare
+/// `<domain>.<name>` and a squatted domain would make core and package IDs
+/// indistinguishable. Bundled first-party packages from the compiled
+/// inventory are exempt (`@clay/git` owns the `git` domain).
+#[test]
+fn package_manifest_rejects_third_party_api_prefix_squatting_core_domain() {
+    let mut squatter = markdown_fixture();
+    squatter["name"] = json!("@vendor/shell");
+    squatter["clay"]["apiPrefix"] = json!("shell");
+    let error = validate_manifest_value(&squatter).unwrap_err();
+    assert_eq!(error.rule, PackageValidationRule::InvalidPrefix);
+    assert!(error.message.contains("reserved Clay core API domain"));
+
+    // Bundled first-party package keeps its core-domain prefix.
+    let mut bundled_git = markdown_fixture();
+    bundled_git["name"] = json!("@clay/git");
+    bundled_git["clay"]["apiPrefix"] = json!("git");
+    bundled_git["clay"]["modes"] = json!([]);
+    bundled_git["clay"]["permissions"] = json!([]);
+    validate_manifest_value(&bundled_git).expect("bundled @clay/git keeps the git domain");
+}
+
 #[test]
 fn package_permissions_reject_unknown_or_prohibited_authority() {
     let mut unknown = markdown_fixture();

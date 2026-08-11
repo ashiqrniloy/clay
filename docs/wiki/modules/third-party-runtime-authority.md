@@ -56,7 +56,7 @@ A `bundle_extension_points_match_real_contributions` test validates every bundle
 
 ## Structured Relations and Graph Resolution
 
-Package manifests declare `clay.graph.relations` with mixed string/object arrays. String entries (`"@clay/markdown"`) are bare target references. Object entries are `StructuredRelationRequest` with:
+Package manifests declare `graph.relations` with mixed string/object arrays. String entries (`"@clay/markdown"`) are bare target references. Object entries are `StructuredRelationRequest` with:
 
 - `package`: target package name.
 - `extensionPoint`: target owner-declared extension point ID.
@@ -130,8 +130,8 @@ Denial reasons: stale requester, revoked approval, wrong target/point/operation,
 
 All 11 bundled packages declare extension points covering their contribution surfaces. A third-party package can:
 
-- **Disable** a first-party package: requires a `clay.graph.disables` declaration matching a declared owner extension point, plus user approval.
-- **Replace** a first-party package: requires both `clay.graph.replaces` + owner extension point consent + user approval. The replacement stays ThirdParty (no promotion). Replaced target is atomically disabled. Contribution IDs must stay within the replacement's own `apiPrefix` namespace (cross-prefix claiming is structurally unrepresentable in `assemble_package_record`).
+- **Disable** a first-party package: requires a `graph.disables` declaration matching a declared owner extension point, plus user approval.
+- **Replace** a first-party package: requires both `graph.replaces` + owner extension point consent + user approval. The replacement stays ThirdParty (no promotion). Replaced target is atomically disabled. Contribution IDs must stay within the replacement's own `apiPrefix` namespace (cross-prefix claiming is structurally unrepresentable in `assemble_package_record`).
 
 ```bash
 clay package inspect @vendor/markdown-repl   # shows pending adoption state

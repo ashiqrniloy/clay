@@ -6,14 +6,14 @@ Clay's file-open, save, and reload operations are server-first and platform-nati
 
 | Operation | Command ID | Default Chord | Scope | Authority |
 |---|---|---|---|---|
-| Open file dialog | `clay.documents.clientOpenFileDialog` | none (bind `Ctrl+O`) | editor | client UI → server selected-file grant |
-| Open workspace file | `clay.documents.serverOpenDocument` | none | editor | server workspace-root read |
-| Fuzzy file open | `clay.workspace.openFuzzyFile` | none (bind `Ctrl+P`) | editor | server workspace listing |
-| Toggle file browser | `clay.workspace.toggleFileBrowser` | canonical example binds `Ctrl+B` | editor | per-tab server workspace-pane visibility |
-| Save document | `clay.documents.serverSaveDocument` | none (bind `Ctrl+S`) | editor | server workspace/selected-file write |
-| Reload document | `clay.documents.serverReloadDocument` | none | editor | server workspace/selected-file read |
-| Show open documents | `clay.editor.clientShowOpenDocuments` | none | editor | client-local session list |
-| Copy selection | `clay.editor.clientCopySelection` | none (bind `Ctrl+Shift+C`) | editor | client clipboard write |
+| Open file dialog | `documents.clientOpenFileDialog` | none (bind `Ctrl+O`) | editor | client UI → server selected-file grant |
+| Open workspace file | `documents.serverOpenDocument` | none | editor | server workspace-root read |
+| Fuzzy file open | `workspace.openFuzzyFile` | none (bind `Ctrl+P`) | editor | server workspace listing |
+| Toggle file browser | `workspace.toggleFileBrowser` | canonical example binds `Ctrl+B` | editor | per-tab server workspace-pane visibility |
+| Save document | `documents.serverSaveDocument` | none (bind `Ctrl+S`) | editor | server workspace/selected-file write |
+| Reload document | `documents.serverReloadDocument` | none | editor | server workspace/selected-file read |
+| Show open documents | `editor.clientShowOpenDocuments` | none | editor | client-local session list |
+| Copy selection | `editor.clientCopySelection` | none (bind `Ctrl+Shift+C`) | editor | client clipboard write |
 
 No default Rust-level shortcuts are hardcoded. Every key binding above is configured through `init.js` or a smoke fixture.
 
@@ -31,7 +31,7 @@ import { loadPackage } from "clay:packages";
 
 await loadPackage("@clay/markdown");
 bindKey("Ctrl+O", clientOpenFileDialog(), { scope: "editor" });
-bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 ```
 
 Selected-file grants are single-file: the server authorizes only the canonical path the user picked. Sibling files, parent directories, and project roots are not implicitly authorized. Selected-file documents support save and reload through the same server workspace path as workspace-root documents.
@@ -45,17 +45,17 @@ Selected-file grants are single-file: the server authorizes only the canonical p
 | macOS | objc2-app-kit `NSOpenPanel` | Markdown extensions, `allowsOtherFileTypes` | non-error no-op |
 | Other | N/A | N/A | returns `Unsupported` diagnostic |
 
-On unsupported platforms, `clientOpenFileDialog` returns a status diagnostic: `clay.client.file_dialog.not_supported_on_this_platform`. No panic, no crash, no blank dialog.
+On unsupported platforms, `clientOpenFileDialog` returns a status diagnostic: `client.file_dialog.not_supported_on_this_platform`. No panic, no crash, no blank dialog.
 
 ### Workspace file browser and fuzzy open
 
-Workspace-root files are opened through the server workspace model (`docs/wiki/modules/server-file-workspace.md`). The server maintains a registry of workspace roots (configured at startup, discovered from opened-file ancestry, or added via `clientOpenFolderDialog`). Each tab starts with its workspace pane hidden; `clay.workspace.toggleFileBrowser` publishes the bounded tree for that tab or an editor-only snapshot that releases the left slot. File browser and fuzzy-file commands list directory entries and open selected paths through `WorkspaceState::open_existing_file`; `Ctrl+O` remains usable while the pane is hidden.
+Workspace-root files are opened through the server workspace model (`docs/wiki/modules/server-file-workspace.md`). The server maintains a registry of workspace roots (configured at startup, discovered from opened-file ancestry, or added via `clientOpenFolderDialog`). Each tab starts with its workspace pane hidden; `workspace.toggleFileBrowser` publishes the bounded tree for that tab or an editor-only snapshot that releases the left slot. File browser and fuzzy-file commands list directory entries and open selected paths through `WorkspaceState::open_existing_file`; `Ctrl+O` remains usable while the pane is hidden.
 
 ```js
 import { clientOpenFolderDialog } from "clay:workspace";
 
-bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
-bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
+bindKey("Ctrl+B", "workspace.toggleFileBrowser", { scope: "editor" });
+bindKey("Ctrl+P", "workspace.openFuzzyFile", { scope: "editor" });
 bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
 ```
 
@@ -79,12 +79,12 @@ Opening the same document again replaces the active buffer without creating a du
 Save is a server file IO operation, never client-local. The client sends `ClientMessage::SaveDocument` with the document ID and known version; the server writes the canonical text to the authorized file path atomically (exclusive unpredictable temp file + `fsync` + permission restore + target-identity revalidation + rename).
 
 ```js
-bindKey("Ctrl+S", "clay.documents.serverSaveDocument", { scope: "editor" });
+bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 ```
 
 When `Ctrl+S` fires:
 
-1. The keybinding matches `clay.documents.serverSaveDocument` in the behavior manifest.
+1. The keybinding matches `documents.serverSaveDocument` in the behavior manifest.
 2. The `EditorWidget` intercepts the command locally (before the generic server `CommandExecutor` route) and calls `request_save_active_document`.
 3. The edit queue sends `ClientMessage::SaveDocument` for the active document's ID and current confirmed version.
 4. The server `save_document_unlocked` reauthorizes the canonical path, compares disk metadata for staleness, writes atomically, and returns `ServerMessage::DocumentSaved { document_id, version, dirty }`.
@@ -188,7 +188,7 @@ Clay retains up to 64 document sessions locally. Opening a second file stashes t
 Dirty state and pending edits are per-document. Confirmed server version is per-document.
 
 ```js
-bindKey("Ctrl+Tab", "clay.editor.clientShowOpenDocuments", { scope: "editor" });
+bindKey("Ctrl+Tab", "editor.clientShowOpenDocuments", { scope: "editor" });
 ```
 
 ## Platform Capabilities Matrix

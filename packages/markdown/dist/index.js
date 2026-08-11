@@ -209,16 +209,16 @@ export function markdownPackageManifest() {
       modes: [modeId],
       docs: "./docs/index.md",
       apiDependencies: [
-        "clay.syntax.serverRegisterSyntaxGrammar",
-        "clay.modes.serverRegisterModePattern",
-        "clay.modes.serverActivateMajorMode",
-        "clay.behavior.buildCodeEditingManifest",
-        "clay.commands.serverRegisterCommand",
-        "clay.completion.serverRegisterCompletionProvider",
-        "clay.completion.completionTriggerCharactersFromEditorRules",
-        "clay.parse.serverRegisterParseHandler",
-        "clay.decorations.serverPublishDecorations",
-        "clay.ui.serverRegisterComponentContribution"
+        "syntax.serverRegisterSyntaxGrammar",
+        "modes.serverRegisterModePattern",
+        "modes.serverActivateMajorMode",
+        "behavior.buildCodeEditingManifest",
+        "commands.serverRegisterCommand",
+        "completion.serverRegisterCompletionProvider",
+        "completion.completionTriggerCharactersFromEditorRules",
+        "parse.serverRegisterParseHandler",
+        "decorations.serverPublishDecorations",
+        "ui.serverRegisterComponentContribution"
       ],
       performance: {
         estimatedManifestBytes: 1900,

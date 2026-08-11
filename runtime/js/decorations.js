@@ -11,7 +11,7 @@
 const ops = globalThis.Deno?.core?.ops;
 function requireOps() {
     if (!ops) {
-        throw new Error("clay.decorations.runtime_unavailable: Clay decoration APIs require the server runtime");
+        throw new Error("decorations.runtime_unavailable: Clay decoration APIs require the server runtime");
     }
     return ops;
 }

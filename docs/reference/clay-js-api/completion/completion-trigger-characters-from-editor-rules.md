@@ -1,5 +1,5 @@
 ---
-id: clay.completion.completionTriggerCharactersFromEditorRules
+id: completion.completionTriggerCharactersFromEditorRules
 kind: clay-js-api
 js_module: "clay:completion"
 js_export: completionTriggerCharactersFromEditorRules
@@ -19,7 +19,7 @@ custom_properties:
   - name: editorRules
     type: object
     default: required
-    description: Editor rules object with an autocompleteTriggers array of { trigger: string } entries, such as the value returned by clay.behavior.buildCodeEditingManifest.
+    description: Editor rules object with an autocompleteTriggers array of { trigger: string } entries, such as the value returned by behavior.buildCodeEditingManifest.
 security: Pure helper; returns inert strings only. Does not execute code, read files, access the network, and does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
 agent_guidance: Use this helper when registering a completion provider so its triggerCharacters match the mode's autocompleteTriggers.
 lookup_tags: [js-api, completion, helper, trigger, phase18.14]
@@ -41,7 +41,7 @@ Derive completion provider `triggerCharacters` from a mode's behavior-manifest `
 
 ## When to use
 
-Use this helper inside a package load entry after building editor rules (for example with `clay.behavior.buildCodeEditingManifest`) and before calling `clay.completion.serverRegisterCompletionProvider`.
+Use this helper inside a package load entry after building editor rules (for example with `behavior.buildCodeEditingManifest`) and before calling `completion.serverRegisterCompletionProvider`.
 
 ## JavaScript usage
 
@@ -110,7 +110,7 @@ No permission required. Pure helper returning inert strings. Does not execute co
 
 ## Agent guidance
 
-Use `clay.completion.completionTriggerCharactersFromEditorRules` to keep completion provider triggers synchronized with mode behavior manifests. Do not re-implement the extraction inline.
+Use `completion.completionTriggerCharactersFromEditorRules` to keep completion provider triggers synchronized with mode behavior manifests. Do not re-implement the extraction inline.
 
 ## Backing implementation
 

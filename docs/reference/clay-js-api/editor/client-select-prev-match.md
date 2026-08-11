@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientSelectPrevMatch
+id: editor.clientSelectPrevMatch
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSelectPrevMatch
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientSelectPrevMatch` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
+agent_guidance: Use `editor.clientSelectPrevMatch` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
 lookup_tags: [editor, js-api, multi-cursor, selection]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Select the previous occurrence of the current selection or word as a new primary
 
 ## Description
 
-`clientSelectPrevMatch` returns the stable bindable command ID `clay.editor.clientSelectPrevMatch` for **Select Previous Match** (Plan 071 task 9). Symmetric backwards variant of select-next-match: each press adds the previous occurrence as a new caret, wrapping once around the document. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientSelectPrevMatch` returns the stable bindable command ID `editor.clientSelectPrevMatch` for **Select Previous Match** (Plan 071 task 9). Symmetric backwards variant of select-next-match: each press adds the previous occurrence as a new caret, wrapping once around the document. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -50,7 +50,7 @@ bindKey("ctrl+k ctrl+n", clientSelectPrevMatch());
 ## Example
 
 ```ts
-const commandId = clientSelectPrevMatch(); // "clay.editor.clientSelectPrevMatch"
+const commandId = clientSelectPrevMatch(); // "editor.clientSelectPrevMatch"
 ```
 
 ## Options
@@ -69,7 +69,7 @@ None.
 
 ## Return and async behavior
 
-Returns the stable command ID string `clay.editor.clientSelectPrevMatch` synchronously. The facade is synchronous, side-effect free, and local.
+Returns the stable command ID string `editor.clientSelectPrevMatch` synchronously. The facade is synchronous, side-effect free, and local.
 
 ## Errors
 
@@ -85,7 +85,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientSelectPrevMatch` when the user asks for Select Previous Match through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientSelectPrevMatch` when the user asks for Select Previous Match through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.editor.clientSelectPrevMatch` when the user asks for Select Previous M
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientSelectPrevMatch`
+- Stable ID: `editor.clientSelectPrevMatch`
 - User-facing name: Select Previous Match
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientSelectPrevMatch`

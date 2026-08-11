@@ -90,7 +90,7 @@ Each package `package.json` declares:
 
 - `clay.modes`: `["rust"]`, `["typescript"]`, or `["javascript"]`.
 - `clay.permissions`: `mode-registration`, `mode-activation`, `command-registration`, `completion-provider`, `parse-document`, `render-decorations`.
-- `clay.apiDependencies`: the Clay JS APIs the package calls (e.g., `clay.modes.serverRegisterModePattern`, `clay.commands.serverRegisterCommand`, `clay.completion.serverRegisterCompletionProvider`, `clay.ui.serverRegisterComponentContribution`, `clay.behavior.buildCodeEditingManifest`, `clay.completion.completionTriggerCharactersFromEditorRules`).
+- `clay.apiDependencies`: the Clay JS APIs the package calls (e.g., `modes.serverRegisterModePattern`, `commands.serverRegisterCommand`, `completion.serverRegisterCompletionProvider`, `ui.serverRegisterComponentContribution`, `behavior.buildCodeEditingManifest`, `completion.completionTriggerCharactersFromEditorRules`).
 - `clay.contributions`: `modePatterns`, `commands`, `completionProviders`, `ui.components`, and `syntaxGrammars`. Completion descriptors carry unique bounded string or structured items; structured snippets use inert `insertText` plus `textFormat: "snippet"` and must not mix with plain items in one provider.
 
 Manifest payloads are minified to stay under the behavior-manifest payload budget (`BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` = 2048).
@@ -151,8 +151,8 @@ await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
 
 bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
-bindKey("Ctrl+P", "clay.workspace.openFuzzyFile", { scope: "editor" });
-bindKey("Ctrl+B", "clay.workspace.toggleFileBrowser", { scope: "editor" });
+bindKey("Ctrl+P", "workspace.openFuzzyFile", { scope: "editor" });
+bindKey("Ctrl+B", "workspace.toggleFileBrowser", { scope: "editor" });
 bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
 ```
 
@@ -222,7 +222,7 @@ Hot-path policy: parse/highlight work and completion resolution run as backgroun
 - Rust, TypeScript, and JavaScript declare `monospace` through generic mode metadata. No language name is inspected by server/client rendering code, and concrete font families/sizes remain user-owned.
 - Completion provider `triggerCharacters` must be derivable from the major-mode behavior manifest to keep autocomplete triggers consistent.
 - All UI contributions are inert declarations; packages never create Masonry widgets, mutate native layout, provide raw CSS, or run client-side JavaScript.
-- Configuration is deferred: indent size, comment tokens, etc., are package-defined defaults in Phase 18.14. Future user tuning must use package-prefixed `clay.contributions.packageOptions` entries read through `clay.configuration.setPackageOption`.
+- Configuration is deferred: indent size, comment tokens, etc., are package-defined defaults in Phase 18.14. Future user tuning must use package-prefixed `clay.contributions.packageOptions` entries read through `configuration.setPackageOption`.
 
 ## Tests
 

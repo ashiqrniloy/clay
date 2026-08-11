@@ -517,7 +517,7 @@ impl DocumentAnalysisCoordinator {
     ) -> Vec<RuntimeDiagnostic> {
         if text.len() > DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES {
             return vec![analysis_status(
-                "clay.analysis.document_too_large",
+                "analysis.document_too_large",
                 "Document exceeds the package analysis limit; baseline language support remains active.",
             )];
         }
@@ -550,7 +550,7 @@ impl DocumentAnalysisCoordinator {
         for (registration, runtime, generation) in matching {
             if !runtime.document_analysis_authorized(&registration, metadata.workspace_root_id) {
                 diagnostics.push(analysis_status(
-                    "clay.analysis.unauthorized",
+                    "analysis.unauthorized",
                     "Document analyzer lacks a current package, parse, or language-server grant.",
                 ));
                 continue;
@@ -571,7 +571,7 @@ impl DocumentAnalysisCoordinator {
             if !inner.workers.contains_key(&key) {
                 if inner.workers.len() >= DOCUMENT_ANALYSIS_MAX_WORKERS {
                     diagnostics.push(analysis_status(
-                        "clay.analysis.worker_limit",
+                        "analysis.worker_limit",
                         "Document analyzer worker limit reached; baseline language support remains active.",
                     ));
                     continue;
@@ -601,7 +601,7 @@ impl DocumentAnalysisCoordinator {
                 .expect("analysis document state lock poisoned");
             if documents.len() >= DOCUMENT_ANALYSIS_MAX_DOCUMENTS_PER_WORKER {
                 diagnostics.push(analysis_status(
-                    "clay.analysis.document_limit",
+                    "analysis.document_limit",
                     "Document analyzer document limit reached; baseline language support remains active.",
                 ));
                 continue;
@@ -612,7 +612,7 @@ impl DocumentAnalysisCoordinator {
                 > DOCUMENT_ANALYSIS_MAX_TEXT_BYTES_PER_WORKER
             {
                 diagnostics.push(analysis_status(
-                    "clay.analysis.text_limit",
+                    "analysis.text_limit",
                     "Document analyzer text limit reached; baseline language support remains active.",
                 ));
                 continue;
@@ -631,7 +631,7 @@ impl DocumentAnalysisCoordinator {
                 worker.active.store(false, Ordering::Release);
                 worker.mailbox.close();
                 diagnostics.push(analysis_status(
-                    "clay.analysis.queue_limit",
+                    "analysis.queue_limit",
                     "Document analyzer input queue is full; baseline language support remains active.",
                 ));
                 continue;
@@ -1154,7 +1154,7 @@ fn spawn_worker(
                 Err(error) => {
                     send_reply_error(queued.reply, &error.to_string());
                     let _ = outputs.try_send(DocumentAnalysisOutput::Diagnostic(analysis_status(
-                        "clay.analysis.worker_failed",
+                        "analysis.worker_failed",
                         "Document analyzer stopped; baseline language support remains active.",
                     )));
                     active.store(false, Ordering::Release);
@@ -1808,7 +1808,7 @@ export async function handleDocumentAnalysis(event) {{
         let diagnostics =
             coordinator.open_document(1, &metadata(1), "test", root, "fn".to_string());
 
-        assert_eq!(diagnostics[0].code, "clay.analysis.unauthorized");
+        assert_eq!(diagnostics[0].code, "analysis.unauthorized");
         assert!(coordinator.active_completion_provider_ids(7).is_empty());
     }
 
@@ -1880,7 +1880,7 @@ export async function handleDocumentAnalysis(event) {{
             root,
             "x".repeat(DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES + 1),
         );
-        assert_eq!(diagnostics[0].code, "clay.analysis.document_too_large");
+        assert_eq!(diagnostics[0].code, "analysis.document_too_large");
         assert!(
             coordinator
                 .request_completion(

@@ -1,5 +1,5 @@
 ---
-id: clay.language-server.startLanguageServerSession
+id: language-server.startLanguageServerSession
 kind: clay-js-api
 js_module: "clay:language-server"
 js_export: startLanguageServerSession
@@ -100,15 +100,15 @@ Returns a `LanguageServerSession` object with `sessionId` (number), `send(messag
 
 ## Errors
 
-- `clay.language_server.unauthorized` — no grant, mismatched contribution, or revoked grant.
-- `clay.language_server.executable_not_found` — canonical executable no longer resolves.
-- `clay.language_server.session_already_running` — same package contribution already has a live session for this workspace root.
-- `clay.language_server.too_many_sessions` — `LANGUAGE_SERVER_MAX_SESSIONS` exceeded.
-- `clay.language_server.spawn_failed` — child process could not start.
-- `clay.language_server.payload_too_large` — message exceeds `LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES`.
-- `clay.language_server.timeout` — read timed out.
-- `clay.language_server.child_exited` — child process exited unexpectedly.
-- `clay.language_server.unknown_session` — session id not recognized (reaped/revoked).
+- `language_server.unauthorized` — no grant, mismatched contribution, or revoked grant.
+- `language_server.executable_not_found` — canonical executable no longer resolves.
+- `language_server.session_already_running` — same package contribution already has a live session for this workspace root.
+- `language_server.too_many_sessions` — `LANGUAGE_SERVER_MAX_SESSIONS` exceeded.
+- `language_server.spawn_failed` — child process could not start.
+- `language_server.payload_too_large` — message exceeds `LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES`.
+- `language_server.timeout` — read timed out.
+- `language_server.child_exited` — child process exited unexpectedly.
+- `language_server.unknown_session` — session id not recognized (reaped/revoked).
 
 ## Permissions and security
 

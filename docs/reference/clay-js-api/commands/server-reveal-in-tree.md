@@ -1,5 +1,5 @@
 ---
-id: clay.commands.serverRevealInTree
+id: commands.serverRevealInTree
 kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverRevealInTree
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Validates the document id against open server workspace metadata and only affects Clay-owned file-browser focus state; does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.commands.serverRevealInTree` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
+agent_guidance: Use `commands.serverRevealInTree` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
 lookup_tags: [commands, workspace, file-browser, reveal, phase18.12, js-api]
 app_visible: true
 help_visible: true
@@ -61,7 +61,7 @@ await serverRevealInTree({ documentId });
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.commands.serverRevealInTree` through documented keybinding/configuration APIs where appropriate.
+No default key binding is assigned. Users may bind a key to `commands.serverRevealInTree` through documented keybinding/configuration APIs where appropriate.
 
 ## Custom properties
 
@@ -85,7 +85,7 @@ Validates the document id against open server workspace metadata and only affect
 
 ## Agent guidance
 
-Use `clay.commands.serverRevealInTree` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
+Use `commands.serverRevealInTree` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.commands.serverRevealInTree` only through the documented Clay JS facad
 
 ## Lookup metadata
 
-- Stable ID: `clay.commands.serverRevealInTree`
+- Stable ID: `commands.serverRevealInTree`
 - User-facing name: Reveal In Tree
 - Kind: `clay-js-api`
 - Module/export: `clay:commands` / `serverRevealInTree`

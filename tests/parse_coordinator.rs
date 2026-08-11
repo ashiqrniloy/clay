@@ -664,7 +664,7 @@ async fn invalid_diagnostic_rejects_parse_update_without_partial_publication() {
             .unwrap()
             .unwrap();
 
-    assert_eq!(runtime_diagnostic.code, "clay.parse.open_failed");
+    assert_eq!(runtime_diagnostic.code, "parse.open_failed");
     assert!(
         tokio::time::timeout(Duration::from_millis(100), coordinator.next_update())
             .await
@@ -698,7 +698,7 @@ async fn invalid_decoration_batch_member_rejects_whole_update() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(diagnostic.code, "clay.parse.open_failed");
+    assert_eq!(diagnostic.code, "parse.open_failed");
     assert!(
         tokio::time::timeout(Duration::from_millis(100), coordinator.next_update())
             .await
@@ -793,7 +793,7 @@ async fn finish_task_publishes_runtime_diagnostic_for_handler_error() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(diagnostic.code, "clay.parse.open_failed");
+    assert_eq!(diagnostic.code, "parse.open_failed");
     assert!(diagnostic.message.contains("markdown"));
     assert!(diagnostic.message.contains("handler failed"));
     assert!(!diagnostic.message.contains("/home/alice"));
@@ -1159,7 +1159,7 @@ async fn handler_failures_are_instrumented_after_generation_replacement() {
             "markdown",
             |_notification: ParseEditNotification| async move {
                 Err(ParseCoordinatorError::HandlerFailed(
-                    "clay.runtime.timeout".to_string(),
+                    "runtime.timeout".to_string(),
                 ))
             },
         )
@@ -1184,7 +1184,7 @@ async fn handler_failures_are_instrumented_and_not_published() {
     coordinator
         .register_handler(&package, "markdown", |_notification| async move {
             Err(ParseCoordinatorError::HandlerFailed(
-                "clay.runtime.timeout".to_string(),
+                "runtime.timeout".to_string(),
             ))
         })
         .unwrap();

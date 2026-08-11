@@ -513,10 +513,10 @@ impl TransientPackageOverlay {
             TransientMenuOrigin::MenuBar => PackageOverlayAnchor::Main,
             TransientMenuOrigin::CommandPalette => PackageOverlayAnchor::Bottom,
         };
-        let prompt_id = format!("clay.menu.{}.prompt", session.session_id().0);
-        let query_id = format!("clay.menu.{}.query", session.session_id().0);
-        let list_id = format!("clay.menu.{}.list", session.session_id().0);
-        let status_id = format!("clay.menu.{}.status", session.session_id().0);
+        let prompt_id = format!("menu.{}.prompt", session.session_id().0);
+        let query_id = format!("menu.{}.query", session.session_id().0);
+        let list_id = format!("menu.{}.list", session.session_id().0);
+        let status_id = format!("menu.{}.status", session.session_id().0);
 
         let mut children = vec![
             PackageUiComponentTree {
@@ -595,7 +595,7 @@ impl TransientPackageOverlay {
                     validation_state: None,
                 });
                 return Self {
-                    id: format!("clay.menu.{}", session.session_id().0),
+                    id: format!("menu.{}", session.session_id().0),
                     anchor,
                     focus_policy: match session.focus_policy() {
                         TransientMenuFocusPolicy::Modal => "modal".to_string(),
@@ -603,7 +603,7 @@ impl TransientPackageOverlay {
                     },
                     dismissal_policy: "escape".to_string(),
                     component: PackageUiComponentTree {
-                        id: format!("clay.menu.{}.root", session.session_id().0),
+                        id: format!("menu.{}.root", session.session_id().0),
                         disabled: false,
                         kind: "stack".to_string(),
                         font_role: FontRole::Ui,
@@ -624,7 +624,7 @@ impl TransientPackageOverlay {
         }
 
         Self {
-            id: format!("clay.menu.{}", session.session_id().0),
+            id: format!("menu.{}", session.session_id().0),
             anchor,
             focus_policy: match session.focus_policy() {
                 TransientMenuFocusPolicy::Modal => "modal".to_string(),
@@ -632,7 +632,7 @@ impl TransientPackageOverlay {
             },
             dismissal_policy: "escape".to_string(),
             component: PackageUiComponentTree {
-                id: format!("clay.menu.{}.root", session.session_id().0),
+                id: format!("menu.{}.root", session.session_id().0),
                 disabled: false,
                 kind: "stack".to_string(),
                 font_role: FontRole::Ui,
@@ -1023,7 +1023,7 @@ mod tests {
             ]);
         let overlay = TransientPackageOverlay::from_menu_session(&session);
 
-        assert_eq!(overlay.id, "clay.menu.7");
+        assert_eq!(overlay.id, "menu.7");
         assert_eq!(overlay.anchor, PackageOverlayAnchor::Bottom);
         assert_eq!(overlay.focus_policy, "modal");
         assert_eq!(overlay.dismissal_policy, "escape");

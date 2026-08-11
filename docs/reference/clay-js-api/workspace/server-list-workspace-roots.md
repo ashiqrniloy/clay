@@ -1,5 +1,5 @@
 ---
-id: clay.workspace.serverListWorkspaceRoots
+id: workspace.serverListWorkspaceRoots
 kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverListWorkspaceRoots
@@ -17,7 +17,7 @@ permissions: ["workspace-read"]
 key_bindings: []
 custom_properties: []
 security: Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.workspace.serverListWorkspaceRoots` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
+agent_guidance: Use `workspace.serverListWorkspaceRoots` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 lookup_tags: [workspace, roots, metadata, file, js-api]
 app_visible: true
 help_visible: true
@@ -62,7 +62,7 @@ No options.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.workspace.serverListWorkspaceRoots` in `~/.config/clay/init.js` once configuration execution exists.
+No default key binding is assigned. Users may bind a key to `workspace.serverListWorkspaceRoots` in `~/.config/clay/init.js` once configuration execution exists.
 
 ## Custom properties
 
@@ -90,7 +90,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.workspace.serverListWorkspaceRoots` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
+Use `workspace.serverListWorkspaceRoots` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -101,7 +101,7 @@ Use `clay.workspace.serverListWorkspaceRoots` only through the documented Clay J
 
 ## Lookup metadata
 
-- Stable ID: `clay.workspace.serverListWorkspaceRoots`
+- Stable ID: `workspace.serverListWorkspaceRoots`
 - User-facing name: List Workspace Roots
 - Kind: `clay-js-api`
 - Module/export: `clay:workspace` / `serverListWorkspaceRoots`

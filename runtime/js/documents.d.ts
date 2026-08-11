@@ -20,7 +20,7 @@ export interface DocumentMetadata {
     workspaceRootId: WorkspaceRootId;
     path: string;
 }
-export type ClientOpenFileDialogCommandId = "clay.documents.clientOpenFileDialog";
+export type ClientOpenFileDialogCommandId = "documents.clientOpenFileDialog";
 export interface OpenDocumentOptions {
     workspaceRootId: WorkspaceRootId;
     path: string;

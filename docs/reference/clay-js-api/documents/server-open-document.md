@@ -1,5 +1,5 @@
 ---
-id: clay.documents.serverOpenDocument
+id: documents.serverOpenDocument
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverOpenDocument
@@ -17,7 +17,7 @@ permissions: ["workspace-read", "document-read"]
 key_bindings: []
 custom_properties: []
 security: Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.documents.serverOpenDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
+agent_guidance: Use `documents.serverOpenDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 lookup_tags: [documents, workspace, file, open, js-api]
 app_visible: true
 help_visible: true
@@ -65,7 +65,7 @@ console.log(opened.metadata.documentId, opened.text);
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.documents.serverOpenDocument` in `~/.config/clay/init.js` once configuration execution exists.
+No default key binding is assigned. Users may bind a key to `documents.serverOpenDocument` in `~/.config/clay/init.js` once configuration execution exists.
 
 ## Custom properties
 
@@ -95,7 +95,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.documents.serverOpenDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
+Use `documents.serverOpenDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -106,7 +106,7 @@ Use `clay.documents.serverOpenDocument` only through the documented Clay JS faca
 
 ## Lookup metadata
 
-- Stable ID: `clay.documents.serverOpenDocument`
+- Stable ID: `documents.serverOpenDocument`
 - User-facing name: Open Document
 - Kind: `clay-js-api`
 - Module/export: `clay:documents` / `serverOpenDocument`

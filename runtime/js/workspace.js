@@ -40,5 +40,5 @@ export async function serverCancelListing(tokenId) {
     return workspaceOps().op_clay_workspace_cancel_listing(tokenId);
 }
 export function clientOpenFolderDialog() {
-    return "clay.workspace.clientOpenFolderDialog";
+    return "workspace.clientOpenFolderDialog";
 }

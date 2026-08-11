@@ -5,7 +5,8 @@ manifests (movement/caret/editor rules), settings UI, theme switching.
 
 ## Setup
 
-init.js (subset of `examples/init.js`):
+init.js (subset of `examples/init.js`; the example keeps its package loads
+in `examples/packages/first-party.js`):
 
 ```js
 import { loadPackage } from "clay:packages";

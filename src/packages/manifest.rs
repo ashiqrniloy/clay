@@ -126,6 +126,17 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
             "clay.apiPrefix must match ^[a-z][a-z0-9-]{1,31}$",
         ));
     }
+    if is_reserved_core_domain_for_package(&api_prefix, &package_name) {
+        return Err(DiagnosticContext::new(
+            Some(package_name.clone()),
+            Some(package_version.clone()),
+            Some(api_prefix.clone()),
+        )
+        .diagnostic(
+            PackageValidationRule::InvalidPrefix,
+            "clay.apiPrefix claims a reserved Clay core API domain; package identifiers must use the package's own prefix",
+        ));
+    }
 
     let entry = required_string_field(clay.get("entry"), "clay.entry", &context)?;
     validate_entry_path(&entry, "clay.entry", &context)?;
@@ -202,6 +213,60 @@ pub fn is_valid_api_prefix(value: &str) -> bool {
         return false;
     }
     chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+}
+
+/// Reserved Clay core API domains. Core command/JS-API identifiers use the
+/// bare `<domain>.<name>` shape (for example `shell.clientSplitPaneVertical`,
+/// `editor.clientCopySelection`, `runtime.reloadConfiguration`); the legacy
+/// `clay.<domain>.*` spelling is retired. Third-party packages must not claim
+/// a core domain as their `clay.apiPrefix` — package-owned identifiers always
+/// start with the package's own prefix (`<package>.<name>`), so a squatted
+/// core domain would make core and package IDs indistinguishable. Bundled
+/// first-party packages from the compiled inventory are exempt because their
+/// provenance is pinned (e.g. `@clay/git` owns the `git` domain that the core
+/// git JS APIs also live under).
+pub const RESERVED_CORE_API_DOMAINS: &[&str] = &[
+    "application",
+    "behavior",
+    "clay",
+    "client",
+    "clipboard",
+    "commands",
+    "completion",
+    "configuration",
+    "controlCenter",
+    "core",
+    "decorations",
+    "default",
+    "diagnostics",
+    "dialog",
+    "documents",
+    "editor",
+    "git",
+    "graph",
+    "keybindings",
+    "language",
+    "language-server",
+    "modes",
+    "packages",
+    "parse",
+    "runtime",
+    "sdui",
+    "shell",
+    "syntax",
+    "tabs",
+    "text",
+    "theme",
+    "ui",
+    "workspace",
+];
+
+/// A package may use a reserved core API domain as its `clay.apiPrefix` only
+/// when it is a bundled first-party package from the compiled inventory
+/// (exact name + pinned manifest fingerprint), never a third-party package.
+pub(crate) fn is_reserved_core_domain_for_package(api_prefix: &str, package_name: &str) -> bool {
+    RESERVED_CORE_API_DOMAINS.contains(&api_prefix)
+        && crate::packages::bundled::bundled_entry(package_name).is_none()
 }
 
 fn parse_requested_capabilities(

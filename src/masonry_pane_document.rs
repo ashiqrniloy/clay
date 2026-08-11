@@ -927,7 +927,7 @@ impl PaneDocumentView {
         );
         if let Some(message) = eviction_notice {
             status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
-                "clay.editor.document_session.evicted",
+                "editor.document_session.evicted",
                 message,
             ));
         }
@@ -1005,7 +1005,7 @@ impl PaneDocumentView {
         let Some(retained) = self.sessions.remove(document_id) else {
             let mut next_status = self.status.clone();
             next_status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
-                "clay.editor.document_session.missing",
+                "editor.document_session.missing",
                 format!("No retained client session for document {document_id}."),
             ));
             return self.set_status(next_status);
@@ -1123,7 +1123,7 @@ impl PaneDocumentView {
                 if let Some(pane) = pane {
                     arguments["paneId"] = serde_json::json!(pane.0);
                 }
-                let action = TransientMenuAction::new("clay.editor.clientActivateDocument")
+                let action = TransientMenuAction::new("editor.clientActivateDocument")
                     .with_arguments(arguments);
                 crate::shell::TransientMenuItem::new(
                     format!("doc.{}", entry.document_id),
@@ -1269,7 +1269,7 @@ impl PaneDocumentView {
     ) -> bool {
         let mut next_status = self.status.clone();
         next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
-            format!("clay.file.{code:?}"),
+            format!("file.{code:?}"),
             message.clone(),
         ));
         // Save/reload failures must never clear dirty; keep local edits.
@@ -1297,20 +1297,20 @@ impl PaneDocumentView {
                     crate::shell::TransientMenuItem::new(
                         "conflict.reload",
                         "Reload from disk (discard local edits)",
-                        TransientMenuAction::new("clay.documents.serverReloadDocument")
+                        TransientMenuAction::new("documents.serverReloadDocument")
                             .with_arguments(serde_json::json!({ "force": true })),
                     )
                     .with_accessibility_label("Reload from disk and discard unsaved local edits"),
                     crate::shell::TransientMenuItem::new(
                         "conflict.keep",
                         "Keep unsaved edits",
-                        TransientMenuAction::new("clay.editor.clientKeepUnsavedEdits"),
+                        TransientMenuAction::new("editor.clientKeepUnsavedEdits"),
                     )
                     .with_accessibility_label("Keep unsaved edits and dismiss conflict menu"),
                     crate::shell::TransientMenuItem::new(
                         "conflict.defer",
                         "Compare later",
-                        TransientMenuAction::new("clay.editor.clientDeferConflictCompare"),
+                        TransientMenuAction::new("editor.clientDeferConflictCompare"),
                     )
                     .with_accessibility_label("Defer conflict comparison and keep unsaved edits"),
                 ];
@@ -1322,20 +1322,20 @@ impl PaneDocumentView {
                     crate::shell::TransientMenuItem::new(
                         "conflict.save",
                         "Save first",
-                        TransientMenuAction::new("clay.documents.serverSaveDocument"),
+                        TransientMenuAction::new("documents.serverSaveDocument"),
                     )
                     .with_accessibility_label("Save the document before reloading"),
                     crate::shell::TransientMenuItem::new(
                         "conflict.reload",
                         "Discard edits and reload",
-                        TransientMenuAction::new("clay.documents.serverReloadDocument")
+                        TransientMenuAction::new("documents.serverReloadDocument")
                             .with_arguments(serde_json::json!({ "force": true })),
                     )
                     .with_accessibility_label("Discard unsaved edits and reload from disk"),
                     crate::shell::TransientMenuItem::new(
                         "conflict.keep",
                         "Keep unsaved edits",
-                        TransientMenuAction::new("clay.editor.clientKeepUnsavedEdits"),
+                        TransientMenuAction::new("editor.clientKeepUnsavedEdits"),
                     )
                     .with_accessibility_label("Keep unsaved edits and dismiss reload prompt"),
                 ];
@@ -1353,13 +1353,13 @@ impl PaneDocumentView {
     pub fn request_save_active_document(&self) -> Result<DocumentId, RuntimeDiagnostic> {
         let Some(queue) = &self.edit_queue else {
             return Err(RuntimeDiagnostic::error(
-                "clay.client.save.unavailable",
+                "client.save.unavailable",
                 "Cannot save because this editor is not connected to a Clay server.",
             ));
         };
         if !self.has_opened_document {
             return Err(RuntimeDiagnostic::error(
-                "clay.client.save.no_document",
+                "client.save.no_document",
                 "Cannot save because no document is open.",
             ));
         }
@@ -1369,7 +1369,7 @@ impl PaneDocumentView {
             .map(|()| document.document_id)
             .map_err(|error| {
                 RuntimeDiagnostic::error(
-                    "clay.client.save.queue_failed",
+                    "client.save.queue_failed",
                     format!("Failed to send save request to the Clay server: {error}"),
                 )
             })
@@ -1379,7 +1379,7 @@ impl PaneDocumentView {
         let Some(queue) = &self.edit_queue else {
             return Some(ClientConnectionEvent::RuntimeDiagnostic(
                 RuntimeDiagnostic::error(
-                    "clay.client.reload.unavailable",
+                    "client.reload.unavailable",
                     "Cannot reload because this editor is not connected to a Clay server.",
                 ),
             ));
@@ -1387,7 +1387,7 @@ impl PaneDocumentView {
         if !self.has_opened_document {
             return Some(ClientConnectionEvent::RuntimeDiagnostic(
                 RuntimeDiagnostic::error(
-                    "clay.client.reload.no_document",
+                    "client.reload.no_document",
                     "Cannot reload because no document is open.",
                 ),
             ));
@@ -1398,7 +1398,7 @@ impl PaneDocumentView {
             .err()
             .map(|error| {
                 ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                    "clay.client.reload.queue_failed",
+                    "client.reload.queue_failed",
                     format!("Failed to send reload request to the Clay server: {error}"),
                 ))
             })
@@ -1406,7 +1406,7 @@ impl PaneDocumentView {
 
     fn handle_save_conflict_menu_action(&mut self, action: &TransientMenuAction) -> bool {
         match action.command_id.as_str() {
-            "clay.documents.serverSaveDocument" => {
+            "documents.serverSaveDocument" => {
                 if let Err(diagnostic) = self.request_save_active_document() {
                     let _ = self.apply_connection_event(ClientConnectionEvent::RuntimeDiagnostic(
                         diagnostic,
@@ -1414,7 +1414,7 @@ impl PaneDocumentView {
                 }
                 true
             }
-            "clay.documents.serverReloadDocument" => {
+            "documents.serverReloadDocument" => {
                 let force = action
                     .arguments
                     .get("force")
@@ -1425,11 +1425,11 @@ impl PaneDocumentView {
                 }
                 true
             }
-            "clay.editor.clientKeepUnsavedEdits" => true,
-            "clay.editor.clientDeferConflictCompare" => {
+            "editor.clientKeepUnsavedEdits" => true,
+            "editor.clientDeferConflictCompare" => {
                 let mut next_status = self.status.clone();
                 next_status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
-                    "clay.file.conflict_deferred",
+                    "file.conflict_deferred",
                     "Save conflict deferred — unsaved edits kept; compare later.",
                 ));
                 let _ = self.set_status(next_status);
@@ -1472,7 +1472,7 @@ impl PaneDocumentView {
             )
         };
         next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
-            "clay.client.disconnect",
+            "client.disconnect",
             "Disconnected (connection lost). Reconnecting…; local unsaved edits stay in this window until then.",
         ));
         let status_changed = self.set_status(next_status);
@@ -1485,7 +1485,7 @@ impl PaneDocumentView {
             .unwrap_or_else(|| "server error".to_string());
         let mut next_status = self.status.clone();
         next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
-            format!("clay.server.error.{code:?}"),
+            format!("server.error.{code:?}"),
             format!("{sanitized}. Use Resync or Dismiss."),
         ));
         let status_changed = self.set_status(next_status);
@@ -1516,7 +1516,7 @@ impl PaneDocumentView {
             crate::shell::TransientMenuItem::new(
                 "recovery.dismiss",
                 "Dismiss",
-                TransientMenuAction::new("clay.editor.clientDismissRecovery"),
+                TransientMenuAction::new("editor.clientDismissRecovery"),
             )
             .with_accessibility_label("Dismiss disconnect recovery guidance"),
         ];
@@ -1538,13 +1538,13 @@ impl PaneDocumentView {
             crate::shell::TransientMenuItem::new(
                 "recovery.resync",
                 "Request resync",
-                TransientMenuAction::new("clay.editor.clientRequestResync"),
+                TransientMenuAction::new("editor.clientRequestResync"),
             )
             .with_accessibility_label(format!("{accessibility_hint} Request resync")),
             crate::shell::TransientMenuItem::new(
                 "recovery.dismiss",
                 "Dismiss",
-                TransientMenuAction::new("clay.editor.clientDismissRecovery"),
+                TransientMenuAction::new("editor.clientDismissRecovery"),
             )
             .with_accessibility_label("Dismiss recovery prompt"),
         ];
@@ -1573,7 +1573,7 @@ impl PaneDocumentView {
         let Some(queue) = &self.edit_queue else {
             return Some(ClientConnectionEvent::RuntimeDiagnostic(
                 RuntimeDiagnostic::error(
-                    "clay.editor.resync_unavailable",
+                    "editor.resync_unavailable",
                     "Resync requires an active server connection.",
                 ),
             ));
@@ -1584,7 +1584,7 @@ impl PaneDocumentView {
         ) {
             return Some(ClientConnectionEvent::RuntimeDiagnostic(
                 RuntimeDiagnostic::error(
-                    "clay.editor.resync_unavailable",
+                    "editor.resync_unavailable",
                     "Resync requires an active server connection. The tab reconnects automatically.",
                 ),
             ));
@@ -1595,14 +1595,14 @@ impl PaneDocumentView {
         {
             return Some(ClientConnectionEvent::RuntimeDiagnostic(
                 RuntimeDiagnostic::error(
-                    "clay.editor.resync_enqueue_failed",
+                    "editor.resync_enqueue_failed",
                     format!("Failed to request resync: {error}"),
                 ),
             ));
         }
         let mut next_status = self.status.clone();
         next_status.runtime_diagnostic = Some(RuntimeDiagnostic::warning(
-            "clay.editor.resync_requested",
+            "editor.resync_requested",
             "Resync requested — waiting for canonical snapshot.",
         ));
         let _ = self.set_status(next_status);
@@ -1624,13 +1624,13 @@ impl PaneDocumentView {
 
     fn handle_sync_recovery_menu_action(&mut self, action: &TransientMenuAction) -> bool {
         match action.command_id.as_str() {
-            "clay.editor.clientRequestResync" => {
+            "editor.clientRequestResync" => {
                 if let Some(diagnostic) = self.request_resync_active_document() {
                     let _ = self.apply_connection_event(diagnostic);
                 }
                 true
             }
-            "clay.editor.clientDismissRecovery" => self.dismiss_recovery(),
+            "editor.clientDismissRecovery" => self.dismiss_recovery(),
             _ => false,
         }
     }
@@ -1730,7 +1730,7 @@ impl PaneDocumentView {
         let text = self.editor.selected_text()?;
         clipboard.set_text(text).err().map(|error| {
             ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                "clay.client.clipboard.write_failed",
+                "client.clipboard.write_failed",
                 format!("Failed to copy selection to the system clipboard: {error}"),
             ))
         })
@@ -1753,7 +1753,7 @@ impl PaneDocumentView {
         if let Err(error) = clipboard.set_text(text) {
             return ClipboardCommandOutcome::diagnostic(ClientConnectionEvent::RuntimeDiagnostic(
                 RuntimeDiagnostic::error(
-                    "clay.client.clipboard.write_failed",
+                    "client.clipboard.write_failed",
                     format!("Failed to cut selection to the system clipboard: {error}"),
                 ),
             ));
@@ -1791,7 +1791,7 @@ impl PaneDocumentView {
             Err(error) => {
                 return ClipboardCommandOutcome::diagnostic(
                     ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                        "clay.client.clipboard.read_failed",
+                        "client.clipboard.read_failed",
                         format!("Failed to read text from the system clipboard: {error}"),
                     )),
                 );
@@ -2028,14 +2028,14 @@ impl PaneDocumentView {
                 {
                     self.enqueue_language_intelligence_request(event);
                 }
-            } else if intent.command_id == "clay.documents.serverSaveDocument" {
+            } else if intent.command_id == "documents.serverSaveDocument" {
                 if let Err(diagnostic) = self.request_save_active_document() {
                     let _ = self.apply_connection_event(ClientConnectionEvent::RuntimeDiagnostic(
                         diagnostic,
                     ));
                     ctx.request_render();
                 }
-            } else if intent.command_id == "clay.documents.serverReloadDocument" {
+            } else if intent.command_id == "documents.serverReloadDocument" {
                 if let Some(diagnostic) = self.request_reload_active_document(false) {
                     let _ = self.apply_connection_event(diagnostic);
                     ctx.request_render();
@@ -2115,10 +2115,7 @@ impl PaneDocumentView {
             self.finish_local_outcome(ctx, outcome);
             self.requests.active_completion_request_id = None;
         } else if let Some(local_action) = self.menu_selected_action() {
-            if local_action
-                .command_id
-                .starts_with("clay.shell.clientTabClose")
-            {
+            if local_action.command_id.starts_with("shell.clientTabClose") {
                 // Phase 22.4: the tab-close confirm session is driver-owned
                 // orchestration (save all dirty panes then close, or discard,
                 // or cancel) — hand the selection back to the driver, which
@@ -2137,7 +2134,7 @@ impl PaneDocumentView {
                     client_id,
                     command_id: local_action.command_id.clone(),
                 });
-            } else if local_action.command_id == "clay.editor.clientActivateDocument" {
+            } else if local_action.command_id == "editor.clientActivateDocument" {
                 let document_id = local_action
                     .arguments
                     .get("documentId")
@@ -2184,7 +2181,7 @@ impl PaneDocumentView {
             } else if let Some(intent) = self.menu_activate_selected()
                 && let Some(edit_queue) = &self.edit_queue
             {
-                if intent.command_id == "clay.workspace.openFile"
+                if intent.command_id == "workspace.openFile"
                     && intent.arguments.iter().any(|arg| {
                         arg.name == "languageIntelligenceNavigation"
                             && matches!(arg.value, crate::protocol::SduiActionValue::Bool(true))
@@ -2262,8 +2259,8 @@ impl PaneDocumentView {
         intent: &TransientMenuAction,
     ) -> bool {
         match intent.command_id.as_str() {
-            "clay.language.dismissResult" => true,
-            "clay.language.previewEdit" => {
+            "language.dismissResult" => true,
+            "language.previewEdit" => {
                 let title = intent
                     .arguments
                     .get("title")
@@ -2271,13 +2268,13 @@ impl PaneDocumentView {
                     .unwrap_or("edit preview");
                 let mut next_status = self.status.clone();
                 next_status.runtime_diagnostic = Some(RuntimeDiagnostic::error(
-                    "clay.language.preview_only",
+                    "language.preview_only",
                     format!("Code action edit preview is display-only in Phase 18.20: {title}"),
                 ));
                 let _ = self.set_status(next_status);
                 true
             }
-            "clay.language.navigateDefinition" => {
+            "language.navigateDefinition" => {
                 let kind = intent
                     .arguments
                     .get("kind")
@@ -3280,7 +3277,7 @@ fn edit_rejection_diagnostic_code(reason: &EditRejection) -> String {
         EditRejection::InvalidRange { .. } => "InvalidRange",
         EditRejection::InvalidBehaviorVersion { .. } => "InvalidBehaviorVersion",
     };
-    format!("clay.edit.rejected.{kind}")
+    format!("edit.rejected.{kind}")
 }
 
 fn edit_rejection_summary(reason: &EditRejection) -> String {
@@ -3489,14 +3486,14 @@ mod tests {
         open(&mut view, 7, "alpha");
 
         let mut manifest = crate::protocol::BehaviorManifest::minimal_text_editing(6);
-        manifest.manifest_id = "clay.runtime.configuration".to_string();
+        manifest.manifest_id = "runtime.configuration".to_string();
         view.apply_behavior_manifest(&manifest);
 
         let state = view.editor_mut().document_state();
         assert_eq!(state.behavior_version, 6);
         assert_eq!(
             state.behavior_manifest.as_ref().unwrap().manifest_id,
-            "clay.runtime.configuration"
+            "runtime.configuration"
         );
     }
 
@@ -3970,7 +3967,7 @@ mod tests {
         let view = view_with_queue(ClientEditQueue::bounded(8).0);
         // Blank view: no document to save.
         let err = view.request_save_active_document().unwrap_err();
-        assert_eq!(err.code, "clay.client.save.no_document");
+        assert_eq!(err.code, "client.save.no_document");
 
         let (queue, _receiver) = ClientEditQueue::bounded(8);
         let mut view = view_with_queue(queue);
@@ -3979,7 +3976,7 @@ mod tests {
         // No connection: the driver must learn the save cannot be enqueued so
         // the close flow cancels instead of closing unsaved work.
         let err = view.request_save_active_document().unwrap_err();
-        assert_eq!(err.code, "clay.client.save.unavailable");
+        assert_eq!(err.code, "client.save.unavailable");
     }
 
     #[test]

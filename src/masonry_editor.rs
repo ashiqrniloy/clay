@@ -132,7 +132,7 @@ pub enum EditorAction {
     /// before `TabCommand::Close`, or the discard/cancel choice), so the
     /// pane view hands the selection here instead of routing it locally or
     /// to the server. `command_id` is one of the driver-local
-    /// `clay.shell.clientTabClose*` family; `client_id` identifies the tab.
+    /// `shell.clientTabClose*` family; `client_id` identifies the tab.
     TabCloseMenuAction {
         client_id: u64,
         command_id: String,
@@ -202,30 +202,30 @@ pub enum EditorClientCommand {
 }
 
 impl EditorClientCommand {
-    /// Maps an allowlisted `clay.editor.clientMoveCursor.*` /
-    /// `clay.editor.clientSetSelection.*` / multi-cursor command ID to its
+    /// Maps an allowlisted `editor.clientMoveCursor.*` /
+    /// `editor.clientSetSelection.*` / multi-cursor command ID to its
     /// editor command. `None` for IDs outside the allowlisted surface.
     pub fn from_command_id(command_id: &str) -> Option<Self> {
         match command_id {
-            "clay.editor.clientMoveCursor.nextWordStart" => Some(Self::MoveWordStartForward),
-            "clay.editor.clientMoveCursor.prevWordStart" => Some(Self::MoveWordStartBackward),
-            "clay.editor.clientMoveCursor.nextParagraph" => Some(Self::MoveParagraphForward),
-            "clay.editor.clientMoveCursor.prevParagraph" => Some(Self::MoveParagraphBackward),
-            "clay.editor.clientSetSelection.selectWord" => Some(Self::SelectWord),
-            "clay.editor.clientSetSelection.selectLine" => Some(Self::SelectLine),
-            "clay.editor.clientAddCursor.below" => Some(Self::AddCursorBelow),
-            "clay.editor.clientAddCursor.above" => Some(Self::AddCursorAbove),
-            "clay.editor.clientColumnSelect.down" => Some(Self::ColumnSelectDown),
-            "clay.editor.clientColumnSelect.up" => Some(Self::ColumnSelectUp),
-            "clay.editor.clientColumnSelect.left" => Some(Self::ColumnSelectLeft),
-            "clay.editor.clientColumnSelect.right" => Some(Self::ColumnSelectRight),
-            "clay.editor.clientSelectNextMatch" => Some(Self::SelectNextMatch),
-            "clay.editor.clientSelectPrevMatch" => Some(Self::SelectPrevMatch),
-            "clay.editor.clientSelectAllMatches" => Some(Self::SelectAllMatches),
-            "clay.editor.clientCancelMultipleSelections" => Some(Self::CancelMultipleSelections),
-            "clay.editor.clientKeepSelection" => Some(Self::KeepSelection),
-            "clay.editor.clientRemoveSelection" => Some(Self::RemoveSelection),
-            "clay.editor.clientUndoCursorMove" => Some(Self::UndoCursorMove),
+            "editor.clientMoveCursor.nextWordStart" => Some(Self::MoveWordStartForward),
+            "editor.clientMoveCursor.prevWordStart" => Some(Self::MoveWordStartBackward),
+            "editor.clientMoveCursor.nextParagraph" => Some(Self::MoveParagraphForward),
+            "editor.clientMoveCursor.prevParagraph" => Some(Self::MoveParagraphBackward),
+            "editor.clientSetSelection.selectWord" => Some(Self::SelectWord),
+            "editor.clientSetSelection.selectLine" => Some(Self::SelectLine),
+            "editor.clientAddCursor.below" => Some(Self::AddCursorBelow),
+            "editor.clientAddCursor.above" => Some(Self::AddCursorAbove),
+            "editor.clientColumnSelect.down" => Some(Self::ColumnSelectDown),
+            "editor.clientColumnSelect.up" => Some(Self::ColumnSelectUp),
+            "editor.clientColumnSelect.left" => Some(Self::ColumnSelectLeft),
+            "editor.clientColumnSelect.right" => Some(Self::ColumnSelectRight),
+            "editor.clientSelectNextMatch" => Some(Self::SelectNextMatch),
+            "editor.clientSelectPrevMatch" => Some(Self::SelectPrevMatch),
+            "editor.clientSelectAllMatches" => Some(Self::SelectAllMatches),
+            "editor.clientCancelMultipleSelections" => Some(Self::CancelMultipleSelections),
+            "editor.clientKeepSelection" => Some(Self::KeepSelection),
+            "editor.clientRemoveSelection" => Some(Self::RemoveSelection),
+            "editor.clientUndoCursorMove" => Some(Self::UndoCursorMove),
             _ => None,
         }
     }
@@ -928,14 +928,14 @@ impl EditorWidget {
         let Some(queue) = &self.edit_queue else {
             return Some(ClientConnectionEvent::RuntimeDiagnostic(
                 RuntimeDiagnostic::error(
-                    "clay.client.selected_file_open.unavailable",
+                    "client.selected_file_open.unavailable",
                     "Cannot open the selected file because this editor is not connected to a Clay server.",
                 ),
             ));
         };
         queue.enqueue_open_selected_file(path).err().map(|error| {
             ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                "clay.client.selected_file_open.queue_failed",
+                "client.selected_file_open.queue_failed",
                 format!("Failed to send selected-file open request to the Clay server: {error}"),
             ))
         })
@@ -945,7 +945,7 @@ impl EditorWidget {
         let Some(queue) = &self.edit_queue else {
             return Some(ClientConnectionEvent::RuntimeDiagnostic(
                 RuntimeDiagnostic::error(
-                    "clay.client.selected_folder_open.unavailable",
+                    "client.selected_folder_open.unavailable",
                     "Cannot add the selected folder because this editor is not connected to a Clay server.",
                 ),
             ));
@@ -955,7 +955,7 @@ impl EditorWidget {
             .err()
             .map(|error| {
                 ClientConnectionEvent::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                    "clay.client.selected_folder_open.queue_failed",
+                    "client.selected_folder_open.queue_failed",
                     format!("Failed to send selected-folder request to the Clay server: {error}"),
                 ))
             })
@@ -1339,76 +1339,76 @@ mod tests {
         // Plan 071 task 5: the six direction-specific command IDs map to editor
         // commands; unknown IDs (e.g. argless clipboard commands) map to None.
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientMoveCursor.nextWordStart"),
+            EditorClientCommand::from_command_id("editor.clientMoveCursor.nextWordStart"),
             Some(EditorClientCommand::MoveWordStartForward)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientMoveCursor.prevWordStart"),
+            EditorClientCommand::from_command_id("editor.clientMoveCursor.prevWordStart"),
             Some(EditorClientCommand::MoveWordStartBackward)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientMoveCursor.nextParagraph"),
+            EditorClientCommand::from_command_id("editor.clientMoveCursor.nextParagraph"),
             Some(EditorClientCommand::MoveParagraphForward)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientMoveCursor.prevParagraph"),
+            EditorClientCommand::from_command_id("editor.clientMoveCursor.prevParagraph"),
             Some(EditorClientCommand::MoveParagraphBackward)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientSetSelection.selectWord"),
+            EditorClientCommand::from_command_id("editor.clientSetSelection.selectWord"),
             Some(EditorClientCommand::SelectWord)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientSetSelection.selectLine"),
+            EditorClientCommand::from_command_id("editor.clientSetSelection.selectLine"),
             Some(EditorClientCommand::SelectLine)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientCopySelection"),
+            EditorClientCommand::from_command_id("editor.clientCopySelection"),
             None
         );
         // Plan 071 task 9: the multi-cursor command IDs map to editor commands.
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientAddCursor.below"),
+            EditorClientCommand::from_command_id("editor.clientAddCursor.below"),
             Some(EditorClientCommand::AddCursorBelow)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientAddCursor.above"),
+            EditorClientCommand::from_command_id("editor.clientAddCursor.above"),
             Some(EditorClientCommand::AddCursorAbove)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientColumnSelect.down"),
+            EditorClientCommand::from_command_id("editor.clientColumnSelect.down"),
             Some(EditorClientCommand::ColumnSelectDown)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientColumnSelect.left"),
+            EditorClientCommand::from_command_id("editor.clientColumnSelect.left"),
             Some(EditorClientCommand::ColumnSelectLeft)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientSelectNextMatch"),
+            EditorClientCommand::from_command_id("editor.clientSelectNextMatch"),
             Some(EditorClientCommand::SelectNextMatch)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientSelectPrevMatch"),
+            EditorClientCommand::from_command_id("editor.clientSelectPrevMatch"),
             Some(EditorClientCommand::SelectPrevMatch)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientSelectAllMatches"),
+            EditorClientCommand::from_command_id("editor.clientSelectAllMatches"),
             Some(EditorClientCommand::SelectAllMatches)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientCancelMultipleSelections"),
+            EditorClientCommand::from_command_id("editor.clientCancelMultipleSelections"),
             Some(EditorClientCommand::CancelMultipleSelections)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientKeepSelection"),
+            EditorClientCommand::from_command_id("editor.clientKeepSelection"),
             Some(EditorClientCommand::KeepSelection)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientRemoveSelection"),
+            EditorClientCommand::from_command_id("editor.clientRemoveSelection"),
             Some(EditorClientCommand::RemoveSelection)
         );
         assert_eq!(
-            EditorClientCommand::from_command_id("clay.editor.clientUndoCursorMove"),
+            EditorClientCommand::from_command_id("editor.clientUndoCursorMove"),
             Some(EditorClientCommand::UndoCursorMove)
         );
 

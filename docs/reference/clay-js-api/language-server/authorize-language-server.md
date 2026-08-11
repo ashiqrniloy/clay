@@ -1,5 +1,5 @@
 ---
-id: clay.language-server.authorizeLanguageServer
+id: language-server.authorizeLanguageServer
 kind: clay-js-api
 js_module: "clay:language-server"
 js_export: authorizeLanguageServer
@@ -100,13 +100,13 @@ Returns a `LanguageServerGrantSummary` with `package`, `version`, `sourceKind`, 
 
 ## Errors
 
-- `clay.language_server.invalid_grant` — missing or excess fields, invalid JSON.
-- `clay.language_server.unknown_package` — package not installed.
-- `clay.language_server.invalid_contribution` — no matching contribution declared.
-- `clay.language_server.executable_not_found` — executable not resolvable via `PATH`.
-- `clay.language_server.unknown_workspace_root` — workspace root id not known.
-- `clay.language_server.authorization_sealed` — grant attempted after `loadPackage` sealed authority.
-- `clay.language_server.duplicate_grant` — grant already exists for this (package, contribution) pair.
+- `language_server.invalid_grant` — missing or excess fields, invalid JSON.
+- `language_server.unknown_package` — package not installed.
+- `language_server.invalid_contribution` — no matching contribution declared.
+- `language_server.executable_not_found` — executable not resolvable via `PATH`.
+- `language_server.unknown_workspace_root` — workspace root id not known.
+- `language_server.authorization_sealed` — grant attempted after `loadPackage` sealed authority.
+- `language_server.duplicate_grant` — grant already exists for this (package, contribution) pair.
 
 ## Permissions and security
 

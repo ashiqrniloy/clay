@@ -33,14 +33,14 @@ authority — all Git execution stays inside the server's `GitDiscoveryService`.
 - Add no modes, no commands, no parse handlers, no decorations, and no
   configuration surface.
 - Remain additive: unloading `@clay/git` leaves the server-owned
-  `clay.git.listStatuses` and `clay.git.refreshStatus` commands available.
+  `git.listStatuses` and `git.refreshStatus` commands available.
 
 ## How It Works
 
 1. The package manifest (`packages/git/package.json`) declares:
    - `apiPrefix: "git"`
    - `permissions: []`
-   - `apiDependencies: ["clay.git.serverListGitStatuses", "clay.sdui.publishTree"]`
+   - `apiDependencies: ["git.serverListGitStatuses", "sdui.publishTree"]`
    - a single SDUI contribution on region `git.status`
 2. `loadPackage("@clay/git")` resolves the first-party specifier to
    `packages/git/dist/load.js` and invokes its default export.
@@ -55,8 +55,8 @@ authority — all Git execution stays inside the server's `GitDiscoveryService`.
    pure display state rendered by the native Masonry/SDUI reconciler.
 6. The server-side ops (`src/server/ops/git.rs`) read the shared
    `GitStatusCache` (`list_cached` / `refresh_root`) after validating the
-   workspace root ID. The built-in commands (`clay.git.listStatuses`,
-   `clay.git.refreshStatus`) in `src/server/command_execution.rs` expose the
+   workspace root ID. The built-in commands (`git.listStatuses`,
+   `git.refreshStatus`) in `src/server/command_execution.rs` expose the
    same data through the generic command-execution path.
 
 ## Code Examples

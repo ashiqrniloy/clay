@@ -20,7 +20,7 @@ pub(super) fn op_clay_keybindings_bind_key(
     let manifest = state
         .borrow::<Arc<ClayOpState>>()
         .bind_key(rule)
-        .map_err(manifest_error("clay.keybindings.bind_failed"))?;
+        .map_err(manifest_error("keybindings.bind_failed"))?;
     serialize_key_binding(
         manifest
             .keymaps
@@ -48,7 +48,7 @@ pub(super) fn op_clay_keybindings_bind_keys(
     for (index, (chord, command_id)) in bindings.iter().enumerate() {
         let rule = build_rule(chord, command_id, scope.clone()).map_err(|error| {
             JsErrorBox::generic(format!(
-                "clay.keybindings.invalid_bind: entry {}: {error}",
+                "keybindings.invalid_bind: entry {}: {error}",
                 index + 1
             ))
         })?;
@@ -58,10 +58,10 @@ pub(super) fn op_clay_keybindings_bind_keys(
     let clay = state.borrow::<Arc<ClayOpState>>();
     for rule in &rules {
         clay.bind_key(rule.clone())
-            .map_err(manifest_error("clay.keybindings.bind_failed"))?;
+            .map_err(manifest_error("keybindings.bind_failed"))?;
     }
     serde_json::to_string(&Value::Array(rules.iter().map(key_binding_json).collect()))
-        .map_err(serialize_error("clay.keybindings.bind_failed"))
+        .map_err(serialize_error("keybindings.bind_failed"))
 }
 
 /// Batch unbind: `unbindKey({ scope, keys: [chord, ...] })`. Mirrors the bind
@@ -78,7 +78,7 @@ pub(super) fn op_clay_keybindings_unbind_keys(
     for (index, chord) in keys.iter().enumerate() {
         let stroke = parse_key_chord(chord).map_err(|error| {
             JsErrorBox::generic(format!(
-                "clay.keybindings.invalid_unbind: entry {}: {error}",
+                "keybindings.invalid_unbind: entry {}: {error}",
                 index + 1
             ))
         })?;
@@ -90,7 +90,7 @@ pub(super) fn op_clay_keybindings_unbind_keys(
     for stroke in &strokes {
         manifest = Some(
             clay.unbind_key(stroke, &scope)
-                .map_err(manifest_error("clay.keybindings.unbind_failed"))?,
+                .map_err(manifest_error("keybindings.unbind_failed"))?,
         );
     }
     serialize_bindings(&manifest.expect("at least one unbind entry").keymaps)
@@ -101,9 +101,9 @@ fn build_bind_rule(
     command_id: &str,
     options_json: &str,
 ) -> Result<KeyBindingRule, JsErrorBox> {
-    let options = parse_options(options_json, "clay.keybindings.invalid_bind")?;
-    let scope = parse_scope(options.get("scope"), "clay.keybindings.invalid_bind")?;
-    reject_when_clause(options.get("when"), "clay.keybindings.invalid_bind")?;
+    let options = parse_options(options_json, "keybindings.invalid_bind")?;
+    let scope = parse_scope(options.get("scope"), "keybindings.invalid_bind")?;
+    reject_when_clause(options.get("when"), "keybindings.invalid_bind")?;
     build_rule(key, command_id, scope)
 }
 
@@ -121,24 +121,24 @@ fn build_rule(
 }
 
 fn parse_bind_table(json: &str) -> Result<(KeyBindingContext, Vec<(String, String)>), JsErrorBox> {
-    let options = parse_options(json, "clay.keybindings.invalid_bind")?;
-    let scope = parse_scope(options.get("scope"), "clay.keybindings.invalid_bind")?;
-    reject_when_clause(options.get("when"), "clay.keybindings.invalid_bind")?;
+    let options = parse_options(json, "keybindings.invalid_bind")?;
+    let scope = parse_scope(options.get("scope"), "keybindings.invalid_bind")?;
+    reject_when_clause(options.get("when"), "keybindings.invalid_bind")?;
     let Some(bindings) = options.get("bindings") else {
         return Err(JsErrorBox::generic(
-            "clay.keybindings.invalid_bind: table form requires a `bindings` object of chord -> command ID",
+            "keybindings.invalid_bind: table form requires a `bindings` object of chord -> command ID",
         ));
     };
     let Value::Object(entries) = bindings else {
         return Err(JsErrorBox::generic(
-            "clay.keybindings.invalid_bind: `bindings` must be an object of chord -> command ID",
+            "keybindings.invalid_bind: `bindings` must be an object of chord -> command ID",
         ));
     };
     let mut pairs = Vec::with_capacity(entries.len());
     for (chord, command) in entries {
         let Some(command) = command.as_str() else {
             return Err(JsErrorBox::generic(format!(
-                "clay.keybindings.invalid_bind: binding for `{chord}` must map to a command ID string"
+                "keybindings.invalid_bind: binding for `{chord}` must map to a command ID string"
             )));
         };
         pairs.push((chord.clone(), command.to_string()));
@@ -147,24 +147,24 @@ fn parse_bind_table(json: &str) -> Result<(KeyBindingContext, Vec<(String, Strin
 }
 
 fn parse_unbind_table(json: &str) -> Result<(KeyBindingContext, Vec<String>), JsErrorBox> {
-    let options = parse_options(json, "clay.keybindings.invalid_unbind")?;
-    let scope = parse_scope(options.get("scope"), "clay.keybindings.invalid_unbind")?;
-    reject_when_clause(options.get("when"), "clay.keybindings.invalid_unbind")?;
+    let options = parse_options(json, "keybindings.invalid_unbind")?;
+    let scope = parse_scope(options.get("scope"), "keybindings.invalid_unbind")?;
+    reject_when_clause(options.get("when"), "keybindings.invalid_unbind")?;
     let Some(keys) = options.get("keys") else {
         return Err(JsErrorBox::generic(
-            "clay.keybindings.invalid_unbind: table form requires a `keys` array of chords",
+            "keybindings.invalid_unbind: table form requires a `keys` array of chords",
         ));
     };
     let Value::Array(entries) = keys else {
         return Err(JsErrorBox::generic(
-            "clay.keybindings.invalid_unbind: `keys` must be an array of chords",
+            "keybindings.invalid_unbind: `keys` must be an array of chords",
         ));
     };
     let mut chords = Vec::with_capacity(entries.len());
     for (index, entry) in entries.iter().enumerate() {
         let Some(chord) = entry.as_str() else {
             return Err(JsErrorBox::generic(format!(
-                "clay.keybindings.invalid_unbind: entry {} must be a chord string",
+                "keybindings.invalid_unbind: entry {} must be a chord string",
                 index + 1
             )));
         };
@@ -180,14 +180,14 @@ pub(super) fn op_clay_keybindings_unbind_key(
     #[string] key: String,
     #[string] options_json: String,
 ) -> Result<String, JsErrorBox> {
-    let options = parse_options(&options_json, "clay.keybindings.invalid_unbind")?;
-    let scope = parse_scope(options.get("scope"), "clay.keybindings.invalid_unbind")?;
-    reject_when_clause(options.get("when"), "clay.keybindings.invalid_unbind")?;
+    let options = parse_options(&options_json, "keybindings.invalid_unbind")?;
+    let scope = parse_scope(options.get("scope"), "keybindings.invalid_unbind")?;
+    reject_when_clause(options.get("when"), "keybindings.invalid_unbind")?;
     let stroke = parse_key_chord(&key)?;
     let manifest = state
         .borrow::<Arc<ClayOpState>>()
         .unbind_key(&stroke, &scope)
-        .map_err(manifest_error("clay.keybindings.unbind_failed"))?;
+        .map_err(manifest_error("keybindings.unbind_failed"))?;
     serialize_bindings(&manifest.keymaps)
 }
 
@@ -210,7 +210,7 @@ pub(super) fn op_clay_keybindings_list_key_bindings(
         .map(key_binding_json)
         .collect();
     serde_json::to_string(&Value::Array(records))
-        .map_err(serialize_error("clay.keybindings.list_failed"))
+        .map_err(serialize_error("keybindings.list_failed"))
 }
 
 fn parse_options(json: &str, code: &str) -> Result<Map<String, Value>, JsErrorBox> {
@@ -252,12 +252,12 @@ fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
     let trimmed = chord.trim();
     if trimmed.is_empty() {
         return Err(JsErrorBox::generic(
-            "clay.keybindings.invalid_key: key chord must not be empty",
+            "keybindings.invalid_key: key chord must not be empty",
         ));
     }
     if trimmed.contains(' ') {
         return Err(JsErrorBox::generic(
-            "clay.keybindings.invalid_key: multi-stroke key chords are not runtime-backed yet",
+            "keybindings.invalid_key: multi-stroke key chords are not runtime-backed yet",
         ));
     }
 
@@ -272,7 +272,7 @@ fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
             _ if key_part.is_none() => key_part = Some(part),
             _ => {
                 return Err(JsErrorBox::generic(format!(
-                    "clay.keybindings.invalid_key: malformed key chord `{chord}`"
+                    "keybindings.invalid_key: malformed key chord `{chord}`"
                 )));
             }
         }
@@ -280,7 +280,7 @@ fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
 
     let Some(key_part) = key_part else {
         return Err(JsErrorBox::generic(format!(
-            "clay.keybindings.invalid_key: missing key in chord `{chord}`"
+            "keybindings.invalid_key: missing key in chord `{chord}`"
         )));
     };
     let key = match key_part.to_ascii_lowercase().as_str() {
@@ -297,7 +297,7 @@ fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
         _ if key_part.chars().count() == 1 => KeyCode::Character(key_part.to_ascii_lowercase()),
         _ => {
             return Err(JsErrorBox::generic(format!(
-                "clay.keybindings.invalid_key: unsupported key `{key_part}`"
+                "keybindings.invalid_key: unsupported key `{key_part}`"
             )));
         }
     };
@@ -310,14 +310,14 @@ fn validate_command_id(command_id: &str) -> Result<String, JsErrorBox> {
         || command_id.contains("=>")
     {
         return Err(JsErrorBox::generic(
-            "clay.keybindings.invalid_command: command ID must be a non-empty registered command string",
+            "keybindings.invalid_command: command ID must be a non-empty registered command string",
         ));
     }
     if is_runtime_bindable_command(command_id) {
         Ok(command_id.to_string())
     } else {
         Err(JsErrorBox::generic(format!(
-            "clay.keybindings.unknown_command: command `{command_id}` is not registered for behavior manifests"
+            "keybindings.unknown_command: command `{command_id}` is not registered for behavior manifests"
         )))
     }
 }
@@ -340,83 +340,80 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "workspace.refresh"
             | "document.focus_active"
             | "document.open_recent"
-            | "clay.documents.serverOpenDocument"
-            | "clay.documents.clientOpenFileDialog"
-            | "clay.workspace.clientOpenFolderDialog"
-            | "clay.workspace.openFuzzyFile"
-            | "clay.workspace.toggleFileBrowser"
-            | "clay.editor.clientCopySelection"
-            | "clay.editor.clientCutSelection"
-            | "clay.editor.clientPasteClipboard"
-            | "clay.editor.clientUndo"
-            | "clay.editor.clientRedo"
-            | "clay.editor.clientShowOpenDocuments"
-            | "clay.editor.clientRequestResync"
-            | "clay.editor.clientDismissRecovery"
-            | "clay.editor.clientMoveCursor.nextWordStart"
-            | "clay.editor.clientMoveCursor.prevWordStart"
-            | "clay.editor.clientMoveCursor.nextParagraph"
-            | "clay.editor.clientMoveCursor.prevParagraph"
-            | "clay.editor.clientSetSelection.selectWord"
-            | "clay.editor.clientSetSelection.selectLine"
-            | "clay.editor.clientAddCursor.below"
-            | "clay.editor.clientAddCursor.above"
-            | "clay.editor.clientColumnSelect.down"
-            | "clay.editor.clientColumnSelect.up"
-            | "clay.editor.clientColumnSelect.left"
-            | "clay.editor.clientColumnSelect.right"
-            | "clay.editor.clientSelectNextMatch"
-            | "clay.editor.clientSelectPrevMatch"
-            | "clay.editor.clientSelectAllMatches"
-            | "clay.editor.clientCancelMultipleSelections"
-            | "clay.editor.clientKeepSelection"
-            | "clay.editor.clientRemoveSelection"
-            | "clay.editor.clientUndoCursorMove"
-            | "clay.language.hover"
-            | "clay.language.goToDefinition"
-            | "clay.language.codeActions"
-            | "clay.language.signatureHelp"
-            | "clay.documents.serverSaveDocument"
-            | "clay.runtime.reloadConfiguration"
-            | "clay.documents.serverReloadDocument"
-            | "clay.documents.serverGetDocumentStatus"
-            | "clay.documents.serverListDocuments"
-            | "clay.workspace.serverListWorkspaceRoots"
-            | "clay.shell.clientSplitPaneVertical"
-            | "clay.shell.clientSplitPaneHorizontal"
+            | "documents.serverOpenDocument"
+            | "documents.clientOpenFileDialog"
+            | "workspace.clientOpenFolderDialog"
+            | "workspace.openFuzzyFile"
+            | "workspace.toggleFileBrowser"
+            | "editor.clientCopySelection"
+            | "editor.clientCutSelection"
+            | "editor.clientPasteClipboard"
+            | "editor.clientUndo"
+            | "editor.clientRedo"
+            | "editor.clientShowOpenDocuments"
+            | "editor.clientRequestResync"
+            | "editor.clientDismissRecovery"
+            | "editor.clientMoveCursor.nextWordStart"
+            | "editor.clientMoveCursor.prevWordStart"
+            | "editor.clientMoveCursor.nextParagraph"
+            | "editor.clientMoveCursor.prevParagraph"
+            | "editor.clientSetSelection.selectWord"
+            | "editor.clientSetSelection.selectLine"
+            | "editor.clientAddCursor.below"
+            | "editor.clientAddCursor.above"
+            | "editor.clientColumnSelect.down"
+            | "editor.clientColumnSelect.up"
+            | "editor.clientColumnSelect.left"
+            | "editor.clientColumnSelect.right"
+            | "editor.clientSelectNextMatch"
+            | "editor.clientSelectPrevMatch"
+            | "editor.clientSelectAllMatches"
+            | "editor.clientCancelMultipleSelections"
+            | "editor.clientKeepSelection"
+            | "editor.clientRemoveSelection"
+            | "editor.clientUndoCursorMove"
+            | "language.hover"
+            | "language.goToDefinition"
+            | "language.codeActions"
+            | "language.signatureHelp"
+            | "documents.serverSaveDocument"
+            | "runtime.reloadConfiguration"
+            | "documents.serverReloadDocument"
+            | "documents.serverGetDocumentStatus"
+            | "documents.serverListDocuments"
+            | "workspace.serverListWorkspaceRoots"
+            | "shell.clientSplitPaneVertical"
+            | "shell.clientSplitPaneHorizontal"
             // Phase 22.7 (F3): direction-named aliases are bindable like the
             // canonical IDs they resolve to.
-            | "clay.shell.clientSplitPaneRight"
-            | "clay.shell.clientSplitPaneDown"
-            | "clay.shell.clientAddEqualPane"
-            | "clay.shell.clientClosePane"
-            | "clay.shell.clientFocusPaneNext"
-            | "clay.shell.clientFocusPanePrev"
-            | "clay.shell.clientResizePaneLeft"
-            | "clay.shell.clientResizePaneRight"
-            | "clay.shell.clientResizePaneUp"
-            | "clay.shell.clientResizePaneDown"
-            | "clay.shell.clientMovePaneNext"
-            | "clay.shell.clientMovePanePrev"
-            | "clay.shell.clientTabNext"
-            | "clay.shell.clientTabPrev"
-            | "clay.shell.clientTabNew"
-            | "clay.shell.clientTabClose"
-            | "clay.shell.clientTabMoveLeft"
-            | "clay.shell.clientTabMoveRight"
+            | "shell.clientSplitPaneRight"
+            | "shell.clientSplitPaneDown"
+            | "shell.clientAddEqualPane"
+            | "shell.clientClosePane"
+            | "shell.clientFocusPaneNext"
+            | "shell.clientFocusPanePrev"
+            | "shell.clientResizePaneLeft"
+            | "shell.clientResizePaneRight"
+            | "shell.clientResizePaneUp"
+            | "shell.clientResizePaneDown"
+            | "shell.clientMovePaneNext"
+            | "shell.clientMovePanePrev"
+            | "shell.clientTabNext"
+            | "shell.clientTabPrev"
+            | "shell.clientTabNew"
+            | "shell.clientTabClose"
+            | "shell.clientTabMoveLeft"
+            | "shell.clientTabMoveRight"
     )
 }
 
-/// Phase 22.4: numbered tab command families. `clay.shell.clientTabActivate.N`
-/// and `clay.shell.clientTabMoveTo.N` exist for N in 1..=9 only — "numbered
+/// Phase 22.4: numbered tab command families. `shell.clientTabActivate.N`
+/// and `shell.clientTabMoveTo.N` exist for N in 1..=9 only — "numbered
 /// switch beyond 9" is the policy that no such command ID exists (the dotted
 /// family rides the Plan 071 `SelectionQuery` parse precedent).
 fn tab_family_variant(command_id: &str) -> Option<u32> {
     let (family, suffix) = command_id.rsplit_once('.')?;
-    if !matches!(
-        family,
-        "clay.shell.clientTabActivate" | "clay.shell.clientTabMoveTo"
-    ) {
+    if !matches!(family, "shell.clientTabActivate" | "shell.clientTabMoveTo") {
         return None;
     }
     let n: u32 = suffix.parse().ok()?;
@@ -426,7 +423,7 @@ fn tab_family_variant(command_id: &str) -> Option<u32> {
 fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPolicy, JsErrorBox> {
     if matches!(command_id, "text.insert_newline" | "text.insert_tab") {
         Ok(crate::protocol::RoutingPolicy::ClientFirstPredictable)
-    } else if command_id == "clay.runtime.reloadConfiguration" {
+    } else if command_id == "runtime.reloadConfiguration" {
         Ok(crate::protocol::RoutingPolicy::ServerFirstWithLock {
             lock_scope: crate::protocol::LockScope::Behavior,
         })
@@ -444,56 +441,56 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
         Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
     } else if matches!(
         command_id,
-        "clay.documents.clientOpenFileDialog"
-            | "clay.workspace.clientOpenFolderDialog"
-            | "clay.editor.clientCopySelection"
-            | "clay.editor.clientCutSelection"
-            | "clay.editor.clientPasteClipboard"
-            | "clay.editor.clientUndo"
-            | "clay.editor.clientRedo"
-            | "clay.editor.clientShowOpenDocuments"
-            | "clay.editor.clientRequestResync"
-            | "clay.editor.clientDismissRecovery"
-            | "clay.editor.clientMoveCursor.nextWordStart"
-            | "clay.editor.clientMoveCursor.prevWordStart"
-            | "clay.editor.clientMoveCursor.nextParagraph"
-            | "clay.editor.clientMoveCursor.prevParagraph"
-            | "clay.editor.clientSetSelection.selectWord"
-            | "clay.editor.clientSetSelection.selectLine"
-            | "clay.editor.clientAddCursor.below"
-            | "clay.editor.clientAddCursor.above"
-            | "clay.editor.clientColumnSelect.down"
-            | "clay.editor.clientColumnSelect.up"
-            | "clay.editor.clientColumnSelect.left"
-            | "clay.editor.clientColumnSelect.right"
-            | "clay.editor.clientSelectNextMatch"
-            | "clay.editor.clientSelectPrevMatch"
-            | "clay.editor.clientSelectAllMatches"
-            | "clay.editor.clientCancelMultipleSelections"
-            | "clay.editor.clientKeepSelection"
-            | "clay.editor.clientRemoveSelection"
-            | "clay.editor.clientUndoCursorMove"
-            | "clay.shell.clientSplitPaneVertical"
-            | "clay.shell.clientSplitPaneHorizontal"
+        "documents.clientOpenFileDialog"
+            | "workspace.clientOpenFolderDialog"
+            | "editor.clientCopySelection"
+            | "editor.clientCutSelection"
+            | "editor.clientPasteClipboard"
+            | "editor.clientUndo"
+            | "editor.clientRedo"
+            | "editor.clientShowOpenDocuments"
+            | "editor.clientRequestResync"
+            | "editor.clientDismissRecovery"
+            | "editor.clientMoveCursor.nextWordStart"
+            | "editor.clientMoveCursor.prevWordStart"
+            | "editor.clientMoveCursor.nextParagraph"
+            | "editor.clientMoveCursor.prevParagraph"
+            | "editor.clientSetSelection.selectWord"
+            | "editor.clientSetSelection.selectLine"
+            | "editor.clientAddCursor.below"
+            | "editor.clientAddCursor.above"
+            | "editor.clientColumnSelect.down"
+            | "editor.clientColumnSelect.up"
+            | "editor.clientColumnSelect.left"
+            | "editor.clientColumnSelect.right"
+            | "editor.clientSelectNextMatch"
+            | "editor.clientSelectPrevMatch"
+            | "editor.clientSelectAllMatches"
+            | "editor.clientCancelMultipleSelections"
+            | "editor.clientKeepSelection"
+            | "editor.clientRemoveSelection"
+            | "editor.clientUndoCursorMove"
+            | "shell.clientSplitPaneVertical"
+            | "shell.clientSplitPaneHorizontal"
             // Phase 22.7 (F3): aliases route ClientUiCommand like the canonical IDs.
-            | "clay.shell.clientSplitPaneRight"
-            | "clay.shell.clientSplitPaneDown"
-            | "clay.shell.clientAddEqualPane"
-            | "clay.shell.clientClosePane"
-            | "clay.shell.clientFocusPaneNext"
-            | "clay.shell.clientFocusPanePrev"
-            | "clay.shell.clientResizePaneLeft"
-            | "clay.shell.clientResizePaneRight"
-            | "clay.shell.clientResizePaneUp"
-            | "clay.shell.clientResizePaneDown"
-            | "clay.shell.clientMovePaneNext"
-            | "clay.shell.clientMovePanePrev"
-            | "clay.shell.clientTabNext"
-            | "clay.shell.clientTabPrev"
-            | "clay.shell.clientTabNew"
-            | "clay.shell.clientTabClose"
-            | "clay.shell.clientTabMoveLeft"
-            | "clay.shell.clientTabMoveRight"
+            | "shell.clientSplitPaneRight"
+            | "shell.clientSplitPaneDown"
+            | "shell.clientAddEqualPane"
+            | "shell.clientClosePane"
+            | "shell.clientFocusPaneNext"
+            | "shell.clientFocusPanePrev"
+            | "shell.clientResizePaneLeft"
+            | "shell.clientResizePaneRight"
+            | "shell.clientResizePaneUp"
+            | "shell.clientResizePaneDown"
+            | "shell.clientMovePaneNext"
+            | "shell.clientMovePanePrev"
+            | "shell.clientTabNext"
+            | "shell.clientTabPrev"
+            | "shell.clientTabNew"
+            | "shell.clientTabClose"
+            | "shell.clientTabMoveLeft"
+            | "shell.clientTabMoveRight"
     ) {
         Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
     } else {
@@ -503,12 +500,12 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
 
 fn serialize_key_binding(rule: &KeyBindingRule) -> Result<String, JsErrorBox> {
     serde_json::to_string(&key_binding_json(rule))
-        .map_err(serialize_error("clay.keybindings.bind_failed"))
+        .map_err(serialize_error("keybindings.bind_failed"))
 }
 
 fn serialize_bindings(rules: &[KeyBindingRule]) -> Result<String, JsErrorBox> {
     serde_json::to_string(&Value::Array(rules.iter().map(key_binding_json).collect()))
-        .map_err(serialize_error("clay.keybindings.unbind_failed"))
+        .map_err(serialize_error("keybindings.unbind_failed"))
 }
 
 pub(super) fn key_binding_json(rule: &KeyBindingRule) -> Value {
@@ -583,10 +580,10 @@ mod tests {
     #[test]
     fn language_intelligence_commands_are_runtime_bindable_ui_reactive_routes() {
         for command in [
-            "clay.language.hover",
-            "clay.language.goToDefinition",
-            "clay.language.codeActions",
-            "clay.language.signatureHelp",
+            "language.hover",
+            "language.goToDefinition",
+            "language.codeActions",
+            "language.signatureHelp",
         ] {
             assert!(is_runtime_bindable_command(command));
             assert_eq!(
@@ -599,11 +596,11 @@ mod tests {
     #[test]
     fn undo_redo_commands_are_runtime_bindable_client_ui_routes() {
         for command in [
-            "clay.editor.clientUndo",
-            "clay.editor.clientRedo",
-            "clay.editor.clientShowOpenDocuments",
-            "clay.editor.clientRequestResync",
-            "clay.editor.clientDismissRecovery",
+            "editor.clientUndo",
+            "editor.clientRedo",
+            "editor.clientShowOpenDocuments",
+            "editor.clientRequestResync",
+            "editor.clientDismissRecovery",
         ] {
             assert!(is_runtime_bindable_command(command));
             assert_eq!(
@@ -619,11 +616,11 @@ mod tests {
         // routes UI-reactive; unknown kinds/scopes/directions stay unbindable
         // (deny-by-default).
         for command in [
-            "clay.editor.clientSelectTextobject.function.inner",
-            "clay.editor.clientSelectTextobject.function.around.next",
-            "clay.editor.clientSelectTextobject.comment.around.previous",
-            "clay.editor.clientSmartSelect.expand",
-            "clay.editor.clientSmartSelect.shrink",
+            "editor.clientSelectTextobject.function.inner",
+            "editor.clientSelectTextobject.function.around.next",
+            "editor.clientSelectTextobject.comment.around.previous",
+            "editor.clientSmartSelect.expand",
+            "editor.clientSmartSelect.shrink",
         ] {
             assert!(is_runtime_bindable_command(command));
             assert_eq!(
@@ -632,9 +629,9 @@ mod tests {
             );
         }
         for command in [
-            "clay.editor.clientSelectTextobject.widget.inner",
-            "clay.editor.clientSelectTextobject.function.side",
-            "clay.editor.clientSmartSelect.grow",
+            "editor.clientSelectTextobject.widget.inner",
+            "editor.clientSelectTextobject.function.side",
+            "editor.clientSmartSelect.grow",
         ] {
             assert!(!is_runtime_bindable_command(command));
         }
@@ -642,7 +639,7 @@ mod tests {
 
     #[test]
     fn workspace_file_browser_toggle_is_bindable_and_server_routed() {
-        let command = "clay.workspace.toggleFileBrowser";
+        let command = "workspace.toggleFileBrowser";
         assert!(is_runtime_bindable_command(command));
         assert_eq!(
             command_routing_policy(command).unwrap(),
@@ -654,22 +651,22 @@ mod tests {
     #[test]
     fn phase_22_1_shell_commands_are_bindable_and_client_ui_routed() {
         let shell_commands = [
-            "clay.shell.clientSplitPaneVertical",
-            "clay.shell.clientSplitPaneHorizontal",
+            "shell.clientSplitPaneVertical",
+            "shell.clientSplitPaneHorizontal",
             // Phase 22.7 (F3): direction aliases are bindable and routed like
             // the canonical IDs.
-            "clay.shell.clientSplitPaneRight",
-            "clay.shell.clientSplitPaneDown",
-            "clay.shell.clientAddEqualPane",
-            "clay.shell.clientClosePane",
-            "clay.shell.clientFocusPaneNext",
-            "clay.shell.clientFocusPanePrev",
-            "clay.shell.clientResizePaneLeft",
-            "clay.shell.clientResizePaneRight",
-            "clay.shell.clientResizePaneUp",
-            "clay.shell.clientResizePaneDown",
-            "clay.shell.clientMovePaneNext",
-            "clay.shell.clientMovePanePrev",
+            "shell.clientSplitPaneRight",
+            "shell.clientSplitPaneDown",
+            "shell.clientAddEqualPane",
+            "shell.clientClosePane",
+            "shell.clientFocusPaneNext",
+            "shell.clientFocusPanePrev",
+            "shell.clientResizePaneLeft",
+            "shell.clientResizePaneRight",
+            "shell.clientResizePaneUp",
+            "shell.clientResizePaneDown",
+            "shell.clientMovePaneNext",
+            "shell.clientMovePanePrev",
         ];
         for command in shell_commands {
             assert!(
@@ -684,19 +681,16 @@ mod tests {
                 command
             );
         }
-        // Unknown clay.shell.* IDs are rejected.
-        assert!(!is_runtime_bindable_command("clay.shell.clientUnknown"));
+        // Unknown shell.* IDs are rejected.
+        assert!(!is_runtime_bindable_command("shell.clientUnknown"));
         assert!(!is_runtime_bindable_command(
-            "clay.shell.clientSplitPane.diagonal"
+            "shell.clientSplitPane.diagonal"
         ));
         // Phase 22.7 configuration gate: the aliases pass the full bindKey
         // validation gate (the op calls validate_command_id, which
         // allow-lists + routes), so `bindKey(chord, alias)` from init.js
         // binds exactly like the canonical IDs.
-        for command in [
-            "clay.shell.clientSplitPaneRight",
-            "clay.shell.clientSplitPaneDown",
-        ] {
+        for command in ["shell.clientSplitPaneRight", "shell.clientSplitPaneDown"] {
             assert_eq!(
                 validate_command_id(command).unwrap(),
                 command,
@@ -708,12 +702,12 @@ mod tests {
     #[test]
     fn phase_22_4_tab_commands_are_bindable_and_client_ui_routed() {
         for command in [
-            "clay.shell.clientTabNext",
-            "clay.shell.clientTabPrev",
-            "clay.shell.clientTabNew",
-            "clay.shell.clientTabClose",
-            "clay.shell.clientTabMoveLeft",
-            "clay.shell.clientTabMoveRight",
+            "shell.clientTabNext",
+            "shell.clientTabPrev",
+            "shell.clientTabNew",
+            "shell.clientTabClose",
+            "shell.clientTabMoveLeft",
+            "shell.clientTabMoveRight",
         ] {
             assert!(
                 is_runtime_bindable_command(command),
@@ -728,8 +722,8 @@ mod tests {
         // Numbered families: every 1..=9 variant is bindable and client-routed.
         for n in 1..=9 {
             for command in [
-                format!("clay.shell.clientTabActivate.{n}"),
-                format!("clay.shell.clientTabMoveTo.{n}"),
+                format!("shell.clientTabActivate.{n}"),
+                format!("shell.clientTabMoveTo.{n}"),
             ] {
                 assert!(
                     is_runtime_bindable_command(&command),
@@ -746,12 +740,12 @@ mod tests {
         // unknown tab-ish IDs reject; the "beyond 9" policy is that no such
         // command ID is declared.
         for command in [
-            "clay.shell.clientTabActivate.0",
-            "clay.shell.clientTabActivate.10",
-            "clay.shell.clientTabMoveTo.0",
-            "clay.shell.clientTabMoveTo.10",
-            "clay.shell.clientTabActivate.1a",
-            "clay.shell.clientTabBogus",
+            "shell.clientTabActivate.0",
+            "shell.clientTabActivate.10",
+            "shell.clientTabMoveTo.0",
+            "shell.clientTabMoveTo.10",
+            "shell.clientTabActivate.1a",
+            "shell.clientTabBogus",
         ] {
             assert!(
                 !is_runtime_bindable_command(command),
@@ -766,9 +760,9 @@ mod tests {
         // calls validate_command_id, which allow-lists + routes + rejects
         // when-clauses).
         for command in [
-            "clay.shell.clientTabClose",
-            "clay.shell.clientTabActivate.5",
-            "clay.shell.clientTabMoveTo.9",
+            "shell.clientTabClose",
+            "shell.clientTabActivate.5",
+            "shell.clientTabMoveTo.9",
         ] {
             assert_eq!(
                 validate_command_id(command).unwrap(),
@@ -781,7 +775,7 @@ mod tests {
     #[test]
     fn bind_table_parses_scope_and_chord_command_pairs() {
         let (scope, pairs) = super::parse_bind_table(
-            r#"{"scope": "global", "bindings": {"Ctrl+\\": "clay.shell.clientSplitPaneVertical", "Ctrl+T": "clay.shell.clientTabNew"}}"#,
+            r#"{"scope": "global", "bindings": {"Ctrl+\\": "shell.clientSplitPaneVertical", "Ctrl+T": "shell.clientTabNew"}}"#,
         )
         .unwrap();
         assert_eq!(scope, crate::protocol::KeyBindingContext::Global);
@@ -790,9 +784,9 @@ mod tests {
             vec![
                 (
                     "Ctrl+\\".to_string(),
-                    "clay.shell.clientSplitPaneVertical".to_string()
+                    "shell.clientSplitPaneVertical".to_string()
                 ),
-                ("Ctrl+T".to_string(), "clay.shell.clientTabNew".to_string()),
+                ("Ctrl+T".to_string(), "shell.clientTabNew".to_string()),
             ]
         );
     }
@@ -800,7 +794,7 @@ mod tests {
     #[test]
     fn bind_table_defaults_scope_to_editor_and_rejects_malformed_shapes() {
         let (scope, pairs) = super::parse_bind_table(
-            r#"{"bindings": {"Ctrl+O": "clay.documents.clientOpenFileDialog"}}"#,
+            r#"{"bindings": {"Ctrl+O": "documents.clientOpenFileDialog"}}"#,
         )
         .unwrap();
         assert_eq!(scope, crate::protocol::KeyBindingContext::EditorTextFocus);
@@ -845,12 +839,12 @@ mod tests {
         // batch op; this mirrors the op's pass-1 loop over the same helper.
         let error = super::build_rule(
             "PgDn",
-            "clay.editor.clientUndo",
+            "editor.clientUndo",
             crate::protocol::KeyBindingContext::EditorTextFocus,
         )
         .unwrap_err();
         assert!(error.to_string().contains("unsupported key `PgDn`"));
-        let wrapped = format!("clay.keybindings.invalid_bind: entry 2: {error}");
+        let wrapped = format!("keybindings.invalid_bind: entry 2: {error}");
         assert!(wrapped.contains("entry 2"));
         assert!(wrapped.contains("unsupported key `PgDn`"));
     }

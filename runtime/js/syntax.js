@@ -6,7 +6,7 @@
 const ops = globalThis.Deno?.core?.ops;
 function requireOps() {
     if (!ops) {
-        throw new Error("clay.syntax.runtime_unavailable: Clay syntax APIs require the server runtime");
+        throw new Error("syntax.runtime_unavailable: Clay syntax APIs require the server runtime");
     }
     return ops;
 }
@@ -19,7 +19,7 @@ export function setSyntaxEnginePreference(target, tier) {
 export function serverRegisterSyntaxGrammar(options) {
     for (const key of ["handler", "callback", "onParse", "function", "clientJavaScript", "nativeHandle", "rawOps"]) {
         if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
-            throw new Error(`clay.syntax.invalid_grammar: executable or raw authority field ${key} is not accepted by the public registration contract`);
+            throw new Error(`syntax.invalid_grammar: executable or raw authority field ${key} is not accepted by the public registration contract`);
         }
     }
     return parseResult(requireOps()["op_clay_syntax_register_syntax_grammar"](JSON.stringify(options ?? null)));

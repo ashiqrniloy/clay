@@ -26,8 +26,8 @@ The file browser is not a package widget. Packages may call documented Clay JS f
 - `WorkspaceState` owns root discovery, root deduplication, explicit user grants, single-file grants, bounded directory listing, ignore filtering, traversal checks, diagnostics, and cancellation token checks.
 - `src/server/ops/workspace.rs` exposes runtime ops behind `runtime/js/workspace.js` facades: `serverAddWorkspaceRoot`, `serverDiscoverWorkspaceRootForPath`, `serverListDirectory`, `serverCreateListingCancelToken`, and `serverCancelListing`.
 - `src/shell/file_browser.rs` builds Clay-owned UI state from a `WorkspaceState` snapshot and converts it to an inert `SduiTree` plus `TransientMenuSession` data.
-- `src/server/connection.rs` sends the bound tab's file-browser SDUI snapshot after `New`/`Reclaim`; the default snapshot is an editor-only inert tree, and `clay.workspace.toggleFileBrowser` switches the calling tab between that tree and the bounded file-browser tree. Directory navigation results are converted into refreshed snapshots without showing the tree while that tab is hidden.
-- `src/server/command_execution.rs` owns built-in workspace commands: `clay.workspace.openFile`, `clay.workspace.openFuzzyFile`, `clay.workspace.openDirectory`, `clay.workspace.revealInTree`, and `clay.workspace.toggleFileBrowser`.
+- `src/server/connection.rs` sends the bound tab's file-browser SDUI snapshot after `New`/`Reclaim`; the default snapshot is an editor-only inert tree, and `workspace.toggleFileBrowser` switches the calling tab between that tree and the bounded file-browser tree. Directory navigation results are converted into refreshed snapshots without showing the tree while that tab is hidden.
+- `src/server/command_execution.rs` owns built-in workspace commands: `workspace.openFile`, `workspace.openFuzzyFile`, `workspace.openDirectory`, `workspace.revealInTree`, and `workspace.toggleFileBrowser`.
 
 ## How It Works
 
@@ -55,9 +55,9 @@ Cancellation uses server-owned token IDs backed by a process-local registry. `se
 
 `FileBrowserState::from_workspace` picks a visible workspace root at the root directory; `FileBrowserState::from_workspace_at` lists a root-relative current directory. Both ask `WorkspaceState::list_directory` for a bounded depth-1 snapshot and store normalized `FileBrowserEntry` values with the actual `WorkspaceRootId`, relative path, display label, kind, child count, and diagnostics.
 
-`FileBrowserState::to_sdui_tree` composes existing SDUI primitives: a left `Panel`/`Stack` with a workspace header and `List` items, plus the normal `EditorView` in a row. The header is `Workspace · {display_name} · {display_path}` and appends the existing `Workspace · … · {relative_directory}` navigation suffix below the root. `hidden_sdui_tree` composes only the editor view, so the client releases the left slot without adding a native `FileTreeWidget` or file-browser branch in Masonry. File rows carry `workspaceRootId` and `relativePath` for `clay.workspace.openFile`; directory rows carry the same bounded root-relative arguments for `clay.workspace.openDirectory`; non-root directories include a `../` parent row. A row's `SduiListItem.id` and `SduiActionSource::ListItem.item_id` are the same display-row identity (for example `main.rs` inside `src/`); the root-relative path (`src/main.rs`) lives only in the typed `relativePath` action argument and is revalidated by `WorkspaceState` on open.
+`FileBrowserState::to_sdui_tree` composes existing SDUI primitives: a left `Panel`/`Stack` with a workspace header and `List` items, plus the normal `EditorView` in a row. The header is `Workspace · {display_name} · {display_path}` and appends the existing `Workspace · … · {relative_directory}` navigation suffix below the root. `hidden_sdui_tree` composes only the editor view, so the client releases the left slot without adding a native `FileTreeWidget` or file-browser branch in Masonry. File rows carry `workspaceRootId` and `relativePath` for `workspace.openFile`; directory rows carry the same bounded root-relative arguments for `workspace.openDirectory`; non-root directories include a `../` parent row. A row's `SduiListItem.id` and `SduiActionSource::ListItem.item_id` are the same display-row identity (for example `main.rs` inside `src/`); the root-relative path (`src/main.rs`) lives only in the typed `relativePath` action argument and is revalidated by `WorkspaceState` on open.
 
-`FileBrowserState::fuzzy_session` builds a bottom `TransientMenuSession` by filtering the same bounded entries locally. Items route to `clay.workspace.openFuzzyFile`; there is no separate fuzzy-open primitive or package-provided picker implementation.
+`FileBrowserState::fuzzy_session` builds a bottom `TransientMenuSession` by filtering the same bounded entries locally. Items route to `workspace.openFuzzyFile`; there is no separate fuzzy-open primitive or package-provided picker implementation.
 
 ### Open/reveal/navigation command routing
 
@@ -70,7 +70,7 @@ Open commands accept either `{ workspaceRootId, relativePath }` or `{ absolutePa
 
 The result is `WorkspaceActionResult::Opened(OpenDocumentSnapshot)`. The connection handler maps that to `ServerMessage::DocumentOpened { metadata, text }`, then runs the same `open_document_followup_messages` path as `OpenDocument` and selected-file opens so behavior manifests, mode activation, and decoration sets are consistent across open origins.
 
-`clay.workspace.revealInTree` validates a real open `documentId` through `WorkspaceState::document_metadata` before returning `WorkspaceActionResult::Revealed`. `clay.workspace.toggleFileBrowser` returns `WorkspaceActionResult::Toggled`; the bound connection flips `TabServerState.workspace_pane_visible` and publishes the matching visible or editor-only `SduiSnapshot`. Visibility is per tab, hidden by default, and not a new configuration setting.
+`workspace.revealInTree` validates a real open `documentId` through `WorkspaceState::document_metadata` before returning `WorkspaceActionResult::Revealed`. `workspace.toggleFileBrowser` returns `WorkspaceActionResult::Toggled`; the bound connection flips `TabServerState.workspace_pane_visible` and publishes the matching visible or editor-only `SduiSnapshot`. Visibility is per tab, hidden by default, and not a new configuration setting.
 
 ## Code Examples
 
@@ -92,7 +92,7 @@ import { serverOpenFile } from "clay:commands";
 const page = await serverListDirectory({ rootId, relativePath: "src", maxDepth: 2 });
 await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].relativePath });
 // Directory rows use the inert command ID directly through SDUI actions:
-// { commandId: "clay.workspace.openDirectory", workspaceRootId: rootId, relativePath: "src" }
+// { commandId: "workspace.openDirectory", workspaceRootId: rootId, relativePath: "src" }
 ```
 
 ## Primitive Coverage

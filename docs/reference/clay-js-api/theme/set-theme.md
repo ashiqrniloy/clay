@@ -1,5 +1,5 @@
 ---
-id: clay.theme.setTheme
+id: theme.setTheme
 kind: clay-js-api
 js_module: "clay:theme"
 js_export: setTheme
@@ -73,7 +73,7 @@ Synchronous. Returns `{ specifier, overrideCount, designTokenCount }` after the 
 
 ## Errors
 
-Throws `clay.theme.invalid_request` for missing specifiers, `clay.theme.unauthorized` for non-`@clay/*` specifiers, and package load/validation errors if the theme package is invalid.
+Throws `theme.invalid_request` for missing specifiers, `theme.unauthorized` for non-`@clay/*` specifiers, and package load/validation errors if the theme package is invalid.
 
 ## Permissions and security
 

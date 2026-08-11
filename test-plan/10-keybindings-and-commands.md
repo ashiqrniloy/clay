@@ -12,7 +12,7 @@ init.js:
 
 ```js
 import { bindKey, unbindKey } from "clay:keybindings";
-bindKey("Ctrl+B", "clay.editor.clientMoveCursor.prevWordStart", { scope: "editor" });
+bindKey("Ctrl+B", "editor.clientMoveCursor.prevWordStart", { scope: "editor" });
 ```
 
 ## Override and validation
@@ -20,11 +20,11 @@ bindKey("Ctrl+B", "clay.editor.clientMoveCursor.prevWordStart", { scope: "editor
 | # | Action | Expected |
 |---|--------|----------|
 | K1 | `Ctrl+B` in any file | Moves one word back (init.js binding beats nothing; direction-specific IDs are bindable) |
-| K2 | Add a second `bindKey("Ctrl+B", "clay.editor.clientMoveCursor.nextWordStart", …)`, reload | Last binding wins — now moves forward |
+| K2 | Add a second `bindKey("Ctrl+B", "editor.clientMoveCursor.nextWordStart", …)`, reload | Last binding wins — now moves forward |
 | K3 | `unbindKey("Ctrl+B", { scope: "editor" })`, reload | Default/no binding restored |
-| K4 | `bindKey("Ctrl+G", "clay.application.quit", …)` | Rejected — non-editor/undeclared command IDs deny-by-default; diagnostic names it |
+| K4 | `bindKey("Ctrl+G", "application.quit", …)` | Rejected — non-editor/undeclared command IDs deny-by-default; diagnostic names it |
 | K5 | `bindKey("Ctrl+Q Ctrl+W", …)` (multi-stroke) | Rejected — single strokes only (known ceiling) |
-| K6 | Bind a textobject ID (`clay.editor.clientSelectTextobject.class.around.current`) | Accepted — auto-declared on first bind; works in grammar files |
+| K6 | Bind a textobject ID (`editor.clientSelectTextobject.class.around.current`) | Accepted — auto-declared on first bind; works in grammar files |
 
 ## Default bindings sanity (must exist without any init.js)
 
@@ -41,14 +41,14 @@ init.js:
 
 ```js
 import { clientExecuteEditorCommand } from "clay:editor";
-clientExecuteEditorCommand({ commandId: "clay.editor.clientSetSelection.selectLine" });
+clientExecuteEditorCommand({ commandId: "editor.clientSetSelection.selectLine" });
 ```
 
 | # | Action | Expected |
 |---|--------|----------|
 | K11 | Cold start with the call above | NOT delivered — no client subscribed yet (expected; advisory) |
 | K12 | Open a file, trigger runtime reload via settings appearance switch while connected | init.js reruns; the line under the caret becomes selected — proves op → gate → broadcast → connection → widget dispatch |
-| K13 | Change `commandId` to `"clay.application.quit"`, reload | Op rejects ("not a known editor command"); nothing published |
+| K13 | Change `commandId` to `"application.quit"`, reload | Op rejects ("not a known editor command"); nothing published |
 | K14 | Third-party package without `editor-control` permission calls the op | Denied (covered by automated tests; not reachable from init.js by design) |
 
 ## Tab command bindings (Phase 22.4)
@@ -64,15 +64,15 @@ init.js:
 
 ```js
 import { bindKey, unbindKey } from "clay:keybindings";
-bindKey("Ctrl+Alt+T", "clay.shell.clientTabNew", { scope: "global" });
+bindKey("Ctrl+Alt+T", "shell.clientTabNew", { scope: "global" });
 ```
 
 | # | Action | Expected |
 |---|--------|----------|
 | K15 | With the init.js above, reload; press `Ctrl+Alt+T` with 2 tabs open | New-tab flow starts (same as `Ctrl+T` / `+`); the shipped default `Ctrl+T` still works — user bindings ADD to defaults |
-| K16 | Override a default chord: `bindKey("Ctrl+Tab", "clay.shell.clientTabPrev", { scope: "global" })`, reload, press `Ctrl+Tab` | The override wins — `Ctrl+Tab` now goes to the PREVIOUS tab (user binding beats the shipped default on the same chord); then `unbindKey("Ctrl+Tab", { scope: "global" })`, reload → the default next-tab behavior returns |
-| K17 | `bindKey("Ctrl+Alt+9", "clay.shell.clientTabActivate.10", { scope: "global" })` | REJECTED deny-by-default — numbered variants exist only for 1..=9; the diagnostic names the ID |
-| K18 | `bindKey("Alt+1", "clay.shell.clientTabActivate.1", { scope: "global" })`; reload; press `Alt+1` with 2 tabs open | Accepted — numbered family IDs bind like any other command ID and activate the first tab; `Alt+2` (unbound) does nothing |
+| K16 | Override a default chord: `bindKey("Ctrl+Tab", "shell.clientTabPrev", { scope: "global" })`, reload, press `Ctrl+Tab` | The override wins — `Ctrl+Tab` now goes to the PREVIOUS tab (user binding beats the shipped default on the same chord); then `unbindKey("Ctrl+Tab", { scope: "global" })`, reload → the default next-tab behavior returns |
+| K17 | `bindKey("Ctrl+Alt+9", "shell.clientTabActivate.10", { scope: "global" })` | REJECTED deny-by-default — numbered variants exist only for 1..=9; the diagnostic names the ID |
+| K18 | `bindKey("Alt+1", "shell.clientTabActivate.1", { scope: "global" })`; reload; press `Alt+1` with 2 tabs open | Accepted — numbered family IDs bind like any other command ID and activate the first tab; `Alt+2` (unbound) does nothing |
 
 Tab command policy table (module 14 steps in parentheses):
 

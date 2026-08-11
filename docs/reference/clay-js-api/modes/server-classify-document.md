@@ -1,5 +1,5 @@
 ---
-id: clay.modes.serverClassifyDocument
+id: modes.serverClassifyDocument
 kind: clay-js-api
 js_module: "clay:modes"
 js_export: serverClassifyDocument
@@ -29,7 +29,7 @@ custom_properties:
     default: optional
     description: Behavior-changing setting `mimeType` for this primitive gate API.
 security: Returns mode classification metadata from already registered static patterns through server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority.
-agent_guidance: Use `clay.modes.serverClassifyDocument` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `modes.serverClassifyDocument` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [js-api, modedocumentclassificationquery, modes]
 app_visible: true
 help_visible: true
@@ -75,7 +75,7 @@ const classification = serverClassifyDocument({ documentId: 5, path: "README.md"
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.modes.serverClassifyDocument` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `modes.serverClassifyDocument` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -103,7 +103,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.modes.serverClassifyDocument` when the user asks for Classify Document through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `modes.serverClassifyDocument` when the user asks for Classify Document through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -114,7 +114,7 @@ Use `clay.modes.serverClassifyDocument` when the user asks for Classify Document
 
 ## Lookup metadata
 
-- Stable ID: `clay.modes.serverClassifyDocument`
+- Stable ID: `modes.serverClassifyDocument`
 - User-facing name: Classify Document
 - Kind: `clay-js-api`
 - Module/export: `clay:modes` / `serverClassifyDocument`

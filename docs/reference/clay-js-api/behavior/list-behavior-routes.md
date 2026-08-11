@@ -1,5 +1,5 @@
 ---
-id: clay.behavior.listBehaviorRoutes
+id: behavior.listBehaviorRoutes
 kind: clay-js-api
 js_module: "clay:behavior"
 js_export: listBehaviorRoutes
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: []
 custom_properties: []
 security: Returns inert routing metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.behavior.listBehaviorRoutes` only for its documented behavior responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `behavior.listBehaviorRoutes` only for its documented behavior responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [behavior, behaviormanifestrouting, js-api]
 app_visible: true
 help_visible: true
@@ -61,7 +61,7 @@ const routes = await listBehaviorRoutes("current");
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.behavior.listBehaviorRoutes` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `behavior.listBehaviorRoutes` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -87,7 +87,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.behavior.listBehaviorRoutes` when the user asks for list behavior routes through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `behavior.listBehaviorRoutes` when the user asks for list behavior routes through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -98,7 +98,7 @@ Use `clay.behavior.listBehaviorRoutes` when the user asks for list behavior rout
 
 ## Lookup metadata
 
-- Stable ID: `clay.behavior.listBehaviorRoutes`
+- Stable ID: `behavior.listBehaviorRoutes`
 - User-facing name: List Behavior Routes
 - Kind: `clay-js-api`
 - Module/export: `clay:behavior` / `listBehaviorRoutes`

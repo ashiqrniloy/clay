@@ -1,5 +1,5 @@
 ---
-id: clay.documents.serverGetDocumentLease
+id: documents.serverGetDocumentLease
 kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverGetDocumentLease
@@ -17,7 +17,7 @@ permissions: [document-read]
 key_bindings: []
 custom_properties: []
 security: Reports or requests lease metadata according to server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.documents.serverGetDocumentLease` only for its documented documents responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `documents.serverGetDocumentLease` only for its documented documents responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [documents, js-api, leasereadonlystate]
 app_visible: true
 help_visible: true
@@ -61,7 +61,7 @@ const lease = await serverGetDocumentLease("current");
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.documents.serverGetDocumentLease` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `documents.serverGetDocumentLease` in `~/.config/clay/init.js`.
 
 ## Custom properties
 
@@ -87,7 +87,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.documents.serverGetDocumentLease` when the user asks for get document lease through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `documents.serverGetDocumentLease` when the user asks for get document lease through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -98,7 +98,7 @@ Use `clay.documents.serverGetDocumentLease` when the user asks for get document 
 
 ## Lookup metadata
 
-- Stable ID: `clay.documents.serverGetDocumentLease`
+- Stable ID: `documents.serverGetDocumentLease`
 - User-facing name: Get Document Lease
 - Kind: `clay-js-api`
 - Module/export: `clay:documents` / `serverGetDocumentLease`

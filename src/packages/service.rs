@@ -570,7 +570,7 @@ impl PackageService {
             let target = self.enabled.get(&request.package).ok_or_else(|| {
                 PackageServiceError::RelationDenied {
                     package_name: record.manifest.name.clone(),
-                    code: "clay.package_relation.target_not_enabled",
+                    code: "package_relation.target_not_enabled",
                     detail: format!("relation target `{}` is not enabled", request.package),
                 }
             })?;
@@ -1230,7 +1230,7 @@ impl PackageService {
         {
             return Err(PackageServiceError::RelationDenied {
                 package_name: package_name.to_string(),
-                code: "clay.package_replacement.target_replaced",
+                code: "package_replacement.target_replaced",
                 detail: format!(
                     "package `{package_name}` was replaced by user-approved replacement; dependents require explicit rollback of the replacement"
                 ),

@@ -1,5 +1,5 @@
 ---
-id: clay.ui.serverRequestLayoutIntent
+id: ui.serverRequestLayoutIntent
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRequestLayoutIntent
@@ -106,7 +106,7 @@ Synchronous. Returns a JSON object with `registered: true`, the intent `id`, `ta
 
 ## Errors
 
-Throws `clay.ui.layout_intent_failed` for invalid package prefix on `id`, duplicate `id`, invalid `orientation`, `ratio` outside 0.05–0.95, invalid `position`, oversized payload, or prohibited authority fields.
+Throws `ui.layout_intent_failed` for invalid package prefix on `id`, duplicate `id`, invalid `orientation`, `ratio` outside 0.05–0.95, invalid `position`, oversized payload, or prohibited authority fields.
 
 ## Permissions and security
 

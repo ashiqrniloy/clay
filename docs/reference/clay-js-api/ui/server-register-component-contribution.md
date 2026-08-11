@@ -1,5 +1,5 @@
 ---
-id: clay.ui.serverRegisterComponentContribution
+id: ui.serverRegisterComponentContribution
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterComponentContribution
@@ -49,7 +49,7 @@ custom_properties:
     default: []
     description: Registered package-prefixed command IDs referenced by component action intents.
 security: Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.
-agent_guidance: Use `clay.ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, Masonry names, CSS strings, or executable client hooks.
+agent_guidance: Use `ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, Masonry names, CSS strings, or executable client hooks.
 lookup_tags: [ui, package-ui, component-catalog, style-tokens, clay-js-api, phase18.3, phase20.5, runtime-backed]
 app_visible: true
 help_visible: true
@@ -153,7 +153,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.ui.serverRegisterComponentContribution` when the user asks for a public Clay JS API for package component trees or style-token-validated component catalog entries. Do not bypass with raw Rust constructors, raw `Deno.core.ops`, protocol DTOs, Masonry widgets, raw CSS, renderer callbacks, hidden config keys, or client-side JavaScript execution.
+Use `ui.serverRegisterComponentContribution` when the user asks for a public Clay JS API for package component trees or style-token-validated component catalog entries. Do not bypass with raw Rust constructors, raw `Deno.core.ops`, protocol DTOs, Masonry widgets, raw CSS, renderer callbacks, hidden config keys, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -164,7 +164,7 @@ Use `clay.ui.serverRegisterComponentContribution` when the user asks for a publi
 
 ## Lookup metadata
 
-- Stable ID: `clay.ui.serverRegisterComponentContribution`
+- Stable ID: `ui.serverRegisterComponentContribution`
 - User-facing name: Register Component Contribution
 - Kind: `clay-js-api`
 - Module/export: `clay:ui` / `serverRegisterComponentContribution`

@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientColumnSelect
+id: editor.clientColumnSelect
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientColumnSelect
@@ -21,7 +21,7 @@ custom_properties:
     default: none
     description: Column-select direction (down, up, left, right).
 security: Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientColumnSelect` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `editor.clientColumnSelect` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, multi-cursor, column-select, selection]
 app_visible: true
 help_visible: true
@@ -37,7 +37,7 @@ Grow a column/box selection one line (down/up) or move every caret one scalar (l
 
 ## Description
 
-`clientColumnSelect` is the public API for **Column Select** (Plan 071 task 9, VSCode `cursorColumnSelect*`). The `op_clay_editor_column_select` deno op validates the `direction` argument (deny-by-default enum) and returns the direction-specific command descriptor (`clay.editor.clientColumnSelect.down|up|left|right`). Down/up add a caret one line below/above the primary at the same column (growing the box); left/right move every caret one scalar character. Key-driven execution is served client-local by those command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`).
+`clientColumnSelect` is the public API for **Column Select** (Plan 071 task 9, VSCode `cursorColumnSelect*`). The `op_clay_editor_column_select` deno op validates the `direction` argument (deny-by-default enum) and returns the direction-specific command descriptor (`editor.clientColumnSelect.down|up|left|right`). Down/up add a caret one line below/above the primary at the same column (growing the box); left/right move every caret one scalar character. Key-driven execution is served client-local by those command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`).
 
 Authority: `client-local-ui-state`. Runtime path: `client-local-hot-path`.
 
@@ -94,7 +94,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientColumnSelect` when the user asks for column/box selection through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientColumnSelect` when the user asks for column/box selection through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -105,7 +105,7 @@ Use `clay.editor.clientColumnSelect` when the user asks for column/box selection
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientColumnSelect`
+- Stable ID: `editor.clientColumnSelect`
 - User-facing name: Column Select
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientColumnSelect`

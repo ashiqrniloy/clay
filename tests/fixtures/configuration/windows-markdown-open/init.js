@@ -11,7 +11,7 @@ import { serverListWorkspaceRoots } from "clay:workspace";
 
 await loadPackage("@clay/markdown");
 
-bindKey("Ctrl+O", "clay.documents.clientOpenFileDialog", { scope: "editor" });
+bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 
 const roots = await serverListWorkspaceRoots();
 if (roots.length > 0) {

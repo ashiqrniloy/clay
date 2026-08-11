@@ -1,5 +1,5 @@
 ---
-id: clay.git.serverRefreshGitStatus
+id: git.serverRefreshGitStatus
 kind: clay-js-api
 js_module: "clay:git"
 js_export: serverRefreshGitStatus
@@ -21,7 +21,7 @@ custom_properties:
     default: required
     description: Authorized workspace root to refresh.
 security: Runs only Clay's closed read-only Git discovery commands under the selected workspace root; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.git.serverRefreshGitStatus` only through the documented `clay:git` facade for explicit refresh of a known workspace root. Do not expose arbitrary Git subcommands, shell arguments, repository mutation, or path traversal.
+agent_guidance: Use `git.serverRefreshGitStatus` only through the documented `clay:git` facade for explicit refresh of a known workspace root. Do not expose arbitrary Git subcommands, shell arguments, repository mutation, or path traversal.
 lookup_tags: [git, refresh, status, branch, workspace, phase18.13, js-api]
 app_visible: true
 help_visible: true
@@ -66,7 +66,7 @@ const head = entry.snapshot?.head;
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.git.serverRefreshGitStatus` through documented keybinding/configuration APIs where appropriate.
+No default key binding is assigned. Users may bind a key to `git.serverRefreshGitStatus` through documented keybinding/configuration APIs where appropriate.
 
 ## Custom properties
 
@@ -94,7 +94,7 @@ Runs only Clay's closed read-only Git discovery commands under the selected work
 
 ## Agent guidance
 
-Use `clay.git.serverRefreshGitStatus` only through the documented `clay:git` facade for explicit refresh of a known workspace root. Do not expose arbitrary Git subcommands, shell arguments, repository mutation, or path traversal.
+Use `git.serverRefreshGitStatus` only through the documented `clay:git` facade for explicit refresh of a known workspace root. Do not expose arbitrary Git subcommands, shell arguments, repository mutation, or path traversal.
 
 ## Backing implementation
 
@@ -104,7 +104,7 @@ Use `clay.git.serverRefreshGitStatus` only through the documented `clay:git` fac
 
 ## Lookup metadata
 
-- Stable ID: `clay.git.serverRefreshGitStatus`
+- Stable ID: `git.serverRefreshGitStatus`
 - User-facing name: Refresh Git Status
 - Kind: `clay-js-api`
 - Module/export: `clay:git` / `serverRefreshGitStatus`

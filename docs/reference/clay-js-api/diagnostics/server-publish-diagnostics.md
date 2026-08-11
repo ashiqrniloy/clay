@@ -1,5 +1,5 @@
 ---
-id: clay.diagnostics.serverPublishDiagnostics
+id: diagnostics.serverPublishDiagnostics
 kind: clay-js-api
 js_module: "clay:diagnostics"
 js_export: serverPublishDiagnostics
@@ -41,7 +41,7 @@ custom_properties:
     default: package context
     description: Package API prefix retained as provenance.
 security: Requires render-decorations permission plus server validation of package provenance, current document version, byte ranges, viewport bounds, source/code/message bounds, and DIAGNOSTIC_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, language-server process, client-side JavaScript, raw Deno ops, arbitrary CSS, draw callbacks, GPU commands, or native widget mutation authority.
-agent_guidance: Use `clay.diagnostics.serverPublishDiagnostics` from server-side package code only. Publish inert DiagnosticSpan records; never invent renderer callbacks, CSS, raw ops, LSP process spawning, or client-side JavaScript hooks. Prefer this over stuffing diagnostic metadata into `serverPublishDecorations`.
+agent_guidance: Use `diagnostics.serverPublishDiagnostics` from server-side package code only. Publish inert DiagnosticSpan records; never invent renderer callbacks, CSS, raw ops, LSP process spawning, or client-side JavaScript hooks. Prefer this over stuffing diagnostic metadata into `serverPublishDecorations`.
 lookup_tags: [js-api, diagnostics, syntax-error, range-diagnostic, lsp-ready, phase18.17]
 app_visible: true
 help_visible: true
@@ -165,7 +165,7 @@ Prefer this facade over raw ops or Rust internals. Keep publications viewport-bo
 
 ## Lookup metadata
 
-- Stable ID: `clay.diagnostics.serverPublishDiagnostics`
+- Stable ID: `diagnostics.serverPublishDiagnostics`
 - User-facing name: Publish Diagnostics
 - Lookup tags: `js-api`, `diagnostics`, `syntax-error`, `range-diagnostic`, `lsp-ready`, `phase18.17`
 - App/help visible: true

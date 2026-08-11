@@ -182,9 +182,9 @@ pub struct SelectionQueryResult {
 }
 
 /// Stable command-ID prefix for textobject selection commands.
-pub const TEXTOBJECT_COMMAND_PREFIX: &str = "clay.editor.clientSelectTextobject.";
+pub const TEXTOBJECT_COMMAND_PREFIX: &str = "editor.clientSelectTextobject.";
 /// Stable command-ID prefix for smart-select commands.
-pub const SMART_SELECT_COMMAND_PREFIX: &str = "clay.editor.clientSmartSelect.";
+pub const SMART_SELECT_COMMAND_PREFIX: &str = "editor.clientSmartSelect.";
 
 impl SelectionQuery {
     /// The stable, direction-specific command ID for this query (the
@@ -296,25 +296,22 @@ mod tests {
     #[test]
     fn unknown_textobject_command_ids_reject_deny_by_default() {
         assert_eq!(
-            SelectionQuery::from_command_id("clay.editor.clientSelectTextobject.function.side"),
+            SelectionQuery::from_command_id("editor.clientSelectTextobject.function.side"),
             None
         );
         assert_eq!(
-            SelectionQuery::from_command_id("clay.editor.clientSelectTextobject.widget.inner"),
+            SelectionQuery::from_command_id("editor.clientSelectTextobject.widget.inner"),
             None
         );
         assert_eq!(
-            SelectionQuery::from_command_id("clay.editor.clientSelectTextobject.function"),
+            SelectionQuery::from_command_id("editor.clientSelectTextobject.function"),
             None
         );
         assert_eq!(
-            SelectionQuery::from_command_id("clay.editor.clientSmartSelect.grow"),
+            SelectionQuery::from_command_id("editor.clientSmartSelect.grow"),
             None
         );
-        assert_eq!(
-            SelectionQuery::from_command_id("clay.editor.clientUndo"),
-            None
-        );
+        assert_eq!(SelectionQuery::from_command_id("editor.clientUndo"), None);
     }
 
     #[test]
@@ -326,7 +323,7 @@ mod tests {
                 direction: TextobjectDirection::Current,
             }
             .command_id(),
-            "clay.editor.clientSelectTextobject.function.inner"
+            "editor.clientSelectTextobject.function.inner"
         );
         assert_eq!(
             SelectionQuery::Textobject {
@@ -335,14 +332,14 @@ mod tests {
                 direction: TextobjectDirection::Next,
             }
             .command_id(),
-            "clay.editor.clientSelectTextobject.class.around.next"
+            "editor.clientSelectTextobject.class.around.next"
         );
         assert_eq!(
             SelectionQuery::SmartSelect {
                 action: SmartSelectAction::Expand,
             }
             .command_id(),
-            "clay.editor.clientSmartSelect.expand"
+            "editor.clientSmartSelect.expand"
         );
     }
 

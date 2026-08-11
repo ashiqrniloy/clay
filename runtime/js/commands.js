@@ -10,7 +10,7 @@
 const ops = globalThis.Deno?.core?.ops;
 function requireOps() {
     if (!ops) {
-        throw new Error("clay.commands.runtime_unavailable: Clay command APIs require the server runtime");
+        throw new Error("commands.runtime_unavailable: Clay command APIs require the server runtime");
     }
     return ops;
 }
@@ -32,9 +32,9 @@ export async function serverExecuteCommand(commandId, args, target) {
     return parse(await requireOps().op_clay_commands_execute_command(JSON.stringify(request)));
 }
 export async function serverOpenFile(args) {
-    const result = await serverExecuteCommand("clay.workspace.openFile", args);
+    const result = await serverExecuteCommand("workspace.openFile", args);
     if (result.status.kind !== "workspace" || result.status.action !== "opened") {
-        throw new Error(`clay.commands.open_failed: expected opened status, got ${JSON.stringify(result.status)}`);
+        throw new Error(`commands.open_failed: expected opened status, got ${JSON.stringify(result.status)}`);
     }
     return {
         documentId: String(result.status.documentId),
@@ -43,9 +43,9 @@ export async function serverOpenFile(args) {
     };
 }
 export async function serverOpenDirectory(args) {
-    const result = await serverExecuteCommand("clay.workspace.openDirectory", args);
+    const result = await serverExecuteCommand("workspace.openDirectory", args);
     if (result.status.kind !== "workspace" || result.status.action !== "navigated") {
-        throw new Error(`clay.commands.open_directory_failed: expected navigated status, got ${JSON.stringify(result.status)}`);
+        throw new Error(`commands.open_directory_failed: expected navigated status, got ${JSON.stringify(result.status)}`);
     }
     return {
         workspaceRootId: String(result.status.workspaceRootId),
@@ -53,9 +53,9 @@ export async function serverOpenDirectory(args) {
     };
 }
 export async function serverRevealInTree(args) {
-    const result = await serverExecuteCommand("clay.workspace.revealInTree", args);
+    const result = await serverExecuteCommand("workspace.revealInTree", args);
     if (result.status.kind !== "workspace" || result.status.action !== "revealed") {
-        throw new Error(`clay.commands.reveal_failed: expected revealed status, got ${JSON.stringify(result.status)}`);
+        throw new Error(`commands.reveal_failed: expected revealed status, got ${JSON.stringify(result.status)}`);
     }
 }
 export function serverListCommands() {

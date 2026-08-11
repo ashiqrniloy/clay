@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientMoveCursor
+id: editor.clientMoveCursor
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientMoveCursor
@@ -33,7 +33,7 @@ custom_properties:
     default: 1
     description: Repeat count for the motion (clamped to >= 1).
 security: Changes only client-local caret/selection/viewport state and grants no document mutation or external authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientMoveCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
+agent_guidance: Use `editor.clientMoveCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [cursormovement, editor, js-api]
 app_visible: true
 help_visible: true
@@ -49,7 +49,7 @@ Move the caret through the `clay:editor` Clay JavaScript facade.
 
 ## Description
 
-`clientMoveCursor` is the public API for **Move Cursor**. The `op_clay_editor_move_cursor` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. Key-driven movement is served client-local by the direction-specific `clay.editor.clientMoveCursor.*` command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`).
+`clientMoveCursor` is the public API for **Move Cursor**. The `op_clay_editor_move_cursor` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. Key-driven movement is served client-local by the direction-specific `editor.clientMoveCursor.*` command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`).
 
 Authority: `client-local-ui-state`. Runtime path: `client-local-hot-path`. Arrow/Home/End and Ctrl+arrow word/paragraph movement update local caret/viewport state without IPC, server work, or JavaScript.
 
@@ -89,7 +89,7 @@ Default key bindings:
 - `Ctrl+Up` (previous paragraph), `Ctrl+Down` (next paragraph)
 - Add `Shift` to any of the above to extend the selection.
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs (e.g. `clay.editor.clientMoveCursor.nextParagraph`).
+Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs (e.g. `editor.clientMoveCursor.nextParagraph`).
 
 ## Custom properties
 
@@ -116,7 +116,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientMoveCursor` when the user asks to move cursor through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientMoveCursor` when the user asks to move cursor through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -127,7 +127,7 @@ Use `clay.editor.clientMoveCursor` when the user asks to move cursor through the
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientMoveCursor`
+- Stable ID: `editor.clientMoveCursor`
 - User-facing name: Move Cursor
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientMoveCursor`

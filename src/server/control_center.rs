@@ -248,7 +248,7 @@ fn format_keystroke(stroke: &KeyStroke) -> String {
 
 fn format_key(key: &KeyCode) -> String {
     match key {
-        KeyCode::Character(c) => c.clone(),
+        KeyCode::Character(c) => c.to_ascii_uppercase(),
         KeyCode::Enter => "Enter".to_string(),
         KeyCode::Tab => "Tab".to_string(),
         KeyCode::Backspace => "Backspace".to_string(),
@@ -376,9 +376,22 @@ mod tests {
             .iter()
             .map(|item| item.id.as_str())
             .collect();
-        assert!(ids.contains(&"clay.controlCenter.open"));
-        assert!(ids.contains(&"clay.runtime.reloadConfiguration"));
+        assert!(ids.contains(&"controlCenter.open"));
+        assert!(ids.contains(&"runtime.reloadConfiguration"));
         assert!(ids.contains(&"workspace.refresh"));
+
+        let reload = session
+            .items()
+            .iter()
+            .find(|item| item.id == "runtime.reloadConfiguration")
+            .expect("reload command is listed");
+        assert!(
+            reload
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("Ctrl+Shift+R")),
+            "Control Center should show the default reload chord"
+        );
     }
 
     #[test]
@@ -534,7 +547,13 @@ mod tests {
             .find(|item| item.id == "markdown.togglePreview")
             .expect("toggle preview item");
 
-        assert!(item.detail.as_ref().unwrap().contains("p"));
+        assert!(
+            item.detail
+                .as_ref()
+                .unwrap()
+                .to_ascii_lowercase()
+                .contains("p")
+        );
         assert!(item.detail.as_ref().unwrap().contains("server-first"));
         assert!(item.detail.as_ref().unwrap().contains("@clay/markdown"));
     }

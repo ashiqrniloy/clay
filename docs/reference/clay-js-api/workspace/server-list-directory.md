@@ -1,5 +1,5 @@
 ---
-id: clay.workspace.serverListDirectory
+id: workspace.serverListDirectory
 kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverListDirectory
@@ -29,7 +29,7 @@ custom_properties:
     default: none
     description: Optional listing cancellation token created by serverCreateListingCancelToken.
 security: Uses server validation to list only paths inside a known workspace root after traversal checks and bounded ignore/depth/count rules using the component grammar; malformed, unsupported, or oversized root .gitignore input aborts with a bounded diagnostic instead of broadening traversal. Packages cannot list arbitrary paths or bypass diagnostics; the API does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.workspace.serverListDirectory` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
+agent_guidance: Use `workspace.serverListDirectory` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader workspace, filesystem, network, shell, extension loading, AI mutation, package, WASM, native-widget, or client-side JavaScript authority.
 lookup_tags: [workspace, directory-listing, file-browser, cancellation, phase18.12, js-api]
 app_visible: true
 help_visible: true
@@ -75,7 +75,7 @@ Root `.gitignore` supports a deliberately bounded grammar: blank lines, column-z
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.workspace.serverListDirectory` through documented keybinding/configuration APIs where appropriate.
+No default key binding is assigned. Users may bind a key to `workspace.serverListDirectory` through documented keybinding/configuration APIs where appropriate.
 
 ## Custom properties
 
@@ -101,7 +101,7 @@ Uses server validation to list only paths inside a known workspace root after tr
 
 ## Agent guidance
 
-Use `clay.workspace.serverListDirectory` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
+Use `workspace.serverListDirectory` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent broader authority.
 
 ## Backing implementation
 
@@ -111,7 +111,7 @@ Use `clay.workspace.serverListDirectory` only through the documented Clay JS fac
 
 ## Lookup metadata
 
-- Stable ID: `clay.workspace.serverListDirectory`
+- Stable ID: `workspace.serverListDirectory`
 - User-facing name: List Directory
 - Kind: `clay-js-api`
 - Module/export: `clay:workspace` / `serverListDirectory`

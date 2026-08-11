@@ -1,5 +1,5 @@
 ---
-id: clay.ui.serverRegisterPanelContribution
+id: ui.serverRegisterPanelContribution
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterPanelContribution
@@ -41,7 +41,7 @@ custom_properties:
     default: []
     description: Package-prefixed command IDs that panel components may emit as inert action intents.
 security: Validates package-prefixed panel IDs, supported slots, bounded component payloads, registered action targets, provenance, and conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.
-agent_guidance: Use `clay.ui.serverRegisterPanelContribution` for inert fixed package panels only; do not invent raw ops, native widget handles, Masonry APIs, raw CSS, client-side JavaScript hooks, or hidden layout configuration keys.
+agent_guidance: Use `ui.serverRegisterPanelContribution` for inert fixed package panels only; do not invent raw ops, native widget handles, Masonry APIs, raw CSS, client-side JavaScript hooks, or hidden layout configuration keys.
 lookup_tags: [ui, package-ui, panel, slot-layout, clay-js-api, phase18.3, runtime-backed]
 app_visible: true
 help_visible: true
@@ -148,7 +148,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.ui.serverRegisterPanelContribution` when the user asks for a public Clay JS API for package fixed panels. Avoid direct Rust calls, raw `Deno.core.ops`, protocol DTO construction, Masonry widget construction, raw CSS, renderer callbacks, hidden JSON/TOML keys, or client-side JavaScript execution.
+Use `ui.serverRegisterPanelContribution` when the user asks for a public Clay JS API for package fixed panels. Avoid direct Rust calls, raw `Deno.core.ops`, protocol DTO construction, Masonry widget construction, raw CSS, renderer callbacks, hidden JSON/TOML keys, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -159,7 +159,7 @@ Use `clay.ui.serverRegisterPanelContribution` when the user asks for a public Cl
 
 ## Lookup metadata
 
-- Stable ID: `clay.ui.serverRegisterPanelContribution`
+- Stable ID: `ui.serverRegisterPanelContribution`
 - User-facing name: Register Panel Contribution
 - Kind: `clay-js-api`
 - Module/export: `clay:ui` / `serverRegisterPanelContribution`

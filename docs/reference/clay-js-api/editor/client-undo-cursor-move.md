@@ -1,5 +1,5 @@
 ---
-id: clay.editor.clientUndoCursorMove
+id: editor.clientUndoCursorMove
 kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientUndoCursorMove
@@ -17,7 +17,7 @@ permissions: []
 key_bindings: ["Ctrl+U"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
-agent_guidance: Use `clay.editor.clientUndoCursorMove` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
+agent_guidance: Use `editor.clientUndoCursorMove` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.
 lookup_tags: [editor, js-api, multi-cursor, selection, undo]
 app_visible: true
 help_visible: true
@@ -33,7 +33,7 @@ Restore the previous selection set from the cursor-undo stack.
 
 ## Description
 
-`clientUndoCursorMove` returns the stable bindable command ID `clay.editor.clientUndoCursorMove` for **Undo Cursor Move** (Plan 071 task 9). VSCode cursorUndo semantics: walks the selection-set snapshots taken before each caret-moving command. Cursor movements only; edits have their own undo history. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientUndoCursorMove` returns the stable bindable command ID `editor.clientUndoCursorMove` for **Undo Cursor Move** (Plan 071 task 9). VSCode cursorUndo semantics: walks the selection-set snapshots taken before each caret-moving command. Cursor movements only; edits have their own undo history. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -50,7 +50,7 @@ bindKey("ctrl+k ctrl+n", clientUndoCursorMove());
 ## Example
 
 ```ts
-const commandId = clientUndoCursorMove(); // "clay.editor.clientUndoCursorMove"
+const commandId = clientUndoCursorMove(); // "editor.clientUndoCursorMove"
 ```
 
 ## Options
@@ -69,7 +69,7 @@ None.
 
 ## Return and async behavior
 
-Returns the stable command ID string `clay.editor.clientUndoCursorMove` synchronously. The facade is synchronous, side-effect free, and local.
+Returns the stable command ID string `editor.clientUndoCursorMove` synchronously. The facade is synchronous, side-effect free, and local.
 
 ## Errors
 
@@ -85,7 +85,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.editor.clientUndoCursorMove` when the user asks for Undo Cursor Move through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientUndoCursorMove` when the user asks for Undo Cursor Move through the Clay JS API. Avoid inventing direct Rust calls, raw op names, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 
@@ -95,7 +95,7 @@ Use `clay.editor.clientUndoCursorMove` when the user asks for Undo Cursor Move t
 
 ## Lookup metadata
 
-- Stable ID: `clay.editor.clientUndoCursorMove`
+- Stable ID: `editor.clientUndoCursorMove`
 - User-facing name: Undo Cursor Move
 - Kind: `clay-js-api`
 - Module/export: `clay:editor` / `clientUndoCursorMove`

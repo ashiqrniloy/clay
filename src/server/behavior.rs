@@ -363,16 +363,13 @@ mod tests {
     fn server_publish_replacement_increments_behavior_version() {
         let mut state = ActiveBehaviorManifest::default();
         let mut replacement = BehaviorManifest::minimal_text_editing(99);
-        replacement.manifest_id = "clay.default.text.replacement".to_string();
+        replacement.manifest_id = "default.text.replacement".to_string();
 
         let published = state.publish_replacement(replacement).unwrap();
 
         assert_eq!(published.behavior_version, 2);
         assert_eq!(state.version(), 2);
-        assert_eq!(
-            state.manifest().manifest_id,
-            "clay.default.text.replacement"
-        );
+        assert_eq!(state.manifest().manifest_id, "default.text.replacement");
     }
 
     #[test]
@@ -418,7 +415,7 @@ mod tests {
     async fn grace_accepts_immediately_previous_version_before_ack_deadline_and_cap() {
         let current = ActiveBehaviorManifest::default();
         let mut previous = current.manifest().clone();
-        previous.manifest_id = "clay.default.text.previous".to_string();
+        previous.manifest_id = "default.text.previous".to_string();
         let mut next = current.clone();
         next.publish_replacement(BehaviorManifest::minimal_text_editing(2))
             .unwrap();
@@ -483,7 +480,7 @@ mod tests {
     fn document_scoped_publishes_resolve_per_document_layers_with_shared_version() {
         let mut state = ActiveBehaviorManifest::default();
         let mut global = BehaviorManifest::minimal_text_editing(1);
-        global.manifest_id = "clay.runtime.configuration".to_string();
+        global.manifest_id = "runtime.configuration".to_string();
         let mut markdown = BehaviorManifest::minimal_text_editing(1);
         markdown.manifest_id = "markdown.markdown".to_string();
         markdown.scope = BehaviorScope::Document { document_id: 7 };
@@ -504,11 +501,8 @@ mod tests {
         assert_eq!(state.manifest_for(7).manifest_id, "markdown.markdown");
         assert_eq!(state.manifest_for(9).manifest_id, "rust.rust");
         // Documents without a layer fall back to the global manifest.
-        assert_eq!(
-            state.manifest_for(3).manifest_id,
-            "clay.runtime.configuration"
-        );
-        assert_eq!(state.manifest().manifest_id, "clay.runtime.configuration");
+        assert_eq!(state.manifest_for(3).manifest_id, "runtime.configuration");
+        assert_eq!(state.manifest().manifest_id, "runtime.configuration");
         // The global slot keeps the global scope publish.
         assert_eq!(
             state.manifest().scope,
@@ -550,14 +544,14 @@ mod tests {
     fn layer_publish_keeps_global_content_but_advances_stamped_version() {
         let mut state = ActiveBehaviorManifest::default();
         let mut global = BehaviorManifest::minimal_text_editing(1);
-        global.manifest_id = "clay.runtime.configuration".to_string();
+        global.manifest_id = "runtime.configuration".to_string();
         global.commands.push(CommandDeclaration::client_edit(
             "text.insert",
             "Duplicate Insert",
         ));
         assert!(state.publish_replacement(global.clone()).is_err());
         let mut clean = BehaviorManifest::minimal_text_editing(1);
-        clean.manifest_id = "clay.runtime.configuration".to_string();
+        clean.manifest_id = "runtime.configuration".to_string();
         state.publish_replacement(clean.clone()).unwrap();
         let mut layer = BehaviorManifest::minimal_text_editing(1);
         layer.manifest_id = "markdown.markdown".to_string();
@@ -565,7 +559,7 @@ mod tests {
         state.publish_replacement(layer.clone()).unwrap();
 
         // Global content untouched by the layer publish; version advanced.
-        assert_eq!(state.manifest().manifest_id, "clay.runtime.configuration");
+        assert_eq!(state.manifest().manifest_id, "runtime.configuration");
         assert_eq!(state.version(), 3);
         assert_eq!(state.manifest_for(2).manifest_id, "markdown.markdown");
     }

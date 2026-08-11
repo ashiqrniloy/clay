@@ -141,7 +141,7 @@ Phase 20.4 paint paths read **cached** resolved values only. Forbidden in `mason
 ## Security Boundary
 
 - All new helpers are `pub(crate)` or private; `PackageUiComponentTree.disabled`/`PackageUiListItem.disabled` are `pub(crate)`. The Phase 20.4 visibility audit (`phase20_4_introduces_no_unexposed_public_rust_function`) asserts no new bare `pub fn` and that none appear in `src/server/ops/ui.rs` deno_core ops or `runtime/js/*` facades.
-- No new Clay JS API (`clay.ui.componentStateColor`, `clay.theme.spacingRhythm`, etc.) was added (`clay_js_api_inventory_unchanged_or_documented`). Density/state-token/spacing control stays on the existing `clay.theme.setTheme` + `designTokens` path.
+- No new Clay JS API (`ui.componentStateColor`, `theme.spacingRhythm`, etc.) was added (`clay_js_api_inventory_unchanged_or_documented`). Density/state-token/spacing control stays on the existing `theme.setTheme` + `designTokens` path.
 - Disabled gating removes action authority (a disabled button cannot emit a `SduiAction`); it does not change SDUI validation, command execution, or server-side authority.
 - Observability types stay `pub(crate)`/test-local; `SduiObservableSnapshot` is unchanged; `ComponentStatePalette` lives in `mod tests`.
 

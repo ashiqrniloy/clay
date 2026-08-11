@@ -1,5 +1,5 @@
 ---
-id: clay.language.serverRegisterDocumentAnalyzer
+id: language.serverRegisterDocumentAnalyzer
 kind: clay-js-api
 js_module: "clay:language"
 js_export: serverRegisterDocumentAnalyzer
@@ -134,14 +134,14 @@ Returns a synchronous JSON result with `{ packageName, packageVersion, packagePr
 
 ## Errors
 
-- `clay.language.invalid_analyzer` — malformed options or excess authority fields.
-- `clay.language.invalid_analyzer: authority field ... is not accepted` — rejected field in top-level or analyzer object.
-- `clay.language.invalid_analyzer: parse-document permission is required` — package manifest lacks parse-document.
-- `clay.language.invalid_analyzer: language-server permission is required` — package manifest lacks language-server.
-- `clay.language.invalid_analyzer: id ... must use package apiPrefix ...` — analyzer ID outside package namespace.
-- `clay.language.invalid_analyzer: contribution must name a fixed package language server` — contribution not found in manifest.
-- `clay.language.invalid_analyzer: moduleSpecifier must resolve to a loaded module owned by the package` — specifier outside package allowlist.
-- `clay.language.invalid_analyzer: package must be enabled with a current exact language-server grant before analyzer registration` — missing/expired grant.
+- `language.invalid_analyzer` — malformed options or excess authority fields.
+- `language.invalid_analyzer: authority field ... is not accepted` — rejected field in top-level or analyzer object.
+- `language.invalid_analyzer: parse-document permission is required` — package manifest lacks parse-document.
+- `language.invalid_analyzer: language-server permission is required` — package manifest lacks language-server.
+- `language.invalid_analyzer: id ... must use package apiPrefix ...` — analyzer ID outside package namespace.
+- `language.invalid_analyzer: contribution must name a fixed package language server` — contribution not found in manifest.
+- `language.invalid_analyzer: moduleSpecifier must resolve to a loaded module owned by the package` — specifier outside package allowlist.
+- `language.invalid_analyzer: package must be enabled with a current exact language-server grant before analyzer registration` — missing/expired grant.
 
 ## Required permissions
 

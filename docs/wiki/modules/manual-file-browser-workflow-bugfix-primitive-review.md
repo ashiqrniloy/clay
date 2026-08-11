@@ -54,7 +54,7 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 - Primitive: server-owned SDUI action validation.
 - Owner: `StaticSduiState` stores the currently valid Clay-owned workspace browser/action tree; runtime/package trees are separately validated before publication.
 - Code: `src/server/sdui.rs`, `src/server/connection.rs`, `src/server/mod.rs::apply_runtime_outputs`.
-- Bug boundary: open-time package/classification output must not erase Clay-owned workspace browser validation state. `UnknownActionCommand("clay.workspace.openFile")` after Markdown activation is a validation-state ownership bug, not a Markdown-specific bug.
+- Bug boundary: open-time package/classification output must not erase Clay-owned workspace browser validation state. `UnknownActionCommand("workspace.openFile")` after Markdown activation is a validation-state ownership bug, not a Markdown-specific bug.
 - Security: keeping strict validation is required; do not make action validation accept undeclared or mismatched commands to mask stale state.
 
 ### SduiNativeState rendering and local action regions
@@ -83,7 +83,7 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 - Primitive: `DocumentClassification`, `MajorModeActivation`, `IncrementalParseUpdate`, and `DecorationRange` on explicit open/reload.
 - Owner: server/runtime classifies and parses open documents asynchronously; client receives inert behavior/decorations/diagnostics.
 - Code: `src/server/connection.rs::open_document_followup_messages`, `src/server/mod.rs::apply_runtime_outputs`, `src/server/parse_coordinator.rs`.
-- Bug boundary: `clay.parse.open_activation_timeout` should be a status/diagnostic result only. It must not poison file-browser navigation or action validation.
+- Bug boundary: `parse.open_activation_timeout` should be a status/diagnostic result only. It must not poison file-browser navigation or action validation.
 
 ## Generic Fix Map
 
@@ -92,7 +92,7 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 | `Ctrl+Shift+O` does not open folder picker | behavior-manifest key route / `ClientUiCommandRoute` | Character key matching for command bindings is normalized at lookup while text insertion preserves actual typed text. |
 | Nested `src/main.rs` fails with `ActionSourceMismatch` | `FileBrowserState` SDUI row construction / `StaticSduiState` validation | Row ID and action source item ID match exactly; `relativePath` remains an argument. |
 | Browser actions fail after Markdown activation | server `StaticSduiState` ownership | Open-time package outputs cannot replace Clay-owned workspace browser validation state. |
-| `clay.parse.open_activation_timeout` hangs workflow | open-document follow-up diagnostics | Diagnostics are non-fatal status; stale parse/decor work is skipped without invalidating navigation. |
+| `parse.open_activation_timeout` hangs workflow | open-document follow-up diagnostics | Diagnostics are non-fatal status; stale parse/decor work is skipped without invalidating navigation. |
 | Second file does not replace first | document-open event application | Every workspace/file-browser open sends/applies the latest `DocumentOpened` snapshot generically. |
 | Editor overlaps file browser | `PaneSlotLayout` / editor-region computation | Visible Clay-owned left slot reserves editor region independent of the active document ID. |
 | Purple circle and visible card padding | `EditorSurface` paint chrome | Paint only useful editor background/text/scroller chrome; no permanent decorative canvas. |

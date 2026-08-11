@@ -509,22 +509,16 @@ fn runtime_diagnostics_remain_status_level_and_range_diagnostics_remain_inline()
 
     assert!(
         widget.apply_connection_event(ClientConnectionEvent::RuntimeDiagnostic(
-            RuntimeDiagnostic::error("clay.parse.open_failed", "parse handler failed")
+            RuntimeDiagnostic::error("parse.open_failed", "parse handler failed")
         ))
     );
-    assert!(
-        widget
-            .status_text()
-            .contains("Runtime clay.parse.open_failed")
-    );
+    assert!(widget.status_text().contains("Runtime parse.open_failed"));
     assert_eq!(widget.diagnostic_span_count(), 0);
 
     assert!(widget.apply_connection_event(ClientConnectionEvent::DiagnosticSet(range)));
     assert_eq!(widget.diagnostic_span_count(), 1);
     assert!(
-        widget
-            .status_text()
-            .contains("Runtime clay.parse.open_failed"),
+        widget.status_text().contains("Runtime parse.open_failed"),
         "range diagnostics must not erase status-level RuntimeDiagnostic"
     );
     assert_ne!(widget.status_text(), status_before);

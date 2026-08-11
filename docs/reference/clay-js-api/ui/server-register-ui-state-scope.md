@@ -1,5 +1,5 @@
 ---
-id: clay.ui.serverRegisterUiStateScope
+id: ui.serverRegisterUiStateScope
 kind: clay-js-api
 js_module: "clay:ui"
 js_export: serverRegisterUiStateScope
@@ -49,7 +49,7 @@ custom_properties:
     default: required
     description: Bounded schema kind, one of `boolean`, `number`, `string`, `enum`, or `object`.
 security: Validates package-prefixed IDs, supported state scopes, lifecycle metadata, schema kind, target IDs, provenance, hidden-key rejection, prohibited authority fields, and payload ceilings; registers schemas only and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, state-value mutation, hidden globals, or raw JSON blob authority.
-agent_guidance: Use `clay.ui.serverRegisterUiStateScope` for inert state schema and lifecycle declarations only. Do not store package state values, raw documents, hidden configuration, native handles, callbacks, raw ops, CSS, or client-side JavaScript through this API.
+agent_guidance: Use `ui.serverRegisterUiStateScope` for inert state schema and lifecycle declarations only. Do not store package state values, raw documents, hidden configuration, native handles, callbacks, raw ops, CSS, or client-side JavaScript through this API.
 lookup_tags: [ui, package-ui, state, lifecycle, clay-js-api, phase18.4, runtime-backed]
 app_visible: true
 help_visible: true
@@ -159,7 +159,7 @@ Agents should keep package state lifecycle declarations generic and primitive-fi
 
 ## Lookup metadata
 
-- API ID: `clay.ui.serverRegisterUiStateScope`
+- API ID: `ui.serverRegisterUiStateScope`
 - Module: `clay:ui`
 - Export: `serverRegisterUiStateScope`
 - Phase: Phase 18.4

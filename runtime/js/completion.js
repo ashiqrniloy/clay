@@ -7,7 +7,7 @@
 const ops = globalThis.Deno?.core?.ops;
 function requireOps() {
     if (!ops) {
-        throw new Error("clay.completion.runtime_unavailable: Clay completion APIs require the server runtime");
+        throw new Error("completion.runtime_unavailable: Clay completion APIs require the server runtime");
     }
     return ops;
 }
@@ -17,7 +17,7 @@ function parseResult(json) {
 export function serverRegisterCompletionProvider(options) {
     for (const key of ["handler", "callback", "complete", "function", "clientJavaScript", "nativeHandle", "rawOps"]) {
         if (Object.prototype.hasOwnProperty.call(options ?? {}, key)) {
-            throw new Error(`clay.completion.invalid_provider: executable or raw authority field ${key} is not accepted by the public registration contract`);
+            throw new Error(`completion.invalid_provider: executable or raw authority field ${key} is not accepted by the public registration contract`);
         }
     }
     const { module, exportName = "provideCompletion", ...opOptions } = options ?? {};
@@ -25,7 +25,7 @@ export function serverRegisterCompletionProvider(options) {
     if (module !== undefined) {
         const handler = module[exportName];
         if (typeof handler !== "function") {
-            throw new Error(`clay.completion.invalid_provider: module export ${exportName} must be a function`);
+            throw new Error(`completion.invalid_provider: module export ${exportName} must be a function`);
         }
         globalThis
             .__clayCompletionHandlers ??= Object.create(null);
@@ -39,21 +39,21 @@ export function serverRegisterCompletionProvider(options) {
 export function serverDisableCompletion(options) {
     for (const key of Object.keys(options ?? {})) {
         if (key !== "provider" && key !== "packagePrefix") {
-            throw new Error("clay.completion.invalid_disable: only provider or packagePrefix is accepted");
+            throw new Error("completion.invalid_disable: only provider or packagePrefix is accepted");
         }
     }
     const provider = (options ?? {}).provider;
     const packagePrefix = (options ?? {}).packagePrefix;
     const targets = [provider, packagePrefix].filter((value) => typeof value === "string" && value.trim().length > 0);
     if (targets.length !== 1) {
-        throw new Error("clay.completion.invalid_disable: provide exactly one non-empty provider or packagePrefix");
+        throw new Error("completion.invalid_disable: provide exactly one non-empty provider or packagePrefix");
     }
     return parseResult(requireOps()["op_clay_completion_disable"](JSON.stringify(options)));
 }
 export function serverListCompletionProvidersForTrigger(options) {
     const trigger = (options ?? {}).trigger;
     if (typeof trigger !== "string" || trigger.length === 0) {
-        throw new Error("clay.completion.invalid_trigger: trigger must be a non-empty string");
+        throw new Error("completion.invalid_trigger: trigger must be a non-empty string");
     }
     return parseResult(requireOps()["op_clay_completion_providers_for_trigger"](trigger));
 }

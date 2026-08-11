@@ -1,5 +1,5 @@
 ---
-id: clay.sdui.defineFlex
+id: sdui.defineFlex
 kind: clay-js-api
 js_module: "clay:sdui"
 js_export: defineFlex
@@ -29,7 +29,7 @@ custom_properties:
     default: "optional"
     description: Optional stable SDUI node identifier used for reconciliation.
 security: Creates inert declarative UI metadata only; Phase 12/13 SDUI helper metadata does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
-agent_guidance: Use `clay.sdui.defineFlex` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.
+agent_guidance: Use `sdui.defineFlex` only to describe server-driven native UI nodes; do not invent raw Rust, protocol, or `Deno.core.ops` access and do not use it for external effects.
 lookup_tags: [sdui, server-driven-ui, js-api, phase12, phase13, runtime-backed]
 app_visible: true
 help_visible: true
@@ -75,7 +75,7 @@ const node = defineFlex({ direction: "row", children: [sidebar, editor] });
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `clay.sdui.defineFlex` in `~/.config/clay/init.js` only if a future command surface explicitly supports invoking SDUI helper APIs; normal use is from startup/reload configuration modules before `publishTree`.
+No default key binding is assigned. Users may bind a key to `sdui.defineFlex` in `~/.config/clay/init.js` only if a future command surface explicitly supports invoking SDUI helper APIs; normal use is from startup/reload configuration modules before `publishTree`.
 
 ## Custom properties
 
@@ -102,7 +102,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `clay.sdui.defineFlex` when the user asks for runtime-backed Clay SDUI schema helpers. Avoid raw `SduiNodeKind` construction in user-facing docs, arbitrary command IDs, filesystem effects, network effects, shell commands, extension loading, AI mutation, package loading, WASM, or client-side JavaScript execution.
+Use `sdui.defineFlex` when the user asks for runtime-backed Clay SDUI schema helpers. Avoid raw `SduiNodeKind` construction in user-facing docs, arbitrary command IDs, filesystem effects, network effects, shell commands, extension loading, AI mutation, package loading, WASM, or client-side JavaScript execution.
 
 ## Backing implementation
 
@@ -113,7 +113,7 @@ Use `clay.sdui.defineFlex` when the user asks for runtime-backed Clay SDUI schem
 
 ## Lookup metadata
 
-- Stable ID: `clay.sdui.defineFlex`
+- Stable ID: `sdui.defineFlex`
 - User-facing name: Define Flex Layout
 - Kind: `clay-js-api`
 - Module/export: `clay:sdui` / `defineFlex`

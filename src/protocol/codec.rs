@@ -338,7 +338,7 @@ mod tests {
     fn codec_round_trips_behavior_manifest_update() {
         let codec = Codec::default();
         let mut manifest = BehaviorManifest::minimal_text_editing(8);
-        manifest.manifest_id = "clay.default.text.hot-reload".to_string();
+        manifest.manifest_id = "default.text.hot-reload".to_string();
         let message = ServerMessage::BehaviorManifest(Box::new(manifest));
 
         let frame = codec.encode_server_message(&message).unwrap();
@@ -644,7 +644,7 @@ mod tests {
                 document_id: None,
             },
             ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                "clay.runtime.syntax_error",
+                "runtime.syntax_error",
                 "JavaScript syntax error while evaluating server-side configuration.",
             )),
         ];
@@ -990,7 +990,7 @@ mod tests {
                 behavior_manifest: None,
             }],
             diagnostics: vec![RuntimeDiagnostic::error(
-                "clay.runtime.reload_succeeded",
+                "runtime.reload_succeeded",
                 "Configuration reloaded.",
             )],
         };

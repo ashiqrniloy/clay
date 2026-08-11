@@ -111,13 +111,13 @@ export function rustPackageManifest() {
       modes: [modeId],
       docs: "./docs/index.md",
       apiDependencies: [
-        "clay.syntax.serverRegisterSyntaxGrammar",
-        "clay.modes.serverRegisterModePattern",
-        "clay.behavior.buildCodeEditingManifest",
-        "clay.commands.serverRegisterCommand",
-        "clay.completion.serverRegisterCompletionProvider",
-        "clay.completion.completionTriggerCharactersFromEditorRules",
-        "clay.ui.serverRegisterComponentContribution"
+        "syntax.serverRegisterSyntaxGrammar",
+        "modes.serverRegisterModePattern",
+        "behavior.buildCodeEditingManifest",
+        "commands.serverRegisterCommand",
+        "completion.serverRegisterCompletionProvider",
+        "completion.completionTriggerCharactersFromEditorRules",
+        "ui.serverRegisterComponentContribution"
       ],
       performance: {
         estimatedManifestBytes: 1700,
