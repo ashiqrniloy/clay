@@ -31,7 +31,7 @@ use tokio::{
 use crate::perf::budgets::{
     MAX_AUXILIARY_READ_BYTES, MAX_DOCUMENTS_PER_CLIENT, MAX_GITIGNORE_LINES,
     MAX_GITIGNORE_PATTERN_CHARS, MAX_GITIGNORE_PATTERNS, MAX_OPENABLE_FILE_BYTES,
-    MAX_SERVER_DOCUMENTS,
+    MAX_SERVER_DOCUMENTS, TRANSIENT_MENU_MAX_ITEMS,
 };
 use crate::protocol::{
     ClientId, DocumentAccess, DocumentId, DocumentMetadata, DocumentVersion, FileErrorCode,
@@ -203,6 +203,84 @@ pub(crate) struct FileListPage {
     pub(crate) cancelled: bool,
     pub(crate) diagnostics: Vec<WorkspaceDiagnostic>,
 }
+
+/// One depth-1 listing inside the built-in path session. Unlike
+/// `FileListRequest` (workspace-root-scoped, root-relative), the target is an
+/// absolute or cwd-relative path reached by explicit user navigation: the
+/// built-in surface itself is the authorization event, so no workspace root
+/// grant is required and none is created. `max_entries` is capped at the
+/// transient-menu ceiling so the installed snapshot always fits the menu
+/// projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UserBrowseListingPlan {
+    pub(crate) target: PathBuf,
+    pub(crate) max_entries: usize,
+}
+
+impl Default for UserBrowseListingPlan {
+    fn default() -> Self {
+        Self {
+            target: PathBuf::new(),
+            max_entries: TRANSIENT_MENU_MAX_ITEMS,
+        }
+    }
+}
+
+/// Kind of a user-browse entry, resolved by following symlinks so the listed
+/// activation path is the canonical target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UserBrowseEntryKind {
+    Directory,
+    File,
+    Other,
+}
+
+/// One inert entry in a user-browse page. `canonical_path` is the
+/// symlink-resolved activation path; activation must resolve through this
+/// server-held entry and never through a client-supplied path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UserBrowseEntry {
+    pub(crate) name: String,
+    pub(crate) kind: UserBrowseEntryKind,
+    pub(crate) canonical_path: PathBuf,
+    pub(crate) size: Option<u64>,
+}
+
+/// Result page for one user-browse listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UserBrowsePage {
+    pub(crate) canonical_dir: PathBuf,
+    pub(crate) entries: Vec<UserBrowseEntry>,
+    pub(crate) truncated: bool,
+}
+
+/// Failure of one user-browse listing. Browsing never panics and never
+/// mutates grants; failures surface as session status text.
+#[derive(Debug)]
+pub(crate) enum UserBrowseError {
+    /// Target does not exist or is not readable.
+    Unavailable { path: PathBuf, source: io::Error },
+    /// Target exists but is not a directory.
+    NotADirectory { path: PathBuf },
+    /// The blocking-pool task failed to join.
+    Join,
+}
+
+impl fmt::Display for UserBrowseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unavailable { path, source } => {
+                write!(formatter, "cannot browse {}: {source}", path.display())
+            }
+            Self::NotADirectory { path } => {
+                write!(formatter, "{} is not a directory", path.display())
+            }
+            Self::Join => formatter.write_str("browse listing worker failed"),
+        }
+    }
+}
+
+impl Error for UserBrowseError {}
 
 /// Request for the bounded directory listing service.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -700,6 +778,104 @@ pub(crate) fn traverse_directory(
     })
 }
 
+/// Traverse a user-browse plan on the blocking pool via
+/// [`execute_user_browse_listing`]; reads no workspace state and creates no
+/// grant. Depth is fixed at 1: only immediate children are listed, no child
+/// trees are scanned, and no recursive child counts are computed. Names are
+/// collected into a bounded, name-sorted window, so a pathological directory
+/// cannot grow memory beyond the cap and truncation is deterministic (the
+/// lexicographically-first `max_entries` names survive). Unreadable or
+/// non-UTF-8-named children are skipped; a broken symlink child is skipped
+/// because its target cannot be canonicalized.
+pub(crate) fn traverse_user_browse_directory(
+    plan: UserBrowseListingPlan,
+) -> Result<UserBrowsePage, UserBrowseError> {
+    let canonical_dir =
+        fs::canonicalize(&plan.target).map_err(|source| UserBrowseError::Unavailable {
+            path: plan.target.clone(),
+            source,
+        })?;
+    let metadata = fs::metadata(&canonical_dir).map_err(|source| UserBrowseError::Unavailable {
+        path: canonical_dir.clone(),
+        source,
+    })?;
+    if !metadata.is_dir() {
+        return Err(UserBrowseError::NotADirectory {
+            path: canonical_dir,
+        });
+    }
+
+    let max_entries = plan.max_entries.max(1);
+    let mut names: Vec<String> = Vec::with_capacity(max_entries.min(TRANSIENT_MENU_MAX_ITEMS));
+    let mut truncated = false;
+    let read_dir = fs::read_dir(&canonical_dir).map_err(|source| UserBrowseError::Unavailable {
+        path: canonical_dir.clone(),
+        source,
+    })?;
+    for entry in read_dir.flatten() {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        match names.binary_search(&name) {
+            // Duplicate names cannot occur within one directory; skip.
+            Ok(_) => {}
+            Err(pos) => {
+                if names.len() < max_entries {
+                    names.insert(pos, name);
+                } else if pos < names.len() {
+                    names.insert(pos, name);
+                    names.pop();
+                    truncated = true;
+                } else {
+                    truncated = true;
+                }
+            }
+        }
+    }
+
+    let mut entries = Vec::with_capacity(names.len());
+    for name in names {
+        // Follow symlinks so the activation path is the canonical target.
+        let Ok(canonical) = fs::canonicalize(canonical_dir.join(&name)) else {
+            continue;
+        };
+        let Ok(metadata) = fs::metadata(&canonical) else {
+            continue;
+        };
+        let kind = if metadata.is_dir() {
+            UserBrowseEntryKind::Directory
+        } else if metadata.is_file() {
+            UserBrowseEntryKind::File
+        } else {
+            UserBrowseEntryKind::Other
+        };
+        entries.push(UserBrowseEntry {
+            name,
+            kind,
+            canonical_path: canonical,
+            size: (kind == UserBrowseEntryKind::File).then_some(metadata.len()),
+        });
+    }
+    Ok(UserBrowsePage {
+        canonical_dir,
+        entries,
+        truncated,
+    })
+}
+
+/// Execute a user-browse listing on Tokio's bounded blocking pool. Callers
+/// must snapshot authority/state into the plan before awaiting; no
+/// workspace/tab/menu lock is held here. Started blocking tasks are not
+/// abortable, so the entry cap and depth-1 shape are the boundedness
+/// guarantees.
+pub(crate) async fn execute_user_browse_listing(
+    plan: UserBrowseListingPlan,
+) -> Result<UserBrowsePage, UserBrowseError> {
+    tokio::task::spawn_blocking(move || traverse_user_browse_directory(plan))
+        .await
+        .map_err(|_| UserBrowseError::Join)?
+}
+
 fn cancelled_listing_page(root_id: WorkspaceRootId) -> FileListPage {
     FileListPage {
         root_id,
@@ -1031,6 +1207,16 @@ impl WorkspaceState {
         self.documents
             .get(&document_id)
             .map(|open_document| Arc::clone(&open_document.document))
+    }
+
+    /// Canonical path of an open document, used to seed the built-in path
+    /// session from the authorized active document's real directory. Works
+    /// for workspace-relative and selected-file (`SingleFile` grant) opens
+    /// alike because the stored path is the canonical file path.
+    pub(crate) fn document_canonical_path(&self, document_id: DocumentId) -> Option<PathBuf> {
+        self.documents
+            .get(&document_id)
+            .map(|open_document| open_document.file_state.canonical_path.clone())
     }
 
     pub(crate) async fn document_metadata(
@@ -2134,6 +2320,34 @@ pub(crate) async fn open_selected_file_unlocked(
     }
 }
 
+/// Resolve the opening seed for the built-in path session, in order:
+/// 1. canonical parent of the authorized active document,
+/// 2. the bound tab's workspace directory root,
+/// 3. the server's canonical current directory.
+///
+/// The seed is only a starting directory for navigation; it creates no root
+/// or grant. The caller snapshots the active document id and tab root before
+/// awaiting (both come from the connection's own command context).
+pub(crate) async fn resolve_user_browse_seed(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    active_document_id: Option<DocumentId>,
+    tab_workspace_root: Option<&str>,
+) -> PathBuf {
+    if let Some(document_id) = active_document_id {
+        let workspace = workspace.lock().await;
+        if let Some(parent) = workspace
+            .document_canonical_path(document_id)
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+        {
+            return parent;
+        }
+    }
+    if let Some(root) = tab_workspace_root.filter(|root| !root.is_empty()) {
+        return PathBuf::from(root);
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
 pub(crate) async fn save_document_unlocked(
     workspace: &Arc<Mutex<WorkspaceState>>,
     document_id: DocumentId,
@@ -2734,8 +2948,10 @@ mod tests {
     use super::{
         AtomicSaveError, BEFORE_REVALIDATE_HOOKS, BETWEEN_METADATA_AND_READ_HOOKS,
         FileListEntryKind, FileListRequest, FileMetadata, SaveIoOutcome, TEST_TEMP_NAMES,
-        TargetIdentity, WorkspaceError, WorkspaceState, atomic_write_file, build_ignore_set,
-        open_existing_file_unlocked, save_document_unlocked,
+        TargetIdentity, UserBrowseEntryKind, UserBrowseError, UserBrowseListingPlan,
+        WorkspaceError, WorkspaceState, atomic_write_file, build_ignore_set,
+        execute_user_browse_listing, open_existing_file_unlocked, open_selected_file_unlocked,
+        resolve_user_browse_seed, save_document_unlocked, traverse_user_browse_directory,
     };
     use tokio::sync::Mutex;
 
@@ -4472,6 +4688,227 @@ mod tests {
         let file = page.entries.iter().find(|e| e.name == "a.txt").unwrap();
         assert_eq!(file.kind, FileListEntryKind::File);
         assert_eq!(file.size_hint, Some(1));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn user_browse_depth1_listing_returns_immediate_children_only() {
+        let root = temp_workspace("user-browse-depth1");
+        fs::create_dir_all(root.join("sub").join("nested")).unwrap();
+        fs::write(root.join("sub").join("deep.txt"), "x").unwrap();
+        fs::write(root.join("a.txt"), "a").unwrap();
+        fs::write(root.join("b.md"), "bb").unwrap();
+
+        let page = traverse_user_browse_directory(UserBrowseListingPlan {
+            target: root.clone(),
+            max_entries: 64,
+        })
+        .unwrap();
+
+        assert_eq!(page.canonical_dir, fs::canonicalize(&root).unwrap());
+        assert!(!page.truncated);
+        let names: Vec<&str> = page.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["a.txt", "b.md", "sub"]);
+        // Depth-1: nested children never appear.
+        assert!(
+            page.entries
+                .iter()
+                .all(|e| e.canonical_path.parent() == Some(page.canonical_dir.as_path()))
+        );
+        // Every activation path is canonical and absolute.
+        assert!(page.entries.iter().all(|e| e.canonical_path.is_absolute()));
+        let file = page.entries.iter().find(|e| e.name == "a.txt").unwrap();
+        assert_eq!(file.kind, UserBrowseEntryKind::File);
+        assert_eq!(file.size, Some(1));
+        let dir = page.entries.iter().find(|e| e.name == "sub").unwrap();
+        assert_eq!(dir.kind, UserBrowseEntryKind::Directory);
+        assert_eq!(dir.size, None);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn user_browse_listing_truncates_deterministically_at_cap() {
+        let root = temp_workspace("user-browse-cap");
+        fs::write(root.join("d.txt"), "d").unwrap();
+        fs::write(root.join("a.txt"), "a").unwrap();
+        fs::write(root.join("c.txt"), "c").unwrap();
+        fs::write(root.join("b.txt"), "b").unwrap();
+        fs::write(root.join("e.txt"), "e").unwrap();
+
+        // The lexicographically-first names survive regardless of read_dir
+        // order, and the cap never exceeds the transient-menu ceiling.
+        let page = traverse_user_browse_directory(UserBrowseListingPlan {
+            target: root.clone(),
+            max_entries: 3,
+        })
+        .unwrap();
+        let names: Vec<&str> = page.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["a.txt", "b.txt", "c.txt"]);
+        assert!(page.truncated);
+        assert!(page.entries.len() <= 3);
+
+        // A directory with exactly the cap entries is not truncated.
+        let page = traverse_user_browse_directory(UserBrowseListingPlan {
+            target: root.clone(),
+            max_entries: 5,
+        })
+        .unwrap();
+        assert!(!page.truncated);
+        assert_eq!(page.entries.len(), 5);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn user_browse_listing_fails_cleanly_without_grant_mutation() {
+        let root = temp_workspace("user-browse-fail");
+        fs::write(root.join("plain.txt"), "x").unwrap();
+        let workspace = WorkspaceState::new();
+
+        // Missing target.
+        let error = traverse_user_browse_directory(UserBrowseListingPlan {
+            target: root.join("missing"),
+            max_entries: 64,
+        })
+        .unwrap_err();
+        assert!(matches!(error, UserBrowseError::Unavailable { .. }));
+
+        // Non-directory target.
+        let error = traverse_user_browse_directory(UserBrowseListingPlan {
+            target: root.join("plain.txt"),
+            max_entries: 64,
+        })
+        .unwrap_err();
+        assert!(matches!(error, UserBrowseError::NotADirectory { .. }));
+
+        // No browse ever mutates workspace grants.
+        assert_eq!(workspace.list_root_metadata().len(), 0);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn user_browse_listing_resolves_symlink_targets_and_skips_broken_links() {
+        let root = temp_workspace("user-browse-symlink");
+        fs::create_dir(root.join("real")).unwrap();
+        fs::write(root.join("real").join("f.txt"), "x").unwrap();
+        fs::write(root.join("plain.txt"), "x").unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("linked")).unwrap();
+        std::os::unix::fs::symlink(root.join("nowhere"), root.join("broken")).unwrap();
+
+        let page = traverse_user_browse_directory(UserBrowseListingPlan {
+            target: root.clone(),
+            max_entries: 64,
+        })
+        .unwrap();
+
+        // Symlink-to-directory lists as a Directory with the canonical
+        // target path, ready for activation.
+        let linked = page.entries.iter().find(|e| e.name == "linked").unwrap();
+        assert_eq!(linked.kind, UserBrowseEntryKind::Directory);
+        assert_eq!(
+            linked.canonical_path,
+            fs::canonicalize(root.join("real")).unwrap()
+        );
+        // Broken symlink child is skipped, never a panic.
+        assert!(page.entries.iter().all(|e| e.name != "broken"));
+        let names: Vec<&str> = page.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["linked", "plain.txt", "real"]);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn user_browse_seed_prefers_active_document_canonical_parent() {
+        let root = temp_workspace("user-browse-seed-doc");
+        let src = root.join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("main.rs"), "fn main() {}\n").unwrap();
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+        let root_id = workspace.lock().await.add_root(&root).unwrap();
+        let lease = workspace
+            .lock()
+            .await
+            .register_loaded_file(
+                root_id,
+                src.join("main.rs"),
+                "fn main() {}\n".to_string(),
+                1,
+            )
+            .await
+            .unwrap();
+
+        let seed = resolve_user_browse_seed(&workspace, Some(lease.document_id), None).await;
+        assert_eq!(seed, fs::canonicalize(&src).unwrap());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn user_browse_seed_uses_real_canonical_parent_of_selected_file() {
+        // Selected-file (SingleFile grant) opens seed from their actual
+        // canonical parent, not any workspace-relative path.
+        let outside = temp_workspace("user-browse-seed-selected");
+        let file = outside.join("notes.md");
+        fs::write(&file, "# notes").unwrap();
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+        let lease = open_selected_file_unlocked(&workspace, &file, 1)
+            .await
+            .unwrap();
+
+        let seed = resolve_user_browse_seed(&workspace, Some(lease.document_id), None).await;
+        assert_eq!(seed, fs::canonicalize(&outside).unwrap());
+
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[tokio::test]
+    async fn user_browse_seed_falls_back_to_tab_root_then_cwd() {
+        let root = temp_workspace("user-browse-seed-tab");
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+
+        // Tab directory root wins over cwd.
+        let seed = resolve_user_browse_seed(&workspace, None, Some(root.to_str().unwrap())).await;
+        assert_eq!(seed, root);
+
+        // Empty tab root falls through to the canonical cwd (no chdir needed:
+        // the seed is compared against the caller's real current directory).
+        let expected_cwd = fs::canonicalize(std::env::current_dir().unwrap()).unwrap();
+        let seed = resolve_user_browse_seed(&workspace, None, Some("")).await;
+        assert_eq!(seed, expected_cwd);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn user_browse_listing_runs_without_holding_workspace_lock() {
+        let root = temp_workspace("user-browse-concurrent");
+        fs::write(root.join("a.txt"), "a").unwrap();
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+        let root_id = workspace.lock().await.add_root(&root).unwrap();
+        let plan = UserBrowseListingPlan {
+            target: root.clone(),
+            max_entries: 64,
+        };
+        let listing = tokio::spawn(execute_user_browse_listing(plan));
+
+        // Hold the workspace lock across the whole listing: traversal must
+        // complete anyway because it reads no workspace state.
+        let page = {
+            let _guard = workspace.lock().await;
+            listing.await.unwrap().unwrap()
+        };
+        assert_eq!(page.entries.len(), 1);
+        assert_eq!(page.entries[0].name, "a.txt");
+
+        // Unrelated workspace operations progressed concurrently.
+        assert_eq!(
+            workspace.lock().await.list_root_metadata()[0].workspace_root_id,
+            root_id
+        );
 
         let _ = fs::remove_dir_all(root);
     }

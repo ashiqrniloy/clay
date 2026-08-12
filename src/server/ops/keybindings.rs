@@ -378,6 +378,13 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "language.signatureHelp"
             | "documents.serverSaveDocument"
             | "runtime.reloadConfiguration"
+            // Phase 24.2: the Control Center opens via the command-intent lane
+            // (ServerFirst like other server intents).
+            | "controlCenter.open"
+            // Phase 24.3: Path Mode opens through the same lane with the same
+            // bindability (temporary Ctrl+Alt+P default; Phase 24.5 sequence
+            // defaults reuse this id).
+            | "controlCenter.openPath"
             | "documents.serverReloadDocument"
             | "documents.serverGetDocumentStatus"
             | "documents.serverListDocuments"
@@ -646,6 +653,27 @@ mod tests {
             RoutingPolicy::ServerFirst
         );
         assert_eq!(validate_command_id(command).unwrap(), command);
+    }
+
+    #[test]
+    fn control_center_open_is_bindable_and_server_routed() {
+        // Phase 24.2: the default Ctrl+Shift+P binding is fully rebindable;
+        // the command passes the bindKey gate and routes ServerFirst like
+        // other server intents (no special-case routing in the overlay).
+        let command = "controlCenter.open";
+        assert!(is_runtime_bindable_command(command));
+        assert_eq!(
+            command_routing_policy(command).unwrap(),
+            RoutingPolicy::ServerFirst
+        );
+        assert_eq!(validate_command_id(command).unwrap(), command);
+        // Phase 24.3: the Path Browser command is bindable the same way;
+        // the reserved domain stays closed — packages cannot register or
+        // shadow `controlCenter.*` ids, and unknown siblings reject.
+        assert!(is_runtime_bindable_command("controlCenter.openPath"));
+        assert!(!is_runtime_bindable_command("controlCenter.close"));
+        assert!(!is_runtime_bindable_command("controlCenter.openX"));
+        assert!(!is_runtime_bindable_command("controlCenter.openPathExtra"));
     }
 
     #[test]

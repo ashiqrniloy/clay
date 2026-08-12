@@ -61,6 +61,10 @@ bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
 
 Workspace opens differ from selected-file opens: the file must be inside a registered workspace root; the server does not create a single-file grant; and `DocumentOpened` snapshots carry workspace-root metadata instead of single-file grant metadata. Save and reload work identically for both kinds of documents.
 
+### Built-in path browser (`controlCenter.openPath`)
+
+Phase 24.3 adds a built-in dired-style path browser over the transient-menu round trip: `Ctrl+Alt+P` (temporary default, fully rebindable via `bindKey`/`unbindKey`; replaced by sequence defaults in Phase 24.5) opens a session whose editable path bar is seeded from the active document's canonical parent, then the bound tab's workspace root, then the server cwd. Primary activation descends into directories and opens files; Alt+Enter on a directory opens it as the tab's workspace; Backspace on an empty filter ascends; typing a path (trailing separator for directories) jumps anywhere. Listings are bounded depth-1 snapshots, and the browse grant is ephemeral: navigation creates no grant, a file open converts browse authority into exactly one `SingleFile` grant through the same selected-file open path, and an Alt+Enter workspace open converts it into one `Directory` root grant for the bound tab only. The native dialogs remain the fallback capability issuers and are unchanged.
+
 ### Document state after open
 
 Both selected-file and workspace opens produce a `DocumentOpened` client event. The editor widget:
@@ -266,10 +270,12 @@ All file operations stay within server-validated boundaries:
 | Operation | Client authority | Server authority |
 |---|---|---|
 | Open file dialog | Renders native dialog; returns user-picked path | Canonicalizes path, creates single-file grant |
+| Open file (path browser) | Sends primary `MenuActivate` on the installed entry | Activation converts ephemeral browse authority into one single-file grant; path comes from server-held installed entries only |
 | Open workspace file | Sends relative path | Validates root containment, loads text |
 | Save | Sends document ID + version | Reauthorizes path, writes atomically |
 | Reload | Sends document ID + force flag | Reauthorizes path, re-reads, validates |
 | Folder dialog | Renders native dialog; returns user-picked path | Canonicalizes directory, adds workspace root |
+| Open workspace (path browser) | Sends secondary `MenuActivate` on the installed entry | Activation converts ephemeral browse authority into one `Directory` root grant for the bound tab; other tabs untouched |
 
 No operation grants:
 - Client-side filesystem read/write beyond the dialog picker

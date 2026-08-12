@@ -18,10 +18,13 @@ use crate::protocol::{
     SduiActionValue, SduiEditorBinding, SduiFlexDirection, SduiListItem, SduiNode, SduiNodeId,
     SduiNodeKind, SduiTree, WorkspaceRootId,
 };
-use crate::server::workspace::{FileListEntryKind, WorkspaceState};
+use crate::server::workspace::{FileListEntryKind, UserBrowseEntryKind, WorkspaceState};
 
-use super::transient_menu::{
-    TransientMenuAction, TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
+use super::{
+    fuzzy::fuzzy_score,
+    transient_menu::{
+        TransientMenuAction, TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
+    },
 };
 
 /// Maximum number of file entries the browser will render in the left panel.
@@ -69,6 +72,16 @@ impl From<FileListEntryKind> for FileBrowserEntryKind {
             FileListEntryKind::File => Self::File,
             FileListEntryKind::Symlink => Self::Symlink,
             FileListEntryKind::Other => Self::Other,
+        }
+    }
+}
+
+impl From<UserBrowseEntryKind> for FileBrowserEntryKind {
+    fn from(kind: UserBrowseEntryKind) -> Self {
+        match kind {
+            UserBrowseEntryKind::Directory => Self::Directory,
+            UserBrowseEntryKind::File => Self::File,
+            UserBrowseEntryKind::Other => Self::Other,
         }
     }
 }
@@ -251,12 +264,26 @@ impl FileBrowserState {
         session_id: TransientMenuSessionId,
         query: &str,
     ) -> TransientMenuSession {
-        let query_lower = query.to_lowercase();
-        let filtered: Vec<&FileBrowserEntry> = self
+        let mut filtered: Vec<(usize, i32, &FileBrowserEntry)> = self
             .entries
             .iter()
-            .filter(|entry| entry.name.to_lowercase().contains(&query_lower))
+            .enumerate()
+            .filter_map(|(index, entry)| {
+                let score = if query.is_empty() {
+                    Some(0)
+                } else {
+                    fuzzy_score(query, &entry.name)
+                }?;
+                Some((index, score, entry))
+            })
+            .collect();
+        if !query.is_empty() {
+            filtered.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        }
+        let filtered: Vec<&FileBrowserEntry> = filtered
+            .into_iter()
             .take(MAX_FUZZY_ITEMS)
+            .map(|(_, _, entry)| entry)
             .collect();
 
         let items: Vec<TransientMenuItem> = filtered
@@ -528,6 +555,32 @@ mod tests {
 
         let empty = browser.fuzzy_session(TransientMenuSessionId(3), "zzzz");
         assert!(empty.items().is_empty());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn file_browser_fuzzy_session_ranks_subsequence_matches() {
+        let root = temp_workspace("browser-fuzzy-ranking");
+        fs::write(root.join("control-center-open.rs"), "").unwrap();
+        fs::write(root.join("ccop.rs"), "").unwrap();
+
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        let browser = FileBrowserState::from_workspace(&workspace, root_id).unwrap();
+
+        let session = browser.fuzzy_session(TransientMenuSessionId(5), "ccop");
+
+        assert_eq!(
+            session.items().first().map(|item| item.label.as_str()),
+            Some("ccop.rs")
+        );
+        assert!(
+            session
+                .items()
+                .iter()
+                .any(|item| item.label == "control-center-open.rs")
+        );
 
         let _ = fs::remove_dir_all(root);
     }

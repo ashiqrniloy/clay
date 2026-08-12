@@ -97,6 +97,152 @@ Expected outcome:
 
 - Window management is production-safe, documented, and performance-bounded.
 
+## Phase 24: Command Centre
+
+Give Clay a single keyboard-first command centre surface — one floating
+Spotlight-style overlay with two modes: a command execution mode (all
+registered commands, filterable, showing package provenance and key bindings)
+and a dired-style filesystem browsing mode (editable path bar, drill into
+directories, filter-as-you-type, open files into the active pane or open a
+directory as the workspace of the current tab). Confirmed decisions: the
+client keybinding router is extended to multi-stroke sequences so Emacs-style
+chords are supported; filtering uses real fuzzy matching, not substring; the
+backdrop is a translucent scrim only — no custom blur beyond what Masonry and
+Vello provide upstream; a file selected in path mode opens in the active pane
+of the current tab, respecting per-tab workspace isolation. The work reuses
+the existing building blocks — `ControlCenter` (`src/server/control_center.rs`),
+`TransientMenuSession` (`src/shell/transient_menu.rs`), `FileBrowserState`
+(`src/shell/file_browser.rs`), the built-in command table
+(`src/server/command_execution.rs`), and the per-tab workspace binding
+(`src/server/tab_registry.rs`) — most of the effort is wiring, not new systems.
+
+### Phase 24.1: Transient Menu Interaction Round-Trip
+
+Focus areas:
+
+- Protocol messages for menu interactivity: client-to-server `MenuQueryUpdate`,
+  selection movement, `MenuActivate`/`MenuCancel` intents keyed by
+  `TransientMenuSessionId`, and a server-to-client transient menu snapshot
+  carrying the bounded, filtered `TransientMenuSession`.
+- Server session ownership in `src/server/connection.rs`: one active menu
+  session per tab; intents mutate server-owned session state and push a fresh
+  snapshot; sessions time out and cancel cleanly on tab switch or disconnect.
+- Client keystroke routing: while a menu session with modal focus policy is
+  active, key events feed the menu query/selection instead of the editor;
+  rendering goes through the existing `set_active_menu`/overlay projection in
+  `src/masonry_sdui.rs`.
+- Bounded payloads: item counts, label/detail/query lengths stay within the
+  existing `TRANSIENT_MENU_*` budget constants.
+
+Expected outcome:
+
+- Any `TransientMenuSession` is fully interactive end-to-end: open, type to
+  filter, move selection, activate, cancel — all server-authoritative.
+
+### Phase 24.2: Command Execution Mode
+
+Focus areas:
+
+- Default key binding for `controlCenter.open`; executing it opens a
+  `ControlCenter` session server-side and pushes the menu snapshot through the
+  Phase 24.1 round-trip instead of returning a bare `Accepted`.
+- Include the `shell.client*` command family (splits, pane focus/resize/move,
+  tab management) in the listing: activating one closes the menu and dispatches
+  through the existing `ShellClientCommand::from_command_id` client path,
+  since these require client UI authority.
+- Item detail already surfaces key binding, routing policy, and package
+  provenance (`built-in` or `name@version`); verify coverage for every
+  built-in command, every `shell.client*` command, and package-registered
+  commands (markdown, javascript/typescript comment toggles, settings, and
+  runtime-registered contributions).
+- Fuzzy matching replaces the current substring filter: a small Clay-owned
+  subsequence-scoring matcher shared by all transient menus, with ranking
+  (word-boundary and consecutive-match bonuses) and bounded candidate scans.
+
+Expected outcome:
+
+- One keybinding opens the command centre listing every executable command
+  with its package and key binding shown; typing fuzzy-filters; Enter runs it
+  through the shared command execution path.
+
+### Phase 24.3: Path Mode — Dired-Style Filesystem Browsing
+
+Focus areas:
+
+- New `PathBrowserSession` state (sibling of `FileBrowserState`): editable
+  path bar seeded with the active document's directory (fallback: tab
+  workspace root, then cwd), a bounded depth-1 listing snapshot, and
+  filter-as-you-type over the listing using the Phase 24.2 fuzzy matcher.
+- Dired navigation semantics: activating a directory descends into it;
+  Backspace on an empty query ascends; the path bar can be edited directly to
+  jump to any path; listings stay bounded (`max_depth: 1`, entry caps) and are
+  never read on the paint/layout path.
+- User-authorized browse grant: navigation inside this built-in surface
+  implicitly authorizes traversal outside granted workspace roots, consistent
+  with the unified user-authorized authority decision; opening a file converts
+  to an explicit `SingleFile` grant and opening a folder as workspace converts
+  to a `Directory` root grant. Package code receives no equivalent authority.
+- Activations: a file opens in the active pane of the current tab (duplicate
+  open focuses the existing pane, per Phase 22.2); a directory offers descend
+  (default) and open-as-workspace-for-this-tab (secondary key), the latter
+  routed through the existing `TabRegistry::open_workspace` binding and
+  per-tab snapshot push, preserving per-tab workspace isolation.
+- Native folder dialog (`src/client/file_dialog.rs`) remains as fallback, not
+  the primary flow.
+
+Expected outcome:
+
+- One keybinding opens the command centre in path mode with the current
+  directory loaded; the user can change path, filter, drill into folders,
+  open any file into the active pane, or load a folder as the tab's workspace
+  — all without leaving the keyboard.
+
+### Phase 24.4: Centered Floating Surface with Scrim Backdrop
+
+Focus areas:
+
+- New `TransientMenuOrigin::Centered` variant: the overlay host anchors the
+  menu at window center with a token-driven width, following the existing
+  origin-to-anchor/focus-policy pattern from Phase 20.5.
+- New `scrim` theme tokens (color + opacity) in the theme catalog; the
+  overlay host paints a translucent scrim over the shell behind the menu.
+  No custom blur: only what Masonry 0.4/Vello provide upstream is used, and
+  true backdrop blur is deferred unless upstream gains a filter pass.
+- Both command and path modes adopt the centered surface; bottom-anchored
+  origins remain for completion pickers and context menus.
+- Accessibility: role/name for the centred dialog, focus trap while modal,
+  screen-reader announcements for filtered result counts, and full keyboard
+  operability already required by Phase 20.5/22.6 conventions.
+
+Expected outcome:
+
+- The command centre presents as a Spotlight-style floating panel that dims
+  the Clay background, works identically for both modes, and meets the
+  existing accessibility and performance budget conventions.
+
+### Phase 24.5: Sequence Keybindings and Hardening
+
+Focus areas:
+
+- Extend the client keybinding router (`route_key` in
+  `src/client/behavior.rs`) from single-stroke matching to multi-stroke
+  sequences with a pending-chord state, timeout, and cancel-on-mismatch, so
+  Emacs-style chords (e.g. a prefix chord for path mode) are bindable through
+  the existing keybinding system and `init.js`.
+- Default bindings for command mode and path mode assigned as chords;
+  conflict/ambiguity validation extended to sequence prefixes.
+- Performance budgets for menu open latency, per-keystroke filter updates,
+  and listing snapshot sizes, CI-guarded like existing budgets; authority
+  review confirming the browse grant cannot be reached by package code.
+- Protocol compatibility tests, primitive reference docs, generated registry
+  entries, and wiki updates.
+
+Expected outcome:
+
+- Multi-stroke keybindings work everywhere keybindings do, the command centre
+  is performance-bounded and documented, and the new authority surface is
+  review-clean.
+
 ## ACP/AG-UI
 
 ## Coding agent

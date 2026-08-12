@@ -5,6 +5,7 @@ mod config_watch;
 mod configuration;
 mod connection;
 pub(crate) mod control_center;
+pub(crate) mod menu_sessions;
 // Cross-domain envelope validation is wired to extension-point handlers in
 // Plan 061 task 8; until then only tests exercise it.
 #[allow(dead_code)]
@@ -76,7 +77,9 @@ use windows::Win32::{
 
 use crate::{
     ipc::IpcEndpoint,
-    packages::commands::CommandRegistry,
+    packages::commands::{
+        CommandCatalogue, CommandCatalogueError, CommandRegistry, RegisteredCommand,
+    },
     perf::budgets::RUNTIME_STATE_BROADCAST_CAPACITY,
     protocol::{
         ClientId, DocumentAccess, DocumentId, LockOwner, RuntimeDiagnostic, RuntimeGenerationId,
@@ -402,6 +405,34 @@ impl RuntimeGenerationStore {
         self.current.lock().await.service.clone()
     }
 
+    /// Build one bounded inert command catalogue from the active runtime
+    /// generation. The worker snapshots clone only Rust metadata; no runtime
+    /// evaluation or V8 value crosses this boundary.
+    pub(crate) async fn command_catalogue_snapshot(
+        &self,
+        active_manifest: &crate::protocol::BehaviorManifest,
+    ) -> Result<(u64, CommandCatalogue), CommandCatalogueError> {
+        let current = self.current.lock().await;
+        let (trusted_commands, third_party_commands) = current.service.command_registry_snapshots();
+        let builtins = crate::server::command_execution::builtin_server_command_ids()
+            .iter()
+            .filter_map(|command_id| {
+                crate::server::command_execution::builtin_server_command(command_id)
+            })
+            .collect();
+        let shell_commands = shell_command_catalogue();
+        let catalogue = CommandCatalogue::from_sources(
+            vec![
+                builtins,
+                shell_commands,
+                trusted_commands,
+                third_party_commands,
+            ],
+            active_manifest,
+        )?;
+        Ok((current.id, catalogue))
+    }
+
     async fn push_diagnostic(&self, diagnostic: RuntimeDiagnostic) {
         self.current.lock().await.diagnostics.push(diagnostic);
     }
@@ -409,6 +440,23 @@ impl RuntimeGenerationStore {
     async fn swap(&self, next: RuntimeGeneration) {
         *self.current.lock().await = next;
     }
+}
+
+fn shell_command_catalogue() -> Vec<RegisteredCommand> {
+    crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE
+        .iter()
+        .map(|(command_id, display_name)| RegisteredCommand {
+            package_name: "clay".to_string(),
+            package_version: env!("CARGO_PKG_VERSION").to_string(),
+            api_prefix: "shell".to_string(),
+            command_id: (*command_id).to_string(),
+            display_name: (*display_name).to_string(),
+            routing_policy: crate::protocol::RoutingPolicy::ClientUiCommand,
+            key_bindings: Vec::new(),
+            custom_properties: Default::default(),
+            permissions: Vec::new(),
+        })
+        .collect()
 }
 
 #[derive(Debug)]
@@ -2498,6 +2546,136 @@ mod runtime_generation_tests {
     };
 
     use super::{IpcServer, ServerConfig};
+
+    #[tokio::test]
+    async fn command_catalogue_merges_loaded_packages_with_exact_provenance() {
+        // Phase 24.2 verification: the live catalogue must merge real
+        // first-party packages with exact (name, version) provenance and
+        // declared key bindings — synthetic fixtures cannot catch
+        // registration drift in shipped packages.
+        let root = temp_config_root(
+            "catalogue-provenance",
+            r#"import { loadPackage } from "clay:packages";
+await loadPackage("@clay/markdown");
+await loadPackage("@clay/settings");
+await loadPackage("@clay/javascript");
+await loadPackage("@clay/typescript");"#,
+        );
+        let server = server_with_config(root.clone());
+        assert!(server.reload_runtime_generation().await.reloaded);
+        // Open a real Markdown document through the follow-up message path so
+        // the markdown mode layer (with its keyRouting contribution) becomes
+        // the active manifest for the snapshot.
+        let metadata = crate::protocol::DocumentMetadata {
+            document_id: 2,
+            version: 1,
+            access: crate::protocol::DocumentAccess::Editable { lease_id: 1 },
+            lease_id: Some(1),
+            dirty: false,
+            workspace_root_id: 1,
+            path: "note.md".to_string(),
+        };
+        let generation_id = server.runtime_generation.generation_id().await;
+        let service = server.runtime_generation.current_service().await;
+        crate::server::connection::open_document_followup_messages(
+            &metadata,
+            "# Hi\n",
+            &server.behavior,
+            &server.sdui,
+            generation_id,
+            &service,
+            &server.parse_coordinator,
+        )
+        .await;
+        let manifest = server
+            .behavior
+            .lock()
+            .await
+            .manifest_for(metadata.document_id)
+            .clone();
+        assert_eq!(manifest.manifest_id, "markdown.markdown");
+        let (_, catalogue) = server
+            .runtime_generation
+            .command_catalogue_snapshot(&manifest)
+            .await
+            .expect("catalogue with loaded packages should validate");
+
+        let find = |command_id: &str| {
+            catalogue
+                .commands()
+                .iter()
+                .find(|command| command.command_id == command_id)
+                .unwrap_or_else(|| panic!("catalogue missing {command_id}"))
+        };
+
+        // Markdown family: package-owned IDs carry exact package provenance
+        // and the package-declared key-routing descriptor (the chord string
+        // label; parsed modifiers stay a manifest-metadata concern).
+        for (command_id, chord) in [
+            ("markdown.togglePreview", "Ctrl+Shift+M"),
+            ("markdown.insertHeading", "Ctrl+Alt+1"),
+            ("markdown.toggleList", "Ctrl+Shift+8"),
+        ] {
+            let command = find(command_id);
+            assert_eq!(command.package_name, "@clay/markdown");
+            assert_eq!(command.package_version, "0.1.0");
+            assert_eq!(command.api_prefix, "markdown");
+            assert_eq!(
+                command.routing_policy,
+                crate::protocol::RoutingPolicy::ServerFirst
+            );
+            assert!(
+                command.key_bindings.iter().any(|rule| rule.sequence[0].key
+                    == crate::protocol::KeyCode::Character(chord.to_string())),
+                "{command_id} should keep its declared key-routing descriptor"
+            );
+        }
+        // Toggle-comment (no default binding) and the settings family
+        // (server-first, no chords) still surface with exact provenance.
+        for command_id in [
+            "markdown.toggleComment",
+            "settings.open",
+            "settings.close",
+            "settings.setTheme",
+            "settings.setAppearance",
+            "settings.setTypography",
+            "settings.reset",
+            "javascript.toggleLineComment",
+            "typescript.toggleLineComment",
+        ] {
+            find(command_id);
+        }
+        assert_eq!(
+            find("markdown.toggleComment").package_name,
+            "@clay/markdown"
+        );
+        assert_eq!(
+            find("javascript.toggleLineComment").package_name,
+            "@clay/javascript"
+        );
+        assert_eq!(
+            find("typescript.toggleLineComment").package_name,
+            "@clay/typescript"
+        );
+        assert_eq!(find("settings.open").package_name, "@clay/settings");
+        assert_eq!(find("settings.open").package_version, "0.1.0");
+        assert_eq!(find("settings.open").api_prefix, "settings");
+
+        // Clay-owned entries keep BuiltIn provenance (package_name "clay")
+        // even when packages are loaded.
+        assert_eq!(
+            find("runtime.reloadConfiguration").package_name,
+            "clay",
+            "built-ins must not be mislabeled as package commands"
+        );
+        assert_eq!(
+            find("shell.clientSplitPaneVertical").package_name,
+            "clay",
+            "shell client commands must stay Clay-owned in the catalogue"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
 
     fn temp_config_root(name: &str, init_js: &str) -> std::path::PathBuf {
         let unique = SystemTime::now()
@@ -5340,6 +5518,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn live_command_catalogue_contains_builtins_and_exact_shell_surface() {
+        let socket_path = unique_socket_path("command-catalogue");
+        let server = server_with_document(
+            &socket_path,
+            DocumentState::new(
+                1,
+                "welcome".to_string(),
+                crate::protocol::DocumentAccess::Editable { lease_id: 1 },
+            ),
+        );
+        let manifest = server.behavior.lock().await.manifest_for(1).clone();
+        let (generation_id, catalogue) = server
+            .runtime_generation
+            .command_catalogue_snapshot(&manifest)
+            .await
+            .expect("live catalogue should validate");
+        let ids: std::collections::HashSet<_> = catalogue
+            .commands()
+            .iter()
+            .map(|command| command.command_id.as_str())
+            .collect();
+
+        assert_eq!(generation_id, 1);
+        for command_id in crate::server::command_execution::builtin_server_command_ids() {
+            assert!(ids.contains(command_id));
+        }
+        for (command_id, _) in crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE {
+            assert!(ids.contains(command_id));
+            assert!(
+                crate::masonry_shell::ShellClientCommand::from_command_id(command_id).is_some()
+            );
+        }
+
+        fs::remove_dir_all(socket_path.parent().expect("socket directory")).unwrap();
+    }
+
+    #[tokio::test]
     async fn deferred_initial_state_waits_for_tab_binding() {
         let socket_path = unique_socket_path("deferred-handshake");
         let selected_root = socket_path.parent().unwrap().join("selected");
@@ -5626,10 +5841,17 @@ mod tests {
         loop {
             match codec.read_server_message(&mut stream).await.unwrap() {
                 ServerMessage::FileOpenCapabilityIssued { .. } => break,
-                ServerMessage::CaretStyleOverride(_)
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::ShellPreferences(_)
-                | ServerMessage::TabRegistry(_) => {}
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_) => {}
                 message => panic!("expected file-open capability, got {message:?}"),
             }
         }
@@ -5657,7 +5879,17 @@ mod tests {
                     assert_eq!(lease_id, snapshot_lease_id);
                     break (document_id, version, lease_id);
                 }
-                ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_) => {}
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             }
         };
@@ -5696,11 +5928,18 @@ mod tests {
                 {
                     break;
                 }
-                ServerMessage::DecorationSet(_)
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
                 | ServerMessage::DiagnosticSet(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::SduiSnapshot { .. }
-                | ServerMessage::TabRegistry(_) => {}
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::FileOpenCapabilityIssued { .. } => {}
                 other => panic!("expected region-lock rejection, got {other:?}"),
             }
         }

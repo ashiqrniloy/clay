@@ -269,6 +269,106 @@ impl Driver {
         }
     }
 
+    /// Phase 24.2 shared shell-command driver path: used by local keybindings
+    /// (`ClientUiCommandResult::ShellCommand`) and server-approved menu
+    /// activation (`ShellClientCommandRequest`). Tab commands are
+    /// driver-routed (active-tab resolution + bounds/wraparound policies +
+    /// server-confirmed ordering); pane commands dispatch through the shell
+    /// widget, with the dirty-close gate for `ClosePane`.
+    fn apply_shell_client_command(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        command: clay::masonry_shell::ShellClientCommand,
+    ) {
+        // Phase 22.4: tab commands are driver-routed (active-tab resolution
+        // + bounds/wraparound policies + server-confirmed ordering); the
+        // shell widget's tab arms stay inert.
+        if self.apply_tab_command(ctx, window_id, command) {
+            return;
+        }
+        // Phase 22.2: closing a pane with unsaved edits is blocked (the view
+        // shows the save-conflict menu); clean panes release their documents
+        // server-side before the tree op.
+        if matches!(command, clay::masonry_shell::ShellClientCommand::ClosePane) {
+            let (may_close, target) =
+                ctx.render_root(window_id)
+                    .edit_widget(self.shell_widget_id, |mut widget| {
+                        let Some(shell) = widget.try_downcast::<ClayShellWidget>() else {
+                            return (false, None);
+                        };
+                        // Single-pane close is a no-op; skip the gate.
+                        if shell.widget.pane_targets().len() <= 1 {
+                            return (true, None);
+                        }
+                        // Phase 22.2: a closed pane's pending open can never be
+                        // answered into it. Phase 22.3: the active tab's
+                        // attribution map.
+                        if let Some(tab) = self.tabs.get_mut(&self.active_tab) {
+                            tab.pending_opens.remove(&shell.widget.active_pane_id());
+                        }
+                        (true, shell.widget.active_pane_target())
+                    });
+            let menu = if may_close {
+                target.map(|target| {
+                    ctx.render_root(window_id)
+                        .edit_widget(target, |mut widget| {
+                            if let Some(editor) = widget.try_downcast::<EditorWidget>() {
+                                if !editor.widget.guard_pane_close() {
+                                    return (false, editor.widget.take_pending_menu());
+                                }
+                                editor.widget.close_pane_view();
+                                (true, None)
+                            } else if let Some(view) = widget.try_downcast::<PaneDocumentView>() {
+                                if !view.widget.guard_pane_close() {
+                                    return (false, view.widget.take_pending_menu());
+                                }
+                                view.widget.close_pane();
+                                (true, None)
+                            } else {
+                                (true, None)
+                            }
+                        })
+                })
+            } else {
+                None
+            };
+            if let Some((may_close, menu)) = menu {
+                if let Some(menu) = menu {
+                    self.apply_menu_sync(ctx, window_id, self.editor_widget_id, menu);
+                }
+                if !may_close {
+                    // Dirty pane: keep it open; the conflict menu offers
+                    // Save/Discard/Keep.
+                    return;
+                }
+            }
+        }
+        // Phase 22.1: dispatch pane-management commands to the shell.
+        let shell_widget_id = self.shell_action_target();
+        ctx.render_root(window_id)
+            .edit_widget(shell_widget_id, |mut widget| {
+                if let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() {
+                    shell
+                        .widget
+                        .apply_shell_client_command(&mut shell.ctx, command);
+                    shell.ctx.request_accessibility_update();
+                }
+            });
+        // Phase 22.2: keyboard routing follows pane focus — move Masonry
+        // focus to the (possibly new) active pane's content.
+        let target = ctx
+            .render_root(window_id)
+            .edit_widget(shell_widget_id, |mut widget| {
+                widget
+                    .try_downcast::<ClayShellWidget>()
+                    .and_then(|shell| shell.widget.active_pane_target())
+            });
+        if let Some(target) = target {
+            let _ = ctx.render_root(window_id).focus_on(Some(target));
+        }
+    }
+
     /// Route a document-scoped event to the pane view owning the document:
     /// try the focused pane's target first (the hot path), then the rest.
     /// Non-owning views no-op on foreign documents.
@@ -867,6 +967,22 @@ impl AppDriver for Driver {
                             // Chrome-only connection state.
                             self.apply_connection_to_chrome(ctx, window_id, chrome_id, event);
                         }
+                        // Phase 24.1: server-owned menu snapshots are per-tab
+                        // chrome state — the chrome overlay renders them and
+                        // every pane view keeps the interactive copy so keys
+                        // dispatch from whichever pane is focused (each view
+                        // pushes the same session through the pending-push
+                        // path; `set_active_menu` is idempotent).
+                        ClientConnectionEvent::TransientMenuSnapshot(_)
+                        | ClientConnectionEvent::TransientMenuClosed { .. } => {
+                            self.apply_connection_to_chrome(
+                                ctx,
+                                window_id,
+                                chrome_id,
+                                event.clone(),
+                            );
+                            self.fan_out_event(ctx, window_id, client_id, chrome_id, event);
+                        }
                         ClientConnectionEvent::RuntimeStateSnapshot(_) => {
                             // Chrome installs fully (exactly one ack); other
                             // panes get the per-document render parts.
@@ -920,6 +1036,17 @@ impl AppDriver for Driver {
                             self.apply_event_to_active_pane(
                                 ctx, window_id, client_id, chrome_id, event,
                             );
+                        }
+                        ClientConnectionEvent::ShellClientCommandRequest { command_id } => {
+                            // Phase 24.2: server-approved shell command from
+                            // menu activation. The client re-parses the id
+                            // deny-by-default; unknown/forged ids are dropped
+                            // with no state mutation.
+                            if let Some(command) =
+                                clay::masonry_shell::ShellClientCommand::from_command_id(command_id)
+                            {
+                                self.apply_shell_client_command(ctx, window_id, command);
+                            }
                         }
                         _ => {
                             // Request-scoped events (completion / language-
@@ -1443,96 +1570,7 @@ impl AppDriver for Driver {
                         });
                 }
                 ClientUiCommandResult::ShellCommand(command) => {
-                    // Phase 22.4: tab commands are driver-routed (active-tab
-                    // resolution + bounds/wraparound policies + server-confirmed
-                    // ordering); the shell widget's tab arms stay inert.
-                    if self.apply_tab_command(ctx, window_id, command) {
-                        return;
-                    }
-                    // Phase 22.2: closing a pane with unsaved edits is blocked
-                    // (the view shows the save-conflict menu); clean panes
-                    // release their documents server-side before the tree op.
-                    if matches!(command, clay::masonry_shell::ShellClientCommand::ClosePane) {
-                        let (may_close, target) = ctx.render_root(window_id).edit_widget(
-                            self.shell_widget_id,
-                            |mut widget| {
-                                let Some(shell) = widget.try_downcast::<ClayShellWidget>() else {
-                                    return (false, None);
-                                };
-                                // Single-pane close is a no-op; skip the gate.
-                                if shell.widget.pane_targets().len() <= 1 {
-                                    return (true, None);
-                                }
-                                // Phase 22.2: a closed pane's pending open can
-                                // never be answered into it. Phase 22.3: the
-                                // active tab's attribution map.
-                                if let Some(tab) = self.tabs.get_mut(&self.active_tab) {
-                                    tab.pending_opens.remove(&shell.widget.active_pane_id());
-                                }
-                                (true, shell.widget.active_pane_target())
-                            },
-                        );
-                        let menu = if may_close {
-                            target.map(|target| {
-                                ctx.render_root(window_id)
-                                    .edit_widget(target, |mut widget| {
-                                        if let Some(editor) = widget.try_downcast::<EditorWidget>()
-                                        {
-                                            if !editor.widget.guard_pane_close() {
-                                                return (false, editor.widget.take_pending_menu());
-                                            }
-                                            editor.widget.close_pane_view();
-                                            (true, None)
-                                        } else if let Some(view) =
-                                            widget.try_downcast::<PaneDocumentView>()
-                                        {
-                                            if !view.widget.guard_pane_close() {
-                                                return (false, view.widget.take_pending_menu());
-                                            }
-                                            view.widget.close_pane();
-                                            (true, None)
-                                        } else {
-                                            (true, None)
-                                        }
-                                    })
-                            })
-                        } else {
-                            None
-                        };
-                        if let Some((may_close, menu)) = menu {
-                            if let Some(menu) = menu {
-                                self.apply_menu_sync(ctx, window_id, self.editor_widget_id, menu);
-                            }
-                            if !may_close {
-                                // Dirty pane: keep it open; the conflict menu
-                                // offers Save/Discard/Keep.
-                                return;
-                            }
-                        }
-                    }
-                    // Phase 22.1: dispatch pane-management commands to the shell.
-                    let shell_widget_id = self.shell_action_target();
-                    ctx.render_root(window_id)
-                        .edit_widget(shell_widget_id, |mut widget| {
-                            if let Some(mut shell) = widget.try_downcast::<ClayShellWidget>() {
-                                shell
-                                    .widget
-                                    .apply_shell_client_command(&mut shell.ctx, command);
-                                shell.ctx.request_accessibility_update();
-                            }
-                        });
-                    // Phase 22.2: keyboard routing follows pane focus — move
-                    // Masonry focus to the (possibly new) active pane's content.
-                    let target =
-                        ctx.render_root(window_id)
-                            .edit_widget(shell_widget_id, |mut widget| {
-                                widget
-                                    .try_downcast::<ClayShellWidget>()
-                                    .and_then(|shell| shell.widget.active_pane_target())
-                            });
-                    if let Some(target) = target {
-                        let _ = ctx.render_root(window_id).focus_on(Some(target));
-                    }
+                    self.apply_shell_client_command(ctx, window_id, command);
                 }
             },
         }

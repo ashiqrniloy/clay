@@ -74,7 +74,15 @@ workspace grants; the registry only binds already-authorized connections.
     capability token is needed for this Clay-owned tab bind.
   - `OpenWorkspace { workspace_root }` — adds a workspace root to the
     sending connection's bound tab workspace and renames the entry; a foreign
-    `TabId` cannot mutate it.
+    `TabId` cannot mutate it. Phase 24.3 extracts the bound-tab open logic
+    into the shared `open_workspace_for_bound_tab` helper, which also backs
+    the Path Browser's `Alt+Enter` secondary activation (see
+    [Path Browser](path-browser.md)): add/validate the canonical root via
+    `WorkspaceState::add_root`, `TabRegistry::open_workspace`, broadcast the
+    reconciled snapshot, and refresh the tab's file-browser SDUI snapshot
+    when the workspace pane is visible. The `TabCommand` path consequently
+    also pushes the file-browser refresh now (consistent with the
+    native-dialog flow).
   - `Activate { tab_id }` — makes the tab active; `Close { tab_id }` —
     removes the tab and **terminates that tab's connection** (the closing
     connection exits its handler loop, releasing its connection permit and
@@ -86,6 +94,10 @@ workspace grants; the registry only binds already-authorized connections.
     reconciling snapshot, and returns `Ok(())` only when closed.
     `Reclaim { tab_id }` — rebinds a surviving registry entry to the
     calling connection (reconnect path: keeps `TabId`, rebinds `ClientId`).
+    Activate also cancels the connection's active server menu session
+    (`TransientMenuClosed`) Escape-free on focus loss — cancel-on-tab-switch
+    beats a hidden-but-alive per-tab menu (Phase 24.1; the Path Browser
+    inherits it, 24.3).
 - Every `Activate`/`Close`/`OpenWorkspace` attempt pushes a fresh
   `TabRegistrySnapshot` on the broadcast lane **even when rejected** — that
   is the reconciliation signal that lets an optimistically-switching client
@@ -496,6 +508,7 @@ tests: `pane_commands_only_mutate_the_active_tab`,
   close guard reused for dirty tabs.
 - [Client Snapshot Bootstrap](client-snapshot-bootstrap.md) — connection
   bootstrap each tab reuses.
+- [Path Browser](path-browser.md) — per-tab workspace open + tab-switch cancellation
 - [Document Leases and Region Locks](../flows/document-leases-and-region-locks.md)
   — the per-connection authority path tab ops ride on.
 

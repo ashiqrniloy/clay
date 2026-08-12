@@ -456,6 +456,67 @@ impl ClientEditQueue {
         })
     }
 
+    // Phase 24.1: server-owned menu intents. The client forwards keystrokes
+    // only; the server is authoritative for query, items, selection, and
+    // activation payloads (`session_id` is the opaque server handle).
+    pub(crate) fn enqueue_menu_query_update(
+        &self,
+        session_id: u64,
+        query: String,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::MenuQueryUpdate {
+            client_id: self.client_id,
+            session_id,
+            query,
+        })
+    }
+
+    /// Phase 24.3: semantic Backspace; the server session decides whether it
+    /// deletes query text or ascends (path mode).
+    pub(crate) fn enqueue_menu_backspace(
+        &self,
+        session_id: u64,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::MenuBackspace {
+            client_id: self.client_id,
+            session_id,
+        })
+    }
+
+    pub(crate) fn enqueue_menu_selection_move(
+        &self,
+        session_id: u64,
+        delta: i64,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::MenuSelectionMove {
+            client_id: self.client_id,
+            session_id,
+            delta,
+        })
+    }
+
+    pub(crate) fn enqueue_menu_activate(
+        &self,
+        session_id: u64,
+        kind: crate::protocol::TransientMenuActivationData,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::MenuActivate {
+            client_id: self.client_id,
+            session_id,
+            kind,
+        })
+    }
+
+    pub(crate) fn enqueue_menu_cancel(
+        &self,
+        session_id: u64,
+    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
+        self.sender.try_send(ClientMessage::MenuCancel {
+            client_id: self.client_id,
+            session_id,
+        })
+    }
+
     /// Acknowledge a fully installed runtime generation after atomic client install.
     pub(crate) fn enqueue_runtime_generation_installed(
         &self,
@@ -814,6 +875,20 @@ pub enum ClientConnectionEvent {
     TabRegistry(TabRegistrySnapshot),
     RuntimeDiagnostic(RuntimeDiagnostic),
     EditTransaction(ServerMessage),
+    /// Phase 24.1: server-authoritative transient-menu display copy. Keys
+    /// route back as menu intents; visuals update only from snapshots.
+    TransientMenuSnapshot(Box<crate::protocol::TransientMenuSnapshotData>),
+    /// Phase 24.1: the server closed a menu session (Escape, activation,
+    /// tab switch, replacement open, or generation replacement).
+    TransientMenuClosed {
+        session_id: u64,
+    },
+    /// Phase 24.2: server-approved shell command from menu activation. The
+    /// client re-parses the id deny-by-default via
+    /// `ShellClientCommand::from_command_id`; unknown/forged ids are dropped.
+    ShellClientCommandRequest {
+        command_id: String,
+    },
     ServerError {
         code: ProtocolErrorCode,
         message: String,
@@ -1598,6 +1673,21 @@ async fn run_connection<S>(
                     }
                     Ok(message @ ServerMessage::EditTransaction { .. }) => {
                         let _ = events.send(ClientConnectionEvent::EditTransaction(message)).await;
+                    }
+                    Ok(ServerMessage::TransientMenuSnapshot(snapshot)) => {
+                        let _ = events
+                            .send(ClientConnectionEvent::TransientMenuSnapshot(snapshot))
+                            .await;
+                    }
+                    Ok(ServerMessage::TransientMenuClosed { session_id }) => {
+                        let _ = events
+                            .send(ClientConnectionEvent::TransientMenuClosed { session_id })
+                            .await;
+                    }
+                    Ok(ServerMessage::ShellClientCommandRequest { command_id }) => {
+                        let _ = events
+                            .send(ClientConnectionEvent::ShellClientCommandRequest { command_id })
+                            .await;
                     }
                     Ok(ServerMessage::ActiveTheme(theme)) => {
                         let _ = events.send(ClientConnectionEvent::ActiveTheme(theme)).await;
@@ -3844,14 +3934,23 @@ mod tests {
             .unwrap();
 
         let mut event = session.events.recv().await.unwrap();
-        // Handshake extras (SDUI snapshot, runtime caret override) are
-        // legitimate at any point; skip past them to the event under test.
+        // Handshake extras and asynchronous server broadcasts (SDUI snapshot,
+        // runtime caret override, the mode-activation document-layer manifest,
+        // theme/typography fanout, parse decorations) are legitimate at any
+        // point; skip past them to the event under test.
         while matches!(
             event,
             ClientConnectionEvent::SduiSnapshot { .. }
                 | ClientConnectionEvent::CaretStyleOverride(_)
                 | ClientConnectionEvent::ShellPreferences(_)
                 | ClientConnectionEvent::TabRegistry(_)
+                | ClientConnectionEvent::BehaviorManifestInstalled { .. }
+                | ClientConnectionEvent::ActiveTheme(_)
+                | ClientConnectionEvent::ActiveTypography(_)
+                | ClientConnectionEvent::RuntimeDiagnostic(_)
+                | ClientConnectionEvent::DecorationSet(_)
+                | ClientConnectionEvent::DecorationBatch(_)
+                | ClientConnectionEvent::DiagnosticSet(_)
         ) {
             event = session.events.recv().await.unwrap();
         }
@@ -4149,10 +4248,17 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
         loop {
             match codec.read_server_message(&mut stream).await.unwrap() {
                 ServerMessage::FileOpenCapabilityIssued { .. } => break,
-                ServerMessage::CaretStyleOverride(_)
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::ShellPreferences(_)
-                | ServerMessage::TabRegistry(_) => {}
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_) => {}
                 message => panic!("expected file-open capability, got {message:?}"),
             }
         }
@@ -4181,7 +4287,17 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                     assert_eq!(lease_id, snapshot_lease_id);
                     break (document_id, version, text, lease_id);
                 }
-                ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_) => {}
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             }
         };
@@ -4212,14 +4328,18 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                     transaction_id: 99,
                     reason,
                 } if rejected_document_id == document_id => break reason,
-                ServerMessage::SduiSnapshot { .. }
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_)
-                | ServerMessage::TabRegistry(_) => continue,
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),
             }
         };
@@ -4244,16 +4364,40 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
             .await
             .unwrap();
 
-        assert_eq!(
-            codec.read_server_message(&mut stream).await.unwrap(),
-            ServerMessage::ResyncSnapshot {
-                document_id,
-                version,
-                text,
-                access: DocumentAccess::Editable { lease_id },
-                lease_id: Some(lease_id),
+        loop {
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::ResyncSnapshot {
+                    document_id: resynced_document_id,
+                    version: resynced_version,
+                    text: resynced_text,
+                    access:
+                        DocumentAccess::Editable {
+                            lease_id: resynced_lease_id,
+                        },
+                    lease_id: Some(resynced_snapshot_lease_id),
+                } => {
+                    assert_eq!(resynced_document_id, document_id);
+                    assert_eq!(resynced_version, version);
+                    assert_eq!(resynced_text, text);
+                    assert_eq!(resynced_lease_id, lease_id);
+                    assert_eq!(resynced_snapshot_lease_id, lease_id);
+                    break;
+                }
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::FileOpenCapabilityIssued { .. }
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_) => {}
+                message => panic!("expected ResyncSnapshot, got {message:?}"),
             }
-        );
+        }
 
         server_task.abort();
     }
@@ -5018,10 +5162,17 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
         loop {
             match codec.read_server_message(&mut stream).await.unwrap() {
                 ServerMessage::FileOpenCapabilityIssued { .. } => break,
-                ServerMessage::CaretStyleOverride(_)
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::ShellPreferences(_)
-                | ServerMessage::TabRegistry(_) => {}
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_) => {}
                 message => panic!("expected file-open capability, got {message:?}"),
             }
         }
@@ -5050,7 +5201,17 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                     assert_eq!(lease_id, snapshot_lease_id);
                     break (document_id, version, text, lease_id);
                 }
-                ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_) => {}
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             }
         };
@@ -5081,14 +5242,18 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                     transaction_id: 99,
                     reason,
                 } if rejected_document_id == document_id => break reason,
-                ServerMessage::SduiSnapshot { .. }
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_)
-                | ServerMessage::TabRegistry(_) => continue,
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),
             }
         };
@@ -5113,16 +5278,40 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
             .await
             .unwrap();
 
-        assert_eq!(
-            codec.read_server_message(&mut stream).await.unwrap(),
-            ServerMessage::ResyncSnapshot {
-                document_id,
-                version,
-                text,
-                access: DocumentAccess::Editable { lease_id },
-                lease_id: Some(lease_id),
+        loop {
+            match codec.read_server_message(&mut stream).await.unwrap() {
+                ServerMessage::ResyncSnapshot {
+                    document_id: resynced_document_id,
+                    version: resynced_version,
+                    text: resynced_text,
+                    access:
+                        DocumentAccess::Editable {
+                            lease_id: resynced_lease_id,
+                        },
+                    lease_id: Some(resynced_snapshot_lease_id),
+                } => {
+                    assert_eq!(resynced_document_id, document_id);
+                    assert_eq!(resynced_version, version);
+                    assert_eq!(resynced_text, text);
+                    assert_eq!(resynced_lease_id, lease_id);
+                    assert_eq!(resynced_snapshot_lease_id, lease_id);
+                    break;
+                }
+                ServerMessage::BehaviorManifest(_)
+                | ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::ActiveTheme(_)
+                | ServerMessage::ActiveTypography(_)
+                | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::ShellPreferences(_)
+                | ServerMessage::FileOpenCapabilityIssued { .. }
+                | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::TabRegistry(_)
+                | ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_) => {}
+                message => panic!("expected ResyncSnapshot, got {message:?}"),
             }
-        );
+        }
 
         server_task.abort();
         let _ = fs::remove_file(&socket_path);

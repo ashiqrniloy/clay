@@ -1267,6 +1267,15 @@ impl ClayOpState {
             .collect()
     }
 
+    pub(crate) fn command_registry_snapshot(
+        &self,
+    ) -> Vec<crate::packages::commands::RegisteredCommand> {
+        self.commands
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .snapshot()
+    }
+
     pub(super) async fn execute_command(
         &self,
         request: crate::server::command_execution::CommandExecutionRequest,

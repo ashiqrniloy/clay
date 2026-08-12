@@ -1,8 +1,10 @@
 pub(crate) mod components;
 pub(crate) mod file_browser;
+pub(crate) mod fuzzy;
 pub(crate) mod layout;
 pub(crate) mod layout_persist;
 pub(crate) mod package_ui;
+pub(crate) mod path_browser;
 pub(crate) mod primitives;
 pub(crate) mod theme;
 #[doc(hidden)]

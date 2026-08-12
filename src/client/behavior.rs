@@ -494,6 +494,72 @@ mod tests {
     }
 
     #[test]
+    fn client_routes_control_center_open_default_binding_as_server_intent() {
+        // Phase 24.2: the default manifest's Global Ctrl+Shift+P route
+        // dispatches through the server-intent lane (no hard-coded chord in
+        // widget event handling).
+        let state = ClientBehaviorState::new(BehaviorManifest::minimal_text_editing(1)).unwrap();
+
+        let routed = state.route_key(&KeyStroke {
+            key: KeyCode::Character("p".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                shift: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert_eq!(
+            routed,
+            RoutedBehavior::ServerIntent(ServerIntentRoute {
+                command_id: "controlCenter.open".to_string(),
+                routing_policy: RoutingPolicy::ServerFirst,
+            })
+        );
+    }
+
+    #[test]
+    fn editor_text_focus_rule_wins_over_global_for_same_chord() {
+        // Precedence: an EditorTextFocus rule shadows a Global rule for the
+        // same chord (more specific context first).
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest
+            .commands
+            .push(CommandDeclaration::client_ui("editor.clientUndo", "Undo"));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "editor.clientUndo".to_string(),
+            sequence: vec![KeyStroke {
+                key: KeyCode::Character("p".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    shift: true,
+                    ..KeyModifiers::NONE
+                },
+            }],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ClientUiCommand,
+        });
+        let state = ClientBehaviorState::new(manifest).unwrap();
+
+        let routed = state.route_key(&KeyStroke {
+            key: KeyCode::Character("p".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                shift: true,
+                ..KeyModifiers::NONE
+            },
+        });
+
+        assert_eq!(
+            routed,
+            RoutedBehavior::ClientUiCommand(ClientUiCommandRoute {
+                command_id: "editor.clientUndo".to_string(),
+                routing_policy: RoutingPolicy::ClientUiCommand,
+            })
+        );
+    }
+
+    #[test]
     fn client_routes_open_file_dialog_as_client_ui_intent() {
         let mut manifest = BehaviorManifest::minimal_text_editing(1);
         manifest.commands.push(CommandDeclaration::client_ui(

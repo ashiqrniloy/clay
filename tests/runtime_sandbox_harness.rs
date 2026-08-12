@@ -122,7 +122,11 @@ async fn sandbox_terminated_and_unterminated_overflow_are_bounded_and_reaped() {
             error,
             RuntimeSandboxError::PayloadTooLarge { len, max } if len == MAX + 1 && max == MAX
         ));
-        assert!(started.elapsed() < Duration::from_secs(1));
+        // Wall-clock promptness bound (not a determinism contract): the
+        // PayloadTooLarge variant already proves rejection happened before
+        // the 2s evaluate timeout; keep a generous margin for parallel-load
+        // runs where several test binaries compile/run at once.
+        assert!(started.elapsed() < Duration::from_millis(1500));
         assert_child_reaped(&pid_file);
         let _ = fs::remove_file(script);
         let _ = fs::remove_file(pid_file);

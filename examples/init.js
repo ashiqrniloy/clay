@@ -250,6 +250,26 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 //   "Ctrl+Alt+Shift+9": "shell.clientTabMoveTo.9",
 // }});
 
+// Control Center (Phase 24.2): built-in server-first command
+// controlCenter.open ships with the default Ctrl+Shift+P chord (Global
+// scope) in the default behavior manifest, re-declared in the batch table
+// below as an idempotent no-op override. The Control Center is a transient
+// menu session: listing grants no authority, and it cannot be styled,
+// positioned, filtered, or dismissed from init.js. Multi-stroke chord
+// sequences (e.g. Emacs-style "Ctrl+X Ctrl+C") are not runtime-backed yet —
+// Phase 24.5 owns sequence key routing; single-stroke chords only for now.
+
+// Path Browser (Phase 24.3): built-in server-first command
+// controlCenter.openPath ships with the temporary default Ctrl+Alt+P chord
+// (Global scope), re-declared in the batch table below as an idempotent
+// no-op override. It opens a dired-style browse session seeded from the
+// active document's directory; Enter descends/opens, Alt+Enter opens a
+// directory as this tab's workspace, Backspace on an empty filter ascends.
+// Browse navigation alone grants nothing — opening a file or workspace is
+// the explicit grant — and packages get no arbitrary-path access. The
+// Ctrl+Alt+P default is temporary: Phase 24.5 replaces it with sequence
+// defaults without changing the command id.
+
 // Default keybindings — implemented below so this file, taken as-is, installs
 // every shipped default chord (they are already active without init.js;
 // re-declaring them is an idempotent no-op override and doubles as the
@@ -286,6 +306,15 @@ bindKey({
     "Ctrl+Alt+]": "shell.clientMovePaneNext",
     // Built-in server-first reload; this re-declaration is idempotent.
     "Ctrl+Shift+R": "runtime.reloadConfiguration",
+    // Built-in server-first Control Center (Phase 24.2); this re-declaration
+    // is idempotent. Global scope, ServerFirst routing; override/remove via
+    // bindKey/unbindKey (see the commented example below).
+    "Ctrl+Shift+P": "controlCenter.open",
+    // Built-in server-first Path Browser (Phase 24.3); this re-declaration
+    // is idempotent. Temporary default — Phase 24.5 ships sequence defaults
+    // without changing the command id; override/remove via bindKey/unbindKey
+    // (see the commented example below).
+    "Ctrl+Alt+P": "controlCenter.openPath",
   },
 });
 
@@ -341,7 +370,19 @@ bindKey("Alt+R", "editor.clientSmartSelect.shrink", { scope: "editor" });
 
 // Rebinding a shipped default (example: "add equal pane" on a different
 // chord; scope "global" matches the shipped default context):
-// bindKey("Ctrl+Shift+P", "shell.clientAddEqualPane", { scope: "global" });
+// bindKey("Ctrl+Shift+=", "shell.clientAddEqualPane", { scope: "global" });
+
+// Rebinding the Control Center default (Phase 24.2): unbind the shipped
+// Ctrl+Shift+P, then bind another global chord. Without the unbind the
+// default remains bound; last binding for a chord wins:
+// unbindKey("Ctrl+Shift+P", { scope: "global" });
+// bindKey("Alt+X", "controlCenter.open", { scope: "global" });
+
+// Rebinding the Path Browser default (Phase 24.3): unbind the shipped
+// Ctrl+Alt+P, then bind another global chord (command id stays stable across
+// the Phase 24.5 sequence-default handoff):
+// unbindKey("Ctrl+Alt+P", { scope: "global" });
+// bindKey("Alt+P", "controlCenter.openPath", { scope: "global" });
 
 // ----------------------------------------------------------------------------
 // 6. Window split pane focus — clay:shell

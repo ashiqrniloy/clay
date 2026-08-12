@@ -1269,6 +1269,23 @@ impl ClayJsRuntimeService {
         )
     }
 
+    /// Clone command metadata from both persistent trust-domain workers.
+    /// Only inert Rust values cross this boundary; workers, V8 values, and
+    /// callbacks remain owned by their runtime domains.
+    pub(crate) fn command_registry_snapshots(
+        &self,
+    ) -> (
+        Vec<crate::packages::commands::RegisteredCommand>,
+        Vec<crate::packages::commands::RegisteredCommand>,
+    ) {
+        (
+            self.worker().op_state.command_registry_snapshot(),
+            self.domain_worker(crate::packages::bundled::RuntimeDomain::ThirdParty)
+                .op_state
+                .command_registry_snapshot(),
+        )
+    }
+
     /// Trusted-domain-only generation shutdown (Plan 061 task 12): reload
     /// shares the third-party worker across generations, so only the old
     /// trusted worker's language-server sessions end at commit.
@@ -7968,6 +7985,101 @@ mod tests {
             crate::protocol::RoutingPolicy::ServerFirstWithLock {
                 lock_scope: crate::protocol::LockScope::Behavior,
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn configuration_default_control_center_binding_is_present_and_overridable() {
+        // Phase 24.2: `controlCenter.open` ships a Global Ctrl+Shift+P
+        // default that init.js can unbind and rebind like any other default.
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { bindKey, listKeyBindings, unbindKey } from "clay:keybindings";
+                const defaultBinding = listKeyBindings("global").find(
+                  (binding) => binding.command === "controlCenter.open"
+                );
+                unbindKey("Ctrl+Shift+P", { scope: "global" });
+                bindKey("Ctrl+Alt+P", "controlCenter.open", { scope: "global" });
+                const bindings = listKeyBindings("global");
+                Deno.core.ops.op_clay_runtime_record(
+                  `${defaultBinding?.key}:${bindings.some((binding) => binding.key === "Ctrl+Shift+P")}:${bindings.some((binding) => binding.key === "Ctrl+Alt+P")}`
+                );
+                "#,
+            )
+            .await
+            .expect("override control center binding");
+        let manifest = result.behavior_manifest.expect("bound behavior manifest");
+        let rule = manifest
+            .keymaps
+            .iter()
+            .find(|rule| rule.command_id == "controlCenter.open")
+            .expect("overridden control center binding");
+
+        assert_eq!(result.op_records, vec!["Ctrl+Shift+P:false:true"]);
+        assert_eq!(rule.context, crate::protocol::KeyBindingContext::Global);
+        assert_eq!(
+            rule.sequence,
+            vec![crate::protocol::KeyStroke {
+                key: crate::protocol::KeyCode::Character("p".to_string()),
+                modifiers: crate::protocol::KeyModifiers {
+                    control: true,
+                    alt: true,
+                    ..crate::protocol::KeyModifiers::NONE
+                },
+            }]
+        );
+        assert_eq!(
+            rule.routing_policy,
+            crate::protocol::RoutingPolicy::ServerFirst
+        );
+    }
+
+    #[tokio::test]
+    async fn configuration_default_path_browser_binding_is_present_and_overridable() {
+        // Phase 24.3: `controlCenter.openPath` ships a Global Ctrl+Alt+P
+        // default that init.js can unbind and rebind like any other default;
+        // the command id never changes (Phase 24.5 replaces the chord with
+        // sequence defaults, not the id).
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { bindKey, listKeyBindings, unbindKey } from "clay:keybindings";
+                const defaultBinding = listKeyBindings("global").find(
+                  (binding) => binding.command === "controlCenter.openPath"
+                );
+                unbindKey("Ctrl+Alt+P", { scope: "global" });
+                bindKey("Alt+P", "controlCenter.openPath", { scope: "global" });
+                const bindings = listKeyBindings("global");
+                Deno.core.ops.op_clay_runtime_record(
+                  `${defaultBinding?.key}:${bindings.some((binding) => binding.key === "Ctrl+Alt+P")}:${bindings.some((binding) => binding.key === "Alt+P")}`
+                );
+                "#,
+            )
+            .await
+            .expect("override path browser binding");
+        let manifest = result.behavior_manifest.expect("bound behavior manifest");
+        let rule = manifest
+            .keymaps
+            .iter()
+            .find(|rule| rule.command_id == "controlCenter.openPath")
+            .expect("overridden path browser binding");
+
+        assert_eq!(result.op_records, vec!["Ctrl+Alt+P:false:true"]);
+        assert_eq!(rule.context, crate::protocol::KeyBindingContext::Global);
+        assert_eq!(
+            rule.sequence,
+            vec![crate::protocol::KeyStroke {
+                key: crate::protocol::KeyCode::Character("p".to_string()),
+                modifiers: crate::protocol::KeyModifiers {
+                    alt: true,
+                    ..crate::protocol::KeyModifiers::NONE
+                },
+            }]
+        );
+        assert_eq!(
+            rule.routing_policy,
+            crate::protocol::RoutingPolicy::ServerFirst
         );
     }
 

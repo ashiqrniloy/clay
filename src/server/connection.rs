@@ -25,7 +25,7 @@ use crate::{
         ParseInputEdit, ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic,
         SduiActionArgument, SduiActionIntent, SduiActionSource, SduiActionValue,
         SelectionQueryRange, SelectionQueryResult, ServerMessage, TabCommand, TabId,
-        TabRegistrySnapshot, WorkspaceRootId,
+        TabRegistrySnapshot, TransientMenuSnapshotData, WorkspaceRootId,
         codec::{Codec, CodecError},
         completion::estimated_result_payload_bytes,
     },
@@ -34,24 +34,33 @@ use crate::{
 use super::{
     RuntimeGenerationStore, TabServerState,
     behavior::{ActiveBehaviorManifest, BehaviorVersionDecision},
-    command_execution::{CommandExecutionRequest, CommandExecutionTarget, CommandExecutor},
+    command_execution::{
+        CONTROL_CENTER_COMMAND_ID, CommandExecutionRequest, CommandExecutionTarget,
+        CommandExecutor, OPEN_PATH_BROWSER_COMMAND_ID,
+    },
     completion::{CompletionProviderMeta, apply_exclusive_suppression},
+    control_center::ServerMenuActivation,
     document::DocumentState,
     js_runtime::ClayJsRuntimeService,
     language_intelligence::{
         LanguageIntelligenceCoordinator, LanguageIntelligenceCoordinatorError,
         LanguageIntelligenceDocumentWindow,
     },
+    menu_sessions::{ServerMenuActivateOutcome, ServerMenuSessions, snapshot_from_session},
     output_router::OutputRouter,
     parse_coordinator::{ParseCoordinator, ParseCoordinatorError, ParseScheduleRequest},
     sdui::{StaticSduiState, sdui_action_response},
     tab_registry::TabRegistry,
     workspace::{
-        WorkspaceError, WorkspaceState, open_existing_file_unlocked, open_selected_file_unlocked,
-        reload_document_unlocked, save_document_unlocked,
+        UserBrowseListingPlan, WorkspaceError, WorkspaceState, execute_user_browse_listing,
+        open_existing_file_unlocked, open_selected_file_unlocked, reload_document_unlocked,
+        resolve_user_browse_seed, save_document_unlocked,
     },
 };
-use crate::shell::file_browser::FileBrowserState;
+use crate::shell::{
+    file_browser::FileBrowserState, path_browser::PathBrowserSession,
+    transient_menu::TransientMenuSession,
+};
 
 /// Bounded, deduplicating runtime-diagnostic retention (Plan 060 T6, P1-8).
 /// Consecutive duplicates collapse to one entry; past the capacity the oldest
@@ -145,7 +154,12 @@ fn client_message_identity(message: &ClientMessage) -> Option<ClientId> {
         | ClientMessage::CommandIntent { client_id, .. }
         | ClientMessage::RuntimeGenerationInstalled { client_id, .. }
         | ClientMessage::CloseDocument { client_id, .. }
-        | ClientMessage::TabCommand { client_id, .. } => Some(*client_id),
+        | ClientMessage::TabCommand { client_id, .. }
+        | ClientMessage::MenuQueryUpdate { client_id, .. }
+        | ClientMessage::MenuBackspace { client_id, .. }
+        | ClientMessage::MenuSelectionMove { client_id, .. }
+        | ClientMessage::MenuActivate { client_id, .. }
+        | ClientMessage::MenuCancel { client_id, .. } => Some(*client_id),
         ClientMessage::CompletionRequest { request } => Some(request.client_id),
         ClientMessage::LanguageIntelligenceRequest { request } => Some(request.client_id),
         ClientMessage::SelectionQueryRequest { request } => Some(request.client_id),
@@ -217,6 +231,13 @@ fn message_requires_tab_state(message: &ClientMessage) -> bool {
                 command: TabCommand::OpenWorkspace { .. },
                 ..
             }
+            // Phase 24.1: server-owned menu sessions are per-connection (per
+            // tab) state; the intents need the bound tab server state.
+            | ClientMessage::MenuQueryUpdate { .. }
+            | ClientMessage::MenuBackspace { .. }
+            | ClientMessage::MenuSelectionMove { .. }
+            | ClientMessage::MenuActivate { .. }
+            | ClientMessage::MenuCancel { .. }
     )
 }
 
@@ -225,6 +246,17 @@ fn unbound_tab_state_error() -> ServerMessage {
         code: ProtocolErrorCode::InvalidMessage,
         message: "connection is not bound to a live tab".to_string(),
     }
+}
+
+/// Phase 24.1: bounded diagnostic for menu intents naming a session this
+/// connection does not hold (stale after cancel/activate/replace, or never
+/// opened). Never an error or disconnect.
+fn unknown_menu_session_diagnostic(client_id: u64, session_id: u64) -> ServerMessage {
+    ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic {
+        severity: crate::protocol::DiagnosticSeverity::Info,
+        code: "menu.unknown_session".to_string(),
+        message: format!("no active menu session for id {session_id} (client {client_id})"),
+    })
 }
 
 fn tab_binding_conflict_error() -> ServerMessage {
@@ -572,6 +604,11 @@ where
     let _read_pump_guard = crate::protocol::codec::ReadPumpGuard::new(read_pump.abort_handle());
 
     let mut bound_tab_id = None;
+    // Phase 24.1-24.3: per-connection server menu session store. One active
+    // session; drops with this function, sweeping every session on any exit
+    // path (no cross-connection leak). Sessions open only from the built-in
+    // `controlCenter.open` / `controlCenter.openPath` command paths (task 6).
+    let mut menu_sessions = ServerMenuSessions::new();
     loop {
         let message = match tokio::select! {
             typography = typography_updates.recv() => match typography {
@@ -669,6 +706,17 @@ where
             },
             runtime_generation_id = runtime_state_updates.recv() => match runtime_generation_id {
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // A command catalogue is generation-bound. Close it before
+                    // replaying the replacement generation's state; activation
+                    // also checks the stamp if both events race.
+                    if let Some(session_id) = menu_sessions.cancel_active() {
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::TransientMenuClosed { session_id },
+                            )
+                            .await?;
+                    }
                     // Always send the latest complete snapshot. Lagged receivers
                     // must not replay intermediate generations.
                     if let Some(snapshot) = runtime_generation
@@ -1218,23 +1266,24 @@ where
                         let _ = tab_registry_tx.send(snapshot);
                         continue;
                     }
-                    let root_id = {
-                        let mut workspace = workspace.lock().await;
-                        match workspace.add_root(std::path::PathBuf::from(root.clone())) {
-                            Ok(root_id) => root_id,
-                            Err(error) => {
-                                let response = file_operation_failed(error, None, None);
-                                codec.write_server_message(&mut stream, &response).await?;
-                                continue;
-                            }
-                        }
-                    };
-                    let snapshot = {
-                        let mut registry = tab_registry.lock().await;
-                        registry.open_workspace(tab_id, client_id, root_id, root);
-                        registry.snapshot()
-                    };
-                    let _ = tab_registry_tx.send(snapshot);
+                    // Shared with path-mode secondary activation (plan 083
+                    // task 10); `bound_tab_id == tab_id` is proven above, so
+                    // the helper's bound-tab check is a no-op here.
+                    for message in open_workspace_for_bound_tab(
+                        &workspace,
+                        &document,
+                        &sdui,
+                        &tab_registry,
+                        &tab_registry_tx,
+                        reload_server.as_ref(),
+                        client_id,
+                        bound_tab_id,
+                        PathBuf::from(root),
+                    )
+                    .await
+                    {
+                        codec.write_server_message(&mut stream, &message).await?;
+                    }
                 }
                 TabCommand::Close { tab_id } => {
                     let closed = {
@@ -1259,6 +1308,16 @@ where
                     // connection keeps serving.
                 }
                 TabCommand::Activate { tab_id } => {
+                    // Phase 24.1: switching tabs dismisses the active server
+                    // menu session (Escape-free dismissal on focus loss).
+                    if let Some(session_id) = menu_sessions.cancel_active() {
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::TransientMenuClosed { session_id },
+                            )
+                            .await?;
+                    }
                     // Always push a snapshot, accepted or not: the client
                     // switches optimistically on click and the server registry
                     // is the reconciling authority — a rejected activate must
@@ -1367,6 +1426,416 @@ where
                     let _ = tab_registry_tx.send(snapshot);
                 }
             },
+            // Phase 24.1 menu intents. Server-owned sessions are the single
+            // source of truth for query/items/selection; the client only
+            // renders snapshots. Unknown/stale ids are dropped with a bounded
+            // diagnostic, never an error or disconnect. Query strings are
+            // clamped in `ServerMenuSession::set_query` before reaching
+            // session state.
+            ClientMessage::MenuQueryUpdate {
+                client_id,
+                session_id,
+                query,
+            } => {
+                let Some(session) = menu_sessions.get_mut(session_id) else {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &unknown_menu_session_diagnostic(client_id, session_id),
+                        )
+                        .await?;
+                    continue;
+                };
+                // Filter-only edits re-score installed entries locally (no
+                // filesystem work); a changed directory prefix relists the
+                // target and installs the bounded page back (plan 083 task 8).
+                let (snapshot, relist) = {
+                    let edit = session.set_query(&query);
+                    (edit.snapshot, edit.relist)
+                };
+                let snapshot = match relist {
+                    Some(target) => {
+                        match path_browser_relist(&mut menu_sessions, session_id, target).await {
+                            Some(snapshot) => snapshot,
+                            None => {
+                                codec
+                                    .write_server_message(
+                                        &mut stream,
+                                        &unknown_menu_session_diagnostic(client_id, session_id),
+                                    )
+                                    .await?;
+                                continue;
+                            }
+                        }
+                    }
+                    None => snapshot,
+                };
+                codec
+                    .write_server_message(
+                        &mut stream,
+                        &ServerMessage::TransientMenuSnapshot(Box::new(snapshot_from_session(
+                            &snapshot,
+                        ))),
+                    )
+                    .await?;
+            }
+            // Phase 24.3: generic semantic Backspace. The session kind
+            // decides whether it deletes query text (Control Center) or
+            // ascends when the filter is empty (path mode); the client no
+            // longer resolves Backspace locally. Ascents relist the parent
+            // like any other directory change.
+            ClientMessage::MenuBackspace {
+                client_id,
+                session_id,
+            } => {
+                let Some(session) = menu_sessions.get_mut(session_id) else {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &unknown_menu_session_diagnostic(client_id, session_id),
+                        )
+                        .await?;
+                    continue;
+                };
+                let (snapshot, relist) = {
+                    let edit = session.backspace();
+                    (edit.snapshot, edit.relist)
+                };
+                let snapshot = match relist {
+                    Some(target) => {
+                        match path_browser_relist(&mut menu_sessions, session_id, target).await {
+                            Some(snapshot) => snapshot,
+                            None => {
+                                codec
+                                    .write_server_message(
+                                        &mut stream,
+                                        &unknown_menu_session_diagnostic(client_id, session_id),
+                                    )
+                                    .await?;
+                                continue;
+                            }
+                        }
+                    }
+                    None => snapshot,
+                };
+                codec
+                    .write_server_message(
+                        &mut stream,
+                        &ServerMessage::TransientMenuSnapshot(Box::new(snapshot_from_session(
+                            &snapshot,
+                        ))),
+                    )
+                    .await?;
+            }
+            ClientMessage::MenuSelectionMove {
+                client_id,
+                session_id,
+                delta,
+            } => {
+                let Some(session) = menu_sessions.get_mut(session_id) else {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &unknown_menu_session_diagnostic(client_id, session_id),
+                        )
+                        .await?;
+                    continue;
+                };
+                let snapshot = snapshot_from_session(&session.move_selection(delta));
+                codec
+                    .write_server_message(
+                        &mut stream,
+                        &ServerMessage::TransientMenuSnapshot(Box::new(snapshot)),
+                    )
+                    .await?;
+            }
+            ClientMessage::MenuActivate {
+                client_id,
+                session_id,
+                kind,
+            } => {
+                // Activation resolves server-side: the session kind maps the
+                // selected item to a dispatch (palette closes first, then the
+                // command executes against the connection's tab) or a path
+                // navigation (the session stays open and relists the target
+                // directory). `kind` distinguishes primary (Enter/Tab) from
+                // secondary (Alt+Enter) activation; the Control Center
+                // activates the same selection for both.
+                let document_id = document.lock().await.document_id();
+                let current_generation_id = runtime_generation.generation_id().await;
+                let activation = {
+                    let Some(session) = menu_sessions.get_mut(session_id) else {
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &unknown_menu_session_diagnostic(client_id, session_id),
+                            )
+                            .await?;
+                        continue;
+                    };
+                    session.activate(
+                        CommandExecutionTarget::ActiveDocument { document_id },
+                        kind,
+                        current_generation_id,
+                    )
+                };
+                match activation {
+                    // Path-mode descend: keep the session open, install the
+                    // bounded listing of the canonical target, push exactly
+                    // one fresh snapshot (plan 083 task 8).
+                    Ok(ServerMenuActivateOutcome::Navigate(target)) => {
+                        let Some(snapshot) =
+                            path_browser_relist(&mut menu_sessions, session_id, target).await
+                        else {
+                            codec
+                                .write_server_message(
+                                    &mut stream,
+                                    &unknown_menu_session_diagnostic(client_id, session_id),
+                                )
+                                .await?;
+                            continue;
+                        };
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::TransientMenuSnapshot(Box::new(
+                                    snapshot_from_session(&snapshot),
+                                )),
+                            )
+                            .await?;
+                        continue;
+                    }
+                    // Path-mode file open (plan 083 task 9): the session
+                    // closes first, then the ordinary selected-file open
+                    // runs against the server-held canonical path. The
+                    // activation itself is the user authorization event that
+                    // converts ephemeral browse authority into a single
+                    // `SingleFile` grant; no capability token is involved.
+                    // Failures (directory, oversized, invalid UTF-8,
+                    // disappeared, permission) become the bounded
+                    // file-operation error with no grant allocated and the
+                    // session already closed.
+                    Ok(ServerMenuActivateOutcome::OpenFile(path)) => {
+                        menu_sessions.cancel(session_id);
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::TransientMenuClosed { session_id },
+                            )
+                            .await?;
+                        let response = open_selected_file_response(
+                            &workspace,
+                            path.to_string_lossy().into_owned(),
+                            client_id,
+                        )
+                        .await;
+                        write_document_open_response(
+                            &codec,
+                            &mut stream,
+                            response,
+                            &behavior,
+                            &runtime_generation,
+                            &workspace,
+                            &sdui,
+                            &parse_coordinator,
+                            &document_analysis,
+                            client_id,
+                        )
+                        .await?;
+                        continue;
+                    }
+                    // Path-mode workspace open (plan 083 task 10): secondary
+                    // activation on a directory closes the session, then
+                    // adds/gets the canonical `Directory` root in the bound
+                    // tab's workspace, rebinds the tab through the shared
+                    // helper (broadcasting the reconciled registry snapshot),
+                    // and refreshes the tab's file-browser snapshot when the
+                    // pane is visible. The activation is the user
+                    // authorization event that converts ephemeral browse
+                    // authority into a `Directory` root grant; other tabs'
+                    // roots, documents, grants, and menus are untouched. A
+                    // missing/foreign bound tab, non-directory root, or
+                    // vanished path rejects with the bounded failure and no
+                    // grant.
+                    Ok(ServerMenuActivateOutcome::OpenWorkspace(path)) => {
+                        menu_sessions.cancel(session_id);
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::TransientMenuClosed { session_id },
+                            )
+                            .await?;
+                        for message in open_workspace_for_bound_tab(
+                            &workspace,
+                            &document,
+                            &sdui,
+                            &tab_registry,
+                            &tab_registry_tx,
+                            reload_server.as_ref(),
+                            client_id,
+                            bound_tab_id,
+                            path,
+                        )
+                        .await
+                        {
+                            codec.write_server_message(&mut stream, &message).await?;
+                        }
+                        continue;
+                    }
+                    // Dispatch outcomes consume the session: the palette
+                    // closes first, then the selected command executes.
+                    // Server/package commands route through the shared
+                    // intent dispatcher (workspace/settings/reload side
+                    // effects included); shell `ClientUiCommand` items
+                    // produce the narrow shell-command request the client
+                    // re-parses deny-by-default.
+                    Ok(ServerMenuActivateOutcome::Dispatch(activation)) => {
+                        menu_sessions.cancel(session_id);
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::TransientMenuClosed { session_id },
+                            )
+                            .await?;
+                        match activation {
+                            ServerMenuActivation::Command(request) => {
+                                // Selecting "Browse Filesystem" from the
+                                // Control Center opens the Path Browser
+                                // through the same shared helper as its
+                                // keybinding (the closed Control Center
+                                // frame was already pushed above).
+                                if request.command_id == OPEN_PATH_BROWSER_COMMAND_ID {
+                                    match open_command_centre_session(
+                                        &request.command_id,
+                                        &mut menu_sessions,
+                                        &behavior,
+                                        &runtime_generation,
+                                        &document,
+                                        &workspace,
+                                        &tab_registry,
+                                        bound_tab_id,
+                                    )
+                                    .await
+                                    {
+                                        Ok((replaced_id, snapshot)) => {
+                                            if let Some(replaced_id) = replaced_id {
+                                                codec
+                                                    .write_server_message(
+                                                        &mut stream,
+                                                        &ServerMessage::TransientMenuClosed {
+                                                            session_id: replaced_id,
+                                                        },
+                                                    )
+                                                    .await?;
+                                            }
+                                            codec
+                                                .write_server_message(
+                                                    &mut stream,
+                                                    &ServerMessage::TransientMenuSnapshot(
+                                                        Box::new(snapshot),
+                                                    ),
+                                                )
+                                                .await?;
+                                        }
+                                        Err(message) => {
+                                            codec
+                                                .write_server_message(
+                                                    &mut stream,
+                                                    &ServerMessage::Error {
+                                                        code: ProtocolErrorCode::InvalidMessage,
+                                                        message,
+                                                    },
+                                                )
+                                                .await?;
+                                        }
+                                    }
+                                    continue;
+                                }
+                                // Execute against the live aggregated
+                                // registries so package commands validate
+                                // through the shared path; built-ins resolve
+                                // via executor fallback. The menu's own
+                                // generation stamp already rejected stale
+                                // sessions, so the service snapshot is
+                                // consistent.
+                                let (trusted, third_party) = runtime_generation
+                                    .current()
+                                    .await
+                                    .service
+                                    .command_registry_snapshots();
+                                let registry =
+                                    CommandRegistry::from_snapshots([trusted, third_party]);
+                                let response = execute_command_intent(
+                                    request,
+                                    Arc::clone(&workspace),
+                                    &document,
+                                    &sdui,
+                                    client_id,
+                                    reload_server.as_ref(),
+                                    &registry,
+                                )
+                                .await;
+                                if let Some(response) = response {
+                                    codec.write_server_message(&mut stream, &response).await?;
+                                }
+                            }
+                            ServerMenuActivation::ShellClientCommand(command_id) => {
+                                codec
+                                    .write_server_message(
+                                        &mut stream,
+                                        &ServerMessage::ShellClientCommandRequest { command_id },
+                                    )
+                                    .await?;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        // Bounded diagnostic; the session is consumed so the
+                        // menu closes (path mode keeps activation authority
+                        // server-side even when the selected item has no
+                        // activation yet).
+                        menu_sessions.cancel(session_id);
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::TransientMenuClosed { session_id },
+                            )
+                            .await?;
+                        codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::Error {
+                                    code: ProtocolErrorCode::InvalidMessage,
+                                    message: format!(
+                                        "command execution rejected: {:?}: {}",
+                                        error.rule, error.message
+                                    ),
+                                },
+                            )
+                            .await?;
+                    }
+                }
+            }
+            ClientMessage::MenuCancel {
+                client_id,
+                session_id,
+            } => {
+                if menu_sessions.cancel(session_id).is_some() {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::TransientMenuClosed { session_id },
+                        )
+                        .await?;
+                } else {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &unknown_menu_session_diagnostic(client_id, session_id),
+                        )
+                        .await?;
+                }
+            }
             ClientMessage::SduiAction {
                 client_id: _,
                 ui_version: _,
@@ -1387,6 +1856,7 @@ where
                     &sdui,
                     client_id,
                     reload_server.as_ref(),
+                    &CommandRegistry::new(),
                 )
                 .await;
                 if let Some(response) = response {
@@ -1424,6 +1894,60 @@ where
                         .await?;
                     continue;
                 }
+                // Phase 24.1-24.3: the built-in Command Centre commands are a
+                // command-lane special case mirroring the workspace-command
+                // precedent — the bounded snapshot IS the response. Generic
+                // execution of these ids yields nothing on the wire, so bare
+                // `Accepted` accounting (the JS op path) is unchanged. Opening
+                // replaces any active server session; the client is told
+                // about the closed one.
+                if command_id == CONTROL_CENTER_COMMAND_ID
+                    || command_id == OPEN_PATH_BROWSER_COMMAND_ID
+                {
+                    match open_command_centre_session(
+                        &command_id,
+                        &mut menu_sessions,
+                        &behavior,
+                        &runtime_generation,
+                        &document,
+                        &workspace,
+                        &tab_registry,
+                        bound_tab_id,
+                    )
+                    .await
+                    {
+                        Ok((replaced_id, snapshot)) => {
+                            if let Some(replaced_id) = replaced_id {
+                                codec
+                                    .write_server_message(
+                                        &mut stream,
+                                        &ServerMessage::TransientMenuClosed {
+                                            session_id: replaced_id,
+                                        },
+                                    )
+                                    .await?;
+                            }
+                            codec
+                                .write_server_message(
+                                    &mut stream,
+                                    &ServerMessage::TransientMenuSnapshot(Box::new(snapshot)),
+                                )
+                                .await?;
+                        }
+                        Err(message) => {
+                            codec
+                                .write_server_message(
+                                    &mut stream,
+                                    &ServerMessage::Error {
+                                        code: ProtocolErrorCode::InvalidMessage,
+                                        message,
+                                    },
+                                )
+                                .await?;
+                        }
+                    }
+                    continue;
+                }
                 let response = execute_command_intent(
                     CommandExecutionRequest {
                         command_id,
@@ -1437,6 +1961,7 @@ where
                     &sdui,
                     client_id,
                     reload_server.as_ref(),
+                    &CommandRegistry::new(),
                 )
                 .await;
                 if let Some(response) = response {
@@ -1982,6 +2507,98 @@ where
     Ok(())
 }
 
+/// Shared open path for the two built-in Command Centre sessions. Both the
+/// command-intent lane (`CommandIntent` from a keybinding or the JS op) and
+/// Control Center activation (selecting "Browse Filesystem" from the
+/// catalogue) land here, so the one-active-session invariant has a single
+/// enforcement point: the helper replaces any active server session and
+/// returns its id for the caller to report as `TransientMenuClosed` before
+/// pushing the snapshot.
+///
+/// Runs one bounded user-browse relist for Path Browser navigation (plan 083
+/// task 8) and installs the result back into the session, returning the
+/// re-projected snapshot. The listing runs on the blocking pool with no
+/// workspace/tab/menu lock held; a failed listing keeps the session open in
+/// its sticky error state (recoverable input) rather than failing the
+/// intent. Returns `None` only when the session vanished while listing.
+async fn path_browser_relist(
+    menu_sessions: &mut ServerMenuSessions,
+    session_id: u64,
+    target: PathBuf,
+) -> Option<TransientMenuSession> {
+    let page = match execute_user_browse_listing(UserBrowseListingPlan {
+        target,
+        max_entries: crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS,
+    })
+    .await
+    {
+        Ok(page) => page,
+        Err(error) => {
+            let session = menu_sessions.get_mut(session_id)?;
+            return Some(session.set_path_browser_error(error.to_string()));
+        }
+    };
+    let session = menu_sessions.get_mut(session_id)?;
+    Some(session.install_path_browser(page))
+}
+
+/// The Path Browser performs exactly one seed resolution (active document's
+/// canonical parent > bound tab's workspace root > server cwd) and one
+/// bounded listing on open. A failed listing opens the session in its sticky
+/// error state instead of failing the command, so the editable path input
+/// stays recoverable.
+#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+async fn open_command_centre_session(
+    command_id: &str,
+    menu_sessions: &mut ServerMenuSessions,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: &RuntimeGenerationStore,
+    document: &Arc<Mutex<DocumentState>>,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    tab_registry: &Arc<Mutex<TabRegistry>>,
+    bound_tab_id: Option<TabId>,
+) -> Result<(Option<u64>, TransientMenuSnapshotData), String> {
+    if command_id == CONTROL_CENTER_COMMAND_ID {
+        let document_id = document.lock().await.document_id();
+        let active_manifest = behavior.lock().await.manifest_for(document_id).clone();
+        let (generation_id, catalogue) = match runtime_generation
+            .command_catalogue_snapshot(&active_manifest)
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => return Err(format!("command catalogue could not be opened: {error}")),
+        };
+        let (snapshot, replaced_id) = menu_sessions.open_control_center(&catalogue, generation_id);
+        Ok((replaced_id, snapshot))
+    } else if command_id == OPEN_PATH_BROWSER_COMMAND_ID {
+        let document_id = document.lock().await.document_id();
+        let generation_id = runtime_generation.generation_id().await;
+        let tab_root = {
+            let tab_registry = tab_registry.lock().await;
+            bound_tab_id
+                .and_then(|tab_id| tab_registry.entry(tab_id))
+                .map(|entry| entry.workspace_root)
+        };
+        let seed =
+            resolve_user_browse_seed(workspace, Some(document_id), tab_root.as_deref()).await;
+        let plan = UserBrowseListingPlan {
+            target: seed.clone(),
+            max_entries: crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS,
+        };
+        let mut session = PathBrowserSession::new(seed);
+        match execute_user_browse_listing(plan).await {
+            Ok(page) => session.install(page),
+            Err(error) => session.set_error(error.to_string()),
+        }
+        let (snapshot, replaced_id) = menu_sessions.open_path_browser(session, generation_id);
+        Ok((replaced_id, snapshot))
+    } else {
+        Err(format!(
+            "unexpected command centre command id: {command_id}"
+        ))
+    }
+}
+
 async fn execute_command_intent(
     request: CommandExecutionRequest,
     workspace: Arc<Mutex<WorkspaceState>>,
@@ -1989,9 +2606,9 @@ async fn execute_command_intent(
     sdui: &Arc<Mutex<StaticSduiState>>,
     client_id: ClientId,
     reload_server: Option<&super::IpcServer>,
+    registry: &CommandRegistry,
 ) -> Option<ServerMessage> {
     let executor = CommandExecutor::new();
-    let registry = CommandRegistry::new();
 
     if crate::server::command_execution::is_settings_command(&request.command_id) {
         // Phase 20.6: settings intents validate, then persist + reload so the
@@ -2083,7 +2700,7 @@ async fn execute_command_intent(
         let result = {
             let mut workspace_guard = workspace.lock().await;
             executor
-                .execute_workspace(&registry, &mut workspace_guard, client_id, request)
+                .execute_workspace(registry, &mut workspace_guard, client_id, request)
                 .await
         };
         match result {
@@ -2108,7 +2725,7 @@ async fn execute_command_intent(
         }
     } else {
         executor
-            .execute(&registry, request)
+            .execute(registry, request)
             .err()
             .map(|error| ServerMessage::Error {
                 code: ProtocolErrorCode::InvalidMessage,
@@ -2781,6 +3398,72 @@ async fn open_document_response(
         metadata,
         text: document.text(),
     }
+}
+
+/// Shared bound-tab workspace open (plan 083 task 10): validates and
+/// adds/gets the canonical directory root in the tab's workspace, rebinds
+/// the tab through `TabRegistry::open_workspace` (bound-client-only),
+/// broadcasts the reconciled snapshot, and returns the file-browser refresh
+/// message (or the bounded failure) the caller must write. Used by the
+/// `TabCommand::OpenWorkspace` branch and path-mode secondary activation —
+/// path mode has no client-supplied tab id, so the bound tab is the only
+/// target and a missing binding is an authorization failure. The caller
+/// already validated any client-supplied tab id against the bound id.
+#[allow(clippy::too_many_arguments)]
+async fn open_workspace_for_bound_tab(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    document: &Arc<Mutex<DocumentState>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    tab_registry: &Arc<Mutex<TabRegistry>>,
+    tab_registry_tx: &tokio::sync::broadcast::Sender<TabRegistrySnapshot>,
+    reload_server: Option<&super::IpcServer>,
+    client_id: ClientId,
+    bound_tab_id: Option<TabId>,
+    root: PathBuf,
+) -> Vec<ServerMessage> {
+    let Some(tab_id) = bound_tab_id else {
+        return vec![ServerMessage::Error {
+            code: ProtocolErrorCode::InvalidMessage,
+            message: "workspace open requires a bound tab".to_string(),
+        }];
+    };
+    let root_id = {
+        let mut workspace = workspace.lock().await;
+        match workspace.add_root(root.clone()) {
+            Ok(root_id) => root_id,
+            Err(error) => return vec![file_operation_failed(error, None, None)],
+        }
+    };
+    let snapshot = {
+        let mut registry = tab_registry.lock().await;
+        registry.open_workspace(
+            tab_id,
+            client_id,
+            root_id,
+            root.to_string_lossy().into_owned(),
+        );
+        registry.snapshot()
+    };
+    let _ = tab_registry_tx.send(snapshot);
+    let workspace_pane_visible = match reload_server {
+        Some(server) => server
+            .state_for_client(client_id)
+            .await
+            .is_some_and(|state| state.workspace_pane_visible()),
+        None => true,
+    };
+    vec![
+        file_browser_snapshot_for_visibility(
+            workspace,
+            document,
+            sdui,
+            client_id,
+            workspace_pane_visible,
+            root_id,
+            PathBuf::new(),
+        )
+        .await,
+    ]
 }
 
 async fn add_selected_workspace_root_messages(
@@ -3530,7 +4213,10 @@ fn bounded_utf8_prefix(text: &str, max_bytes: usize) -> (&str, u64) {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf, sync::Arc, time::SystemTime};
+    use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc, time::SystemTime};
+
+    use crate::packages::commands::CommandRegistry;
+    use crate::protocol::{KeyBindingContext, KeyCode};
 
     use tokio::{
         io::duplex,
@@ -3540,8 +4226,8 @@ mod tests {
 
     use super::{
         RuntimeDiagnosticStore, execute_command_intent, handle_connection,
-        language_intelligence_document_window_for_behavior, route_connection_tab_state,
-        sdui_command_request, static_package_completion_result,
+        language_intelligence_document_window_for_behavior, open_workspace_for_bound_tab,
+        route_connection_tab_state, sdui_command_request, static_package_completion_result,
     };
     use crate::server::command_execution::{CommandExecutionRequest, CommandExecutionTarget};
 
@@ -3843,8 +4529,16 @@ await loadPackage("@clay/markdown");"#,
         let document = document_state();
         let sdui = sdui_state();
         assert_eq!(
-            execute_command_intent(sdui_request, workspace_state(), &document, &sdui, 1, None)
-                .await,
+            execute_command_intent(
+                sdui_request,
+                workspace_state(),
+                &document,
+                &sdui,
+                1,
+                None,
+                &CommandRegistry::new(),
+            )
+            .await,
             None
         );
         assert_eq!(
@@ -3855,6 +4549,7 @@ await loadPackage("@clay/markdown");"#,
                 &sdui,
                 1,
                 None,
+                &CommandRegistry::new(),
             )
             .await,
             None
@@ -3884,6 +4579,7 @@ await loadPackage("@clay/markdown");"#,
             &server.sdui,
             1,
             Some(&server),
+            &CommandRegistry::new(),
         )
         .await
         .expect("reload command returns status");
@@ -3919,6 +4615,7 @@ await loadPackage("@clay/markdown");"#,
         let document = document_state();
         let sdui = sdui_state();
 
+        let settings_registry = CommandRegistry::new();
         let settings_request = |command_id: &str, item_id: &str| {
             execute_command_intent(
                 CommandExecutionRequest {
@@ -3933,6 +4630,7 @@ await loadPackage("@clay/markdown");"#,
                 &sdui,
                 1,
                 Some(&server),
+                &settings_registry,
             )
         };
 
@@ -3992,6 +4690,7 @@ await loadPackage("@clay/markdown");"#,
             &sdui,
             1,
             Some(&server),
+            &CommandRegistry::new(),
         )
         .await;
         assert!(
@@ -4024,6 +4723,7 @@ await loadPackage("@clay/markdown");"#,
             &sdui_state(),
             1,
             None,
+            &CommandRegistry::new(),
         )
         .await
         .expect("unknown package UI action returns protocol error");
@@ -4069,6 +4769,7 @@ await loadPackage("@clay/markdown");"#,
             &sdui,
             42,
             None,
+            &CommandRegistry::new(),
         )
         .await
         .expect("directory navigation sends a snapshot");
@@ -4938,6 +5639,2328 @@ await loadPackage("@clay/markdown");"#,
         let _ = fs::remove_dir_all(root_a);
         let _ = fs::remove_dir_all(root_b);
         let _ = fs::remove_dir_all(extra_root_a);
+    }
+
+    /// Phase 24.3: `controlCenter.openPath` opens the Path Browser through
+    /// the shared Command Centre helper — from its keybinding command and
+    /// from the Control Center catalogue — with the one-active-session
+    /// invariant enforced on every open.
+    #[tokio::test]
+    async fn path_browser_opens_from_keybinding_and_control_center_catalogue() {
+        let root = temp_workspace("path-browser-open");
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("README.md"), "# path browser").unwrap();
+        let root = fs::canonicalize(&root).unwrap();
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("path-browser-open"),
+        ));
+        let (tab_snapshot, _) = server
+            .create_tab_state(11, root.to_string_lossy().into_owned())
+            .await
+            .expect("tab state is created");
+        let tab_id = tab_snapshot.tabs[0].tab_id;
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        connection.reclaim(11, tab_id).await;
+        connection.drain_bounded().await;
+        let behavior_version = server.behavior.lock().await.version();
+
+        // Keybinding path: one seed resolution + one bounded listing, pushed
+        // as the initial snapshot (the active document is the tab's welcome
+        // document, so the seed falls back to the bound tab's workspace root).
+        connection
+            .send(&ClientMessage::CommandIntent {
+                client_id: 11,
+                document_id: 1,
+                behavior_version,
+                command_id: "controlCenter.openPath".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(first) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected TransientMenuSnapshot");
+        };
+        assert_eq!(first.prompt, format!("Browse · {}", root.display()));
+        assert_eq!(first.query, format!("{}/", root.display()));
+        let names: Vec<_> = first.items.iter().map(|item| item.label.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["src", "README.md"],
+            "empty filter keeps deterministic directory-first order"
+        );
+        let first_path_id = first.session_id;
+        assert!(first_path_id & (1 << 63) != 0, "server-owned id partition");
+
+        // Reopening replaces the active session and reports the closed id.
+        connection
+            .send(&ClientMessage::CommandIntent {
+                client_id: 11,
+                document_id: 1,
+                behavior_version,
+                command_id: "controlCenter.openPath".to_string(),
+            })
+            .await;
+        assert!(matches!(
+            receive_menu_message(&mut connection).await,
+            ServerMessage::TransientMenuClosed { session_id: closed }
+                if closed == first_path_id
+        ));
+        let ServerMessage::TransientMenuSnapshot(second) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected replacement TransientMenuSnapshot");
+        };
+        assert_ne!(second.session_id, first_path_id);
+        let second_path_id = second.session_id;
+        connection
+            .send(&ClientMessage::MenuCancel {
+                client_id: 11,
+                session_id: second_path_id,
+            })
+            .await;
+        assert!(matches!(
+            receive_menu_message(&mut connection).await,
+            ServerMessage::TransientMenuClosed { session_id: closed }
+                if closed == second_path_id
+        ));
+
+        // Control Center path: the catalogue lists "Browse Filesystem";
+        // activating it closes the Control Center and opens the Path Browser
+        // through the same helper.
+        connection
+            .send(&ClientMessage::CommandIntent {
+                client_id: 11,
+                document_id: 1,
+                behavior_version,
+                command_id: "controlCenter.open".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(control_center) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected Control Center snapshot");
+        };
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: control_center.session_id,
+                query: "Browse Filesystem".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(filtered) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected filtered snapshot");
+        };
+        assert_eq!(filtered.items.len(), 1);
+        assert_eq!(filtered.items[0].id, "controlCenter.openPath");
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: control_center.session_id,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            })
+            .await;
+        assert!(matches!(
+            receive_menu_message(&mut connection).await,
+            ServerMessage::TransientMenuClosed { session_id: closed }
+                if closed == control_center.session_id
+        ));
+        let ServerMessage::TransientMenuSnapshot(from_catalogue) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected Path Browser snapshot from catalogue activation");
+        };
+        assert_eq!(
+            from_catalogue.prompt,
+            format!("Browse · {}", root.display())
+        );
+        assert_eq!(from_catalogue.query, format!("{}/", root.display()));
+
+        connection.drain_bounded().await;
+        connection.close().await;
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Phase 24.3: `controlCenter.openPath` opens the Path Browser through
+    /// the shared Command Centre helper — from its keybinding command and
+    /// from the Control Center catalogue — with the one-active-session
+    /// invariant enforced on every open.
+    #[tokio::test]
+    async fn path_browser_opens_with_sticky_error_for_unlistable_seed() {
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("path-browser-error-seed"),
+        ));
+        let root = temp_workspace("path-browser-error-seed");
+        let (tab_snapshot, _) = server
+            .create_tab_state(11, root.to_string_lossy().into_owned())
+            .await
+            .expect("tab state is created");
+        let tab_id = tab_snapshot.tabs[0].tab_id;
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        connection.reclaim(11, tab_id).await;
+        connection.drain_bounded().await;
+        // The tab root vanishes after binding: the seed still resolves to it,
+        // but the bounded listing fails. The command does not fail; the
+        // session opens in its sticky error state (empty items, bounded
+        // status) and stays cancellable.
+        let _ = fs::remove_dir_all(&root);
+        let behavior_version = server.behavior.lock().await.version();
+
+        // A missing seed does not fail the command: the session opens in its
+        // sticky error state (empty items, bounded status) and stays
+        // cancellable.
+        connection
+            .send(&ClientMessage::CommandIntent {
+                client_id: 11,
+                document_id: 1,
+                behavior_version,
+                command_id: "controlCenter.openPath".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected TransientMenuSnapshot");
+        };
+        assert!(snapshot.prompt.starts_with("Browse · "));
+        assert!(snapshot.items.is_empty(), "items suppressed under error");
+        assert!(matches!(
+            snapshot.status,
+            crate::protocol::TransientMenuStatusData::Empty { .. }
+        ));
+        connection
+            .send(&ClientMessage::MenuCancel {
+                client_id: 11,
+                session_id: snapshot.session_id,
+            })
+            .await;
+        assert!(matches!(
+            receive_menu_message(&mut connection).await,
+            ServerMessage::TransientMenuClosed { session_id: closed }
+                if closed == snapshot.session_id
+        ));
+        connection.drain_bounded().await;
+        connection.close().await;
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Phase 24.3 (task 8): directory descend (primary activation keeps the
+    /// session open and relists), empty-filter Backspace ascent, direct
+    /// absolute/relative path jumps, and invalid-path recovery — all with a
+    /// stable session id and exactly one snapshot per accepted transition.
+    #[tokio::test]
+    async fn path_browser_navigates_descend_ascend_and_direct_jump() {
+        let root = temp_workspace("path-browser-navigate");
+        fs::create_dir_all(root.join("a/b")).unwrap();
+        fs::create_dir(root.join("c")).unwrap();
+        fs::write(root.join("notes.txt"), "notes").unwrap();
+        fs::write(root.join("a/a1.txt"), "a1").unwrap();
+        fs::write(root.join("a/b/b1.txt"), "b1").unwrap();
+        fs::write(root.join("c/c1.txt"), "c1").unwrap();
+        let root = fs::canonicalize(&root).unwrap();
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("path-browser-navigate"),
+        ));
+        let (tab_snapshot, _) = server
+            .create_tab_state(11, root.to_string_lossy().into_owned())
+            .await
+            .expect("tab state is created");
+        let tab_id = tab_snapshot.tabs[0].tab_id;
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        connection.reclaim(11, tab_id).await;
+        connection.drain_bounded().await;
+        let behavior_version = server.behavior.lock().await.version();
+
+        connection
+            .send(&ClientMessage::CommandIntent {
+                client_id: 11,
+                document_id: 1,
+                behavior_version,
+                command_id: "controlCenter.openPath".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected TransientMenuSnapshot");
+        };
+        let path_id = snapshot.session_id;
+        let names: Vec<_> = snapshot
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(names, vec!["a", "c", "notes.txt"]);
+
+        // Direct relative jump: typing `c/` from the tab root relists
+        // `/root/c`.
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: path_id,
+                query: "c/".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected relist snapshot");
+        };
+        assert_eq!(snapshot.session_id, path_id, "session id stays stable");
+        assert_eq!(snapshot.prompt, format!("Browse · {}/c", root.display()));
+        let names: Vec<_> = snapshot
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(names, vec!["c1.txt"]);
+
+        // Direct absolute jump into `a/b`.
+        let a_b = format!("{}/a/b/", root.display());
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: path_id,
+                query: a_b.clone(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected absolute jump snapshot");
+        };
+        assert_eq!(snapshot.session_id, path_id);
+        assert_eq!(snapshot.prompt, format!("Browse · {}/a/b", root.display()));
+        assert_eq!(snapshot.query, a_b);
+        let names: Vec<_> = snapshot
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(names, vec!["b1.txt"]);
+
+        // Empty-filter Backspace ascends one level (relist, same session).
+        connection
+            .send(&ClientMessage::MenuBackspace {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected ascent snapshot");
+        };
+        assert_eq!(snapshot.session_id, path_id);
+        assert_eq!(snapshot.prompt, format!("Browse · {}/a", root.display()));
+        assert_eq!(snapshot.query, format!("{}/a/", root.display()));
+        let names: Vec<_> = snapshot
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(names, vec!["b", "a1.txt"]);
+
+        // Primary activation on the selected directory (`b`, index 0)
+        // descends: the session stays open and relists.
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: path_id,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected descend snapshot");
+        };
+        assert_eq!(snapshot.session_id, path_id, "descend keeps the session");
+        assert_eq!(snapshot.prompt, format!("Browse · {}/a/b", root.display()));
+        assert_eq!(snapshot.query, format!("{}/a/b/", root.display()));
+        let names: Vec<_> = snapshot
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(names, vec!["b1.txt"]);
+
+        // Filter-only edits never relist (no second snapshot): typing a
+        // fuzzy fragment over the listing re-scores locally.
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: path_id,
+                query: "b1".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected filter-only snapshot");
+        };
+        assert_eq!(snapshot.session_id, path_id);
+        assert_eq!(snapshot.query, "b1");
+        let names: Vec<_> = snapshot
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(names, vec!["b1.txt"]);
+
+        // Invalid direct jump: the menu stays open with a bounded error
+        // status (items suppressed), and Backspace recovers by ascending to
+        // the last canonical directory.
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: path_id,
+                query: format!("{}/missing/", root.display()),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected error-status snapshot");
+        };
+        assert_eq!(snapshot.session_id, path_id);
+        assert!(snapshot.items.is_empty(), "items suppressed under error");
+        assert!(matches!(
+            snapshot.status,
+            crate::protocol::TransientMenuStatusData::Empty { .. }
+        ));
+        connection
+            .send(&ClientMessage::MenuBackspace {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected recovery snapshot");
+        };
+        assert_eq!(snapshot.session_id, path_id);
+        assert_eq!(snapshot.prompt, format!("Browse · {}/a", root.display()));
+        assert!(!snapshot.items.is_empty(), "recovered listing reinstated");
+
+        // Path mode browses the whole filesystem: ascents past the tab root
+        // continue to the filesystem root, where Backspace is a no-op. The
+        // recovery above left the session at `/root/a`.
+        connection
+            .send(&ClientMessage::MenuBackspace {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected tab-root ascent snapshot");
+        };
+        assert_eq!(snapshot.session_id, path_id);
+        assert_eq!(snapshot.prompt, format!("Browse · {}", root.display()));
+        connection
+            .send(&ClientMessage::MenuBackspace {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected /tmp ascent snapshot");
+        };
+        assert_eq!(snapshot.prompt, "Browse · /tmp");
+        connection
+            .send(&ClientMessage::MenuBackspace {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected filesystem-root snapshot");
+        };
+        assert_eq!(snapshot.prompt, "Browse · /");
+        assert_eq!(snapshot.query, "/");
+        connection
+            .send(&ClientMessage::MenuBackspace {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected root no-op snapshot");
+        };
+        assert_eq!(snapshot.session_id, path_id);
+        assert_eq!(snapshot.query, "/", "filesystem root Backspace is a no-op");
+
+        connection.drain_bounded().await;
+        connection.close().await;
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Phase 24.3 (task 9): primary activation on a selected file closes the
+    /// path session and runs the ordinary selected-file open — the browse
+    /// activation itself is the authorization event that converts to exactly
+    /// one `SingleFile` grant. The grant is strictly single-file (siblings
+    /// fail `OutsideRoot`), duplicate opens return the same document id with
+    /// no second view, and a file that disappeared between listing and
+    /// activation fails without a grant or document leak.
+    #[tokio::test]
+    async fn path_browser_open_file_converts_browse_to_single_file_grant() {
+        let root = temp_workspace("path-browser-open-file");
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(root.join("sub/b.txt"), "b").unwrap();
+        fs::write(root.join("a.txt"), "hello").unwrap();
+        let root = fs::canonicalize(&root).unwrap();
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("path-browser-open-file"),
+        ));
+        let (tab_snapshot, tab_state) = server
+            .create_tab_state(11, root.to_string_lossy().into_owned())
+            .await
+            .expect("tab state is created");
+        let tab_id = tab_snapshot.tabs[0].tab_id;
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        connection.reclaim(11, tab_id).await;
+        connection.drain_bounded().await;
+
+        // Open the Path Browser with a fresh behavior stamp; a stale stamp
+        // (a concurrent manifest publish bumps the connection-wide version)
+        // is answered with a bounded Error, so resync and retry exactly like
+        // the real client would.
+        async fn open_path_browser(
+            connection: &mut TestConnection,
+            server: &super::super::IpcServer,
+        ) -> ServerMessage {
+            loop {
+                connection
+                    .send(&ClientMessage::CommandIntent {
+                        client_id: 11,
+                        document_id: 1,
+                        behavior_version: server.behavior.lock().await.version(),
+                        command_id: "controlCenter.openPath".to_string(),
+                    })
+                    .await;
+                loop {
+                    match timeout(Duration::from_secs(5), connection.receive()).await {
+                        Ok(message @ ServerMessage::TransientMenuSnapshot(_)) => return message,
+                        Ok(ServerMessage::Error {
+                            code: ProtocolErrorCode::InvalidMessage,
+                            message,
+                        }) if message.contains("behavior version is stale") => break,
+                        Ok(_) => continue,
+                        Err(_) => panic!("timed out awaiting path browser snapshot"),
+                    }
+                }
+            }
+        }
+
+        // Read the next transient-menu frame, skipping parse/analysis noise
+        // that can race an exchange; labeled so failures name the phase.
+        async fn recv_menu_frame(
+            label: &'static str,
+            connection: &mut TestConnection,
+        ) -> ServerMessage {
+            loop {
+                match timeout(Duration::from_secs(5), connection.receive()).await {
+                    Ok(
+                        message @ (ServerMessage::TransientMenuSnapshot(_)
+                        | ServerMessage::TransientMenuClosed { .. }),
+                    ) => return message,
+                    Ok(_) => continue,
+                    Err(_) => panic!("{label}: timed out awaiting transient menu frame"),
+                }
+            }
+        }
+
+        // Open the path browser and filter down to the file (directory-first
+        // order puts `sub` at index 0).
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        let path_id = snapshot.session_id;
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: path_id,
+                query: "a.txt".to_string(),
+            })
+            .await;
+        let snapshot = recv_menu_frame("filter", &mut connection).await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) = snapshot else {
+            panic!("filter: expected snapshot, got closed");
+        };
+        let names: Vec<_> = snapshot
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(names, vec!["a.txt"]);
+
+        // Primary activation: session closes first, then DocumentOpened with
+        // the ordinary follow-up chain (no capability token involved).
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: path_id,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            })
+            .await;
+        let closed = recv_menu_frame("close-before-open", &mut connection).await;
+        let ServerMessage::TransientMenuClosed { session_id } = closed else {
+            panic!("close-before-open: expected closed, got {closed:?}");
+        };
+        assert_eq!(session_id, path_id, "menu closes before the open response");
+        let (opened_root_id, opened_document_id) =
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::DocumentOpened { metadata, text }) => {
+                    assert_eq!(text, "hello");
+                    assert_eq!(metadata.path, "a.txt");
+                    (metadata.workspace_root_id, metadata.document_id)
+                }
+                Ok(other) => panic!("expected DocumentOpened, got {other:?}"),
+                Err(_) => panic!("timed out awaiting DocumentOpened"),
+            };
+        // Follow-ups arrive after the open frame; drain them.
+        connection.drain_bounded().await;
+
+        // The browse activation became a single-file grant: opening a
+        // sibling document under that root fails OutsideRoot.
+        connection
+            .send(&ClientMessage::OpenDocument {
+                client_id: 11,
+                workspace_root_id: opened_root_id,
+                path: "sub/b.txt".to_string(),
+            })
+            .await;
+        let mut saw_outside_root = false;
+        for _ in 0..8 {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::FileOperationFailed {
+                    code: FileErrorCode::OutsideRoot,
+                    workspace_root_id: Some(id),
+                    document_id: None,
+                    ..
+                }) if id == opened_root_id => {
+                    saw_outside_root = true;
+                    break;
+                }
+                Ok(ServerMessage::DecorationSet(_))
+                | Ok(ServerMessage::DiagnosticSet(_))
+                | Ok(ServerMessage::RuntimeDiagnostic(_))
+                | Ok(ServerMessage::BehaviorManifest(_)) => {}
+                Ok(other) => panic!("expected outside-root failure, got {other:?}"),
+                Err(_) => panic!("timed out awaiting outside-root failure"),
+            }
+        }
+        assert!(saw_outside_root, "single-file grant rejects siblings");
+        connection.drain_bounded().await;
+
+        // Duplicate open: reopening the same file returns the same document
+        // id with no second view or grant.
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        let path_id = snapshot.session_id;
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: path_id,
+                query: "a.txt".to_string(),
+            })
+            .await;
+        let snapshot = recv_menu_frame("second-filter", &mut connection).await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) = snapshot else {
+            panic!("second-filter: expected snapshot, got closed");
+        };
+        assert_eq!(snapshot.items.len(), 1);
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: path_id,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            })
+            .await;
+        let closed = recv_menu_frame("close-duplicate", &mut connection).await;
+        assert!(
+            matches!(closed, ServerMessage::TransientMenuClosed { .. }),
+            "close-duplicate: expected closed, got {closed:?}"
+        );
+        let mut duplicate_id = None;
+        for _ in 0..8 {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::DocumentOpened { metadata, .. }) => {
+                    duplicate_id = Some(metadata.document_id);
+                    break;
+                }
+                Ok(ServerMessage::DecorationSet(_))
+                | Ok(ServerMessage::DiagnosticSet(_))
+                | Ok(ServerMessage::RuntimeDiagnostic(_))
+                | Ok(ServerMessage::BehaviorManifest(_)) => {}
+                Ok(other) => panic!("expected duplicate DocumentOpened, got {other:?}"),
+                Err(_) => panic!("timed out awaiting duplicate DocumentOpened"),
+            }
+        }
+        assert_eq!(
+            duplicate_id,
+            Some(opened_document_id),
+            "duplicate open returns the existing document"
+        );
+        connection.drain_bounded().await;
+        let workspace = tab_state.workspace.lock().await;
+        assert!(
+            workspace
+                .document_canonical_path(opened_document_id)
+                .is_some()
+        );
+        assert!(
+            workspace
+                .document_canonical_path(opened_document_id + 1)
+                .is_none(),
+            "no second document created by the duplicate open"
+        );
+        drop(workspace);
+
+        // Disappeared file: the listing was taken before deletion, so the
+        // activation still resolves to the stale canonical path; the open
+        // fails with a bounded FileOperationFailed, the session is closed,
+        // and no grant or document appears.
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        let path_id = snapshot.session_id;
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: path_id,
+                query: "a.txt".to_string(),
+            })
+            .await;
+        let snapshot = recv_menu_frame("third-filter", &mut connection).await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) = snapshot else {
+            panic!("third-filter: expected snapshot, got closed");
+        };
+        assert_eq!(snapshot.items.len(), 1, "listing predates the deletion");
+        fs::remove_file(root.join("a.txt")).unwrap();
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: path_id,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            })
+            .await;
+        let closed = recv_menu_frame("close-failed-open", &mut connection).await;
+        assert!(
+            matches!(closed, ServerMessage::TransientMenuClosed { .. }),
+            "close-failed-open: expected closed, got {closed:?}"
+        );
+        let mut failed = false;
+        for _ in 0..8 {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::FileOperationFailed { .. }) => {
+                    failed = true;
+                    break;
+                }
+                Ok(ServerMessage::DecorationSet(_))
+                | Ok(ServerMessage::DiagnosticSet(_))
+                | Ok(ServerMessage::RuntimeDiagnostic(_))
+                | Ok(ServerMessage::BehaviorManifest(_)) => {}
+                Ok(other) => panic!("expected FileOperationFailed, got {other:?}"),
+                Err(_) => panic!("timed out awaiting FileOperationFailed"),
+            }
+        }
+        assert!(failed, "disappeared file fails without an open");
+        connection.drain_bounded().await;
+        let workspace = tab_state.workspace.lock().await;
+        assert!(
+            workspace
+                .document_canonical_path(opened_document_id)
+                .is_some()
+        );
+        assert!(
+            workspace
+                .document_canonical_path(opened_document_id + 1)
+                .is_none(),
+            "failed open allocates no document"
+        );
+        drop(workspace);
+
+        connection.close().await;
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Phase 24.3 (task 10): secondary activation (Alt+Enter) on a selected
+    /// directory closes the path session and opens that directory as the
+    /// current tab's workspace — the browse activation itself is the
+    /// authorization event that converts ephemeral browse authority into a
+    /// `Directory` root grant. The bound tab's registry row rebinds to the
+    /// canonical directory root and the file browser refreshes to the new
+    /// root; a foreign tab's row is untouched; reopening the same directory
+    /// deduplicates to the same root id; secondary activation on a file
+    /// rejects without mutation.
+    #[tokio::test]
+    async fn path_browser_workspace_open_rebinds_only_bound_tab() {
+        let root = temp_workspace("path-browser-open-workspace");
+        fs::create_dir(root.join("alpha")).unwrap();
+        fs::create_dir(root.join("alpha/inner")).unwrap();
+        fs::write(root.join("alpha/file.txt"), "hi").unwrap();
+        fs::write(root.join("beta.txt"), "b").unwrap();
+        let root = fs::canonicalize(&root).unwrap();
+        let alpha = fs::canonicalize(root.join("alpha")).unwrap();
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("path-browser-open-workspace"),
+        ));
+        let (tab_snapshot, tab_state) = server
+            .create_tab_state(11, root.to_string_lossy().into_owned())
+            .await
+            .expect("tab state is created");
+        let tab_id = tab_snapshot.tabs[0].tab_id;
+        // Make the workspace pane visible so the rebind refresh carries the
+        // file-browser listing (hidden by default in fresh tab state).
+        tab_state.toggle_workspace_pane();
+        // A second tab owned by a foreign client must stay untouched by the
+        // bound tab's workspace open.
+        let (foreign_snapshot, _) = server
+            .create_tab_state(7, root.to_string_lossy().into_owned())
+            .await
+            .expect("foreign tab state is created");
+        let foreign_tab_id = foreign_snapshot
+            .tabs
+            .iter()
+            .find(|tab| tab.client_id == 7)
+            .expect("foreign tab present")
+            .tab_id;
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        connection.reclaim(11, tab_id).await;
+        connection.drain_bounded().await;
+
+        async fn open_path_browser(
+            connection: &mut TestConnection,
+            server: &super::super::IpcServer,
+        ) -> ServerMessage {
+            loop {
+                connection
+                    .send(&ClientMessage::CommandIntent {
+                        client_id: 11,
+                        document_id: 1,
+                        behavior_version: server.behavior.lock().await.version(),
+                        command_id: "controlCenter.openPath".to_string(),
+                    })
+                    .await;
+                loop {
+                    match timeout(Duration::from_secs(5), connection.receive()).await {
+                        Ok(message @ ServerMessage::TransientMenuSnapshot(_)) => return message,
+                        Ok(ServerMessage::Error {
+                            code: ProtocolErrorCode::InvalidMessage,
+                            message,
+                        }) if message.contains("behavior version is stale") => break,
+                        Ok(_) => continue,
+                        Err(_) => panic!("timed out awaiting path browser snapshot"),
+                    }
+                }
+            }
+        }
+
+        // Seed listing: directory-first order puts `alpha` at index 0.
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        let path_id = snapshot.session_id;
+        let names: Vec<_> = snapshot
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(names, vec!["alpha", "beta.txt"]);
+
+        // Alt+Enter on the selected directory: the session closes first,
+        // then the bound tab rebinds to the canonical directory root and the
+        // file browser refreshes to the new root's listing.
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: path_id,
+                kind: crate::protocol::TransientMenuActivationData::Secondary,
+            })
+            .await;
+        let mut closed_id = None;
+        let mut registry_snapshot = None;
+        let mut saw_browser_refresh = false;
+        for _ in 0..8 {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::TransientMenuClosed { session_id }) => {
+                    assert_eq!(session_id, path_id, "workspace open closes the session");
+                    closed_id = Some(session_id);
+                }
+                Ok(ServerMessage::TabRegistry(snapshot)) => registry_snapshot = Some(snapshot),
+                Ok(ServerMessage::SduiSnapshot { tree, .. }) => {
+                    // The refresh is the file-browser tree for the new root.
+                    // Other snapshots (late reclaim follow-ups with the
+                    // hidden editor-only tree) are noise; keep scanning.
+                    // Directory labels carry a trailing separator ("inner/").
+                    let labels: Vec<String> = tree
+                        .nodes
+                        .iter()
+                        .find_map(|node| match &node.kind {
+                            SduiNodeKind::List { items } => {
+                                Some(items.iter().map(|item| item.label.clone()).collect())
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    if labels.iter().any(|label| label == "inner/")
+                        && labels.iter().any(|label| label == "file.txt")
+                    {
+                        saw_browser_refresh = true;
+                    }
+                }
+                Ok(_) => continue,
+                Err(_) => panic!("timed out awaiting workspace rebind frames"),
+            }
+            if closed_id.is_some() && registry_snapshot.is_some() && saw_browser_refresh {
+                break;
+            }
+        }
+        assert_eq!(closed_id, Some(path_id));
+        assert!(
+            saw_browser_refresh,
+            "file browser refresh for the new root never arrived"
+        );
+        let registry_snapshot =
+            registry_snapshot.expect("TabRegistry snapshot after workspace open");
+        let bound = registry_snapshot
+            .tabs
+            .iter()
+            .find(|tab| tab.tab_id == tab_id)
+            .expect("bound tab present");
+        assert_eq!(bound.workspace_root, alpha.to_string_lossy().as_ref());
+        let foreign = registry_snapshot
+            .tabs
+            .iter()
+            .find(|tab| tab.tab_id == foreign_tab_id)
+            .expect("foreign tab present");
+        assert_eq!(
+            foreign.workspace_root,
+            root.to_string_lossy().as_ref(),
+            "other tabs' roots are untouched"
+        );
+        let bound_root_id = registry_snapshot
+            .tabs
+            .iter()
+            .find(|tab| tab.tab_id == tab_id)
+            .expect("bound tab present")
+            .workspace_root_id;
+        connection.drain_bounded().await;
+
+        // Reopening the same directory deduplicates to the same root id: the
+        // tab's seed is now the rebound root, so ascend back to the original
+        // root and activate `alpha` again.
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        assert_eq!(
+            snapshot.prompt,
+            format!("Browse · {}", alpha.display()),
+            "seed follows the rebound tab workspace root"
+        );
+        let path_id = snapshot.session_id;
+        connection
+            .send(&ClientMessage::MenuBackspace {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected ascent snapshot");
+        };
+        assert_eq!(snapshot.prompt, format!("Browse · {}", root.display()));
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: path_id,
+                kind: crate::protocol::TransientMenuActivationData::Secondary,
+            })
+            .await;
+        loop {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::TabRegistry(snapshot)) => {
+                    let bound = snapshot
+                        .tabs
+                        .iter()
+                        .find(|tab| tab.tab_id == tab_id)
+                        .expect("bound tab present");
+                    assert_eq!(
+                        bound.workspace_root_id, bound_root_id,
+                        "same canonical directory deduplicates to the same root id"
+                    );
+                    break;
+                }
+                Ok(ServerMessage::TransientMenuClosed { .. }) => {}
+                Ok(_) => continue,
+                Err(_) => panic!("timed out awaiting deduplicated TabRegistry snapshot"),
+            }
+        }
+        connection.drain_bounded().await;
+
+        // Secondary activation on a file is not a workspace open: the
+        // session closes and the bounded diagnostic names the rejection.
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        let path_id = snapshot.session_id;
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: path_id,
+                query: "file.txt".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected filter snapshot");
+        };
+        assert_eq!(snapshot.items.len(), 1);
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: path_id,
+                kind: crate::protocol::TransientMenuActivationData::Secondary,
+            })
+            .await;
+        let mut saw_rejection = false;
+        for _ in 0..4 {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::TransientMenuClosed { .. }) => {}
+                Ok(ServerMessage::Error { message, .. }) => {
+                    assert!(
+                        message.contains("no activation"),
+                        "file has no secondary activation: {message}"
+                    );
+                    saw_rejection = true;
+                    break;
+                }
+                Ok(_) => continue,
+                Err(_) => panic!("timed out awaiting file-activation rejection"),
+            }
+        }
+        assert!(saw_rejection);
+
+        connection.close().await;
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Phase 24.3 (task 10): secondary activation on a directory that
+    /// vanished between listing and activation rejects with the bounded
+    /// file-operation failure and leaves the tab's workspace root unchanged.
+    #[tokio::test]
+    async fn path_browser_workspace_open_rejects_vanished_directory() {
+        let root = temp_workspace("path-browser-vanished-workspace");
+        fs::create_dir(root.join("alpha")).unwrap();
+        fs::write(root.join("beta.txt"), "b").unwrap();
+        let root = fs::canonicalize(&root).unwrap();
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("path-browser-vanished-workspace"),
+        ));
+        let (tab_snapshot, _) = server
+            .create_tab_state(11, root.to_string_lossy().into_owned())
+            .await
+            .expect("tab state is created");
+        let tab_id = tab_snapshot.tabs[0].tab_id;
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        connection.reclaim(11, tab_id).await;
+        connection.drain_bounded().await;
+
+        async fn open_path_browser(
+            connection: &mut TestConnection,
+            server: &super::super::IpcServer,
+        ) -> ServerMessage {
+            loop {
+                connection
+                    .send(&ClientMessage::CommandIntent {
+                        client_id: 11,
+                        document_id: 1,
+                        behavior_version: server.behavior.lock().await.version(),
+                        command_id: "controlCenter.openPath".to_string(),
+                    })
+                    .await;
+                loop {
+                    match timeout(Duration::from_secs(5), connection.receive()).await {
+                        Ok(message @ ServerMessage::TransientMenuSnapshot(_)) => return message,
+                        Ok(ServerMessage::Error {
+                            code: ProtocolErrorCode::InvalidMessage,
+                            message,
+                        }) if message.contains("behavior version is stale") => break,
+                        Ok(_) => continue,
+                        Err(_) => panic!("timed out awaiting path browser snapshot"),
+                    }
+                }
+            }
+        }
+
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        let path_id = snapshot.session_id;
+        // The directory disappears after the listing installed.
+        fs::remove_dir_all(root.join("alpha")).unwrap();
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: path_id,
+                kind: crate::protocol::TransientMenuActivationData::Secondary,
+            })
+            .await;
+        let mut saw_failure = false;
+        for _ in 0..4 {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::TransientMenuClosed { session_id }) => {
+                    assert_eq!(session_id, path_id);
+                }
+                Ok(ServerMessage::FileOperationFailed {
+                    code: FileErrorCode::NotFound,
+                    workspace_root_id: None,
+                    document_id: None,
+                    ..
+                }) => {
+                    saw_failure = true;
+                    break;
+                }
+                Ok(_) => continue,
+                Err(_) => panic!("timed out awaiting vanished-directory failure"),
+            }
+        }
+        assert!(saw_failure, "vanished directory fails with NotFound");
+
+        // The tab's workspace root did not change: a fresh Path Browser still
+        // seeds from the original root.
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        assert_eq!(
+            snapshot.prompt,
+            format!("Browse · {}", root.display()),
+            "failed workspace open leaves the tab root unchanged"
+        );
+
+        connection.close().await;
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Phase 24.3 (task 10): the shared bound-tab workspace-open helper
+    /// rejects a connection with no bound tab before touching the workspace
+    /// or registry.
+    #[tokio::test]
+    async fn open_workspace_helper_requires_bound_tab() {
+        let workspace = workspace_state();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let sdui = sdui_state();
+        let (registry, tab_registry_tx) = two_tab_registry();
+        let messages = open_workspace_for_bound_tab(
+            &workspace,
+            &document,
+            &sdui,
+            &registry,
+            &tab_registry_tx,
+            None,
+            99,
+            None,
+            PathBuf::from("/tmp/unused"),
+        )
+        .await;
+        assert_eq!(messages.len(), 1);
+        match &messages[0] {
+            ServerMessage::Error { message, .. } => {
+                assert!(message.contains("requires a bound tab"));
+            }
+            other => panic!("expected bound-tab rejection, got {other:?}"),
+        }
+    }
+
+    /// Phase 24.3 (task 11): browsing alone — open, filter, descend, ascend,
+    /// direct jump, cancel — never allocates a root grant or opens a
+    /// document. Activation is the single grant conversion point.
+    #[tokio::test]
+    async fn path_browser_navigation_only_creates_no_grants() {
+        let root = temp_workspace("path-browser-navigation-only");
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(root.join("README.md"), "r").unwrap();
+        let root = fs::canonicalize(&root).unwrap();
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("path-browser-navigation-only"),
+        ));
+        let (tab_snapshot, tab_state) = server
+            .create_tab_state(11, root.to_string_lossy().into_owned())
+            .await
+            .expect("tab state is created");
+        let tab_id = tab_snapshot.tabs[0].tab_id;
+        let workspace = Arc::clone(&tab_state.workspace);
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        connection.reclaim(11, tab_id).await;
+        connection.drain_bounded().await;
+        assert_eq!(workspace.lock().await.directory_roots().len(), 1);
+
+        async fn open_path_browser(
+            connection: &mut TestConnection,
+            server: &super::super::IpcServer,
+        ) -> ServerMessage {
+            loop {
+                connection
+                    .send(&ClientMessage::CommandIntent {
+                        client_id: 11,
+                        document_id: 1,
+                        behavior_version: server.behavior.lock().await.version(),
+                        command_id: "controlCenter.openPath".to_string(),
+                    })
+                    .await;
+                loop {
+                    match timeout(Duration::from_secs(5), connection.receive()).await {
+                        Ok(message @ ServerMessage::TransientMenuSnapshot(_)) => return message,
+                        Ok(ServerMessage::Error {
+                            code: ProtocolErrorCode::InvalidMessage,
+                            message,
+                        }) if message.contains("behavior version is stale") => break,
+                        Ok(_) => continue,
+                        Err(_) => panic!("timed out awaiting path browser snapshot"),
+                    }
+                }
+            }
+        }
+
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        let path_id = snapshot.session_id;
+
+        // Filter-only edit: no filesystem work, no grant.
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: path_id,
+                query: "RE".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(filtered) =
+            timeout(Duration::from_secs(5), connection.receive())
+                .await
+                .expect("filter snapshot")
+        else {
+            panic!("expected snapshot after filter edit");
+        };
+        assert_eq!(
+            filtered.session_id, path_id,
+            "session id stable across edits"
+        );
+        assert_eq!(filtered.items.len(), 1);
+        assert_eq!(filtered.items[0].label, "README.md");
+
+        // Descend into src (primary on the directory after clearing the
+        // filter): the session stays open and relists.
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: path_id,
+                query: String::new(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(_) =
+            timeout(Duration::from_secs(5), connection.receive())
+                .await
+                .expect("cleared filter snapshot")
+        else {
+            panic!("expected snapshot after clearing the filter");
+        };
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: path_id,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(descended) =
+            timeout(Duration::from_secs(5), connection.receive())
+                .await
+                .expect("descend snapshot")
+        else {
+            panic!("expected snapshot after descend");
+        };
+        assert_eq!(
+            descended.session_id, path_id,
+            "session id stable across descend"
+        );
+        assert_eq!(
+            descended.prompt,
+            format!("Browse · {}/src", root.display()),
+            "descend relists the canonical target"
+        );
+        assert_eq!(descended.items.len(), 1);
+        assert_eq!(descended.items[0].label, "main.rs");
+
+        // Ascend (Backspace on the empty filter) back to the tab root.
+        connection
+            .send(&ClientMessage::MenuBackspace {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(ascended) =
+            timeout(Duration::from_secs(5), connection.receive())
+                .await
+                .expect("ascend snapshot")
+        else {
+            panic!("expected snapshot after ascend");
+        };
+        assert_eq!(
+            ascended.prompt,
+            format!("Browse · {}", root.display()),
+            "empty-filter Backspace ascends to the parent"
+        );
+
+        // Direct jump to a typed absolute directory.
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: path_id,
+                query: format!("{}/src/", root.display()),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(jumped) =
+            timeout(Duration::from_secs(5), connection.receive())
+                .await
+                .expect("direct jump snapshot")
+        else {
+            panic!("expected snapshot after direct jump");
+        };
+        assert_eq!(
+            jumped.prompt,
+            format!("Browse · {}/src", root.display()),
+            "direct path edit jumps to the typed directory"
+        );
+
+        // Cancel: the session closes, still no grant or document.
+        connection
+            .send(&ClientMessage::MenuCancel {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuClosed { session_id } =
+            timeout(Duration::from_secs(5), connection.receive())
+                .await
+                .expect("cancel frame")
+        else {
+            panic!("expected menu close");
+        };
+        assert_eq!(session_id, path_id);
+
+        // Nothing but menu frames flowed, and the workspace gained no root.
+        for _ in 0..16 {
+            if timeout(
+                Duration::from_millis(10),
+                connection.codec.read_server_message(&mut connection.client),
+            )
+            .await
+            .is_err()
+            {
+                break;
+            }
+        }
+        assert_eq!(
+            workspace.lock().await.directory_roots().len(),
+            1,
+            "browse navigation alone creates no root grants"
+        );
+        connection.close().await;
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Phase 24.3 (task 11): a session id from one connection is opaque to
+    /// every other connection — cross-client activation fails closed with the
+    /// bounded `menu.unknown_session` diagnostic and never disturbs the
+    /// owning session.
+    #[tokio::test]
+    async fn path_browser_cross_client_activation_denied() {
+        let root = temp_workspace("path-browser-cross-client");
+        fs::write(root.join("a.txt"), "a").unwrap();
+        let root = fs::canonicalize(&root).unwrap();
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("path-browser-cross-client"),
+        ));
+        let (tab_snapshot, _) = server
+            .create_tab_state(11, root.to_string_lossy().into_owned())
+            .await
+            .expect("tab state is created");
+        let tab_id = tab_snapshot.tabs[0].tab_id;
+        let (foreign_snapshot, _) = server
+            .create_tab_state(22, root.to_string_lossy().into_owned())
+            .await
+            .expect("foreign tab state is created");
+        let foreign_tab_id = foreign_snapshot
+            .tabs
+            .iter()
+            .find(|tab| tab.client_id == 22)
+            .expect("foreign tab present")
+            .tab_id;
+        let mut connection_a = TestConnection::connect_with_server(11, server.clone()).await;
+        connection_a.reclaim(11, tab_id).await;
+        connection_a.drain_bounded().await;
+        let mut connection_b = TestConnection::connect_with_server(22, server.clone()).await;
+        connection_b.reclaim(22, foreign_tab_id).await;
+        connection_b.drain_bounded().await;
+
+        async fn open_path_browser(
+            connection: &mut TestConnection,
+            server: &super::super::IpcServer,
+        ) -> ServerMessage {
+            loop {
+                connection
+                    .send(&ClientMessage::CommandIntent {
+                        client_id: 11,
+                        document_id: 1,
+                        behavior_version: server.behavior.lock().await.version(),
+                        command_id: "controlCenter.openPath".to_string(),
+                    })
+                    .await;
+                loop {
+                    match timeout(Duration::from_secs(5), connection.receive()).await {
+                        Ok(message @ ServerMessage::TransientMenuSnapshot(_)) => return message,
+                        Ok(ServerMessage::Error {
+                            code: ProtocolErrorCode::InvalidMessage,
+                            message,
+                        }) if message.contains("behavior version is stale") => break,
+                        Ok(_) => continue,
+                        Err(_) => panic!("timed out awaiting path browser snapshot"),
+                    }
+                }
+            }
+        }
+
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection_a, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        let path_id = snapshot.session_id;
+
+        // Client B cannot drive A's session: the id is per-connection opaque.
+        connection_b
+            .send(&ClientMessage::MenuActivate {
+                client_id: 22,
+                session_id: path_id,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            })
+            .await;
+        let mut saw_denial = false;
+        for _ in 0..4 {
+            match timeout(Duration::from_secs(2), connection_b.receive()).await {
+                Ok(ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic {
+                    code, message, ..
+                })) if code == "menu.unknown_session" => {
+                    assert!(message.contains(&path_id.to_string()));
+                    saw_denial = true;
+                    break;
+                }
+                Ok(_) => continue,
+                Err(_) => panic!("timed out awaiting cross-client denial"),
+            }
+        }
+        assert!(saw_denial, "foreign session id fails closed");
+
+        // A's session is untouched: it still cancels with the expected frame.
+        connection_a
+            .send(&ClientMessage::MenuCancel {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuClosed { session_id } =
+            timeout(Duration::from_secs(5), connection_a.receive())
+                .await
+                .expect("owner cancel frame")
+        else {
+            panic!("expected owner menu close");
+        };
+        assert_eq!(
+            session_id, path_id,
+            "owning connection still holds the session"
+        );
+
+        connection_a.close().await;
+        connection_b.close().await;
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Phase 24.3 (task 11): the per-connection session store survives tab
+    /// rebinds and drops cleanly on disconnect.
+    #[tokio::test]
+    async fn path_browser_survives_tab_switch_and_disconnect() {
+        let root_a = temp_workspace("path-browser-tab-switch-a");
+        fs::write(root_a.join("a.txt"), "a").unwrap();
+        let root_b = temp_workspace("path-browser-tab-switch-b");
+        fs::write(root_b.join("b.txt"), "b").unwrap();
+        let root_a = fs::canonicalize(&root_a).unwrap();
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("path-browser-tab-switch"),
+        ));
+        let (tab_a_snapshot, _) = server
+            .create_tab_state(11, root_a.to_string_lossy().into_owned())
+            .await
+            .expect("tab a is created");
+        let (tab_b_snapshot, _) = server
+            .create_tab_state(11, root_b.to_string_lossy().into_owned())
+            .await
+            .expect("tab b is created");
+        let tab_a = tab_a_snapshot.tabs[0].tab_id;
+        let tab_b = tab_b_snapshot.tabs[1].tab_id;
+        assert_ne!(tab_a, tab_b);
+
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        connection.reclaim(11, tab_a).await;
+        connection.drain_bounded().await;
+
+        async fn open_path_browser(
+            connection: &mut TestConnection,
+            server: &super::super::IpcServer,
+        ) -> ServerMessage {
+            loop {
+                connection
+                    .send(&ClientMessage::CommandIntent {
+                        client_id: 11,
+                        document_id: 1,
+                        behavior_version: server.behavior.lock().await.version(),
+                        command_id: "controlCenter.openPath".to_string(),
+                    })
+                    .await;
+                loop {
+                    match timeout(Duration::from_secs(5), connection.receive()).await {
+                        Ok(message @ ServerMessage::TransientMenuSnapshot(_)) => return message,
+                        Ok(ServerMessage::Error {
+                            code: ProtocolErrorCode::InvalidMessage,
+                            message,
+                        }) if message.contains("behavior version is stale") => break,
+                        Ok(_) => continue,
+                        Err(_) => panic!("timed out awaiting path browser snapshot"),
+                    }
+                }
+            }
+        }
+
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        let path_id = snapshot.session_id;
+
+        // Activating the second tab dismisses the session Escape-free (focus
+        // loss) with the ordinary close frame; the session is then gone.
+        connection
+            .send(&ClientMessage::TabCommand {
+                client_id: 11,
+                command: crate::protocol::TabCommand::Activate { tab_id: tab_b },
+            })
+            .await;
+        let ServerMessage::TransientMenuClosed { session_id } =
+            timeout(Duration::from_secs(5), connection.receive())
+                .await
+                .expect("tab switch close frame")
+        else {
+            panic!("expected menu close on tab switch");
+        };
+        assert_eq!(session_id, path_id, "tab switch dismisses the session");
+        connection
+            .send(&ClientMessage::MenuCancel {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let mut saw_unknown = false;
+        for _ in 0..4 {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic { code, .. }))
+                    if code == "menu.unknown_session" =>
+                {
+                    saw_unknown = true;
+                    break;
+                }
+                Ok(_) => continue,
+                Err(_) => panic!("timed out awaiting unknown-session diagnostic"),
+            }
+        }
+        assert!(saw_unknown, "dismissed session is gone");
+
+        // Disconnect sweeps the store; `close` fails the test if the
+        // connection task panicked or leaked a session.
+        connection.close().await;
+        let _ = fs::remove_dir_all(&root_a);
+        let _ = fs::remove_dir_all(&root_b);
+    }
+
+    /// Phase 24.3 (task 11): after a runtime reload bumps the generation
+    /// stamp, an open session fails closed with the bounded stale-generation
+    /// diagnostic instead of executing against the old generation — and the
+    /// session is then gone, so cancel reports `menu.unknown_session`.
+    #[tokio::test]
+    async fn path_browser_activation_after_runtime_reload_fails_closed() {
+        let config_root = temp_workspace("path-browser-reload-config");
+        fs::write(config_root.join("init.js"), "").unwrap();
+        let workspace_root = temp_workspace("path-browser-reload-workspace");
+        fs::write(workspace_root.join("a.txt"), "a").unwrap();
+        let workspace_root = fs::canonicalize(&workspace_root).unwrap();
+        let mut config = super::super::ServerConfig::new(crate::ipc::IpcEndpoint::from_argument(
+            "path-browser-reload",
+        ));
+        config.configuration_root = Some(config_root.clone());
+        let server = super::super::IpcServer::new(config);
+        let (tab_snapshot, _) = server
+            .create_tab_state(11, workspace_root.to_string_lossy().into_owned())
+            .await
+            .expect("tab state is created");
+        let tab_id = tab_snapshot.tabs[0].tab_id;
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        connection.reclaim(11, tab_id).await;
+        connection.drain_bounded().await;
+
+        async fn open_path_browser(
+            connection: &mut TestConnection,
+            server: &super::super::IpcServer,
+        ) -> ServerMessage {
+            loop {
+                connection
+                    .send(&ClientMessage::CommandIntent {
+                        client_id: 11,
+                        document_id: 1,
+                        behavior_version: server.behavior.lock().await.version(),
+                        command_id: "controlCenter.openPath".to_string(),
+                    })
+                    .await;
+                loop {
+                    match timeout(Duration::from_secs(5), connection.receive()).await {
+                        Ok(message @ ServerMessage::TransientMenuSnapshot(_)) => return message,
+                        Ok(ServerMessage::Error {
+                            code: ProtocolErrorCode::InvalidMessage,
+                            message,
+                        }) if message.contains("behavior version is stale") => break,
+                        Ok(_) => continue,
+                        Err(_) => panic!("timed out awaiting path browser snapshot"),
+                    }
+                }
+            }
+        }
+
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            open_path_browser(&mut connection, &server).await
+        else {
+            panic!("expected path browser snapshot");
+        };
+        let path_id = snapshot.session_id;
+        assert_eq!(server.runtime_generation.generation_id().await, 1);
+
+        let outcome = server.reload_runtime_generation().await;
+        assert!(
+            outcome.reloaded,
+            "reload succeeds with the empty init.js config"
+        );
+        assert_eq!(server.runtime_generation.generation_id().await, 2);
+
+        // Activation with the old stamp fails closed: bounded diagnostic, no
+        // execution, and the session is consumed like any rejected activation.
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: path_id,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            })
+            .await;
+        // Reload publishes the new generation snapshot; the loop closes the
+        // active session first (the catalogue is generation-bound), exactly
+        // like a tab switch dismisses on focus loss.
+        let mut saw_closed = false;
+        for _ in 0..8 {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::TransientMenuClosed { session_id }) => {
+                    assert_eq!(session_id, path_id);
+                    saw_closed = true;
+                    break;
+                }
+                Ok(_) => continue,
+                Err(_) => panic!("timed out awaiting reload dismissal"),
+            }
+        }
+        assert!(saw_closed, "runtime reload dismisses the active session");
+
+        // The session is gone: cancel reports the bounded unknown-session
+        // diagnostic rather than a spurious close.
+        connection
+            .send(&ClientMessage::MenuCancel {
+                client_id: 11,
+                session_id: path_id,
+            })
+            .await;
+        let mut saw_unknown = false;
+        for _ in 0..4 {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic { code, .. }))
+                    if code == "menu.unknown_session" =>
+                {
+                    saw_unknown = true;
+                    break;
+                }
+                Ok(_) => continue,
+                Err(_) => panic!("timed out awaiting unknown-session diagnostic"),
+            }
+        }
+        assert!(saw_unknown, "cancelled session reports unknown_session");
+
+        connection.close().await;
+        let _ = fs::remove_dir_all(&config_root);
+        let _ = fs::remove_dir_all(&workspace_root);
+    }
+
+    /// Phase 24.3 (task 11): the package/generic command lane cannot open
+    /// the Path Browser. Only the connection's `CommandIntent` special case
+    /// and the Control Centre catalogue's `MenuActivate` special case reach
+    /// the session store; the shared executor (the lane package callbacks
+    /// run through) yields nothing on the wire for the built-in id.
+    #[tokio::test]
+    async fn package_command_lane_cannot_open_path_browser() {
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("package-lane-path-browser"),
+        ));
+        let response = execute_command_intent(
+            CommandExecutionRequest {
+                command_id: "controlCenter.openPath".to_string(),
+                arguments: serde_json::Value::Null,
+                target: CommandExecutionTarget::ActiveDocument { document_id: 1 },
+                provenance: None,
+                expected_permissions: Vec::new(),
+            },
+            Arc::clone(&server.workspace),
+            &server.document,
+            &server.sdui,
+            1,
+            Some(&server),
+            &CommandRegistry::new(),
+        )
+        .await;
+        assert!(
+            response.is_none(),
+            "generic execution of controlCenter.openPath must yield no message"
+        );
+    }
+
+    /// Phase 24.1: menu intents naming sessions this connection does not hold
+    /// are dropped with a bounded `menu.unknown_session` diagnostic — never an
+    /// error or disconnect. Sessions are per-tab (per-connection), so the
+    /// connection must be tab-bound first.
+    #[tokio::test]
+    async fn menu_intents_for_unknown_sessions_produce_bounded_diagnostics() {
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("menu-unknown-session"),
+        ));
+        let (snapshot, _state) = server
+            .create_tab_state(
+                11,
+                temp_workspace("menu-unknown")
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+            .await
+            .expect("tab state is created");
+        let tab_id = snapshot.tabs[0].tab_id;
+
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        connection.reclaim(11, tab_id).await;
+        connection.drain_bounded().await;
+
+        for message in [
+            ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: 1 << 63 | 7,
+                query: "reload".to_string(),
+            },
+            ClientMessage::MenuSelectionMove {
+                client_id: 11,
+                session_id: 1 << 63 | 7,
+                delta: 1,
+            },
+            ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: 1 << 63 | 7,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            },
+            ClientMessage::MenuCancel {
+                client_id: 11,
+                session_id: 1 << 63 | 7,
+            },
+        ] {
+            connection.send(&message).await;
+            let response = connection.receive().await;
+            assert!(
+                matches!(
+                    response,
+                    ServerMessage::RuntimeDiagnostic(ref diagnostic)
+                        if diagnostic.code == "menu.unknown_session"
+                ),
+                "unexpected response: {response:?}"
+            );
+        }
+
+        // The connection is still alive and functional (never a disconnect).
+        connection
+            .send(&ClientMessage::ListDocuments { client_id: 11 })
+            .await;
+        assert!(matches!(
+            connection.receive_response().await,
+            ServerMessage::DocumentList { .. }
+        ));
+        connection.close().await;
+    }
+
+    /// Read until a transient-menu frame arrives, skipping parse/activation
+    /// noise that can race a menu exchange.
+    async fn receive_menu_message(connection: &mut TestConnection) -> ServerMessage {
+        loop {
+            match timeout(Duration::from_secs(2), connection.receive()).await {
+                Ok(
+                    message @ (ServerMessage::TransientMenuSnapshot(_)
+                    | ServerMessage::TransientMenuClosed { .. }),
+                ) => return message,
+                Ok(_) => continue,
+                Err(_) => panic!("timed out awaiting transient menu frame"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn control_center_opens_filters_activates_and_cancels() {
+        let root = temp_workspace("control-center");
+        let mut config = super::super::ServerConfig::new(crate::ipc::IpcEndpoint::from_argument(
+            "control-center-open",
+        ));
+        config.workspace_roots.push(root.clone());
+        let server = super::super::IpcServer::new(config);
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        let open = |behavior_version| ClientMessage::CommandIntent {
+            client_id: 11,
+            document_id: 1,
+            behavior_version,
+            command_id: "controlCenter.open".to_string(),
+        };
+        let mut behavior_version = server.behavior.lock().await.version();
+
+        // Opening replaces any active session: the first open delivers a
+        // snapshot, a second open closes the old session and returns a
+        // distinct new session id.
+        connection.send(&open(behavior_version)).await;
+        let ServerMessage::TransientMenuSnapshot(first_snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected first TransientMenuSnapshot");
+        };
+        let first_session_id = first_snapshot.session_id;
+        connection.send(&open(behavior_version)).await;
+        assert!(matches!(
+            receive_menu_message(&mut connection).await,
+            ServerMessage::TransientMenuClosed { session_id }
+                if session_id == first_session_id
+        ));
+        let ServerMessage::TransientMenuSnapshot(second_snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected replacement TransientMenuSnapshot");
+        };
+        let second_session_id = second_snapshot.session_id;
+        assert_ne!(first_session_id, second_session_id);
+
+        // A stale selection move against the replaced session is a bounded
+        // diagnostic, never an error or disconnect.
+        connection
+            .send(&ClientMessage::MenuSelectionMove {
+                client_id: 11,
+                session_id: first_session_id,
+                delta: 1,
+            })
+            .await;
+        assert!(matches!(
+            connection.receive().await,
+            ServerMessage::RuntimeDiagnostic(ref diagnostic)
+                if diagnostic.code == "menu.unknown_session"
+        ));
+
+        // Query filtering narrows the live session's items.
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id: second_session_id,
+                query: "reload".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(filtered) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected filtered TransientMenuSnapshot");
+        };
+        assert!(
+            !filtered.items.is_empty()
+                && filtered.items.iter().all(|item| item.id.contains("reload")),
+            "filtered items must all match the query: {:?}",
+            filtered
+                .items
+                .iter()
+                .map(|item| &item.id)
+                .collect::<Vec<_>>()
+        );
+
+        // Activating the selected item closes the menu and executes the
+        // server command; the reload fanout (diagnostic + snapshot) arrives
+        // asynchronously after the close.
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id: second_session_id,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            })
+            .await;
+        assert!(matches!(
+            receive_menu_message(&mut connection).await,
+            ServerMessage::TransientMenuClosed { session_id }
+                if session_id == second_session_id
+        ));
+        let mut saw_reload_diagnostic = false;
+        let mut saw_runtime_snapshot = false;
+        for _ in 0..64 {
+            match connection.receive().await {
+                ServerMessage::RuntimeDiagnostic(ref diagnostic)
+                    if diagnostic.code == "runtime.reload_succeeded" =>
+                {
+                    saw_reload_diagnostic = true;
+                }
+                ServerMessage::RuntimeStateSnapshot(snapshot) => {
+                    saw_runtime_snapshot = true;
+                    behavior_version = snapshot.behavior.behavior_version;
+                }
+                ServerMessage::BehaviorManifest(manifest) => {
+                    behavior_version = manifest.behavior_version;
+                }
+                _ => {}
+            }
+            if saw_reload_diagnostic && saw_runtime_snapshot {
+                break;
+            }
+        }
+        assert!(
+            saw_reload_diagnostic && saw_runtime_snapshot,
+            "reload fanout must deliver the diagnostic and snapshot"
+        );
+
+        // Reopening after the generation replacement yields a fresh session
+        // id (the old generation's session is gone).
+        connection.send(&open(behavior_version)).await;
+        let ServerMessage::TransientMenuSnapshot(third_snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected reopened TransientMenuSnapshot");
+        };
+        assert_ne!(third_snapshot.session_id, second_session_id);
+
+        // Escape (MenuCancel) closes the active session with a close frame.
+        connection
+            .send(&ClientMessage::MenuCancel {
+                client_id: 11,
+                session_id: third_snapshot.session_id,
+            })
+            .await;
+        assert!(matches!(
+            receive_menu_message(&mut connection).await,
+            ServerMessage::TransientMenuClosed { session_id }
+                if session_id == third_snapshot.session_id
+        ));
+
+        // The connection is still alive and functional.
+        connection
+            .send(&ClientMessage::ListDocuments { client_id: 11 })
+            .await;
+        assert!(matches!(
+            connection.receive_response().await,
+            ServerMessage::DocumentList { .. }
+        ));
+        connection.drain_bounded().await;
+        connection.close().await;
+    }
+
+    #[tokio::test]
+    async fn control_center_shell_activation_sends_shell_command_request() {
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("control-center-shell"),
+        ));
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        let behavior_version = server.behavior.lock().await.version();
+        connection
+            .send(&ClientMessage::CommandIntent {
+                client_id: 11,
+                document_id: 1,
+                behavior_version,
+                command_id: "controlCenter.open".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected TransientMenuSnapshot");
+        };
+        let session_id = snapshot.session_id;
+        assert!(
+            snapshot
+                .items
+                .iter()
+                .any(|item| item.id == "shell.clientSplitPaneVertical"),
+            "shell.client* entries must appear in the Control Center listing"
+        );
+
+        // Fuzzy query narrows to exactly the shell entry.
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id,
+                query: "clientSplitPaneVertical".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(filtered) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected filtered TransientMenuSnapshot");
+        };
+        assert_eq!(filtered.items.len(), 1);
+        assert_eq!(filtered.items[0].id, "shell.clientSplitPaneVertical");
+
+        // Activation closes the menu, then ships the narrow shell-command
+        // request frame the client re-parses deny-by-default.
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            })
+            .await;
+        assert!(matches!(
+            receive_menu_message(&mut connection).await,
+            ServerMessage::TransientMenuClosed { session_id: closed }
+                if closed == session_id
+        ));
+        assert_eq!(
+            connection.receive().await,
+            ServerMessage::ShellClientCommandRequest {
+                command_id: "shell.clientSplitPaneVertical".to_string(),
+            }
+        );
+        connection.drain_bounded().await;
+        connection.close().await;
+    }
+
+    #[tokio::test]
+    async fn menu_backspace_deletes_one_char_and_secondary_activation_matches_primary() {
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("menu-backspace-secondary"),
+        ));
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        let behavior_version = server.behavior.lock().await.version();
+        connection
+            .send(&ClientMessage::CommandIntent {
+                client_id: 11,
+                document_id: 1,
+                behavior_version,
+                command_id: "controlCenter.open".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected TransientMenuSnapshot");
+        };
+        let session_id = snapshot.session_id;
+
+        // Backspace on an empty query is a bounded no-op snapshot.
+        connection
+            .send(&ClientMessage::MenuBackspace {
+                client_id: 11,
+                session_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(after_empty_backspace) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected TransientMenuSnapshot");
+        };
+        assert_eq!(after_empty_backspace.query, "");
+
+        // Backspace deletes exactly one query character (Control Center
+        // semantics; path mode overrides with ascend in task 8).
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id,
+                query: "clientSplitPaneVertical".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(filtered) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected filtered TransientMenuSnapshot");
+        };
+        assert_eq!(filtered.items.len(), 1);
+        connection
+            .send(&ClientMessage::MenuBackspace {
+                client_id: 11,
+                session_id,
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(after_backspace) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected TransientMenuSnapshot");
+        };
+        assert_eq!(after_backspace.query, "clientSplitPaneVertica");
+
+        // Restore the exact query, then activate with the secondary kind:
+        // the Control Center executes the same selection as primary.
+        connection
+            .send(&ClientMessage::MenuQueryUpdate {
+                client_id: 11,
+                session_id,
+                query: "clientSplitPaneVertical".to_string(),
+            })
+            .await;
+        let _ = receive_menu_message(&mut connection).await;
+        connection
+            .send(&ClientMessage::MenuActivate {
+                client_id: 11,
+                session_id,
+                kind: crate::protocol::TransientMenuActivationData::Secondary,
+            })
+            .await;
+        assert!(matches!(
+            receive_menu_message(&mut connection).await,
+            ServerMessage::TransientMenuClosed { session_id: closed }
+                if closed == session_id
+        ));
+        assert_eq!(
+            connection.receive().await,
+            ServerMessage::ShellClientCommandRequest {
+                command_id: "shell.clientSplitPaneVertical".to_string(),
+            }
+        );
+        connection.drain_bounded().await;
+        connection.close().await;
+    }
+
+    #[tokio::test]
+    async fn runtime_generation_replacement_cancels_open_control_center() {
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("control-center-generation"),
+        ));
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        let mut behavior_version = server.behavior.lock().await.version();
+        connection
+            .send(&ClientMessage::CommandIntent {
+                client_id: 11,
+                document_id: 1,
+                behavior_version,
+                command_id: "controlCenter.open".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected TransientMenuSnapshot");
+        };
+        let session_id = snapshot.session_id;
+
+        // A direct reload while the menu is open replaces the runtime
+        // generation; the broadcast cancels the open menu session before
+        // replaying the replacement state.
+        connection
+            .send(&ClientMessage::CommandIntent {
+                client_id: 11,
+                document_id: 1,
+                behavior_version,
+                command_id: "runtime.reloadConfiguration".to_string(),
+            })
+            .await;
+        let mut saw_reload_diagnostic = false;
+        let mut saw_menu_close = false;
+        let mut saw_runtime_snapshot = false;
+        for _ in 0..64 {
+            match connection.receive().await {
+                ServerMessage::RuntimeDiagnostic(ref diagnostic)
+                    if diagnostic.code == "runtime.reload_succeeded" =>
+                {
+                    saw_reload_diagnostic = true;
+                }
+                ServerMessage::TransientMenuClosed { session_id: closed }
+                    if closed == session_id =>
+                {
+                    saw_menu_close = true;
+                }
+                ServerMessage::RuntimeStateSnapshot(snapshot) => {
+                    saw_runtime_snapshot = true;
+                    behavior_version = snapshot.behavior.behavior_version;
+                }
+                ServerMessage::BehaviorManifest(manifest) => {
+                    behavior_version = manifest.behavior_version;
+                }
+                _ => {}
+            }
+            if saw_reload_diagnostic && saw_menu_close && saw_runtime_snapshot {
+                break;
+            }
+        }
+        assert!(
+            saw_reload_diagnostic && saw_menu_close && saw_runtime_snapshot,
+            "generation replacement must close the open menu and replay state"
+        );
+
+        // The reopened menu is stamped with the replacement generation and
+        // gets a distinct session id.
+        connection
+            .send(&ClientMessage::CommandIntent {
+                client_id: 11,
+                document_id: 1,
+                behavior_version,
+                command_id: "controlCenter.open".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(reopened) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected reopened TransientMenuSnapshot");
+        };
+        assert_ne!(reopened.session_id, session_id);
+        connection.drain_bounded().await;
+        connection.close().await;
+    }
+
+    #[tokio::test]
+    async fn tab_switch_cancels_the_active_server_menu_session() {
+        let root_a = temp_workspace("menu-tab-alpha");
+        let root_b = temp_workspace("menu-tab-beta");
+        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+            crate::ipc::IpcEndpoint::from_argument("menu-tab-switch"),
+        ));
+        let (first_snapshot, _) = server
+            .create_tab_state(11, root_a.to_string_lossy().into_owned())
+            .await
+            .expect("first tab state is created");
+        let first_tab = first_snapshot.tabs[0].tab_id;
+        let (second_snapshot, _) = server
+            .create_tab_state(11, root_b.to_string_lossy().into_owned())
+            .await
+            .expect("second tab state is created");
+        let second_tab = second_snapshot.tabs[0].tab_id;
+
+        let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+        connection.reclaim(11, first_tab).await;
+        connection.drain_bounded().await;
+        let behavior_version = server.behavior.lock().await.version();
+        connection
+            .send(&ClientMessage::CommandIntent {
+                client_id: 11,
+                document_id: 1,
+                behavior_version,
+                command_id: "controlCenter.open".to_string(),
+            })
+            .await;
+        let ServerMessage::TransientMenuSnapshot(snapshot) =
+            receive_menu_message(&mut connection).await
+        else {
+            panic!("expected TransientMenuSnapshot");
+        };
+        let session_id = snapshot.session_id;
+
+        // Switching to the second tab dismisses the open menu (Escape-free
+        // dismissal on focus loss) with an explicit close frame.
+        connection
+            .send(&ClientMessage::TabCommand {
+                client_id: 11,
+                command: crate::protocol::TabCommand::Activate { tab_id: second_tab },
+            })
+            .await;
+        assert!(matches!(
+            receive_menu_message(&mut connection).await,
+            ServerMessage::TransientMenuClosed { session_id: closed }
+                if closed == session_id
+        ));
+        connection.drain_bounded().await;
+        connection.close().await;
+    }
+
+    #[tokio::test]
+    async fn package_command_dispatchs_through_shared_dispatcher_with_live_registry() {
+        // A validated package command resolves through the live aggregated
+        // registry passed by the menu-activation path (not the empty registry
+        // SDUI/CommandIntent use): the dispatcher returns `None` (Accepted —
+        // the JS side effect runs in the package runtime, no wire message).
+        let mut registry = CommandRegistry::new();
+        registry.insert_test_command(crate::packages::commands::RegisteredCommand {
+            command_id: "markdown.togglePreview".to_string(),
+            display_name: "Toggle Markdown Preview".to_string(),
+            package_name: "@clay/markdown".to_string(),
+            package_version: "0.1.0".to_string(),
+            api_prefix: "markdown".to_string(),
+            routing_policy: crate::protocol::RoutingPolicy::ServerFirst,
+            key_bindings: Vec::new(),
+            permissions: vec![crate::packages::permissions::PackagePermission::ParseDocument],
+            custom_properties: BTreeMap::new(),
+        });
+        let response = execute_command_intent(
+            CommandExecutionRequest {
+                command_id: "markdown.togglePreview".to_string(),
+                arguments: serde_json::Value::Null,
+                target: CommandExecutionTarget::ActiveDocument { document_id: 1 },
+                provenance: None,
+                expected_permissions: Vec::new(),
+            },
+            workspace_state(),
+            &document_state(),
+            &sdui_state(),
+            1,
+            None,
+            &registry,
+        )
+        .await;
+        assert_eq!(response, None, "validated package commands accept silently");
     }
 
     /// Read until a `TabRegistry` snapshot arrives (skipping unrelated
@@ -5924,6 +8947,176 @@ await loadPackage("@clay/markdown");"#,
             }
             message => panic!("expected runtime SduiSnapshot, got {message:?}"),
         }
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn control_center_lists_and_activates_loaded_package_commands() {
+        let (client, server) = duplex(65536);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            1,
+            "Hello from package commands".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let sdui = sdui_state();
+        let runtime = js_runtime();
+        let coordinator = parse_coordinator();
+        load_markdown_runtime(&runtime, &coordinator, &behavior, &sdui).await;
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            Arc::clone(&behavior),
+            workspace_state(),
+            Arc::clone(&sdui),
+            active_theme_state(),
+            runtime_diagnostics(),
+            runtime_generation_from(runtime),
+            coordinator,
+            language_intelligence_coordinator(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // Handshake: a runtime with loaded packages ships extra frames, so
+        // read until the file-open capability, capturing the markdown mode
+        // layer manifest on the way.
+        let mut markdown_manifest = None;
+        loop {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::BehaviorManifest(manifest) => {
+                    if manifest.manifest_id == "markdown.markdown" {
+                        markdown_manifest = Some(*manifest);
+                    }
+                }
+                ServerMessage::FileOpenCapabilityIssued { .. } => break,
+                _ => {}
+            }
+        }
+        let markdown_manifest = markdown_manifest.expect("markdown mode layer must be published");
+        // The default Control Center binding survives mode activation: the
+        // layer carries the Global Ctrl+Shift+P rule from the shared default
+        // commands/keymaps.
+        assert!(markdown_manifest.keymaps.iter().any(|rule| {
+            rule.command_id == "controlCenter.open"
+                && rule.context == KeyBindingContext::Global
+                && rule.sequence.len() == 1
+                && rule.sequence[0].key == KeyCode::Character("p".to_string())
+                && rule.sequence[0].modifiers.control
+                && rule.sequence[0].modifiers.shift
+        }));
+
+        let behavior_version = behavior.lock().await.version();
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::CommandIntent {
+                    client_id: 99,
+                    document_id: 1,
+                    behavior_version,
+                    command_id: "controlCenter.open".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let snapshot = loop {
+            if let ServerMessage::TransientMenuSnapshot(snapshot) =
+                codec.read_server_message(&mut client).await.unwrap()
+            {
+                break snapshot;
+            }
+        };
+        let session_id = snapshot.session_id;
+        let toggle_preview = snapshot
+            .items
+            .iter()
+            .find(|item| item.id == "markdown.togglePreview")
+            .expect("markdown.togglePreview must be listed");
+        assert!(
+            snapshot
+                .items
+                .iter()
+                .any(|item| item.id == "markdown.toggleComment"),
+            "markdown.toggleComment must be listed"
+        );
+        let detail = toggle_preview.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("CTRL+SHIFT+M"),
+            "detail must carry the effective binding: {detail}"
+        );
+        assert!(
+            detail.contains("@clay/markdown@0.1.0"),
+            "detail must carry package provenance: {detail}"
+        );
+
+        // Query narrows to exactly the preview command.
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::MenuQueryUpdate {
+                    client_id: 99,
+                    session_id,
+                    query: "togglePreview".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let filtered = loop {
+            if let ServerMessage::TransientMenuSnapshot(snapshot) =
+                codec.read_server_message(&mut client).await.unwrap()
+            {
+                break snapshot;
+            }
+        };
+        assert_eq!(filtered.items.len(), 1);
+        assert_eq!(filtered.items[0].id, "markdown.togglePreview");
+
+        // Activation closes the menu and validates through the live
+        // aggregated registry; the JS side effect runs in the package
+        // runtime, so no wire frame follows the close.
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::MenuActivate {
+                    client_id: 99,
+                    session_id,
+                    kind: crate::protocol::TransientMenuActivationData::Primary,
+                },
+            )
+            .await
+            .unwrap();
+        loop {
+            if let message @ ServerMessage::TransientMenuClosed { .. } =
+                codec.read_server_message(&mut client).await.unwrap()
+            {
+                assert_eq!(message, ServerMessage::TransientMenuClosed { session_id });
+                break;
+            }
+        }
+        assert!(
+            timeout(
+                Duration::from_millis(25),
+                codec.read_server_message(&mut client)
+            )
+            .await
+            .is_err(),
+            "no frame after validated package activation"
+        );
 
         drop(client);
         server_task.await.unwrap().unwrap();

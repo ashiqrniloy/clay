@@ -158,6 +158,60 @@ impl TransientMenuSession {
         self.origin
     }
 
+    /// Phase 24.1: hydrate an inert protocol snapshot into a display session.
+    /// Items carry no activation action — server-owned sessions activate by
+    /// opaque session id on the server, never from client-side data — and no
+    /// provenance (that stays server-side; the wire carries detail text only).
+    pub(crate) fn from_snapshot_data(
+        snapshot: &crate::protocol::TransientMenuSnapshotData,
+    ) -> Self {
+        let items = snapshot
+            .items
+            .iter()
+            .map(|item| {
+                TransientMenuItem::new(
+                    item.id.clone(),
+                    item.label.clone(),
+                    TransientMenuAction::new(item.id.clone()),
+                )
+                .with_detail(item.detail.clone().unwrap_or_default())
+                .with_accessibility_label(item.accessibility_label.clone())
+            })
+            .collect();
+        let status = match &snapshot.status {
+            crate::protocol::TransientMenuStatusData::Active => None,
+            crate::protocol::TransientMenuStatusData::Empty { message } => Some(message.as_str()),
+        };
+        let focus_policy = match snapshot.focus_policy {
+            crate::protocol::TransientMenuFocusPolicyData::Modal => TransientMenuFocusPolicy::Modal,
+            crate::protocol::TransientMenuFocusPolicyData::Modeless => {
+                TransientMenuFocusPolicy::Modeless
+            }
+        };
+        let origin = match snapshot.origin {
+            crate::protocol::TransientMenuOriginData::CommandPalette => {
+                TransientMenuOrigin::CommandPalette
+            }
+            crate::protocol::TransientMenuOriginData::ContextMenu => {
+                TransientMenuOrigin::ContextMenu
+            }
+            crate::protocol::TransientMenuOriginData::MenuBar => TransientMenuOrigin::MenuBar,
+        };
+        let mut session = Self::new(
+            TransientMenuSessionId(snapshot.session_id),
+            snapshot.prompt.clone(),
+        )
+        .with_items(items)
+        .with_query(&snapshot.query)
+        .with_focus_policy(focus_policy)
+        .with_origin(origin);
+        if let Some(message) = status {
+            session = session.with_empty_status(message);
+        }
+        session = session.with_selected_index(snapshot.selected_index as usize);
+        session
+    }
+
     pub(crate) fn with_focus_policy(mut self, policy: TransientMenuFocusPolicy) -> Self {
         self.focus_policy = policy;
         self
@@ -179,6 +233,22 @@ impl TransientMenuSession {
         } else {
             self.status = TransientMenuStatus::Active;
         }
+        self
+    }
+
+    /// Phase 24.1: restore a persisted selection after `with_items`, clamped
+    /// to the item list (empty list → 0). Server-owned sessions keep their
+    /// selection across snapshot pushes via this builder.
+    pub(crate) fn with_selected_index(mut self, index: usize) -> Self {
+        self.selected_index = index.min(self.items.len().saturating_sub(1));
+        self
+    }
+
+    /// Phase 24.1: restore the filter query on a produced session, truncated
+    /// to the shared query budget. Server-owned sessions carry their query in
+    /// the session so snapshots render what the user typed.
+    pub(crate) fn with_query(mut self, query: impl Into<String>) -> Self {
+        self.query = truncate(&query.into(), MAX_QUERY_CHARS);
         self
     }
 

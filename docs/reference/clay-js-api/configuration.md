@@ -721,23 +721,46 @@ User-visible Phase 18.8 configuration surfaces:
 
 | Surface | Status | API / mechanism | Notes |
 |---|---|---|---|
-| Control Center launch key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in command `controlCenter.open`; no default chord exists in Rust, so the Control Center is only reachable when `init.js` binds a key |
+| Control Center launch key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in command `controlCenter.open`; a default `Ctrl+Shift+P` chord ships in the default behavior manifest and is fully overrideable/removable via `bindKey`/`unbindKey` |
 | Control Center command id | built-in server command | `controlCenter.open` (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`) | A fixed Clay command ID routed by inert behavior manifests after configuration evaluation; not an `init.js` key |
 | Built-in server commands (`workspace.refresh`, `document.focus_active`, `document.open_recent`) | built-in server command | `builtin_server_command_ids` / `builtin_server_command` | Fixed Clay command IDs, not user configuration |
 | Package command/action customization | reused, runtime-backed | [`commands.serverRegisterCommand`](commands/server-register-command.md), [`ui.serverRegisterPanelContribution`](ui/server-register-panel-contribution.md), [`ui.serverRegisterInputContribution`](ui/server-register-input-contribution.md), [`configuration.setPackageOption`](configuration/set-package-option.md) | Package commands, action targets, and `action.default`/`input.default` overrides flow through phase 18.3/18.4 package UI/configuration APIs |
-| Transient menu session state | internal | `TransientMenuSession` (`src/shell/transient_menu.rs`, `pub(crate)`) | Clay-owned session state: prompt, query, bounded items, selection, status, focus policy, inert activation actions; not user configuration |
-| Control Center menu building | internal | `ControlCenter` (`src/server/control_center.rs`, `pub(crate)`) | Filters the registered command snapshot, excludes client-first/client-ui commands, and appends built-ins; not user configuration |
-| Command execution validation | internal | `CommandExecutor` (`src/server/command_execution.rs`, `pub(crate)`) | Validates command id, routing policy, provenance, permissions, argument budget, target context, and session/action freshness per request; not user configuration |
+| Transient menu session state | internal | `TransientMenuSession` (`src/shell/transient_menu.rs`) | Clay-owned session state: prompt, query, bounded items, selection, status, focus policy, inert activation actions; internal Rust type, not user configuration |
+| Control Center menu building | internal | `ControlCenter` (`src/server/control_center.rs`, `pub(crate)`) | Builds the bounded `TransientMenuSession` from the generation-stamped command catalogue; excludes client-first edit commands only; not user configuration |
+| Command execution validation | internal | `CommandExecutor` (`src/server/command_execution.rs`) | Validates command id, routing policy, provenance, permissions, argument budget, target context, and session/action freshness per request; internal Rust type, not user configuration |
 
 The expected end-user Control Center configuration is a normal `~/.config/clay/init.js` binding:
 
 ```js
-import { bindKey } from "clay:keybindings";
+import { bindKey, unbindKey } from "clay:keybindings";
 
-bindKey("Ctrl+Shift+P", "controlCenter.open", { scope: "editor" });
+// Remove the shipped Ctrl+Shift+P default, then bind a different chord.
+unbindKey("Ctrl+Shift+P", { scope: "global" });
+bindKey("Alt+X", "controlCenter.open", { scope: "global" });
 ```
 
-`controlCenter.open` is a fixed Clay command ID that can be routed by inert behavior manifests after configuration evaluation. No default `Ctrl+Shift+P` shortcut in Rust exists; without an `init.js` binding (or test/fixture binding) the Control Center is not bound by default. `bindKey` is the documented configuration surface — the transient menu is not a callable `clay:configuration` API and cannot be styled, positioned, filtered, or dismissed through `init.js`. Menu geometry, item count limit (`MAX_ITEMS = 256`), query/label/detail/accessibility bounds, focus policy, and built-in command membership are Clay-owned compiled/internal constants, not hidden `init.js` keys.
+`controlCenter.open` is a fixed Clay command ID routed by inert behavior manifests. Phase 24.2 ships the default `Ctrl+Shift+P` chord (Global scope, `ServerFirst` routing) in the default behavior manifest; `bindKey`/`unbindKey` can rebind or remove it — without an explicit unbind the default remains bound. `bindKey` is the documented configuration surface — the transient menu is not a callable `clay:configuration` API and cannot be styled, positioned, filtered, or dismissed through `init.js`. Menu geometry, item count limit (`MAX_ITEMS = 256`), query/label/detail/accessibility bounds, focus policy, fuzzy matcher constants, and built-in command membership are Clay-owned compiled/internal constants, not hidden `init.js` keys.
+
+## Phase 24.3 path mode configuration review
+
+Phase 24.3 added the Path Browser (`controlCenter.openPath`, “Browse Filesystem”): a second built-in consumer of the Phase 24.1/24.2 transient-menu round trip that browses user-authorized filesystem paths with dired-style navigation. This review added **no** new `clay:configuration` API. The user-visible configuration surface reuses [`keybindings.bindKey`](keybindings/bind-key.md)/`unbindKey` for the launch route; the browse session, listing, seed resolution, and grant conversion are `pub(crate)` Rust internals with no Clay JS facade and no raw `Deno.core.ops` path.
+
+| Surface | Status | API / mechanism | Notes |
+|---|---|---|---|
+| Path Browser launch key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in command id `controlCenter.openPath`; a temporary default `Ctrl+Alt+P` chord ships in the default behavior manifest and is fully overrideable/removable via `bindKey`/`unbindKey`; Phase 24.5 may replace the default with a sequence without changing the id |
+| Path Browser command id | built-in server command | `controlCenter.openPath` (`CommandDeclaration::server_intent`, `RoutingPolicy::ServerFirst`) | A fixed Clay command ID routed by inert behavior manifests; not an `init.js` key; the bare id is valid, `clay.controlCenter.openPath` is never valid |
+| Browse listing and session | internal | `BuiltInUserBrowseListing` (`src/server/workspace.rs`), `PathBrowserSession` (`src/shell/path_browser.rs`), `ServerMenuSessions` (`src/server/menu_sessions.rs`) | Clay-owned bounded depth-1 listings and session state; packages cannot open, populate, intercept, or receive paths from the session |
+| Browse authority conversion | internal | activation → `SingleFile` / `Directory` grant | Ephemeral user-authorized browse authority converts into exactly one explicit grant on file open / Alt+Enter workspace open; navigation alone creates no grant; native dialogs remain the fallback capability issuers |
+
+```js
+import { bindKey, unbindKey } from "clay:keybindings";
+
+// Remove the temporary Ctrl+Alt+P default, then bind a different chord.
+unbindKey("Ctrl+Alt+P", { scope: "global" });
+bindKey("Alt+P", "controlCenter.openPath", { scope: "global" });
+```
+
+`controlCenter.openPath` is a fixed Clay command ID routed by inert behavior manifests. The Path Browser path input, listing bounds (`TRANSIENT_MENU_MAX_ITEMS`, `TRANSIENT_MENU_MAX_QUERY_CHARS`), fuzzy matcher constants, seed fallback order, and grant conversion rules are Clay-owned compiled/internal constants, not hidden `init.js` keys. Hidden/ad hoc configuration keys that would claim to configure path mode are rejected by policy unless expressed through the documented APIs above.
 
 Hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through a documented API above:
 

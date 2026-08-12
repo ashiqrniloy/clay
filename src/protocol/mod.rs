@@ -4,6 +4,7 @@ pub mod decorations;
 pub mod diagnostics;
 pub mod editor_control;
 pub mod language_intelligence;
+pub mod menu;
 pub mod parse;
 pub mod runtime;
 pub mod sdui;
@@ -14,6 +15,7 @@ pub use decorations::*;
 pub use diagnostics::*;
 pub use editor_control::*;
 pub use language_intelligence::*;
+pub use menu::*;
 pub use parse::*;
 pub use runtime::*;
 pub use sdui::*;
@@ -42,8 +44,10 @@ pub use textobjects::*;
 /// Version 15 defers `InitialDocument` and the initial SDUI/file-browser
 /// snapshot until the connection binds a tab with `TabCommand::New` or
 /// `TabCommand::Reclaim`.
+/// Version 16 (Phase 24.3) adds the generic semantic `MenuBackspace` intent
+/// and the `MenuActivate` activation kind (`Primary`/`Secondary`).
 /// Older server processes must not retain the previous wire semantics.
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 16;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;
@@ -224,6 +228,21 @@ fn default_keymaps() -> Vec<KeyBindingRule> {
         KeyBindingRule::single("text.insert_newline", KeyCode::Enter),
         KeyBindingRule::single("text.insert_tab", KeyCode::Tab),
         KeyBindingRule::default_reload_configuration(),
+        // Phase 24.2: the Control Center opens through the same command-intent
+        // lane as any server-intent command; Global scope fires outside editor
+        // text focus, overridable via bindKey/unbindKey like every default.
+        KeyBindingRule::global_server_first(
+            "controlCenter.open",
+            ctrl_shift_key(KeyCode::Character("p".to_string())),
+        ),
+        // Phase 24.3: Path Mode's temporary default. Fully rebindable/
+        // removable via bindKey/unbindKey like every default; Phase 24.5
+        // replaces the chord with sequence defaults without changing the
+        // command id.
+        KeyBindingRule::global_server_first(
+            "controlCenter.openPath",
+            ctrl_alt_key(KeyCode::Character("p".to_string())),
+        ),
         // Phase 22.1: shell pane-management defaults (all overridable via bindKey
         // in init.js with { scope: "global" }). "vertical" = side by side,
         // "horizontal" = stacked (vim-style vsplit / split).
@@ -379,6 +398,14 @@ fn default_commands() -> Vec<CommandDeclaration> {
             },
             authority: CommandAuthority::ServerIntent,
         },
+        // Phase 24.2: the Control Center opens via the command-intent lane
+        // (server-owned menu session); declared like any built-in server
+        // intent so the default Global Ctrl+Shift+P binding routes.
+        CommandDeclaration::server_intent("controlCenter.open", "Open Control Center"),
+        // Phase 24.3: Path Mode (dired-style filesystem browsing) opens via
+        // the same command-intent lane; default Global Ctrl+Alt+P binding,
+        // replaceable by Phase 24.5 sequence defaults without an id change.
+        CommandDeclaration::server_intent("controlCenter.openPath", "Browse Filesystem"),
         CommandDeclaration::ui_reactive("completion.trigger", "Trigger Completion"),
         // Phase 18.20: discoverable language-intelligence commands with empty
         // default key bindings. Client captures cursor/version locally and
@@ -476,6 +503,19 @@ impl KeyBindingRule {
             sequence: vec![stroke],
             context: KeyBindingContext::Global,
             routing_policy: RoutingPolicy::ClientUiCommand,
+        }
+    }
+
+    /// Phase 24.2: a Global-scope, ServerFirst-routed binding (server-intent
+    /// commands like `controlCenter.open`). Fires even outside editor text
+    /// focus and emits the existing inert `CommandIntent`; overridable via
+    /// `bindKey`.
+    pub fn global_server_first(command_id: impl Into<String>, stroke: KeyStroke) -> Self {
+        Self {
+            command_id: command_id.into(),
+            sequence: vec![stroke],
+            context: KeyBindingContext::Global,
+            routing_policy: RoutingPolicy::ServerFirst,
         }
     }
 }
@@ -1235,6 +1275,46 @@ pub enum ClientMessage {
         client_id: ClientId,
         command: TabCommand,
     },
+    /// Phase 24.1: interactive intents for a server-owned transient menu
+    /// session. The server is authoritative for query, items, and selection;
+    /// the client renders snapshots and forwards keystrokes only. `session_id`
+    /// is an opaque server-allocated handle (high bit set); unknown/stale ids
+    /// are dropped server-side with a bounded diagnostic, never an error.
+    MenuQueryUpdate {
+        client_id: ClientId,
+        session_id: u64,
+        query: String,
+    },
+    /// Generic semantic Backspace (Phase 24.3): the server session decides
+    /// whether Backspace deletes query text or ascends (path mode). The
+    /// client no longer pops the mirrored query locally; it only mirrors
+    /// full-value replacements for the bounded character send path and
+    /// resyncs from every snapshot.
+    MenuBackspace {
+        client_id: ClientId,
+        session_id: u64,
+    },
+    /// Relative selection movement (arrow keys); the server clamps.
+    MenuSelectionMove {
+        client_id: ClientId,
+        session_id: u64,
+        delta: i64,
+    },
+    /// Activate the session's currently selected item. The server holds the
+    /// item's action; the client never supplies command payloads. `kind`
+    /// distinguishes primary (Enter/Tab) from secondary (Alt+Enter)
+    /// activation; kind semantics are interpreted by the session kind.
+    MenuActivate {
+        client_id: ClientId,
+        session_id: u64,
+        kind: TransientMenuActivationData,
+    },
+    /// Dismiss the session. The server drops it and answers
+    /// `ServerMessage::TransientMenuClosed`.
+    MenuCancel {
+        client_id: ClientId,
+        session_id: u64,
+    },
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1921,6 +2001,26 @@ pub enum ServerMessage {
         document_id: DocumentId,
         closed: bool,
     },
+    /// Phase 24.1: bounded inert snapshot of a server-owned transient menu
+    /// session. Boxed so the variant's inline size never inflates the union
+    /// floor that small payloads like `EditAck` pay. The client renders this
+    /// through the existing `TransientMenuSession` overlay projection.
+    TransientMenuSnapshot(Box<TransientMenuSnapshotData>),
+    /// Phase 24.1: a server-owned transient menu session ended (cancelled,
+    /// replaced, or swept on disconnect). The client clears the overlay for
+    /// this session id. No `Cancelled` status crosses the wire; this message
+    /// IS the terminal state.
+    TransientMenuClosed {
+        session_id: u64,
+    },
+    /// Phase 24.2: a menu-activated shell command approved by the server.
+    /// The id comes only from the server-held session catalogue (the shell
+    /// surface); the client re-parses it deny-by-default through
+    /// `ShellClientCommand::from_command_id` and drops unknown ids with no
+    /// state mutation. No generic arbitrary client-command channel exists.
+    ShellClientCommandRequest {
+        command_id: String,
+    },
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -1960,6 +2060,75 @@ mod tests {
                 lock_scope: LockScope::Behavior,
             }
         );
+    }
+
+    #[test]
+    fn default_keymaps_contain_control_center_open_binding() {
+        let keymaps = default_keymaps();
+        let rules: Vec<_> = keymaps
+            .iter()
+            .filter(|rule| rule.command_id == "controlCenter.open")
+            .collect();
+        // Exactly one default route (Phase 24.2): Global, ServerFirst,
+        // single-stroke Ctrl+Shift+P.
+        assert_eq!(
+            rules.len(),
+            1,
+            "exactly one default controlCenter.open route"
+        );
+        let rule = rules[0];
+        assert_eq!(
+            rule.sequence,
+            vec![KeyStroke {
+                key: KeyCode::Character("p".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    shift: true,
+                    ..KeyModifiers::NONE
+                },
+            }]
+        );
+        assert_eq!(rule.context, KeyBindingContext::Global);
+        assert_eq!(rule.routing_policy, RoutingPolicy::ServerFirst);
+    }
+
+    #[test]
+    fn default_keymaps_contain_path_browser_open_binding() {
+        let keymaps = default_keymaps();
+        let rules: Vec<_> = keymaps
+            .iter()
+            .filter(|rule| rule.command_id == "controlCenter.openPath")
+            .collect();
+        // Exactly one default route (Phase 24.3): Global, ServerFirst,
+        // single-stroke Ctrl+Alt+P; Phase 24.5 replaces it with sequence
+        // defaults without changing the command id.
+        assert_eq!(rules.len(), 1, "exactly one default openPath route");
+        let rule = rules[0];
+        assert_eq!(
+            rule.sequence,
+            vec![KeyStroke {
+                key: KeyCode::Character("p".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    alt: true,
+                    ..KeyModifiers::NONE
+                },
+            }]
+        );
+        assert_eq!(rule.context, KeyBindingContext::Global);
+        assert_eq!(rule.routing_policy, RoutingPolicy::ServerFirst);
+    }
+
+    #[test]
+    fn default_commands_declare_control_center_open_as_server_intent() {
+        let commands = default_commands();
+        let command = commands
+            .iter()
+            .find(|command| command.command_id == "controlCenter.open")
+            .expect("default commands missing controlCenter.open");
+        assert_eq!(command.display_name, "Open Control Center");
+        assert_eq!(command.authority, CommandAuthority::ServerIntent);
+        assert_eq!(command.routing_policy, RoutingPolicy::ServerFirst);
     }
 
     #[test]

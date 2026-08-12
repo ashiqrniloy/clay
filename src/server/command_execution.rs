@@ -122,6 +122,7 @@ pub enum CommandExecutionRule {
     InvalidArguments,
     UnauthorizedTarget,
     ReloadInProgress,
+    StaleRuntimeGeneration,
 }
 
 #[derive(Debug, Default)]
@@ -692,6 +693,7 @@ macro_rules! builtin_commands {
 
 builtin_commands! {
     CONTROL_CENTER_COMMAND_ID => ("controlCenter.open", "Open Control Center", General),
+    OPEN_PATH_BROWSER_COMMAND_ID => ("controlCenter.openPath", "Browse Filesystem", General),
     RELOAD_CONFIGURATION_COMMAND_ID => ("runtime.reloadConfiguration", "Reload Configuration and Packages", Reload),
     REFRESH_WORKSPACE_COMMAND_ID => ("workspace.refresh", "Refresh Workspace", General),
     FOCUS_ACTIVE_DOCUMENT_COMMAND_ID => ("document.focus_active", "Focus Active Document", General),

@@ -166,6 +166,50 @@ impl ShellClientCommand {
     }
 }
 
+/// Complete server-visible shell command surface. Each ID is checked by the
+/// client parser before execution; aliases remain listed so the menu mirrors
+/// the same deny-by-default surface as keybinding validation.
+pub(crate) const SHELL_CLIENT_COMMAND_CATALOGUE: &[(&str, &str)] = &[
+    ("shell.clientSplitPaneVertical", "Split Pane Vertical"),
+    ("shell.clientSplitPaneHorizontal", "Split Pane Horizontal"),
+    ("shell.clientSplitPaneRight", "Split Pane Right"),
+    ("shell.clientSplitPaneDown", "Split Pane Down"),
+    ("shell.clientAddEqualPane", "Add Equal Pane"),
+    ("shell.clientClosePane", "Close Pane"),
+    ("shell.clientFocusPaneNext", "Focus Next Pane"),
+    ("shell.clientFocusPanePrev", "Focus Previous Pane"),
+    ("shell.clientResizePaneLeft", "Resize Pane Left"),
+    ("shell.clientResizePaneRight", "Resize Pane Right"),
+    ("shell.clientResizePaneUp", "Resize Pane Up"),
+    ("shell.clientResizePaneDown", "Resize Pane Down"),
+    ("shell.clientMovePaneNext", "Move Pane Next"),
+    ("shell.clientMovePanePrev", "Move Pane Previous"),
+    ("shell.clientTabNext", "Next Tab"),
+    ("shell.clientTabPrev", "Previous Tab"),
+    ("shell.clientTabNew", "New Tab"),
+    ("shell.clientTabClose", "Close Tab"),
+    ("shell.clientTabMoveLeft", "Move Tab Left"),
+    ("shell.clientTabMoveRight", "Move Tab Right"),
+    ("shell.clientTabActivate.1", "Activate Tab 1"),
+    ("shell.clientTabActivate.2", "Activate Tab 2"),
+    ("shell.clientTabActivate.3", "Activate Tab 3"),
+    ("shell.clientTabActivate.4", "Activate Tab 4"),
+    ("shell.clientTabActivate.5", "Activate Tab 5"),
+    ("shell.clientTabActivate.6", "Activate Tab 6"),
+    ("shell.clientTabActivate.7", "Activate Tab 7"),
+    ("shell.clientTabActivate.8", "Activate Tab 8"),
+    ("shell.clientTabActivate.9", "Activate Tab 9"),
+    ("shell.clientTabMoveTo.1", "Move Tab to Position 1"),
+    ("shell.clientTabMoveTo.2", "Move Tab to Position 2"),
+    ("shell.clientTabMoveTo.3", "Move Tab to Position 3"),
+    ("shell.clientTabMoveTo.4", "Move Tab to Position 4"),
+    ("shell.clientTabMoveTo.5", "Move Tab to Position 5"),
+    ("shell.clientTabMoveTo.6", "Move Tab to Position 6"),
+    ("shell.clientTabMoveTo.7", "Move Tab to Position 7"),
+    ("shell.clientTabMoveTo.8", "Move Tab to Position 8"),
+    ("shell.clientTabMoveTo.9", "Move Tab to Position 9"),
+];
+
 /// Phase 22.3: tab bar card chrome is token-driven (Phase 20.4 state tokens:
 /// `surface.list`/`surface.selected` rests, `surface.hover`, `surface.active`,
 /// `accent.primary` focus ring, `surface.disabled` × `opacity.disabled`).

@@ -57,7 +57,7 @@ Cancellation uses server-owned token IDs backed by a process-local registry. `se
 
 `FileBrowserState::to_sdui_tree` composes existing SDUI primitives: a left `Panel`/`Stack` with a workspace header and `List` items, plus the normal `EditorView` in a row. The header is `Workspace · {display_name} · {display_path}` and appends the existing `Workspace · … · {relative_directory}` navigation suffix below the root. `hidden_sdui_tree` composes only the editor view, so the client releases the left slot without adding a native `FileTreeWidget` or file-browser branch in Masonry. File rows carry `workspaceRootId` and `relativePath` for `workspace.openFile`; directory rows carry the same bounded root-relative arguments for `workspace.openDirectory`; non-root directories include a `../` parent row. A row's `SduiListItem.id` and `SduiActionSource::ListItem.item_id` are the same display-row identity (for example `main.rs` inside `src/`); the root-relative path (`src/main.rs`) lives only in the typed `relativePath` action argument and is revalidated by `WorkspaceState` on open.
 
-`FileBrowserState::fuzzy_session` builds a bottom `TransientMenuSession` by filtering the same bounded entries locally. Items route to `workspace.openFuzzyFile`; there is no separate fuzzy-open primitive or package-provided picker implementation.
+`FileBrowserState::fuzzy_session` builds a bottom `TransientMenuSession` by scoring the same bounded entries locally with the shared bounded fuzzy subsequence matcher (`src/shell/fuzzy.rs`, [Fuzzy Matching](fuzzy-matching.md); at most `MAX_FUZZY_ITEMS` results, deterministic ordering). Items route to `workspace.openFuzzyFile`; there is no separate fuzzy-open primitive or package-provided picker implementation.
 
 ### Open/reveal/navigation command routing
 
@@ -118,7 +118,7 @@ await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].re
 ## Tests
 
 - `src/server/workspace.rs`: root discovery, explicit grants, root deduplication, bounded directory listing, `*` backtracking/`?`/Unicode/directory-only and root-relative path ignore rules, unsupported-rule and oversized-input fail-closed pages, traversal rejection, cancellation, child counts, and diagnostics.
-- `src/shell/file_browser.rs`: SDUI tree shape, workspace name+full-path header, editor-only hidden tree, current-directory parent row, row/action source identity for nested files, directory-row navigation command IDs, fuzzy session filtering, command IDs, and list action opening through the workspace API.
+- `src/shell/fuzzy.rs`: shared bounded fuzzy subsequence scorer (`fuzzy_score`/`fuzzy_score_fields`) used by `fuzzy_session` (Phase 24.2), SDUI tree shape, workspace name+full-path header, editor-only hidden tree, current-directory parent row, row/action source identity for nested files, directory-row navigation command IDs, command IDs, and list action opening through the workspace API.
 - `src/server/command_execution.rs`: workspace open/directory-navigation/reveal/toggle execution, selected-file grants, missing arguments, and save-related command absence.
 - `src/server/connection.rs`: `workspace_directory_action_sends_refreshed_file_browser_snapshot` verifies directory navigation returns a refreshed `SduiSnapshot`; deferred-handshake/toggle coverage proves the initial editor-only snapshot and later visible tree; `file_browser_open_uses_generic_open_document_followups` opens as client 99 and proves that same client can immediately submit an accepted edit with the returned lease.
 - `src/masonry_sdui.rs`: `file_browser_scroll_reveals_later_rows_without_relisting`, `file_browser_scrolled_action_hits_visible_row`, and `scrolls_point_routes_scroll_to_file_browser_only_inside_left_pane` verify client-local file-browser scroll, scrolled action hit testing, and the scroll-routing boundary.
@@ -141,6 +141,7 @@ cargo test --test protocol clay_js_facade_layout:: --quiet
 - [Server File Workspace Model](server-file-workspace.md)
 - [Command Registry](command-registry.md)
 - [Transient Menu Session](transient-menu-session.md)
+- [Path Browser](path-browser.md) — Phase 24.3 built-in browse listing lives beside the workspace listing and refreshes this browser on workspace open
 - [Masonry Shell Runtime](masonry-shell.md)
 - [Configuration Runtime](configuration-runtime.md)
 - [Phase 18.12 Workspace Discovery and File Browser Foundation Primitive Review](phase18.12-workspace-discovery-primitive-review.md)

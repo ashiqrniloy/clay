@@ -87,6 +87,13 @@ Clay uses server-authoritative documents with optimistic client shadows.
 - Conflicts between packages in one mode: coexist, no automatic arbitration — the user deactivates packages. Revocation takes effect on runtime generation replacement.
 - Decision log source: `decision-logs/2026-08-03-1859-editor-control-trust-boundary-for-editor-ops.md`.
 
+## Built-In Browse Grant (Command Centre Path Mode)
+
+- User-driven navigation inside a Clay-owned built-in surface (e.g. Command Centre path mode) implicitly authorizes filesystem traversal outside granted workspace roots; packages never receive equivalent authority.
+- Converting a browsed path into durable access still requires an explicit grant: opening a file creates a `SingleFile` grant, opening a folder as workspace creates a `Directory` root grant via the existing tab/workspace binding path.
+- Browse listings stay bounded (depth 1, entry caps) and are never read on the paint/layout path.
+- Decision log source: `decision-logs/2026-08-11-1711-command-centre-surface-path-mode-and-sequence-keybindings.md`.
+
 ## Planning Guidance
 
 - Do not describe the server as a stateless behavior service.

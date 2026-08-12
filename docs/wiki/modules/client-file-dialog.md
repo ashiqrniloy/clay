@@ -19,6 +19,8 @@ The client file dialog backend is the native UI half of Phase 19's file-open smo
 
 The backend intentionally does only native user-mediated path picking: ask the user to pick a file or folder and return the selected path, cancellation, unsupported platform status, or a dialog error. It does not read file contents, scan directories, execute shell commands, open network listeners, or broaden server workspace authority. On Linux, `Driver` owns independent `file_dialog_in_flight` and `folder_dialog_in_flight` generations, so one portal file picker and one portal folder picker may coexist but repeated commands of the same kind are ignored while their picker is open. When a file path is selected, the app enqueues `ClientMessage::OpenSelectedFile`; the server canonicalizes and validates the path before creating a selected-file single-file grant and document snapshot. When a folder path is selected through `workspace.clientOpenFolderDialog`, the app enqueues `ClientMessage::AddSelectedWorkspaceRoot`; the server consumes the same single-use selected-path capability, canonicalizes the directory, records it as a workspace root, and sends a refreshed file-browser `SduiSnapshot`.
 
+Phase 24.3 adds a built-in alternative that does **not** use this backend: the [Path Browser](path-browser.md) (`controlCenter.openPath`) issues its own user-authorized browse activation as the capability event (no single-use token), converting ephemeral browse authority into exactly one `SingleFile` or `Directory` grant. The native dialogs remain the fallback capability issuers and are behaviorally unchanged — path mode never disables them.
+
 ## How It Works
 
 `src/client/file_dialog.rs` exposes a platform-neutral API:
@@ -75,6 +77,7 @@ On Linux, both `open_markdown_file_dialog()` and `open_folder_dialog()` use `xdg
 ## Related
 
 - [Client Behavior Routing](../flows/client-behavior-routing.md)
+- [Path Browser](path-browser.md) — the built-in browse alternative; this backend stays the fallback capability issuer
 - [Phase 19 Windows File Open Primitive Review](phase19-windows-file-open-primitive-review.md)
 - [Server File Workspace Model](server-file-workspace.md)
 - [Client Open File Dialog Clay JS API](../../reference/clay-js-api/documents/client-open-file-dialog.md)

@@ -376,6 +376,61 @@ pub fn encode_decode_sdui_snapshot() -> usize {
     }
 }
 
+/// Phase 24.1: worst-case server-owned transient-menu snapshot (max items ×
+/// max label/detail/accessibility/query strings) must encode/decode and stay
+/// far under the 1 MiB frame cap. The DTO clamps at construction, so the
+/// worst case is bounded by `TRANSIENT_MENU_MAX_*`; this asserts the wire
+/// size stays small enough that per-keystroke snapshot pushes on local IPC
+/// are negligible. Returns the encoded frame length in bytes.
+pub fn encode_decode_max_transient_menu_snapshot() -> usize {
+    use crate::protocol::{
+        TransientMenuFocusPolicyData, TransientMenuItemData, TransientMenuOriginData,
+        TransientMenuSnapshotData, TransientMenuStatusData,
+    };
+    let max_string = "x".repeat(
+        crate::perf::budgets::TRANSIENT_MENU_MAX_LABEL_CHARS
+            .max(crate::perf::budgets::TRANSIENT_MENU_MAX_DETAIL_CHARS),
+    );
+    let items = (0..crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS)
+        .map(|i| {
+            TransientMenuItemData::new(
+                format!("item-{i}"),
+                max_string.clone(),
+                Some(max_string.clone()),
+                max_string.clone(),
+            )
+        })
+        .collect();
+    let snapshot = TransientMenuSnapshotData::new(
+        1 << 63 | 1,
+        max_string.clone(),
+        max_string.clone(),
+        items,
+        0,
+        TransientMenuStatusData::Active,
+        TransientMenuFocusPolicyData::Modal,
+        TransientMenuOriginData::CommandPalette,
+    );
+    let codec = Codec::default();
+    let message = ServerMessage::TransientMenuSnapshot(Box::new(snapshot));
+    let frame = codec
+        .encode_server_message(&message)
+        .expect("max transient menu snapshot should encode");
+    assert!(
+        frame.len() < crate::protocol::codec::DEFAULT_MAX_FRAME_SIZE,
+        "max snapshot frame {} bytes exceeds the {} byte cap",
+        frame.len(),
+        crate::protocol::codec::DEFAULT_MAX_FRAME_SIZE
+    );
+    let decoded = codec
+        .decode_server_message(&frame)
+        .expect("max transient menu snapshot should decode");
+    match decoded {
+        ServerMessage::TransientMenuSnapshot(snapshot) => snapshot.items.len(),
+        _ => 0,
+    }
+}
+
 pub fn protocol_hello_roundtrip() -> u32 {
     let codec = Codec::default();
     let message = ClientMessage::Hello {

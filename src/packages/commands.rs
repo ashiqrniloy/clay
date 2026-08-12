@@ -94,6 +94,95 @@ pub struct CommandRegistry {
     commands: HashMap<String, RegisteredCommand>,
 }
 
+/// Bounded, inert command metadata assembled for one Control Center open.
+///
+/// Sources are merged before rendering so duplicate IDs fail closed instead of
+/// letting one trust domain shadow another. Key bindings come from the active
+/// behavior manifest when that manifest declares the command; registered
+/// metadata remains the fallback for commands outside the active layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CommandCatalogue {
+    commands: Vec<RegisteredCommand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CommandCatalogueError {
+    DuplicateCommandId { command_id: Box<str> },
+    TooManyCommands { count: usize, max: usize },
+}
+
+impl std::fmt::Display for CommandCatalogueError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DuplicateCommandId { command_id } => {
+                write!(formatter, "duplicate command ID `{command_id}`")
+            }
+            Self::TooManyCommands { count, max } => {
+                write!(
+                    formatter,
+                    "command catalogue has {count} items; maximum is {max}"
+                )
+            }
+        }
+    }
+}
+
+impl CommandCatalogue {
+    pub(crate) fn from_sources(
+        sources: impl IntoIterator<Item = Vec<RegisteredCommand>>,
+        active_manifest: &BehaviorManifest,
+    ) -> Result<Self, CommandCatalogueError> {
+        let mut ids = HashSet::new();
+        let mut commands = Vec::new();
+        for source in sources {
+            for command in source {
+                if !ids.insert(command.command_id.clone()) {
+                    return Err(CommandCatalogueError::DuplicateCommandId {
+                        command_id: command.command_id.into_boxed_str(),
+                    });
+                }
+                commands.push(with_effective_key_bindings(command, active_manifest));
+            }
+        }
+        if commands.len() > crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS {
+            return Err(CommandCatalogueError::TooManyCommands {
+                count: commands.len(),
+                max: crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS,
+            });
+        }
+        commands.sort_by(|left, right| {
+            left.display_name
+                .cmp(&right.display_name)
+                .then_with(|| left.command_id.cmp(&right.command_id))
+        });
+        Ok(Self { commands })
+    }
+
+    pub(crate) fn commands(&self) -> &[RegisteredCommand] {
+        &self.commands
+    }
+}
+
+fn with_effective_key_bindings(
+    mut command: RegisteredCommand,
+    active_manifest: &BehaviorManifest,
+) -> RegisteredCommand {
+    let active_bindings: Vec<KeyBindingRule> = active_manifest
+        .keymaps
+        .iter()
+        .filter(|binding| binding.command_id == command.command_id)
+        .cloned()
+        .collect();
+    let declared_in_active_manifest = active_manifest
+        .commands
+        .iter()
+        .any(|declaration| declaration.command_id == command.command_id);
+    if declared_in_active_manifest || !active_bindings.is_empty() {
+        command.key_bindings = active_bindings;
+    }
+    command
+}
+
 impl CommandRegistry {
     pub fn new() -> Self {
         Self::default()
@@ -194,9 +283,35 @@ impl CommandRegistry {
         self.commands.values()
     }
 
+    /// Clone the registry's inert metadata for a bounded catalogue merge.
+    pub(crate) fn snapshot(&self) -> Vec<RegisteredCommand> {
+        self.commands.values().cloned().collect()
+    }
+
     /// Remove every command owned by `package_name`. Returns the number removed.
     /// Used by package disable/revoke withdrawal; runtime reload replaces the
     /// whole command registry with the next generation's service instead.
+    ///
+    /// Rebuilds a registry from cloned inert snapshots (Phase 24.2 menu
+    /// activation executes against the live trusted + third-party
+    /// registries). The open catalogue already rejects duplicate IDs across
+    /// sources, so a later source wins here only as a defensive tie-break;
+    /// built-ins need no entry (`CommandExecutor` falls back to the built-in
+    /// table).
+    pub(crate) fn from_snapshots(
+        sources: impl IntoIterator<Item = Vec<RegisteredCommand>>,
+    ) -> Self {
+        let mut registry = Self::new();
+        for source in sources {
+            for command in source {
+                registry
+                    .commands
+                    .insert(command.command_id.clone(), command);
+            }
+        }
+        registry
+    }
+
     #[cfg_attr(
         not(test),
         expect(
@@ -420,5 +535,93 @@ impl CommandDiagnosticContext {
             rule,
             message: message.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{KeyBindingContext, KeyCode, KeyStroke};
+
+    fn command(id: &str, label: &str) -> RegisteredCommand {
+        RegisteredCommand {
+            package_name: "@test/package".to_string(),
+            package_version: "1.0.0".to_string(),
+            api_prefix: "test".to_string(),
+            command_id: id.to_string(),
+            display_name: label.to_string(),
+            routing_policy: RoutingPolicy::ServerFirst,
+            key_bindings: Vec::new(),
+            custom_properties: BTreeMap::new(),
+            permissions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn catalogue_sorts_and_uses_active_manifest_bindings() {
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest
+            .commands
+            .push(CommandDeclaration::server_intent("test.run", "Run"));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "test.run".to_string(),
+            sequence: vec![KeyStroke::new(KeyCode::Character("r".to_string()))],
+            context: KeyBindingContext::Global,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+
+        let mut registered = command("test.run", "Run");
+        registered.key_bindings = vec![KeyBindingRule::single(
+            "test.run",
+            KeyCode::Character("x".to_string()),
+        )];
+        let catalogue = CommandCatalogue::from_sources(
+            vec![vec![command("test.z", "Zulu"), registered]],
+            &manifest,
+        )
+        .expect("catalogue should validate");
+
+        assert_eq!(catalogue.commands()[0].command_id, "test.run");
+        assert_eq!(
+            catalogue.commands()[0].key_bindings[0].sequence[0].key,
+            KeyCode::Character("r".to_string())
+        );
+    }
+
+    #[test]
+    fn catalogue_rejects_duplicate_ids_across_sources() {
+        let error = CommandCatalogue::from_sources(
+            vec![
+                vec![command("test.run", "Run")],
+                vec![command("test.run", "Other")],
+            ],
+            &BehaviorManifest::minimal_text_editing(1),
+        )
+        .expect_err("duplicate command IDs must fail closed");
+
+        assert!(matches!(
+            error,
+            CommandCatalogueError::DuplicateCommandId { command_id }
+                if command_id.as_ref() == "test.run"
+        ));
+    }
+
+    #[test]
+    fn catalogue_rejects_more_than_transient_menu_budget() {
+        let commands = (0..=crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS)
+            .map(|index| command(&format!("test.command{index}"), &format!("Command {index}")))
+            .collect();
+        let error = CommandCatalogue::from_sources(
+            vec![commands],
+            &BehaviorManifest::minimal_text_editing(1),
+        )
+        .expect_err("oversized catalogue must fail closed");
+
+        assert!(matches!(
+            error,
+            CommandCatalogueError::TooManyCommands { count, max }
+                if count == crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS + 1
+                    && max == crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS
+        ));
     }
 }

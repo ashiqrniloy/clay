@@ -59,9 +59,13 @@ Node hash is `stable_package_source_id(component_id)` (FNV-1a, same as `SduiNode
 
 ## Keyboard Routing
 
-`route_package_component_key` (`src/masonry_editor.rs`) is called before `route_menu_key` in `local_key`:
+Widget-local key handling in `src/masonry_package_region.rs` (the Phase 22.x
+split moved package-region widgets out of `src/masonry_editor.rs`; the old
+`route_package_component_key` dispatcher no longer exists). Each focusable
+package widget owns its route in its `on_text_event`; the pane's `local_key`
+(`src/masonry_pane_document.rs`) runs `route_menu_key` before editor routing:
 
-- `ui.dropdownToggle` focused: ArrowUp/Down → `dropdown_cycle`, Enter/Space → clear focus (confirm)
+- `ui.dropdownToggle` focused: ArrowUp/Down → `cycle`, Enter/Space → `activate` (confirm), Escape while open → close
 - `ui.collapseToggle` focused: Enter/Space → `collapse_toggle`
 - Any other focused action + Tab: modal focus-trap cycles `modal_focusable_intents()`
 

@@ -201,6 +201,13 @@ struct PaneMenuSync {
     menu: Option<TransientMenuSession>,
     pending: Option<Option<TransientMenuSession>>,
     session_ids: Rc<Cell<u64>>,
+    /// Phase 24.1: the current session is server-owned (snapshot-driven):
+    /// keyboard dispatch sends menu intents instead of mutating local state.
+    server_owned: bool,
+    /// Phase 24.1: send-buffer copy of the server session's query. Visuals
+    /// update only from pushed snapshots; this mirrors what was sent so
+    /// keystrokes accumulate correctly between round trips.
+    server_query_buffer: String,
 }
 
 impl Default for PaneMenuSync {
@@ -209,6 +216,8 @@ impl Default for PaneMenuSync {
             menu: None,
             pending: None,
             session_ids: Rc::new(Cell::new(1)),
+            server_owned: false,
+            server_query_buffer: String::new(),
         }
     }
 }
@@ -220,9 +229,22 @@ impl PaneMenuSync {
     }
 
     /// Remember `menu` as the current session and mark a pending push.
-    fn push(&mut self, menu: Option<TransientMenuSession>) {
+    /// Local pushes clear the server-ownership flag and its query buffer;
+    /// server pushes (via `push_server`) set both.
+    fn push(&mut self, menu: Option<TransientMenuSession>, server_owned: bool) {
+        if !server_owned {
+            self.server_query_buffer.clear();
+        }
+        self.server_owned = server_owned;
         self.menu = menu.clone();
         self.pending = Some(menu);
+    }
+
+    /// Phase 24.1: install a server-owned session (snapshot display copy),
+    /// resyncing the query send-buffer to the server's authoritative query.
+    fn push_server(&mut self, menu: Option<TransientMenuSession>, query: &str) {
+        self.server_query_buffer = query.to_string();
+        self.push(menu, true);
     }
 
     /// Connection-shared session-id allocation (monotonic, saturating).
@@ -556,7 +578,27 @@ impl PaneDocumentView {
     }
 
     pub fn push_menu(&mut self, menu: Option<TransientMenuSession>) {
-        self.menu_sync.push(menu);
+        // Phase 24.1 (lifecycle hardening): one active menu per tab. A local
+        // session replacing a server-owned one must cancel the server session
+        // first — fire-and-forget intent; the server answers with
+        // `TransientMenuClosed` (and the local push below renders immediately,
+        // so the overlay never shows two menus).
+        if menu.is_some()
+            && self.menu_sync.server_owned
+            && let Some(active) = self.menu_sync.menu.as_ref()
+            && let Some(edit_queue) = &self.edit_queue
+        {
+            let _ = edit_queue.enqueue_menu_cancel(active.session_id().0);
+        }
+        self.menu_sync.push(menu, false);
+    }
+
+    /// Phase 24.1: install a server-owned session snapshot as this view's
+    /// interactive copy (per-tab chrome: every pane view keeps the copy so
+    /// keys dispatch from whichever pane is focused; the overlay renders
+    /// through the usual pending-push path).
+    pub fn push_server_menu(&mut self, menu: Option<TransientMenuSession>, query: &str) {
+        self.menu_sync.push_server(menu, query);
     }
 
     /// Phase 22.4: the pane's active document display name (tab-close
@@ -735,6 +777,29 @@ impl PaneDocumentView {
             ClientConnectionEvent::Disconnected => self.apply_disconnect(None),
             ClientConnectionEvent::ConnectionError(message) => {
                 self.apply_disconnect(Some(message.as_str()))
+            }
+            ClientConnectionEvent::TransientMenuSnapshot(snapshot) => {
+                // Phase 24.1: server-authoritative display copy; keys route
+                // back as menu intents, visuals update only from snapshots.
+                self.push_server_menu(
+                    Some(TransientMenuSession::from_snapshot_data(&snapshot)),
+                    &snapshot.query,
+                );
+                false
+            }
+            ClientConnectionEvent::TransientMenuClosed { session_id } => {
+                // Phase 24.1: clear only the matching server session (a stale
+                // close for a replaced id must not touch the active menu).
+                let matches = self
+                    .menu_sync
+                    .menu
+                    .as_ref()
+                    .map(|menu| menu.session_id().0 == session_id)
+                    .unwrap_or(false);
+                if matches {
+                    self.push_menu(None);
+                }
+                false
             }
             _ => false,
         }
@@ -2064,7 +2129,17 @@ impl PaneDocumentView {
     /// if the key was consumed by the menu, keeping editor hot paths free of
     /// command execution or IPC work.
     fn route_menu_key(&mut self, ctx: &mut EventCtx<'_>, key: &KeyStroke) -> bool {
-        if self.menu_sync.menu.is_none() {
+        let Some(menu) = self.menu_sync.menu.as_ref() else {
+            return false;
+        };
+        if self.menu_sync.server_owned {
+            // Phase 24.1: server-owned sessions never mutate locally; every
+            // key is a menu intent, and visuals update only from snapshots.
+            let session_id = menu.session_id().0;
+            if self.dispatch_server_menu_key(key, session_id) {
+                ctx.set_handled();
+                return true;
+            }
             return false;
         }
         match key.key {
@@ -2102,6 +2177,88 @@ impl PaneDocumentView {
                 } else {
                     false
                 }
+            }
+            _ => false,
+        }
+    }
+
+    /// Phase 24.1: dispatch one key for a server-owned session — a `try_send`
+    /// menu intent plus send-buffer bookkeeping, nothing else. `Escape` and
+    /// `Enter` do not clear locally: the server always answers with
+    /// `TransientMenuClosed` (cancel happens before activation), keeping the
+    /// client strictly server-authoritative.
+    fn dispatch_server_menu_key(&mut self, key: &KeyStroke, session_id: u64) -> bool {
+        let Some(edit_queue) = &self.edit_queue else {
+            return false;
+        };
+        // Phase 24.3: Alt+Enter is the generic secondary activation (path
+        // mode: open the selected directory as the tab's workspace). It is
+        // captured here so it never falls through to the editor while a
+        // server-owned session is active; the server interprets the kind per
+        // session kind.
+        if key.modifiers.alt {
+            return match key.key {
+                KeyCode::Enter => edit_queue
+                    .enqueue_menu_activate(
+                        session_id,
+                        crate::protocol::TransientMenuActivationData::Secondary,
+                    )
+                    .is_ok(),
+                _ => false,
+            };
+        }
+        match key.key {
+            KeyCode::ArrowUp | KeyCode::ArrowDown => {
+                let delta = if matches!(key.key, KeyCode::ArrowUp) {
+                    -1
+                } else {
+                    1
+                };
+                edit_queue
+                    .enqueue_menu_selection_move(session_id, delta)
+                    .is_ok()
+            }
+            KeyCode::Enter | KeyCode::Tab => edit_queue
+                .enqueue_menu_activate(
+                    session_id,
+                    crate::protocol::TransientMenuActivationData::Primary,
+                )
+                .is_ok(),
+            KeyCode::Escape => edit_queue.enqueue_menu_cancel(session_id).is_ok(),
+            KeyCode::Backspace => {
+                // Phase 24.3: semantic Backspace — the server session decides
+                // whether it deletes query text or ascends (path mode). The
+                // mirrored query pops one character as the common-case
+                // approximation so a following Character append stays
+                // correct; any divergence (e.g. an ascend that rewrites the
+                // whole query) is corrected by the next snapshot, which
+                // resyncs the buffer.
+                self.menu_sync.server_query_buffer.pop();
+                edit_queue.enqueue_menu_backspace(session_id).is_ok()
+            }
+            KeyCode::Character(ref text) => {
+                if text.is_empty() {
+                    return false;
+                }
+                let mut query = self.menu_sync.server_query_buffer.clone();
+                query.push_str(text);
+                // Mirror the server's query budget so the send buffer stays
+                // bounded regardless of how long the key is held.
+                if query.chars().count() > crate::perf::budgets::TRANSIENT_MENU_MAX_QUERY_CHARS {
+                    let cut = query
+                        .char_indices()
+                        .nth(crate::perf::budgets::TRANSIENT_MENU_MAX_QUERY_CHARS)
+                        .map(|(index, _)| index)
+                        .unwrap_or(query.len());
+                    query.truncate(cut);
+                }
+                let sent = edit_queue
+                    .enqueue_menu_query_update(session_id, query.clone())
+                    .is_ok();
+                if sent {
+                    self.menu_sync.server_query_buffer = query;
+                }
+                sent
             }
             _ => false,
         }
@@ -2610,7 +2767,14 @@ impl PaneDocumentView {
                         self.local_key(ctx, key_stroke(KeyCode::Escape, key_event));
                     }
                     Key::Named(NamedKey::Backspace) => {
-                        self.local_command(ctx, EditorCommand::Backspace);
+                        if self.menu_sync.server_owned {
+                            // Phase 24.1: a server-owned menu owns the query
+                            // buffer; Backspace edits the filter, never the
+                            // document.
+                            self.local_key(ctx, key_stroke(KeyCode::Backspace, key_event));
+                        } else {
+                            self.local_command(ctx, EditorCommand::Backspace);
+                        }
                     }
                     Key::Named(NamedKey::Delete) => {
                         self.local_command(ctx, EditorCommand::DeleteForward);
@@ -3519,7 +3683,7 @@ mod tests {
         global.document_font_role = crate::protocol::DocumentFontRole::Monospace;
         let snapshot = RuntimeStateSnapshot {
             runtime_generation_id: 1,
-            client_id: 1,
+            client_id: 0,
             behavior: global,
             active_theme: crate::protocol::ActiveTheme {
                 specifier: "@clay/default".to_string(),
@@ -4098,18 +4262,373 @@ mod tests {
         assert_eq!(sync.take_pending(), None);
         // Show: push remembers the session and marks a one-shot pending push.
         let session = TransientMenuSession::new(TransientMenuSessionId(1), "test");
-        sync.push(Some(session.clone()));
+        sync.push(Some(session.clone()), false);
         assert_eq!(sync.menu, Some(session.clone()));
         assert_eq!(sync.take_pending(), Some(Some(session.clone())));
         assert_eq!(sync.take_pending(), None, "pending push is one-shot");
         // Clear: Some(None) means an explicit clear, not no-pending.
-        sync.push(None);
+        sync.push(None, false);
         assert_eq!(sync.menu, None);
         assert_eq!(sync.take_pending(), Some(None));
+        // Server-owned pushes record ownership and resync the query buffer.
+        sync.push_server(Some(session.clone()), "re");
+        assert!(sync.server_owned);
+        assert_eq!(sync.server_query_buffer, "re");
+        sync.push(None, false);
+        assert!(!sync.server_owned);
+        assert!(sync.server_query_buffer.is_empty());
         // Session ids allocate monotonically from the shared cell.
         let id = sync.next_session_id();
         assert!(id >= 1);
         let next = sync.next_session_id();
         assert!(next > id);
+    }
+
+    // -- Phase 24.1: server-owned session snapshot routing and dispatch --
+
+    fn snapshot_data(
+        session_id: u64,
+        query: &str,
+        selected: u32,
+        items: &[&str],
+    ) -> crate::protocol::TransientMenuSnapshotData {
+        crate::protocol::TransientMenuSnapshotData::new(
+            session_id,
+            "Control Center",
+            query,
+            items
+                .iter()
+                .map(|label| {
+                    crate::protocol::TransientMenuItemData::new(
+                        format!("cmd.{label}"),
+                        *label,
+                        Some(format!("{label} detail")),
+                        format!("{label} accessibility"),
+                    )
+                })
+                .collect(),
+            selected,
+            crate::protocol::TransientMenuStatusData::Active,
+            crate::protocol::TransientMenuFocusPolicyData::Modal,
+            crate::protocol::TransientMenuOriginData::CommandPalette,
+        )
+    }
+
+    fn server_menu_view(queue: ClientEditQueue) -> PaneDocumentView {
+        let mut view = view_with_queue(queue);
+        view.push_server_menu(
+            Some(TransientMenuSession::from_snapshot_data(&snapshot_data(
+                1 << 63 | 3,
+                "re",
+                1,
+                &["reload", "refresh"],
+            ))),
+            "re",
+        );
+        view
+    }
+
+    #[test]
+    fn server_menu_typing_sends_exactly_one_query_update_with_the_full_buffer() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(8);
+        let mut view = server_menu_view(queue);
+
+        // Two typed characters: each key sends exactly one update carrying
+        // the accumulated buffer, and nothing else leaves the queue.
+        assert!(view.dispatch_server_menu_key(
+            &key_stroke(
+                KeyCode::Character("x".to_string()),
+                &masonry::core::keyboard::KeyboardEvent::default(),
+            ),
+            1 << 63 | 3
+        ));
+        assert!(view.dispatch_server_menu_key(
+            &key_stroke(
+                KeyCode::Character("y".to_string()),
+                &masonry::core::keyboard::KeyboardEvent::default(),
+            ),
+            1 << 63 | 3
+        ));
+        let first = receiver.try_recv().expect("one update per key");
+        assert_eq!(
+            first,
+            ClientMessage::MenuQueryUpdate {
+                client_id: 0,
+                session_id: 1 << 63 | 3,
+                query: "rex".to_string(),
+            }
+        );
+        let second = receiver.try_recv().expect("one update per key");
+        assert_eq!(
+            second,
+            ClientMessage::MenuQueryUpdate {
+                client_id: 0,
+                session_id: 1 << 63 | 3,
+                query: "rexy".to_string(),
+            }
+        );
+        assert!(receiver.try_recv().is_err(), "no further messages");
+
+        // Phase 24.3: Backspace is the generic semantic intent; the server
+        // session decides pop vs ascend. The mirrored buffer pops one
+        // character as the common-case approximation.
+        assert!(view.dispatch_server_menu_key(
+            &key_stroke(
+                KeyCode::Backspace,
+                &masonry::core::keyboard::KeyboardEvent::default(),
+            ),
+            1 << 63 | 3
+        ));
+        let third = receiver.try_recv().expect("backspace intent");
+        assert_eq!(
+            third,
+            ClientMessage::MenuBackspace {
+                client_id: 0,
+                session_id: 1 << 63 | 3,
+            }
+        );
+        assert_eq!(
+            view.menu_sync.server_query_buffer, "rex",
+            "mirror pops one character"
+        );
+
+        // A character after Backspace appends to the popped mirror.
+        assert!(view.dispatch_server_menu_key(
+            &key_stroke(
+                KeyCode::Character("z".to_string()),
+                &masonry::core::keyboard::KeyboardEvent::default(),
+            ),
+            1 << 63 | 3
+        ));
+        let fourth = receiver.try_recv().expect("one update per key");
+        assert_eq!(
+            fourth,
+            ClientMessage::MenuQueryUpdate {
+                client_id: 0,
+                session_id: 1 << 63 | 3,
+                query: "rexz".to_string(),
+            }
+        );
+        assert!(receiver.try_recv().is_err(), "no further messages");
+
+        // Local session state is untouched by dispatch: the display copy
+        // still carries the server's query, items, and selection.
+        let menu = view.menu_sync.menu.as_ref().expect("menu installed");
+        assert_eq!(menu.query(), "re");
+        assert_eq!(menu.items().len(), 2);
+        assert_eq!(menu.selected_index(), 1);
+    }
+
+    #[test]
+    fn server_menu_arrows_send_selection_moves_without_local_mutation() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(8);
+        let mut view = server_menu_view(queue);
+
+        assert!(view.dispatch_server_menu_key(
+            &key_stroke(
+                KeyCode::ArrowDown,
+                &masonry::core::keyboard::KeyboardEvent::default(),
+            ),
+            1 << 63 | 3
+        ));
+        assert!(view.dispatch_server_menu_key(
+            &key_stroke(
+                KeyCode::ArrowUp,
+                &masonry::core::keyboard::KeyboardEvent::default(),
+            ),
+            1 << 63 | 3
+        ));
+        assert_eq!(
+            receiver.try_recv().expect("down move"),
+            ClientMessage::MenuSelectionMove {
+                client_id: 0,
+                session_id: 1 << 63 | 3,
+                delta: 1,
+            }
+        );
+        assert_eq!(
+            receiver.try_recv().expect("up move"),
+            ClientMessage::MenuSelectionMove {
+                client_id: 0,
+                session_id: 1 << 63 | 3,
+                delta: -1,
+            }
+        );
+        assert!(receiver.try_recv().is_err(), "no further messages");
+        // Selection/query visuals stay server-authoritative.
+        let menu = view.menu_sync.menu.as_ref().expect("menu installed");
+        assert_eq!(menu.selected_index(), 1, "no local selection mutation");
+    }
+
+    #[test]
+    fn server_menu_enter_and_escape_send_activate_and_cancel() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(8);
+        let mut view = server_menu_view(queue);
+
+        assert!(view.dispatch_server_menu_key(
+            &key_stroke(
+                KeyCode::Enter,
+                &masonry::core::keyboard::KeyboardEvent::default(),
+            ),
+            1 << 63 | 3
+        ));
+        assert_eq!(
+            receiver.try_recv().expect("activate"),
+            ClientMessage::MenuActivate {
+                client_id: 0,
+                session_id: 1 << 63 | 3,
+                kind: crate::protocol::TransientMenuActivationData::Primary,
+            }
+        );
+        assert!(view.dispatch_server_menu_key(
+            &key_stroke(
+                KeyCode::Escape,
+                &masonry::core::keyboard::KeyboardEvent::default(),
+            ),
+            1 << 63 | 3
+        ));
+        assert_eq!(
+            receiver.try_recv().expect("cancel"),
+            ClientMessage::MenuCancel {
+                client_id: 0,
+                session_id: 1 << 63 | 3,
+            }
+        );
+        assert!(receiver.try_recv().is_err(), "no further messages");
+    }
+
+    #[test]
+    fn server_menu_alt_enter_sends_secondary_activation_only() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(8);
+        let mut view = server_menu_view(queue);
+
+        let mut alt_enter = masonry::core::keyboard::KeyboardEvent::default();
+        alt_enter
+            .modifiers
+            .insert(masonry::core::keyboard::Modifiers::ALT);
+        assert!(
+            view.dispatch_server_menu_key(&key_stroke(KeyCode::Enter, &alt_enter), 1 << 63 | 3)
+        );
+        assert_eq!(
+            receiver.try_recv().expect("secondary activate"),
+            ClientMessage::MenuActivate {
+                client_id: 0,
+                session_id: 1 << 63 | 3,
+                kind: crate::protocol::TransientMenuActivationData::Secondary,
+            }
+        );
+        assert!(receiver.try_recv().is_err(), "exactly one intent");
+
+        // Other Alt-combinations are not captured: they fall through to the
+        // editor (no intent, unchanged mirror).
+        let mut alt_x = masonry::core::keyboard::KeyboardEvent::default();
+        alt_x
+            .modifiers
+            .insert(masonry::core::keyboard::Modifiers::ALT);
+        assert!(!view.dispatch_server_menu_key(
+            &key_stroke(KeyCode::Character("x".to_string()), &alt_x),
+            1 << 63 | 3
+        ));
+        assert!(receiver.try_recv().is_err(), "no intent for Alt+X");
+    }
+
+    #[test]
+    fn local_menu_open_cancels_the_active_server_session() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(8);
+        let mut view = server_menu_view(queue);
+
+        // A local session (completion, tab-close confirm, open-documents)
+        // replacing the server-owned one must cancel it first: one active
+        // menu per tab, enforced client-side too.
+        let local = TransientMenuSession::new(TransientMenuSessionId(7), "Open documents");
+        view.push_menu(Some(local.clone()));
+        assert_eq!(
+            receiver.try_recv().expect("cancel intent"),
+            ClientMessage::MenuCancel {
+                client_id: 0,
+                session_id: 1 << 63 | 3,
+            }
+        );
+        assert!(receiver.try_recv().is_err(), "exactly one intent");
+        // The local session is now the active (client-owned) menu.
+        assert!(!view.menu_sync.server_owned);
+        assert_eq!(view.menu_sync.menu, Some(local));
+
+        // Clearing locally never re-cancels the (already replaced) server
+        // session, and pushing a local menu on an already-local session
+        // sends nothing.
+        view.push_menu(None);
+        view.push_menu(Some(TransientMenuSession::new(
+            TransientMenuSessionId(8),
+            "again",
+        )));
+        assert!(receiver.try_recv().is_err(), "no stale cancel intents");
+    }
+
+    #[test]
+    fn server_menu_snapshot_hydration_preserves_display_fields() {
+        let snapshot = snapshot_data(1 << 63 | 9, "zz", 1, &["alpha", "beta", "gamma"]);
+        let menu = TransientMenuSession::from_snapshot_data(&snapshot);
+        assert_eq!(menu.session_id().0, 1 << 63 | 9);
+        assert_eq!(menu.prompt(), "Control Center");
+        assert_eq!(menu.query(), "zz");
+        assert_eq!(menu.items().len(), 3);
+        assert_eq!(menu.selected_index(), 1);
+        assert!(menu.is_active());
+        assert_eq!(
+            menu.origin(),
+            crate::shell::transient_menu::TransientMenuOrigin::CommandPalette
+        );
+        let first = &menu.items()[0];
+        assert_eq!(first.label, "alpha");
+        assert_eq!(first.detail.as_deref(), Some("alpha detail"));
+        assert_eq!(first.accessibility_label, "alpha accessibility");
+        // Inert items: no activation action survives the wire.
+        assert!(
+            menu.activate_selected().is_some(),
+            "action stays inert-but-present"
+        );
+    }
+
+    #[test]
+    fn server_menu_closed_clears_only_the_matching_session() {
+        let (queue, _receiver) = ClientEditQueue::bounded(8);
+        let mut view = server_menu_view(queue);
+
+        // A stale close for an unknown id must not touch the active menu.
+        assert!(
+            !view.apply_connection_event(ClientConnectionEvent::TransientMenuClosed {
+                session_id: 1 << 63 | 99,
+            })
+        );
+        assert!(view.menu_sync.menu.is_some(), "unrelated close ignored");
+
+        // The matching close clears the session copy.
+        assert!(
+            !view.apply_connection_event(ClientConnectionEvent::TransientMenuClosed {
+                session_id: 1 << 63 | 3,
+            })
+        );
+        assert!(view.menu_sync.menu.is_none(), "matching close clears");
+        assert!(!view.menu_sync.server_owned);
+    }
+
+    #[test]
+    fn server_menu_snapshot_replaces_and_resyncs_query_buffer() {
+        let (queue, _receiver) = ClientEditQueue::bounded(8);
+        let mut view = server_menu_view(queue);
+
+        // The server echoes the filtered session: new query + items.
+        view.apply_connection_event(ClientConnectionEvent::TransientMenuSnapshot(Box::new(
+            snapshot_data(1 << 63 | 3, "rel", 0, &["reload"]),
+        )));
+        assert_eq!(view.menu_sync.server_query_buffer, "rel");
+        let menu = view.menu_sync.menu.as_ref().expect("menu installed");
+        assert_eq!(menu.query(), "rel");
+        assert_eq!(menu.items().len(), 1);
+        assert_eq!(menu.selected_index(), 0);
+        // The server's query is authoritative even if it differs from the
+        // send buffer (clamped or re-filtered server-side).
+        assert!(view.menu_sync.server_owned);
     }
 }

@@ -1,138 +1,205 @@
 //! Control Center command workflow.
 //!
 //! The Control Center is a built-in transient menu that lists registered
-//! commands, filters them by query, and produces inert activation actions that
-//! route through the server-owned `CommandExecutor`. It is not a bespoke
-//! command-palette dispatcher: it reuses `TransientMenuSession`, the command
-//! registry snapshot, and the existing command execution path.
-
-#![allow(dead_code)]
+//! commands, filters them by query, and produces inert activation actions.
+//! It is not a bespoke command-palette dispatcher: it reuses
+//! `TransientMenuSession`, the generation-stamped command catalogue snapshot,
+//! and the existing server/shell execution paths (Phase 24.2).
 
 use crate::{
-    packages::commands::{CommandRegistry, RegisteredCommand},
+    packages::commands::{CommandCatalogue, RegisteredCommand},
     protocol::{KeyCode, KeyStroke, RoutingPolicy},
     server::command_execution::{
-        CommandExecutionRequest, CommandExecutionResult, CommandExecutionTarget, CommandExecutor,
-        builtin_server_command_ids,
+        CommandExecutionDiagnostic, CommandExecutionRequest, CommandExecutionRule,
+        CommandExecutionTarget,
     },
-    shell::transient_menu::{
-        TransientMenuAction, TransientMenuItem, TransientMenuItemProvenance, TransientMenuSession,
-        TransientMenuSessionId,
+    shell::{
+        fuzzy::fuzzy_score_fields,
+        transient_menu::{
+            TransientMenuAction, TransientMenuItem, TransientMenuItemProvenance,
+            TransientMenuSession, TransientMenuSessionId,
+        },
     },
 };
 
+/// Typed result of activating one Control Center item (Phase 24.2).
+/// Server/package commands produce a `CommandExecutionRequest` routed through
+/// the same dispatcher as keybindings/SDUI; shell `ClientUiCommand` items
+/// produce the narrow server-approved shell command id the client re-parses
+/// deny-by-default. No generic arbitrary client-command channel exists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ServerMenuActivation {
+    Command(CommandExecutionRequest),
+    ShellClientCommand(String),
+}
+
 /// Server-owned Control Center state.
 ///
-/// Holds the full unfiltered command list and the current query. The filtered
-/// `TransientMenuSession` is produced on demand so Masonry only ever sees the
-/// bounded, filtered item list.
+/// Holds the full unfiltered command list (with routing policy for activation
+/// typing) and the current query. The filtered `TransientMenuSession` is
+/// produced on demand so Masonry only ever sees the bounded, filtered item
+/// list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ControlCenter {
     session_id: TransientMenuSessionId,
-    all_items: Vec<TransientMenuItem>,
+    all_items: Vec<(TransientMenuItem, RoutingPolicy)>,
     query: String,
+    selected_index: usize,
 }
 
 impl ControlCenter {
-    /// Opens a Control Center session from the current command registry.
-    ///
-    /// Only commands with server-owned or background routing policies are
-    /// exposed. Client-first and native-client-UI commands are not executable
-    /// from the Control Center because they require client-side edit authority
-    /// or native widget coordination.
-    pub(crate) fn open(registry: &CommandRegistry, session_id: u64) -> Self {
-        let mut all_items: Vec<TransientMenuItem> = registry
-            .list()
+    /// Opens a Control Center session from one generation-stamped catalogue.
+    /// Client-first edit commands stay excluded; shell `ClientUiCommand`
+    /// entries stay visible and are activated through the client shell bridge.
+    pub(crate) fn open_catalogue(catalogue: &CommandCatalogue, session_id: u64) -> Self {
+        let all_items = catalogue
+            .commands()
+            .iter()
             .filter(|command| is_executable_from_control_center(&command.routing_policy))
-            .map(command_to_menu_item)
+            .map(|command| {
+                (
+                    command_to_menu_item(command),
+                    command.routing_policy.clone(),
+                )
+            })
             .collect();
-
-        for command_id in builtin_server_command_ids() {
-            if registry.get(command_id).is_none()
-                && let Some(command) =
-                    crate::server::command_execution::builtin_server_command(command_id)
-            {
-                all_items.push(command_to_menu_item(&command));
-            }
-        }
-
-        all_items.sort_by(|a, b| a.label.cmp(&b.label));
 
         Self {
             session_id: TransientMenuSessionId(session_id),
             all_items,
             query: String::new(),
+            selected_index: 0,
         }
     }
 
-    pub(crate) fn session_id(&self) -> TransientMenuSessionId {
-        self.session_id
+    #[cfg(test)]
+    pub(crate) fn open(
+        registry: &crate::packages::commands::CommandRegistry,
+        session_id: u64,
+    ) -> Self {
+        let builtins = crate::server::command_execution::builtin_server_command_ids()
+            .iter()
+            .filter_map(|command_id| {
+                crate::server::command_execution::builtin_server_command(command_id)
+            })
+            .collect();
+        let catalogue = CommandCatalogue::from_sources(
+            vec![builtins, registry.snapshot()],
+            &crate::protocol::BehaviorManifest::minimal_text_editing(1),
+        )
+        .expect("test catalogue should fit and have unique IDs");
+        Self::open_catalogue(&catalogue, session_id)
     }
 
-    pub(crate) fn query(&self) -> &str {
-        &self.query
-    }
-
-    /// Replaces the filter query and returns the filtered session.
+    /// Replaces the filter query and returns the filtered session. Filtering
+    /// resets the selection to index 0 (the item set changed).
     pub(crate) fn set_query(&mut self, query: impl Into<String>) -> TransientMenuSession {
         self.query = query.into();
-        let filtered: Vec<TransientMenuItem> = self
-            .all_items
-            .iter()
-            .filter(|item| matches_query(item, &self.query))
-            .cloned()
-            .collect();
-        TransientMenuSession::new(self.session_id, "Control Center").with_items(filtered)
+        self.selected_index = 0;
+        self.session()
     }
 
-    /// Returns a fresh session reflecting the current query without mutating
-    /// stored query state. Useful for tests and idempotent renders.
+    /// Generic semantic Backspace (Phase 24.3): delete the last query
+    /// character. The Control Center has no path semantics; path mode
+    /// overrides this with ascend-when-filter-empty behavior.
+    pub(crate) fn backspace(&mut self) -> TransientMenuSession {
+        self.query.pop();
+        self.session()
+    }
+
+    /// Returns a fresh session reflecting the current query and persisted
+    /// selection without mutating stored query state.
     pub(crate) fn session(&self) -> TransientMenuSession {
-        let filtered: Vec<TransientMenuItem> = self
+        let mut filtered: Vec<(usize, i32, &TransientMenuItem)> = self
             .all_items
             .iter()
-            .filter(|item| matches_query(item, &self.query))
-            .cloned()
+            .enumerate()
+            .filter_map(|(index, (item, _))| {
+                query_score(item, &self.query).map(|score| (index, score, item))
+            })
             .collect();
-        TransientMenuSession::new(self.session_id, "Control Center").with_items(filtered)
+        if !self.query.is_empty() {
+            filtered.sort_by(|left, right| {
+                right
+                    .1
+                    .cmp(&left.1)
+                    .then_with(|| left.2.label.cmp(&right.2.label))
+                    .then_with(|| left.2.id.cmp(&right.2.id))
+                    .then_with(|| left.0.cmp(&right.0))
+            });
+        }
+        let filtered = filtered
+            .into_iter()
+            .map(|(_, _, item)| item.clone())
+            .collect();
+        TransientMenuSession::new(self.session_id, "Control Center")
+            .with_items(filtered)
+            .with_selected_index(self.selected_index)
+            .with_query(&self.query)
     }
 
-    /// Executes the currently selected item from the filtered session through
-    /// the shared command executor.
-    pub(crate) fn execute_selected(
-        &self,
-        executor: &CommandExecutor,
-        registry: &CommandRegistry,
-        target: CommandExecutionTarget,
-    ) -> Result<CommandExecutionResult, crate::server::command_execution::CommandExecutionDiagnostic>
-    {
-        let session = self.session();
-        let action = session.activate_selected().ok_or_else(|| {
-            crate::server::command_execution::CommandExecutionDiagnostic {
-                command_id: String::new(),
-                rule: crate::server::command_execution::CommandExecutionRule::UnknownCommand,
-                message: "no command selected in Control Center".to_string(),
+    /// Moves the persisted selection by `delta` (relative steps, wrapping per
+    /// `TransientMenuSession::select_next` semantics) and returns the session.
+    pub(crate) fn move_selection(&mut self, delta: i64) -> TransientMenuSession {
+        let mut session = self.session();
+        let len = session.items().len();
+        if len > 0 {
+            let steps = delta.rem_euclid(len as i64) as usize;
+            for _ in 0..steps {
+                session.select_next();
             }
-        })?;
-        executor.execute(
-            registry,
-            CommandExecutionRequest {
+            self.selected_index = session.selected_index();
+        }
+        session
+    }
+
+    /// Produces the typed activation for the currently selected item: a
+    /// `CommandExecutionRequest` for server/package commands (dispatched by
+    /// the connection through the shared intent dispatcher) or the narrow
+    /// shell command id for `ClientUiCommand` items (re-parsed by the client
+    /// deny-by-default). Nothing executes here; the caller owns the session
+    /// close and the response ordering.
+    pub(crate) fn selected_activation(
+        &self,
+        target: CommandExecutionTarget,
+    ) -> Result<ServerMenuActivation, CommandExecutionDiagnostic> {
+        let session = self.session();
+        let action = session
+            .activate_selected()
+            .ok_or_else(|| CommandExecutionDiagnostic {
+                command_id: String::new(),
+                rule: CommandExecutionRule::UnknownCommand,
+                message: "no command selected in Control Center".to_string(),
+            })?;
+        let routing = self
+            .all_items
+            .iter()
+            .find(|(item, _)| item.id == action.command_id)
+            .map(|(_, routing)| routing)
+            .ok_or_else(|| CommandExecutionDiagnostic {
                 command_id: action.command_id.clone(),
-                arguments: action.arguments.clone(),
-                target,
-                provenance: None,
-                expected_permissions: Vec::new(),
-            },
-        )
+                rule: CommandExecutionRule::UnknownCommand,
+                message: "selected item is not in the Control Center catalogue".to_string(),
+            })?;
+        if *routing == RoutingPolicy::ClientUiCommand {
+            return Ok(ServerMenuActivation::ShellClientCommand(
+                action.command_id.clone(),
+            ));
+        }
+        Ok(ServerMenuActivation::Command(CommandExecutionRequest {
+            command_id: action.command_id.clone(),
+            arguments: action.arguments.clone(),
+            target,
+            provenance: None,
+            expected_permissions: Vec::new(),
+        }))
     }
 }
 
 fn is_executable_from_control_center(routing_policy: &RoutingPolicy) -> bool {
     !matches!(
         routing_policy,
-        RoutingPolicy::ClientFirstPredictable
-            | RoutingPolicy::ClientFirstRequiresAck
-            | RoutingPolicy::ClientUiCommand
+        RoutingPolicy::ClientFirstPredictable | RoutingPolicy::ClientFirstRequiresAck
     )
 }
 
@@ -174,19 +241,19 @@ fn command_to_menu_item(command: &RegisteredCommand) -> TransientMenuItem {
     .with_provenance(provenance)
 }
 
-fn matches_query(item: &TransientMenuItem, query: &str) -> bool {
+fn query_score(item: &TransientMenuItem, query: &str) -> Option<i32> {
     if query.is_empty() {
-        return true;
+        return Some(0);
     }
-    let query = query.to_lowercase();
-    item.label.to_lowercase().contains(&query)
-        || item.id.to_lowercase().contains(&query)
-        || item
-            .detail
-            .as_ref()
-            .map(|d| d.to_lowercase().contains(&query))
-            .unwrap_or(false)
-        || item.accessibility_label.to_lowercase().contains(&query)
+    fuzzy_score_fields(
+        query,
+        [
+            item.label.as_str(),
+            item.id.as_str(),
+            item.detail.as_deref().unwrap_or_default(),
+            item.accessibility_label.as_str(),
+        ],
+    )
 }
 
 fn routing_label(routing_policy: &RoutingPolicy) -> &'static str {
@@ -270,14 +337,12 @@ mod tests {
     use super::*;
     use crate::{
         packages::{
-            commands::{PackageCommandDeclaration, RegisteredCommand},
+            commands::{CommandRegistry, PackageCommandDeclaration, RegisteredCommand},
             manifest::validate_manifest_value,
             permissions::PackagePermission,
         },
         protocol::{KeyBindingContext, KeyBindingRule, KeyCode, KeyStroke, RoutingPolicy},
-        server::command_execution::{
-            CommandExecutionRule, CommandExecutionStatus, CommandExecutionTarget,
-        },
+        server::command_execution::{CommandExecutionRule, CommandExecutionTarget},
     };
 
     fn package_manifest() -> crate::packages::manifest::ClayPackageManifest {
@@ -438,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_command_executes_through_command_executor() {
+    fn selected_command_produces_command_activation() {
         let mut registry = CommandRegistry::new();
         register_command(
             &mut registry,
@@ -453,20 +518,21 @@ mod tests {
         let session = center.set_query("togglePreview");
         assert_eq!(session.selected_index(), 0);
 
-        let result = center
-            .execute_selected(
-                &CommandExecutor::new(),
-                &registry,
-                CommandExecutionTarget::ActiveDocument { document_id: 1 },
-            )
-            .expect("execute selected command");
-
-        assert_eq!(result.command_id, "markdown.togglePreview");
-        assert_eq!(result.status, CommandExecutionStatus::Accepted);
+        let activation = center
+            .selected_activation(CommandExecutionTarget::ActiveDocument { document_id: 1 })
+            .expect("selected command activation");
+        let ServerMenuActivation::Command(request) = activation else {
+            panic!("expected command activation")
+        };
+        assert_eq!(request.command_id, "markdown.togglePreview");
+        assert_eq!(
+            request.target,
+            CommandExecutionTarget::ActiveDocument { document_id: 1 }
+        );
     }
 
     #[test]
-    fn empty_filtered_session_rejects_execution() {
+    fn empty_filtered_session_rejects_activation() {
         let mut registry = CommandRegistry::new();
         register_command(
             &mut registry,
@@ -480,21 +546,52 @@ mod tests {
         center.set_query("zzzz-no-match");
 
         let error = center
-            .execute_selected(
-                &CommandExecutor::new(),
-                &registry,
-                CommandExecutionTarget::Global,
-            )
+            .selected_activation(CommandExecutionTarget::Global)
             .expect_err("no selected command");
 
         assert!(matches!(error.rule, CommandExecutionRule::UnknownCommand));
     }
 
     #[test]
+    fn selected_shell_client_item_produces_shell_activation() {
+        let shell_commands = crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE
+            .iter()
+            .map(|(command_id, display_name)| RegisteredCommand {
+                package_name: "clay".to_string(),
+                package_version: env!("CARGO_PKG_VERSION").to_string(),
+                api_prefix: "shell".to_string(),
+                command_id: (*command_id).to_string(),
+                display_name: (*display_name).to_string(),
+                routing_policy: RoutingPolicy::ClientUiCommand,
+                key_bindings: Vec::new(),
+                custom_properties: BTreeMap::new(),
+                permissions: Vec::new(),
+            })
+            .collect();
+        let catalogue = CommandCatalogue::from_sources(
+            vec![shell_commands],
+            &crate::protocol::BehaviorManifest::minimal_text_editing(1),
+        )
+        .expect("shell catalogue should validate");
+        let mut center = ControlCenter::open_catalogue(&catalogue, 8);
+
+        let session = center.set_query("clientSplitPaneVertical");
+        assert_eq!(session.items().len(), 1);
+
+        let activation = center
+            .selected_activation(CommandExecutionTarget::Global)
+            .expect("selected shell item activation");
+        assert_eq!(
+            activation,
+            ServerMenuActivation::ShellClientCommand("shell.clientSplitPaneVertical".to_string())
+        );
+    }
+
+    #[test]
     fn client_first_command_is_not_executable_from_control_center() {
         // Package registration already rejects client-first and client-ui
-        // routing policies, so this test exercises the filtering defense
-        // directly with raw RegisteredCommand values.
+        // routing policies. Client-first remains hidden; shell client-ui
+        // entries are intentionally visible for task 6's activation bridge.
         let command = RegisteredCommand {
             package_name: "@clay/markdown".to_string(),
             package_version: "0.1.0".to_string(),
@@ -519,7 +616,133 @@ mod tests {
             custom_properties: std::collections::BTreeMap::new(),
             permissions: vec![PackagePermission::ParseDocument],
         };
-        assert!(!is_executable_from_control_center(&command.routing_policy));
+        assert!(is_executable_from_control_center(&command.routing_policy));
+    }
+
+    #[test]
+    fn shell_client_catalogue_entries_are_visible_and_parser_allowlisted() {
+        let shell_commands = crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE
+            .iter()
+            .map(|(command_id, display_name)| RegisteredCommand {
+                package_name: "clay".to_string(),
+                package_version: env!("CARGO_PKG_VERSION").to_string(),
+                api_prefix: "shell".to_string(),
+                command_id: (*command_id).to_string(),
+                display_name: (*display_name).to_string(),
+                routing_policy: RoutingPolicy::ClientUiCommand,
+                key_bindings: Vec::new(),
+                custom_properties: BTreeMap::new(),
+                permissions: Vec::new(),
+            })
+            .collect();
+        let catalogue = CommandCatalogue::from_sources(
+            vec![shell_commands],
+            &crate::protocol::BehaviorManifest::minimal_text_editing(1),
+        )
+        .expect("shell catalogue should fit");
+        let center = ControlCenter::open_catalogue(&catalogue, 8);
+        let session = center.session();
+        let ids: std::collections::HashSet<_> = session
+            .items()
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+
+        assert_eq!(
+            ids.len(),
+            crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE.len()
+        );
+        for (command_id, _) in crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE {
+            assert!(ids.contains(command_id));
+            assert!(
+                crate::masonry_shell::ShellClientCommand::from_command_id(command_id).is_some()
+            );
+        }
+    }
+
+    #[test]
+    fn catalogue_snapshot_is_not_rebuilt_for_query_updates() {
+        let mut registry = CommandRegistry::new();
+        register_command(
+            &mut registry,
+            "markdown.togglePreview",
+            "Toggle Preview",
+            RoutingPolicy::ServerFirst,
+            vec![PackagePermission::ParseDocument],
+            Vec::new(),
+        );
+        let mut center = ControlCenter::open(&registry, 9);
+        registry.insert_test_command(RegisteredCommand {
+            package_name: "@clay/markdown".to_string(),
+            package_version: "0.1.0".to_string(),
+            api_prefix: "markdown".to_string(),
+            command_id: "markdown.addedAfterOpen".to_string(),
+            display_name: "Added After Open".to_string(),
+            routing_policy: RoutingPolicy::ServerFirst,
+            key_bindings: Vec::new(),
+            custom_properties: BTreeMap::new(),
+            permissions: vec![PackagePermission::ParseDocument],
+        });
+
+        assert!(center.set_query("addedAfterOpen").items().is_empty());
+    }
+
+    #[test]
+    fn fuzzy_query_matches_subsequence_in_command_label() {
+        let command = RegisteredCommand {
+            package_name: "clay".to_string(),
+            package_version: env!("CARGO_PKG_VERSION").to_string(),
+            api_prefix: "clay".to_string(),
+            command_id: "controlCenter.open".to_string(),
+            display_name: "Control Center Open".to_string(),
+            routing_policy: RoutingPolicy::ServerFirst,
+            key_bindings: Vec::new(),
+            custom_properties: BTreeMap::new(),
+            permissions: Vec::new(),
+        };
+        let catalogue = CommandCatalogue::from_sources(
+            vec![vec![command]],
+            &crate::protocol::BehaviorManifest::minimal_text_editing(1),
+        )
+        .expect("fuzzy test catalogue should validate");
+        let mut center = ControlCenter::open_catalogue(&catalogue, 10);
+
+        let session = center.set_query("ccop");
+
+        assert_eq!(
+            session.items().first().map(|item| item.label.as_str()),
+            Some("Control Center Open")
+        );
+    }
+
+    #[test]
+    fn fuzzy_ties_follow_catalogue_label_and_id_order() {
+        let command = |command_id: &str| RegisteredCommand {
+            package_name: "clay".to_string(),
+            package_version: env!("CARGO_PKG_VERSION").to_string(),
+            api_prefix: "clay".to_string(),
+            command_id: command_id.to_string(),
+            display_name: "Same Label".to_string(),
+            routing_policy: RoutingPolicy::ServerFirst,
+            key_bindings: Vec::new(),
+            custom_properties: BTreeMap::new(),
+            permissions: Vec::new(),
+        };
+        let catalogue = CommandCatalogue::from_sources(
+            vec![vec![command("test.b"), command("test.a")]],
+            &crate::protocol::BehaviorManifest::minimal_text_editing(1),
+        )
+        .expect("tie test catalogue should validate");
+        let mut center = ControlCenter::open_catalogue(&catalogue, 11);
+
+        let session = center.set_query("same");
+        let ids: Vec<_> = session
+            .items()
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+
+        assert_eq!(ids, ["test.a", "test.b"]);
     }
 
     #[test]
