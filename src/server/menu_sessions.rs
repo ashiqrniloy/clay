@@ -390,6 +390,7 @@ pub(crate) fn snapshot_from_session(session: &TransientMenuSession) -> Transient
             TransientMenuOrigin::CommandPalette => TransientMenuOriginData::CommandPalette,
             TransientMenuOrigin::ContextMenu => TransientMenuOriginData::ContextMenu,
             TransientMenuOrigin::MenuBar => TransientMenuOriginData::MenuBar,
+            TransientMenuOrigin::Centered => TransientMenuOriginData::Centered,
         },
     )
 }
@@ -947,7 +948,7 @@ mod tests {
         assert_eq!(snapshot.items[0].id, "markdown.refreshPreview");
         assert_eq!(snapshot.items[0].label, "Refresh Preview");
         assert_eq!(snapshot.focus_policy, TransientMenuFocusPolicyData::Modal);
-        assert_eq!(snapshot.origin, TransientMenuOriginData::CommandPalette);
+        assert_eq!(snapshot.origin, TransientMenuOriginData::Centered);
     }
 
     #[test]

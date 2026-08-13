@@ -45,16 +45,13 @@ pub(super) fn op_clay_language_register_document_analyzer(
     let clay_state = state.borrow::<Arc<ClayOpState>>().clone();
     let package =
         clay_state.require_current_package_capability(PackagePermission::ParseDocument)?;
-    if !clay_state
-        .package_service()
-        .lock()
-        .expect("package service mutex poisoned")
-        .has_approved_capability(&package.manifest.name, PackagePermission::LanguageServer)
-    {
-        return Err(clay_error(
-            "language.invalid_analyzer: language-server permission is required",
-        ));
-    }
+    // Phase 24.5 decision (2026-08-13-2223): a missing `language-server`
+    // grant no longer blocks analyzer registration — grantLanguageServer
+    // degrades independently per the examples contract. The registration is
+    // inert without a grant: every invocation re-checks a current exact
+    // grant covering the document's workspace root
+    // (document_analysis_authorized), and session start remains strictly
+    // grant-gated.
     let analyzer = options
         .get("analyzer")
         .and_then(Value::as_object)
@@ -90,7 +87,7 @@ pub(super) fn op_clay_language_register_document_analyzer(
     }
     let contribution =
         required_str(analyzer, "contribution", "language.invalid_analyzer")?.to_string();
-    let Some(descriptor) = package
+    let Some(_descriptor) = package
         .contributions
         .language_servers
         .iter()
@@ -143,19 +140,10 @@ pub(super) fn op_clay_language_register_document_analyzer(
         .lock()
         .expect("package service mutex poisoned");
     let enabled = service.enabled_records().any(|record| record == &package);
-    let current_grant = service
-        .language_server_grant(&package.manifest.name, &contribution)
-        .is_some_and(|grant| {
-            grant.descriptor_fingerprint
-                == crate::packages::authorization::language_server_descriptor_fingerprint(
-                    descriptor,
-                )
-                && !grant.workspace_root_ids.is_empty()
-        });
     drop(service);
-    if !enabled || !current_grant {
+    if !enabled {
         return Err(clay_error(
-            "language.invalid_analyzer: package must be enabled with a current exact language-server grant before analyzer registration",
+            "language.invalid_analyzer: package must be enabled before analyzer registration",
         ));
     }
     let registration = JsDocumentAnalyzerRegistration {

@@ -105,6 +105,8 @@ ln -s /tmp/clay-manual/a.txt /tmp/clay-manual/link.txt
 | F27 | Native-dialog fallback: `Ctrl+O`, and the workspace-open dialog | Unchanged (F1, F16) — native dialogs remain the fallback capability issuers; path mode never disables them |
 | F28 | Switch tabs while the path browser is open (module 14 tab bar) | Session dismissed with explicit `TransientMenuClosed`; stale intents for the old session → bounded `menu.unknown_session` diagnostic; the other tab is unaffected (automated: `path_browser_survives_tab_switch_and_disconnect`) |
 | F29 | Trigger a runtime reload while the path browser is open (`Ctrl+Shift+R`) | Generation replacement cancels the session (`TransientMenuClosed`) before `RuntimeStateSnapshot`; reopening uses a fresh session id (automated: `path_browser_activation_after_runtime_reload_fails_closed`) |
+| F30 | Open Path Browser and inspect its surface/accessibility tree | One centered Spotlight-style panel dims full window; exactly one named modal Dialog contains Menu/MenuItems and a polite Status with `0 results`, `1 result`, or `{n} results`; path prompt is bounded/sanitized. |
+| F31 | Click scrim, type unsupported modifier/function input, paste, or start IME while Path Browser is open | Scrim/input is contained; no editor text/caret/selection mutation or path authority change. Escape closes and returns focus to originating pane. |
 
 ## Negative checks
 

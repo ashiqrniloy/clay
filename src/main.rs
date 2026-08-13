@@ -176,6 +176,10 @@ impl Driver {
             });
         if let Some(menu) = menu {
             self.apply_menu_sync(ctx, window_id, chrome_id, menu);
+        } else {
+            // Theme/SDUI events can change the centered host's cached render
+            // context without pushing a new menu snapshot.
+            self.sync_centered_layer(ctx, window_id, chrome_id);
         }
     }
 
@@ -197,6 +201,7 @@ impl Driver {
                     editor.ctx.request_accessibility_update();
                 }
             });
+        self.sync_centered_layer(ctx, window_id, chrome_id);
     }
 
     /// Apply one connection event to a pane content target (chrome or a
@@ -994,12 +999,21 @@ impl AppDriver for Driver {
                             };
                             self.sync_shell_ui_theme(ctx, window_id, &snapshot.active_theme);
                             self.apply_connection_to_chrome(ctx, window_id, chrome_id, event);
+                            // A runtime-generation replacement cancels any
+                            // centered session; never let the old layer outlive
+                            // the new catalogue/theme install.
+                            if client_id == self.active_tab {
+                                self.remove_centered_layer(ctx.render_root(window_id));
+                            }
                             self.fan_out_runtime_snapshot(
                                 ctx, window_id, client_id, chrome_id, snapshot,
                             );
                         }
                         ClientConnectionEvent::Disconnected
                         | ClientConnectionEvent::ConnectionError(_) => {
+                            if client_id == self.active_tab {
+                                self.remove_centered_layer(ctx.render_root(window_id));
+                            }
                             self.apply_connection_to_chrome(
                                 ctx,
                                 window_id,
@@ -3001,6 +3015,7 @@ fn run_editor(
             editor_widget_id,
             shell_widget_id,
             window_id,
+            centered_layer_id: None,
             tabs: BTreeMap::from([(
                 client_id,
                 TabState {

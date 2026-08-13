@@ -109,6 +109,22 @@ The session itself never ranks items — filtering policy stays with the caller.
 
 The [Path Browser](path-browser.md) is the second server-owned session kind and the first that treats the query line as an editable path bar: the session derives a filter fragment from the input (split at the last platform separator), scores its **installed** bounded entries with the same shared scorer, and projects prompt `Browse · {canonical_dir}` / query = input / inert empty-string actions through the identical builder chain (`with_items`/`with_selected_index`/`with_empty_status`). Filter-only edits never touch the filesystem — only directory-prefix changes relist.
 
+## Phase 24.4: centered dialog accessibility and containment
+
+Command Centre command/path snapshots use `TransientMenuOrigin::Centered`.
+`TransientPackageOverlay::from_menu_session` carries the sanitized prompt,
+selected item labels, and a bounded result-count string to the retained
+`PackageRegionWidget`. The window-level `PackageOverlayHost` is the modal
+`Role::Dialog`; its child region is the `Role::Menu` with `Role::MenuItem`
+children and one stable polite `Role::Status` count node.
+
+Masonry focus stays on the originating pane. `PaneDocumentView` routes
+server-owned modal keys through the existing intent queue and consumes unknown
+keys, queue failures, clipboard paste, and IME events instead of allowing
+editor mutation. The centered root layer swallows scrim pointer events. Query
+and selection snapshots reconcile the same root/region and synthetic AccessKit
+IDs; selection changes with unchanged count do not re-announce.
+
 ## Tests
 
 - `src/shell/transient_menu.rs`: `session_stores_prompt_and_starts_empty`

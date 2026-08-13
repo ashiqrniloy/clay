@@ -225,6 +225,37 @@ pub const PRIMITIVES_REGISTRY_VERSION: &str = "phase16-primitives-v1";
 
 pub const KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS: u64 = 16;
 
+// Phase 24.5 Command Centre budgets. Advisory per the Phase 21 promotion
+// rule (hard CI thresholds only after stable-runner evidence; Plan 084
+// deferred menu-latency measurement to this phase and the evidence is
+// still single-machine). The deterministic CI-blocking gates are the
+// work-count/payload guards in tests/editor_performance_invariants.rs.
+/// One Command Centre open: server catalogue snapshot + menu session
+/// construction + snapshot encode. No document-sized work; candidate count
+/// bounded by the registered-command registry and `TRANSIENT_MENU_MAX_ITEMS`.
+pub const COMMAND_CENTRE_OPEN_P95_BUDGET_MS: u64 = 50;
+/// One per-keystroke filter update: fuzzy-score the installed candidate
+/// list (<= `TRANSIENT_MENU_MAX_ITEMS` entries) locally; never touches
+/// document text or the filesystem. Tighter than the open budget because
+/// it runs on every keystroke.
+pub const COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS: u64 = 4;
+/// Entry ceiling for one path-browser listing snapshot. Aliases the
+/// transient-menu cap: the browse listing plan is built against this
+/// constant so a future menu cap change cannot silently unbind listings.
+pub const COMMAND_CENTRE_LISTING_MAX_ENTRIES: usize = TRANSIENT_MENU_MAX_ITEMS;
+/// Advisory serialized-size ceiling for one path-browser listing snapshot:
+/// `COMMAND_CENTRE_LISTING_MAX_ENTRIES` items x (label 128 + detail 256 +
+/// path text) plus envelope headroom. Far below the 1 MiB codec frame
+/// ceiling; a pathological full-listing snapshot must never approach the
+/// frame budget.
+pub const COMMAND_CENTRE_LISTING_PAYLOAD_BUDGET_BYTES: usize = 64 * 1024;
+
+/// Phase 24.5: a pending multi-stroke chord older than this is cancelled on
+/// the next keystroke (the stale key is re-evaluated fresh). Advisory:
+/// wall-clock constant matched against real typing latency once sequence
+/// defaults ship; not yet CI-guarded.
+pub const KEY_CHORD_PENDING_TIMEOUT_MS: u64 = 1500;
+
 // Phase 22.6 (plan 077 task 5) window-model performance budgets. The two
 // wall-clock budgets are advisory, pinned from `cargo bench --bench
 // window_baselines` measurements (docs/development/performance.md, Phase

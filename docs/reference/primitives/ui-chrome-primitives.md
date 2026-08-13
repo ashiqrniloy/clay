@@ -58,6 +58,7 @@ Announcements for tab/split changes come from the shell's persistent
 | `paint_kbd_hint` | Keyboard shortcut hint | `color.surface.kbd`, `color.text.kbd`, `dimension.radius.kbd`, `spacing.kbd.padding.x`, `spacing.kbd.padding.y`, `typography.kbd` | `kbd` (via label) |
 | `paint_icon_slot` | Standardized icon placeholder | `dimension.icon.size`, `dimension.icon.slot.size`, `color.text.muted`, `dimension.radius.icon` | `img` or `presentation` |
 | `paint_tooltip_shell` | Tooltip background/border | `color.surface.overlay`, `color.border`, `dimension.border.width`, `dimension.radius.tooltip`, `spacing.tooltip.padding` | `tooltip` |
+| `paint_scrim` (Phase 24.4) | Full-window dim behind centered Command Centre | `color.surface.scrim`, `opacity.scrim` | modal `Dialog` backdrop |
 | `tab_card_chrome` (Phase 22.3) | Tab card background/text with interaction states and selection | `list_row_fill_color`/`disabled_text_color` state mapping, `color.surface.list`, `color.surface.selected`, `color.surface.hover`, `color.surface.active`, `color.text.disabled`, `opacity.disabled` | informational `Tab` under the shell `TabList` (virtual node, not a widget) |
 
 ## State-color helpers (Phase 20.4)
@@ -79,6 +80,7 @@ All three are token-driven (read `ResolvedUiTheme::color` / `opacity`) and apply
 - **Sidebar chrome**: `paint()` → `paint_panel_chrome()`
 - **Package fixed panel chrome**: `paint_package_fixed_panels()` → `paint_panel_chrome()`
 - **Package overlay chrome**: `paint_package_overlays()` → `paint_tooltip_shell()`
+- **Centered Command Centre backdrop**: root-layer `PackageOverlayHost::paint()` → `paint_scrim()` once over cached window bounds, then existing tooltip-shell chrome. This is a translucent scrim only; no blur, filter, or offscreen pass.
 
 ### Editor chrome routing (src/editor/surface.rs)
 
@@ -123,13 +125,15 @@ See [Creating Clay Packages](../packages/creating-packages.md#ui-chrome-conforma
 - Primitives are deterministic and allocation-free in paint paths.
 - No per-frame theme re-resolution; tokens are cached in `ResolvedUiTheme`.
 - No layout mutation during paint.
+- Centered Command Centre paint is one token-driven scrim fill plus the bounded retained overlay subtree; width/scrim tokens resolve before paint and are cached.
+- No backdrop blur, filter, or offscreen render target.
 - No package JavaScript in paint/layout/pointer/scroll/keypress/text-event handlers.
 
 ## Security
 
 - Primitives are `pub(crate)` inert paint helpers; not exposed to JavaScript.
 - No new filesystem, network, shell, AI, WASM, raw-op, or package-manager authority.
-- Packages still cannot call primitives directly or paint chrome themselves.
+- Packages still cannot call primitives directly or paint chrome themselves. `paint_scrim` and the internal centered root layer are Clay-owned; package anchors remain `working-area`, `active-pane`, `main`, and `pointer`.
 
 ## References
 

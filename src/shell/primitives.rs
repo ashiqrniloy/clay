@@ -530,6 +530,26 @@ pub(crate) fn paint_tooltip_shell(scene: &mut Scene, rect: Rect, theme: &Resolve
     // For now, chrome only — text rendering is Phase 20.5
 }
 
+/// Phase 24.4: full-window scrim behind the centered Command Centre surface.
+/// Fills `rect` with `surface.scrim` alpha-multiplied by `opacity.scrim`.
+/// One `Scene::fill`, no text/layout work; empty rects are a no-op.
+pub(crate) fn paint_scrim(scene: &mut Scene, rect: Rect, theme: &ResolvedUiTheme) {
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return;
+    }
+    let color = apply_alpha(
+        theme.color("surface.scrim").unwrap_or(Color::BLACK),
+        theme.opacity("opacity.scrim").unwrap_or(0.5),
+    );
+    scene.fill(
+        masonry::vello::peniko::Fill::NonZero,
+        masonry::kurbo::Affine::IDENTITY,
+        color,
+        None,
+        &rect,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -771,5 +791,36 @@ mod tests {
         let faint = Color::from_rgba8(0x9f, 0x9f, 0x9f, 0x22);
         let lifted = scrollbar_thumb_paint_color(faint, InteractionState::Hover).to_rgba8();
         assert!(lifted.a > faint.to_rgba8().a && lifted.a < 255);
+    }
+
+    #[test]
+    fn scrim_alpha_composition_is_deterministic() {
+        let theme = test_theme();
+        let mut scene = Scene::new();
+        paint_scrim(
+            &mut scene,
+            Rect::from_origin_size((0.0, 0.0), (800.0, 600.0)),
+            &theme,
+        );
+        // One fill: the scrim color is `surface.scrim` alpha-multiplied by
+        // `opacity.scrim` (0.5) — black at 50%.
+        assert!(!scene.encoding().is_empty());
+        let rgba = apply_alpha(
+            theme.color("surface.scrim").unwrap(),
+            theme.opacity("opacity.scrim").unwrap(),
+        )
+        .to_rgba8();
+        assert_eq!(rgba.r, 0);
+        assert_eq!(rgba.g, 0);
+        assert_eq!(rgba.b, 0);
+        assert_eq!(rgba.a, 127); // 255 × 0.5, truncated by apply_alpha
+    }
+
+    #[test]
+    fn scrim_empty_rect_is_a_noop() {
+        let theme = test_theme();
+        let mut scene = Scene::new();
+        paint_scrim(&mut scene, Rect::ZERO, &theme);
+        assert!(scene.encoding().is_empty(), "empty rect must not paint");
     }
 }

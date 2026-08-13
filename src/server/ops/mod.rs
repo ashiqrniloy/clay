@@ -1017,7 +1017,7 @@ impl ClayOpState {
 
     pub(super) fn unbind_key(
         &self,
-        stroke: &KeyStroke,
+        sequence: &[KeyStroke],
         context: &KeyBindingContext,
     ) -> Result<BehaviorManifest, crate::behavior::manifest::ManifestValidationError> {
         let mut replacement = self
@@ -1027,7 +1027,7 @@ impl ClayOpState {
             .manifest()
             .clone();
         replacement.keymaps.retain(|existing| {
-            existing.context != *context || existing.sequence != vec![stroke.clone()]
+            existing.context != *context || existing.sequence.as_slice() != sequence
         });
         replacement.manifest_id = "runtime.configuration".to_string();
         let manifest = self.publish_behavior_replacement(replacement)?;
@@ -1042,7 +1042,7 @@ impl ClayOpState {
                 .lock()
                 .expect("Clay runtime op state mutex poisoned")
                 .retain(|existing| {
-                    existing.context != *context || existing.sequence != vec![stroke.clone()]
+                    existing.context != *context || existing.sequence.as_slice() != sequence
                 });
         }
         Ok(manifest)

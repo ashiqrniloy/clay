@@ -532,3 +532,15 @@ pub fn tab_switch_geometry_work(pane_count: usize) -> usize {
     let editor = usize::from(layout.editor_component_rect(area).width() > 0.0);
     dividers + slots + focus + editor
 }
+
+/// Geometry work a centered Command Centre open/theme update performs: the
+/// full-window scrim rect plus the centered surface rect and one rect per
+/// hosted overlay. Pure rect math over window bounds — no document text,
+/// serialization, IPC, or paint work — so the count is O(overlay_count) and
+/// independent of document size.
+pub fn centered_overlay_geometry_work(overlay_count: usize) -> usize {
+    let window = Rect::new(0.0, 0.0, 900.0, 600.0);
+    let centered = crate::shell::package_ui::centered_rect(window, 640.0, 220.0);
+    // One scrim fill rect + one centered surface rect + one rect per overlay.
+    1 + 1 + overlay_count * usize::from(centered.width() > 0.0)
+}

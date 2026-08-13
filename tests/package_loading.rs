@@ -2317,7 +2317,12 @@ fn language_server_contribution_is_fixed_bounded_and_permissioned() {
 }
 
 #[test]
-fn language_server_enable_requires_current_exact_grant_and_revocation_fails_closed() {
+fn language_server_enable_tolerates_missing_grant_while_sessions_stay_grant_gated() {
+    // Phase 24.5 decision (2026-08-13-2223): loadPackage tolerates a missing
+    // language-server grant (grants degrade independently; the capability is
+    // inert until a session starts). The grant APIs stay strict: contribution
+    // must exist, executable must resolve canonically, roots must be
+    // non-empty, and the session-start gate reads the grant store.
     use clay::packages::{authorization::RuntimeProfile, permissions::PackagePermission};
 
     let fixture = language_server_package_fixture("@vendor/lsp", "1.0.0", "vendor-lsp");
@@ -2337,10 +2342,19 @@ fn language_server_enable_requires_current_exact_grant_and_revocation_fails_clos
             "test-user",
         )
         .unwrap();
-    assert!(matches!(
-        service.enable("@vendor/lsp"),
-        Err(PackageServiceError::MissingLanguageServerGrant { .. })
-    ));
+    service.approve_package("@vendor/lsp", "test").unwrap();
+    // No grant yet: the package still enables (capability inert), and no
+    // session can start because the grant store is empty.
+    service
+        .enable("@vendor/lsp")
+        .expect("missing grant is tolerated");
+    assert!(
+        service
+            .language_server_grant("@vendor/lsp", "vendor-lsp.server")
+            .is_none(),
+        "session start must stay grant-gated"
+    );
+    service.disable("@vendor/lsp").unwrap();
     assert!(matches!(
         service.authorize_language_server(
             "@vendor/lsp",
@@ -2367,13 +2381,18 @@ fn language_server_enable_requires_current_exact_grant_and_revocation_fails_clos
         .expect("exact grant enables package");
     service.disable("@vendor/lsp").unwrap();
     assert_eq!(service.revoke_language_server_grants("@vendor/lsp"), 1);
-    assert!(matches!(
-        service.enable("@vendor/lsp"),
-        Err(PackageServiceError::MissingCapabilityGrant {
-            capability: PackagePermission::LanguageServer,
-            ..
-        })
-    ));
+    // Revocation no longer blocks enable (capability inert), and the grant
+    // store is empty again so no session can start.
+    service
+        .enable("@vendor/lsp")
+        .expect("revoked grant is tolerated at load");
+    assert!(
+        service
+            .language_server_grant("@vendor/lsp", "vendor-lsp.server")
+            .is_none(),
+        "revocation must leave session start grant-gated"
+    );
+    service.disable("@vendor/lsp").unwrap();
 
     service
         .authorize_language_server(
@@ -2392,10 +2411,13 @@ fn language_server_enable_requires_current_exact_grant_and_revocation_fails_clos
             "local:/vendor-lsp",
         )
         .unwrap();
-    assert!(matches!(
-        service.enable("@vendor/lsp"),
-        Err(PackageServiceError::MissingLanguageServerGrant { .. })
-    ));
+    service.approve_package("@vendor/lsp", "test").unwrap();
+    // A stale grant (package updated since) is tolerated at load; session
+    // start re-checks the current grant on the authorize path.
+    service
+        .enable("@vendor/lsp")
+        .expect("stale grant is tolerated at load");
+    service.disable("@vendor/lsp").unwrap();
 
     service
         .authorize_language_server(
@@ -2414,10 +2436,10 @@ fn language_server_enable_requires_current_exact_grant_and_revocation_fails_clos
             "github:vendor/lsp",
         )
         .unwrap();
-    assert!(matches!(
-        service.enable("@vendor/lsp"),
-        Err(PackageServiceError::MissingLanguageServerGrant { .. })
-    ));
+    service.approve_package("@vendor/lsp", "test").unwrap();
+    service
+        .enable("@vendor/lsp")
+        .expect("provenance change is tolerated at load");
 }
 
 #[test]
@@ -2450,13 +2472,19 @@ fn bundled_defaults_never_auto_grant_language_server() {
         )
         .unwrap();
 
-    assert!(matches!(
-        service.enable("@clay/lsp-test"),
-        Err(PackageServiceError::MissingCapabilityGrant {
-            capability: PackagePermission::LanguageServer,
-            ..
-        })
-    ));
+    // The capability stays inert: the package loads, but no language-server
+    // grant is auto-created, so no session can ever start (Phase 24.5
+    // decision 2026-08-13-2223).
+    service.approve_package("@clay/lsp-test", "test").unwrap();
+    service
+        .enable("@clay/lsp-test")
+        .expect("missing language-server grant is tolerated at load");
+    assert!(
+        service
+            .language_server_grant("@clay/lsp-test", "lsp-test.server")
+            .is_none(),
+        "bundled defaults must never auto-grant language-server authority"
+    );
 }
 
 #[test]
@@ -2667,16 +2695,18 @@ fn replacement_language_server_requires_own_fresh_grant() {
         )
         .unwrap();
     service.approve_package("@vendor/lsp-repl", "test").unwrap();
-    // The target's grant must not transfer: enable fails closed until the
-    // replacement holds its own exact grant.
-    let error = service.enable("@vendor/lsp-repl").unwrap_err();
+    // The target's grant must not transfer: the replacement loads (missing
+    // language-server grant is tolerated), but the grant store has no entry
+    // for it, so session start stays denied until it holds its own exact
+    // grant (Phase 24.5 decision 2026-08-13-2223).
+    service
+        .enable("@vendor/lsp-repl")
+        .expect("replacement loads without inheriting a grant");
     assert!(
-        matches!(
-            error,
-            PackageServiceError::MissingLanguageServerGrant { .. }
-                | PackageServiceError::MissingCapabilityGrant { .. }
-        ),
-        "replacement must not inherit the target's grant, got {error}"
+        service
+            .language_server_grant("@vendor/lsp-repl", "ls-repl.server")
+            .is_none(),
+        "replacement must not inherit the target's grant"
     );
     service
         .authorize_language_server(
@@ -2687,13 +2717,16 @@ fn replacement_language_server_requires_own_fresh_grant() {
             "user",
         )
         .unwrap();
-    service
-        .enable("@vendor/lsp-repl")
-        .expect("replacement enables with its own exact grant");
+    assert!(
+        service
+            .language_server_grant("@vendor/lsp-repl", "ls-repl.server")
+            .is_some(),
+        "own fresh grant lands in the grant store"
+    );
     assert!(!service.inspect("@vendor/lsp-target").unwrap().is_enabled);
     // The target's grant stays keyed to the target only (revocable, exact
     // package + contribution + fingerprint); it was never usable by the
-    // replacement, proven by the failed enable above.
+    // replacement, proven by the empty grant store before the grant above.
     assert_eq!(
         service.revoke_language_server_grants("@vendor/lsp-target"),
         1

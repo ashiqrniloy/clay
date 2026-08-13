@@ -147,6 +147,20 @@ serverRegisterPanelContribution(manifest, {
 - Historical Phase 18.3 boundary: User-visible layout overrides, default-slot overrides, persisted panel visibility, durable workspace/document state mutation, and user theme-token remapping remain planned APIs until they get facade/op/docs/registry/tests.
 - Phase 18.4 update: user-visible layout overrides, package default-slot/default-visibility overrides, input/action defaults, package option records, and user theme-token remap records are now runtime-backed through documented `serverSetLayoutOverride` and `setPackageOption` validators. Durable workspace/document state-value mutation, pane selector APIs, multi-panel ordering, and overlay z-order remain planned until they get facade/op/docs/registry/tests.
 
+## Phase 24.4 internal centered surface boundary
+
+The built-in Command Centre now projects command/path menu sessions through an
+internal `PackageOverlayAnchor::Centered` and a driver-owned window-level
+`PackageOverlayHost`. This is not a package contribution anchor: package
+registration continues to accept only `working-area`, `active-pane`, `main`, and
+`pointer`, and parsing `centered` falls back closed to the normal working-area
+anchor. Packages cannot paint the scrim, request the root layer, drive the
+server-owned menu session, or obtain Path Browser authority.
+
+Centered paint reuses the generic `paint_scrim` and `paint_tooltip_shell`
+primitives with cached typed theme tokens; package overlays remain on the
+existing local host and stacking/anchor behavior is unchanged.
+
 ## Tests
 
 - `src/server/js_runtime.rs::runtime_imports_clay_ui_facade_and_registers_contributions`: imports `clay:ui`, registers panel/component/overlay/token declarations, and verifies registry snapshots preserve accepted records.

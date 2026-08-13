@@ -46,8 +46,11 @@ pub use textobjects::*;
 /// `TabCommand::Reclaim`.
 /// Version 16 (Phase 24.3) adds the generic semantic `MenuBackspace` intent
 /// and the `MenuActivate` activation kind (`Primary`/`Secondary`).
+/// Version 17 (Phase 24.4) adds `TransientMenuOriginData::Centered` so
+/// command/path mode snapshots can select the window-centered Command Centre
+/// surface (client-side layout/presentation only).
 /// Older server processes must not retain the previous wire semantics.
-pub const PROTOCOL_VERSION: u32 = 16;
+pub const PROTOCOL_VERSION: u32 = 17;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;
@@ -228,20 +231,30 @@ fn default_keymaps() -> Vec<KeyBindingRule> {
         KeyBindingRule::single("text.insert_newline", KeyCode::Enter),
         KeyBindingRule::single("text.insert_tab", KeyCode::Tab),
         KeyBindingRule::default_reload_configuration(),
-        // Phase 24.2: the Control Center opens through the same command-intent
-        // lane as any server-intent command; Global scope fires outside editor
-        // text focus, overridable via bindKey/unbindKey like every default.
-        KeyBindingRule::global_server_first(
+        // Phase 24.5: the Command Centre opens on the Emacs-like `Ctrl+X
+        // Ctrl+P` chord (P = palette), routed through the same server-intent
+        // lane as the Phase 24.2 single-stroke default. Global scope fires
+        // outside editor text focus; overridable via bindKey/unbindKey like
+        // every default.
+        KeyBindingRule::global_server_first_sequence(
             "controlCenter.open",
-            ctrl_shift_key(KeyCode::Character("p".to_string())),
+            vec![
+                ctrl_key(KeyCode::Character("x".to_string())),
+                ctrl_key(KeyCode::Character("p".to_string())),
+            ],
         ),
-        // Phase 24.3: Path Mode's temporary default. Fully rebindable/
-        // removable via bindKey/unbindKey like every default; Phase 24.5
-        // replaces the chord with sequence defaults without changing the
-        // command id.
-        KeyBindingRule::global_server_first(
+        // Phase 24.5: Path Mode's default is the Emacs-like `Ctrl+X Ctrl+F`
+        // chord (find-file family: filesystem browsing), divergent from the
+        // Command Centre chord at the second stroke so neither shadows the
+        // other. Same command id, context, and ServerFirst routing as the
+        // Phase 24.3 single-stroke default; fully rebindable/removable via
+        // bindKey/unbindKey like every default.
+        KeyBindingRule::global_server_first_sequence(
             "controlCenter.openPath",
-            ctrl_alt_key(KeyCode::Character("p".to_string())),
+            vec![
+                ctrl_key(KeyCode::Character("x".to_string())),
+                ctrl_key(KeyCode::Character("f".to_string())),
+            ],
         ),
         // Phase 22.1: shell pane-management defaults (all overridable via bindKey
         // in init.js with { scope: "global" }). "vertical" = side by side,
@@ -400,11 +413,12 @@ fn default_commands() -> Vec<CommandDeclaration> {
         },
         // Phase 24.2: the Control Center opens via the command-intent lane
         // (server-owned menu session); declared like any built-in server
-        // intent so the default Global Ctrl+Shift+P binding routes.
+        // intent so the default Global `Ctrl+X Ctrl+P` chord routes.
         CommandDeclaration::server_intent("controlCenter.open", "Open Control Center"),
         // Phase 24.3: Path Mode (dired-style filesystem browsing) opens via
-        // the same command-intent lane; default Global Ctrl+Alt+P binding,
-        // replaceable by Phase 24.5 sequence defaults without an id change.
+        // the same command-intent lane; default Global `Ctrl+X Ctrl+F` chord
+        // (Phase 24.5), same command id as the temporary single-stroke
+        // default.
         CommandDeclaration::server_intent("controlCenter.openPath", "Browse Filesystem"),
         CommandDeclaration::ui_reactive("completion.trigger", "Trigger Completion"),
         // Phase 18.20: discoverable language-intelligence commands with empty
@@ -514,6 +528,21 @@ impl KeyBindingRule {
         Self {
             command_id: command_id.into(),
             sequence: vec![stroke],
+            context: KeyBindingContext::Global,
+            routing_policy: RoutingPolicy::ServerFirst,
+        }
+    }
+
+    /// Phase 24.5: multi-stroke variant of [`Self::global_server_first`]
+    /// (Emacs-style chord defaults). The pending-chord matcher resolves the
+    /// first stroke and dispatches on the completing stroke.
+    pub fn global_server_first_sequence(
+        command_id: impl Into<String>,
+        sequence: Vec<KeyStroke>,
+    ) -> Self {
+        Self {
+            command_id: command_id.into(),
+            sequence,
             context: KeyBindingContext::Global,
             routing_policy: RoutingPolicy::ServerFirst,
         }
@@ -2069,8 +2098,8 @@ mod tests {
             .iter()
             .filter(|rule| rule.command_id == "controlCenter.open")
             .collect();
-        // Exactly one default route (Phase 24.2): Global, ServerFirst,
-        // single-stroke Ctrl+Shift+P.
+        // Exactly one default route (Phase 24.5): Global, ServerFirst,
+        // two-stroke `Ctrl+X Ctrl+P` chord.
         assert_eq!(
             rules.len(),
             1,
@@ -2079,14 +2108,22 @@ mod tests {
         let rule = rules[0];
         assert_eq!(
             rule.sequence,
-            vec![KeyStroke {
-                key: KeyCode::Character("p".to_string()),
-                modifiers: KeyModifiers {
-                    control: true,
-                    shift: true,
-                    ..KeyModifiers::NONE
+            vec![
+                KeyStroke {
+                    key: KeyCode::Character("x".to_string()),
+                    modifiers: KeyModifiers {
+                        control: true,
+                        ..KeyModifiers::NONE
+                    },
                 },
-            }]
+                KeyStroke {
+                    key: KeyCode::Character("p".to_string()),
+                    modifiers: KeyModifiers {
+                        control: true,
+                        ..KeyModifiers::NONE
+                    },
+                },
+            ]
         );
         assert_eq!(rule.context, KeyBindingContext::Global);
         assert_eq!(rule.routing_policy, RoutingPolicy::ServerFirst);
@@ -2099,24 +2136,42 @@ mod tests {
             .iter()
             .filter(|rule| rule.command_id == "controlCenter.openPath")
             .collect();
-        // Exactly one default route (Phase 24.3): Global, ServerFirst,
-        // single-stroke Ctrl+Alt+P; Phase 24.5 replaces it with sequence
-        // defaults without changing the command id.
+        // Exactly one default route (Phase 24.5): Global, ServerFirst,
+        // two-stroke `Ctrl+X Ctrl+F` chord (command id unchanged from Phase
+        // 24.3's temporary single-stroke default).
         assert_eq!(rules.len(), 1, "exactly one default openPath route");
         let rule = rules[0];
         assert_eq!(
             rule.sequence,
-            vec![KeyStroke {
-                key: KeyCode::Character("p".to_string()),
-                modifiers: KeyModifiers {
-                    control: true,
-                    alt: true,
-                    ..KeyModifiers::NONE
+            vec![
+                KeyStroke {
+                    key: KeyCode::Character("x".to_string()),
+                    modifiers: KeyModifiers {
+                        control: true,
+                        ..KeyModifiers::NONE
+                    },
                 },
-            }]
+                KeyStroke {
+                    key: KeyCode::Character("f".to_string()),
+                    modifiers: KeyModifiers {
+                        control: true,
+                        ..KeyModifiers::NONE
+                    },
+                },
+            ]
         );
         assert_eq!(rule.context, KeyBindingContext::Global);
         assert_eq!(rule.routing_policy, RoutingPolicy::ServerFirst);
+    }
+
+    #[test]
+    fn default_keymaps_are_prefix_collision_free() {
+        // Phase 24.5: the full default keymap (including the new chord
+        // defaults) must pass the task-5 prefix-collision validation.
+        crate::behavior::manifest::validate_manifest(&BehaviorManifest::minimal_text_editing(1))
+            .expect("default keymap must be prefix-collision free");
+        crate::behavior::manifest::validate_manifest(&BehaviorManifest::core_code_editing(1))
+            .expect("core.code keymap must be prefix-collision free");
     }
 
     #[test]

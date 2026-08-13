@@ -8,6 +8,16 @@ fn repository_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+fn non_test_body(src: &str) -> &str {
+    if let Some(index) = src.find("\nmod tests") {
+        return &src[..index];
+    }
+    if let Some(index) = src.find("\n#[cfg(test)]") {
+        return &src[..index];
+    }
+    src
+}
+
 /// Parse public third-party facade rows from the single runtime facade table.
 fn parse_third_party_facades() -> BTreeSet<String> {
     let source = fs::read_to_string(repository_root().join("src/server/facades.rs"))
@@ -231,6 +241,7 @@ fn phase20_2_primitives_are_not_exposed_to_javascript() {
         "paint_kbd_hint",
         "paint_icon_slot",
         "paint_tooltip_shell",
+        "paint_scrim",
     ];
     for func in primitive_functions {
         let pub_crate_marker = format!("pub(crate) fn {func}");
@@ -381,6 +392,158 @@ fn phase20_4_introduces_no_unexposed_public_rust_function() {
             );
         }
     }
+}
+
+/// Plan 084 task 9: Phase 24.4 adds no public programmatic surface. The
+/// centered Command Centre is presentation/accessibility work: `paint_scrim`
+/// stays `pub(crate)` (pinned by `phase20_2_primitives_are_not_exposed_to_javascript`),
+/// the centered anchor/geometry helpers stay `pub(crate)`, and the only new
+/// bare `pub` is the `#[doc(hidden)]` `EditorWidget::reconcile_centered_overlay_layer`
+/// bridge the driver bin crate needs to mount/remove its window-level layer.
+/// Nothing from the centered surface may be wrapped by a deno_core op or
+/// appear in a Clay JS facade, and the generated JS API registry must not gain
+/// any Phase 24.4 entry (no `setCommandCenterPosition`, no scrim API).
+#[test]
+fn phase24_5_command_centre_sessions_are_not_a_package_programmatic_surface() {
+    // Phase 24.5 authority review: the built-in browse grant (path-mode
+    // traversal outside workspace roots) is reachable only from the
+    // user-driven built-in path-mode surface. The session-opening helper is
+    // defined in the connection layer and has exactly two call sites — the
+    // client CommandIntent special case for the two builtin ids and menu
+    // activation of the built-in openPath id — both fed by user-driven
+    // client messages. Package JavaScript runs in the op layer, which never
+    // calls the helper; the package executeCommand facade validates and
+    // acknowledges without opening a session; package registerCommand cannot
+    // claim either id (tests/command_execution.rs
+    // control_center_command_ids_are_not_registerable_by_packages).
+    let root = repository_root();
+    let connection =
+        fs::read_to_string(root.join("src/server/connection.rs")).expect("connection readable");
+    assert_eq!(
+        connection.matches("open_command_centre_session(").count(),
+        3,
+        "definition + exactly two call sites (CommandIntent, menu activation)"
+    );
+
+    for file in [
+        "src/server/ops/mod.rs",
+        "src/server/ops/commands.rs",
+        "src/packages/commands.rs",
+        "src/packages/service.rs",
+        "src/packages/modes.rs",
+        "src/server/control_center.rs",
+    ] {
+        let src = fs::read_to_string(root.join(file))
+            .unwrap_or_else(|error| panic!("read {file}: {error}"));
+        let body = non_test_body(&src);
+        for forbidden in [
+            "open_command_centre_session",
+            "PathBrowserSession",
+            "UserBrowseListingPlan",
+            "execute_user_browse_listing",
+        ] {
+            assert!(
+                !body.contains(forbidden),
+                "{file} must not open command centre/browse sessions: {forbidden}"
+            );
+        }
+    }
+    // Session state legitimately flows through the menu-session store, but
+    // opening a browse session must stay in the connection layer.
+    let sessions =
+        fs::read_to_string(root.join("src/server/menu_sessions.rs")).expect("sessions readable");
+    assert!(
+        !non_test_body(&sessions).contains("open_command_centre_session"),
+        "menu_sessions.rs must not open command centre/browse sessions"
+    );
+}
+
+#[test]
+fn phase24_4_centered_surface_is_not_a_public_programmatic_surface() {
+    let root = repository_root();
+
+    // The reconcile bridge joins the established `#[doc(hidden)] pub fn`
+    // widget-method allowlist (the bin crate calls shell widget methods), so
+    // any new bare-pub helper outside the allowlist fails this pin.
+    let editor =
+        fs::read_to_string(root.join("src/masonry_editor.rs")).expect("read src/masonry_editor.rs");
+    assert!(
+        editor.contains("#[doc(hidden)]\n    pub fn reconcile_centered_overlay_layer"),
+        "masonry_editor.rs must keep the doc(hidden) reconcile bridge"
+    );
+    let mut doc_hidden_pub_fns: Vec<String> = std::fs::read_dir(root.join("src"))
+        .expect("read src")
+        .filter_map(|entry| entry.ok())
+        .flat_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("rs") {
+                return Vec::new();
+            }
+            fs::read_to_string(&path)
+                .expect("read source file")
+                .split("#[doc(hidden)]")
+                .skip(1)
+                .filter(|tail| tail.trim_start().starts_with("pub fn"))
+                .map(|_| format!("{}::pub fn", path.display()))
+                .collect()
+        })
+        .collect();
+    doc_hidden_pub_fns.sort();
+    assert_eq!(
+        doc_hidden_pub_fns,
+        vec![
+            format!("{}::pub fn", root.join("src/masonry_editor.rs").display()),
+            format!("{}::pub fn", root.join("src/masonry_shell.rs").display()),
+            format!("{}::pub fn", root.join("src/masonry_shell.rs").display()),
+        ],
+        "doc(hidden) pub fn allowlist: reconcile bridge + shell widget methods only"
+    );
+
+    // No Phase 24.4 implementation name may be wrapped by a deno_core op.
+    for ops in ["src/server/ops/ui.rs", "src/server/ops/theme.rs"] {
+        let ops_source = fs::read_to_string(root.join(ops)).expect("read ops source");
+        for name in [
+            "reconcile_centered_overlay_layer",
+            "paint_scrim",
+            "PackageOverlayAnchor::Centered",
+        ] {
+            assert!(
+                !ops_source.contains(name),
+                "{ops} must not wrap {name} in a deno_core op"
+            );
+        }
+    }
+
+    // No Phase 24.4 implementation name may appear in a Clay JS facade.
+    for entry in fs::read_dir(root.join("runtime/js")).expect("read runtime/js") {
+        let path = entry.expect("runtime/js entry").path();
+        if !matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("js" | "ts")
+        ) {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read facade source");
+        for name in [
+            "reconcile_centered_overlay_layer",
+            "paint_scrim",
+            "setCommandCenterPosition",
+        ] {
+            assert!(
+                !source.contains(name),
+                "{} must not expose {name} to JavaScript",
+                path.display()
+            );
+        }
+    }
+
+    // The generated registry must not gain a Phase 24.4 API entry.
+    let registry = fs::read_to_string(root.join("docs/generated/clay-js-api-registry.json"))
+        .expect("read generated registry");
+    assert!(
+        !registry.contains("setCommandCenterPosition") && !registry.contains("scrim"),
+        "generated registry must not contain a Phase 24.4 API entry"
+    );
 }
 
 /// Plan 077 task 9: Phase 22.6 window-model accessibility additions are not
@@ -598,6 +761,150 @@ fn phase22_8_per_tab_state_has_no_new_public_programmatic_surface() {
         assert!(
             !facades.contains(internal_name),
             "runtime JS must not expose per-tab internal name {internal_name}"
+        );
+    }
+}
+
+/// Plan 085 task 10: Phase 24.5 keybinding internals stay crate-private.
+/// The multi-stroke extension is a chord-string FORMAT change to the existing
+/// bindKey/unbindKey APIs — no new op, facade function, command id, or public
+/// Rust capability. The sequence matcher (route_key_sequence/ChordRouteOutcome),
+/// the pending-chord input-routing state (PendingChord), the sequence parser
+/// (parse_key_sequence/key_sequence_string), and the prefix validator
+/// (is_strict_prefix) are internal router/parser machinery: pub(crate) or
+/// private, absent from runtime/js facades, and never wrapped in a deno_core
+/// op. The generated registry stores API shape only — it contains no default
+/// keybinding metadata, so the chord defaults (controlCenter.open =
+/// Ctrl+X Ctrl+P, controlCenter.openPath = Ctrl+X Ctrl+F) cannot go stale
+/// there; their documentation lives in bind-key.md (updated by task 9) and
+/// the protocol default_keymaps (task 6), pinned by
+/// default_keymaps_are_prefix_collision_free.
+#[test]
+fn phase24_5_keybinding_internals_stay_crate_private() {
+    let root = repository_root();
+
+    // (1) New router/parser internals are pub(crate) or private — never `pub fn`.
+    let cases = [
+        (
+            "src/client/behavior.rs",
+            "pub(crate) fn route_key_sequence(",
+            "route_key_sequence must stay pub(crate): it is the pure sequence matcher, not a public capability",
+        ),
+        (
+            "src/client/behavior.rs",
+            "pub(crate) enum ChordRouteOutcome {",
+            "ChordRouteOutcome must stay pub(crate)",
+        ),
+        (
+            "src/editor/surface.rs",
+            "pub(crate) struct PendingChord {",
+            "PendingChord must stay pub(crate): it is internal input-routing state",
+        ),
+        (
+            "src/server/ops/keybindings.rs",
+            "fn parse_key_sequence(chord: &str) -> Result<Vec<KeyStroke>, JsErrorBox> {",
+            "parse_key_sequence must stay private to the ops module (configuration path only)",
+        ),
+        (
+            "src/server/ops/keybindings.rs",
+            "pub(super) fn key_sequence_string(sequence: &[KeyStroke]) -> String {",
+            "key_sequence_string must stay pub(super)",
+        ),
+        (
+            "src/behavior/manifest.rs",
+            "fn is_strict_prefix(a: &[KeyStroke], b: &[KeyStroke]) -> bool {",
+            "is_strict_prefix must stay private to the manifest validator",
+        ),
+    ];
+    for (file, needle, message) in cases {
+        let src = fs::read_to_string(root.join(file)).expect("read {file}");
+        assert!(
+            non_test_body(&src).contains(needle),
+            "{message} (missing `{needle}` in {file})"
+        );
+    }
+
+    // (2) No new public Rust capability: the parser module exposes no `pub fn`
+    // at all, and no new op is registered.
+    let keybindings_ops = fs::read_to_string(root.join("src/server/ops/keybindings.rs"))
+        .expect("read keybindings ops");
+    assert_eq!(
+        keybindings_ops.matches("pub fn ").count(),
+        0,
+        "keybindings ops module must not add public Rust functions"
+    );
+    let ops_mod = fs::read_to_string(root.join("src/server/ops/mod.rs")).expect("read ops mod");
+    for op in [
+        "op_clay_keybindings_bind_key,",
+        "op_clay_keybindings_bind_keys,",
+        "op_clay_keybindings_unbind_key,",
+        "op_clay_keybindings_unbind_keys,",
+        "op_clay_keybindings_list_key_bindings,",
+    ] {
+        assert_eq!(
+            ops_mod.matches(op).count(),
+            2,
+            "op {op} must be imported and registered exactly once (no new keybinding ops)"
+        );
+    }
+
+    // (3) The runtime/js facade stays the complete public keybinding surface:
+    // exactly the three pre-existing functions, referencing only the five
+    // pre-existing ops, with no internal routing symbols.
+    let facade = fs::read_to_string(root.join("runtime/js/keybindings.js")).expect("read facade");
+    for export in [
+        "export function bindKey(",
+        "export function unbindKey(",
+        "export function listKeyBindings(",
+    ] {
+        assert!(facade.contains(export), "facade must keep {export}");
+    }
+    for internal_name in [
+        "PendingChord",
+        "pending_chord",
+        "route_key_sequence",
+        "parse_key_sequence",
+    ] {
+        assert!(
+            !facade.contains(internal_name),
+            "runtime JS must not expose keybinding internal {internal_name}"
+        );
+    }
+    for op in [
+        "op_clay_keybindings_bind_key",
+        "op_clay_keybindings_bind_keys",
+        "op_clay_keybindings_unbind_key",
+        "op_clay_keybindings_unbind_keys",
+        "op_clay_keybindings_list_key_bindings",
+    ] {
+        assert!(
+            facade.contains(op),
+            "facade must reference the pre-existing op {op}"
+        );
+    }
+    // No new op names leak into the facade beyond the pre-existing five.
+    for line in facade.lines().filter(|l| l.contains("op_clay_keybindings")) {
+        let known = [
+            "op_clay_keybindings_bind_key",
+            "op_clay_keybindings_bind_keys",
+            "op_clay_keybindings_unbind_key",
+            "op_clay_keybindings_unbind_keys",
+            "op_clay_keybindings_list_key_bindings",
+        ];
+        assert!(
+            known.iter().any(|op| line.contains(op)),
+            "facade references unknown keybinding op: {line}"
+        );
+    }
+
+    // (4) The generated registry stores API shape only: it must not carry any
+    // default keybinding metadata that could go stale when defaults change.
+    let registry = fs::read_to_string(root.join("docs/generated/clay-js-api-registry.json"))
+        .expect("read generated registry");
+    for stale in ["Ctrl+Shift+P", "Ctrl+Alt+P", "controlCenter.openPath"] {
+        assert!(
+            !registry.contains(stale),
+            "generated registry must not embed default keybinding metadata ({stale})"
         );
     }
 }

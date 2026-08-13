@@ -3,10 +3,11 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use masonry::accesskit::{Node, NodeId, Role};
+use masonry::app::RenderRoot;
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, MutateCtx, NewWidget,
     PaintCtx, PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, TextEvent, Update,
-    UpdateCtx, Widget, WidgetMut, WidgetPod,
+    UpdateCtx, Widget, WidgetId, WidgetMut, WidgetPod,
 };
 use masonry::kurbo::{Point, Rect, Size};
 use masonry::vello::Scene;
@@ -569,17 +570,83 @@ impl EditorWidget {
             .sync_panels(&mut host.ctx, &package_ui, typography, ui_theme);
     }
 
-    /// Reconcile the retained overlay children (package transient overlays +
-    /// the active menu projected as one) from the current state when it changed
-    /// (plan 070 step 13e). Mirrors `sync_panels`.
+    /// Reconcile the retained editor-local overlay children (package transient
+    /// overlays + non-centered active menus) from the current state when it
+    /// changed (plan 070 step 13e). Centered Command Centre menus are routed
+    /// to the driver-owned window layer instead.
     pub fn sync_overlays(&mut self, ctx: &mut MutateCtx<'_>) {
         if !self.sdui.take_overlays_dirty() {
             return;
         }
-        let (overlays, typography, ui_theme) = self.sdui.overlays_render_input();
+        let (overlays, typography, ui_theme) = self.sdui.local_overlays_render_input();
         let mut host = ctx.get_mut(&mut self.overlay_host);
         host.widget
             .sync_overlays(&mut host.ctx, overlays, typography, ui_theme);
+    }
+
+    /// Snapshot the centered Command Centre overlay and its cached render
+    /// context for the driver-owned window-level Masonry layer.
+    pub(crate) fn centered_overlay_render_input(
+        &self,
+    ) -> (
+        Vec<crate::shell::TransientPackageOverlay>,
+        crate::editor::typography::TypographyRegistry,
+        crate::shell::theme::ResolvedUiTheme,
+    ) {
+        self.sdui.centered_overlays_render_input()
+    }
+
+    /// Reconcile the Clay-owned centered Command Centre layer for the native
+    /// app driver. This is a hidden binary-boundary bridge: protocol/session
+    /// state stays in `EditorWidget`, while the driver retains only the root
+    /// layer id.
+    #[doc(hidden)]
+    pub fn reconcile_centered_overlay_layer(
+        root: &mut RenderRoot,
+        existing_layer_id: Option<WidgetId>,
+        chrome_id: WidgetId,
+    ) -> Option<WidgetId> {
+        let input = root.edit_widget(chrome_id, |mut widget| {
+            widget
+                .try_downcast::<EditorWidget>()
+                .map(|editor| editor.widget.centered_overlay_render_input())
+        });
+        let Some((overlays, typography, ui_theme)) = input else {
+            if let Some(layer_id) = existing_layer_id
+                && root.has_widget(layer_id)
+            {
+                root.remove_layer(layer_id);
+            }
+            return None;
+        };
+        if overlays.is_empty() {
+            if let Some(layer_id) = existing_layer_id
+                && root.has_widget(layer_id)
+            {
+                root.remove_layer(layer_id);
+            }
+            return None;
+        }
+
+        let focus_restore_target = root.focused_widget();
+        let layer_id = match existing_layer_id {
+            Some(layer_id) if root.has_widget(layer_id) => layer_id,
+            Some(_) | None => {
+                let host = NewWidget::new(PackageOverlayHost::new_centered());
+                let layer_id = host.id();
+                root.add_layer(host, Point::ZERO);
+                layer_id
+            }
+        };
+        root.edit_widget(layer_id, |mut widget| {
+            let mut host = widget
+                .try_downcast::<PackageOverlayHost>()
+                .expect("centered layer root is a PackageOverlayHost");
+            host.widget.set_focus_restore_target(focus_restore_target);
+            host.widget
+                .sync_overlays(&mut host.ctx, overlays, typography, ui_theme);
+        });
+        Some(layer_id)
     }
 
     /// Route a reconciled package `textInput` commit (Enter) to its server
@@ -1250,6 +1317,7 @@ mod tests {
     use super::{EditorClientCommand, EditorWidget};
     use crate::client::{ClientConnectionEvent, ClientEditQueue, ClientInitialState};
     use crate::editor::EditorCommand;
+    use crate::masonry_package_region::PackageOverlayHost;
     use crate::protocol::{
         BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, FontRole,
         SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
@@ -1259,6 +1327,303 @@ mod tests {
         FixedPackagePanel, FixedSlotId, FixedSlotState, PackagePanelVisibility,
         PackageUiComponentTree, PackageUiRuntimeUpdate, PaneSlotLayout,
     };
+    use masonry::app::{RenderRoot, RenderRootOptions, WindowSizePolicy};
+    use masonry::core::{
+        NewWidget, PointerButton, PointerButtonEvent, PointerEvent, PointerId, PointerInfo,
+        PointerState, PointerType, WidgetId,
+    };
+    use masonry::dpi::{PhysicalPosition, PhysicalSize};
+    use masonry::theme::default_property_set;
+
+    fn render_root_options() -> RenderRootOptions {
+        RenderRootOptions {
+            default_properties: default_property_set().into(),
+            use_system_fonts: false,
+            size_policy: WindowSizePolicy::User,
+            size: PhysicalSize::new(900, 600),
+            scale_factor: 1.0,
+            test_font: None,
+        }
+    }
+
+    fn centered_menu() -> crate::shell::TransientMenuSession {
+        use crate::shell::transient_menu::{
+            TransientMenuAction, TransientMenuItem, TransientMenuOrigin, TransientMenuSessionId,
+        };
+
+        crate::shell::TransientMenuSession::new(TransientMenuSessionId(91), "Control Center")
+            .with_origin(TransientMenuOrigin::Centered)
+            .with_items(vec![
+                TransientMenuItem::new("alpha", "Alpha", TransientMenuAction::new("app.alpha")),
+                TransientMenuItem::new("beta", "Beta", TransientMenuAction::new("app.beta")),
+            ])
+    }
+
+    #[test]
+    fn centered_layer_reconciles_in_place_and_removes_idempotently() {
+        let root_widget = NewWidget::new(EditorWidget::default());
+        let chrome_id = root_widget.id();
+        let mut rr = RenderRoot::new(root_widget, |_| {}, render_root_options());
+        rr.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+        assert!(rr.focus_on(Some(chrome_id)));
+        rr.edit_widget(chrome_id, |mut widget| {
+            let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            editor.widget.set_active_menu(Some(centered_menu()));
+            editor.widget.sync_overlays(&mut editor.ctx);
+        });
+        let local_host_id = rr.edit_widget(chrome_id, |mut widget| {
+            let editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            editor.widget.overlay_host.id()
+        });
+        let local_host = rr
+            .get_widget(local_host_id)
+            .expect("local overlay host")
+            .downcast::<PackageOverlayHost>()
+            .expect("package overlay host");
+        assert!(
+            local_host.children().is_empty(),
+            "centered menu is filtered out of pane-local host"
+        );
+
+        let layer_id = EditorWidget::reconcile_centered_overlay_layer(&mut rr, None, chrome_id)
+            .expect("centered menu creates one root layer");
+        let (scene, tree_update) = rr.redraw();
+        assert!(rr.has_widget(layer_id));
+        assert_eq!(rr.focused_widget(), Some(chrome_id));
+        assert!(!scene.encoding().is_empty());
+        let update = tree_update.expect("access tree active");
+        let dialog = update
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == masonry::accesskit::Role::Dialog
+                    && node.is_modal()
+                    && node.label() == Some("Control Center")
+            })
+            .expect("centered host is a named modal dialog");
+        let menu = update
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == masonry::accesskit::Role::Menu
+                    && node.label() == Some("Control Center")
+            })
+            .expect("dialog contains a menu");
+        let status = update
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == masonry::accesskit::Role::Status
+                    && node.live() == Some(masonry::accesskit::Live::Polite)
+                    && node.label() == Some("2 results")
+            })
+            .expect("centered menu announces its result count");
+        let menu_id = menu.0;
+        let status_id = status.0;
+        assert!(dialog.1.children().contains(&menu_id));
+        assert!(menu.1.children().contains(&status_id));
+        assert_eq!(
+            update
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.live() == Some(masonry::accesskit::Live::Polite))
+                .count(),
+            1,
+            "centered menu exposes one live result-count node"
+        );
+
+        // Scrim clicks are swallowed by the centered root layer; focus stays on
+        // the originating pane and the editor receives no pointer mutation.
+        let info = PointerInfo {
+            pointer_id: Some(PointerId::PRIMARY),
+            persistent_device_id: None,
+            pointer_type: PointerType::Mouse,
+        };
+        let state = PointerState {
+            position: PhysicalPosition::new(10.0, 10.0),
+            ..Default::default()
+        };
+        rr.handle_pointer_event(PointerEvent::Down(PointerButtonEvent {
+            pointer: info,
+            button: Some(PointerButton::Primary),
+            state: state.clone(),
+        }));
+        rr.handle_pointer_event(PointerEvent::Up(PointerButtonEvent {
+            pointer: info,
+            button: Some(PointerButton::Primary),
+            state,
+        }));
+        assert_eq!(rr.focused_widget(), Some(chrome_id));
+
+        // Selection-only snapshot keeps status-node identity and label.
+        let selected = centered_menu().with_selected_index(1);
+        rr.edit_widget(chrome_id, |mut widget| {
+            let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            editor.widget.set_active_menu(Some(selected));
+            editor.widget.sync_overlays(&mut editor.ctx);
+        });
+        EditorWidget::reconcile_centered_overlay_layer(&mut rr, Some(layer_id), chrome_id);
+        let (_, update) = rr.redraw();
+        let update = update.expect("access tree after selection update");
+        let selected_status = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("2 results"))
+            .expect("same count remains announced");
+        assert_eq!(
+            selected_status.0, status_id,
+            "status node id remains stable"
+        );
+
+        // Query result-count change updates same status node and grammar.
+        let one = crate::shell::TransientMenuSession::new(
+            crate::shell::TransientMenuSessionId(91),
+            "Control Center",
+        )
+        .with_origin(crate::shell::transient_menu::TransientMenuOrigin::Centered)
+        .with_items(vec![crate::shell::TransientMenuItem::new(
+            "alpha",
+            "Alpha",
+            crate::shell::TransientMenuAction::new("app.alpha"),
+        )]);
+        rr.edit_widget(chrome_id, |mut widget| {
+            let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            editor.widget.set_active_menu(Some(one));
+            editor.widget.sync_overlays(&mut editor.ctx);
+        });
+        EditorWidget::reconcile_centered_overlay_layer(&mut rr, Some(layer_id), chrome_id);
+        let (_, update) = rr.redraw();
+        let update = update.expect("access tree after count update");
+        let one_status = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("1 result"))
+            .expect("singular count grammar");
+        assert_eq!(one_status.0, status_id, "count update reuses status node");
+
+        let same_layer =
+            EditorWidget::reconcile_centered_overlay_layer(&mut rr, Some(layer_id), chrome_id)
+                .expect("query/selection reconcile keeps layer");
+        assert_eq!(same_layer, layer_id, "snapshots reuse root layer identity");
+
+        rr.edit_widget(chrome_id, |mut widget| {
+            let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            editor.widget.set_active_menu(None);
+            editor.widget.sync_overlays(&mut editor.ctx);
+        });
+        assert_eq!(
+            EditorWidget::reconcile_centered_overlay_layer(&mut rr, Some(layer_id), chrome_id),
+            None,
+            "close removes root layer"
+        );
+        assert!(!rr.has_widget(layer_id));
+        assert_eq!(
+            EditorWidget::reconcile_centered_overlay_layer(&mut rr, None, chrome_id),
+            None,
+            "repeated close is a no-op"
+        );
+    }
+
+    #[test]
+    fn centered_layer_theme_switch_keeps_layer_and_updates_surface_geometry() {
+        use crate::protocol::{UiDesignTokenOverride, WireDesignTokenValue};
+        use crate::shell::theme::ResolvedUiTheme;
+
+        let root_widget = NewWidget::new(EditorWidget::default());
+        let chrome_id = root_widget.id();
+        let mut rr = RenderRoot::new(root_widget, |_| {}, render_root_options());
+        rr.edit_widget(chrome_id, |mut widget| {
+            let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            editor.widget.set_active_menu(Some(centered_menu()));
+            editor.widget.sync_overlays(&mut editor.ctx);
+        });
+        let layer_id = EditorWidget::reconcile_centered_overlay_layer(&mut rr, None, chrome_id)
+            .expect("centered menu creates one root layer");
+        let region_id = rr
+            .get_widget(layer_id)
+            .expect("centered host present")
+            .children()[0]
+            .id();
+        let surface_width = |rr: &RenderRoot| {
+            rr.get_widget(region_id)
+                .expect("centered region present")
+                .ctx()
+                .size()
+                .width
+        };
+        assert!(
+            (surface_width(&rr) - 640.0).abs() < 1.0,
+            "default centered width applies"
+        );
+
+        // Theme switch while open: width and scrim tokens update in place
+        // without recreating the window-level layer or the retained menu pod.
+        let overrides = vec![
+            UiDesignTokenOverride {
+                token: "dimension.overlay.centered.width".to_string(),
+                value: WireDesignTokenValue::Scalar(480.0),
+                provenance: "test".to_string(),
+            },
+            UiDesignTokenOverride {
+                token: "surface.scrim".to_string(),
+                value: WireDesignTokenValue::Color([0x11, 0x22, 0x33, 0xff]),
+                provenance: "test".to_string(),
+            },
+        ];
+        let theme = ResolvedUiTheme::from_active_theme(&overrides).expect("valid overrides");
+        rr.edit_widget(chrome_id, |mut widget| {
+            let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            editor.widget.sdui.set_ui_theme(theme);
+            editor.widget.sync_overlays(&mut editor.ctx);
+        });
+        let same_layer =
+            EditorWidget::reconcile_centered_overlay_layer(&mut rr, Some(layer_id), chrome_id)
+                .expect("theme switch keeps the layer");
+        assert_eq!(same_layer, layer_id, "theme switch reuses the root layer");
+        assert!(
+            rr.has_widget(region_id),
+            "menu pod retained across the theme switch"
+        );
+        assert!(
+            (surface_width(&rr) - 480.0).abs() < 1.0,
+            "width token override applies without layer recreation"
+        );
+    }
+
+    #[test]
+    fn centered_layer_repeated_open_close_cycles_leave_no_orphan_layers() {
+        let root_widget = NewWidget::new(EditorWidget::default());
+        let chrome_id = root_widget.id();
+        let mut rr = RenderRoot::new(root_widget, |_| {}, render_root_options());
+        let mut layer_id: Option<WidgetId> = None;
+        for cycle in 0..3 {
+            rr.edit_widget(chrome_id, |mut widget| {
+                let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+                editor.widget.set_active_menu(Some(centered_menu()));
+                editor.widget.sync_overlays(&mut editor.ctx);
+            });
+            let id = EditorWidget::reconcile_centered_overlay_layer(&mut rr, layer_id, chrome_id)
+                .unwrap_or_else(|| panic!("cycle {cycle}: open creates a layer"));
+            assert!(rr.has_widget(id), "cycle {cycle}: layer is mounted");
+
+            rr.edit_widget(chrome_id, |mut widget| {
+                let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+                editor.widget.set_active_menu(None);
+                editor.widget.sync_overlays(&mut editor.ctx);
+            });
+            assert_eq!(
+                EditorWidget::reconcile_centered_overlay_layer(&mut rr, Some(id), chrome_id),
+                None,
+                "cycle {cycle}: close removes the layer"
+            );
+            assert!(
+                !rr.has_widget(id),
+                "cycle {cycle}: no orphan root layer after close"
+            );
+            layer_id = None;
+        }
+        assert!(layer_id.is_none());
+    }
 
     fn sdui_tree(label_text: &str) -> SduiTree {
         SduiTree {

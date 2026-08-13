@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::protocol::{CommandAuthority, RoutingPolicy};
 
-use super::{ClayOpState, keybindings::key_chord_string};
+use super::{ClayOpState, keybindings::key_sequence_string};
 
 #[op2]
 #[string]
@@ -38,7 +38,7 @@ pub(super) fn op_clay_behavior_list_routes(
         .iter()
         .map(|rule| {
             json!({
-                "input": key_chord_string(&rule.sequence[0]),
+                "input": key_sequence_string(&rule.sequence),
                 "runtimePath": runtime_path(&rule.routing_policy),
                 // Core Clay commands use bare `<domain>.<name>` IDs; package
                 // commands use the package prefix and carry no core apiId.

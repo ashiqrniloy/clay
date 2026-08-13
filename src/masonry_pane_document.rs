@@ -52,6 +52,7 @@ use crate::protocol::{
     KeyCode, KeyModifiers, KeyStroke, LanguageIntelligenceRequestId, LanguageIntelligenceResult,
     ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent, WorkspaceRootId,
 };
+use crate::shell::transient_menu::TransientMenuFocusPolicy;
 use crate::shell::{
     PaneId, TransientMenuAction, TransientMenuSession, TransientMenuSessionId,
     completion_result_to_menu_session, language_intelligence_result_to_menu_session,
@@ -2066,6 +2067,12 @@ impl PaneDocumentView {
             return;
         }
         let outcome = self.editor.route_key_with_event(&key);
+        if outcome.consumed {
+            // Phase 24.5: a pending chord stroke — consume it so it neither
+            // inserts text nor bubbles to shell-level key handling.
+            ctx.set_handled();
+            return;
+        }
         let changed = outcome.command_outcome.changed;
         self.finish_local_outcome(ctx, outcome.command_outcome);
         if let Some(completion) = outcome.completion_request {
@@ -2129,14 +2136,22 @@ impl PaneDocumentView {
     /// if the key was consumed by the menu, keeping editor hot paths free of
     /// command execution or IPC work.
     fn route_menu_key(&mut self, ctx: &mut EventCtx<'_>, key: &KeyStroke) -> bool {
-        let Some(menu) = self.menu_sync.menu.as_ref() else {
+        let Some((session_id, modal)) = self.menu_sync.menu.as_ref().map(|menu| {
+            (
+                menu.session_id().0,
+                menu.focus_policy() == TransientMenuFocusPolicy::Modal,
+            )
+        }) else {
             return false;
         };
         if self.menu_sync.server_owned {
             // Phase 24.1: server-owned sessions never mutate locally; every
             // key is a menu intent, and visuals update only from snapshots.
-            let session_id = menu.session_id().0;
-            if self.dispatch_server_menu_key(key, session_id) {
+            // Modal server-owned menus own the complete key stream. This
+            // prevents unknown keys and queue-pressure failures from falling
+            // through into editor text/keybinding handlers.
+            let dispatched = self.dispatch_server_menu_key(key, session_id);
+            if dispatched || modal {
                 ctx.set_handled();
                 return true;
             }
@@ -2191,6 +2206,12 @@ impl PaneDocumentView {
         let Some(edit_queue) = &self.edit_queue else {
             return false;
         };
+        // Control/Meta chords belong to the editor/keybinding layer, but a
+        // centered modal still consumes them after this dispatcher returns.
+        // They must not become query characters.
+        if key.modifiers.control || key.modifiers.super_key {
+            return false;
+        }
         // Phase 24.3: Alt+Enter is the generic secondary activation (path
         // mode: open the selected directory as the tab's workspace). It is
         // captured here so it never falls through to the editor while a
@@ -2758,6 +2779,52 @@ impl PaneDocumentView {
         event: &TextEvent,
     ) {
         use masonry::core::keyboard::{Key, KeyState, NamedKey};
+        let modal_server_menu = self.menu_sync.server_owned
+            && self
+                .menu_sync
+                .menu
+                .as_ref()
+                .is_some_and(|menu| menu.focus_policy() == TransientMenuFocusPolicy::Modal);
+        if modal_server_menu {
+            match event {
+                TextEvent::Keyboard(key_event) => {
+                    // A centered server-owned session is modal even when Masonry
+                    // focus remains on this pane. Route supported menu keys;
+                    // consume every other key/up event so it cannot reach editor
+                    // text/keybinding handlers.
+                    let stroke = (key_event.state == KeyState::Down && !key_event.is_composing)
+                        .then(|| match &key_event.key {
+                            Key::Character(text) => {
+                                key_stroke(KeyCode::Character(text.clone()), key_event)
+                            }
+                            Key::Named(NamedKey::Enter) => key_stroke(KeyCode::Enter, key_event),
+                            Key::Named(NamedKey::Tab) => key_stroke(KeyCode::Tab, key_event),
+                            Key::Named(NamedKey::Backspace) => {
+                                key_stroke(KeyCode::Backspace, key_event)
+                            }
+                            Key::Named(NamedKey::Escape) => key_stroke(KeyCode::Escape, key_event),
+                            Key::Named(NamedKey::ArrowUp) => {
+                                key_stroke(KeyCode::ArrowUp, key_event)
+                            }
+                            Key::Named(NamedKey::ArrowDown) => {
+                                key_stroke(KeyCode::ArrowDown, key_event)
+                            }
+                            _ => key_stroke(KeyCode::Delete, key_event),
+                        });
+                    if let Some(stroke) = stroke {
+                        self.local_key(ctx, stroke);
+                    } else {
+                        ctx.set_handled();
+                    }
+                    return;
+                }
+                TextEvent::ClipboardPaste(_) | TextEvent::Ime(_) => {
+                    ctx.set_handled();
+                    return;
+                }
+                _ => {}
+            }
+        }
         match event {
             TextEvent::Keyboard(key_event)
                 if key_event.state == KeyState::Down && !key_event.is_composing =>
@@ -2876,6 +2943,23 @@ impl PaneDocumentView {
                             EditorCommand::LineEnd
                         };
                         self.local_command(ctx, command);
+                    }
+                    // Phase 24.5: the behavior manifest owns key routing (no
+                    // hard-coded key in widgets). Give manifest-claimed strokes —
+                    // a bound chord prefix or exact match (e.g. `Ctrl+X Ctrl+P`
+                    // / `Ctrl+X Ctrl+F`) — precedence over the hard-coded
+                    // platform shortcuts below so the first stroke of a
+                    // multi-stroke chord is not swallowed (Ctrl+X would
+                    // otherwise cut and the Command Centre chord would never
+                    // start). Unclaimed keys fall through to those shortcuts
+                    // unchanged.
+                    Key::Character(_)
+                        if character_key_stroke(key_event)
+                            .is_some_and(|stroke| self.editor.manifest_claims_chord(&stroke)) =>
+                    {
+                        if let Some(stroke) = character_key_stroke(key_event) {
+                            self.local_key(ctx, stroke);
+                        }
                     }
                     Key::Character(_) if is_select_all_matches_shortcut(key_event) => {
                         if self.editor.command(EditorCommand::SelectAllMatches) {
@@ -4498,6 +4582,35 @@ mod tests {
     }
 
     #[test]
+    fn server_menu_modal_dispatch_consumes_queue_failure_and_modifier_keys() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        queue
+            .enqueue_menu_cancel(99)
+            .expect("fill the bounded queue");
+        let mut view = server_menu_view(queue);
+        let mut key = masonry::core::keyboard::KeyboardEvent {
+            state: masonry::core::keyboard::KeyState::Down,
+            ..Default::default()
+        };
+        key.modifiers
+            .insert(masonry::core::keyboard::Modifiers::CONTROL);
+        assert!(
+            !view.dispatch_server_menu_key(
+                &key_stroke(KeyCode::Character("x".to_string()), &key),
+                1 << 63 | 3,
+            ),
+            "queue failure remains visible to the modal caller"
+        );
+        assert_eq!(
+            view.visible_text_for_test(),
+            "",
+            "test view stays untouched"
+        );
+        let _ = receiver.try_recv();
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
     fn server_menu_alt_enter_sends_secondary_activation_only() {
         let (queue, mut receiver) = ClientEditQueue::bounded(8);
         let mut view = server_menu_view(queue);
@@ -4587,6 +4700,17 @@ mod tests {
         assert!(
             menu.activate_selected().is_some(),
             "action stays inert-but-present"
+        );
+    }
+
+    #[test]
+    fn server_menu_snapshot_hydrates_centered_origin() {
+        let mut snapshot = snapshot_data(1 << 63 | 10, "", 0, &["alpha"]);
+        snapshot.origin = crate::protocol::TransientMenuOriginData::Centered;
+        let menu = TransientMenuSession::from_snapshot_data(&snapshot);
+        assert_eq!(
+            menu.origin(),
+            crate::shell::transient_menu::TransientMenuOrigin::Centered
         );
     }
 

@@ -11,7 +11,7 @@ The `clay-ui` skill references are the authoritative catalog. This page links th
 
 ## Reference Documents
 
-- [UI Chrome Primitives](primitives/ui-chrome-primitives.md) — Phase 20.2 native chrome primitive layer (`src/shell/primitives.rs`): divider, focus ring, panel chrome, scroll chrome, badge, kbd hint, icon slot, tooltip shell; token mapping, interaction states, accessibility roles, and the conformance contract.
+- [UI Chrome Primitives](primitives/ui-chrome-primitives.md) — Phase 20.2 native chrome primitive layer (`src/shell/primitives.rs`): divider, focus ring, panel chrome, scroll chrome, badge, kbd hint, icon slot, tooltip shell, and the Phase 24.4 token-driven scrim; token mapping, interaction states, accessibility roles, and the conformance contract.
 - [Clay Shell and Package UI/Layout Strategy](primitives/shell-layout-strategy.md) — shell vocabulary, working area, pane/split tree, fixed/transient slots, package UI/state/style contract, and the Masonry implementation boundary.
 - [Creating Clay Packages](packages/creating-packages.md) — package authoring guide. The Components section and the UI and Layout Model section define the package-facing authoring contract; the Styling and Themes section and the Phase 20.1/20.4/20.7 authoring contracts define token/theme usage. Implemented-vs-planned markers in the guide match the component catalog exactly.
 
@@ -39,4 +39,4 @@ Agents and plan documents that touch app UI must follow the create-plan UI requi
 1. Reuse cataloged components, primitives, style variables, and tokens first; a custom component outside the catalog requires explicit justification.
 2. New components, primitives, tokens, and style variables are additive-only and token-driven (no raw colors, CSS, concrete font families, or point sizes).
 3. Every new component ships state-complete (all applicable `InteractionState` variants styled from tokens) and accessible.
-4. Update the component catalog, the token catalog, `docs/reference/packages/creating-packages.md`, and the documentation-drift tests in the same change. Documentation drift fails `cargo test`.
+4. Update the component catalog, the token catalog, `docs/reference/packages/creating-packages.md`, and the documentation-drift tests in the same change. Clay-internal surfaces such as the Phase 24.4 centered root layer and scrim stay out of package-facing anchor enums. Documentation drift fails `cargo test`.

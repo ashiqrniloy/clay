@@ -472,6 +472,12 @@ impl PackageApprovalStore {
             serde_json::to_vec_pretty(&document).map_err(|error| ApprovalStoreError::Corrupt {
                 reason: format!("store serialization failed: {error}"),
             })?;
+        // The store can be written before its parent directory exists (first
+        // approval in a fresh config root); create it so the atomic write
+        // cannot fail with ENOENT and mask the caller's original error.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(ApprovalStoreError::Io)?;
+        }
         atomic_write_owner_only(path, &bytes)
     }
 

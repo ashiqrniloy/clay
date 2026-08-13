@@ -154,12 +154,20 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 // listKeyBindings(scope?)                        — inspect bindings ("all" default).
 //
 // Key format: single stroke "Modifier+Key" (Ctrl/Shift/Alt + a key name,
-// e.g. "Ctrl+O", "Shift+Alt+Down"). Multi-stroke chords ("g g") are NOT
-// Supported yet. Bindings validate deny-by-default; unknown or non-editor
-// command IDs are rejected. Last binding for a chord wins (within a table,
-// duplicate chords collapse to the last value). Table-form calls validate
-// every entry before applying any: one bad entry rejects the whole table
-// and names its 1-based index, so nothing binds halfway.
+// e.g. "Ctrl+O", "Shift+Alt+Down") OR a space-separated multi-stroke chord
+// (e.g. "Ctrl+X Ctrl+P", "g g"). Single-stroke is the fast path; a
+// multi-stroke chord holds a pending chord until the sequence completes,
+// times out, or mismatches — on mismatch the key re-evaluates fresh, so a
+// half-typed chord never eats typing. Example (commented; the shipped
+// defaults are re-declared in the batch tables below):
+//   // bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" });
+// Bindings validate deny-by-default; unknown or non-editor command IDs are
+// rejected, and a chord that is a strict prefix of another binding in the
+// same scope is rejected as ambiguous at bind time. Last binding for a chord
+// wins (within a table, duplicate chords collapse to the last value).
+// Table-form calls validate every entry before applying any: one bad entry
+// rejects the whole table and names its 1-based index, so nothing binds
+// halfway.
 //
 // Bindable editor command IDs (Plan 071 surface):
 //   Movement:      editor.clientMoveCursor.nextWordStart
@@ -251,24 +259,24 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 // }});
 
 // Control Center (Phase 24.2): built-in server-first command
-// controlCenter.open ships with the default Ctrl+Shift+P chord (Global
+// controlCenter.open ships with the default Ctrl+X Ctrl+P chord (Global
 // scope) in the default behavior manifest, re-declared in the batch table
 // below as an idempotent no-op override. The Control Center is a transient
 // menu session: listing grants no authority, and it cannot be styled,
 // positioned, filtered, or dismissed from init.js. Multi-stroke chord
-// sequences (e.g. Emacs-style "Ctrl+X Ctrl+C") are not runtime-backed yet —
-// Phase 24.5 owns sequence key routing; single-stroke chords only for now.
+// sequences are supported (Phase 24.5): space-separated strokes, e.g.
+// "Ctrl+X Ctrl+P", "g g".
 
 // Path Browser (Phase 24.3): built-in server-first command
-// controlCenter.openPath ships with the temporary default Ctrl+Alt+P chord
-// (Global scope), re-declared in the batch table below as an idempotent
-// no-op override. It opens a dired-style browse session seeded from the
-// active document's directory; Enter descends/opens, Alt+Enter opens a
-// directory as this tab's workspace, Backspace on an empty filter ascends.
-// Browse navigation alone grants nothing — opening a file or workspace is
-// the explicit grant — and packages get no arbitrary-path access. The
-// Ctrl+Alt+P default is temporary: Phase 24.5 replaces it with sequence
-// defaults without changing the command id.
+// controlCenter.openPath ships with the Phase 24.5 sequence default
+// Ctrl+X Ctrl+F chord (Global scope), re-declared in the batch table below
+// as an idempotent no-op override. It opens a dired-style browse session
+// seeded from the active document's directory; Enter descends/opens,
+// Alt+Enter opens a directory as this tab's workspace, Backspace on an
+// empty filter ascends. Browse navigation alone grants nothing — opening a
+// file or workspace is the explicit grant — and packages get no
+// arbitrary-path access. The command id is stable across the Phase 24.5
+// sequence-default handoff (previously the temporary Ctrl+Alt+P chord).
 
 // Default keybindings — implemented below so this file, taken as-is, installs
 // every shipped default chord (they are already active without init.js;
@@ -309,12 +317,11 @@ bindKey({
     // Built-in server-first Control Center (Phase 24.2); this re-declaration
     // is idempotent. Global scope, ServerFirst routing; override/remove via
     // bindKey/unbindKey (see the commented example below).
-    "Ctrl+Shift+P": "controlCenter.open",
+    "Ctrl+X Ctrl+P": "controlCenter.open",
     // Built-in server-first Path Browser (Phase 24.3); this re-declaration
-    // is idempotent. Temporary default — Phase 24.5 ships sequence defaults
-    // without changing the command id; override/remove via bindKey/unbindKey
-    // (see the commented example below).
-    "Ctrl+Alt+P": "controlCenter.openPath",
+    // is idempotent. Phase 24.5 sequence default; override/remove via
+    // bindKey/unbindKey (see the commented example below).
+    "Ctrl+X Ctrl+F": "controlCenter.openPath",
   },
 });
 
@@ -355,7 +362,8 @@ bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 bindKey("Ctrl+B", "workspace.toggleFileBrowser", { scope: "editor" });
 
 // Text objects + smart select ship with NO default bindings by design —
-// bound here as single-form examples (single strokes only):
+// bound here as single-form examples (single strokes and multi-stroke
+// chords both work):
 bindKey("Alt+I", "editor.clientSelectTextobject.function.inner.current", { scope: "editor" });
 bindKey("Alt+O", "editor.clientSelectTextobject.function.around.current", { scope: "editor" });
 bindKey("Alt+A", "editor.clientSelectTextobject.argument.inner.current", { scope: "editor" });
@@ -373,15 +381,16 @@ bindKey("Alt+R", "editor.clientSmartSelect.shrink", { scope: "editor" });
 // bindKey("Ctrl+Shift+=", "shell.clientAddEqualPane", { scope: "global" });
 
 // Rebinding the Control Center default (Phase 24.2): unbind the shipped
-// Ctrl+Shift+P, then bind another global chord. Without the unbind the
-// default remains bound; last binding for a chord wins:
-// unbindKey("Ctrl+Shift+P", { scope: "global" });
+// Ctrl+X Ctrl+P chord, then bind another global chord (single-stroke or
+// multi-stroke). Without the unbind the default remains bound; last binding
+// for a chord wins:
+// unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
 // bindKey("Alt+X", "controlCenter.open", { scope: "global" });
 
 // Rebinding the Path Browser default (Phase 24.3): unbind the shipped
-// Ctrl+Alt+P, then bind another global chord (command id stays stable across
-// the Phase 24.5 sequence-default handoff):
-// unbindKey("Ctrl+Alt+P", { scope: "global" });
+// Ctrl+X Ctrl+F chord, then bind another global chord (command id stays
+// stable across the Phase 24.5 sequence-default handoff):
+// unbindKey("Ctrl+X Ctrl+F", { scope: "global" });
 // bindKey("Alt+P", "controlCenter.openPath", { scope: "global" });
 
 // ----------------------------------------------------------------------------

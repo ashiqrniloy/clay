@@ -4,7 +4,7 @@ Phase 18.8 Task 7: built-in command-palette workflow. Phase 24.1: first
 server-owned session kind on the transient-menu round trip. Phase 24.2:
 command execution mode — generation-stamped live catalogue, shared fuzzy
 matching, typed activation with the client shell bridge, and a default
-`Ctrl+Shift+P` binding.
+`Ctrl+X Ctrl+P` sequence binding (Phase 24.5; pre-24.5 `Ctrl+Shift+P`).
 
 ## What it is
 
@@ -63,16 +63,18 @@ Round Trip](transient-menu-round-trip.md):
 ## Phase 24.2: Command execution mode
 
 - **Default binding**. `controlCenter.open` ships as a built-in server-intent
-  command in the default behavior manifest with a single-stroke `Ctrl+Shift+P`
-  rule (`KeyBindingRule::global_server_first`: `Global` context, `ServerFirst`
-  routing), shared by `minimal_text_editing` and `core_code_editing`. It is
+  command in the default behavior manifest with a two-stroke `Ctrl+X Ctrl+P`
+  sequence rule (Phase 24.5; `KeyBindingRule::global_server_first_sequence`:
+  `Global` context, `ServerFirst` routing), shared by
+  `minimal_text_editing` and `core_code_editing`. It is
   in the `is_runtime_bindable_command` allowlist, so `bindKey`/`unbindKey`
   configuration overlays can rebind or remove it; the chord survives mode
   activation because every published mode manifest starts from the shared
   default commands/keymaps. Phase 24.3 adds the sibling
   `controlCenter.openPath` with a temporary Global `Ctrl+Alt+P` default in
-  the same allowlist, replaced by sequence defaults in Phase 24.5 without
-  changing the id — see [Path Browser](path-browser.md).
+  the same allowlist, replaced by the `Ctrl+X Ctrl+F` sequence default in
+  Phase 24.5 without changing the id — see [Path Browser](path-browser.md)
+  and [Sequence Keybindings](sequence-keybindings.md).
 - **Live catalogue**. The menu reflects the runtime's current command
   registry: built-ins, the full `shell.client*` surface, and every
   validated package command from both trust domains — loaded packages

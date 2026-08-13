@@ -1,6 +1,6 @@
 ---
 name: clay-ui
-description: Clay app UI conventions, reusable primitives, component catalog, theme tokens, typography hierarchy, and shell layout model. Use for ANY Clay UI work — revamping or adding components, panels, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, dialogs, tooltips, split layouts, theme/token/typography changes, or package UI contributions. Enforces primitives-first: agents must reuse the documented component catalog before creating anything custom, and must route through `npx ui-skills start` before UI design or implementation.
+description: Clay app UI conventions, reusable primitives, component catalog, theme tokens, typography hierarchy, and shell layout model. Use for ANY Clay UI work — revamping or adding components, panels, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, dialogs, tooltips, split layouts, theme/token/typography changes, or package UI contributions. Enforces primitives-first and visual proof: agents must reuse the documented component catalog, route through `npx ui-skills start`, then inspect screenshots and accessibility state of implemented UI before calling UI work complete.
 ---
 
 # Clay UI
@@ -16,6 +16,12 @@ npx ui-skills start
 ```
 
 Then inspect the relevant category (`npx ui-skills list --category <category>`) and load the smallest useful skill set (`npx ui-skills get <slug>`; prefer 1, max 3). Apply the loaded guidance to Clay's native context — Clay has no CSS/Tailwind; translate web guidance into Clay theme tokens, typography variants, and Masonry primitives.
+
+## Step 1 (mandatory): Inspect implemented UI
+
+After every UI change, launch representative UI states and take screenshots. Inspect default and every changed interaction state; include empty, error/recovery, and narrow/wide layout states when applicable. Record screenshot paths and findings with completion evidence.
+
+When `computer-use-linux` is available, call `get_app_state` first, then inspect the accessibility tree and test keyboard focus/order, names, roles, states, modal containment, and live announcements for changed controls. Re-check state after interaction. If GUI launch, screenshot capture, or computer use is blocked, record the exact blocker and leave visual/a11y acceptance unresolved; structural tests do not substitute for visual evidence.
 
 ## Golden Rules
 

@@ -1,4 +1,4 @@
-# Accessibility (Phase 22.6)
+# Accessibility (Phase 22.6 and 24.4)
 
 Phase 22.6 (plan 077 tasks 3–4) establishes the accessibility contract for
 the Clay window model: accessibility roles and names for the tab bar, tab
@@ -30,6 +30,29 @@ through the Phase 22.4 tab commands (`TabNext`/`TabPrev`/`TabActivate`),
 not per-card widget focus. Focus traversal therefore matches the keyboard
 model: TabList nodes precede the active pane hosts, and no new focus
 targets were introduced.
+
+## Centered Command Centre dialog (Phase 24.4)
+
+Command and path sessions with `TransientMenuOrigin::Centered` are exposed
+through the retained window-level overlay layer as one modal `Dialog`, named
+from the bounded/sanitized menu prompt. Its child menu reports `MenuItem`
+children with selected state, plus one stable `Status` child with
+`Live::Polite`. That status uses exact count grammar: `0 results`, `1 result`,
+or `{n} results`.
+
+The dialog does not move Masonry focus away from the originating pane. The
+server-owned pane route remains the keyboard entry point, and every key,
+clipboard paste, or IME event is consumed while the modal is active; supported
+keys enqueue the existing bounded menu intents. Scrim pointer-down events are
+swallowed and restore/retain originating-pane focus, so they cannot mutate the
+editor. Closing removes the root layer and leaves focus on the originating
+pane.
+
+Menu and item/status virtual node IDs are derived from the retained region ID,
+so query snapshots and selection-only snapshots reuse identity. Selection-only
+updates with unchanged result count keep the same status label; a changed count
+updates that same node. Construction is bounded by the existing 256-item menu
+cap and runs only during accessibility passes.
 
 ## Announcements
 

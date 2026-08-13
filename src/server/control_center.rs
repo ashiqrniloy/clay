@@ -17,7 +17,7 @@ use crate::{
         fuzzy::fuzzy_score_fields,
         transient_menu::{
             TransientMenuAction, TransientMenuItem, TransientMenuItemProvenance,
-            TransientMenuSession, TransientMenuSessionId,
+            TransientMenuOrigin, TransientMenuSession, TransientMenuSessionId,
         },
     },
 };
@@ -136,6 +136,7 @@ impl ControlCenter {
             .with_items(filtered)
             .with_selected_index(self.selected_index)
             .with_query(&self.query)
+            .with_origin(TransientMenuOrigin::Centered)
     }
 
     /// Moves the persisted selection by `delta` (relative steps, wrapping per

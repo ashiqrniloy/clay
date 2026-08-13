@@ -24,7 +24,23 @@ import { bindKey } from "clay:keybindings";
 bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 ```
 
-`op_clay_keybindings_bind_key` parses a single key chord, maps `editor` or `global` scope into `KeyBindingContext`, rejects unsupported conditional `when` expressions, and checks the command against the runtime-bindable command allowlist. Server-first Clay API commands are declared as `CommandAuthority::ServerIntent`; built-in predictable text commands keep built-in client-edit authority. The op mutates `ClayOpState` by cloning the active manifest, replacing any existing rule for the same chord/context, adding a command declaration if needed, and publishing through `ActiveBehaviorManifest::publish_replacement` so validation and behavior-version advancement are reused.
+`op_clay_keybindings_bind_key` parses a key chord — since Phase 24.5 a
+space-separated multi-stroke **sequence** (`parse_key_sequence`, each stroke
+through the same `parse_key_chord` `+`-modifier grammar; empty sequences and
+malformed strokes reject the whole bind) — maps `editor` or `global` scope
+into `KeyBindingContext`, rejects unsupported conditional `when` expressions,
+and checks the command against the runtime-bindable command allowlist. The
+parsed strokes become `KeyBindingRule.sequence: Vec<KeyStroke>`, the
+pre-existing archived protocol shape, so no protocol or op change was
+needed. Server-first Clay API commands are declared as
+`CommandAuthority::ServerIntent`; built-in predictable text commands keep
+built-in client-edit authority. The op mutates `ClayOpState` by cloning the
+active manifest, replacing any existing rule for the same sequence/context,
+adding a command declaration if needed, and publishing through
+`ActiveBehaviorManifest::publish_replacement` so validation (including the
+Phase 24.5 prefix-collision check) and behavior-version advancement are
+reused. `unbindKey` removes only rules whose FULL sequence matches, so a
+default rule for the same command bound to a different sequence survives.
 
 Batch table form (bindKey ergonomics round): `bindKey({ scope, bindings: { chord: command, ... } })` and `unbindKey({ scope, keys: [...] })` are overloads of the same facade functions, dispatched to `op_clay_keybindings_bind_keys` / `op_clay_keybindings_unbind_keys` when the first argument is an object. The batch ops are **all-or-nothing**: pass 1 validates every entry with the same pure helpers as the single ops (`parse_key_chord`, `validate_command_id`, `command_routing_policy` — none touch state), pass 2 applies via the existing `ClayOpState::bind_key`/`unbind_key` loop. A bad entry rejects the whole table with its 1-based index in the diagnostic (`keybindings.invalid_bind: entry 2: ...`). Duplicate chords inside one table collapse to the last value at JSON parse time, preserving the per-chord "last binding wins" rule. The single-argument form is unchanged; per-entry scope overrides were deliberately not added (YAGNI).
 
@@ -39,12 +55,19 @@ Batch table form (bindKey ergonomics round): `bindKey({ scope, bindings: { chord
 - Client UI command routes grant only native app UI intent routing. `documents.clientOpenFileDialog` may later open a user-mediated file picker, but the binding itself does not scan files, read file contents, install packages, enable shell/network/AI/WASM/raw-op access, or broaden workspace authority.
 - Unknown command IDs and malformed chords/scopes are rejected before a manifest can be published.
 - Manifest versioning is atomic and server-owned through `ActiveBehaviorManifest::publish_replacement`.
-- Client routing continues through `src/client/behavior.rs::ClientBehaviorState::route_key`, so server-first bindings become intent routes instead of synchronous JavaScript calls.
+- Client routing continues through `src/client/behavior.rs::ClientBehaviorState::route_key`
+(and, for multi-stroke chords, `route_key_sequence` with the
+`EditorSurface` pending-chord buffer), so server-first bindings become intent
+routes instead of synchronous JavaScript calls. Multi-stroke matching,
+pending/timeout/cancel semantics, and prefix-collision validation are
+documented in [Sequence Keybindings](sequence-keybindings.md).
 
 ## Tests
 
 - `configuration_bind_key_updates_behavior_manifest`: verifies `bindKey` creates a versioned manifest route for a Clay API command.
-- `configuration_unbind_key_updates_behavior_manifest`: verifies `unbindKey` removes the route through another atomic manifest update.
+- `configuration_bind_key_sequence_publishes_multi_stroke_rule`: verifies a space-separated sequence publishes one multi-stroke `KeyBindingRule`.
+- `configuration_unbind_key_sequence_removes_only_the_matching_rule`: verifies `unbindKey` removes only full-sequence matches.
+- `configuration_bind_key_prefix_collision_is_rejected`: verifies a same-scope strict-prefix rebind fails with `keybindings.bind_failed`.
 - `unknown_command_binding_is_rejected`: verifies unregistered/permission-bearing command IDs fail safely.
 - `configuration_bind_ctrl_o_to_client_open_file_dialog`: verifies `bindKey` can publish `Ctrl+O` as a client UI route with `client-ui` authority.
 - `keypress_routing_uses_manifest_not_js`: installs the runtime-generated manifest in `ClientBehaviorState` and routes `Ctrl+S` locally as a server intent.
@@ -54,6 +77,7 @@ Batch table form (bindKey ergonomics round): `bindKey({ scope, bindings: { chord
 ## Related
 
 - [Behavior Manifests](behavior-manifests.md)
+- [Sequence Keybindings](sequence-keybindings.md) — Phase 24.5 multi-stroke parser, matcher, pending-chord state, prefix validation
 - [Embedded JavaScript Runtime](embedded-js-runtime.md)
 - [Client Behavior Routing](../flows/client-behavior-routing.md)
 - `plans/014-Phase13-Embedded-JavaScript-Runtime.md`

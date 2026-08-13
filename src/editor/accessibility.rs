@@ -110,6 +110,13 @@ pub(crate) fn pending_edits_summary(pending_edit_count: usize) -> Option<String>
     }
 }
 
+pub(crate) fn compose_menu_result_count(result_count: usize) -> String {
+    match result_count {
+        1 => "1 result".to_string(),
+        count => format!("{count} results"),
+    }
+}
+
 pub(crate) fn compose_editor_accessibility_label(
     parts: EditorAccessibilityLabelParts<'_>,
 ) -> String {
@@ -196,5 +203,8 @@ mod tests {
                 .unwrap()
                 .contains("Conflict")
         );
+        assert_eq!(compose_menu_result_count(0), "0 results");
+        assert_eq!(compose_menu_result_count(1), "1 result");
+        assert_eq!(compose_menu_result_count(2), "2 results");
     }
 }

@@ -76,6 +76,11 @@ bindKey("Ctrl+Y", clientRedo(), { scope: "editor" });
 bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
 bindKey("Ctrl+Shift+R", clientRequestResync(), { scope: "editor" });
 bindKey("Ctrl+Shift+D", clientDismissRecovery(), { scope: "editor" });
+
+// Multi-stroke chords (Phase 24.5): a space-separated stroke list, Emacs-style.
+bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" });
+bindKey("Ctrl+X Ctrl+F", "controlCenter.openPath", { scope: "global" });
+bindKey("g g", "workspace.refresh", { scope: "editor" });
 ```
 
 Table form (one call, one scope, a chord → command map; returns the bound
@@ -109,6 +114,30 @@ import { unbindKey } from "clay:keybindings";
 unbindKey({ scope: "editor", keys: ["Ctrl+O", "Ctrl+S", "Ctrl+P"] });
 ```
 
+## Multi-stroke chords
+
+A `key` is either a single stroke (`"Ctrl+O"`, the fast path) or a
+space-separated stroke sequence (`"Ctrl+X Ctrl+P"`, `"g g"`). The parser
+splits on whitespace and validates each stroke with the single-stroke
+chord grammar; `"Space"` is the literal space key, so sequences never need
+escaping.
+
+The first stroke of a multi-stroke chord is consumed without any other
+effect: a pending chord is held until the sequence completes, times out
+(server-owned budget, cancelled and re-checked on the next keystroke), or
+mismatches. On mismatch the chord cancels and the mismatching stroke is
+re-evaluated fresh — a half-typed chord never eats typing. Only an exact
+match dispatches the command.
+
+A binding whose sequence is a strict prefix of another binding in the same
+scope cannot be installed: both the single and the batch table form reject
+the shorter rule with `keybindings.bind_failed` (the diagnostic names the
+prefix rule's command), so the matcher never has to choose between two
+rules. `unbindKey` removes only rules whose full sequence matches.
+
+All chord parsing runs on the configuration path; the matcher adds no
+hot-path allocation beyond the bounded pending buffer.
+
 ## Example
 
 ```ts
@@ -117,7 +146,7 @@ bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 // Configure the Phase 20 save route from ~/.config/clay/init.js.
 bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 // Configure the Phase 18.8 Control Center launch route from ~/.config/clay/init.js.
-bindKey("Ctrl+Shift+P", "controlCenter.open", { scope: "editor" });
+bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" });
 // Configure the Phase 18.11 manual completion trigger route from ~/.config/clay/init.js.
 bindKey("Ctrl+Space", "completion.trigger", { scope: "editor" });
 // Configure Phase 18.12 file-browser/fuzzy-open routes from ~/.config/clay/init.js.
@@ -160,11 +189,11 @@ bindKey({
 bindKey({ scope: "global", bindings: { "Ctrl+Shift+R": "runtime.reloadConfiguration" } });
 ```
 
-Phase 18.8 note: `controlCenter.open` is a fixed built-in server-first command id (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`). Phase 24.2 ships the default `Ctrl+Shift+P` binding in the default behavior manifest; binding it (again) through `bindKey` is the documented configuration surface for overriding the Control Center launch route, and `unbindKey` removes the default. Activating the bound key enqueues an inert command intent that the server-owned `CommandExecutor` validates before any side effect. The transient menu session itself is Clay-owned internal state and is not a callable `clay:configuration` API; see `docs/reference/clay-js-api/configuration.md`.
+Phase 18.8 note: `controlCenter.open` is a fixed built-in server-first command id (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`). Phase 24.5 ships the default `Ctrl+X Ctrl+P` chord (Global scope, `ServerFirst` routing; the pre-24.5 single-stroke default was `Ctrl+Shift+P`) in the default behavior manifest; binding it (again) through `bindKey` is the documented configuration surface for overriding the Control Center launch route, and `unbindKey` removes the default. Activating the bound key enqueues an inert command intent that the server-owned `CommandExecutor` validates before any side effect. The transient menu session itself is Clay-owned internal state and is not a callable `clay:configuration` API; see `docs/reference/clay-js-api/configuration.md`.
 
 Phase 18.12/22.8 note: `workspace.openFuzzyFile` and `workspace.toggleFileBrowser` are fixed built-in server-first workspace file-browser command ids. Binding them through `bindKey` is the documented configuration surface for fuzzy-open and file-browser toggle routes. The canonical `examples/init.js` binds `Ctrl+B` to the toggle; the pane starts hidden and the server retains visibility per tab. Activation is revalidated by `CommandExecutor`, and file opening still routes through server workspace roots or selected-file grants. The left file-browser panel, bottom transient fuzzy-open menu, workspace marker set, ignore set, and listing budgets are Clay-owned internals, not callable `clay:configuration` APIs.
 
-Phase 24.3 note: `controlCenter.openPath` (display name “Browse Filesystem”) is a fixed built-in server-first command id that opens the Path Browser session — the dired-style path-mode surface. Use the bare id `"controlCenter.openPath"` with `bindKey`/`unbindKey`; `clay.controlCenter.openPath` is never valid. Phase 24.3 ships a temporary default `Ctrl+Alt+P` chord (Global scope, `ServerFirst` routing) in the default behavior manifest; it is fully rebindable or removable via `bindKey`/`unbindKey` without an unbind the default remains bound, and Phase 24.5 may replace the default with a sequence without changing the command id. Activating the bound key enqueues an inert command intent that the connection's server-intent handler converts into a session; packages cannot open, drive, intercept, or receive paths from the session, and the browse listing/session/grant helpers are `pub(crate)` Rust internals with no Clay JS facade. Browse authority is ephemeral and user-authorized by the built-in surface itself; opening a file converts it into one `SingleFile` grant and Alt+Enter on a directory converts it into one `Directory` root grant for the bound tab only (see `docs/development/file-open-save-reload-workflow.md`).
+Phase 24.3 note: `controlCenter.openPath` (display name “Browse Filesystem”) is a fixed built-in server-first command id that opens the Path Browser session — the dired-style path-mode surface. Use the bare id `"controlCenter.openPath"` with `bindKey`/`unbindKey`; `clay.controlCenter.openPath` is never valid. Phase 24.3 shipped a temporary default `Ctrl+Alt+P` chord; Phase 24.5 replaced it with the `Ctrl+X Ctrl+F` sequence default (Global scope, `ServerFirst` routing) without changing the command id — both the single and multi-stroke forms are accepted as overrides. Activating the bound key enqueues an inert command intent that the connection's server-intent handler converts into a session; packages cannot open, drive, intercept, or receive paths from the session, and the browse listing/session/grant helpers are `pub(crate)` Rust internals with no Clay JS facade. Browse authority is ephemeral and user-authorized by the built-in surface itself; opening a file converts it into one `SingleFile` grant and Alt+Enter on a directory converts it into one `Directory` root grant for the bound tab only (see `docs/development/file-open-save-reload-workflow.md`).
 
 End-to-end file-browser workflow note: `workspace.clientOpenFolderDialog` and `editor.clientCopySelection` are fixed built-in client UI command ids. Binding them through `bindKey` installs inert client UI routes only. The folder picker still requires explicit native user selection plus the server's selected-path capability/root validation flow. Copy runs only after an explicit user-routed command; it does not expose package/configuration/AI clipboard-contents APIs, arbitrary clipboard text writes, or server clipboard access.
 
@@ -176,7 +205,7 @@ Shifted character matching note: character-key chords match case-insensitively a
 
 ## Options
 
-- `key` (`string`): Key chord, for example `"Ctrl+I"`.
+- `key` (`string`): Key chord or space-separated multi-stroke sequence, for example `"Ctrl+I"` or `"Ctrl+X Ctrl+P"`.
 - `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"editor.serverInsertText"`, `"documents.clientOpenFileDialog"`, `"documents.serverSaveDocument"`, `"documents.serverReloadDocument"`, `"workspace.clientOpenFolderDialog"`, `"editor.clientCopySelection"`, `"editor.clientCutSelection"`, `"editor.clientPasteClipboard"`, `"editor.clientUndo"`, `"editor.clientRedo"`, `"editor.clientShowOpenDocuments"`, `"editor.clientRequestResync"`, `"editor.clientDismissRecovery"`, the built-in server-first command ids `"controlCenter.open"`, `"controlCenter.openPath"`, `"workspace.openFuzzyFile"`, `"workspace.toggleFileBrowser"`, or the built-in `UiReactivePriority` completion command id `"completion.trigger"`; future extension commands must be registered and permissioned before they can be bound.
 - `scope` (`"global" | "editor"`): Binding scope; defaults to `"editor"`.
 - `when` (`string`): Optional future condition expression for context-sensitive bindings; conditions are metadata for server-owned manifest routing, not executable client JavaScript.
@@ -204,7 +233,7 @@ The Phase 13 facade/runtime status is `runtime-backed`; the `deno_core` op wirin
 
 ## Errors
 
-The runtime fails if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. The Phase 13 runtime returns typed JavaScript errors for unavailable state or validation failures.
+The runtime fails if arguments are malformed, the referenced document or editor surface does not exist, required permissions are absent, or server/client state rejects the requested operation. Binding a sequence that is a strict prefix of another binding in the same scope fails with `keybindings.bind_failed` (the shorter rule is rejected as ambiguous, naming the prefix rule's command); the batch table form rejects the whole table all-or-nothing with its 1-based entry index. The Phase 13 runtime returns typed JavaScript errors for unavailable state or validation failures.
 
 ## Permissions and security
 

@@ -59,17 +59,20 @@ Use this API when JavaScript configuration, extensions, or future Clay automatio
 import { unbindKey } from "clay:keybindings";
 
 unbindKey("Ctrl+I", { scope: "editor" });
+// Multi-stroke chords use the same space-separated sequence format as bindKey.
+unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
 ```
 
 ## Example
 
 ```ts
 unbindKey("Ctrl+I", { scope: "editor" });
+unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
 ```
 
 ## Options
 
-- `key` (`string`): Key chord to remove.
+- `key` (`string`): Key chord or space-separated multi-stroke sequence to remove, for example `"Ctrl+I"` or `"Ctrl+X Ctrl+P"`. Only rules whose full sequence matches are removed; a default rule for the same command bound to a different sequence survives.
 - `scope` (`"global" | "editor"`): Binding scope; defaults to `"editor"`.
 - `when` (`string`): Optional condition expression identifying a specific binding; conditions are metadata for server-owned manifest routing, not executable client JavaScript.
 

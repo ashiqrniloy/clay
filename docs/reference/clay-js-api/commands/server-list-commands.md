@@ -112,7 +112,7 @@ Phase 24.2 replaced the Control Center's earlier `serverListCommands`-style reus
 
 ## Phase 19 built-in command discovery note
 
-`serverListCommands` returns package-registered commands only. Built-in Clay-owned commands (such as `runtime.reloadConfiguration`, `controlCenter.open`, `workspace.openFuzzyFile`, `workspace.toggleFileBrowser`) are not listed by this API. The Control Center (`controlCenter.open`) builds its catalogue from the Rust `builtin_server_command_ids` table, the `shell.client*` surface, and the trusted/third-party package registry snapshots (see the Phase 24.2 note above). User configuration can bind built-in commands through [`bindKey`](../keybindings/bind-key.md) (a default `Ctrl+Shift+P` chord ships for `controlCenter.open`) or invoke them through SDUI actions; discovery is through documentation and the Control Center, not through this listing API.
+`serverListCommands` returns package-registered commands only. Built-in Clay-owned commands (such as `runtime.reloadConfiguration`, `controlCenter.open`, `workspace.openFuzzyFile`, `workspace.toggleFileBrowser`) are not listed by this API. The Control Center (`controlCenter.open`) builds its catalogue from the Rust `builtin_server_command_ids` table, the `shell.client*` surface, and the trusted/third-party package registry snapshots (see the Phase 24.2 note above). User configuration can bind built-in commands through [`bindKey`](../keybindings/bind-key.md) (a default `Ctrl+X Ctrl+P` chord ships for `controlCenter.open`) or invoke them through SDUI actions; discovery is through documentation and the Control Center, not through this listing API.
 
 ## Lookup metadata
 

@@ -94,6 +94,23 @@ Clay uses server-authoritative documents with optimistic client shadows.
 - Browse listings stay bounded (depth 1, entry caps) and are never read on the paint/layout path.
 - Decision log source: `decision-logs/2026-08-11-1711-command-centre-surface-path-mode-and-sequence-keybindings.md`.
 
+## Language-Server Grant Degradation (load-time tolerance)
+
+- `loadPackage` tolerates a missing (or stale/revoked) `language-server`
+  grant: the capability stays inert because session start and every
+  analyzer invocation re-check a current exact grant covering the
+  document's workspace root. All other capability grants keep their hard
+  load-time requirement.
+- Analyzer registration (`language.serverRegisterDocumentAnalyzer`)
+  requires the package to be enabled and the contribution to name a fixed
+  package language server, but not a current grant; a generation reload
+  skips analyzers without a current grant (re-registers once the grant
+  lands) instead of failing the generation.
+- Bundled defaults never auto-grant language-server authority; a
+  replacement package never inherits the replaced target's grant.
+- Decision log source:
+  `decision-logs/2026-08-13-2223-degraded-language-server-grant-tolerated-at-load-package.md`.
+
 ## Planning Guidance
 
 - Do not describe the server as a stateless behavior service.

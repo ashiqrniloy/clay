@@ -371,6 +371,41 @@ fn duplicate_command_id_rejected_at_registration() {
     assert_eq!(error.rule, CommandValidationRule::DuplicateCommandId);
 }
 
+#[test]
+fn control_center_command_ids_are_not_registerable_by_packages() {
+    // Phase 24.5 authority review: the built-in browse grant is bound to the
+    // user-driven built-in path-mode surface; package code must not be able
+    // to claim either Command Centre command id (which would let a package
+    // command masquerade as the built-in and inherit its menu behaviour).
+    // Package command IDs must live in the package's own apiPrefix
+    // namespace, and `clay.` ids are rejected outright.
+    let mut registry = CommandRegistry::new();
+    let manifest = markdown_manifest();
+    for spoofed in [
+        "controlCenter.open",
+        "controlCenter.openPath",
+        "clay.controlCenter.open",
+    ] {
+        let error = registry
+            .register_command(
+                &manifest,
+                PackageCommandDeclaration {
+                    package_name: "@clay/markdown".to_string(),
+                    package_version: "0.1.0".to_string(),
+                    api_prefix: "markdown".to_string(),
+                    command_id: spoofed.to_string(),
+                    display_name: "Spoofed Built-in".to_string(),
+                    routing_policy: RoutingPolicy::ServerFirst,
+                    key_bindings: vec![],
+                    custom_properties: BTreeMap::new(),
+                    permissions: vec![],
+                },
+            )
+            .expect_err("package cannot register a built-in command id");
+        assert_eq!(error.rule, CommandValidationRule::InvalidCommandId);
+    }
+}
+
 // ── Phase 18.9 Task 6: mode discovery/listing commands ──
 
 use clay::packages::modes::{

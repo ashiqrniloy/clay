@@ -568,3 +568,71 @@ full Phase 22.6 window bench set with:
 ```text
 cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
 ```
+
+### Phase 24.4 centered overlay guards (deterministic)
+
+The centered Command Centre surface keeps paint/layout work independent of
+document size: one token-driven full-window scrim fill plus the existing
+bounded retained overlay subtree. `centered_overlay_work_is_bounded_and_scrim_is_single_pass`
+(`tests/editor_performance_invariants.rs`) checks the single scrim fill, the
+single window-level host, window-bounded geometry, and rejection of
+blur/offscreen/filter/JS/IPC/IO work; `centered_layer_reconciles_in_place_and_removes_idempotently`
+and the open/close-cycle and theme-switch tests (`src/masonry_editor.rs`)
+check that query/selection/theme snapshots reuse the retained layer and leave
+no orphan root layers.
+
+`window_baselines` gained the advisory `centered_overlay_baselines` group
+(`centered_overlay_geometry_work`, one scrim rect + one surface rect + one
+rect per hosted overlay — O(overlay count), no document text). Wall-clock
+menu-open latency stays advisory and belongs to Phase 24.5.
+
+## Phase 24.5 Command Centre budgets, guards, and browse-grant authority review
+
+Phase 24.5 (plan 085 task 7) budgets the Command Centre in the established
+split: deterministic work-count/payload gates run on every push; wall-clock
+figures stay advisory until the Phase 21 stable-CI-runner promotion rule is
+met (single-machine evidence only, as Plan 084 deferred menu-latency
+measurement to this phase).
+
+### Advisory budgets (`src/perf/budgets.rs`)
+
+| Constant | Value | What it covers |
+| --- | --- | --- |
+| `COMMAND_CENTRE_OPEN_P95_BUDGET_MS` | 50 | one menu open: server catalogue snapshot + session construction + snapshot encode; no document-sized work |
+| `COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS` | 4 | one per-keystroke filter update: fuzzy-score the installed candidate list (<= 256 entries) locally |
+| `COMMAND_CENTRE_LISTING_MAX_ENTRIES` | 256 | path-browser listing snapshot entry ceiling (aliases `TRANSIENT_MENU_MAX_ITEMS`) |
+| `COMMAND_CENTRE_LISTING_PAYLOAD_BUDGET_BYTES` | 64 KiB | advisory serialized-size ceiling for one listing snapshot; far below the 1 MiB codec frame ceiling |
+
+`KEY_CHORD_PENDING_TIMEOUT_MS` (1500, advisory) bounds a stale pending
+multi-stroke chord: the chord cancels and the next key re-evaluates fresh.
+
+### Deterministic hard guards (`tests/editor_performance_invariants.rs`)
+
+| Guard | Claim |
+| --- | --- |
+| `command_centre_open_filter_and_listing_stay_bounded_off_hot_paths` | menu open reads no document text and bounds the browse listing plan by `COMMAND_CENTRE_LISTING_MAX_ENTRIES`; per-keystroke filters (menu sessions + path browser) touch no `DocumentState`; listing snapshot types appear in no paint/layout body (pure paint files and the pane document's `paint_in`/`paint_status_line`/`paint`) |
+| `pending_chord_buffer_grows_one_stroke_per_pending_outcome` | the pending buffer grows by exactly one validated stroke in exactly the Pending arm and every other path clears it (runtime proof: `editor_pending_chord_buffer_never_exceeds_longest_bound_sequence`) |
+
+### Browse-grant authority review (recorded 2026-08-13)
+
+The built-in browse grant (path-mode traversal outside workspace roots) is
+reachable only from the user-driven built-in path-mode surface:
+
+- The only session-opening helper (`open_command_centre_session`,
+  `src/server/connection.rs`) has exactly two call sites, both fed by
+  user-driven client messages: the `CommandIntent` special case for the two
+  builtin ids and menu activation of `controlCenter.openPath`.
+- Package JavaScript runs in the op layer: no op/facade (including
+  `commands.execute`) calls the helper or constructs a browse session; the
+  package `executeCommand` facade validates and acknowledges without opening
+  a session.
+- Package `registerCommand` cannot claim either builtin id: command IDs must
+  live in the package's own apiPrefix namespace and `clay.` ids are rejected
+  (`control_center_command_ids_are_not_registerable_by_packages`).
+- Source guards: `phase24_5_command_centre_sessions_are_not_a_package_programmatic_surface`
+  (`tests/rust_visibility_api_mapping.rs`, security suite) pins the two-call-
+  site invariant and the absence of browse-session construction outside the
+  connection layer.
+- Browsed-path conversions stay on the existing `SingleFile`/`Directory`
+  grant paths; a file open converts browse authority into exactly one grant
+  through the same selected-file open path as before.

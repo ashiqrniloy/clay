@@ -599,7 +599,7 @@ Phase 18.20 discoverable commands (empty default key bindings):
 
 Manual Phase 18.20 smoke (fake analyzer / no language-server required):
 
-1. Bind one command in `~/.config/clay/init.js`, for example `bindKey("Alt+H", "language.hover", { scope: "editor" })`. Runtime keybindings currently accept one key stroke; multi-stroke chords and function keys remain unsupported.
+1. Bind one command in `~/.config/clay/init.js`, for example `bindKey("Alt+H", "language.hover", { scope: "editor" })`. Runtime keybindings accept single strokes and space-separated multi-stroke chords (for example `bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" })`); function keys remain unsupported.
 2. Launch Clay and place the caret in an editable document.
 3. Invoke the binding. A bottom `TransientMenuSession` should show bounded plain-text hover/signature content or a selectable definitions/code-actions list. Raw HTML must not render as native markup.
 4. For multiple definitions, select a current-document target and confirm caret navigation. Workspace-file targets open through `workspace.openFile` after root/relative-path revalidation; external/traversing targets are not navigable.

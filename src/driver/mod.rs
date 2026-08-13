@@ -53,7 +53,10 @@ pub(crate) struct Driver {
     /// Phase 22.1: the ClayShellWidget's id (root widget) for shell command dispatch.
     pub(crate) shell_widget_id: WidgetId,
     pub(crate) window_id: WindowId,
-    /// Phase 22.3: one tab state per connection, keyed by the connection's
+    /// Phase 24.4: the optional Clay-owned root layer for the active centered
+    /// Command Centre menu. The layer is window-scoped and never enters shell
+    /// or protocol session state.
+    pub(crate) centered_layer_id: Option<WidgetId>,
     /// `ClientId` (the client-known identity at mount time; the server-assigned
     /// `TabId` arrives asynchronously via the registry snapshot).
     pub(crate) tabs: BTreeMap<ClientId, TabState>,
@@ -272,6 +275,34 @@ pub(crate) fn with_view<R>(
 }
 
 impl Driver {
+    pub(crate) fn remove_centered_layer(&mut self, root: &mut RenderRoot) {
+        let Some(layer_id) = self.centered_layer_id.take() else {
+            return;
+        };
+        if root.has_widget(layer_id) {
+            root.remove_layer(layer_id);
+        }
+    }
+
+    /// Reconcile the active tab's centered menu into one window-level root
+    /// layer. Menu snapshots reuse this layer; only open/close/origin changes
+    /// add or remove it.
+    pub(crate) fn sync_centered_layer(
+        &mut self,
+        ctx: &mut DriverCtx<'_, '_>,
+        window_id: WindowId,
+        chrome_id: WidgetId,
+    ) {
+        if chrome_id != self.editor_widget_id {
+            return;
+        }
+        self.centered_layer_id = EditorWidget::reconcile_centered_overlay_layer(
+            ctx.render_root(window_id),
+            self.centered_layer_id,
+            chrome_id,
+        );
+    }
+
     pub(crate) fn editor_action_target(&self, _source_widget_id: WidgetId) -> WidgetId {
         // Phase 18.2 has one editor component under the shell root. Keep
         // editor-specific actions aimed at that child even if Masonry reports a
@@ -486,8 +517,10 @@ impl Driver {
                 workspace_root: workspace_root.to_string_lossy().into_owned(),
             },
         );
+        self.remove_centered_layer(ctx.render_root(window_id));
         self.active_tab = client_id;
         self.editor_widget_id = chrome_id;
+        self.sync_centered_layer(ctx, window_id, chrome_id);
         Some(client_id)
     }
 
@@ -524,6 +557,10 @@ impl Driver {
         }
         if let Some(target) = target {
             let _ = ctx.render_root(window_id).focus_on(Some(target));
+        }
+        self.remove_centered_layer(ctx.render_root(window_id));
+        if let Some(chrome_id) = chrome_id {
+            self.sync_centered_layer(ctx, window_id, chrome_id);
         }
         true
     }
@@ -820,6 +857,7 @@ pub(crate) mod tests {
             editor_widget_id,
             shell_widget_id: WidgetId::next(),
             window_id: WindowId::next(),
+            centered_layer_id: None,
             tabs: BTreeMap::new(),
             active_tab: 0,
             registry: TabRegistrySnapshot {
@@ -901,6 +939,7 @@ pub(crate) mod tests {
             editor_widget_id: WidgetId::next(),
             shell_widget_id: WidgetId::next(),
             window_id: WindowId::next(),
+            centered_layer_id: None,
             tabs,
             active_tab: 0,
             registry: TabRegistrySnapshot {

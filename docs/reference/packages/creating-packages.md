@@ -752,6 +752,24 @@ Phase 24.2 extends the boundary with the live command catalogue: any validated r
 
 This boundary follows from the trust-domain rule for commands: menu activation routes to command intents, and command authority is the unified user-authorized package model ([package security](../primitives/package-security.md)). Menu snapshots are bounded protocol data governed by the `TRANSIENT_MENU_*` budgets — not SDUI payloads — so the [UI component conformance rules](../ui-components.md) and the [transient menu family](../primitives/shell-layout-strategy.md) contract apply unchanged.
 
+### Centered Command Centre surface (Phase 24.4)
+
+Command and path sessions use an internal `TransientMenuOrigin::Centered` and
+are mounted as one Clay-owned window-level retained overlay above the shell.
+The host paints the token-driven `surface.scrim`/`opacity.scrim` backdrop and
+uses `dimension.overlay.centered.width`; it provides modal Dialog/Menu/MenuItem/
+Status accessibility and contains input on the originating pane. This is a
+presentation change only: command/path authority, grants, activation, and
+server-owned snapshots remain unchanged.
+
+Packages cannot request the centered anchor, paint or configure the scrim,
+mount root layers, intercept menu input, open/drive the built-in menu sessions,
+or obtain Path Browser authority. Supported package overlay anchors remain
+`working-area`, `active-pane`, `main`, and `pointer`; `centered` is not part of
+the package `OverlayAnchor` type or manifest validation. The centered host uses
+one scrim fill and no blur/filter/offscreen pass; package JavaScript never runs
+in its paint/layout/input paths.
+
 ## Conflict and Precedence Contract
 
 The Phase 18.3 panel/component/overlay/token contribution APIs are runtime-backed; broader shell/layout override APIs are still planned. Package authors should design declarations around this deterministic precedence order:
@@ -1049,6 +1067,8 @@ serverRegisterInputContribution(manifest, {
 ```
 
 Mouse/pointer input is declared by component/action metadata, not by package-owned client event handlers. `serverRegisterInputContribution` rejects `keys`, `keybindings`, and `onKey`; key routing remains behavior-manifest and `clay:keybindings` work.
+
+**Keybinding chords (Phase 24.5):** chords are space-separated stroke lists — `"Ctrl+X Ctrl+P"`, `"g g"` — or the single-stroke form `"Ctrl+O"`, which remains fully supported and is the fast path. The parser splits on whitespace and validates each stroke with the single-stroke grammar (`"Space"` is the literal space key, so sequences never need escaping). A binding whose sequence is a strict prefix of another binding in the same scope (for example `"Ctrl+X"` vs `"Ctrl+X Ctrl+P"`) is rejected as ambiguous at bind time with `keybindings.bind_failed`; the matcher then never has to choose between two rules. A pending multi-stroke chord is held until the sequence completes, times out (server-owned budget, cancelled and re-checked on the next keystroke), or mismatches — on mismatch the chord cancels and the mismatching stroke re-evaluates fresh, so a half-typed chord never eats typing. Parsing runs on the configuration path only; the matcher adds no hot-path allocation beyond the bounded pending buffer. Package authority is unchanged: packages may bind chords only for commands they registered or documented built-in/auto-declared command IDs reachable through `bindKey`, and the prefix-collision check blocks ambiguous bindings from installing.
 
 **Implemented/runtime-backed Phase 18.4 state-scope lifecycle example:**
 
@@ -2257,8 +2277,9 @@ Capture schema (mirrors the Helix/Nvim convention, Clay-prefixed):
 Runtime behavior is advisory: `clientSelectTextobject`/`clientSmartSelect` send the document's selection set to the server, which answers with one optional range per caret (multi-cursor-aware); grammars without a textobjects query (Markdown, Tier 2/3 handlers) answer no ranges and the carets stay put. Selection queries never block editing — any miss (no grammar, parse timeout, no handler) degrades to empty ranges. The 50 command IDs (48 textobject + 2 smart-select) are not enumerated in the built-in command table; they are auto-declared the first time a package binds a key to one via `bindKey`, and validated by prefix parse rather than string lists. Smart-select (`expand` walks the syntax tree up, `shrink` walks down) works for any parsed grammar even without a textobjects query.
 
 ```js
-// In a package loadEntry: bind a text-object command (single-stroke chords
-// only; multi-stroke chords like "]f" are not runtime-backed yet).
+// In a package loadEntry: bind a text-object command. Chords are
+// space-separated stroke lists: single strokes ("Ctrl+Shift+F") and
+// multi-stroke chords (for example "g f") are both supported.
 import { bindKey } from "clay:keybindings";
 
 bindKey("Ctrl+Shift+F", "editor.clientSelectTextobject.function.around.current", { scope: "editor" });

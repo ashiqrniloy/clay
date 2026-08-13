@@ -238,3 +238,25 @@ Recommended task title:
 ```
 
 Place this task after entry-gate/baseline tasks and before UI implementation tasks.
+
+## Mandatory UI Visual and Accessibility Review Task
+
+Each Clay plan that touches app UI must include one post-implementation task that reviews the implemented interface visually and through accessibility tooling before final API/documentation/wiki work.
+
+The task must require:
+
+- Launch a real Linux GUI build using representative data and exercise every changed state: default, interactive/focus, empty/error/loading/recovery states when applicable, plus narrow and wide window layouts when layout is affected.
+- Take and inspect screenshots for each exercised state. Store review evidence under a clearly named review artifact path, and record the path and findings in the task completion evidence.
+- When `computer-use-linux` is available, call `get_app_state` before UI interaction, inspect its accessibility tree, and verify keyboard-only flow, focus visibility/order, role/name/state exposure, modal containment, and announcements for changed controls. Prefer semantic selectors; re-check state after each interaction.
+- If GUI launch, screenshot capture, or computer use is unavailable, state the exact blocker, preserve automated structural/accessibility checks, and leave manual visual/a11y acceptance unresolved rather than claiming it passed.
+- Treat a screenshot or accessibility failure as a product defect or an explicitly prioritized follow-up; do not replace it with source inspection alone.
+
+Recommended task title:
+
+```markdown
+- [ ] Perform visual screenshot and accessibility review of changed UI
+```
+
+Place this task after UI implementation and automated verification, before Clay JS API/configuration/manual-test-plan/wiki finalization.
+
+Decision source: `decision-logs/2026-08-14-0200-mandatory-ui-visual-and-accessibility-review.md`.

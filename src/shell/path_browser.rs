@@ -29,7 +29,8 @@ use super::{
     file_browser::FileBrowserEntryKind,
     fuzzy::fuzzy_score,
     transient_menu::{
-        TransientMenuAction, TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
+        TransientMenuAction, TransientMenuItem, TransientMenuOrigin, TransientMenuSession,
+        TransientMenuSessionId,
     },
 };
 
@@ -306,7 +307,9 @@ impl PathBrowserSession {
     /// session id on the server, never from item actions.
     pub(crate) fn menu_session(&self, session_id: TransientMenuSessionId) -> TransientMenuSession {
         let prompt = format!("Browse · {}", self.canonical_dir.display());
-        let mut session = TransientMenuSession::new(session_id, prompt).with_query(&self.input);
+        let mut session = TransientMenuSession::new(session_id, prompt)
+            .with_query(&self.input)
+            .with_origin(TransientMenuOrigin::Centered);
         if let Some(message) = &self.error {
             // Items stay suppressed while a listing error is pending.
             return session.with_empty_status(message);

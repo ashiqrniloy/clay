@@ -894,3 +894,286 @@ fn four_pane_decoration_aggregate_payload_fits_budget() {
         "4-pane aggregate decoration payload {aggregate} exceeds budget {MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES}"
     );
 }
+
+#[test]
+fn command_centre_open_filter_and_listing_stay_bounded_off_hot_paths() {
+    // Phase 24.5: the Command Centre's menu open does no document-sized
+    // work, the per-keystroke filter scans only the bounded candidate list
+    // (never the document), the path-browser listing snapshot is bounded by
+    // the menu caps, and listing snapshot state is never read on paint/
+    // layout paths. Advisory wall-clock budgets are pinned in
+    // src/perf/budgets.rs; these are the deterministic CI-blocking guards.
+    use clay::perf::budgets::{
+        COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS, COMMAND_CENTRE_LISTING_MAX_ENTRIES,
+        COMMAND_CENTRE_LISTING_PAYLOAD_BUDGET_BYTES, COMMAND_CENTRE_OPEN_P95_BUDGET_MS,
+        TRANSIENT_MENU_MAX_ITEMS,
+    };
+    const {
+        assert!(COMMAND_CENTRE_LISTING_MAX_ENTRIES <= TRANSIENT_MENU_MAX_ITEMS);
+        assert!(COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS < COMMAND_CENTRE_OPEN_P95_BUDGET_MS);
+        assert!(COMMAND_CENTRE_OPEN_P95_BUDGET_MS > 0);
+        assert!(
+            COMMAND_CENTRE_LISTING_PAYLOAD_BUDGET_BYTES < 1024 * 1024,
+            "a listing snapshot must stay far below the 1 MiB codec frame ceiling"
+        );
+    }
+
+    // Menu open: the browse listing plan is bounded by the listing-entry
+    // constant and the open helper reads only document metadata, never
+    // document text.
+    let connection = fs::read_to_string("src/server/connection.rs").expect("connection readable");
+    let open_body = connection
+        .split("async fn open_command_centre_session")
+        .nth(1)
+        .expect("open_command_centre_session present")
+        .split("\n}")
+        .next()
+        .expect("open helper body");
+    assert!(open_body.contains("COMMAND_CENTRE_LISTING_MAX_ENTRIES"));
+    assert!(open_body.contains("execute_user_browse_listing"));
+    for forbidden in [".text()", "visible_text"] {
+        assert!(
+            !open_body.contains(forbidden),
+            "command centre open must not read document text: {forbidden}"
+        );
+    }
+
+    // Per-keystroke filter: query updates clamp at the shared query budget
+    // and score the installed (bounded) candidate list only; the path
+    // browser's refresh_filter scores installed entries locally.
+    let sessions = fs::read_to_string("src/server/menu_sessions.rs").expect("sessions readable");
+    let sessions_body = non_test_body(&sessions);
+    assert!(sessions_body.contains("TRANSIENT_MENU_MAX_QUERY_CHARS"));
+    assert!(sessions_body.contains("FilterOnly"));
+    for forbidden in ["DocumentState", ".text()", "visible_text"] {
+        assert!(
+            !sessions_body.contains(forbidden),
+            "menu session filter path must not touch document state: {forbidden}"
+        );
+    }
+    let browser = fs::read_to_string("src/shell/path_browser.rs").expect("browser readable");
+    let browser_body = non_test_body(&browser);
+    assert!(browser_body.contains("fn refresh_filter"));
+    assert!(browser_body.contains("fuzzy_score"));
+    for forbidden in ["DocumentState", ".text()", "visible_text"] {
+        assert!(
+            !browser_body.contains(forbidden),
+            "path browser filter must not touch document state: {forbidden}"
+        );
+    }
+
+    // Listing snapshot state is never read on paint/layout paths: the pure
+    // paint/layout files reference none of it, and the pane document's
+    // paint bodies (paint_in / paint_status_line / paint) reference none of
+    // it either — the snapshot is consumed only by the connection-event
+    // handler.
+    for file in [
+        "src/masonry_editor.rs",
+        "src/masonry_shell.rs",
+        "src/masonry_sdui.rs",
+        "src/shell/primitives.rs",
+    ] {
+        let src = fs::read_to_string(file).unwrap_or_else(|error| panic!("read {file}: {error}"));
+        let body = non_test_body(&src);
+        for forbidden in [
+            "TransientMenuSnapshotData",
+            "PathBrowserSession",
+            "UserBrowseEntry",
+            "UserBrowsePage",
+            "UserBrowseListingPlan",
+        ] {
+            assert!(
+                !body.contains(forbidden),
+                "{file} must not read listing snapshot state: {forbidden}"
+            );
+        }
+    }
+    let pane = fs::read_to_string("src/masonry_pane_document.rs").expect("pane readable");
+    let pane_body = non_test_body(&pane);
+    assert!(
+        pane_body.contains("ClientConnectionEvent::TransientMenuSnapshot(snapshot)"),
+        "listing snapshots are consumed only by the connection-event handler"
+    );
+    let paint_bodies = [
+        pane_body
+            .split("fn paint_in(")
+            .nth(1)
+            .and_then(|s| s.split("fn paint_status_line(").next())
+            .unwrap_or(""),
+        pane_body
+            .split("fn paint_status_line(")
+            .nth(1)
+            .and_then(|s| s.split("fn paint(").next())
+            .unwrap_or(""),
+        pane_body
+            .split("fn paint(")
+            .nth(1)
+            .and_then(|s| s.split("fn accessibility_role(").next())
+            .unwrap_or(""),
+    ]
+    .join("\n");
+    for forbidden in [
+        "TransientMenuSnapshotData",
+        "PathBrowserSession",
+        "UserBrowseEntry",
+        "UserBrowsePage",
+    ] {
+        assert!(
+            !paint_bodies.contains(forbidden),
+            "pane paint must not read listing snapshot state: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn pending_chord_buffer_grows_one_stroke_per_pending_outcome() {
+    // Phase 24.5: the pending-chord buffer is bounded by the longest bound
+    // sequence. Source guard: the buffer grows by exactly one validated
+    // stroke in exactly the Pending arm, and every non-pending path clears
+    // it; the matcher reports Pending only while the candidate is a strict
+    // prefix of some rule. (Runtime proof: the surface test
+    // editor_pending_chord_buffer_never_exceeds_longest_bound_sequence.)
+    let surface = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
+    let body = non_test_body(&surface);
+    let routing_body = body
+        .split("pub(crate) fn route_key_with_event")
+        .nth(1)
+        .expect("route_key_with_event present")
+        .split("fn dispatch_routed")
+        .next()
+        .expect("routing body");
+    assert_eq!(
+        routing_body.matches("strokes.push(key.clone())").count(),
+        1,
+        "pending buffer grows by one stroke in exactly the Pending arm"
+    );
+    assert!(
+        routing_body.contains("pending_chord = None"),
+        "match/mismatch/timeout paths clear the pending buffer"
+    );
+    assert!(
+        body.contains("KEY_CHORD_PENDING_TIMEOUT_MS"),
+        "stale pending chords expire via the budget constant"
+    );
+}
+
+#[test]
+fn centered_overlay_work_is_bounded_and_scrim_is_single_pass() {
+    // Phase 24.4 (plan 084 task 7): the centered Command Centre surface must
+    // stay deterministic — one token-driven full-window scrim fill, one
+    // window-level host, layer lifecycle confined to the reconcile bridge,
+    // menu items bounded at session construction, window-bounded geometry with
+    // no document-size dependency, and no blur/filter/offscreen/JS/IPC/IO work
+    // on the paint/layout path.
+    let primitives =
+        fs::read_to_string("src/shell/primitives.rs").expect("primitives source readable");
+    let scrim_body = primitives
+        .split("pub(crate) fn paint_scrim")
+        .nth(1)
+        .expect("paint_scrim present")
+        .split("\n#[cfg(test)]")
+        .next()
+        .expect("paint_scrim body");
+    assert_eq!(
+        scrim_body.matches("scene.fill(").count(),
+        1,
+        "paint_scrim is exactly one Scene::fill"
+    );
+    assert!(
+        scrim_body.contains("surface.scrim"),
+        "scrim color is token-driven"
+    );
+    assert!(
+        scrim_body.contains("opacity.scrim"),
+        "scrim opacity is token-driven"
+    );
+    for forbidden in ["draw_blurred_rounded_rect", "offscreen", "filter"] {
+        assert!(
+            !scrim_body.contains(forbidden),
+            "scrim must not blur/filter/offscreen: {forbidden}"
+        );
+    }
+
+    let host = fs::read_to_string("src/masonry_package_region.rs").expect("host source readable");
+    let host_body = non_test_body(&host);
+    assert_eq!(
+        host_body
+            .matches("paint_scrim(scene, self.window_rect, &self.ui_theme)")
+            .count(),
+        1,
+        "centered host paints exactly one scrim fill per paint pass"
+    );
+    assert!(
+        host_body.contains("self.window_rect = working_area"),
+        "scrim bounds come from window geometry"
+    );
+    assert!(
+        host_body.contains("size.to_rect()"),
+        "window bounds derive from layout size, not document metrics"
+    );
+    for forbidden in [
+        "draw_blurred_rounded_rect",
+        "offscreen",
+        "filter",
+        "Deno.core",
+        "op_clay_",
+        "std::fs",
+        "TcpStream",
+        "reqwest",
+        "visible_line_count",
+        "document_state",
+    ] {
+        assert!(
+            !host_body.contains(forbidden),
+            "centered host paint/layout must not blur/filter, run JS/IPC/IO, or depend on document size: {forbidden}"
+        );
+    }
+
+    let sdui = fs::read_to_string("src/masonry_sdui.rs").expect("sdui source readable");
+    let sdui_body = non_test_body(&sdui);
+    assert!(
+        sdui_body.contains("overlay.anchor != PackageOverlayAnchor::Centered"),
+        "pane-local host filters centered overlays out"
+    );
+    assert!(
+        sdui_body.contains("overlay.anchor == PackageOverlayAnchor::Centered"),
+        "window-level layer receives only centered overlays"
+    );
+
+    let driver = fs::read_to_string("src/driver/mod.rs").expect("driver source readable");
+    let driver_body = non_test_body(&driver);
+    assert!(
+        driver_body.contains("centered_layer_id: Option<WidgetId>"),
+        "driver owns one optional window-level layer"
+    );
+    assert!(
+        !driver_body.contains("centered_layer_ids:"),
+        "exactly one centered layer, never a collection"
+    );
+    let sync_body = driver_body
+        .split("fn sync_centered_layer")
+        .nth(1)
+        .expect("sync_centered_layer present");
+    assert!(
+        sync_body.contains("reconcile_centered_overlay_layer"),
+        "snapshot sync routes through the retained-layer bridge"
+    );
+    for forbidden in ["add_layer(", "remove_layer("] {
+        assert!(
+            !sync_body.contains(forbidden),
+            "layer lifecycle stays in the reconcile bridge: {forbidden}"
+        );
+    }
+
+    let session =
+        fs::read_to_string("src/shell/transient_menu.rs").expect("session source readable");
+    let session_body = non_test_body(&session);
+    assert!(
+        session_body.contains("const MAX_ITEMS: usize = TRANSIENT_MENU_MAX_ITEMS;"),
+        "menu item bound aliases the documented budget constant"
+    );
+    assert!(
+        session_body.contains("take(MAX_ITEMS)"),
+        "menu items bounded at session construction"
+    );
+}

@@ -605,7 +605,7 @@ Phase 20.1 expanded the typed token catalog from five domains to ten and added u
 
 - **Typed token catalog**: five new domains (`dimension`, `elevation`, `motion-duration`, `z-level`, `density`) joined the lexical five (`color-role`, `spacing`, `radius`, `typography`, `opacity`) in `ThemeTokenType`. The core fallback catalog grew from ~21 to 61 tokens additively; no legacy token was renamed or repurposed.
 - **Typography hierarchy**: seven semantic `UiTextVariant` tokens (`typography.body`, `typography.title`, `typography.status`, `typography.display`, `typography.section`, `typography.detail`, `typography.caption`) with user-owned `UiTypographyHierarchy` scale ratios, delivered atomically through the existing [`theme.setTypography`](theme/set-typography.md) API via an optional `hierarchy` object. Omission preserves Clay defaults; partial hierarchies are rejected atomically.
-- **Typed UI design-token overrides**: `ActiveTheme` gained a `design_tokens` field carrying validated typed UI overrides (dimension, elevation, motion-duration, z-level, density, color-role, spacing, radius, opacity) from `clay.contributions.designTokens`. These are validated server-side against core token types and domain bounds, then resolved client-side into `ResolvedUiTheme` — a cached registry serving paint/layout hot paths with no per-frame parsing or IPC.
+- **Typed UI design-token overrides**: `ActiveTheme` gained a `design_tokens` field carrying validated typed UI overrides (dimension, elevation, motion-duration, z-level, density, color-role, spacing, radius, opacity) from `clay.contributions.designTokens`. These are validated server-side against core token types and domain bounds, then resolved client-side into `ResolvedUiTheme` — a cached registry serving paint/layout hot paths with no per-frame parsing or IPC. Phase 24.4 adds three core tokens overridable the same way: `surface.scrim`, `opacity.scrim`, and `dimension.overlay.centered.width` (the centered Command Centre surface is Clay-internal; only its token values are customizable, and invalid types/values fail closed before install).
 - **Token-backed panel/sidebar/density defaults**: the legacy hardcoded panel/sidebar dimension constants and density default moved behind typed tokens (`dimension.sidebar.default`, `dimension.panel.side.*`, `dimension.panel.vertical.*`, `density.default`), resolved through `ResolvedUiTheme::panel_defaults()` and `ResolvedUiTheme::density()`. Dimension ordering is validated with fallback to Clay constants on invalid order; density scales only the token-owned UI spacing rhythm (Phase 20.4 component uplift), never panel dimensions or document typography.
 
 ### Configuration surfaces
@@ -721,7 +721,7 @@ User-visible Phase 18.8 configuration surfaces:
 
 | Surface | Status | API / mechanism | Notes |
 |---|---|---|---|
-| Control Center launch key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in command `controlCenter.open`; a default `Ctrl+Shift+P` chord ships in the default behavior manifest and is fully overrideable/removable via `bindKey`/`unbindKey` |
+| Control Center launch key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in command `controlCenter.open`; a default `Ctrl+X Ctrl+P` chord ships in the default behavior manifest and is fully overrideable/removable via `bindKey`/`unbindKey` |
 | Control Center command id | built-in server command | `controlCenter.open` (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`) | A fixed Clay command ID routed by inert behavior manifests after configuration evaluation; not an `init.js` key |
 | Built-in server commands (`workspace.refresh`, `document.focus_active`, `document.open_recent`) | built-in server command | `builtin_server_command_ids` / `builtin_server_command` | Fixed Clay command IDs, not user configuration |
 | Package command/action customization | reused, runtime-backed | [`commands.serverRegisterCommand`](commands/server-register-command.md), [`ui.serverRegisterPanelContribution`](ui/server-register-panel-contribution.md), [`ui.serverRegisterInputContribution`](ui/server-register-input-contribution.md), [`configuration.setPackageOption`](configuration/set-package-option.md) | Package commands, action targets, and `action.default`/`input.default` overrides flow through phase 18.3/18.4 package UI/configuration APIs |
@@ -734,12 +734,13 @@ The expected end-user Control Center configuration is a normal `~/.config/clay/i
 ```js
 import { bindKey, unbindKey } from "clay:keybindings";
 
-// Remove the shipped Ctrl+Shift+P default, then bind a different chord.
-unbindKey("Ctrl+Shift+P", { scope: "global" });
+// Remove the shipped Ctrl+X Ctrl+P default, then bind a different chord
+// (single-stroke or multi-stroke, e.g. "Ctrl+X Ctrl+P" or "Alt+X").
+unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
 bindKey("Alt+X", "controlCenter.open", { scope: "global" });
 ```
 
-`controlCenter.open` is a fixed Clay command ID routed by inert behavior manifests. Phase 24.2 ships the default `Ctrl+Shift+P` chord (Global scope, `ServerFirst` routing) in the default behavior manifest; `bindKey`/`unbindKey` can rebind or remove it — without an explicit unbind the default remains bound. `bindKey` is the documented configuration surface — the transient menu is not a callable `clay:configuration` API and cannot be styled, positioned, filtered, or dismissed through `init.js`. Menu geometry, item count limit (`MAX_ITEMS = 256`), query/label/detail/accessibility bounds, focus policy, fuzzy matcher constants, and built-in command membership are Clay-owned compiled/internal constants, not hidden `init.js` keys.
+`controlCenter.open` is a fixed Clay command ID routed by inert behavior manifests. Phase 24.5 ships the default `Ctrl+X Ctrl+P` chord (Global scope, `ServerFirst` routing; the pre-24.5 single-stroke default was `Ctrl+Shift+P`) in the default behavior manifest; `bindKey`/`unbindKey` can rebind or remove it — without an explicit unbind the default remains bound. `bindKey` is the documented configuration surface — the transient menu is not a callable `clay:configuration` API and cannot be styled, positioned, filtered, or dismissed through `init.js`. Menu geometry, item count limit (`MAX_ITEMS = 256`), query/label/detail/accessibility bounds, focus policy, fuzzy matcher constants, and built-in command membership are Clay-owned compiled/internal constants, not hidden `init.js` keys.
 
 ## Phase 24.3 path mode configuration review
 
@@ -747,7 +748,7 @@ Phase 24.3 added the Path Browser (`controlCenter.openPath`, “Browse Filesyste
 
 | Surface | Status | API / mechanism | Notes |
 |---|---|---|---|
-| Path Browser launch key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in command id `controlCenter.openPath`; a temporary default `Ctrl+Alt+P` chord ships in the default behavior manifest and is fully overrideable/removable via `bindKey`/`unbindKey`; Phase 24.5 may replace the default with a sequence without changing the id |
+| Path Browser launch key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in command id `controlCenter.openPath`; a default `Ctrl+X Ctrl+F` chord (Phase 24.5 sequence default, Global scope, `ServerFirst` routing) ships in the default behavior manifest and is fully overrideable/removable via `bindKey`/`unbindKey` without changing the id |
 | Path Browser command id | built-in server command | `controlCenter.openPath` (`CommandDeclaration::server_intent`, `RoutingPolicy::ServerFirst`) | A fixed Clay command ID routed by inert behavior manifests; not an `init.js` key; the bare id is valid, `clay.controlCenter.openPath` is never valid |
 | Browse listing and session | internal | `BuiltInUserBrowseListing` (`src/server/workspace.rs`), `PathBrowserSession` (`src/shell/path_browser.rs`), `ServerMenuSessions` (`src/server/menu_sessions.rs`) | Clay-owned bounded depth-1 listings and session state; packages cannot open, populate, intercept, or receive paths from the session |
 | Browse authority conversion | internal | activation → `SingleFile` / `Directory` grant | Ephemeral user-authorized browse authority converts into exactly one explicit grant on file open / Alt+Enter workspace open; navigation alone creates no grant; native dialogs remain the fallback capability issuers |
@@ -755,8 +756,9 @@ Phase 24.3 added the Path Browser (`controlCenter.openPath`, “Browse Filesyste
 ```js
 import { bindKey, unbindKey } from "clay:keybindings";
 
-// Remove the temporary Ctrl+Alt+P default, then bind a different chord.
-unbindKey("Ctrl+Alt+P", { scope: "global" });
+// Remove the shipped Ctrl+X Ctrl+F default, then bind a different chord
+// (single-stroke or multi-stroke, e.g. "Ctrl+X Ctrl+F" or "Alt+P").
+unbindKey("Ctrl+X Ctrl+F", { scope: "global" });
 bindKey("Alt+P", "controlCenter.openPath", { scope: "global" });
 ```
 

@@ -1447,37 +1447,33 @@ impl PackageService {
         package_name: &str,
         record: &PackageRecord,
     ) -> Result<(), PackageServiceError> {
+        // Phase 24.5 decision (2026-08-13-2223 decision log): a missing
+        // `language-server` grant no longer blocks loadPackage —
+        // grantLanguageServer degrades independently per the examples
+        // contract, and the capability stays inert because session start is
+        // strictly grant-gated in authorize_language_server. All other
+        // capabilities keep their hard load-time requirement.
+        let required: Vec<&PackagePermission> = record
+            .manifest
+            .clay
+            .permissions
+            .iter()
+            .filter(|capability| **capability != PackagePermission::LanguageServer)
+            .collect();
         let Some(authorization) = self.authorizations.get(package_name) else {
-            let Some(capability) = record.manifest.clay.permissions.first().copied() else {
+            let Some(capability) = required.first().copied() else {
                 return Ok(());
             };
             return Err(PackageServiceError::MissingCapabilityGrant {
                 package_name: package_name.to_string(),
-                capability,
+                capability: *capability,
             });
         };
-        for capability in &record.manifest.clay.permissions {
+        for capability in required {
             if !authorization.grants(*capability) {
                 return Err(PackageServiceError::MissingCapabilityGrant {
                     package_name: package_name.to_string(),
                     capability: *capability,
-                });
-            }
-        }
-        if record
-            .manifest
-            .clay
-            .permissions
-            .contains(&PackagePermission::LanguageServer)
-        {
-            let installed = self
-                .installed
-                .get(package_name)
-                .expect("enabled package must remain installed");
-            if !self.has_current_language_server_grant(package_name, &installed.provenance, record)
-            {
-                return Err(PackageServiceError::MissingLanguageServerGrant {
-                    package_name: package_name.to_string(),
                 });
             }
         }

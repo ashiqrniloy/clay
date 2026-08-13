@@ -310,6 +310,15 @@ Phase 22.3 (2026-08-06) makes each tab an independent client view with its own s
 - **Switch tab**: card click → optimistic `switch_tab` + `TabCommand::Activate`; the server registry reconciles rejections.
 - **Reconnect**: on `Disconnected`/`ConnectionError` for a tab, `start_tab_reconnect` spawns a per-tab task that retries `client::connect_for_reclaim_or_new(tab_id, workspace_root)` with the existing backoff until it succeeds or the tab is removed (per-tab `Arc<AtomicBool>` cancellation flag set by `apply_registry_reconcile`). The fresh session already owns the reclaimed tab's initial document/browser state when `Reclaim` succeeds; after a server reset or TTL eviction, the same persisted root is bound through `New`. The driver swaps its queue into the chrome and every pane view (`reconnect`), re-keys the tab, and re-opens every document it holds through plain `OpenDocument` because the fresh connection has no selected-file capability. It spawns a new event bridge to the same chrome and restores focus when the tab was active. In-flight `pending_opens` are cleared. Split trees and per-pane document state restore from retained `TabChrome`/sessions; a full client process restart selects each persisted root before handshake-bound `New`. Multi-client reclamation remains a 21 ceiling.
 
+### Phase 24.4: centered modal surface accessibility
+
+The active Command Centre centered menu is mounted as one window-level Masonry
+layer above the shell. Its `PackageOverlayHost` reports a named modal Dialog,
+paints the scrim, and swallows scrim pointer events. The menu region reports
+Menu/MenuItem/Status semantics; the result-count Status is stable and polite.
+Masonry focus remains on the originating pane so `PaneDocumentView` remains the
+single keyboard route and close restores the original focus target.
+
 ### Key Invariants
 
 - One connection per tab: separate `ClientEditQueue`/sync state, chrome (SDUI region, panels, overlays, runtime generation), split tree, pane targets, focus policy, and pending-open attribution. Editing in one tab never mutates another tab's state.

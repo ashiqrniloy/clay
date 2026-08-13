@@ -7,13 +7,13 @@ use masonry::parley::style::StyleProperty;
 use masonry::peniko::{Color, Fill};
 
 use crate::client::behavior::{
-    ClientBehaviorState, ClientLocalEdit, ClientUiCommandRoute, CompletionTriggerRoute,
-    LanguageIntelligenceTriggerRoute, RoutedBehavior, ServerIntentRoute,
+    ChordRouteOutcome, ClientBehaviorState, ClientLocalEdit, ClientUiCommandRoute,
+    CompletionTriggerRoute, LanguageIntelligenceTriggerRoute, RoutedBehavior, ServerIntentRoute,
 };
 use crate::perf::{
     budgets::{
         DECORATION_NEAR_VIEWPORT_GUARD_BYTES, DIAGNOSTIC_CACHE_BUDGET_BYTES,
-        SYNTAX_CACHE_BUDGET_BYTES,
+        KEY_CHORD_PENDING_TIMEOUT_MS, SYNTAX_CACHE_BUDGET_BYTES,
     },
     metrics::PerfRecorder,
 };
@@ -206,6 +206,19 @@ pub(crate) struct EditorKeyOutcome {
     pub(crate) client_ui_command: Option<ClientUiCommandRoute>,
     pub(crate) completion_request: Option<EditorCompletionRequestEvent>,
     pub(crate) language_intelligence_request: Option<EditorLanguageIntelligenceRequestEvent>,
+    /// Phase 24.5: the key was consumed by chord bookkeeping (a pending stroke)
+    /// with no dispatchable side effect; the pane must mark it handled so it
+    /// neither inserts text nor bubbles to shell-level handlers.
+    pub(crate) consumed: bool,
+}
+
+/// Phase 24.5: an in-progress multi-stroke chord. Owned by `EditorSurface`
+/// (mutable routing state that must survive across keystrokes); holds only
+/// already-validated `KeyStroke` values from the incoming event stream.
+#[derive(Debug)]
+pub(crate) struct PendingChord {
+    strokes: Vec<KeyStroke>,
+    started_at: std::time::Instant,
 }
 
 impl EditorKeyOutcome {
@@ -216,6 +229,18 @@ impl EditorKeyOutcome {
             client_ui_command: None,
             completion_request: None,
             language_intelligence_request: None,
+            consumed: false,
+        }
+    }
+
+    fn consumed() -> Self {
+        Self {
+            command_outcome: EditorCommandOutcome::unchanged(),
+            server_intent: None,
+            client_ui_command: None,
+            completion_request: None,
+            language_intelligence_request: None,
+            consumed: true,
         }
     }
 
@@ -226,6 +251,7 @@ impl EditorKeyOutcome {
             client_ui_command: None,
             completion_request: None,
             language_intelligence_request: None,
+            consumed: false,
         }
     }
 
@@ -236,6 +262,7 @@ impl EditorKeyOutcome {
             client_ui_command: Some(client_ui_command),
             completion_request: None,
             language_intelligence_request: None,
+            consumed: false,
         }
     }
 
@@ -246,6 +273,7 @@ impl EditorKeyOutcome {
             client_ui_command: None,
             completion_request: Some(completion_request),
             language_intelligence_request: None,
+            consumed: false,
         }
     }
 
@@ -258,6 +286,7 @@ impl EditorKeyOutcome {
             client_ui_command: None,
             completion_request: None,
             language_intelligence_request: Some(language_intelligence_request),
+            consumed: false,
         }
     }
 
@@ -1332,11 +1361,17 @@ pub struct EditorSurface {
     visual_scroll_y: f64,
     last_visual_max_scroll_y: f64,
     follow_visual_end: bool,
+    /// Phase 24.5: an in-progress multi-stroke chord, owned by this surface
+    /// so it survives across keystrokes. Holds only validated `KeyStroke`
+    /// values from the incoming event stream; cleared on match, mismatch,
+    /// timeout, and key paths that bypass the chord matcher.
+    pending_chord: Option<PendingChord>,
     /// One-shot flag: keep the caret sub-line visible on the next paint after a
     /// caret move. Explicit scrolling clears it so the view can move away from
     /// the caret instead of snapping back (the caret-keep-visible logic must
     /// not fight user scrolling).
     pin_caret_visible: bool,
+
     /// Single source of color for the editor + shell paint path (Plan 046 task
     /// 4). Defaults to the Clay theme; task 5 swaps in the active theme at
     /// load/reload. Immutable during paint.
@@ -1740,8 +1775,23 @@ impl EditorSurface {
         self.layout_style_revision = self.layout_style_revision.saturating_add(1);
     }
 
+    /// Phase 24.5: does the installed behavior manifest claim `key` as the
+    /// first stroke of a bound chord (a single-stroke exact match or the
+    /// prefix of a multi-stroke sequence)? Non-mutating and allocation-free;
+    /// widget key handling uses this to give manifest-claimed strokes
+    /// precedence over hard-coded platform shortcuts (e.g. so `Ctrl+X` starts
+    /// the `Ctrl+X Ctrl+P` Command Centre chord instead of being swallowed by
+    /// the hard-coded cut shortcut).
+    pub(crate) fn manifest_claims_chord(&self, key: &KeyStroke) -> bool {
+        self.document
+            .behavior_manifest
+            .as_ref()
+            .is_some_and(|manifest| crate::client::behavior::manifest_claims_chord(manifest, key))
+    }
+
     pub(crate) fn route_key_with_event(&mut self, key: &KeyStroke) -> EditorKeyOutcome {
         if matches!(key.key, KeyCode::Tab) && self.snippet_session.is_some() {
+            self.pending_chord = None;
             let changed = if key.modifiers.shift {
                 self.select_previous_snippet_placeholder()
             } else {
@@ -1750,6 +1800,7 @@ impl EditorSurface {
             return EditorKeyOutcome::client(EditorCommandOutcome::from_changed(changed));
         }
         if matches!(key.key, KeyCode::Escape) && self.snippet_session.take().is_some() {
+            self.pending_chord = None;
             return EditorKeyOutcome::client(EditorCommandOutcome::from_changed(true));
         }
         // Plan 071 task 9: with no menu (widget-handled) or snippet session
@@ -1757,6 +1808,7 @@ impl EditorSurface {
         if matches!(key.key, KeyCode::Escape)
             && (self.selections.selection_count() > 1 || self.has_selection())
         {
+            self.pending_chord = None;
             let changed = self.cancel_multiple_selections();
             return EditorKeyOutcome::client(EditorCommandOutcome::from_changed(changed));
         }
@@ -1768,7 +1820,67 @@ impl EditorSurface {
             return EditorKeyOutcome::unhandled();
         };
 
-        match router.route_key(key) {
+        // Phase 24.5: a stale pending chord cancels on the next keystroke and
+        // the key is re-evaluated as a fresh stroke.
+        if self.pending_chord.as_ref().is_some_and(|pending| {
+            pending.started_at.elapsed()
+                >= std::time::Duration::from_millis(KEY_CHORD_PENDING_TIMEOUT_MS)
+        }) {
+            self.pending_chord = None;
+        }
+
+        let outcome = match &self.pending_chord {
+            Some(pending) => router.route_key_sequence(&pending.strokes, key),
+            None => router.route_key_sequence(&[], key),
+        };
+        match outcome {
+            ChordRouteOutcome::Matched(behavior) => {
+                self.pending_chord = None;
+                self.dispatch_routed(behavior)
+            }
+            ChordRouteOutcome::Pending => {
+                // Keep waiting: extend the buffer and consume the key so it
+                // neither inserts text nor bubbles to shell handlers.
+                let started_at = self
+                    .pending_chord
+                    .as_ref()
+                    .map(|pending| pending.started_at)
+                    .unwrap_or_else(std::time::Instant::now);
+                let mut strokes = self
+                    .pending_chord
+                    .take()
+                    .map(|pending| pending.strokes)
+                    .unwrap_or_default();
+                strokes.push(key.clone());
+                self.pending_chord = Some(PendingChord {
+                    strokes,
+                    started_at,
+                });
+                EditorKeyOutcome::consumed()
+            }
+            ChordRouteOutcome::Mismatch => {
+                // Abandoned chord: clear it and re-evaluate the key fresh so
+                // abandoning a prefix never eats typing (Emacs behavior).
+                self.pending_chord = None;
+                match router.route_key_sequence(&[], key) {
+                    ChordRouteOutcome::Matched(behavior) => self.dispatch_routed(behavior),
+                    ChordRouteOutcome::Pending => {
+                        self.pending_chord = Some(PendingChord {
+                            strokes: vec![key.clone()],
+                            started_at: std::time::Instant::now(),
+                        });
+                        EditorKeyOutcome::consumed()
+                    }
+                    ChordRouteOutcome::Mismatch => self.dispatch_routed(router.route_key(key)),
+                }
+            }
+        }
+    }
+
+    /// Dispatch a routed behavior to its side effect path (Phase 24.5:
+    /// shared by the single-stroke fast path and the chord matcher).
+    fn dispatch_routed(&mut self, behavior: RoutedBehavior) -> EditorKeyOutcome {
+        match behavior {
             RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText(text), completion_trigger) => {
                 let implicit_completion = completion_trigger.or_else(|| {
                     (self
@@ -4478,7 +4590,10 @@ mod tests {
         normalize_visible_text_style_runs, subtract_half_open_range,
     };
     use crate::editor::layout::LayoutCacheKey;
-    use crate::perf::{budgets::SYNTAX_CACHE_BUDGET_BYTES, metrics::PerfRecorder};
+    use crate::perf::{
+        budgets::{KEY_CHORD_PENDING_TIMEOUT_MS, SYNTAX_CACHE_BUDGET_BYTES},
+        metrics::PerfRecorder,
+    };
     use crate::protocol::{
         ActiveTypography, BehaviorManifest, BehaviorScope, BlinkStyle, CaretShape, CaretStyle,
         CommandAuthority, CommandDeclaration, CompletionItemTextFormat, CompletionTrigger,
@@ -6239,6 +6354,140 @@ mod tests {
             outcome.command_outcome.edit_event.unwrap().behavior_version,
             3
         );
+    }
+
+    fn editor_installs_two_stroke_chord_manifest(behavior_version: u32) -> EditorSurface {
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            String::new(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        let mut manifest = BehaviorManifest::minimal_text_editing(behavior_version.into());
+        // `controlCenter.open` is already declared in the default manifest.
+        let g = KeyStroke::new(KeyCode::Character("g".to_string()));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "controlCenter.open".to_string(),
+            sequence: vec![g.clone(), g.clone()],
+            context: KeyBindingContext::Global,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+        editor.install_behavior_manifest(manifest);
+        editor
+    }
+
+    #[test]
+    fn editor_pending_chord_consumes_strokes_and_dispatches_on_completion() {
+        let mut editor = editor_installs_two_stroke_chord_manifest(3);
+        let g = KeyStroke::new(KeyCode::Character("g".to_string()));
+
+        // First stroke: pending — consumed, no text inserted, no dispatch.
+        let first = editor.route_key_with_event(&g);
+        assert!(first.consumed);
+        assert!(!first.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "");
+        assert_eq!(editor.pending_chord.as_ref().unwrap().strokes.len(), 1);
+
+        // Second stroke: exact match dispatches through the server-intent
+        // lane and clears the pending chord.
+        let second = editor.route_key_with_event(&g);
+        assert!(!second.consumed);
+        assert!(matches!(
+            second.server_intent,
+            Some(crate::client::behavior::ServerIntentRoute {
+                ref command_id,
+                routing_policy: RoutingPolicy::ServerFirst,
+            }) if command_id == "controlCenter.open"
+        ));
+        assert!(editor.pending_chord.is_none());
+        assert_eq!(editor.visible_text(), "");
+    }
+
+    #[test]
+    fn editor_abandoned_chord_does_not_eat_the_next_key() {
+        let mut editor = editor_installs_two_stroke_chord_manifest(3);
+        let g = KeyStroke::new(KeyCode::Character("g".to_string()));
+
+        assert!(editor.route_key_with_event(&g).consumed);
+        // Abandon the chord: the unrelated key is re-evaluated fresh and
+        // inserts its text; the prefix "g" is never inserted.
+        let next =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("z".to_string())));
+        assert!(!next.consumed);
+        assert!(next.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "z");
+        assert!(editor.pending_chord.is_none());
+    }
+
+    #[test]
+    fn editor_stale_pending_chord_cancels_on_the_next_key() {
+        let mut editor = editor_installs_two_stroke_chord_manifest(3);
+        let g = KeyStroke::new(KeyCode::Character("g".to_string()));
+
+        assert!(editor.route_key_with_event(&g).consumed);
+        // Backdate the pending chord past the timeout.
+        editor.pending_chord.as_mut().unwrap().started_at = std::time::Instant::now()
+            - std::time::Duration::from_millis(KEY_CHORD_PENDING_TIMEOUT_MS + 1);
+        // The stale chord cancels; the incoming key is re-evaluated fresh
+        // (unbound "x" inserts its text) and the chord state is cleared.
+        let next =
+            editor.route_key_with_event(&KeyStroke::new(KeyCode::Character("x".to_string())));
+        assert!(!next.consumed);
+        assert!(next.command_outcome.changed);
+        assert_eq!(editor.visible_text(), "x");
+        assert!(editor.pending_chord.is_none());
+    }
+
+    #[test]
+    fn editor_pending_chord_buffer_never_exceeds_longest_bound_sequence() {
+        // Phase 24.5: the pending buffer grows by one validated stroke per
+        // Pending outcome, and the matcher reports Pending only while the
+        // candidate is a strict prefix of some rule, so the buffer can never
+        // exceed the longest bound sequence.
+        let mut editor = EditorSurface::default();
+        editor.load_snapshot(
+            1,
+            2,
+            String::new(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        let mut manifest = BehaviorManifest::minimal_text_editing(3);
+        manifest.commands.push(CommandDeclaration::server_intent(
+            "workspace.refresh",
+            "Refresh Workspace",
+        ));
+        let a = KeyStroke::new(KeyCode::Character("a".to_string()));
+        let b = KeyStroke::new(KeyCode::Character("b".to_string()));
+        let c = KeyStroke::new(KeyCode::Character("c".to_string()));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "workspace.refresh".to_string(),
+            sequence: vec![a.clone(), b.clone(), c.clone()],
+            context: KeyBindingContext::Global,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+        editor.install_behavior_manifest(manifest);
+        let longest = 3usize;
+
+        assert!(editor.route_key_with_event(&a).consumed);
+        assert!(editor.route_key_with_event(&b).consumed);
+        assert_eq!(editor.pending_chord.as_ref().unwrap().strokes.len(), 2);
+        assert!(
+            editor.pending_chord.as_ref().unwrap().strokes.len() <= longest,
+            "pending buffer must never exceed the longest bound sequence"
+        );
+
+        // The completing stroke dispatches and clears the buffer.
+        let done = editor.route_key_with_event(&c);
+        assert!(!done.consumed);
+        assert!(matches!(
+            done.server_intent,
+            Some(crate::client::behavior::ServerIntentRoute {
+                ref command_id,
+                routing_policy: RoutingPolicy::ServerFirst,
+            }) if command_id == "workspace.refresh"
+        ));
+        assert!(editor.pending_chord.is_none());
     }
 
     #[test]

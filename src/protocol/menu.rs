@@ -85,12 +85,15 @@ pub enum TransientMenuFocusPolicyData {
 }
 
 /// Mirrors `TransientMenuOrigin` (shell layer): selects the overlay anchor
-/// (`Bottom`/`Pointer`/`Main`). Phase 24.4 adds `Centered` additively.
+/// (`Bottom`/`Pointer`/`Main`) or, Phase 24.4, the window-centered Command
+/// Centre surface (`Centered`). Additive: `CommandPalette` remains the
+/// compatibility spelling for the bottom origin.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransientMenuOriginData {
     CommandPalette,
     ContextMenu,
     MenuBar,
+    Centered,
 }
 
 /// Activation kind for `ClientMessage::MenuActivate` (Phase 24.3).
@@ -189,6 +192,21 @@ mod tests {
         let frame = codec.encode_server_message(&message).unwrap();
         let restored = codec.decode_server_message(&frame).unwrap();
         assert_eq!(restored, message);
+    }
+
+    #[test]
+    fn centered_origin_snapshot_round_trips_through_codec() {
+        let codec = codec();
+        let mut snapshot = sample_snapshot();
+        snapshot.origin = TransientMenuOriginData::Centered;
+        let message = crate::protocol::ServerMessage::TransientMenuSnapshot(Box::new(snapshot));
+        let frame = codec.encode_server_message(&message).unwrap();
+        let restored = codec.decode_server_message(&frame).unwrap();
+        assert_eq!(restored, message);
+        let crate::protocol::ServerMessage::TransientMenuSnapshot(restored) = restored else {
+            panic!("unexpected message variant");
+        };
+        assert_eq!(restored.origin, TransientMenuOriginData::Centered);
     }
 
     #[test]

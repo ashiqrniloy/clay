@@ -143,6 +143,11 @@ impl Driver {
         reconcile: TabRegistryReconcile,
     ) {
         let active_removed = reconcile.removed.contains(&self.active_tab);
+        if active_removed {
+            // The active tab's window-level surface cannot survive its
+            // server-authoritative removal.
+            self.remove_centered_layer(ctx.render_root(window_id));
+        }
         if !reconcile.removed.is_empty() {
             with_shell(
                 ctx.render_root(window_id),
@@ -177,6 +182,7 @@ impl Driver {
             .flatten()
             {
                 self.editor_widget_id = chrome_id;
+                self.sync_centered_layer(ctx, window_id, chrome_id);
             }
         }
         let cards = reconcile.cards;

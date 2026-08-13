@@ -100,6 +100,9 @@ pub(crate) enum TransientMenuOrigin {
     ContextMenu,
     /// Main-area-anchored menu bar dropdown.
     MenuBar,
+    /// Phase 24.4: window-centered Command Centre surface (command and path
+    /// modes) hosted in a window-level overlay layer with a scrim backdrop.
+    Centered,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,6 +199,7 @@ impl TransientMenuSession {
                 TransientMenuOrigin::ContextMenu
             }
             crate::protocol::TransientMenuOriginData::MenuBar => TransientMenuOrigin::MenuBar,
+            crate::protocol::TransientMenuOriginData::Centered => TransientMenuOrigin::Centered,
         };
         let mut session = Self::new(
             TransientMenuSessionId(snapshot.session_id),

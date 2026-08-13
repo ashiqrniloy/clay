@@ -2583,7 +2583,7 @@ async fn open_command_centre_session(
             resolve_user_browse_seed(workspace, Some(document_id), tab_root.as_deref()).await;
         let plan = UserBrowseListingPlan {
             target: seed.clone(),
-            max_entries: crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS,
+            max_entries: crate::perf::budgets::COMMAND_CENTRE_LISTING_MAX_ENTRIES,
         };
         let mut session = PathBrowserSession::new(seed);
         match execute_user_browse_listing(plan).await {
@@ -7467,10 +7467,17 @@ await loadPackage("@clay/markdown");"#,
     #[tokio::test]
     async fn control_center_opens_filters_activates_and_cancels() {
         let root = temp_workspace("control-center");
+        // Hermetic configuration root (Phase 24.5, task 8): without an
+        // explicit root this test fell back to the real ~/.config/clay and
+        // hung whenever that directory contains an init.js (reload evaluates
+        // the live user config). An empty init.js reloads cleanly and fast.
+        let config_root = temp_workspace("control-center-config");
+        fs::write(config_root.join("init.js"), "").unwrap();
         let mut config = super::super::ServerConfig::new(crate::ipc::IpcEndpoint::from_argument(
             "control-center-open",
         ));
         config.workspace_roots.push(root.clone());
+        config.configuration_root = Some(config_root);
         let server = super::super::IpcServer::new(config);
         let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
         let open = |behavior_version| ClientMessage::CommandIntent {
@@ -7788,9 +7795,15 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn runtime_generation_replacement_cancels_open_control_center() {
-        let server = super::super::IpcServer::new(super::super::ServerConfig::new(
-            crate::ipc::IpcEndpoint::from_argument("control-center-generation"),
+        // Hermetic configuration root (Phase 24.5, task 8): same real-config
+        // fallback hazard as control_center_opens_filters_activates_and_cancels.
+        let config_root = temp_workspace("control-center-generation-config");
+        fs::write(config_root.join("init.js"), "").unwrap();
+        let mut config = super::super::ServerConfig::new(crate::ipc::IpcEndpoint::from_argument(
+            "control-center-generation",
         ));
+        config.configuration_root = Some(config_root);
+        let server = super::super::IpcServer::new(config);
         let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
         let mut behavior_version = server.behavior.lock().await.version();
         connection
@@ -9010,15 +9023,16 @@ await loadPackage("@clay/markdown");"#,
         }
         let markdown_manifest = markdown_manifest.expect("markdown mode layer must be published");
         // The default Control Center binding survives mode activation: the
-        // layer carries the Global Ctrl+Shift+P rule from the shared default
-        // commands/keymaps.
+        // layer carries the Global `Ctrl+X Ctrl+P` chord from the shared
+        // default commands/keymaps.
         assert!(markdown_manifest.keymaps.iter().any(|rule| {
             rule.command_id == "controlCenter.open"
                 && rule.context == KeyBindingContext::Global
-                && rule.sequence.len() == 1
-                && rule.sequence[0].key == KeyCode::Character("p".to_string())
+                && rule.sequence.len() == 2
+                && rule.sequence[0].key == KeyCode::Character("x".to_string())
                 && rule.sequence[0].modifiers.control
-                && rule.sequence[0].modifiers.shift
+                && rule.sequence[1].key == KeyCode::Character("p".to_string())
+                && rule.sequence[1].modifiers.control
         }));
 
         let behavior_version = behavior.lock().await.version();

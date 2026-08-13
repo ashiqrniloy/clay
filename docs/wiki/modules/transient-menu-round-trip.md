@@ -140,10 +140,12 @@ keep their exact pre-24.1 path unchanged.
 
 ## Phase 24.2: live catalogue, typed activation, generation invalidation
 
-- **Open**. `controlCenter.open` now ships as a default `Ctrl+Shift+P`
-  binding (`Global`, `ServerFirst`) in the default behavior manifest, and
-  the ID is runtime-bindable (`is_runtime_bindable_command` allowlist), so
-  the menu opens from the routed default key without an `init.js` binding.
+- **Open**. `controlCenter.open` ships as a default `Ctrl+X Ctrl+P`
+  sequence binding (`Global`, `ServerFirst`) in the default behavior
+  manifest (Phase 24.5; pre-24.5 it was the single-stroke `Ctrl+Shift+P`),
+  and the ID is runtime-bindable (`is_runtime_bindable_command` allowlist),
+  so the menu opens from the routed default chord without an `init.js`
+  binding.
   The `CommandIntent` arm clones the active behavior manifest and awaits
   `RuntimeGenerationStore::command_catalogue_snapshot(active_manifest)`, a
   generation-stamped four-source merge (22 built-ins, 38 `shell.client*`
@@ -198,6 +200,16 @@ live query and selection. Activation details changed in 24.2 (see above);
 the Path Browser adds `Navigate` (session stays open) and the
 `OpenFile`/`OpenWorkspace` outcomes (24.3, see [Path Browser](path-browser.md)).
 
+## Phase 24.4 centered accessibility boundary
+
+Centered command/path snapshots remain inert server-owned display data. The
+client derives only a sanitized dialog name, item labels, selected flags, and
+bounded result-count status from the snapshot. The root-layer dialog does not
+own command/path authority or move focus; pane routing continues to enqueue the
+existing opaque session intents. Modal containment consumes unsupported input
+locally, while activation/query/backspace/selection retain their existing
+server-authoritative behavior.
+
 ## Performance and budgets
 
 - One bounded snapshot per keystroke (~70 KiB worst case, under the 1 MiB
@@ -205,8 +217,18 @@ the Path Browser adds `Navigate` (session stays open) and the
   guards the ceiling. A diff protocol was rejected unless profiling demands.
 - One catalogue snapshot per menu open (not per keystroke) and one bounded
   fuzzy scan per query; open latency is one snapshot merge + one projection.
-- No advisory latency constants were added — measurements did not justify
-  them (task 8).
+- Phase 24.5 adds advisory latency constants (`src/perf/budgets.rs`) —
+  `COMMAND_CENTRE_OPEN_P95_BUDGET_MS = 50`, `COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS = 4`,
+  `COMMAND_CENTRE_LISTING_MAX_ENTRIES = TRANSIENT_MENU_MAX_ITEMS` (aliased
+  so a menu-cap change cannot silently unbind listings), and
+  `COMMAND_CENTRE_LISTING_PAYLOAD_BUDGET_BYTES = 64 KiB` — advisory per the
+  Phase 21 promotion rule (no wall-clock CI gate). The deterministic CI
+  guards are the work-count/payload checks in
+  `tests/editor_performance_invariants.rs`
+  (`command_centre_open_filter_and_listing_stay_bounded_off_hot_paths`).
+  The round trip itself is unchanged: filter updates stay local bounded
+  fuzzy scores, relists stay connection-executed, and the listing reads
+  only `document_id()` metadata, never document text.
 - The no-hot-path rule still holds: handlers run on the server; the client
   key path only enqueues non-blocking `try_send` intents.
 

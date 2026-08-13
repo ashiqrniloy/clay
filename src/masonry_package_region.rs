@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 
-use masonry::accesskit::{Node, NodeId, Role};
+use masonry::accesskit::{Live, Node, NodeId, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, MutateCtx, NewWidget,
@@ -56,7 +56,7 @@ use crate::shell::package_ui::{
     MenuA11y, PackageOverlayAnchor, PackageUiComponentTree, PackageUiListItem,
     PackageUiRuntimeState, TransientPackageOverlay,
 };
-use crate::shell::primitives::paint_tooltip_shell;
+use crate::shell::primitives::{paint_scrim, paint_tooltip_shell};
 use crate::shell::theme::{ResolvedUiTheme, SduiThemeStyle};
 use crate::shell::{
     FixedPackagePanel, FixedSlotId, InteractionState, PanelChrome, component_state_color,
@@ -83,6 +83,17 @@ enum PackageChildKey {
 struct PackagePodRecord {
     id: WidgetId,
     kind: String,
+}
+
+const MENU_A11Y_NODE_PREFIX: u64 = 0xD000_0000_0000_0000;
+const MENU_A11Y_REGION_MASK: u64 = 0x0000_7FFF_FFFF_FFFF;
+
+fn stable_menu_a11y_node_id(region_id: WidgetId, slot: u16) -> NodeId {
+    NodeId::from(
+        MENU_A11Y_NODE_PREFIX
+            | ((region_id.to_raw() & MENU_A11Y_REGION_MASK) << 9)
+            | u64::from(slot),
+    )
 }
 
 /// Clay-owned container reconciling a package_ui component tree into a retained
@@ -751,16 +762,17 @@ impl Widget for PackageRegionWidget {
         _props: &PropertiesRef<'_>,
         node: &mut Node,
     ) {
-        // Plan 070 step 13f: a hosted transient menu reports a `Menu`/
-        // `MenuItem`/`Status` a11y subtree built from the menu payload, excluding
-        // the generic reconciled subtree (which would report `Group`/`ListItem`)
-        // so the screen-reader contract matches the legacy
-        // `collect_active_menu_accessibility_entries` path.
+        // Plan 070 step 13f + Phase 24.4: a hosted transient menu reports a
+        // stable `Menu`/`MenuItem`/`Status` subtree built from the menu payload,
+        // excluding the generic reconciled subtree.
         if let Some(menu) = &self.menu_a11y {
             node.set_label(menu.prompt.clone());
-            let mut children = Vec::new();
-            for item in &menu.items {
-                let id = NodeId::from(WidgetId::next());
+            if menu.result_count.is_some() {
+                node.set_modal();
+            }
+            let mut children = Vec::with_capacity(menu.items.len() + 1);
+            for (index, item) in menu.items.iter().enumerate() {
+                let id = stable_menu_a11y_node_id(ctx.widget_id(), 2 + index as u16);
                 let label = if item.selected {
                     format!("{} selected", item.label)
                 } else {
@@ -768,13 +780,17 @@ impl Widget for PackageRegionWidget {
                 };
                 let mut item_node = Node::new(Role::MenuItem);
                 item_node.set_label(label);
+                item_node.set_selected(item.selected);
                 ctx.tree_update().nodes.push((id, item_node));
                 children.push(id);
             }
-            if let Some(status) = &menu.status {
-                let id = NodeId::from(WidgetId::next());
+            if let Some(status) = menu.result_count.as_ref().or(menu.status.as_ref()) {
+                let id = stable_menu_a11y_node_id(ctx.widget_id(), 1);
                 let mut status_node = Node::new(Role::Status);
                 status_node.set_label(status.clone());
+                if menu.result_count.is_some() {
+                    status_node.set_live(Live::Polite);
+                }
                 ctx.tree_update().nodes.push((id, status_node));
                 children.push(id);
             }
@@ -2918,9 +2934,10 @@ struct HostedOverlay {
 /// it does not block the region outside — the Step-7 bounding-rect caveat) and
 /// stacked `z.overlay` < `z.modal` < `z.tooltip` (children_ids order; Masonry
 /// paints first→last and hit-tests in reverse, so the last child is topmost).
-/// The host fills the working area but paints only the tooltip-shell chrome —
-/// the editor/sidebar show through, and pointer events outside an overlay's rect
-/// bubble up to `EditorWidget`.
+/// The host fills its parent bounds for absolute placement. Editor-local hosts
+/// paint only tooltip-shell chrome and remain pointer-transparent outside their
+/// overlay rects; the centered root-layer host additionally paints one full
+/// window scrim and shields the base layer.
 pub(crate) struct PackageOverlayHost {
     overlays: Vec<HostedOverlay>,
     typography: TypographyRegistry,
@@ -2932,6 +2949,16 @@ pub(crate) struct PackageOverlayHost {
     main_rect: Rc<Cell<Rect>>,
     /// Overlay rects computed in layout, read in paint for the chrome.
     overlay_rects: Vec<Rect>,
+    /// Whether this host is the Clay-owned window-level centered layer.
+    centered: bool,
+    /// Full root bounds cached by layout for the centered scrim fill.
+    window_rect: Rect,
+    /// Sanitized accessible name for the centered dialog.
+    dialog_label: Option<String>,
+    /// Focus target to restore after scrim pointer events. The centered menu
+    /// routes keys through the originating pane instead of creating a second
+    /// focus stack.
+    focus_restore_target: Option<WidgetId>,
 }
 
 impl PackageOverlayHost {
@@ -2942,6 +2969,25 @@ impl PackageOverlayHost {
             ui_theme: ResolvedUiTheme::default(),
             main_rect,
             overlay_rects: Vec::new(),
+            centered: false,
+            window_rect: Rect::ZERO,
+            dialog_label: None,
+            focus_restore_target: None,
+        }
+    }
+
+    /// Create the Clay-owned root-layer host for a centered Command Centre
+    /// menu. Its root bounds are the window, not an editor pane.
+    pub(crate) fn new_centered() -> Self {
+        Self {
+            centered: true,
+            ..Self::new(Rc::new(Cell::new(Rect::ZERO)))
+        }
+    }
+
+    pub(crate) fn set_focus_restore_target(&mut self, target: Option<WidgetId>) {
+        if self.focus_restore_target.is_none() {
+            self.focus_restore_target = target;
         }
     }
 
@@ -2959,6 +3005,12 @@ impl PackageOverlayHost {
     ) {
         self.typography = typography;
         self.ui_theme = ui_theme;
+        self.dialog_label = self.centered.then(|| {
+            overlays
+                .iter()
+                .find_map(|overlay| overlay.menu_a11y.as_ref().map(|menu| menu.prompt.clone()))
+                .unwrap_or_else(|| "Command Centre".to_string())
+        });
         let typography = self.typography.clone();
         let ui_theme = self.ui_theme.clone();
 
@@ -2985,6 +3037,7 @@ impl PackageOverlayHost {
                 region
                     .widget
                     .reconcile_tree_live(&mut region.ctx, &overlay.component);
+                region.ctx.request_accessibility_update();
             } else {
                 let mut region = PackageRegionWidget::new();
                 region.set_render_context(typography.clone(), ui_theme.clone());
@@ -3005,11 +3058,32 @@ impl PackageOverlayHost {
             ctx.children_changed();
         }
         ctx.request_layout();
+        ctx.request_accessibility_update();
     }
 }
 
 impl Widget for PackageOverlayHost {
     type Action = NoAction;
+
+    fn on_pointer_event(
+        &mut self,
+        ctx: &mut EventCtx<'_>,
+        _props: &mut PropertiesMut<'_>,
+        event: &PointerEvent,
+    ) {
+        if !self.centered {
+            return;
+        }
+        if matches!(event, PointerEvent::Down(..))
+            && let Some(target) = self.focus_restore_target
+        {
+            // Scrim clicks are modal but do not move focus into the transient
+            // layer; keep keyboard routing and close-time restoration on the
+            // originating pane.
+            ctx.set_focus(target);
+        }
+        ctx.set_handled();
+    }
 
     fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
         for hosted in &mut self.overlays {
@@ -3029,13 +3103,24 @@ impl Widget for PackageOverlayHost {
             bc.constrain(Size::new(900.0, 600.0))
         };
         let working_area = size.to_rect();
+        self.window_rect = working_area;
         let main_rect = self.main_rect.get();
         // Content inset matching the legacy overlay paint (`spacing.panel` from
         // the top edge; the row rect supplies the left indent).
         let overlay_padding = self.ui_theme.scalar_f64("spacing.panel").unwrap_or(16.0);
+        let centered_width = self
+            .ui_theme
+            .dimension("dimension.overlay.centered.width")
+            .unwrap_or(640.0);
         self.overlay_rects.clear();
         for hosted in &mut self.overlays {
-            let rect = hosted.anchor.rect(working_area, main_rect);
+            let rect = if self.centered {
+                hosted
+                    .anchor
+                    .rect_with_centered_width(working_area, main_rect, centered_width)
+            } else {
+                hosted.anchor.rect(working_area, main_rect)
+            };
             self.overlay_rects.push(rect);
             let content_size = Size::new(rect.width(), (rect.height() - overlay_padding).max(1.0));
             let _ = ctx.run_layout(
@@ -3051,6 +3136,11 @@ impl Widget for PackageOverlayHost {
     }
 
     fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
+        if self.centered {
+            // Root-layer paint runs above the complete shell/base layer; the
+            // scrim therefore dims splits and tab chrome before the menu shell.
+            paint_scrim(scene, self.window_rect, &self.ui_theme);
+        }
         // Tooltip-shell chrome behind each overlay; the children paint their
         // component content on top during the child pass.
         for rect in &self.overlay_rects {
@@ -3059,7 +3149,11 @@ impl Widget for PackageOverlayHost {
     }
 
     fn accessibility_role(&self) -> Role {
-        Role::Group
+        if self.centered {
+            Role::Dialog
+        } else {
+            Role::Group
+        }
     }
 
     fn accessibility(
@@ -3069,7 +3163,12 @@ impl Widget for PackageOverlayHost {
         node: &mut Node,
     ) {
         // Children (the overlay regions) flow into the a11y tree by default.
-        node.set_label("Package overlays");
+        if self.centered {
+            node.set_label(self.dialog_label.as_deref().unwrap_or("Command Centre"));
+            node.set_modal();
+        } else {
+            node.set_label("Package overlays");
+        }
     }
 
     fn children_ids(&self) -> ChildrenIds {
@@ -3077,13 +3176,10 @@ impl Widget for PackageOverlayHost {
     }
 
     fn accepts_pointer_interaction(&self) -> bool {
-        // The host fills the working area (to place overlays at absolute anchor
-        // rects) but must NOT intercept pointer events itself: returning `false`
-        // keeps it transparent to hit-testing so clicks outside an overlay's rect
-        // fall through to the SDUI region / editor below (the Step-7
-        // bounding-rect caveat). The overlay regions (children) still hit-test
-        // and handle their own clicks.
-        false
+        // Local hosts stay transparent outside their bounded overlay rects;
+        // the centered root layer is a modal window shield, so scrim clicks do
+        // not reach the editor/base layer.
+        self.centered
     }
 }
 
@@ -4146,6 +4242,101 @@ mod tests {
             Vec::new(),
             z,
         )
+    }
+
+    fn hosted_centered_overlay_host(
+        overlays: Vec<TransientPackageOverlay>,
+    ) -> (RenderRoot, WidgetId) {
+        let host_widget = NewWidget::new(PackageOverlayHost::new_centered());
+        let host_id = host_widget.id();
+        let mut rr = RenderRoot::new(host_widget, |_| {}, render_root_options());
+        rr.edit_widget(host_id, |mut w| {
+            let mut host = w
+                .try_downcast::<PackageOverlayHost>()
+                .expect("centered overlay host");
+            host.widget.sync_overlays(
+                &mut host.ctx,
+                overlays,
+                TypographyRegistry::default(),
+                ResolvedUiTheme::default(),
+            );
+        });
+        let _ = rr.redraw();
+        (rr, host_id)
+    }
+
+    #[test]
+    fn centered_overlay_host_clamps_width_and_reuses_layer_on_resize() {
+        let overlays = vec![make_overlay(
+            "menu",
+            PackageOverlayAnchor::Centered,
+            "z.overlay",
+            json!({"kind": "label", "id": "menu.l", "text": "centered"}),
+        )];
+        let (mut rr, host_id) = hosted_centered_overlay_host(overlays);
+        let region_id = rr
+            .get_widget(host_id)
+            .expect("host present")
+            .downcast::<PackageOverlayHost>()
+            .expect("a centered overlay host")
+            .overlays[0]
+            .pod
+            .id();
+        let initial = *rr
+            .get_widget(region_id)
+            .expect("centered region present")
+            .ctx();
+        let initial_origin = initial.to_window(Point::ZERO);
+        assert!((initial_origin.x - 130.0).abs() < 1.0);
+        assert!((initial_origin.y - 204.0).abs() < 1.0);
+        assert!((initial.size().width - 640.0).abs() < 1.0);
+        assert!(
+            rr.get_widget(host_id)
+                .expect("host present")
+                .ctx()
+                .accepts_pointer_interaction(),
+            "centered root layer shields scrim clicks"
+        );
+
+        rr.handle_window_event(masonry::core::WindowEvent::Resize(PhysicalSize::new(
+            300, 200,
+        )));
+        let _ = rr.redraw();
+        let resized = *rr
+            .get_widget(region_id)
+            .expect("same centered region remains")
+            .ctx();
+        let resized_origin = resized.to_window(Point::ZERO);
+        assert!((resized_origin.x - 0.0).abs() < 1.0);
+        assert!((resized_origin.y - 14.0).abs() < 1.0);
+        assert!((resized.size().width - 300.0).abs() < 1.0);
+        assert!(
+            rr.get_widget(host_id).is_some(),
+            "resize keeps one root layer and retained host"
+        );
+    }
+
+    #[test]
+    fn centered_overlay_host_paints_full_window_scrim_before_surface() {
+        let overlays = vec![make_overlay(
+            "menu",
+            PackageOverlayAnchor::Centered,
+            "z.overlay",
+            json!({"kind": "label", "id": "menu.l", "text": "centered"}),
+        )];
+        let (mut rr, host_id) = hosted_centered_overlay_host(overlays);
+        let (scene, _) = rr.redraw();
+        assert!(
+            !scene.encoding().is_empty(),
+            "centered host paints scrim and retained menu content"
+        );
+        let host = rr
+            .get_widget(host_id)
+            .expect("host present")
+            .downcast::<PackageOverlayHost>()
+            .expect("a centered overlay host");
+        assert_eq!(host.window_rect, Rect::new(0.0, 0.0, 900.0, 600.0));
+        assert_eq!(host.overlay_rects.len(), 1);
     }
 
     fn hosted_overlay_host(

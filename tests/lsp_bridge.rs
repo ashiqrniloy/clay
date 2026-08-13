@@ -3,10 +3,8 @@ use std::path::Path;
 use std::process::Command;
 
 use clay::packages::{
-    manager::FakeBackend,
-    permissions::PackagePermission,
-    record::assemble_package_record,
-    service::{PackageService, PackageServiceError},
+    manager::FakeBackend, permissions::PackagePermission, record::assemble_package_record,
+    service::PackageService,
 };
 use clay::protocol::language_intelligence::LanguageIntelligenceFeature;
 
@@ -87,7 +85,7 @@ fn markdown_bridge_package_suite_passes() {
 }
 
 #[test]
-fn markdown_bridge_manifest_is_fixed_opt_in_and_requires_exact_grant() {
+fn markdown_bridge_manifest_is_fixed_opt_in_and_load_tolerates_missing_grant() {
     let manifest_text = fs::read_to_string("packages/lsp-markdown/package.json").unwrap();
     let manifest: serde_json::Value = serde_json::from_str(&manifest_text).unwrap();
     let record = assemble_package_record(&manifest).expect("@clay/lsp-markdown manifest validates");
@@ -129,13 +127,21 @@ fn markdown_bridge_manifest_is_fixed_opt_in_and_requires_exact_grant() {
     service
         .authorize_bundled_defaults("@clay/lsp-markdown", "test")
         .unwrap();
-    assert!(matches!(
-        service.enable("@clay/lsp-markdown"),
-        Err(PackageServiceError::MissingCapabilityGrant {
-            capability: PackagePermission::LanguageServer,
-            ..
-        })
-    ));
+    service
+        .approve_package("@clay/lsp-markdown", "test")
+        .unwrap();
+    // Phase 24.5 decision (2026-08-13-2223): the missing language-server
+    // grant is tolerated at load; the capability stays inert because the
+    // grant store is empty (session start remains grant-gated).
+    service
+        .enable("@clay/lsp-markdown")
+        .expect("missing language-server grant is tolerated at load");
+    assert!(
+        service
+            .language_server_grant("@clay/lsp-markdown", "lsp-markdown.server")
+            .is_none(),
+        "bundled defaults must not auto-grant language-server authority"
+    );
 
     let load = fs::read_to_string("packages/lsp-markdown/dist/load.js").unwrap();
     assert!(load.contains("serverRegisterDocumentAnalyzer"));
@@ -147,7 +153,8 @@ fn markdown_bridge_manifest_is_fixed_opt_in_and_requires_exact_grant() {
 }
 
 #[test]
-fn typescript_javascript_bridge_manifests_are_fixed_opt_in_and_mode_separated() {
+fn typescript_javascript_bridge_manifests_are_fixed_opt_in_mode_separated_and_load_tolerates_missing_grant()
+ {
     for (package, contribution, mode, fixture_root, fixture_files) in [
         (
             "lsp-typescript",
@@ -198,13 +205,20 @@ fn typescript_javascript_bridge_manifests_are_fixed_opt_in_and_mode_separated() 
         service
             .authorize_bundled_defaults(&format!("@clay/{package}"), "test")
             .unwrap();
-        assert!(matches!(
-            service.enable(&format!("@clay/{package}")),
-            Err(PackageServiceError::MissingCapabilityGrant {
-                capability: PackagePermission::LanguageServer,
-                ..
-            })
-        ));
+        service
+            .approve_package(&format!("@clay/{package}"), "test")
+            .unwrap();
+        // Phase 24.5 decision (2026-08-13-2223): tolerated at load, inert
+        // without a grant in the store.
+        service
+            .enable(&format!("@clay/{package}"))
+            .expect("missing language-server grant is tolerated at load");
+        assert!(
+            service
+                .language_server_grant(&format!("@clay/{package}"), &format!("{package}.server"))
+                .is_none(),
+            "bundled defaults must not auto-grant language-server authority"
+        );
 
         let load = fs::read_to_string(format!("packages/{package}/dist/load.js")).unwrap();
         assert!(load.contains("serverRegisterDocumentAnalyzer"));
@@ -226,7 +240,7 @@ fn typescript_javascript_bridge_manifests_are_fixed_opt_in_and_mode_separated() 
 }
 
 #[test]
-fn rust_bridge_manifest_is_fixed_opt_in_and_requires_exact_grant() {
+fn rust_bridge_manifest_is_fixed_opt_in_and_load_tolerates_missing_grant() {
     let manifest_text = fs::read_to_string("packages/lsp-rust/package.json").unwrap();
     let manifest: serde_json::Value = serde_json::from_str(&manifest_text).unwrap();
     let record = assemble_package_record(&manifest).expect("@clay/lsp-rust manifest validates");
@@ -255,13 +269,18 @@ fn rust_bridge_manifest_is_fixed_opt_in_and_requires_exact_grant() {
     service
         .authorize_bundled_defaults("@clay/lsp-rust", "test")
         .unwrap();
-    assert!(matches!(
-        service.enable("@clay/lsp-rust"),
-        Err(PackageServiceError::MissingCapabilityGrant {
-            capability: PackagePermission::LanguageServer,
-            ..
-        })
-    ));
+    service.approve_package("@clay/lsp-rust", "test").unwrap();
+    // Phase 24.5 decision (2026-08-13-2223): tolerated at load, inert
+    // without a grant in the store.
+    service
+        .enable("@clay/lsp-rust")
+        .expect("missing language-server grant is tolerated at load");
+    assert!(
+        service
+            .language_server_grant("@clay/lsp-rust", "lsp-rust.server")
+            .is_none(),
+        "bundled defaults must not auto-grant language-server authority"
+    );
 
     let load = fs::read_to_string("packages/lsp-rust/dist/load.js").unwrap();
     assert!(load.contains("serverRegisterDocumentAnalyzer"));

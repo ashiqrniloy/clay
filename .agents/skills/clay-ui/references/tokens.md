@@ -32,6 +32,7 @@ Core tokens live in `core_theme_value` (`src/shell/theme.rs`) and are the only s
 | `surface.main` | App background |
 | `surface.panel` | Panel background |
 | `surface.overlay` | Floating layer background |
+| `surface.scrim` | Full-window dim behind the centered Command Centre surface (Phase 24.4) |
 | `surface.control` | Button/control background |
 | `surface.list` | List background |
 | `surface.selected` | Selected row/item |
@@ -115,6 +116,7 @@ Editor base UI color keys (`src/editor/theme.rs` `BaseUiColors`, theme-package c
 |-------|-------|-----|
 | `opacity.disabled` | 0.55 | Disabled state |
 | `opacity.full` | 1.0 | Default |
+| `opacity.scrim` | 0.5 | Scrim dim behind the centered Command Centre surface (Phase 24.4) |
 
 ### Dimension (Phase 20.1)
 
@@ -135,6 +137,7 @@ Panel, sidebar, and border logical-pixel defaults. These feed `ResolvedUiTheme::
 | `dimension.scrollbar.width` | 8 | Scrollbar thumb width (Phase 20.2) |
 | `dimension.icon.size` | 16 | Icon slot size (Phase 20.2) |
 | `dimension.kbd.height` | 20 | kbd hint height (Phase 20.2) |
+| `dimension.overlay.centered.width` | 640 | Centered Command Centre surface width, clamped to available window width (Phase 24.4) |
 
 ### Elevation (Phase 20.1)
 
@@ -215,6 +218,23 @@ Theme packages may also ship typed UI design-token overrides via `clay.contribut
 6. Update this file when tokens, variants, or hierarchy defaults change.
 7. **Contrast and fallback correctness are enforced at validation (Phase 20.7).** The active theme's status-chrome token pairs must meet `TEXT_CONTRAST_MIN` (4.5) and `UI_CONTRAST_MIN` (3.0) (`validate_active_theme_contrast`, `src/shell/theme.rs`; `enforce_contrast`, `src/server/ops/theme.rs`) — a below-AA theme is not activated. A package token's `fallback` must be a same-typed Clay core token; type mismatches and invalid units are rejected (`core_fallback_matches_type`, `src/shell/theme.rs`; parsed in `src/packages/record.rs`). Raw colors, raw CSS, and raw sizes in `designTokens` overrides or component `style.*` variables are rejected at load time. These are host-authority checks run inside Clay's Rust host validator; no package-facing op or facade exposes them. See `docs/reference/packages/creating-packages.md` § "Phase 20.7 authoring contract: UI conformance guardrails".
 8. **Code-vs-catalog drift is linted (Phase 20.7).** The `core_theme_value` match arms in `src/shell/theme.rs` must stay in sync with the Core Tokens tables above; `tests/package_ui_conformance.rs::core_token_catalog_matches_tokens_md` fails the build if they drift.
+
+## Phase 24.4 consumption (centered Command Centre)
+
+Phase 24.4 adds three core tokens consumed by the Clay-internal centered
+Command Centre surface: `surface.scrim` (color role), `opacity.scrim` (0.5),
+and `dimension.overlay.centered.width` (640). Consumption policy:
+
+- **Hot path:** all three resolve once at active-theme install into the cached
+  `ResolvedUiTheme` and are read on paint/layout from cache — never re-resolved
+  per frame. The centered host performs exactly one `paint_scrim` fill per
+  paint pass and adds no blur/filter/offscreen work; `dimension.overlay.centered.width`
+  clamps to the available window width.
+- **Authority:** the scrim and centered surface are Clay-owned. Theme packages
+  may override the three typed values through `designTokens` (same validation
+  rules as any core token), but packages cannot paint, configure, or request
+  the centered surface; package overlay anchors remain
+  `working-area` | `active-pane` | `main` | `pointer`.
 
 ## Phase 20.4 consumption (no new tokens)
 

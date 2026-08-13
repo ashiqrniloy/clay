@@ -722,6 +722,19 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0x28, 0x28, 0x28)),
         },
+        // --- Phase 24.4: centered Command Centre surface tokens ---
+        "surface.scrim" => CoreThemeValue {
+            token_type: ColorRole,
+            value: ColorValue(Color::from_rgb8(0x00, 0x00, 0x00)),
+        },
+        "opacity.scrim" => CoreThemeValue {
+            token_type: Opacity,
+            value: F32(0.5),
+        },
+        "dimension.overlay.centered.width" => CoreThemeValue {
+            token_type: Dimension,
+            value: DimensionValue(640.0),
+        },
         _ => return None,
     };
     Some(value)
@@ -1533,6 +1546,22 @@ mod tests {
                 ThemeTokenType::Density,
                 ResolvedThemeValue::Density(DensityLevel::Spacious),
             ),
+            // Phase 24.4: centered Command Centre surface.
+            (
+                "surface.scrim",
+                ThemeTokenType::ColorRole,
+                ResolvedThemeValue::Color(Color::from_rgb8(0x00, 0x00, 0x00)),
+            ),
+            (
+                "opacity.scrim",
+                ThemeTokenType::Opacity,
+                ResolvedThemeValue::F32(0.5),
+            ),
+            (
+                "dimension.overlay.centered.width",
+                ThemeTokenType::Dimension,
+                ResolvedThemeValue::Dimension(640.0),
+            ),
         ];
 
         let mut seen = std::collections::BTreeSet::new();
@@ -1623,6 +1652,9 @@ mod tests {
             "density.compact",
             "density.default",
             "density.spacious",
+            "surface.scrim",
+            "opacity.scrim",
+            "dimension.overlay.centered.width",
         ];
         let mut names = std::collections::BTreeSet::new();
         for token in all_core {
@@ -2054,6 +2086,31 @@ mod tests {
         // Out-of-range opacity.
         assert_eq!(
             validate_design_token_override("opacity.full", &W::Opacity(2.0)),
+            Err(DesignTokenError::TypeMismatch)
+        );
+        // Phase 24.4 centered Command Centre tokens fail closed: type
+        // mismatch, out-of-range dimension, and out-of-range opacity.
+        assert_eq!(
+            validate_design_token_override("surface.scrim", &W::Scalar(0.5)),
+            Err(DesignTokenError::TypeMismatch)
+        );
+        assert_eq!(
+            validate_design_token_override("dimension.overlay.centered.width", &W::Color([0; 4])),
+            Err(DesignTokenError::TypeMismatch)
+        );
+        assert_eq!(
+            validate_design_token_override(
+                "dimension.overlay.centered.width",
+                &W::Scalar(f64::INFINITY)
+            ),
+            Err(DesignTokenError::TypeMismatch)
+        );
+        assert_eq!(
+            validate_design_token_override("dimension.overlay.centered.width", &W::Scalar(-5.0)),
+            Err(DesignTokenError::TypeMismatch)
+        );
+        assert_eq!(
+            validate_design_token_override("opacity.scrim", &W::Opacity(1.5)),
             Err(DesignTokenError::TypeMismatch)
         );
         // Out-of-range motion duration.

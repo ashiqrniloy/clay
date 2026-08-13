@@ -7990,8 +7990,9 @@ mod tests {
 
     #[tokio::test]
     async fn configuration_default_control_center_binding_is_present_and_overridable() {
-        // Phase 24.2: `controlCenter.open` ships a Global Ctrl+Shift+P
-        // default that init.js can unbind and rebind like any other default.
+        // Phase 24.5: `controlCenter.open` ships a Global `Ctrl+X Ctrl+P`
+        // chord default that init.js can unbind and rebind like any other
+        // default.
         let result = ClayJsRuntimeService::default()
             .evaluate_controlled_module(
                 r#"
@@ -7999,11 +8000,11 @@ mod tests {
                 const defaultBinding = listKeyBindings("global").find(
                   (binding) => binding.command === "controlCenter.open"
                 );
-                unbindKey("Ctrl+Shift+P", { scope: "global" });
+                unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
                 bindKey("Ctrl+Alt+P", "controlCenter.open", { scope: "global" });
                 const bindings = listKeyBindings("global");
                 Deno.core.ops.op_clay_runtime_record(
-                  `${defaultBinding?.key}:${bindings.some((binding) => binding.key === "Ctrl+Shift+P")}:${bindings.some((binding) => binding.key === "Ctrl+Alt+P")}`
+                  `${defaultBinding?.key}:${bindings.some((binding) => binding.key === "Ctrl+X Ctrl+P")}:${bindings.some((binding) => binding.key === "Ctrl+Alt+P")}`
                 );
                 "#,
             )
@@ -8016,7 +8017,7 @@ mod tests {
             .find(|rule| rule.command_id == "controlCenter.open")
             .expect("overridden control center binding");
 
-        assert_eq!(result.op_records, vec!["Ctrl+Shift+P:false:true"]);
+        assert_eq!(result.op_records, vec!["Ctrl+X Ctrl+P:false:true"]);
         assert_eq!(rule.context, crate::protocol::KeyBindingContext::Global);
         assert_eq!(
             rule.sequence,
@@ -8037,10 +8038,9 @@ mod tests {
 
     #[tokio::test]
     async fn configuration_default_path_browser_binding_is_present_and_overridable() {
-        // Phase 24.3: `controlCenter.openPath` ships a Global Ctrl+Alt+P
-        // default that init.js can unbind and rebind like any other default;
-        // the command id never changes (Phase 24.5 replaces the chord with
-        // sequence defaults, not the id).
+        // Phase 24.5: `controlCenter.openPath` ships a Global `Ctrl+X Ctrl+F`
+        // chord default that init.js can unbind and rebind like any other
+        // default; the command id never changes.
         let result = ClayJsRuntimeService::default()
             .evaluate_controlled_module(
                 r#"
@@ -8048,11 +8048,11 @@ mod tests {
                 const defaultBinding = listKeyBindings("global").find(
                   (binding) => binding.command === "controlCenter.openPath"
                 );
-                unbindKey("Ctrl+Alt+P", { scope: "global" });
+                unbindKey("Ctrl+X Ctrl+F", { scope: "global" });
                 bindKey("Alt+P", "controlCenter.openPath", { scope: "global" });
                 const bindings = listKeyBindings("global");
                 Deno.core.ops.op_clay_runtime_record(
-                  `${defaultBinding?.key}:${bindings.some((binding) => binding.key === "Ctrl+Alt+P")}:${bindings.some((binding) => binding.key === "Alt+P")}`
+                  `${defaultBinding?.key}:${bindings.some((binding) => binding.key === "Ctrl+X Ctrl+F")}:${bindings.some((binding) => binding.key === "Alt+P")}`
                 );
                 "#,
             )
@@ -8065,7 +8065,7 @@ mod tests {
             .find(|rule| rule.command_id == "controlCenter.openPath")
             .expect("overridden path browser binding");
 
-        assert_eq!(result.op_records, vec!["Ctrl+Alt+P:false:true"]);
+        assert_eq!(result.op_records, vec!["Ctrl+X Ctrl+F:false:true"]);
         assert_eq!(rule.context, crate::protocol::KeyBindingContext::Global);
         assert_eq!(
             rule.sequence,
@@ -8314,6 +8314,134 @@ mod tests {
                     | "editor.clientSelectTextobject.function.inner.current"
             )
         }));
+    }
+
+    #[tokio::test]
+    async fn configuration_unbind_key_sequence_removes_only_the_matching_rule() {
+        // Phase 24.5: unbindKey accepts a multi-stroke sequence and removes
+        // only the rule whose full sequence matches; a single-stroke rule
+        // sharing the first stroke stays intact.
+        let ctrl_x = crate::protocol::KeyStroke {
+            key: crate::protocol::KeyCode::Character("x".to_string()),
+            modifiers: crate::protocol::KeyModifiers {
+                control: true,
+                ..crate::protocol::KeyModifiers::NONE
+            },
+        };
+        let ctrl_p = crate::protocol::KeyStroke {
+            key: crate::protocol::KeyCode::Character("p".to_string()),
+            modifiers: crate::protocol::KeyModifiers {
+                control: true,
+                ..crate::protocol::KeyModifiers::NONE
+            },
+        };
+        let ctrl_y = crate::protocol::KeyStroke {
+            key: crate::protocol::KeyCode::Character("y".to_string()),
+            modifiers: crate::protocol::KeyModifiers {
+                control: true,
+                ..crate::protocol::KeyModifiers::NONE
+            },
+        };
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { bindKey, unbindKey, listKeyBindings } from "clay:keybindings";
+                bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" });
+                // Phase 24.5: the single stroke must not be a strict prefix of
+                // an existing rule, so a chord that shares the first stroke
+                // cannot accompany a single-stroke binding.
+                bindKey("Ctrl+Y", "controlCenter.openPath", { scope: "global" });
+                unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
+                const bindings = listKeyBindings("global");
+                Deno.core.ops.op_clay_runtime_record(`${bindings.some((binding) => binding.key === "Ctrl+X Ctrl+P")}:${bindings.some((binding) => binding.key === "Ctrl+Y" && binding.command === "controlCenter.openPath")}`);
+                "#,
+            )
+            .await
+            .unwrap();
+        let manifest = result
+            .behavior_manifest
+            .expect("published behavior manifest");
+
+        assert_eq!(result.op_records, vec!["false:true"]);
+        assert!(manifest.keymaps.iter().any(|rule| {
+            rule.command_id == "controlCenter.openPath"
+                && rule.sequence.len() == 1
+                && rule.sequence[0] == ctrl_y
+        }));
+        // The sequence rule is gone; the default `Ctrl+X Ctrl+P` rule for the
+        // same command may remain (unbind removes only the matching sequence).
+        let expected_sequence = vec![ctrl_x, ctrl_p];
+        assert!(
+            !manifest
+                .keymaps
+                .iter()
+                .any(|rule| rule.command_id == "controlCenter.open"
+                    && rule.sequence == expected_sequence)
+        );
+    }
+
+    #[tokio::test]
+    async fn configuration_bind_key_sequence_publishes_multi_stroke_rule() {
+        // Phase 24.5: bindKey accepts a space-separated sequence; the op
+        // publishes a rule whose sequence has one stroke per chord.
+        let ctrl_x = crate::protocol::KeyStroke {
+            key: crate::protocol::KeyCode::Character("x".to_string()),
+            modifiers: crate::protocol::KeyModifiers {
+                control: true,
+                ..crate::protocol::KeyModifiers::NONE
+            },
+        };
+        let ctrl_f = crate::protocol::KeyStroke {
+            key: crate::protocol::KeyCode::Character("f".to_string()),
+            modifiers: crate::protocol::KeyModifiers {
+                control: true,
+                ..crate::protocol::KeyModifiers::NONE
+            },
+        };
+        let result = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { bindKey, listKeyBindings } from "clay:keybindings";
+                const bound = bindKey("Ctrl+X Ctrl+F", "workspace.openFuzzyFile", { scope: "global" });
+                const bindings = listKeyBindings("global");
+                Deno.core.ops.op_clay_runtime_record(`${bound.key}:${bindings.some((binding) => binding.key === "Ctrl+X Ctrl+F" && binding.command === "workspace.openFuzzyFile")}`);
+                "#,
+            )
+            .await
+            .unwrap();
+        let manifest = result
+            .behavior_manifest
+            .expect("published behavior manifest");
+
+        assert_eq!(result.op_records, vec!["Ctrl+X Ctrl+F:true"]);
+        let expected = vec![ctrl_x, ctrl_f];
+        assert!(
+            manifest
+                .keymaps
+                .iter()
+                .any(|rule| rule.command_id == "workspace.openFuzzyFile"
+                    && rule.sequence == expected)
+        );
+    }
+
+    #[tokio::test]
+    async fn configuration_bind_key_prefix_collision_is_rejected() {
+        // Phase 24.5: a runtime bindKey that would make a rule a strict
+        // prefix of an existing rule in the same context is rejected before
+        // install (the colliding rule never publishes).
+        let error = ClayJsRuntimeService::default()
+            .evaluate_controlled_module(
+                r#"
+                import { bindKey } from "clay:keybindings";
+                bindKey("g g", "workspace.openFuzzyFile", { scope: "global" });
+                bindKey("g", "controlCenter.open", { scope: "global" });
+                "#,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, ClayRuntimeError::Runtime(_)));
+        assert!(error.to_string().contains("keybindings.bind_failed"));
     }
 
     #[tokio::test]

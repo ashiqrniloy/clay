@@ -814,6 +814,10 @@ fn phase20_2_primitive_documentation_exists_and_is_linked() {
         primitive_doc.contains("paint_tooltip_shell"),
         "ui-chrome-primitives.md must list paint_tooltip_shell primitive"
     );
+    assert!(
+        primitive_doc.contains("paint_scrim"),
+        "ui-chrome-primitives.md must list the Phase 24.4 paint_scrim primitive"
+    );
 
     // Verify the primitive doc is linked from the primitive index.
     let primitive_index = read("docs/reference/primitives/index.md");
@@ -838,7 +842,7 @@ fn phase20_2_primitive_documentation_exists_and_is_linked() {
         "docs/wiki/index.md must link ui-chrome-primitives.md"
     );
 
-    // Verify components.md lists all eight primitives.
+    // Verify components.md lists all eight primitives plus the Phase 24.4 scrim.
     let components = read(".agents/skills/clay-ui/references/components.md");
     assert!(
         components.contains("## Clay-Native Chrome Primitives (internal)"),
@@ -853,6 +857,7 @@ fn phase20_2_primitive_documentation_exists_and_is_linked() {
         "paint_kbd_hint",
         "paint_icon_slot",
         "paint_tooltip_shell",
+        "paint_scrim",
     ] {
         let row_marker = format!("| `{primitive}` | internal |");
         assert!(

@@ -74,22 +74,22 @@ pub(super) fn op_clay_keybindings_unbind_keys(
 ) -> Result<String, JsErrorBox> {
     let (scope, keys) = parse_unbind_table(&request_json)?;
     // Pass 1: validate every chord before mutating the manifest.
-    let mut strokes = Vec::with_capacity(keys.len());
+    let mut sequences = Vec::with_capacity(keys.len());
     for (index, chord) in keys.iter().enumerate() {
-        let stroke = parse_key_chord(chord).map_err(|error| {
+        let sequence = parse_key_sequence(chord).map_err(|error| {
             JsErrorBox::generic(format!(
                 "keybindings.invalid_unbind: entry {}: {error}",
                 index + 1
             ))
         })?;
-        strokes.push(stroke);
+        sequences.push(sequence);
     }
     // Pass 2: unbind each; the last manifest carries the final binding list.
     let clay = state.borrow::<Arc<ClayOpState>>();
     let mut manifest = None;
-    for stroke in &strokes {
+    for sequence in &sequences {
         manifest = Some(
-            clay.unbind_key(stroke, &scope)
+            clay.unbind_key(sequence, &scope)
                 .map_err(manifest_error("keybindings.unbind_failed"))?,
         );
     }
@@ -114,7 +114,7 @@ fn build_rule(
 ) -> Result<KeyBindingRule, JsErrorBox> {
     Ok(KeyBindingRule {
         command_id: validate_command_id(command_id)?,
-        sequence: vec![parse_key_chord(key)?],
+        sequence: parse_key_sequence(key)?,
         context: scope,
         routing_policy: command_routing_policy(command_id)?,
     })
@@ -183,10 +183,10 @@ pub(super) fn op_clay_keybindings_unbind_key(
     let options = parse_options(&options_json, "keybindings.invalid_unbind")?;
     let scope = parse_scope(options.get("scope"), "keybindings.invalid_unbind")?;
     reject_when_clause(options.get("when"), "keybindings.invalid_unbind")?;
-    let stroke = parse_key_chord(&key)?;
+    let sequence = parse_key_sequence(&key)?;
     let manifest = state
         .borrow::<Arc<ClayOpState>>()
-        .unbind_key(&stroke, &scope)
+        .unbind_key(&sequence, &scope)
         .map_err(manifest_error("keybindings.unbind_failed"))?;
     serialize_bindings(&manifest.keymaps)
 }
@@ -255,11 +255,6 @@ fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
             "keybindings.invalid_key: key chord must not be empty",
         ));
     }
-    if trimmed.contains(' ') {
-        return Err(JsErrorBox::generic(
-            "keybindings.invalid_key: multi-stroke key chords are not runtime-backed yet",
-        ));
-    }
 
     let mut modifiers = KeyModifiers::NONE;
     let mut key_part = None;
@@ -302,6 +297,24 @@ fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
         }
     };
     Ok(KeyStroke { key, modifiers })
+}
+
+/// Parse a space-separated key sequence into strokes (Phase 24.5). Each
+/// stroke keeps the existing `+`-modifier grammar exactly; a single-stroke
+/// chord parses as a one-element vec. Leading/trailing/multiple whitespace
+/// collapses via `split_ascii_whitespace`. An empty sequence and any
+/// empty/malformed stroke reject the whole sequence.
+fn parse_key_sequence(chord: &str) -> Result<Vec<KeyStroke>, JsErrorBox> {
+    let strokes: Vec<KeyStroke> = chord
+        .split_ascii_whitespace()
+        .map(parse_key_chord)
+        .collect::<Result<_, _>>()?;
+    if strokes.is_empty() {
+        return Err(JsErrorBox::generic(
+            "keybindings.invalid_key: key sequence must not be empty",
+        ));
+    }
+    Ok(strokes)
 }
 
 fn validate_command_id(command_id: &str) -> Result<String, JsErrorBox> {
@@ -381,9 +394,9 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             // Phase 24.2: the Control Center opens via the command-intent lane
             // (ServerFirst like other server intents).
             | "controlCenter.open"
-            // Phase 24.3: Path Mode opens through the same lane with the same
-            // bindability (temporary Ctrl+Alt+P default; Phase 24.5 sequence
-            // defaults reuse this id).
+            // Phase 24.5: Path Mode opens through the same lane with the same
+            // bindability (Global `Ctrl+X Ctrl+F` chord default, same id as
+            // the Phase 24.3 single-stroke default).
             | "controlCenter.openPath"
             | "documents.serverReloadDocument"
             | "documents.serverGetDocumentStatus"
@@ -517,13 +530,23 @@ fn serialize_bindings(rules: &[KeyBindingRule]) -> Result<String, JsErrorBox> {
 
 pub(super) fn key_binding_json(rule: &KeyBindingRule) -> Value {
     json!({
-        "key": key_chord_string(&rule.sequence[0]),
+        "key": key_sequence_string(&rule.sequence),
         "command": rule.command_id,
         "scope": match rule.context {
             KeyBindingContext::Global => "global",
             _ => "editor",
         },
     })
+}
+
+/// Serialize a stroke sequence the way the user typed it: per-stroke chord
+/// strings joined with single spaces (Phase 24.5).
+pub(super) fn key_sequence_string(sequence: &[KeyStroke]) -> String {
+    sequence
+        .iter()
+        .map(key_chord_string)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub(super) fn key_chord_string(stroke: &KeyStroke) -> String {
@@ -569,6 +592,71 @@ fn manifest_error(
 mod tests {
     use super::{command_routing_policy, is_runtime_bindable_command, validate_command_id};
     use crate::protocol::RoutingPolicy;
+
+    #[test]
+    fn parse_key_sequence_accepts_single_and_multi_stroke_chords() {
+        // Single-stroke chords parse to a one-element vec identical to today.
+        let single = super::parse_key_sequence("Ctrl+S").unwrap();
+        assert_eq!(single.len(), 1);
+        assert_eq!(single, vec![super::parse_key_chord("Ctrl+S").unwrap()]);
+
+        // Multi-stroke: one stroke per space-separated chord, modifiers kept
+        // per stroke (Phase 24.5).
+        let multi = super::parse_key_sequence("Ctrl+X Ctrl+P").unwrap();
+        assert_eq!(multi.len(), 2);
+        assert_eq!(multi[0], super::parse_key_chord("Ctrl+X").unwrap());
+        assert_eq!(multi[1], super::parse_key_chord("Ctrl+P").unwrap());
+
+        // Bare-stroke sequences (Emacs prefix style) parse per stroke.
+        let g_g = super::parse_key_sequence("g g").unwrap();
+        assert_eq!(g_g.len(), 2);
+        assert_eq!(g_g[0], super::parse_key_chord("g").unwrap());
+        assert_eq!(g_g[1], super::parse_key_chord("g").unwrap());
+
+        // Leading/trailing/double whitespace collapses.
+        let collapsed = super::parse_key_sequence("  Ctrl+X   Ctrl+P  ").unwrap();
+        assert_eq!(collapsed.len(), 2);
+        assert_eq!(collapsed, multi);
+    }
+
+    #[test]
+    fn parse_key_sequence_rejects_empty_and_malformed_sequences() {
+        for empty in ["", "   ", "\t"] {
+            let error = super::parse_key_sequence(empty).unwrap_err();
+            assert!(
+                error.to_string().contains("must not be empty"),
+                "{empty:?} must reject"
+            );
+        }
+        // A malformed stroke rejects the whole sequence; the old
+        // "not runtime-backed yet" message is gone (sequences parse now).
+        let error = super::parse_key_sequence("Ctrl+X PgDn").unwrap_err();
+        assert!(error.to_string().contains("unsupported key `PgDn`"));
+        assert!(!error.to_string().contains("not runtime-backed yet"));
+        // Missing key inside one stroke rejects the sequence.
+        assert!(super::parse_key_sequence("Ctrl+ Ctrl+P").is_err());
+        // Unsupported multi-char keys stay rejected per stroke.
+        assert!(super::parse_key_sequence("javascript: Ctrl+P").is_err());
+    }
+
+    #[test]
+    fn key_sequence_string_round_trips_multi_stroke_rules() {
+        let sequence = super::parse_key_sequence("Ctrl+X Ctrl+P").unwrap();
+        assert_eq!(super::key_sequence_string(&sequence), "Ctrl+X Ctrl+P");
+        let sequence = super::parse_key_sequence("g g").unwrap();
+        assert_eq!(super::key_sequence_string(&sequence), "G G");
+
+        // build_rule produces the full vec, and serialization shows every
+        // stroke, not just the first.
+        let rule = super::build_rule(
+            "Ctrl+X Ctrl+P",
+            "controlCenter.open",
+            crate::protocol::KeyBindingContext::Global,
+        )
+        .unwrap();
+        assert_eq!(rule.sequence.len(), 2);
+        assert_eq!(super::key_binding_json(&rule)["key"], "Ctrl+X Ctrl+P");
+    }
 
     #[test]
     fn documented_space_chord_parses_for_manual_completion() {
@@ -657,9 +745,10 @@ mod tests {
 
     #[test]
     fn control_center_open_is_bindable_and_server_routed() {
-        // Phase 24.2: the default Ctrl+Shift+P binding is fully rebindable;
-        // the command passes the bindKey gate and routes ServerFirst like
-        // other server intents (no special-case routing in the overlay).
+        // Phase 24.5: the default `Ctrl+X Ctrl+P` chord binding is fully
+        // rebindable; the command passes the bindKey gate and routes
+        // ServerFirst like other server intents (no special-case routing in
+        // the overlay).
         let command = "controlCenter.open";
         assert!(is_runtime_bindable_command(command));
         assert_eq!(

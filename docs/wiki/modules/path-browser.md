@@ -33,9 +33,9 @@ A user-authorized browse session that lives entirely server-side:
 
 The native file/folder dialogs (`documents.clientOpenFileDialog`,
 workspace-open) remain the fallback capability issuers; path mode never
-disables them. The shipped default is the temporary Global `Ctrl+Alt+P`
-chord; Phase 24.5 replaces it with sequence defaults without changing the
-command id.
+disables them. The shipped default is the Global `Ctrl+X Ctrl+F` sequence
+chord (Phase 24.5; the pre-24.5 temporary default was `Ctrl+Alt+P`, the
+command id never changed).
 
 ## Source files
 
@@ -277,7 +277,7 @@ reachable only from the built-in session):
   only the bound tab + vanished-directory denial, navigation-only creates
   no grants, cross-client denial, tab-switch + disconnect survival,
   reload dismissal).
-- `src/server/js_runtime.rs` — default/unbind/rebind of `Ctrl+Alt+P`
+- `src/server/js_runtime.rs` — default/unbind/rebind of `Ctrl+X Ctrl+F`
   through `clay:keybindings`.
 - `src/protocol/mod.rs` — default keymap contains the path-browser binding.
 - Manual plan: `test-plan/03-files-and-workspace.md` F17–F29,

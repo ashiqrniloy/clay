@@ -58,24 +58,59 @@ impl ClientBehaviorState {
     }
 
     pub(crate) fn route_key(&self, key: &KeyStroke) -> RoutedBehavior {
-        // Phase 22.1: EditorTextFocus rules take precedence over Global rules
-        // (more specific context first). Shell pane commands use Global scope so
-        // they fire even without editor text focus, but an EditorTextFocus
-        // binding for the same chord wins.
+        // Phase 24.5: the single-stroke path delegates to the pure sequence
+        // matcher with an empty pending buffer. A pending prefix cannot
+        // dispatch here (callers with chord state use `route_key_sequence`);
+        // it must not insert text, so it maps to Unhandled.
+        match self.route_key_sequence(&[], key) {
+            ChordRouteOutcome::Matched(behavior) => behavior,
+            ChordRouteOutcome::Pending => RoutedBehavior::Unhandled,
+            ChordRouteOutcome::Mismatch => self.route_unbound_key(key),
+        }
+    }
+
+    /// Pure multi-stroke matcher (Phase 24.5): given the accumulated pending
+    /// strokes and the incoming key, decide whether the extended candidate
+    /// exactly matches a rule (`Matched`), is a strict prefix of some rule
+    /// (`Pending`), or matches nothing (`Mismatch`). Contexts are considered
+    /// in the Phase 22.1 order (EditorTextFocus before Global), and within a
+    /// context an exact match wins over a longer rule's prefix. Allocation-
+    /// free: rules are compared slice-wise against `pending` + `key`.
+    pub(crate) fn route_key_sequence(
+        &self,
+        pending: &[KeyStroke],
+        key: &KeyStroke,
+    ) -> ChordRouteOutcome {
+        let candidate_len = pending.len() + 1;
         let contexts = [
             KeyBindingContext::EditorTextFocus,
             KeyBindingContext::Global,
         ];
         for context in contexts {
-            if let Some(rule) = self.active.keymaps.iter().find(|rule| {
-                rule.context == context
-                    && rule.sequence.len() == 1
-                    && key_matches_binding(&rule.sequence[0], key)
-            }) {
-                return self.dispatch_rule(rule);
+            let mut saw_prefix = false;
+            for rule in self.active.keymaps.iter() {
+                if rule.context != context {
+                    continue;
+                }
+                let sequence = &rule.sequence;
+                if sequence.len() == candidate_len
+                    && sequence[..pending.len()] == *pending
+                    && key_matches_binding(&sequence[pending.len()], key)
+                {
+                    return ChordRouteOutcome::Matched(self.dispatch_rule(rule));
+                }
+                if sequence.len() > candidate_len
+                    && sequence[..pending.len()] == *pending
+                    && key_matches_binding(&sequence[pending.len()], key)
+                {
+                    saw_prefix = true;
+                }
+            }
+            if saw_prefix {
+                return ChordRouteOutcome::Pending;
             }
         }
-        self.route_unbound_key(key)
+        ChordRouteOutcome::Mismatch
     }
 
     /// Dispatch a matched keymap rule to its routed behavior.
@@ -183,6 +218,23 @@ fn key_matches_binding(binding: &KeyStroke, event: &KeyStroke) -> bool {
     }
 }
 
+/// Phase 24.5: non-mutating probe used by widget key handling to give the
+/// behavior manifest precedence over hard-coded platform shortcuts. True
+/// when `key` is the first stroke of any bound rule — a single-stroke exact
+/// match or the prefix of a multi-stroke chord — in any context. That is
+/// exactly the condition under which `route_key_sequence(&[], key)` would
+/// return `Matched` or `Pending` from a fresh pending buffer, so this lets the
+/// widget divert a manifest-claimed first stroke (e.g. `Ctrl+X`, the prefix
+/// of the `Ctrl+X Ctrl+P` Command Centre chord) to the manifest instead of
+/// letting a hard-coded shortcut (e.g. Ctrl+X cut) swallow it. Borrowed only:
+/// no manifest clone or validation, so it is cheap to run on every keystroke.
+pub(crate) fn manifest_claims_chord(manifest: &BehaviorManifest, key: &KeyStroke) -> bool {
+    manifest
+        .keymaps
+        .iter()
+        .any(|rule| !rule.sequence.is_empty() && key_matches_binding(&rule.sequence[0], key))
+}
+
 fn tab_text(manifest: &BehaviorManifest) -> String {
     use crate::protocol::TabMode;
 
@@ -190,6 +242,21 @@ fn tab_text(manifest: &BehaviorManifest) -> String {
         TabMode::InsertSpaces => " ".repeat(manifest.editor_rules.tab.spaces_per_tab as usize),
         TabMode::InsertTabCharacter => "\t".to_string(),
     }
+}
+
+/// Phase 24.5: outcome of routing an incoming key against the accumulated
+/// pending chord. `#[must_use]`: dropping the outcome would swallow either a
+/// dispatch or a cancel decision.
+#[must_use]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ChordRouteOutcome {
+    /// The extended candidate exactly matched a rule; dispatch it.
+    Matched(RoutedBehavior),
+    /// The extended candidate is a strict prefix of some rule; keep waiting.
+    Pending,
+    /// No rule has the extended candidate as a prefix; cancel and re-evaluate
+    /// the incoming key as a fresh stroke.
+    Mismatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,8 +316,8 @@ pub(crate) struct CompletionTriggerRoute {
 #[cfg(test)]
 mod tests {
     use super::{
-        ClientBehaviorState, ClientLocalEdit, ClientUiCommandRoute, CompletionTriggerRoute,
-        RoutedBehavior, ServerIntentRoute,
+        ChordRouteOutcome, ClientBehaviorState, ClientLocalEdit, ClientUiCommandRoute,
+        CompletionTriggerRoute, RoutedBehavior, ServerIntentRoute,
     };
     use crate::protocol::{
         BehaviorManifest, CommandDeclaration, CompletionTrigger, KeyBindingContext, KeyBindingRule,
@@ -294,6 +361,63 @@ mod tests {
         assert_eq!(
             routed,
             RoutedBehavior::ClientEdit(ClientLocalEdit::InsertText("x".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn manifest_claims_chord_prefix_without_swallowing_unbound_shortcuts() {
+        // Phase 24.5: the predicate that lets widget key handling give the
+        // behavior manifest precedence over hard-coded platform shortcuts.
+        // The shipped default manifest binds the Command Centre (`Ctrl+X
+        // Ctrl+P`) and Path Browser (`Ctrl+X Ctrl+F`) Global chords, so their
+        // shared first stroke `Ctrl+X` must be claimed — otherwise the
+        // hard-coded Ctrl+X cut shortcut swallows it and the chord never
+        // starts. Single-stroke hard-coded shortcuts (Ctrl+C copy, Ctrl+V
+        // paste, Ctrl+Z undo) are NOT in the manifest, so they stay unclaimed
+        // and fall through to those shortcuts unchanged.
+        let manifest = BehaviorManifest::minimal_text_editing(1);
+        let ctrl = |c: char| KeyStroke {
+            key: KeyCode::Character(c.to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        };
+        assert!(
+            super::manifest_claims_chord(&manifest, &ctrl('x')),
+            "Ctrl+X is the prefix of the Ctrl+X Ctrl+P / Ctrl+X Ctrl+F chords and must be claimed"
+        );
+        assert!(
+            !super::manifest_claims_chord(&manifest, &ctrl('c')),
+            "Ctrl+C copy is hard-coded, not manifest-bound; stay unclaimed"
+        );
+        assert!(
+            !super::manifest_claims_chord(&manifest, &ctrl('v')),
+            "Ctrl+V paste is hard-coded, not manifest-bound; stay unclaimed"
+        );
+        assert!(
+            !super::manifest_claims_chord(&manifest, &ctrl('z')),
+            "Ctrl+Z undo is hard-coded, not manifest-bound; stay unclaimed"
+        );
+        // The completing stroke of the chord is not a *first* stroke of any
+        // rule, so it is unclaimed from a fresh buffer (it only matches once
+        // the pending Ctrl+X prefix is in place, which `local_key` handles).
+        assert!(
+            !super::manifest_claims_chord(&manifest, &ctrl('p')),
+            "Ctrl+P is only the second stroke; unclaimed from a fresh buffer"
+        );
+        assert!(
+            !super::manifest_claims_chord(&manifest, &ctrl('f')),
+            "Ctrl+F is only the second stroke; unclaimed from a fresh buffer"
+        );
+        // A plain typing key is never claimed, so the guard does not divert
+        // ordinary insertion.
+        assert!(
+            !super::manifest_claims_chord(
+                &manifest,
+                &KeyStroke::new(KeyCode::Character("a".to_string()))
+            ),
+            "plain 'a' is not a chord first stroke"
         );
     }
 
@@ -468,6 +592,179 @@ mod tests {
     }
 
     #[test]
+    fn route_key_sequence_matches_single_stroke_without_regression() {
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest.commands.push(CommandDeclaration::server_intent(
+            "documents.serverSaveDocument",
+            "Save Document",
+        ));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "documents.serverSaveDocument".to_string(),
+            sequence: vec![KeyStroke::new(KeyCode::Character("s".to_string()))],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+        let state = ClientBehaviorState::new(manifest).unwrap();
+        let key = KeyStroke::new(KeyCode::Character("s".to_string()));
+
+        // Phase 24.5: `route_key` delegates to the pure matcher, so the
+        // single-stroke dispatch is identical to the pre-change fast path.
+        let routed = state.route_key(&key);
+        assert_eq!(
+            state.route_key_sequence(&[], &key),
+            ChordRouteOutcome::Matched(routed.clone())
+        );
+        assert!(matches!(
+            routed,
+            RoutedBehavior::ServerIntent(ServerIntentRoute {
+                command_id,
+                ..
+            }) if command_id == "documents.serverSaveDocument"
+        ));
+    }
+
+    #[test]
+    fn route_key_sequence_tracks_a_two_stroke_chord() {
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        // `controlCenter.open` is already declared in the default manifest.
+        let g = KeyStroke::new(KeyCode::Character("g".to_string()));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "controlCenter.open".to_string(),
+            sequence: vec![g.clone(), g.clone()],
+            context: KeyBindingContext::Global,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+        let state = ClientBehaviorState::new(manifest).unwrap();
+
+        // First stroke: strict prefix of the bound sequence.
+        assert_eq!(
+            state.route_key_sequence(&[], &g),
+            ChordRouteOutcome::Pending
+        );
+        // Second stroke: exact match dispatches.
+        assert_eq!(
+            state.route_key_sequence(std::slice::from_ref(&g), &g),
+            ChordRouteOutcome::Matched(RoutedBehavior::ServerIntent(ServerIntentRoute {
+                command_id: "controlCenter.open".to_string(),
+                routing_policy: RoutingPolicy::ServerFirst,
+            }))
+        );
+        // A third stroke is no longer a prefix of the two-stroke rule.
+        assert_eq!(
+            state.route_key_sequence(&[g.clone(), g.clone()], &g),
+            ChordRouteOutcome::Mismatch
+        );
+    }
+
+    #[test]
+    fn route_key_sequence_mismatch_clears_the_chord() {
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest.commands.push(CommandDeclaration::server_intent(
+            "workspace.refresh",
+            "Refresh Workspace",
+        ));
+        let g = KeyStroke::new(KeyCode::Character("g".to_string()));
+        let x = KeyStroke::new(KeyCode::Character("x".to_string()));
+        let z = KeyStroke::new(KeyCode::Character("z".to_string()));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "workspace.refresh".to_string(),
+            sequence: vec![g.clone(), x.clone()],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+        let state = ClientBehaviorState::new(manifest).unwrap();
+
+        assert_eq!(
+            state.route_key_sequence(&[], &g),
+            ChordRouteOutcome::Pending
+        );
+        // The completing stroke dispatches.
+        assert!(matches!(
+            state.route_key_sequence(std::slice::from_ref(&g), &x),
+            ChordRouteOutcome::Matched(_)
+        ));
+        // An unrelated key after the prefix mismatches: the surface cancels
+        // and re-evaluates it fresh, which the matcher reports as unbound.
+        assert_eq!(
+            state.route_key_sequence(&[g], &z),
+            ChordRouteOutcome::Mismatch
+        );
+        assert_eq!(
+            state.route_key_sequence(&[], &z),
+            ChordRouteOutcome::Mismatch
+        );
+    }
+
+    #[test]
+    fn route_key_sequence_keeps_editor_context_precedence_for_exact_matches() {
+        // Same first stroke in both contexts: the EditorTextFocus exact rule
+        // wins even though the Global rule could continue a chord.
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest
+            .commands
+            .push(CommandDeclaration::server_intent("editor.save", "Save"));
+        manifest
+            .commands
+            .push(CommandDeclaration::server_intent("global.save", "Save"));
+        let g = KeyStroke::new(KeyCode::Character("g".to_string()));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "editor.save".to_string(),
+            sequence: vec![g.clone()],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "global.save".to_string(),
+            sequence: vec![g.clone(), g.clone()],
+            context: KeyBindingContext::Global,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+        let state = ClientBehaviorState::new(manifest).unwrap();
+
+        assert!(matches!(
+            state.route_key_sequence(&[], &g),
+            ChordRouteOutcome::Matched(RoutedBehavior::ServerIntent(ServerIntentRoute {
+                command_id,
+                ..
+            })) if command_id == "editor.save"
+        ));
+    }
+
+    #[test]
+    fn route_key_sequence_keeps_editor_context_precedence_for_prefixes() {
+        // A pending continuation in EditorTextFocus wins over an exact
+        // Global match for the same candidate strokes.
+        let mut manifest = BehaviorManifest::minimal_text_editing(1);
+        manifest
+            .commands
+            .push(CommandDeclaration::server_intent("editor.save", "Save"));
+        manifest
+            .commands
+            .push(CommandDeclaration::server_intent("global.save", "Save"));
+        let g = KeyStroke::new(KeyCode::Character("g".to_string()));
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "editor.save".to_string(),
+            sequence: vec![g.clone(), g.clone(), g.clone()],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+        manifest.keymaps.push(KeyBindingRule {
+            command_id: "global.save".to_string(),
+            sequence: vec![g.clone(), g.clone()],
+            context: KeyBindingContext::Global,
+            routing_policy: RoutingPolicy::ServerFirst,
+        });
+        let state = ClientBehaviorState::new(manifest).unwrap();
+
+        // After "g", the next "g" extends the EditorTextFocus prefix instead
+        // of dispatching Global's exact "g g" rule.
+        assert_eq!(
+            state.route_key_sequence(std::slice::from_ref(&g), &g),
+            ChordRouteOutcome::Pending
+        );
+    }
+
+    #[test]
     fn client_routes_server_first_command_as_intent() {
         let mut manifest = BehaviorManifest::minimal_text_editing(1);
         manifest.commands.push(CommandDeclaration::server_intent(
@@ -495,26 +792,36 @@ mod tests {
 
     #[test]
     fn client_routes_control_center_open_default_binding_as_server_intent() {
-        // Phase 24.2: the default manifest's Global Ctrl+Shift+P route
+        // Phase 24.5: the default manifest's Global `Ctrl+X Ctrl+P` chord
         // dispatches through the server-intent lane (no hard-coded chord in
-        // widget event handling).
+        // widget event handling); the first stroke is pending, the second
+        // dispatches.
         let state = ClientBehaviorState::new(BehaviorManifest::minimal_text_editing(1)).unwrap();
-
-        let routed = state.route_key(&KeyStroke {
+        let ctrl_x = KeyStroke {
+            key: KeyCode::Character("x".to_string()),
+            modifiers: KeyModifiers {
+                control: true,
+                ..KeyModifiers::NONE
+            },
+        };
+        let ctrl_p = KeyStroke {
             key: KeyCode::Character("p".to_string()),
             modifiers: KeyModifiers {
                 control: true,
-                shift: true,
                 ..KeyModifiers::NONE
             },
-        });
+        };
 
         assert_eq!(
-            routed,
-            RoutedBehavior::ServerIntent(ServerIntentRoute {
+            state.route_key_sequence(&[], &ctrl_x),
+            ChordRouteOutcome::Pending
+        );
+        assert_eq!(
+            state.route_key_sequence(&[ctrl_x], &ctrl_p),
+            ChordRouteOutcome::Matched(RoutedBehavior::ServerIntent(ServerIntentRoute {
                 command_id: "controlCenter.open".to_string(),
                 routing_policy: RoutingPolicy::ServerFirst,
-            })
+            }))
         );
     }
 

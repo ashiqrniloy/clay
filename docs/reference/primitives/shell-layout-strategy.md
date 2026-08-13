@@ -123,6 +123,15 @@ Package authors declare commands with `commands.serverRegisterCommand` and expos
 
 No bottom transient menu path may run package JavaScript, command handlers, package validation, configuration evaluation, blocking IPC, filesystem, network, shell, AI, WASM, package-manager, package installation, package enable/disable, full-document serialization, raw op, raw CSS, native-widget, or client-side JavaScript work in Masonry paint/layout/pointer/scroll/key/text-event handlers. Paint and layout read installed inert menu/overlay state only; ordinary editor typing remains client-first.
 
+Phase 24.4 presents built-in command and path sessions as one centered
+window-level `PackageOverlayHost` above the shell. `TransientMenuOrigin::Centered`
+uses cached `dimension.overlay.centered.width` and one `paint_scrim` fill from
+`surface.scrim`/`opacity.scrim`; it adds no blur, filter, or offscreen render
+target. Completion, context-menu, menu-bar, and package overlays preserve
+existing local anchors. The centered anchor is Clay-internal, not a package
+`OverlayAnchor` value. The centered host reports modal Dialog/Menu/MenuItem/Status
+accessibility and keeps server-owned input containment on the originating pane.
+
 ### Phase 18.12 Clay-Owned File Browser
 
 The Phase 18.12 file browser is a first-party composition of existing shell primitives, not a new package-owned primitive category. It uses the `left` fixed panel shape for a workspace tree/list and the bottom transient menu shape for fuzzy-open. Both surfaces read bounded server-prepared state and emit inert command intents.

@@ -22,7 +22,8 @@ use crate::{
         SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate, SduiVersion,
     },
     shell::{
-        FixedSlotId, FixedSlotState, PackageUiRuntimeState, PaneSlotLayout, TransientMenuSession,
+        FixedSlotId, FixedSlotState, PackageOverlayAnchor, PackageUiRuntimeState, PaneSlotLayout,
+        TransientMenuSession,
         layout::PaneSlotId,
         theme::{PanelDefaults, SduiThemeStyle},
     },
@@ -38,9 +39,7 @@ use crate::{
 };
 
 #[cfg(test)]
-use crate::shell::{
-    FixedPackagePanel, PackageOverlayAnchor, PackagePanelVisibility, TransientPackageOverlay,
-};
+use crate::shell::{FixedPackagePanel, PackagePanelVisibility, TransientPackageOverlay};
 
 #[cfg(test)]
 const SIDEBAR_WIDTH: f64 = 240.0;
@@ -156,8 +155,8 @@ impl SduiNativeState {
         std::mem::take(&mut self.overlays_dirty)
     }
 
-    /// Snapshot the transient overlays + render context for the overlay host to
-    /// reconcile its retained overlay children (plan 070 step 13e).
+    /// Snapshot all transient overlays + render context. The editor-local host
+    /// and the centered root layer use filtered projections below.
     pub(crate) fn overlays_render_input(
         &self,
     ) -> (
@@ -170,6 +169,32 @@ impl SduiNativeState {
             self.typography.clone(),
             self.ui_theme.clone(),
         )
+    }
+
+    pub(crate) fn local_overlays_render_input(
+        &self,
+    ) -> (
+        Vec<crate::shell::TransientPackageOverlay>,
+        TypographyRegistry,
+        crate::shell::theme::ResolvedUiTheme,
+    ) {
+        let (mut overlays, typography, ui_theme) = self.overlays_render_input();
+        overlays.retain(|overlay| overlay.anchor != PackageOverlayAnchor::Centered);
+        (overlays, typography, ui_theme)
+    }
+
+    /// Snapshot only the Clay-owned centered menu for the window-level root
+    /// layer. Package overlays cannot produce this anchor.
+    pub(crate) fn centered_overlays_render_input(
+        &self,
+    ) -> (
+        Vec<crate::shell::TransientPackageOverlay>,
+        TypographyRegistry,
+        crate::shell::theme::ResolvedUiTheme,
+    ) {
+        let (mut overlays, typography, ui_theme) = self.overlays_render_input();
+        overlays.retain(|overlay| overlay.anchor == PackageOverlayAnchor::Centered);
+        (overlays, typography, ui_theme)
     }
 
     /// Snapshot the package_ui state + render context for the panel host to

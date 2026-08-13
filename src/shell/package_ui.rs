@@ -93,6 +93,9 @@ pub(crate) struct MenuA11y {
     pub(crate) prompt: String,
     pub(crate) items: Vec<MenuA11yItem>,
     pub(crate) status: Option<String>,
+    /// Phase 24.4: centered Command Centre surfaces expose one stable polite
+    /// result-count status node, separate from empty-state detail text.
+    pub(crate) result_count: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +113,10 @@ pub(crate) enum PackageOverlayAnchor {
     Main,
     Pointer,
     Bottom,
+    /// Phase 24.4: window-centered Command Centre surface. Clay-internal only:
+    /// `parse` never produces it (packages keep the four documented anchors),
+    /// and it is not part of `VALID_OVERLAY_ANCHORS` on the server.
+    Centered,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -506,12 +513,18 @@ impl TransientPackageOverlay {
                 }
                 _ => None,
             },
+            result_count: (session.origin() == TransientMenuOrigin::Centered).then(|| {
+                crate::editor::accessibility::compose_menu_result_count(session.items().len())
+            }),
         };
         // Phase 20.5: anchor selected by surface origin.
         let anchor = match session.origin() {
             TransientMenuOrigin::ContextMenu => PackageOverlayAnchor::Pointer,
             TransientMenuOrigin::MenuBar => PackageOverlayAnchor::Main,
             TransientMenuOrigin::CommandPalette => PackageOverlayAnchor::Bottom,
+            // Phase 24.4: command/path mode request the window-centered
+            // surface; the host routes it to the window-level overlay layer.
+            TransientMenuOrigin::Centered => PackageOverlayAnchor::Centered,
         };
         let prompt_id = format!("menu.{}.prompt", session.session_id().0);
         let query_id = format!("menu.{}.query", session.session_id().0);
@@ -693,11 +706,24 @@ impl PackageOverlayAnchor {
     }
 
     pub(crate) fn rect(self, working_area: Rect, main_rect: Rect) -> Rect {
+        self.rect_with_centered_width(working_area, main_rect, 640.0)
+    }
+
+    /// Resolve geometry with the cached centered-surface width. The centered
+    /// anchor uses window bounds; other anchors preserve their existing
+    /// pane-local geometry.
+    pub(crate) fn rect_with_centered_width(
+        self,
+        working_area: Rect,
+        main_rect: Rect,
+        centered_width: f64,
+    ) -> Rect {
         match self {
             Self::Main => main_rect,
             Self::Pointer => centered_rect(main_rect, 320.0, 220.0),
             Self::Bottom => bottom_rect(main_rect),
             Self::WorkingArea | Self::ActivePane => working_area,
+            Self::Centered => centered_rect(working_area, centered_width, 220.0),
         }
     }
 }
@@ -841,7 +867,7 @@ fn optional_text<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a st
         .filter(|value| !value.trim().is_empty())
 }
 
-fn centered_rect(bounds: Rect, width: f64, height: f64) -> Rect {
+pub(crate) fn centered_rect(bounds: Rect, width: f64, height: f64) -> Rect {
     let width = width.min(bounds.width()).max(0.0);
     let height = height.min(bounds.height()).max(0.0);
     let x0 = bounds.x0 + (bounds.width() - width) / 2.0;
@@ -866,7 +892,8 @@ mod tests {
 
     use super::*;
     use crate::shell::transient_menu::{
-        TransientMenuAction, TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
+        TransientMenuAction, TransientMenuItem, TransientMenuOrigin, TransientMenuSession,
+        TransientMenuSessionId,
     };
 
     fn component(id: &str) -> PackageUiComponentTree {
@@ -1048,6 +1075,35 @@ mod tests {
         );
         assert!(list_component.items[0].selected);
         assert!(!list_component.items[1].selected);
+    }
+
+    #[test]
+    fn centered_menu_projection_uses_window_geometry_and_stays_internal() {
+        let session = TransientMenuSession::new(TransientMenuSessionId(8), "Control Center")
+            .with_origin(TransientMenuOrigin::Centered);
+        let overlay = TransientPackageOverlay::from_menu_session(&session);
+        assert_eq!(overlay.anchor, PackageOverlayAnchor::Centered);
+        assert_eq!(
+            PackageOverlayAnchor::parse("centered"),
+            PackageOverlayAnchor::WorkingArea,
+            "package parsing cannot request the internal centered anchor"
+        );
+
+        let window = Rect::new(0.0, 0.0, 900.0, 600.0);
+        assert_eq!(
+            overlay
+                .anchor
+                .rect_with_centered_width(window, Rect::ZERO, 640.0),
+            Rect::new(130.0, 190.0, 770.0, 410.0)
+        );
+        assert_eq!(
+            overlay.anchor.rect_with_centered_width(
+                Rect::new(0.0, 0.0, 300.0, 200.0),
+                Rect::ZERO,
+                640.0
+            ),
+            Rect::new(0.0, 0.0, 300.0, 200.0)
+        );
     }
 
     #[test]

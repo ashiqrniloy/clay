@@ -64,7 +64,7 @@ Phase 20.5 promoted `dropdown`, `collapse`, `modal` from reserved to implemented
 
 **Z-level stacking**: `TransientPackageOverlay` carries a `z_level_token: &'static str`; `PackageOverlayHost` sorts children by z-order: `z.overlay` (0) < `z.modal` (1) < `z.tooltip` (2). `from_menu_session` sets `"z.overlay"`; modal overlays set `"z.modal"`; tooltip-anchored overlays set `"z.tooltip"`.
 
-**Surface origin**: `TransientMenuOrigin` (`CommandPalette`/`ContextMenu`/`MenuBar`) on `TransientMenuSession` selects the overlay anchor: `Bottom`/`Pointer`/`Main` respectively. `TransientPackageOverlay::from_menu_session` reads `session.origin()` instead of hardcoding `Bottom`.
+**Surface origin**: `TransientMenuOrigin` (`CommandPalette`/`ContextMenu`/`MenuBar`) on `TransientMenuSession` selects the overlay anchor: `Bottom`/`Pointer`/`Main` respectively. Phase 24.4 adds the Clay-internal `Centered` origin for the built-in Command Centre command/path sessions; it uses one window-level host and is not a package anchor. `TransientPackageOverlay::from_menu_session` reads `session.origin()` instead of hardcoding `Bottom`.
 
 **Overlay cursor inset**: `PackageOverlayHost` reads `ui_theme.scalar_f64("spacing.panel")` for overlay padding, consistent with `paint_tooltip_shell` which reads `ResolvedUiTheme` tokens directly.
 
@@ -98,7 +98,7 @@ Validated in `src/shell/components.rs`. Token-backed variables must reference a 
 | Pane split tree | internal | `src/shell/layout.rs` | Horizontal/vertical splits, ratio 0.05–0.95 |
 | Fixed panel slots | internal | `src/shell/layout.rs` | `left`/`right`/`top`/`bottom` with size/min/max/visible/collapsed/resized_by_user; the Clay workspace browser may be absent entirely when its per-tab visibility flag is off |
 | Status bar | internal | editor/shell paint | Uses `statusBg`/`statusText` theme keys |
-| Transient menu | internal | `src/shell/transient_menu.rs` | Bottom-pane prompt + item list scored by the shared bounded fuzzy subsequence matcher (`src/shell/fuzzy.rs`), focus policy, package provenance; Phase 20.5: `TransientMenuOrigin` (`CommandPalette`/`ContextMenu`/`MenuBar`) selects overlay anchor; Phase 24.1/24.2: server session round trip + generation-stamped command catalogue (Control Center); Phase 24.3: second built-in consumer `PathBrowserSession` (`src/shell/path_browser.rs`) — editable path bar, bounded depth-1 listing, primary/secondary activation (`MenuActivate` kind), semantic Backspace — same projection, same tokens, no new surface |
+| Transient menu | internal | `src/shell/transient_menu.rs` | Bounded prompt/item list scored by the shared fuzzy subsequence matcher (`src/shell/fuzzy.rs`), focus policy, package provenance; Phase 20.5 origins; Phase 24.1/24.2 server round trip/catalogue; Phase 24.3 Path Browser; Phase 24.4 centered built-in command/path projection with modal accessibility and one window-level host |
 | Inline completion pop-up | internal | `src/shell/transient_menu.rs` | Completion results rendered through the transient menu session (`completion_result_to_menu_session`) |
 | Fixed package panels | internal | `src/shell/package_ui.rs` | Slot-bound package panels with visibility |
 | Transient package overlays | internal | `src/shell/package_ui.rs` | Anchored overlays (`PackageOverlayAnchor`) |
@@ -119,6 +119,7 @@ Phase 20.2 introduced a native chrome primitive layer in `src/shell/primitives.r
 | `paint_kbd_hint` | internal | `src/shell/primitives.rs` | Keyboard shortcut hint | `color.surface.kbd`, `color.text.kbd`, `dimension.radius.kbd`, `spacing.kbd.padding.x`, `spacing.kbd.padding.y`, `typography.kbd` | `kbd` (via label) |
 | `paint_icon_slot` | internal | `src/shell/primitives.rs` | Standardized icon placeholder | `dimension.icon.size`, `dimension.icon.slot.size`, `color.text.muted`, `dimension.radius.icon` | `img` or `presentation` |
 | `paint_tooltip_shell` | internal | `src/shell/primitives.rs` | Tooltip background/border | `color.surface.overlay`, `color.border`, `dimension.border.width`, `dimension.radius.tooltip`, `spacing.tooltip.padding` | `tooltip` |
+| `paint_scrim` | internal | `src/shell/primitives.rs` | Full-window dim behind the centered Command Centre surface (Phase 24.4) | `color.surface.scrim`, `opacity.scrim` | `dialog` backdrop (Clay-internal; no package-facing surface) |
 
 All primitives:
 - Read color/dimension/opacity/typography from `ResolvedUiTheme` tokens (no hardcoded values).

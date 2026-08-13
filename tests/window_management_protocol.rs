@@ -8,8 +8,9 @@
 //! bytes are validated before access by the codec contract).
 
 use clay::protocol::{
-    ClientMessage, PROTOCOL_VERSION, ServerMessage, TabCommand, TabEntry, TabRegistrySnapshot,
-    codec::Codec,
+    BehaviorManifest, ClientMessage, KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers,
+    KeyStroke, PROTOCOL_VERSION, RoutingPolicy, ServerMessage, TabCommand, TabEntry,
+    TabRegistrySnapshot, codec::Codec,
 };
 
 fn registry_snapshot() -> TabRegistrySnapshot {
@@ -36,8 +37,63 @@ fn registry_snapshot() -> TabRegistrySnapshot {
 /// The handshake wire version is pinned. Bump `PROTOCOL_VERSION`
 /// deliberately when the wire changes; this test fails loudly otherwise.
 #[test]
+fn multi_stroke_key_binding_rules_round_trip_the_archive_identically() {
+    // Phase 24.5: the multi-stroke router adds no wire shape —
+    // `KeyBindingRule.sequence` already carried N strokes. Prove a
+    // multi-stroke rule survives the codec identically (mixed with a
+    // single-stroke rule, since both share the manifest snapshot).
+    let codec = Codec::default();
+    let mut manifest = BehaviorManifest::minimal_text_editing(1);
+    manifest.keymaps.push(KeyBindingRule {
+        command_id: "controlCenter.open".to_string(),
+        sequence: vec![
+            KeyStroke {
+                key: KeyCode::Character("x".to_string()),
+                modifiers: KeyModifiers {
+                    shift: false,
+                    control: true,
+                    alt: false,
+                    super_key: false,
+                },
+            },
+            KeyStroke {
+                key: KeyCode::Character("p".to_string()),
+                modifiers: KeyModifiers {
+                    shift: false,
+                    control: true,
+                    alt: false,
+                    super_key: false,
+                },
+            },
+        ],
+        context: KeyBindingContext::Global,
+        routing_policy: RoutingPolicy::ServerFirst,
+    });
+    manifest.keymaps.push(KeyBindingRule::single(
+        "text.insert_newline",
+        KeyCode::Enter,
+    ));
+
+    let frame = codec
+        .encode_server_message(&ServerMessage::BehaviorManifest(Box::new(manifest.clone())))
+        .expect("manifest encodes");
+    assert!(
+        frame.len() < 1024 * 1024,
+        "behavior manifest frame must stay bounded"
+    );
+    let decoded = codec
+        .decode_server_message(&frame)
+        .expect("manifest decodes");
+    assert_eq!(
+        decoded,
+        ServerMessage::BehaviorManifest(Box::new(manifest)),
+        "multi-stroke rules must round-trip the archive identically"
+    );
+}
+
+#[test]
 fn protocol_version_is_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 16);
+    assert_eq!(PROTOCOL_VERSION, 17);
 }
 
 /// The handshake itself round-trips: `Hello` carries the pinned version to

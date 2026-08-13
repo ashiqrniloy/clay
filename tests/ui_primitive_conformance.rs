@@ -192,6 +192,7 @@ fn primitives_are_token_driven() {
         "paint_kbd_hint",
         "paint_icon_slot",
         "paint_tooltip_shell",
+        "paint_scrim",
     ];
 
     for func in paint_functions {
@@ -216,6 +217,36 @@ fn primitives_are_token_driven() {
                 "primitive {func} must not contain hardcoded color literals (Color::from_rgb*8(0x...)); read from theme.color() instead. Color::from_rgba8(rgba.r, ...) for opacity application is allowed."
             );
         }
+    }
+}
+
+#[test]
+fn centered_scrim_routes_through_token_driven_primitive_without_blur() {
+    // Phase 24.4: the centered Command Centre backdrop is one token-driven
+    // `paint_scrim` fill (`surface.scrim` × `opacity.scrim`). No custom blur,
+    // filter, or offscreen-render work exists in the primitive module: Vello
+    // 0.6 has no backdrop-filter pass, and the approved boundary is scrim-only.
+    let primitives_src = fs::read_to_string("src/shell/primitives.rs")
+        .expect("src/shell/primitives.rs should be readable");
+    let body = non_test_body(&primitives_src);
+
+    assert!(
+        body.contains("pub(crate) fn paint_scrim"),
+        "primitives.rs must define paint_scrim for the centered backdrop"
+    );
+    assert!(
+        body.contains("theme.color(\"surface.scrim\")"),
+        "paint_scrim must read its color from the surface.scrim token"
+    );
+    assert!(
+        body.contains("theme.opacity(\"opacity.scrim\")"),
+        "paint_scrim must read its opacity from the opacity.scrim token"
+    );
+    for prohibited in ["draw_blurred_rounded_rect", "blur", "offscreen", "filter"] {
+        assert!(
+            !body.contains(prohibited),
+            "primitives.rs must not contain {prohibited}: the Phase 24.4 backdrop is scrim-only (no blur/filter/offscreen pass)"
+        );
     }
 }
 

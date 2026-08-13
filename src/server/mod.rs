@@ -1634,11 +1634,14 @@ fn register_runtime_contributions(
             )
         })?;
     for registration in &evaluation.document_analyzers {
+        // Phase 24.5 decision (2026-08-13-2223): an analyzer registered
+        // without a language-server grant stays inactive rather than failing
+        // the generation — grantLanguageServer degrades independently when
+        // tooling/roots are absent. It is not registered for this generation
+        // and re-registers on a later reload once the grant lands; the
+        // per-document route check keeps denying invocation until then.
         if !service.document_analysis_registration_authorized(registration) {
-            return Err(runtime_candidate_error(
-                "analysis.unauthorized",
-                "Runtime document analyzer lacks an exact current package/process grant.",
-            ));
+            continue;
         }
         document_analysis
             .register(

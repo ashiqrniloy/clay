@@ -19,6 +19,7 @@ Create or update actionable, numbered, documentation-backed implementation plans
    - Run `npx ui-skills start` first and load the smallest useful UI skill set before designing UI tasks.
    - Load the `clay-ui` skill and read `.agents/skills/clay-ui/references/components.md` and `.agents/skills/clay-ui/references/tokens.md`.
    - Tasks must reuse cataloged primitives and components first; building custom components outside the catalog requires explicit justification in the task's `Options Considered`.
+   - Include one post-implementation **visual and accessibility review** task before final documentation/wiki work. It must launch a real representative UI, take and inspect screenshots for every changed state, and record screenshot paths plus findings. When computer-use capability is available, start with `get_app_state`, inspect the accessibility tree, and verify keyboard focus, roles, labels, and interaction for changed controls. If live UI or computer use is unavailable, record the blocker and run the strongest available structural/accessibility checks; do not claim visual review passed.
 8. Load project-specific plan requirements deterministically:
    - Read `.agents/skills/create-plan/references/default.md` if it exists.
    - Read `.agents/skills/create-plan/references/<git-root-basename>.md` if it exists.
