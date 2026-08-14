@@ -4,6 +4,7 @@ Use this before writing or updating any Clay plan.
 
 ## Required Checks
 
+- **UI skill routing:** If work touches UI, theme, typography, tokens, components, layout, SDUI, or accessibility, run `npx ui-skills start` before reviewing or editing implementation; inspect the relevant category, load 1–3 selected skills, and record the routing evidence.
 - **Decision alignment:** Identify relevant decision logs and roadmap sections.
 - **Authority boundary:** State which component owns state, behavior, execution, persistence, and validation.
 - **Client hot path:** Confirm ordinary typing/rendering does not block on IPC, server work, JavaScript, AI, file IO, or full-document serialization.

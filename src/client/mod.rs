@@ -4104,10 +4104,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 
         let session = connect_with_retry(&endpoint).await;
 
-        assert_eq!(
-            session.initial_state.text,
-            "Welcome to Clay's Phase 4 IPC server.\n"
-        );
+        assert_eq!(session.initial_state.text, "");
         assert!(matches!(
             session.initial_state.access,
             DocumentAccess::Editable { lease_id: 1 }

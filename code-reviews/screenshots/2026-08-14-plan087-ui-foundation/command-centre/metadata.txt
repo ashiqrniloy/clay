@@ -1,0 +1,14 @@
+fixture=ui-review-completion
+binding=default-Ctrl+X-Ctrl+P
+window_logical_size=900x600
+ipc=private-unix-socket
+config=private-mode-700
+screenshot=xdg-desktop-portal
+accessibility=python3-gi-atspi
+state=command-centre-overflow
+window_backend=x11
+menu_items=66
+menu_accessible_children=110
+menu_bounds=640x206 logical px
+filtered_query=split
+filtered_results=8

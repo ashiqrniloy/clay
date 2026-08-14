@@ -204,7 +204,7 @@ pub(crate) fn paint_divider(scene: &mut Scene, rect: Rect, axis: Axis, theme: &R
 pub(crate) fn paint_focus_ring(scene: &mut Scene, rect: Rect, theme: &ResolvedUiTheme) {
     let color = theme.color("border.focus").unwrap_or(Color::TRANSPARENT);
     let width = theme.dimension("dimension.border.thin").unwrap_or(2.0);
-    let radius = theme.dimension("radius.xs").unwrap_or(2.0);
+    let radius = theme.scalar_f64("radius.xs").unwrap_or(2.0);
 
     let rounded = RoundedRect::from_rect(rect, radius);
     let stroke = Stroke::new(width);
@@ -234,7 +234,7 @@ pub(crate) fn paint_panel_chrome(
 ) {
     let bg = theme.color("surface.panel").unwrap_or(Color::TRANSPARENT);
     let border = theme.color("border.subtle").unwrap_or(Color::TRANSPARENT);
-    let radius = theme.dimension("radius.sm").unwrap_or(4.0);
+    let radius = theme.scalar_f64("radius.sm").unwrap_or(4.0);
     let border_width = theme.dimension("dimension.border.hairline").unwrap_or(1.0);
 
     // Panel background
@@ -281,12 +281,22 @@ pub(crate) fn paint_panel_chrome(
         InteractionState::Disabled => theme.color("border.hairline").unwrap_or(Color::TRANSPARENT),
     };
 
-    // Paint resize handle grip (three vertical lines at right edge)
-    let handle_width = 6.0;
-    let grip_spacing = 2.0;
+    // Paint resize handle grip (three vertical lines at right edge). Use the
+    // existing spacing/border tokens so density and theme overrides reach
+    // handle geometry without adding a handle-specific token.
+    let handle_width = theme.scalar_f64("spacing.xs").unwrap_or(8.0);
+    let grip_spacing = theme.scalar_f64("spacing.xxs").unwrap_or(4.0);
+    let grip_inset = theme.scalar_f64("spacing.xxs").unwrap_or(4.0);
+    let grip_width = theme.dimension("dimension.border.hairline").unwrap_or(1.0);
     for i in 0..3 {
-        let x = rect.x1 - handle_width + (i as f64 * grip_spacing);
-        let grip_rect = Rect::new(x, rect.y0 + 4.0, x + 1.0, rect.y1 - 4.0);
+        let x = rect.x1 - handle_width
+            + (i as f64 * grip_spacing).min((handle_width - grip_width).max(0.0));
+        let grip_rect = Rect::new(
+            x,
+            rect.y0 + grip_inset,
+            x + grip_width,
+            rect.y1 - grip_inset,
+        );
         scene.fill(
             masonry::vello::peniko::Fill::NonZero,
             masonry::kurbo::Affine::IDENTITY,
@@ -325,7 +335,7 @@ pub(crate) fn paint_scroll_chrome(
     let thumb_color = theme
         .color("surface.scrollbar")
         .unwrap_or(Color::TRANSPARENT);
-    let radius = theme.dimension("radius.xs").unwrap_or(2.0);
+    let radius = theme.scalar_f64("radius.xs").unwrap_or(2.0);
 
     // Track background
     scene.fill(
@@ -380,7 +390,7 @@ pub(crate) fn paint_badge(
 ) {
     let bg = theme.color("surface.badge").unwrap_or(Color::TRANSPARENT);
     let text_color = theme.color("text.badge").unwrap_or(Color::TRANSPARENT);
-    let radius = theme.dimension("radius.xs").unwrap_or(2.0);
+    let radius = theme.scalar_f64("radius.xs").unwrap_or(2.0);
 
     // Badge background with state-based opacity
     let bg_opacity = match state {
@@ -427,7 +437,7 @@ pub(crate) fn paint_kbd_hint(
 ) {
     let bg = theme.color("surface.kbd").unwrap_or(Color::TRANSPARENT);
     let border = theme.color("border.kbd").unwrap_or(Color::TRANSPARENT);
-    let radius = theme.dimension("radius.xs").unwrap_or(2.0);
+    let radius = theme.scalar_f64("radius.xs").unwrap_or(2.0);
     let border_width = theme.dimension("dimension.border.hairline").unwrap_or(1.0);
 
     // kbd background
@@ -503,7 +513,7 @@ pub(crate) fn paint_icon_slot(
 pub(crate) fn paint_tooltip_shell(scene: &mut Scene, rect: Rect, theme: &ResolvedUiTheme) {
     let bg = theme.color("surface.tooltip").unwrap_or(Color::TRANSPARENT);
     let border = theme.color("border.hairline").unwrap_or(Color::TRANSPARENT);
-    let radius = theme.dimension("radius.sm").unwrap_or(4.0);
+    let radius = theme.scalar_f64("radius.sm").unwrap_or(4.0);
     let border_width = theme.dimension("dimension.border.hairline").unwrap_or(1.0);
 
     // Tooltip background

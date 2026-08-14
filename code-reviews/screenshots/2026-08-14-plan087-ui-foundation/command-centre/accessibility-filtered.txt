@@ -1,0 +1,32 @@
+0|application|-|clay|/org/a11y/atspi/accessible/root|clay
+1|frame|-||/org/a11y/atspi/accessible/0/14|clay
+2|panel|-|Clay working area shell. Active pane 1.|/org/a11y/atspi/accessible/0/12|clay
+3|panel|-|Pane 1 of 1: editor|/org/a11y/atspi/accessible/0/11|clay
+4|entry|-|Clay — Connected — Editable — review.md — doc 2 — v5 — Recovery: Control Center. Theme theme-modus-vivendi. # Completion review zzzzfn hello hello_world helper |/org/a11y/atspi/accessible/0/10|clay
+5|panel|-|Server-driven UI region|/org/a11y/atspi/accessible/0/4|clay
+6|label|-||/org/a11y/atspi/accessible/0/15|clay
+5|panel|-|Package panels|/org/a11y/atspi/accessible/0/5|clay
+5|panel|-|Package overlays|/org/a11y/atspi/accessible/0/6|clay
+5|status bar|-|Clay — Connected — Editable — review.md — doc 2 — v5 — Recovery: Control Center|/org/a11y/atspi/accessible/0/14987979559889015809|clay
+3|status bar|-||/org/a11y/atspi/accessible/0/14987979559889016834|clay
+2|dialog|-|Control Center|/org/a11y/atspi/accessible/0/138|clay
+3|menu|-|Control Center|/org/a11y/atspi/accessible/0/211|clay
+4|label|-||/org/a11y/atspi/accessible/0/139|clay
+4|label|-||/org/a11y/atspi/accessible/0/140|clay
+4|list item|-|Split Pane Down|/org/a11y/atspi/accessible/0/141|clay
+4|list item|-|Split Pane Horizontal|/org/a11y/atspi/accessible/0/142|clay
+4|list item|-|Split Pane Right|/org/a11y/atspi/accessible/0/143|clay
+4|list item|-|Split Pane Vertical|/org/a11y/atspi/accessible/0/144|clay
+4|list item|-|Explain Active Mode|/org/a11y/atspi/accessible/0/145|clay
+4|list item|-|Reveal in File Tree|/org/a11y/atspi/accessible/0/146|clay
+4|list item|-|Resize Pane Left|/org/a11y/atspi/accessible/0/147|clay
+4|list item|-|Toggle JavaScript Line Comment|/org/a11y/atspi/accessible/0/148|clay
+4|menu item|selected|Split Pane Down built-in selected|/org/a11y/atspi/accessible/0/14987979559889118722|clay
+4|menu item|-|Split Pane Horizontal built-in|/org/a11y/atspi/accessible/0/14987979559889118723|clay
+4|menu item|-|Split Pane Right built-in|/org/a11y/atspi/accessible/0/14987979559889118724|clay
+4|menu item|-|Split Pane Vertical built-in|/org/a11y/atspi/accessible/0/14987979559889118725|clay
+4|menu item|-|Explain Active Mode built-in|/org/a11y/atspi/accessible/0/14987979559889118726|clay
+4|menu item|-|Reveal in File Tree built-in|/org/a11y/atspi/accessible/0/14987979559889118727|clay
+4|menu item|-|Resize Pane Left built-in|/org/a11y/atspi/accessible/0/14987979559889118728|clay
+4|menu item|-|Toggle JavaScript Line Comment @clayjavascript@0.1.0|/org/a11y/atspi/accessible/0/14987979559889118729|clay
+4|status bar|-|8 results|/org/a11y/atspi/accessible/0/14987979559889118721|clay

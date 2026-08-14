@@ -1,0 +1,148 @@
+0|application|-|clay|/org/a11y/atspi/accessible/root|clay
+1|frame|-||/org/a11y/atspi/accessible/0/14|clay
+2|panel|-|Clay working area shell. Active pane 1.|/org/a11y/atspi/accessible/0/12|clay
+3|panel|-|Pane 1 of 1: editor|/org/a11y/atspi/accessible/0/11|clay
+4|entry|-|Clay — Connected — Editable — review.md — doc 2 — v1 — Recovery: Control Center. Theme theme-modus-vivendi. # Completion review fn hello hello_world helper |/org/a11y/atspi/accessible/0/10|clay
+5|panel|-|Server-driven UI region|/org/a11y/atspi/accessible/0/4|clay
+6|label|-||/org/a11y/atspi/accessible/0/15|clay
+5|panel|-|Package panels|/org/a11y/atspi/accessible/0/5|clay
+5|panel|-|Package overlays|/org/a11y/atspi/accessible/0/6|clay
+5|status bar|-|Clay — Connected — Editable — review.md — doc 2 — v1 — Recovery: Control Center|/org/a11y/atspi/accessible/0/14987979559889015809|clay
+3|status bar|-||/org/a11y/atspi/accessible/0/14987979559889016834|clay
+2|dialog|-|Control Center|/org/a11y/atspi/accessible/0/41|clay
+3|menu|-|Control Center|/org/a11y/atspi/accessible/0/114|clay
+4|label|-||/org/a11y/atspi/accessible/0/42|clay
+4|label|-||/org/a11y/atspi/accessible/0/43|clay
+4|list item|-|Activate Tab 1|/org/a11y/atspi/accessible/0/44|clay
+4|list item|-|Activate Tab 2|/org/a11y/atspi/accessible/0/45|clay
+4|list item|-|Activate Tab 3|/org/a11y/atspi/accessible/0/46|clay
+4|list item|-|Activate Tab 4|/org/a11y/atspi/accessible/0/47|clay
+4|list item|-|Activate Tab 5|/org/a11y/atspi/accessible/0/48|clay
+4|list item|-|Activate Tab 6|/org/a11y/atspi/accessible/0/49|clay
+4|list item|-|Activate Tab 7|/org/a11y/atspi/accessible/0/50|clay
+4|list item|-|Activate Tab 8|/org/a11y/atspi/accessible/0/51|clay
+4|list item|-|Activate Tab 9|/org/a11y/atspi/accessible/0/52|clay
+4|list item|-|Add Equal Pane|/org/a11y/atspi/accessible/0/53|clay
+4|list item|-|Browse Filesystem|/org/a11y/atspi/accessible/0/54|clay
+4|list item|-|Close Pane|/org/a11y/atspi/accessible/0/55|clay
+4|list item|-|Close Tab|/org/a11y/atspi/accessible/0/56|clay
+4|list item|-|Code Actions|/org/a11y/atspi/accessible/0/57|clay
+4|list item|-|Dismiss Language Result|/org/a11y/atspi/accessible/0/58|clay
+4|list item|-|Explain Active Mode|/org/a11y/atspi/accessible/0/59|clay
+4|list item|-|Focus Active Document|/org/a11y/atspi/accessible/0/60|clay
+4|list item|-|Focus Next Pane|/org/a11y/atspi/accessible/0/61|clay
+4|list item|-|Focus Previous Pane|/org/a11y/atspi/accessible/0/62|clay
+4|list item|-|Go to Definition|/org/a11y/atspi/accessible/0/63|clay
+4|list item|-|Hover|/org/a11y/atspi/accessible/0/64|clay
+4|list item|-|Insert Markdown Heading|/org/a11y/atspi/accessible/0/65|clay
+4|list item|-|List Active Modes|/org/a11y/atspi/accessible/0/66|clay
+4|list item|-|List Git Statuses|/org/a11y/atspi/accessible/0/67|clay
+4|list item|-|Move Pane Next|/org/a11y/atspi/accessible/0/68|clay
+4|list item|-|Move Pane Previous|/org/a11y/atspi/accessible/0/69|clay
+4|list item|-|Move Tab Left|/org/a11y/atspi/accessible/0/70|clay
+4|list item|-|Move Tab Right|/org/a11y/atspi/accessible/0/71|clay
+4|list item|-|Move Tab to Position 1|/org/a11y/atspi/accessible/0/72|clay
+4|list item|-|Move Tab to Position 2|/org/a11y/atspi/accessible/0/73|clay
+4|list item|-|Move Tab to Position 3|/org/a11y/atspi/accessible/0/74|clay
+4|list item|-|Move Tab to Position 4|/org/a11y/atspi/accessible/0/75|clay
+4|list item|-|Move Tab to Position 5|/org/a11y/atspi/accessible/0/76|clay
+4|list item|-|Move Tab to Position 6|/org/a11y/atspi/accessible/0/77|clay
+4|list item|-|Move Tab to Position 7|/org/a11y/atspi/accessible/0/78|clay
+4|list item|-|Move Tab to Position 8|/org/a11y/atspi/accessible/0/79|clay
+4|list item|-|Move Tab to Position 9|/org/a11y/atspi/accessible/0/80|clay
+4|list item|-|Navigate Definition|/org/a11y/atspi/accessible/0/81|clay
+4|list item|-|New Tab|/org/a11y/atspi/accessible/0/82|clay
+4|list item|-|Next Tab|/org/a11y/atspi/accessible/0/83|clay
+4|list item|-|Open Control Center|/org/a11y/atspi/accessible/0/84|clay
+4|list item|-|Open Directory|/org/a11y/atspi/accessible/0/85|clay
+4|list item|-|Open File|/org/a11y/atspi/accessible/0/86|clay
+4|list item|-|Open File by Name|/org/a11y/atspi/accessible/0/87|clay
+4|list item|-|Open Recent Document|/org/a11y/atspi/accessible/0/88|clay
+4|list item|-|Preview Edit (Deferred)|/org/a11y/atspi/accessible/0/89|clay
+4|list item|-|Previous Tab|/org/a11y/atspi/accessible/0/90|clay
+4|list item|-|Refresh Git Status|/org/a11y/atspi/accessible/0/91|clay
+4|list item|-|Refresh Workspace|/org/a11y/atspi/accessible/0/92|clay
+4|list item|-|Reload Configuration and Packages|/org/a11y/atspi/accessible/0/93|clay
+4|list item|-|Resize Pane Down|/org/a11y/atspi/accessible/0/94|clay
+4|list item|-|Resize Pane Left|/org/a11y/atspi/accessible/0/95|clay
+4|list item|-|Resize Pane Right|/org/a11y/atspi/accessible/0/96|clay
+4|list item|-|Resize Pane Up|/org/a11y/atspi/accessible/0/97|clay
+4|list item|-|Reveal in File Tree|/org/a11y/atspi/accessible/0/98|clay
+4|list item|-|Signature Help|/org/a11y/atspi/accessible/0/99|clay
+4|list item|-|Split Pane Down|/org/a11y/atspi/accessible/0/100|clay
+4|list item|-|Split Pane Horizontal|/org/a11y/atspi/accessible/0/101|clay
+4|list item|-|Split Pane Right|/org/a11y/atspi/accessible/0/102|clay
+4|list item|-|Split Pane Vertical|/org/a11y/atspi/accessible/0/103|clay
+4|list item|-|Toggle File Browser|/org/a11y/atspi/accessible/0/104|clay
+4|list item|-|Toggle JavaScript Line Comment|/org/a11y/atspi/accessible/0/105|clay
+4|list item|-|Toggle Markdown Comment|/org/a11y/atspi/accessible/0/106|clay
+4|list item|-|Toggle Markdown List|/org/a11y/atspi/accessible/0/107|clay
+4|list item|-|Toggle Markdown Preview|/org/a11y/atspi/accessible/0/108|clay
+4|list item|-|Toggle Rust Line Comment|/org/a11y/atspi/accessible/0/109|clay
+4|menu item|selected|Activate Tab 1 built-in selected|/org/a11y/atspi/accessible/0/14987979559889069058|clay
+4|menu item|-|Activate Tab 2 built-in|/org/a11y/atspi/accessible/0/14987979559889069059|clay
+4|menu item|-|Activate Tab 3 built-in|/org/a11y/atspi/accessible/0/14987979559889069060|clay
+4|menu item|-|Activate Tab 4 built-in|/org/a11y/atspi/accessible/0/14987979559889069061|clay
+4|menu item|-|Activate Tab 5 built-in|/org/a11y/atspi/accessible/0/14987979559889069062|clay
+4|menu item|-|Activate Tab 6 built-in|/org/a11y/atspi/accessible/0/14987979559889069063|clay
+4|menu item|-|Activate Tab 7 built-in|/org/a11y/atspi/accessible/0/14987979559889069064|clay
+4|menu item|-|Activate Tab 8 built-in|/org/a11y/atspi/accessible/0/14987979559889069065|clay
+4|menu item|-|Activate Tab 9 built-in|/org/a11y/atspi/accessible/0/14987979559889069066|clay
+4|menu item|-|Add Equal Pane built-in|/org/a11y/atspi/accessible/0/14987979559889069067|clay
+4|menu item|-|Browse Filesystem built-in|/org/a11y/atspi/accessible/0/14987979559889069068|clay
+4|menu item|-|Close Pane built-in|/org/a11y/atspi/accessible/0/14987979559889069069|clay
+4|menu item|-|Close Tab built-in|/org/a11y/atspi/accessible/0/14987979559889069070|clay
+4|menu item|-|Code Actions built-in|/org/a11y/atspi/accessible/0/14987979559889069071|clay
+4|menu item|-|Dismiss Language Result built-in|/org/a11y/atspi/accessible/0/14987979559889069072|clay
+4|menu item|-|Explain Active Mode built-in|/org/a11y/atspi/accessible/0/14987979559889069073|clay
+4|menu item|-|Focus Active Document built-in|/org/a11y/atspi/accessible/0/14987979559889069074|clay
+4|menu item|-|Focus Next Pane built-in|/org/a11y/atspi/accessible/0/14987979559889069075|clay
+4|menu item|-|Focus Previous Pane built-in|/org/a11y/atspi/accessible/0/14987979559889069076|clay
+4|menu item|-|Go to Definition built-in|/org/a11y/atspi/accessible/0/14987979559889069077|clay
+4|menu item|-|Hover built-in|/org/a11y/atspi/accessible/0/14987979559889069078|clay
+4|menu item|-|Insert Markdown Heading @claymarkdown@0.1.0|/org/a11y/atspi/accessible/0/14987979559889069079|clay
+4|menu item|-|List Active Modes built-in|/org/a11y/atspi/accessible/0/14987979559889069080|clay
+4|menu item|-|List Git Statuses built-in|/org/a11y/atspi/accessible/0/14987979559889069081|clay
+4|menu item|-|Move Pane Next built-in|/org/a11y/atspi/accessible/0/14987979559889069082|clay
+4|menu item|-|Move Pane Previous built-in|/org/a11y/atspi/accessible/0/14987979559889069083|clay
+4|menu item|-|Move Tab Left built-in|/org/a11y/atspi/accessible/0/14987979559889069084|clay
+4|menu item|-|Move Tab Right built-in|/org/a11y/atspi/accessible/0/14987979559889069085|clay
+4|menu item|-|Move Tab to Position 1 built-in|/org/a11y/atspi/accessible/0/14987979559889069086|clay
+4|menu item|-|Move Tab to Position 2 built-in|/org/a11y/atspi/accessible/0/14987979559889069087|clay
+4|menu item|-|Move Tab to Position 3 built-in|/org/a11y/atspi/accessible/0/14987979559889069088|clay
+4|menu item|-|Move Tab to Position 4 built-in|/org/a11y/atspi/accessible/0/14987979559889069089|clay
+4|menu item|-|Move Tab to Position 5 built-in|/org/a11y/atspi/accessible/0/14987979559889069090|clay
+4|menu item|-|Move Tab to Position 6 built-in|/org/a11y/atspi/accessible/0/14987979559889069091|clay
+4|menu item|-|Move Tab to Position 7 built-in|/org/a11y/atspi/accessible/0/14987979559889069092|clay
+4|menu item|-|Move Tab to Position 8 built-in|/org/a11y/atspi/accessible/0/14987979559889069093|clay
+4|menu item|-|Move Tab to Position 9 built-in|/org/a11y/atspi/accessible/0/14987979559889069094|clay
+4|menu item|-|Navigate Definition built-in|/org/a11y/atspi/accessible/0/14987979559889069095|clay
+4|menu item|-|New Tab built-in|/org/a11y/atspi/accessible/0/14987979559889069096|clay
+4|menu item|-|Next Tab built-in|/org/a11y/atspi/accessible/0/14987979559889069097|clay
+4|menu item|-|Open Control Center built-in|/org/a11y/atspi/accessible/0/14987979559889069098|clay
+4|menu item|-|Open Directory built-in|/org/a11y/atspi/accessible/0/14987979559889069099|clay
+4|menu item|-|Open File built-in|/org/a11y/atspi/accessible/0/14987979559889069100|clay
+4|menu item|-|Open File by Name built-in|/org/a11y/atspi/accessible/0/14987979559889069101|clay
+4|menu item|-|Open Recent Document built-in|/org/a11y/atspi/accessible/0/14987979559889069102|clay
+4|menu item|-|Preview Edit (Deferred) built-in|/org/a11y/atspi/accessible/0/14987979559889069103|clay
+4|menu item|-|Previous Tab built-in|/org/a11y/atspi/accessible/0/14987979559889069104|clay
+4|menu item|-|Refresh Git Status built-in|/org/a11y/atspi/accessible/0/14987979559889069105|clay
+4|menu item|-|Refresh Workspace built-in|/org/a11y/atspi/accessible/0/14987979559889069106|clay
+4|menu item|-|Reload Configuration and Packages built-in|/org/a11y/atspi/accessible/0/14987979559889069107|clay
+4|menu item|-|Resize Pane Down built-in|/org/a11y/atspi/accessible/0/14987979559889069108|clay
+4|menu item|-|Resize Pane Left built-in|/org/a11y/atspi/accessible/0/14987979559889069109|clay
+4|menu item|-|Resize Pane Right built-in|/org/a11y/atspi/accessible/0/14987979559889069110|clay
+4|menu item|-|Resize Pane Up built-in|/org/a11y/atspi/accessible/0/14987979559889069111|clay
+4|menu item|-|Reveal in File Tree built-in|/org/a11y/atspi/accessible/0/14987979559889069112|clay
+4|menu item|-|Signature Help built-in|/org/a11y/atspi/accessible/0/14987979559889069113|clay
+4|menu item|-|Split Pane Down built-in|/org/a11y/atspi/accessible/0/14987979559889069114|clay
+4|menu item|-|Split Pane Horizontal built-in|/org/a11y/atspi/accessible/0/14987979559889069115|clay
+4|menu item|-|Split Pane Right built-in|/org/a11y/atspi/accessible/0/14987979559889069116|clay
+4|menu item|-|Split Pane Vertical built-in|/org/a11y/atspi/accessible/0/14987979559889069117|clay
+4|menu item|-|Toggle File Browser built-in|/org/a11y/atspi/accessible/0/14987979559889069118|clay
+4|menu item|-|Toggle JavaScript Line Comment @clayjavascript@0.1.0|/org/a11y/atspi/accessible/0/14987979559889069119|clay
+4|menu item|-|Toggle Markdown Comment @claymarkdown@0.1.0|/org/a11y/atspi/accessible/0/14987979559889069120|clay
+4|menu item|-|Toggle Markdown List @claymarkdown@0.1.0|/org/a11y/atspi/accessible/0/14987979559889069121|clay
+4|menu item|-|Toggle Markdown Preview @claymarkdown@0.1.0|/org/a11y/atspi/accessible/0/14987979559889069122|clay
+4|menu item|-|Toggle Rust Line Comment @clayrust@0.1.0|/org/a11y/atspi/accessible/0/14987979559889069123|clay
+4|status bar|-|66 results|/org/a11y/atspi/accessible/0/14987979559889069057|clay

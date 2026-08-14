@@ -9,6 +9,36 @@ The `clay-ui` skill references are the authoritative catalog. This page links th
 - [Component catalog](../../.agents/skills/clay-ui/references/components.md) — every package-facing `ComponentKind`, typed style variable, Clay-native surface, chrome primitive, planned component, typography variant, and the rules for adding components. Status legend: **implemented** / **reserved** / **planned** / **internal**.
 - [Token catalog](../../.agents/skills/clay-ui/references/tokens.md) — the ten typed token domains, every implemented core token, typography hierarchy, package token contributions, and the rules for adding tokens.
 
+## Plan 087 package authoring boundary
+
+Plan 087 changed Clay-owned native presentation without adding a package-facing
+component kind, token, style variable, overlay anchor, manifest field, or JS
+API. There is no new package-facing component kind, token, style variable, or
+anchor; there is no package-facing anchor for the Plan 087 internal surfaces.
+The package guide remains the authoring contract; these internal surfaces
+are cataloged here so package authors do not mistake them for extension points:
+
+- **Welcome entry surface:** `WelcomeWidget` is Clay-owned empty/local-fallback
+  presentation. It exposes existing file/folder command routes only; packages
+  cannot replace it or gain dialog authority.
+- **Completion:** `TransientMenuOrigin::Completion` is a Clay-owned modeless
+  caret/IME projection with an 8 visible-row and 480 logical-pixel cap,
+  retained scrolling, stale/empty/error dismissal, and sanitized status/a11y
+  data. Completion is not a package overlay anchor or component kind.
+- **Command Centre/Path Browser:** `TransientMenuOrigin::Centered` is a
+  Clay-owned modal window-level surface using the token-backed centered width
+  (640 logical-pixel default), retained result scrolling, and a single scrim.
+  Package commands may be listed but packages cannot open, drive, configure, or
+  intercept the session. `centered` is not a package anchor.
+- **Package overlays:** package declarations remain limited to
+  `working-area`, `active-pane`, `main`, and `pointer`; no package JavaScript
+  runs in paint/layout/input paths. Package-authored transient-menu labels are
+  normalized once at the host boundary and remain within the 256-character
+  accessibility ceiling.
+
+The Plan 087 visual review also records host-only follow-up `P1-087-UI-1` for
+retained scroll-child clipping; it does not change the package contract.
+
 ## Reference Documents
 
 - [UI Chrome Primitives](primitives/ui-chrome-primitives.md) — Phase 20.2 native chrome primitive layer (`src/shell/primitives.rs`): divider, focus ring, panel chrome, scroll chrome, badge, kbd hint, icon slot, tooltip shell, and the Phase 24.4 token-driven scrim; token mapping, interaction states, accessibility roles, and the conformance contract.
@@ -39,4 +69,4 @@ Agents and plan documents that touch app UI must follow the create-plan UI requi
 1. Reuse cataloged components, primitives, style variables, and tokens first; a custom component outside the catalog requires explicit justification.
 2. New components, primitives, tokens, and style variables are additive-only and token-driven (no raw colors, CSS, concrete font families, or point sizes).
 3. Every new component ships state-complete (all applicable `InteractionState` variants styled from tokens) and accessible.
-4. Update the component catalog, the token catalog, `docs/reference/packages/creating-packages.md`, and the documentation-drift tests in the same change. Clay-internal surfaces such as the Phase 24.4 centered root layer and scrim stay out of package-facing anchor enums. Documentation drift fails `cargo test`.
+4. Update the component catalog, the token catalog when token entries change, `docs/reference/packages/creating-packages.md`, and the documentation-drift tests in the same change. Plan 087 also records Clay-owned welcome/completion/centered surfaces and keeps them out of package-facing anchor enums. Documentation drift fails `cargo test`.

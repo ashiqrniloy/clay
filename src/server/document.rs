@@ -820,11 +820,7 @@ impl RegionLock {
 
 impl Default for DocumentState {
     fn default() -> Self {
-        Self::new(
-            1,
-            "Welcome to Clay's Phase 4 IPC server.\n".to_string(),
-            DocumentAccess::Editable { lease_id: 1 },
-        )
+        Self::new(1, String::new(), DocumentAccess::Editable { lease_id: 1 })
     }
 }
 

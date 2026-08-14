@@ -19,7 +19,9 @@ use crate::client::{
 use crate::editor::typography::UiTextVariant;
 use crate::masonry_package_region::{PackageOverlayHost, PackagePanelHost};
 use crate::masonry_pane_document::PaneDocumentView;
-use crate::masonry_sdui::{SduiNativeState, editor_region_for_document};
+use crate::masonry_sdui::{
+    SduiNativeState, editor_region_for_document, editor_region_without_workspace_sidebar,
+};
 use crate::masonry_sdui_region::SduiRegionWidget;
 // Re-exported so the native app driver (`main.rs`) can downcast the reconciled
 // SDUI button's action without exposing the whole `pub(crate)` region module.
@@ -466,6 +468,8 @@ pub struct EditorWidget {
     /// The editor main rect shared with `overlay_host` (set each layout from
     /// the SDUI sidebar geometry) so main-pane-anchored overlays resolve.
     overlay_main_rect: Rc<Cell<Rect>>,
+    /// The active pane caret bounds shared with the completion overlay host.
+    overlay_completion_anchor: Rc<Cell<Option<Rect>>>,
     layout_invalidated: bool,
     /// Last successfully installed runtime generation (0 before any live snapshot).
     runtime_generation_id: RuntimeGenerationId,
@@ -482,6 +486,7 @@ impl Default for EditorWidget {
         let view =
             PaneDocumentView::new(PaneId(1), menu_session_ids.clone(), sdui_ui_version.clone());
         let overlay_main_rect = Rc::new(Cell::new(Rect::ZERO));
+        let overlay_completion_anchor = Rc::new(Cell::new(None));
         Self {
             view,
             pane_id: PaneId(1),
@@ -489,8 +494,12 @@ impl Default for EditorWidget {
             sdui: SduiNativeState::empty(),
             region: Self::new_region_pod(),
             panel_host: Self::new_panel_host_pod(),
-            overlay_host: Self::new_overlay_host_pod(&overlay_main_rect),
+            overlay_host: Self::new_overlay_host_pod(
+                &overlay_main_rect,
+                &overlay_completion_anchor,
+            ),
             overlay_main_rect,
+            overlay_completion_anchor,
             layout_invalidated: false,
             runtime_generation_id: 0,
             menu_session_ids,
@@ -512,6 +521,7 @@ impl EditorWidget {
         sdui.set_ui_theme(view.ui_theme().clone());
         sdui.set_typography(view.typography().clone());
         let overlay_main_rect = Rc::new(Cell::new(Rect::ZERO));
+        let overlay_completion_anchor = Rc::new(Cell::new(None));
         Self {
             view,
             pane_id: PaneId(1),
@@ -519,8 +529,12 @@ impl EditorWidget {
             sdui,
             region: Self::new_region_pod(),
             panel_host: Self::new_panel_host_pod(),
-            overlay_host: Self::new_overlay_host_pod(&overlay_main_rect),
+            overlay_host: Self::new_overlay_host_pod(
+                &overlay_main_rect,
+                &overlay_completion_anchor,
+            ),
             overlay_main_rect,
+            overlay_completion_anchor,
             layout_invalidated: false,
             runtime_generation_id: 0,
             menu_session_ids,
@@ -554,8 +568,14 @@ impl EditorWidget {
         WidgetPod::new(PackagePanelHost::new())
     }
 
-    fn new_overlay_host_pod(main_rect: &Rc<Cell<Rect>>) -> WidgetPod<PackageOverlayHost> {
-        WidgetPod::new(PackageOverlayHost::new(main_rect.clone()))
+    fn new_overlay_host_pod(
+        main_rect: &Rc<Cell<Rect>>,
+        completion_anchor: &Rc<Cell<Option<Rect>>>,
+    ) -> WidgetPod<PackageOverlayHost> {
+        WidgetPod::new(PackageOverlayHost::with_completion_anchor(
+            main_rect.clone(),
+            completion_anchor.clone(),
+        ))
     }
 
     /// Reconcile the retained fixed-panel children from the current package_ui
@@ -1093,6 +1113,11 @@ impl EditorWidget {
 
     fn editor_main_rect(&self, size: Size) -> Rect {
         let document_id = self.view.document_id();
+        if self.view.welcome_visible() {
+            // Welcome is a full-window entry surface. Keep package-owned fixed
+            // panels, but do not reserve a stale/empty workspace slot.
+            return editor_region_without_workspace_sidebar(size, &self.sdui, document_id);
+        }
         editor_region_for_document(size, &self.sdui, document_id)
     }
 
@@ -1122,9 +1147,10 @@ impl Widget for EditorWidget {
         // (including main-rect pointer interaction) is the pane-1 view's.
         match event {
             PointerEvent::Scroll(scroll)
-                if self
-                    .sdui
-                    .scrolls_point(ctx.size(), ctx.local_position(scroll.state.position)) => {}
+                if !self.view.welcome_visible()
+                    && self
+                        .sdui
+                        .scrolls_point(ctx.size(), ctx.local_position(scroll.state.position)) => {}
             _ => self.view.handle_pointer_event(ctx, props, event),
         }
     }
@@ -1167,6 +1193,7 @@ impl Widget for EditorWidget {
     }
 
     fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
+        self.view.register_welcome_child(ctx);
         ctx.register_child(&mut self.region);
         ctx.register_child(&mut self.panel_host);
         ctx.register_child(&mut self.overlay_host);
@@ -1192,13 +1219,17 @@ impl Widget for EditorWidget {
         let view_constraints =
             BoxConstraints::tight(Size::new(editor_rect.width(), editor_rect.height()));
         self.view.layout_in(ctx, &view_constraints, editor_rect);
+        self.overlay_completion_anchor
+            .set(self.view.completion_anchor());
         // Place the reconciled SDUI region child (plan 070 step 8). The sidebar
         // geometry comes from the same legacy walk that produces the hit-test
         // action rects, so the painted region and the click rects stay
         // pixel-aligned. The region is placed as a fixed scroll viewport:
         // sidebar width × (sidebar height below the top padding), at the
         // sidebar origin below the padding.
-        if let Some(geo) = self.sdui.sidebar_geometry(size) {
+        if !self.view.welcome_visible()
+            && let Some(geo) = self.sdui.sidebar_geometry(size)
+        {
             let region_size = Size::new(geo.rect.width(), geo.rect.height());
             let _ = ctx.run_layout(
                 &mut self.region,
@@ -1244,7 +1275,11 @@ impl Widget for EditorWidget {
     }
 
     fn accessibility_role(&self) -> Role {
-        Role::MultilineTextInput
+        if self.view.welcome_visible() {
+            Role::Group
+        } else {
+            Role::MultilineTextInput
+        }
     }
 
     fn accessibility(
@@ -1262,6 +1297,9 @@ impl Widget for EditorWidget {
         // task 2), and empty group children are the same convention the
         // panel/overlay hosts already follow.
         let mut children = Vec::new();
+        if self.view.welcome_visible() {
+            children.push(self.view.welcome_widget_id().into());
+        }
         children.push(self.region.id().into());
         children.push(self.panel_host.id().into());
         children.push(self.overlay_host.id().into());
@@ -1299,6 +1337,7 @@ impl Widget for EditorWidget {
         // `overlay_host` last so the transient overlays layer above everything
         // (plan 070 step 13e).
         ChildrenIds::from_slice(&[
+            self.view.welcome_widget_id(),
             self.panel_host.id(),
             self.region.id(),
             self.overlay_host.id(),
@@ -1310,7 +1349,7 @@ impl Widget for EditorWidget {
     }
 
     fn accepts_text_input(&self) -> bool {
-        true
+        !self.view.welcome_visible()
     }
 }
 
@@ -1346,6 +1385,13 @@ mod tests {
             scale_factor: 1.0,
             test_font: None,
         }
+    }
+
+    fn welcome_initial_state() -> ClientInitialState {
+        let mut state = initial_state(DocumentAccess::Editable { lease_id: 99 }, 1);
+        state.text.clear();
+        state.workspace_root = "/tmp/project".to_string();
+        state
     }
 
     fn centered_menu() -> crate::shell::TransientMenuSession {
@@ -1428,7 +1474,10 @@ mod tests {
             update
                 .nodes
                 .iter()
-                .filter(|(_, node)| node.live() == Some(masonry::accesskit::Live::Polite))
+                .filter(|(_, node)| {
+                    node.live() == Some(masonry::accesskit::Live::Polite)
+                        && node.label() == Some("2 results")
+                })
                 .count(),
             1,
             "centered menu exposes one live result-count node"
@@ -1590,6 +1639,69 @@ mod tests {
             (surface_width(&rr) - 480.0).abs() < 1.0,
             "width token override applies without layer recreation"
         );
+    }
+
+    #[test]
+    fn welcome_entry_exposes_actions_and_hides_after_document_open() {
+        let root_widget = NewWidget::new(EditorWidget::with_initial_state(welcome_initial_state()));
+        let chrome_id = root_widget.id();
+        let mut rr = RenderRoot::new(root_widget, |_| {}, render_root_options());
+        rr.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+
+        let (_, update) = rr.redraw();
+        let update = update.expect("welcome access tree");
+        for label in ["Open File", "Open Folder"] {
+            let button = update
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == masonry::accesskit::Role::Button && node.label() == Some(label)
+                })
+                .unwrap_or_else(|| panic!("welcome exposes {label} button"));
+            assert!(button.1.supports_action(masonry::accesskit::Action::Click));
+        }
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.role() == masonry::accesskit::Role::Group
+                && node.label() == Some("Welcome to Clay")
+        }));
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.role() == masonry::accesskit::Role::Status
+                && node
+                    .label()
+                    .is_some_and(|label| label.contains("Workspace: project"))
+        }));
+        let _consumer = accesskit_consumer::Tree::new(update, false);
+
+        rr.edit_widget(chrome_id, |mut widget| {
+            let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            assert!(
+                editor
+                    .widget
+                    .apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                        metadata: DocumentMetadata {
+                            document_id: 42,
+                            version: 1,
+                            access: DocumentAccess::Editable { lease_id: 42 },
+                            lease_id: Some(42),
+                            dirty: false,
+                            workspace_root_id: 77,
+                            path: "src/main.rs".to_string(),
+                        },
+                        text: "fn main() {}".to_string(),
+                    })
+            );
+            editor.ctx.request_render();
+            editor.ctx.request_accessibility_update();
+        });
+        let (_, update) = rr.redraw();
+        let update = update.expect("document access tree");
+        assert!(!update.nodes.iter().any(|(_, node)| {
+            node.role() == masonry::accesskit::Role::Button && node.label() == Some("Open File")
+        }));
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.role() == masonry::accesskit::Role::MultilineTextInput
+                && node.label().is_some_and(|label| label.contains("main.rs"))
+        }));
     }
 
     #[test]
@@ -1956,6 +2068,20 @@ mod tests {
             widget.editor_local_point(size, masonry::kurbo::Point::new(300.0, 80.0)),
             Some(masonry::kurbo::Point::new(60.0, 80.0))
         );
+    }
+
+    #[test]
+    fn welcome_entry_reclaims_workspace_sidebar_space() {
+        let mut initial = initial_state(DocumentAccess::Editable { lease_id: 99 }, 12);
+        initial.text.clear();
+        let mut widget = EditorWidget::with_initial_state(initial);
+        widget.apply_connection_event(ClientConnectionEvent::SduiSnapshot {
+            client_id: 11,
+            tree: sdui_tree("Workspace"),
+        });
+
+        let main = widget.editor_main_rect(masonry::kurbo::Size::new(900.0, 600.0));
+        assert_eq!(main, masonry::kurbo::Rect::new(0.0, 0.0, 900.0, 600.0));
     }
 
     #[test]

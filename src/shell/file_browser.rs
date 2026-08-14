@@ -43,7 +43,6 @@ pub(crate) const TOGGLE_FILE_BROWSER_COMMAND_ID: &str = "workspace.toggleFileBro
 pub(crate) struct FileBrowserState {
     root_id: WorkspaceRootId,
     root_display_name: String,
-    root_display_path: String,
     current_directory: PathBuf,
     entries: Vec<FileBrowserEntry>,
 }
@@ -132,8 +131,9 @@ impl FileBrowserState {
 
         Ok(Self {
             root_id,
-            root_display_name: root_metadata.display_name,
-            root_display_path: root_metadata.display_path,
+            root_display_name: crate::editor::accessibility::sanitize_document_display_name(
+                &root_metadata.display_name,
+            ),
             current_directory: relative_path,
             entries,
         })
@@ -161,14 +161,15 @@ impl FileBrowserState {
         let file_list_id = SduiNodeId(5);
         let editor_id = SduiNodeId(6);
 
-        let workspace_title = format!(
-            "Workspace · {} · {}",
-            self.root_display_name, self.root_display_path
-        );
+        // Keep shell-visible workspace labels useful without exposing the
+        // server's absolute root path. The typed action still carries the
+        // validated root ID and relative path for server-side authority.
+        let workspace_title = format!("Workspace · {}", self.root_display_name);
         let title = if self.current_directory.as_os_str().is_empty() {
             workspace_title
         } else {
-            format!("{workspace_title} · {}", self.current_directory.display())
+            let directory = self.current_directory.to_string_lossy().replace('\\', "/");
+            format!("{workspace_title} · {}", sanitize_browser_label(&directory))
         };
         let title_label = SduiNode::new(title_label_id, SduiNodeKind::Label { text: title });
 
@@ -297,8 +298,12 @@ impl FileBrowserState {
                         "relativePath": relative,
                     }),
                 );
-                TransientMenuItem::new(index.to_string(), entry.name.clone(), action)
-                    .with_detail(entry.kind_label())
+                TransientMenuItem::new(
+                    index.to_string(),
+                    sanitize_browser_label(&entry.name),
+                    action,
+                )
+                .with_detail(entry.kind_label())
             })
             .collect();
 
@@ -353,14 +358,28 @@ impl FileBrowserEntry {
     }
 
     fn display_label(&self) -> String {
+        let name = sanitize_browser_label(&self.name);
         match self.kind {
-            FileBrowserEntryKind::Directory => format!("{}/", self.name),
-            _ => self.name.clone(),
+            FileBrowserEntryKind::Directory => format!("{name}/"),
+            _ => name,
         }
     }
 
     fn root_id_hint(&self) -> u64 {
         self.root_id
+    }
+}
+
+fn sanitize_browser_label(value: &str) -> String {
+    let safe: String = value
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(crate::editor::accessibility::ACCESSIBILITY_DISPLAY_NAME_MAX_CHARS)
+        .collect();
+    if safe.is_empty() {
+        "untitled".to_string()
+    } else {
+        safe
     }
 }
 
@@ -480,8 +499,8 @@ mod tests {
             .into_iter()
             .find(|root| root.workspace_root_id == root_id)
             .unwrap();
-        assert!(title.contains(&root_metadata.display_name));
-        assert!(title.contains(&root_metadata.display_path));
+        assert_eq!(title, format!("Workspace · {}", root_metadata.display_name));
+        assert!(!title.contains(&root_metadata.display_path));
 
         let nested =
             FileBrowserState::from_workspace_at(&workspace, root_id, PathBuf::from("src")).unwrap();

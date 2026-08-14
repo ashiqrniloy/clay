@@ -74,6 +74,9 @@ pub struct BaseUiColors {
     pub scrollbar_track: Color,
     pub status_bg: Color,
     pub status_text: Color,
+    pub diagnostic_error: Color,
+    pub diagnostic_warning: Color,
+    pub diagnostic_info: Color,
 }
 
 // Bit positions in `StyleRegistry::attr_defaults` for theme-declared
@@ -105,10 +108,8 @@ pub struct StyleRegistry {
     semantic: Color,
     /// Legacy `DecorationKind::Diagnostic` fill tint (error-severity default).
     diagnostic: Color,
-    /// Severity-aware squiggle/underline colors for `DiagnosticSpan` paint.
-    diagnostic_error: Color,
-    diagnostic_warning: Color,
-    diagnostic_info: Color,
+    /// Severity-aware search/diagnostic colors remain editor-owned base UI
+    /// colors; diagnostics are mirrored in `BaseUiColors` for shell projection.
     search_match: Color,
     // Per-`TokenType` colors for the `Syntax` layer, indexed by
     // [`TokenType::index`]. The Clay default still reproduces the old family
@@ -150,12 +151,12 @@ impl StyleRegistry {
                 scrollbar_track: Color::from_rgba8(0xff, 0xff, 0xff, 0x14),
                 status_bg: Color::from_rgb8(0x18, 0x18, 0x1f),
                 status_text: Color::from_rgb8(0xd7, 0xd2, 0xe8),
+                diagnostic_error: Color::from_rgb8(0xff, 0x4d, 0x6d),
+                diagnostic_warning: Color::from_rgb8(0xff, 0xd1, 0x66),
+                diagnostic_info: Color::from_rgb8(0x61, 0xaf, 0xef),
             },
             semantic: Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f),
             diagnostic: Color::from_rgba8(0xff, 0x4d, 0x6d, 0x3f),
-            diagnostic_error: Color::from_rgb8(0xff, 0x4d, 0x6d),
-            diagnostic_warning: Color::from_rgb8(0xff, 0xd1, 0x66),
-            diagnostic_info: Color::from_rgb8(0x61, 0xaf, 0xef),
             search_match: Color::from_rgba8(0xff, 0xd1, 0x66, 0x45),
             syntax: [
                 Color::from_rgba8(0x61, 0xaf, 0xef, 0x55), // Namespace
@@ -245,9 +246,9 @@ impl StyleRegistry {
     /// branch and no hardcoded paint-path colors.
     pub fn diagnostic_style(&self, severity: DiagnosticSeverity) -> StyleSpec {
         let color = match severity {
-            DiagnosticSeverity::Error => self.diagnostic_error,
-            DiagnosticSeverity::Warning => self.diagnostic_warning,
-            DiagnosticSeverity::Info => self.diagnostic_info,
+            DiagnosticSeverity::Error => self.base.diagnostic_error,
+            DiagnosticSeverity::Warning => self.base.diagnostic_warning,
+            DiagnosticSeverity::Info => self.base.diagnostic_info,
         };
         StyleSpec {
             color,
@@ -452,11 +453,13 @@ impl StyleRegistry {
                             BaseUiColorKey::ScrollbarTrack => registry.base.scrollbar_track = color,
                             BaseUiColorKey::StatusBg => registry.base.status_bg = color,
                             BaseUiColorKey::StatusText => registry.base.status_text = color,
-                            BaseUiColorKey::DiagnosticError => registry.diagnostic_error = color,
-                            BaseUiColorKey::DiagnosticWarning => {
-                                registry.diagnostic_warning = color
+                            BaseUiColorKey::DiagnosticError => {
+                                registry.base.diagnostic_error = color
                             }
-                            BaseUiColorKey::DiagnosticInfo => registry.diagnostic_info = color,
+                            BaseUiColorKey::DiagnosticWarning => {
+                                registry.base.diagnostic_warning = color
+                            }
+                            BaseUiColorKey::DiagnosticInfo => registry.base.diagnostic_info = color,
                         }
                     }
                 }
@@ -559,9 +562,12 @@ mod tests {
         assert_eq!(r.base.selection, Color::from_rgba8(0x8a, 0x6f, 0xff, 0x66));
         assert_eq!(r.semantic, Color::from_rgba8(0x4d, 0xc8, 0x8a, 0x2f));
         assert_eq!(r.diagnostic, Color::from_rgba8(0xff, 0x4d, 0x6d, 0x3f));
-        assert_eq!(r.diagnostic_error, Color::from_rgb8(0xff, 0x4d, 0x6d));
-        assert_eq!(r.diagnostic_warning, Color::from_rgb8(0xff, 0xd1, 0x66));
-        assert_eq!(r.diagnostic_info, Color::from_rgb8(0x61, 0xaf, 0xef));
+        assert_eq!(r.base.diagnostic_error, Color::from_rgb8(0xff, 0x4d, 0x6d));
+        assert_eq!(
+            r.base.diagnostic_warning,
+            Color::from_rgb8(0xff, 0xd1, 0x66)
+        );
+        assert_eq!(r.base.diagnostic_info, Color::from_rgb8(0x61, 0xaf, 0xef));
         assert_eq!(
             r.syntax_color(TokenType::Keyword),
             Color::from_rgba8(0xc7, 0x92, 0xea, 0x55)
@@ -577,9 +583,9 @@ mod tests {
         assert_ne!(error, warning);
         assert_ne!(warning, info);
         assert_ne!(error, info);
-        assert_eq!(error, r.diagnostic_error);
-        assert_eq!(warning, r.diagnostic_warning);
-        assert_eq!(info, r.diagnostic_info);
+        assert_eq!(error, r.base.diagnostic_error);
+        assert_eq!(warning, r.base.diagnostic_warning);
+        assert_eq!(info, r.base.diagnostic_info);
 
         let overrides = [TextStyleOverride {
             token: "diagnosticError".to_string(),
@@ -597,7 +603,7 @@ mod tests {
         );
         assert_eq!(
             themed.diagnostic_style(DiagnosticSeverity::Warning).color,
-            r.diagnostic_warning
+            r.base.diagnostic_warning
         );
     }
 

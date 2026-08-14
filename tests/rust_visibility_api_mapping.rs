@@ -608,6 +608,9 @@ fn phase22_6_window_model_a11y_additions_are_not_public_programmatic_surfaces() 
         "AnnouncementKind",
         "pane_chrome_piece_count",
         "tab_switch_geometry_work",
+        "completion_open_projection_work",
+        "transient_menu_filter_work",
+        "completion_layout_work",
         "pane_split_tree_with",
         "working_area_layout_with",
         "PANE_PAINT_P95_BUDGET_MS",
@@ -979,6 +982,151 @@ fn plan086_virtual_accessibility_helpers_are_not_public_programmatic_surfaces() 
         assert!(
             !registry.contains(internal_name),
             "generated registry must not contain accessibility internal {internal_name}"
+        );
+    }
+}
+
+/// Plan 087 task 9: the Clay-owned welcome entry surface and the completion
+/// projection are client-native presentation, not programmatic capabilities.
+/// Welcome actions reuse the existing documented `documents.clientOpenFileDialog`
+/// and `workspace.clientOpenFolderDialog` client commands; the welcome widget
+/// types, the internal `Completion` origin/anchor, the shared completion
+/// geometry helper, the menu-label normalizer, and the completion surface
+/// budgets stay out of deno_core ops, Clay JS facades, and the generated JS
+/// API registry. No new public API was introduced by Plan 087.
+#[test]
+fn plan087_welcome_and_completion_internals_are_not_public_programmatic_surfaces() {
+    let root = repository_root();
+
+    // Internal items must be pub(crate) or private, never bare `pub`.
+    let internal_declarations: &[(&str, &str)] = &[
+        ("src/lib.rs", "pub(crate) mod masonry_welcome"),
+        ("src/masonry_welcome.rs", "pub(crate) struct WelcomeState"),
+        ("src/masonry_welcome.rs", "pub(crate) struct WelcomeWidget"),
+        (
+            "src/editor/accessibility.rs",
+            "pub(crate) fn compose_menu_item_accessibility_label",
+        ),
+        (
+            "src/shell/package_ui.rs",
+            "pub(crate) fn completion_overlay_rect",
+        ),
+        (
+            "src/shell/transient_menu.rs",
+            "pub(crate) enum TransientMenuOrigin",
+        ),
+        (
+            "src/shell/transient_menu.rs",
+            "pub(crate) struct CompletionAnchor",
+        ),
+    ];
+    for (path, declaration) in internal_declarations {
+        let source =
+            fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        assert!(
+            source.contains(declaration),
+            "{declaration} in {path} must be pub(crate) or private"
+        );
+    }
+    // The welcome button itself is private to its module, and its action
+    // routing reuses the existing documented client command IDs.
+    let welcome =
+        fs::read_to_string(root.join("src/masonry_welcome.rs")).expect("read masonry_welcome.rs");
+    assert!(
+        welcome.contains("struct WelcomeButton {") && !welcome.contains("pub struct WelcomeButton"),
+        "WelcomeButton must stay private to masonry_welcome.rs"
+    );
+    assert!(
+        welcome.contains("\"documents.clientOpenFileDialog\"")
+            && welcome.contains("\"workspace.clientOpenFolderDialog\""),
+        "welcome buttons must reuse the documented client command IDs"
+    );
+    // The package-facing anchor contract stays at the four documented
+    // anchors; the internal Completion/Centered anchors are never parseable
+    // from a package declaration.
+    let anchors = fs::read_to_string(root.join("src/server/ui.rs")).expect("read server/ui.rs");
+    assert!(
+        anchors.contains(
+            "const VALID_OVERLAY_ANCHORS: &[&str] = &[\"working-area\", \"active-pane\", \"main\", \"pointer\"];"
+        ),
+        "VALID_OVERLAY_ANCHORS must stay the exact four-anchor allowlist"
+    );
+    let parse =
+        fs::read_to_string(root.join("src/shell/package_ui.rs")).expect("read package_ui.rs");
+    let parse_start = parse
+        .find("pub(crate) fn parse(value: &str) -> Self {")
+        .expect("PackageOverlayAnchor::parse exists");
+    let parse_end = parse
+        .find("pub(crate) fn rect(self, working_area: Rect, main_rect: Rect)")
+        .expect("parse is followed by rect");
+    let parse_body = &parse[parse_start..parse_end];
+    assert!(
+        !parse_body.contains("Completion") && !parse_body.contains("Centered"),
+        "PackageOverlayAnchor::parse must never produce the internal Completion/Centered anchors"
+    );
+
+    // None of the Plan 087 additions may be wrapped by a deno_core op.
+    let internal_names = [
+        "WelcomeWidget",
+        "WelcomeState",
+        "WelcomeButton",
+        "completion_overlay_rect",
+        "compose_menu_item_accessibility_label",
+        "CompletionAnchor",
+        "COMPLETION_MAX_VISIBLE_ROWS",
+        "COMPLETION_MAX_WIDTH_PX",
+    ];
+    for entry in fs::read_dir(root.join("src/server/ops")).expect("read src/server/ops") {
+        let path = entry.expect("src/server/ops entry").path();
+        if path.extension().and_then(|value| value.to_str()) != Some("rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read ops source");
+        for name in internal_names {
+            assert!(
+                !source.contains(name),
+                "{} must not wrap Plan 087 internal {name} in a deno_core op",
+                path.display()
+            );
+        }
+    }
+
+    // None of the additions may be exposed through a Clay JS facade.
+    for entry in fs::read_dir(root.join("runtime/js")).expect("read runtime/js") {
+        let path = entry.expect("runtime/js entry").path();
+        if !matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("js" | "ts")
+        ) {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read facade source");
+        for name in internal_names {
+            assert!(
+                !source.contains(name),
+                "{} must not expose Plan 087 internal {name} to JavaScript",
+                path.display()
+            );
+        }
+    }
+
+    // The generated registry gains no Plan 087 entry, while the two welcome
+    // command IDs stay documented public APIs.
+    let registry = fs::read_to_string(root.join("docs/generated/clay-js-api-registry.json"))
+        .expect("read generated registry");
+    for name in internal_names {
+        assert!(
+            !registry.contains(name),
+            "generated registry must not contain Plan 087 internal {name}"
+        );
+    }
+    for documented in [
+        "documents.clientOpenFileDialog",
+        "workspace.clientOpenFolderDialog",
+    ] {
+        assert!(
+            registry.contains(&format!("\"id\": \"{documented}\"")),
+            "generated registry must keep the welcome action command {documented}"
         );
     }
 }

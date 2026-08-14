@@ -128,11 +128,26 @@ Tab command policy table (module 14 steps in parentheses):
   route consumes arrows/Enter/Escape/printable/Backspace before editor
   dispatch (keys leak only for unhandled keys; e2e asserts the menu path).
 
+## Plan 087 UI foundation steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| K69 | Fixture manifest installs `completion.trigger` on `Ctrl+Space` (editor scope, `UiReactivePriority`) | `BehaviorManifestInstalled` log entry contains the binding; pressing `Ctrl+Space` in an editor opens the completion popup; no Rust-side default chord was added |
+| K70 | Open the Command Centre (default `Ctrl+X Ctrl+P` chord or fixture binding) with 60+ catalogue entries | Centered Command Centre still opens with the bounded 640-logical-px surface, retained scrollable list, `{n} results` status; rows stay selectable; Escape closes (non-regression of the Phase 24.4/24.5 surface) |
+| K71 | Type a filter query in the Command Centre | Results filter live; selected index resets to 0; `{n} results` updates; no editor text leaks |
+| K72 | Negative: with a completion or Command Centre session active, attempt editor chords | Menu route consumes arrows/Enter/Escape/printable/Backspace before editor dispatch; keys do not reach the editor |
+
 ## Linux execution record (Plan 086 task 11, 2026-08-14)
 
 - **PASS — K19–K24/K29/K47 representative path:** the real Wayland/AT-SPI review instance opened Control Center with the isolated fixture binding, filtered `60` results to `7`, and closed with Escape. The menu/status tree updated through stable virtual IDs (status `14987979559889054209`, items in the following slots); no editor text leaked from menu input and responsiveness was immediate. Evidence: `code-reviews/screenshots/2026-08-14-plan086-a11y/control-center-menu.png`, `control-center-filtered.png`, and `review-log.md`.
 - **PASS — manifest/isolation:** the manual instance's `BehaviorManifestInstalled` contained the default `Ctrl+X Ctrl+P` / `Ctrl+X Ctrl+F` sequence bindings plus the isolated fixture overrides. No package or raw-op surface was added; menu labels/status did not expose host paths.
 - **Coverage note:** native path/file dialog selection and a second-client observer keyboard flow were blocked by this host's window-targeting backend. Automated chord/deny-by-default coverage remains green.
+
+## Linux execution record (Plan 087 task 11, 2026-08-15)
+
+- **PASS — K69:** the live X11 instance's `BehaviorManifestInstalled` contained `completion.trigger` on `Ctrl+Space` (editor scope, `UiReactivePriority`) and the default `controlCenter.open` `Ctrl+X Ctrl+P` / `controlCenter.openPath` `Ctrl+X Ctrl+F` sequence bindings; `Ctrl+Space` opened the completion popup (module 04 E16).
+- **PASS — K70/K71 (non-regression):** the Command Centre open/filter/Escape round trip with 60+ entries was verified live earlier in this plan (task 7): centered `Control Center` Menu `640x206`, 66 results incl. package items, filter `split` → 8 results, Escape close, status `{n} results`; artifacts under `code-reviews/screenshots/2026-08-14-plan087-ui-foundation/command-centre/` (same build).
+- **Host limitation (not a false pass):** this session's xdg-desktop-portal keyboard delivery could not hold Ctrl across the two strokes of the `Ctrl+X Ctrl+P` sequence (each combo arrives press+release; the pending-chord timeout is ~1.5 s), so the Command Centre was not re-opened in this instance; the task-7 live capture above plus automated chord tests cover the surface.
 
 ## Known ceilings
 

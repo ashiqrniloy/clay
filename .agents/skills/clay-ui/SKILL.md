@@ -9,13 +9,13 @@ Clay is a native Rust GUI app (Masonry/winit + Vello/Parley). All UI visuals are
 
 ## Step 0 (mandatory): Route through ui-skills
 
-Before any UI design or implementation work, run:
+Before reviewing existing UI, planning, designing, or implementing any UI work, run:
 
 ```bash
 npx ui-skills start
 ```
 
-Then inspect the relevant category (`npx ui-skills list --category <category>`) and load the smallest useful skill set (`npx ui-skills get <slug>`; prefer 1, max 3). Apply the loaded guidance to Clay's native context — Clay has no CSS/Tailwind; translate web guidance into Clay theme tokens, typography variants, and Masonry primitives.
+Then inspect the relevant category (`npx ui-skills list --category <category>`) and load the smallest useful skill set (`npx ui-skills get <slug>`; prefer 1, max 3). This is a per-task gate; do not reuse routing evidence from an earlier task. Record the selected category/slugs when the work is plan-driven. Apply the loaded guidance to Clay's native context — Clay has no CSS/Tailwind; translate web guidance into Clay theme tokens, typography variants, and Masonry primitives. Do not start source review or UI edits until this routing step is complete.
 
 ## Step 1 (mandatory): Inspect implemented UI
 

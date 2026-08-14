@@ -180,6 +180,15 @@ fn primitives_are_token_driven() {
         primitives_body.contains("theme.opacity("),
         "primitives must read opacity from ResolvedUiTheme.opacity()"
     );
+    assert!(
+        primitives_body.contains("theme.scalar_f64(\"radius.xs\")")
+            && primitives_body.contains("theme.scalar_f64(\"radius.sm\")"),
+        "radius tokens must use the scalar accessor, not the dimension domain"
+    );
+    assert!(
+        !primitives_body.contains("theme.dimension(\"radius."),
+        "radius tokens must not be resolved as dimensions"
+    );
 
     // Assert that primitives do not contain hardcoded color literals in paint
     // functions (only in tests).

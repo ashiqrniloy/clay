@@ -416,6 +416,8 @@ pub struct ClayShellWidget {
     /// Phase 22.3: hovered card index for state paint (None when the pointer
     /// is not over a card).
     tab_bar_hover: Option<usize>,
+    /// Hover state for the pinned new-tab affordance.
+    tab_bar_new_tab_hover: bool,
     /// Phase 22.7: horizontal strip scroll offset (one `f64`; clamped to
     /// `[0, max_scroll]` by `tab_bar_geometry` and every mutation path).
     /// `0` when the strip fits, so non-overflowing bars never shift.
@@ -470,6 +472,7 @@ impl ClayShellWidget {
             last_persist: None,
             tab_cards: Vec::new(),
             tab_bar_hover: None,
+            tab_bar_new_tab_hover: false,
             tab_bar_scroll: 0.0,
             typography: TypographyRegistry::default(),
             announcement: None,
@@ -493,6 +496,7 @@ impl ClayShellWidget {
             last_persist: None,
             tab_cards: Vec::new(),
             tab_bar_hover: None,
+            tab_bar_new_tab_hover: false,
             tab_bar_scroll: 0.0,
             typography: TypographyRegistry::default(),
             announcement: None,
@@ -653,6 +657,7 @@ impl ClayShellWidget {
         // Removing at the two-card boundary can hide the bar before replacement cards arrive; clear stale hover.
         if self.tab_cards.len() <= 2 {
             self.tab_bar_hover = None;
+            self.tab_bar_new_tab_hover = false;
         }
         // Phase 22.6 (task 4): announce the close (name/position from the
         // registry cards; remaining count from the tabs map after removal).
@@ -707,6 +712,7 @@ impl ClayShellWidget {
         self.tab_cards = cards;
         if self.tab_cards.len() < 2 {
             self.tab_bar_hover = None;
+            self.tab_bar_new_tab_hover = false;
             self.tab_bar_scroll = 0.0;
         }
         // Phase 22.7: registry-driven order/names may move the active card;
@@ -1443,7 +1449,7 @@ impl ClayShellWidget {
             &hairline_rect,
         );
 
-        let radius = theme.dimension("radius.xs").unwrap_or(2.0);
+        let radius = theme.scalar_f64("radius.xs").unwrap_or(2.0);
         let metrics = self
             .typography
             .ui_text_metrics(FontRole::Ui, UiTextVariant::Status);
@@ -1508,11 +1514,32 @@ impl ClayShellWidget {
         }
         scene.pop_layer();
 
-        // New-tab affordance: a token-colored "+" at the bar's right edge
-        // (hover/focus polish is the 22.4 keybinding task).
-        let new_tab_color = theme
-            .color("text.primary")
-            .unwrap_or(masonry::peniko::Color::TRANSPARENT);
+        // New-tab affordance: reuse the same state palette as cards so the
+        // pinned action has a visible hover state without relying on color
+        // alone for its accessible name/action.
+        let new_tab_state = if self.tab_bar_new_tab_hover {
+            InteractionState::Hover
+        } else {
+            InteractionState::Rest
+        };
+        let new_tab_fill =
+            crate::shell::component_state_color(theme, "surface.control", new_tab_state);
+        let new_tab = masonry::kurbo::RoundedRect::from_rect(geometry.new_tab_rect, radius);
+        scene.fill(
+            masonry::vello::peniko::Fill::NonZero,
+            masonry::kurbo::Affine::IDENTITY,
+            new_tab_fill,
+            None,
+            &new_tab,
+        );
+        let new_tab_color = match new_tab_state {
+            InteractionState::Rest => theme
+                .color("text.muted")
+                .unwrap_or(masonry::peniko::Color::TRANSPARENT),
+            _ => theme
+                .color("text.primary")
+                .unwrap_or(masonry::peniko::Color::TRANSPARENT),
+        };
         Self::paint_plus_glyph(scene, geometry.new_tab_rect, new_tab_color, hairline);
     }
 
@@ -1771,13 +1798,6 @@ impl Widget for ClayShellWidget {
                 paint_panel_chrome(scene, handle, &chrome, &theme);
             }
         }
-
-        // Phase 20.3: paint focus ring on the active pane.
-        if active.layout.pane_tree().pane_count() > 1
-            && let Some(focus_rect) = active.layout.focused_pane_rect(area)
-        {
-            paint_focus_ring(scene, focus_rect, &theme);
-        }
     }
 
     fn post_paint(
@@ -1795,6 +1815,14 @@ impl Widget for ClayShellWidget {
         let area = self.working_area(_ctx.size());
         let theme = self.ui_theme.clone();
         let active = self.active();
+        // Paint focus after pane hosts so their backgrounds cannot cover the
+        // active-pane ring. The ring is the non-color-only active/inactive
+        // distinction for split panes.
+        if active.layout.pane_tree().pane_count() > 1
+            && let Some(focus_rect) = active.layout.focused_pane_rect(area)
+        {
+            paint_focus_ring(scene, focus_rect, &theme);
+        }
         for divider in active.layout.pane_tree().divider_rects(area) {
             let axis = match divider.orientation {
                 crate::shell::SplitOrientation::Horizontal => Axis::Vertical,
@@ -2008,12 +2036,17 @@ impl Widget for ClayShellWidget {
                 // Phase 22.3: tab bar hover tracking (state paint). The bar is
                 // above the working area, so a hovered card and a hovered pane
                 // are mutually exclusive.
-                let hover = self
-                    .tab_bar_geometry(ctx.size())
-                    .and_then(|geometry| self.tab_bar_hit_test(&geometry, point))
+                let geometry = self.tab_bar_geometry(ctx.size());
+                let hover = geometry
+                    .as_ref()
+                    .and_then(|geometry| self.tab_bar_hit_test(geometry, point))
                     .map(|(index, _)| index);
-                if hover != self.tab_bar_hover {
+                let new_tab_hover = geometry
+                    .as_ref()
+                    .is_some_and(|geometry| geometry.new_tab_rect.contains(point));
+                if hover != self.tab_bar_hover || new_tab_hover != self.tab_bar_new_tab_hover {
                     self.tab_bar_hover = hover;
+                    self.tab_bar_new_tab_hover = new_tab_hover;
                     ctx.request_paint_only();
                 }
 
@@ -4847,6 +4880,14 @@ mod tests {
         render_root.edit_widget(shell_id, |mut widget| {
             let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
             assert_eq!(shell.widget.tab_bar_hover_index(), Some(0));
+            assert!(!shell.widget.tab_bar_new_tab_hover);
+        });
+        // Move over the pinned new-tab affordance.
+        render_root.handle_pointer_event(pointer_move_event(882.0, 15.0));
+        render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            assert_eq!(shell.widget.tab_bar_hover_index(), None);
+            assert!(shell.widget.tab_bar_new_tab_hover);
         });
         // Move into the working area (below the bar): hover clears.
         render_root.handle_pointer_event(pointer_move_event(94.0, 300.0));

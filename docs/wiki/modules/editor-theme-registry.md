@@ -207,9 +207,9 @@ Phase 20.1 extends the same `ActiveTheme` snapshot and `setTheme` path with a se
 
 ### `ResolvedUiTheme` construction and resolution
 
-`ResolvedUiTheme::from_active_theme(&design_tokens)` validates each override against `core_token_type()` and domain bounds (`is_valid_dimension`, opacity `[0,1]`, level parse, `MotionDuration` bounds). Valid overrides live in a lazy `BTreeMap<String, ResolvedThemeValue>`; `resolved(token)` checks overrides first, then `core_theme_value()` fallbacks. Empty override sets mean all-core defaults, so existing Gruvbox manifests need no edits.
+`ResolvedUiTheme::from_active_theme(&design_tokens)` validates each override against `core_token_type()` and domain bounds (`is_valid_dimension`, opacity `[0,1]`, level parse, `MotionDuration` bounds). Valid overrides live in a lazy `BTreeMap<String, ResolvedThemeValue>`; `resolved(token)` checks overrides first, then an optional legacy base palette, then `core_theme_value()` fallbacks. `with_base_ui` projects existing `textStyles` base colors into modern surface/state/focus/feedback roles, while typed `designTokens` remain higher precedence. Low-contrast legacy placeholders fall back to the base text color for UI `text.muted`, preserving the WCAG AA gate without changing editor placeholder paint. Empty override sets still mean all-core defaults when no legacy base palette is installed.
 
-Typed accessors (`color`, `scalar_f64`, `opacity`, `dimension`, `elevation`, `motion_duration`, `z_level`, `density`) and `panel_defaults()` / `active_density()` / `spacing_scale()` feed shell layout. `PanelDefaults` validates min ≤ default ≤ max triples and falls back to Clay core constants (`240/120/48/480/240` px) when overrides are missing or misordered.
+Typed accessors (`color`, `scalar_f64`, `opacity`, `dimension`, `elevation`, `motion_duration`, `z_level`, `density`) and `panel_defaults()` / `active_density()` / `spacing_scale()` feed shell layout. Radius tokens use `scalar_f64`; dimensions remain reserved for logical-pixel geometry. `PanelDefaults` validates min ≤ default ≤ max triples and falls back to Clay core constants (`240/120/48/480/240` px) when overrides are missing or misordered.
 
 Packages cannot override `typography.*` design tokens (`DesignTokenError::TypographyNotOverridable`); typography scale ratios remain user-owned through `ActiveTypography.hierarchy`.
 

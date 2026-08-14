@@ -8,7 +8,7 @@ Primitives are the **only** way to paint UI chrome in Clay. Shell/SDUI paint pat
 
 ### Token-driven design
 
-All primitives read color, dimension, opacity, and typography from `ResolvedUiTheme` tokens. No hardcoded values. This ensures:
+All primitives read color, spacing/radius/dimension, opacity, and typography from `ResolvedUiTheme` tokens. Radius values use the scalar accessor because `radius.*` belongs to the radius domain; logical pixel geometry uses `dimension.*`. No hardcoded values. This ensures:
 - Theme packages can customize all chrome through token contributions.
 - User preferences (density, reduced motion, high contrast) flow through tokens.
 - Chrome remains consistent across the shell and editor.
@@ -99,7 +99,7 @@ Enforced by `tests/ui_primitive_conformance.rs`:
 1. **No color literals**: Shell/SDUI chrome paint files contain no `Color::from_rgb8`/`Color::from_rgba8` literals outside `primitives.rs` and `theme.rs`. Phase 20.4 added `src/editor/surface.rs` (editor chrome) to the color-guard set.
 2. **No hardcoded sizes**: Shell/SDUI chrome paint files contain no hardcoded chrome-size constants (`SCROLLBAR_WIDTH`, `BORDER_WIDTH`, etc.) outside `primitives.rs` and `theme.rs`. Phase 20.4 added `src/masonry_editor.rs` (status bar) to the size-guard set.
 3. **Primitive routing**: Package components map onto primitives by construction (SDUI paint routes chrome through primitive helpers).
-4. **Token-driven**: Each primitive reads from `ResolvedUiTheme` (`theme.color()`, `theme.dimension()`, `theme.opacity()`).
+4. **Token-driven**: Each primitive reads from `ResolvedUiTheme` (`theme.color()`, `theme.scalar_f64()` for spacing/radius, `theme.dimension()` for logical dimensions, and `theme.opacity()`).
 5. **State-complete**: Interactive primitives handle all `InteractionState` variants including `Disabled`.
 
 ## Package authoring contract

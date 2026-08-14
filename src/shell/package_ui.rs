@@ -17,12 +17,13 @@ use masonry::kurbo::Rect;
 use serde_json::{Map, Value};
 
 use crate::{
-    editor::typography::UiTextVariant,
+    editor::typography::{TypographyRegistry, UiTextVariant},
+    perf::budgets::{COMPLETION_MAX_VISIBLE_ROWS, COMPLETION_MAX_WIDTH_PX},
     protocol::{FontRole, PackageUiSnapshot},
 };
 
 use super::layout::{FixedSlotId, FixedSlotState, PaneSlotLayout};
-use super::theme::PanelDefaults;
+use super::theme::{PanelDefaults, ResolvedUiTheme, SduiThemeStyle};
 use super::transient_menu::{
     TransientMenuFocusPolicy, TransientMenuItem, TransientMenuOrigin, TransientMenuSession,
     TransientMenuStatus,
@@ -79,15 +80,17 @@ pub(crate) struct TransientPackageOverlay {
     /// by [`TransientPackageOverlay::from_menu_session`]; the hosted
     /// `PackageRegionWidget` builds a `Menu`/`MenuItem`/`Status` a11y subtree
     /// from it instead of letting the generic `Group`/`ListItem` subtree flow.
+    /// Item labels are finalized by the shared bounded accessibility helper
+    /// before this payload reaches Masonry.
     /// `None` for package-declared overlays (they keep the generic subtree).
     pub(crate) menu_a11y: Option<MenuA11y>,
 }
 
 /// Plan 070 step 13f: a11y payload for a hosted transient menu — the hosted
 /// `PackageRegionWidget` reports `Role::Menu` (prompt) > `Role::MenuItem`
-/// (rows, with a `" selected"` suffix on the active item) + `Role::Status`
-/// (empty-state message), matching the legacy `collect_active_menu_accessibility_entries`
-/// screen-reader contract.
+/// (already bounded/sanitized rows, with a `" selected"` suffix on the active
+/// item) + `Role::Status` (empty-state message), matching the legacy
+/// `collect_active_menu_accessibility_entries` screen-reader contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MenuA11y {
     pub(crate) prompt: String,
@@ -100,8 +103,8 @@ pub(crate) struct MenuA11y {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MenuA11yItem {
-    /// Resolved row label: the item's `accessibility_label` when non-empty, else
-    /// its display `label` (matches the legacy `base` selection).
+    /// Final bounded/sanitized row label, including the in-budget ` selected`
+    /// suffix when active. Display/action data remains on the session item.
     pub(crate) label: String,
     pub(crate) selected: bool,
 }
@@ -113,6 +116,8 @@ pub(crate) enum PackageOverlayAnchor {
     Main,
     Pointer,
     Bottom,
+    /// Clay-native completion surface anchored to the active caret.
+    Completion,
     /// Phase 24.4: window-centered Command Centre surface. Clay-internal only:
     /// `parse` never produces it (packages keep the four documented anchors),
     /// and it is not part of `VALID_OVERLAY_ANCHORS` on the server.
@@ -491,6 +496,8 @@ impl TransientPackageOverlay {
         // labels + selected, empty-state status). Built once from the session;
         // the hosted `PackageRegionWidget` reports `Menu`/`MenuItem`/`Status`
         // from it regardless of which component-tree branch renders below.
+        // Package-authored labels are normalized here, before Masonry sees the
+        // payload; display/action data remains unchanged.
         let menu_a11y = MenuA11y {
             prompt: crate::editor::accessibility::sanitize_recovery_summary(session.prompt())
                 .unwrap_or_else(|| "Transient menu".to_string()),
@@ -498,13 +505,16 @@ impl TransientPackageOverlay {
                 .items()
                 .iter()
                 .enumerate()
-                .map(|(index, item)| MenuA11yItem {
-                    label: if item.accessibility_label.trim().is_empty() {
-                        item.label.clone()
-                    } else {
-                        item.accessibility_label.clone()
-                    },
-                    selected: index == session.selected_index(),
+                .map(|(index, item)| {
+                    let selected = index == session.selected_index();
+                    MenuA11yItem {
+                        label: crate::editor::accessibility::compose_menu_item_accessibility_label(
+                            &item.accessibility_label,
+                            &item.label,
+                            selected,
+                        ),
+                        selected,
+                    }
                 })
                 .collect(),
             status: match session.status() {
@@ -522,6 +532,7 @@ impl TransientPackageOverlay {
             TransientMenuOrigin::ContextMenu => PackageOverlayAnchor::Pointer,
             TransientMenuOrigin::MenuBar => PackageOverlayAnchor::Main,
             TransientMenuOrigin::CommandPalette => PackageOverlayAnchor::Bottom,
+            TransientMenuOrigin::Completion => PackageOverlayAnchor::Completion,
             // Phase 24.4: command/path mode request the window-centered
             // surface; the host routes it to the window-level overlay layer.
             TransientMenuOrigin::Centered => PackageOverlayAnchor::Centered,
@@ -593,7 +604,7 @@ impl TransientPackageOverlay {
                     .filter(|item| item.action.completion_accept.is_none())
                     .map(|item| item.action.command_id.clone())
                     .collect();
-                children.push(PackageUiComponentTree {
+                let list = PackageUiComponentTree {
                     id: list_id,
                     disabled: false,
                     kind: "list".to_string(),
@@ -605,6 +616,20 @@ impl TransientPackageOverlay {
                     action_command_id: None,
                     items,
                     children: Vec::new(),
+                    validation_state: None,
+                };
+                children.push(PackageUiComponentTree {
+                    id: format!("menu.{}.scroll", session.session_id().0),
+                    disabled: false,
+                    kind: "scroll".to_string(),
+                    font_role: FontRole::Ui,
+                    text_variant: None,
+                    title: None,
+                    text: None,
+                    label: None,
+                    action_command_id: None,
+                    items: Vec::new(),
+                    children: vec![list],
                     validation_state: None,
                 });
                 return Self {
@@ -722,10 +747,52 @@ impl PackageOverlayAnchor {
             Self::Main => main_rect,
             Self::Pointer => centered_rect(main_rect, 320.0, 220.0),
             Self::Bottom => bottom_rect(main_rect),
+            Self::Completion => main_rect,
             Self::WorkingArea | Self::ActivePane => working_area,
             Self::Centered => centered_rect(working_area, centered_width, 220.0),
         }
     }
+}
+
+pub(crate) fn completion_overlay_rect(
+    main_rect: Rect,
+    caret: Option<Rect>,
+    item_count: usize,
+    typography: &TypographyRegistry,
+    ui_theme: &ResolvedUiTheme,
+) -> Rect {
+    let style = SduiThemeStyle::from_ui_theme(ui_theme);
+    let body = typography.ui_text_metrics(FontRole::Ui, style.body_text);
+    let detail = typography.ui_text_metrics(FontRole::Ui, UiTextVariant::Detail);
+    let row_height = body.list_height(detail);
+    let visible_rows = item_count.clamp(1, COMPLETION_MAX_VISIBLE_ROWS);
+    let padding = ui_theme.scalar_f64("spacing.panel").unwrap_or(16.0);
+    let height = (padding + body.row_height * 2.0 + row_height * visible_rows as f64)
+        .min(main_rect.height().max(0.0));
+    let width = main_rect.width().clamp(0.0, COMPLETION_MAX_WIDTH_PX);
+    let max_x = (main_rect.x1 - width).max(main_rect.x0);
+    let caret = caret.unwrap_or(Rect::new(
+        main_rect.x0,
+        main_rect.y0,
+        main_rect.x0,
+        main_rect.y0,
+    ));
+    let x = caret.x0.clamp(main_rect.x0, max_x);
+    let gap = ui_theme.scalar_f64("spacing.inline").unwrap_or(6.0);
+    let y = if height >= main_rect.height().max(0.0) {
+        main_rect.y0
+    } else {
+        let below = caret.y1 + gap;
+        let above = caret.y0 - gap - height;
+        if below + height <= main_rect.y1 {
+            below
+        } else if above >= main_rect.y0 {
+            above
+        } else {
+            below.clamp(main_rect.y0, main_rect.y1 - height)
+        }
+    };
+    Rect::new(x, y, x + width, y + height)
 }
 
 impl PackageUiComponentTree {
@@ -911,6 +978,13 @@ mod tests {
         .unwrap()
     }
 
+    fn find_list(tree: &PackageUiComponentTree) -> Option<&PackageUiComponentTree> {
+        if tree.kind == "list" {
+            return Some(tree);
+        }
+        tree.children.iter().find_map(find_list)
+    }
+
     #[test]
     fn package_components_default_to_ui_typography() {
         let component = PackageUiComponentTree::from_declaration(&json!({
@@ -1057,12 +1131,7 @@ mod tests {
         assert_eq!(overlay.component.kind, "stack");
         assert_eq!(overlay.action_targets, vec!["clay.alpha", "clay.beta"]);
 
-        let list_component = overlay
-            .component
-            .children
-            .iter()
-            .find(|child| child.kind == "list")
-            .expect("menu overlay contains list component");
+        let list_component = find_list(&overlay.component).expect("menu overlay contains list");
         assert_eq!(list_component.items.len(), 2);
         assert_eq!(list_component.items[0].label, "Alpha Command");
         assert_eq!(
@@ -1171,15 +1240,68 @@ mod tests {
         let overlay = TransientPackageOverlay::from_menu_session(&session);
 
         assert!(overlay.action_targets.is_empty());
-        let list_component = overlay
-            .component
-            .children
-            .iter()
-            .find(|child| child.kind == "list")
-            .expect("completion menu overlay contains list component");
+        assert_eq!(overlay.anchor, PackageOverlayAnchor::Completion);
+        assert!(
+            overlay
+                .component
+                .children
+                .iter()
+                .any(|child| child.kind == "scroll")
+        );
+        let list_component =
+            find_list(&overlay.component).expect("completion menu overlay contains list");
         assert_eq!(list_component.items[0].label, "alpha");
         assert!(list_component.items[0].action_command_id.is_none());
         assert!(list_component.items[0].selected);
+    }
+
+    #[test]
+    fn completion_overlay_clamps_above_or_below_caret_inside_main_rect() {
+        let typography = TypographyRegistry::default();
+        let theme = ResolvedUiTheme::default();
+        let main = Rect::new(0.0, 20.0, 900.0, 820.0);
+        let below = completion_overlay_rect(
+            main,
+            Some(Rect::new(180.0, 100.0, 181.0, 120.0)),
+            COMPLETION_MAX_VISIBLE_ROWS + 4,
+            &typography,
+            &theme,
+        );
+        assert!(below.x0 >= main.x0 && below.x1 <= main.x1);
+        assert_eq!(below.width(), COMPLETION_MAX_WIDTH_PX);
+        assert!(below.y0 >= 120.0 && below.y1 <= main.y1);
+
+        let above = completion_overlay_rect(
+            main,
+            Some(Rect::new(180.0, 760.0, 181.0, 780.0)),
+            COMPLETION_MAX_VISIBLE_ROWS + 4,
+            &typography,
+            &theme,
+        );
+        assert!(above.x0 >= main.x0 && above.x1 <= main.x1);
+        assert!(above.y0 >= main.y0 && above.y1 <= 760.0);
+    }
+
+    #[test]
+    fn completion_overlay_height_uses_visible_row_cap() {
+        let typography = TypographyRegistry::default();
+        let theme = ResolvedUiTheme::default();
+        let main = Rect::new(0.0, 0.0, 900.0, 600.0);
+        let caret = Some(Rect::new(120.0, 100.0, 121.0, 120.0));
+        let one = completion_overlay_rect(main, caret, 1, &typography, &theme);
+        let eight = completion_overlay_rect(
+            main,
+            caret,
+            COMPLETION_MAX_VISIBLE_ROWS,
+            &typography,
+            &theme,
+        );
+        let many = completion_overlay_rect(main, caret, usize::MAX, &typography, &theme);
+
+        assert!(one.height() < eight.height());
+        assert_eq!(many.height(), eight.height());
+        assert!(many.height() <= main.height());
+        assert_eq!(many.width(), COMPLETION_MAX_WIDTH_PX);
     }
 
     #[test]

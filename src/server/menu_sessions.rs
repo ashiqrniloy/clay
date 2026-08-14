@@ -388,6 +388,9 @@ pub(crate) fn snapshot_from_session(session: &TransientMenuSession) -> Transient
         },
         match session.origin() {
             TransientMenuOrigin::CommandPalette => TransientMenuOriginData::CommandPalette,
+            // Completion sessions are client-local and never serialize through
+            // the server-owned menu snapshot protocol.
+            TransientMenuOrigin::Completion => TransientMenuOriginData::CommandPalette,
             TransientMenuOrigin::ContextMenu => TransientMenuOriginData::ContextMenu,
             TransientMenuOrigin::MenuBar => TransientMenuOriginData::MenuBar,
             TransientMenuOrigin::Centered => TransientMenuOriginData::Centered,

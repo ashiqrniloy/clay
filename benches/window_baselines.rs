@@ -4,8 +4,11 @@
 // editor-surface paint is viewport-bounded and benched separately in
 // editor_baselines. Results pin the advisory PANE_PAINT_P95_BUDGET_MS and
 // TAB_SWITCH_P95_BUDGET_MS constants (docs/development/performance.md).
+use std::hint::black_box;
+
 use clay::perf::baselines::{
-    centered_overlay_geometry_work, pane_chrome_piece_count, tab_switch_geometry_work,
+    centered_overlay_geometry_work, completion_layout_work, completion_open_projection_work,
+    pane_chrome_piece_count, tab_switch_geometry_work, transient_menu_filter_work,
 };
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
@@ -46,10 +49,53 @@ fn centered_overlay_baselines(c: &mut Criterion) {
     group.finish();
 }
 
+// Plan 087: advisory completion/menu baselines. Hard bounds are covered by
+// structural tests; these groups provide local timing signals only.
+fn completion_open_baselines(c: &mut Criterion) {
+    let mut group = c.benchmark_group("completion_open_baselines");
+    for items in [1usize, 8, 60, 256] {
+        group.bench_with_input(BenchmarkId::from_parameter(items), &items, |b, &items| {
+            b.iter(|| completion_open_projection_work(black_box(items)));
+        });
+    }
+    group.finish();
+}
+
+fn completion_filter_baselines(c: &mut Criterion) {
+    let mut group = c.benchmark_group("completion_filter_baselines");
+    for (items, query) in [(16usize, ""), (60, "split"), (256, "split pane")] {
+        group.bench_with_input(
+            BenchmarkId::new(query, items),
+            &(items, query),
+            |b, &(items, query)| {
+                b.iter(|| transient_menu_filter_work(black_box(items), black_box(query)));
+            },
+        );
+    }
+    group.finish();
+}
+
+fn completion_layout_baselines(c: &mut Criterion) {
+    let mut group = c.benchmark_group("completion_layout_baselines");
+    for (items, caret_y) in [(1usize, 20.0), (8, 280.0), (256, 560.0)] {
+        group.bench_with_input(
+            BenchmarkId::new(format!("{items} items"), caret_y as u32),
+            &(items, caret_y),
+            |b, &(items, caret_y)| {
+                b.iter(|| completion_layout_work(black_box(items), black_box(caret_y)));
+            },
+        );
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     pane_paint_baselines,
     tab_switch_baselines,
-    centered_overlay_baselines
+    centered_overlay_baselines,
+    completion_open_baselines,
+    completion_filter_baselines,
+    completion_layout_baselines
 );
 criterion_main!(benches);

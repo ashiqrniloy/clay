@@ -211,6 +211,13 @@ mod tests {
     }
 
     #[test]
+    fn tab_card_display_name_never_falls_back_to_an_absolute_path() {
+        assert_eq!(tab_card_display_name("/tmp/workspace"), "workspace");
+        assert_eq!(tab_card_display_name("/"), "Workspace");
+        assert_eq!(tab_card_display_name("\u{1f}"), "Workspace");
+    }
+
+    #[test]
     fn accept_registry_snapshot_rejects_stale_relays_and_resets_on_restart() {
         // Registry relays interleave across connections (a connection's
         // handshake replay races its own pending tab command): only

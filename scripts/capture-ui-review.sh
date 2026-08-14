@@ -263,7 +263,7 @@ with open(layout_path, "w", encoding="utf-8") as output:
         "tabs": [{
             "workspaceRoot": workspace,
             "activePane": 1,
-            "splitTree": None,
+            "splitTree": {"leaf": {"paneId": 1}},
             "slots": [],
             "panes": {"1": document_name},
         }],

@@ -51,10 +51,11 @@ use crate::masonry_sdui::{
     overlay_z_order, package_action_intent, paint_sdui_text, sdui_row_rect,
     stable_package_source_id,
 };
+use crate::masonry_sdui_region::SduiScrollViewport;
 use crate::protocol::{FontRole, SduiActionArgument, SduiActionIntent, SduiActionValue};
 use crate::shell::package_ui::{
     MenuA11y, PackageOverlayAnchor, PackageUiComponentTree, PackageUiListItem,
-    PackageUiRuntimeState, TransientPackageOverlay,
+    PackageUiRuntimeState, TransientPackageOverlay, completion_overlay_rect,
 };
 use crate::shell::primitives::{paint_scrim, paint_tooltip_shell};
 use crate::shell::theme::{ResolvedUiTheme, SduiThemeStyle};
@@ -114,6 +115,9 @@ pub(crate) struct PackageRegionWidget {
     /// it (excluding the generic reconciled subtree) instead of the default
     /// `Group` + children flow. Set by `PackageOverlayHost::sync_overlays`.
     menu_a11y: Option<MenuA11y>,
+    /// Selection target consumed by any internal `scroll` wrapper in a menu
+    /// projection so keyboard selection remains visible after reconciliation.
+    menu_scroll_target: Rc<Cell<Option<(f64, f64)>>>,
 }
 
 impl PackageRegionWidget {
@@ -128,6 +132,7 @@ impl PackageRegionWidget {
             typography: TypographyRegistry::default(),
             ui_theme: ResolvedUiTheme::default(),
             menu_a11y: None,
+            menu_scroll_target: Rc::new(Cell::new(None)),
         }
     }
 
@@ -162,6 +167,21 @@ impl PackageRegionWidget {
     /// Plan 070 step 13f: install the hosted-menu a11y payload (`Some` for menu
     /// overlays, `None` for package-declared overlays/fixed panels).
     pub(crate) fn set_menu_a11y(&mut self, menu_a11y: Option<MenuA11y>) {
+        let selected = menu_a11y
+            .as_ref()
+            .and_then(|menu| menu.items.iter().position(|item| item.selected));
+        let style = SduiThemeStyle::from_ui_theme(&self.ui_theme);
+        let body = self
+            .typography
+            .ui_text_metrics(FontRole::Ui, style.body_text);
+        let detail = self
+            .typography
+            .ui_text_metrics(FontRole::Ui, UiTextVariant::Detail);
+        let row_height = body.list_height(detail);
+        self.menu_scroll_target.set(selected.map(|index| {
+            let y0 = index as f64 * row_height;
+            (y0, y0 + row_height)
+        }));
         self.menu_a11y = menu_a11y;
     }
 
@@ -253,7 +273,7 @@ impl PackageRegionWidget {
                 // renderer stacks them with a shared cursor_y), so map every
                 // container — including `stack`, which is *not* a z-stack here —
                 // to a zero-gap column.
-                "flex" | "stack" | "overlay" | "scroll" | "portal" => {
+                "flex" | "stack" | "overlay" | "portal" => {
                     let mut column = Flex::column().with_gap(Length::ZERO);
                     let mut keys = Vec::new();
                     for child in &component.children {
@@ -261,6 +281,23 @@ impl PackageRegionWidget {
                         keys.push(Self::component_key(child));
                     }
                     (NewWidget::new(column).erased(), keys)
+                }
+                "scroll" => {
+                    let mut column = Flex::column().with_gap(Length::ZERO);
+                    let mut keys = Vec::new();
+                    for child in &component.children {
+                        column = column.with_child(self.build_component(child, depth));
+                        keys.push(Self::component_key(child));
+                    }
+                    (
+                        NewWidget::new(SduiScrollViewport::with_selection_target(
+                            NewWidget::new(column).erased(),
+                            self.ui_theme.clone(),
+                            self.menu_scroll_target.clone(),
+                        ))
+                        .erased(),
+                        keys,
+                    )
                 }
                 "button" => {
                     let button = NewWidget::new(PackageButton::from_component(
@@ -433,10 +470,23 @@ impl PackageRegionWidget {
                     button.ctx.request_layout();
                 }
             }
-            "panel" | "flex" | "stack" | "overlay" | "scroll" | "portal" => {
+            "panel" | "flex" | "stack" | "overlay" | "portal" => {
                 if let Some(mut flex) = widget.try_downcast::<Flex>() {
                     let keys = Self::container_keys(component);
                     self.reconcile_flex_children(&mut flex, component, keys, depth);
+                }
+            }
+            "scroll" => {
+                if let Some(mut viewport) = widget.try_downcast::<SduiScrollViewport>() {
+                    viewport.widget.set_ui_theme(self.ui_theme.clone());
+                    let keys = Self::container_keys(component);
+                    {
+                        let mut content = SduiScrollViewport::content_mut(&mut viewport);
+                        if let Some(mut flex) = content.try_downcast::<Flex>() {
+                            self.reconcile_flex_children(&mut flex, component, keys, depth);
+                        }
+                    }
+                    viewport.ctx.request_layout();
                 }
             }
             "list" => {
@@ -777,13 +827,8 @@ impl Widget for PackageRegionWidget {
                     crate::editor::accessibility::virtual_a11y_slots::REGION_MENU_ITEM_BASE
                         + index as u16,
                 );
-                let label = if item.selected {
-                    format!("{} selected", item.label)
-                } else {
-                    item.label.clone()
-                };
                 let mut item_node = Node::new(Role::MenuItem);
-                item_node.set_label(label);
+                item_node.set_label(item.label.clone());
                 item_node.set_selected(item.selected);
                 ctx.tree_update().nodes.push((id, item_node));
                 children.push(id);
@@ -2931,8 +2976,16 @@ impl Widget for PackagePanelHost {
 struct HostedOverlay {
     id: String,
     anchor: PackageOverlayAnchor,
+    completion_item_count: usize,
     z_order: u8,
     pod: WidgetPod<PackageRegionWidget>,
+}
+
+fn menu_item_count(component: &PackageUiComponentTree) -> usize {
+    if component.kind == "list" {
+        return component.items.len();
+    }
+    component.children.iter().map(menu_item_count).sum()
 }
 
 /// Hosts the transient overlays (package transient overlays + the active menu
@@ -2955,6 +3008,8 @@ pub(crate) struct PackageOverlayHost {
     /// Set during `EditorWidget`'s layout before this host's children are laid
     /// out.
     main_rect: Rc<Cell<Rect>>,
+    /// Current pane-local caret bounds for the Clay-native completion anchor.
+    completion_anchor: Rc<Cell<Option<Rect>>>,
     /// Overlay rects computed in layout, read in paint for the chrome.
     overlay_rects: Vec<Rect>,
     /// Whether this host is the Clay-owned window-level centered layer.
@@ -2971,11 +3026,19 @@ pub(crate) struct PackageOverlayHost {
 
 impl PackageOverlayHost {
     pub(crate) fn new(main_rect: Rc<Cell<Rect>>) -> Self {
+        Self::with_completion_anchor(main_rect, Rc::new(Cell::new(None)))
+    }
+
+    pub(crate) fn with_completion_anchor(
+        main_rect: Rc<Cell<Rect>>,
+        completion_anchor: Rc<Cell<Option<Rect>>>,
+    ) -> Self {
         Self {
             overlays: Vec::new(),
             typography: TypographyRegistry::default(),
             ui_theme: ResolvedUiTheme::default(),
             main_rect,
+            completion_anchor,
             overlay_rects: Vec::new(),
             centered: false,
             window_rect: Rect::ZERO,
@@ -3036,6 +3099,7 @@ impl PackageOverlayHost {
         for overlay in &overlays {
             if let Some(hosted) = kept.iter_mut().find(|h| h.id == overlay.id) {
                 hosted.anchor = overlay.anchor;
+                hosted.completion_item_count = menu_item_count(&overlay.component);
                 hosted.z_order = overlay_z_order(overlay.z_level_token);
                 let mut region = ctx.get_mut(&mut hosted.pod);
                 region
@@ -3054,6 +3118,7 @@ impl PackageOverlayHost {
                 kept.push(HostedOverlay {
                     id: overlay.id.clone(),
                     anchor: overlay.anchor,
+                    completion_item_count: menu_item_count(&overlay.component),
                     z_order: overlay_z_order(overlay.z_level_token),
                     pod: WidgetPod::new(region),
                 });
@@ -3122,12 +3187,20 @@ impl Widget for PackageOverlayHost {
             .unwrap_or(640.0);
         self.overlay_rects.clear();
         for hosted in &mut self.overlays {
-            let rect = if self.centered {
-                hosted
-                    .anchor
-                    .rect_with_centered_width(working_area, main_rect, centered_width)
-            } else {
-                hosted.anchor.rect(working_area, main_rect)
+            let rect = match hosted.anchor {
+                PackageOverlayAnchor::Completion => completion_overlay_rect(
+                    main_rect,
+                    self.completion_anchor.get(),
+                    hosted.completion_item_count,
+                    &self.typography,
+                    &self.ui_theme,
+                ),
+                _ if self.centered => {
+                    hosted
+                        .anchor
+                        .rect_with_centered_width(working_area, main_rect, centered_width)
+                }
+                _ => hosted.anchor.rect(working_area, main_rect),
             };
             self.overlay_rects.push(rect);
             let content_size = Size::new(rect.width(), (rect.height() - overlay_padding).max(1.0));
@@ -4507,6 +4580,115 @@ mod tests {
             .selected
     }
 
+    fn menu_scroll_offset(rr: &RenderRoot, host_id: WidgetId) -> f64 {
+        let host = rr
+            .get_widget(host_id)
+            .expect("host present")
+            .downcast::<PackageOverlayHost>()
+            .expect("an overlay host");
+        let region_id = host.overlays[0].pod.id();
+        let region = rr
+            .get_widget(region_id)
+            .expect("overlay region present")
+            .downcast::<PackageRegionWidget>()
+            .expect("a package region");
+        let scroll_id = region
+            .pod_id_for(stable_package_source_id("menu.9.scroll"))
+            .expect("menu scroll viewport present");
+        rr.get_widget(scroll_id)
+            .expect("menu scroll viewport present")
+            .downcast::<SduiScrollViewport>()
+            .expect("menu scroll viewport")
+            .scroll_offset_for_test()
+    }
+
+    #[test]
+    fn menu_selection_keeps_selected_row_in_scroll_viewport() {
+        use crate::shell::transient_menu::{
+            TransientMenuAction, TransientMenuItem, TransientMenuOrigin, TransientMenuSession,
+            TransientMenuSessionId,
+        };
+
+        let items = (0..20)
+            .map(|index| {
+                TransientMenuItem::new(
+                    format!("item-{index}"),
+                    format!("Item {index}"),
+                    TransientMenuAction::new("app.item"),
+                )
+            })
+            .collect();
+        let menu = TransientMenuSession::new(TransientMenuSessionId(9), "Completion")
+            .with_origin(TransientMenuOrigin::Completion)
+            .with_completion_anchor(Rect::new(200.0, 40.0, 201.0, 60.0))
+            .with_items(items)
+            .with_selected_index(19);
+        let overlay = TransientPackageOverlay::from_menu_session(&menu);
+        let (mut rr, host_id) =
+            hosted_overlay_host(vec![overlay], Rect::new(0.0, 0.0, 900.0, 600.0));
+        assert!(
+            menu_scroll_offset(&rr, host_id) > 0.0,
+            "last selected row must be scrolled into view"
+        );
+
+        let first = TransientPackageOverlay::from_menu_session(&menu.with_selected_index(0));
+        rr.edit_widget(host_id, |mut w| {
+            let mut host = w
+                .try_downcast::<PackageOverlayHost>()
+                .expect("overlay host");
+            host.widget.sync_overlays(
+                &mut host.ctx,
+                vec![first],
+                TypographyRegistry::default(),
+                ResolvedUiTheme::default(),
+            );
+        });
+        let _ = rr.redraw();
+        assert_eq!(
+            menu_scroll_offset(&rr, host_id),
+            0.0,
+            "selection at list start returns viewport to its top"
+        );
+    }
+
+    #[test]
+    fn centered_command_center_scrolls_60_results_without_overflow() {
+        use crate::shell::transient_menu::{
+            TransientMenuAction, TransientMenuItem, TransientMenuOrigin, TransientMenuSession,
+            TransientMenuSessionId,
+        };
+
+        let items = (0..60)
+            .map(|index| {
+                TransientMenuItem::new(
+                    format!("command-{index}"),
+                    format!("Command {index}"),
+                    TransientMenuAction::new("app.command"),
+                )
+            })
+            .collect();
+        let menu = TransientMenuSession::new(TransientMenuSessionId(9), "Control Center")
+            .with_origin(TransientMenuOrigin::Centered)
+            .with_items(items)
+            .with_selected_index(59);
+        let overlay = TransientPackageOverlay::from_menu_session(&menu);
+        let (rr, host_id) = hosted_centered_overlay_host(vec![overlay]);
+        let host = rr
+            .get_widget(host_id)
+            .expect("centered host")
+            .downcast::<PackageOverlayHost>()
+            .expect("centered overlay host");
+        let region_widget = rr
+            .get_widget(host.overlays[0].pod.id())
+            .expect("centered region");
+        let region = region_widget.ctx();
+        let origin = region.to_window(Point::ZERO);
+        assert!(origin.x >= 0.0 && origin.y >= 0.0);
+        assert!(origin.x + region.size().width <= 900.0);
+        assert!(origin.y + region.size().height <= 600.0);
+        assert!(menu_scroll_offset(&rr, host_id) > 0.0);
+    }
+
     #[test]
     fn overlay_host_reconcile_updates_menu_selection() {
         // Plan 070 step 13e: a transient menu's selection (which changes via the
@@ -4634,6 +4816,158 @@ mod tests {
             }),
             "non-selected menu item uses its accessibility label"
         );
+    }
+
+    #[test]
+    fn completion_menu_accessibility_is_modeless_and_consumer_valid() {
+        use crate::protocol::{
+            CompletionItem, CompletionProvenance, CompletionReplacementRange, CompletionResultSet,
+            CompletionStatus,
+        };
+        use crate::shell::transient_menu::TransientMenuFocusPolicy;
+
+        let result = CompletionResultSet {
+            request_id: 12,
+            client_id: 1,
+            document_id: 7,
+            document_version: 1,
+            behavior_version: 0,
+            provider_generation: 1,
+            replacement_range: CompletionReplacementRange::new(0, 0),
+            status: CompletionStatus::Ok,
+            items: vec![
+                CompletionItem::new("alpha", "alpha", CompletionProvenance::builtin_core()),
+                CompletionItem::new("beta", "beta", CompletionProvenance::builtin_core()),
+            ],
+            provenance: CompletionProvenance::builtin_core(),
+        };
+        let menu = crate::shell::completion_result_to_menu_session(&result)
+            .with_focus_policy(TransientMenuFocusPolicy::Modeless)
+            .with_completion_anchor(Rect::new(700.0, 500.0, 701.0, 520.0))
+            .with_selected_index(1);
+        let overlay = TransientPackageOverlay::from_menu_session(&menu);
+        assert_eq!(overlay.anchor, PackageOverlayAnchor::Completion);
+        assert_eq!(overlay.focus_policy, "modeless");
+        assert!(overlay.action_targets.is_empty());
+        assert_eq!(
+            overlay
+                .menu_a11y
+                .as_ref()
+                .and_then(|menu| menu.result_count.as_deref()),
+            None
+        );
+
+        let main_rect = Rc::new(Cell::new(Rect::new(0.0, 0.0, 900.0, 600.0)));
+        let caret = Rc::new(Cell::new(Some(Rect::new(700.0, 500.0, 701.0, 520.0))));
+        let host_widget =
+            NewWidget::new(PackageOverlayHost::with_completion_anchor(main_rect, caret));
+        let host_id = host_widget.id();
+        let mut rr = RenderRoot::new(host_widget, |_| {}, render_root_options());
+        rr.edit_widget(host_id, |mut w| {
+            let mut host = w
+                .try_downcast::<PackageOverlayHost>()
+                .expect("overlay host");
+            host.widget.sync_overlays(
+                &mut host.ctx,
+                vec![overlay],
+                TypographyRegistry::default(),
+                ResolvedUiTheme::default(),
+            );
+        });
+        rr.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+        let (_, update) = rr.redraw();
+        let update = update.expect("access tree active after EnableAccessTree");
+        assert!(
+            update.nodes.iter().any(|(_, node)| {
+                node.role() == Role::Menu && node.label() == Some("Completion")
+            })
+        );
+        assert!(update.nodes.iter().any(|(_, node)| {
+            node.role() == Role::MenuItem
+                && node.label() == Some("Completion beta selected")
+                && node.is_selected() == Some(true)
+        }));
+        assert!(!update.nodes.iter().any(|(_, node)| {
+            node.role() == Role::Dialog && node.label() == Some("Completion")
+        }));
+        let _tree = accesskit_consumer::Tree::new(update, false);
+    }
+
+    #[test]
+    fn package_menu_accessibility_labels_are_sanitized_bounded_and_consumer_valid() {
+        use crate::shell::transient_menu::{
+            TransientMenuAction, TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
+        };
+
+        let mut items = vec![
+            TransientMenuItem::new(
+                "long",
+                "Display fallback",
+                TransientMenuAction::new("package.long"),
+            )
+            .with_accessibility_label("x".repeat(256))
+            .with_package_provenance("@clay/untrusted", "0.1.0"),
+            TransientMenuItem::new(
+                "path",
+                "Safe fallback",
+                TransientMenuAction::new("package.path"),
+            )
+            .with_accessibility_label("/\\\n")
+            .with_package_provenance("@clay/untrusted", "0.1.0"),
+            TransientMenuItem::new("empty", "", TransientMenuAction::new("package.empty"))
+                .with_package_provenance("@clay/untrusted", "0.1.0"),
+        ];
+        items.extend((3..256).map(|index| {
+            TransientMenuItem::new(
+                format!("item-{index}"),
+                format!("Item {index}"),
+                TransientMenuAction::new("package.item"),
+            )
+            .with_package_provenance("@clay/untrusted", "0.1.0")
+        }));
+        let menu = TransientMenuSession::new(TransientMenuSessionId(11), "Package menu")
+            .with_items(items)
+            .with_selected_index(0);
+        let overlay = TransientPackageOverlay::from_menu_session(&menu);
+        let menu_a11y = overlay.menu_a11y.as_ref().expect("hosted menu a11y");
+        assert_eq!(menu_a11y.items.len(), 256);
+        assert_eq!(menu_a11y.items[1].label, "Safe fallback");
+        assert_eq!(menu_a11y.items[2].label, "Menu item");
+        assert_eq!(menu_a11y.items[0].label.chars().count(), 256);
+        assert!(menu_a11y.items[0].label.ends_with(" selected"));
+        assert!(menu_a11y.items.iter().all(|item| {
+            item.label.chars().count() <= 256
+                && !item.label.contains('/')
+                && !item.label.contains('\\')
+                && !item.label.chars().any(char::is_control)
+        }));
+
+        let cell = Rc::new(Cell::new(Rect::new(0.0, 0.0, 900.0, 600.0)));
+        let host_widget = NewWidget::new(PackageOverlayHost::new(cell));
+        let host_id = host_widget.id();
+        let mut rr = RenderRoot::new(host_widget, |_| {}, render_root_options());
+        rr.edit_widget(host_id, |mut w| {
+            let mut host = w
+                .try_downcast::<PackageOverlayHost>()
+                .expect("overlay host");
+            host.widget.sync_overlays(
+                &mut host.ctx,
+                vec![overlay],
+                TypographyRegistry::default(),
+                ResolvedUiTheme::default(),
+            );
+        });
+        rr.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+        let (_, update) = rr.redraw();
+        let update = update.expect("access tree active after EnableAccessTree");
+        let labels: Vec<String> = update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == Role::MenuItem)
+            .map(|(_, node)| node.label().unwrap_or_default().to_string())
+            .collect();
+        assert_eq!(labels.len(), 256);
+        let _tree = accesskit_consumer::Tree::new(update, false);
     }
 
     /// Plan 086 task 3: menu updates stay consumer-valid. Query/selection

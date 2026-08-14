@@ -1,5 +1,7 @@
 # Package UI Layout and Clay Shell
 
+- Before reviewing or changing package UI, SDUI, shell layout, styling, or input routing, run `npx ui-skills start`, inspect the relevant category, and load the smallest useful skill set (prefer 1, max 3); record selected slugs in the plan evidence.
+
 Decision source: `decision-logs/2026-06-09-1431-clay-owned-shell-layout-and-package-ui-contribution-model.md`.
 
 - Clay owns the package-facing application shell, working area, pane/split tree, fixed pane slots, component catalog, style/theme token model, and action routing contract.

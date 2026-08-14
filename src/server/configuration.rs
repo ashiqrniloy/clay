@@ -993,6 +993,15 @@ mod tests {
             "protocol.archiveValidation",
             "protocol.codecValidation",
             "protocol.rkyvValidation",
+            // Plan 087 task 10: welcome entry state and completion
+            // projection geometry/dismissal are Clay-owned compiled
+            // surfaces; these remain rejected configuration keys.
+            "completion.maxVisibleRows",
+            "completion.maxWidthPx",
+            "completion.anchor",
+            "welcome.enabled",
+            "welcome.entryState",
+            "centered.overlayWidth",
             "build.debugProfile",
             "build.targetDirectory",
         ] {

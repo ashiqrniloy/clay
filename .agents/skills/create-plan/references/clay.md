@@ -223,7 +223,7 @@ Each Clay plan that touches the app UI (components, panels, overlays, pop-ups, d
 
 The plan should require:
 
-- Run `npx ui-skills start` before UI design or implementation tasks and load the smallest useful UI skill set (prefer 1, max 3).
+- Before reviewing existing UI or planning, designing, or implementing any UI task, run `npx ui-skills start`; inspect the relevant category and load the smallest useful skill set (prefer 1, max 3). Repeat this per independently executed UI task and record the selected category/slugs in plan evidence.
 - Load the `clay-ui` skill (`.agents/skills/clay-ui/`) and read its `references/components.md` and `references/tokens.md` before writing UI tasks. Read `docs/reference/ui-components.md` for the navigation/contract entry point that links the catalog, token tables, chrome primitives, package authoring guide, and Phase 20.7 conformance rules.
 - Reuse cataloged components, primitives, style variables, and theme tokens first; a custom component outside the catalog requires explicit justification in the task's `Options Considered`.
 - New components, primitives, tokens, or layout rules must be generic and reusable across packages, token-driven (no raw colors, CSS, concrete font families, or point sizes), and state-complete (hover/active/focus/disabled).

@@ -1279,6 +1279,86 @@ fn creating_packages_status_markers_match_clay_ui_catalog() {
 }
 
 #[test]
+fn plan087_ui_authoring_contract_is_consistent_across_catalog_and_guides() {
+    let catalog = read(".agents/skills/clay-ui/references/components.md");
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let navigation = read("docs/reference/ui-components.md");
+    let strategy = read("docs/reference/primitives/shell-layout-strategy.md");
+
+    for (path, text) in [
+        ("components.md", catalog.as_str()),
+        ("creating-packages.md", guide.as_str()),
+        ("ui-components.md", navigation.as_str()),
+        ("shell-layout-strategy.md", strategy.as_str()),
+    ] {
+        for marker in [
+            "Plan 087",
+            "Clay-owned",
+            "no package-facing",
+            "no package JavaScript",
+        ] {
+            assert!(
+                text.contains(marker),
+                "{path} must document Plan 087 package boundary marker {marker:?}"
+            );
+        }
+    }
+
+    for marker in [
+        "Welcome entry surface",
+        "TransientMenuOrigin::Completion",
+        "8 visible rows",
+        "480 logical",
+        "sanitized",
+    ] {
+        assert!(
+            catalog.contains(marker),
+            "components.md missing Plan 087 catalog marker {marker:?}"
+        );
+    }
+    for marker in [
+        "WelcomeWidget",
+        "COMPLETION_MAX_VISIBLE_ROWS",
+        "COMPLETION_MAX_WIDTH_PX",
+        "completion.provider_timeout",
+        "compose_menu_item_accessibility_label",
+        "P1-087-UI-1",
+        "dialog authority",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md missing Plan 087 authoring marker {marker:?}"
+        );
+    }
+
+    for anchor in ["working-area", "active-pane", "main", "pointer"] {
+        assert!(
+            guide.contains(anchor),
+            "creating-packages.md must retain package overlay anchor {anchor:?}"
+        );
+    }
+    assert!(
+        guide.contains("`centered` is not part of")
+            && guide.contains("the package `OverlayAnchor`")
+            && guide.contains("Completion anchor is Clay-internal"),
+        "creating-packages.md must reject centered and caret-native package anchors"
+    );
+    assert!(
+        guide.contains("There is no new `ComponentKind`")
+            && guide.contains("token, manifest field, or JS API")
+            && navigation.contains("There is no new package-facing component kind")
+            && navigation.contains("there is no package-facing anchor"),
+        "Plan 087 must state that the package contract is unchanged"
+    );
+    assert!(
+        !guide.contains("SduiNativeState` active-menu rendering")
+            && !guide
+                .contains("Completion reuses the Phase 18.8 `TransientMenuSession` bottom overlay"),
+        "creating-packages.md must not retain the pre-Plan-087 completion renderer contract"
+    );
+}
+
+#[test]
 fn create_plan_ui_requirements_name_existing_catalog_files() {
     // Phase 20.8 task 5/6: the create-plan UI requirements reference the catalog
     // files and the UI components navigation page that actually exist.

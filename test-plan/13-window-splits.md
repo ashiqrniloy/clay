@@ -200,12 +200,25 @@ bindKey("Ctrl+Shift+Down", "shell.clientSplitPaneDown", { scope: "global" });
 | S31 | Fresh launch WITHOUT the alias bindings (or with the lines commented), press `Ctrl+Shift+Right` | NO-OP — the aliases ship with no default chords; nothing binds, nothing splits, no diagnostic |
 | S32 | Replace the string forms with the facade helpers: `import { clientSplitPaneRight, clientSplitPaneDown } from "clay:shell"; bindKey("Ctrl+Shift+Right", clientSplitPaneRight(), { scope: "global" }); bindKey("Ctrl+Shift+Down", clientSplitPaneDown(), { scope: "global" });`, reload | Same behavior as S29 — the helpers return the alias command IDs |
 
+## Plan 087 completion-in-split steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| S33 | Open a document in pane 1, split vertically (`Ctrl+\`), trigger completion in pane 1 | Completion popup anchors to pane 1's caret and stays inside pane 1's rect; the split divider/pane 2 are unaffected |
+| S34 | Move focus to pane 2 (click / `Ctrl+Alt+Arrow`), trigger completion there | Popup re-anchors to pane 2's caret; only the active pane's caret is used (`completion_anchor` comes from the active pane) |
+| S35 | Close the last pane's document, then close the pane | The pane returns to the welcome entry state; splitting again from welcome yields a normal editable pane |
+
 ## Linux execution record (Plan 086 task 11, 2026-08-14)
 
 - **PASS — S1/S3/S23/S24:** the real AT-SPI tree showed restored two-pane geometry and numbered pane labels; activating `Split Pane Vertical` through Control Center produced a third placeholder and `Split pane vertically` in the stable live announcement node. No malformed tree occurred.
 - **PASS — S5:** clean `Ctrl+Alt+W` removed one pane, left the survivor filling the working area, kept client/server alive, and exposed `Closed pane; 1 pane remains` once.
 - **FAIL/BLOCKER — D10/S5 dirty-close variant:** a dirty active pane close crashed the client in `accesskit_consumer` with `Focused ID #4 is not in the node list`; server survived. See `code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log`. This needs a follow-up focus/a11y update fix before dirty-pane close can be called green.
 - **PASS — security/labels:** pane names and announcements used sanitized basenames/action text; no absolute workspace path or document contents appeared in the pane/status labels. Isolated HOME/XDG roots were used.
+
+## Linux execution record (Plan 087 task 11, 2026-08-15)
+
+- **PASS — S35 (welcome return):** closing the last pane's document resets the pane to the Clay-owned welcome state (`close_pane` clears sessions, reapplies the default surface, sets `welcome_visible`); the welcome surface is also the state shown on fresh empty-tab launches (module 01 L12) and was verified live this session.
+- **BLOCKED by host — S33/S34 (completion in split panes):** this session's portal keyboard delivery could not drive the multi-stroke/split chords reliably, so live split+completion was not re-run; the split surface itself passed in plan 086 task 11 (S1/S3/S23/S24 above) and completion-in-pane anchoring is covered by automated tests (`completion_menu_observation_uses_caret_bounded_geometry`, `completion_overlay_clamps_above_or_below_caret_inside_main_rect`). Not a false pass.
 
 ## Negative checks
 

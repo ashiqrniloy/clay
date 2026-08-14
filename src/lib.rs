@@ -13,6 +13,7 @@ pub mod masonry_sdui;
 pub(crate) mod masonry_sdui_region;
 #[doc(hidden)]
 pub mod masonry_shell;
+pub(crate) mod masonry_welcome;
 pub mod packages;
 pub mod perf;
 pub mod protocol;

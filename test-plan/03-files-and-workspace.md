@@ -108,12 +108,28 @@ ln -s /tmp/clay-manual/a.txt /tmp/clay-manual/link.txt
 | F30 | Open Path Browser and inspect its surface/accessibility tree | One centered Spotlight-style panel dims full window; exactly one named modal Dialog contains Menu/MenuItems and a polite Status with `0 results`, `1 result`, or `{n} results`; path prompt is bounded/sanitized. |
 | F31 | Click scrim, type unsupported modifier/function input, paste, or start IME while Path Browser is open | Scrim/input is contained; no editor text/caret/selection mutation or path authority change. Escape closes and returns focus to originating pane. |
 
+## Plan 087 entry-state steps (welcome)
+
+| # | Action | Expected |
+|---|--------|----------|
+| F32 | Fresh launch on an empty tab (no restored document) | Welcome entry state is the Clay-owned surface: `Welcome to Clay` with `Open File` and `Open Folder` buttons; no prototype/stale document text; status bar normal |
+| F33 | Activate `Open File` (click or Space/Enter on the button) | Native file dialog opens (user dialog, no implicit authority); cancelling leaves the welcome state intact |
+| F34 | Select a file in the native dialog and accept | Document opens in the pane; welcome hides; status/entry show `doc N` with the basename only (e.g. `review.md — doc 3 — v1`) |
+| F35 | Repeat with `Open Folder` and accept a directory | Workspace root rebinds to the chosen folder (existing validated-grant path); welcome stays absent while a document is open |
+| F36 | Close the last document/pane | Pane returns to the welcome state (`welcome_visible`), buttons functional again |
+| F37 | Negative: check AT-SPI names for the welcome state | Labels show basenames and sanitized copy only — no host path segments (`/home/…`, `/tmp/…`) or secrets |
+
 ## Linux execution record (Plan 086 task 11, 2026-08-14)
 
 - **PASS — restored multi-document panes:** the isolated v2 layout restored `a.txt` and `b.md` into separate panes. AT-SPI exposed `Pane 1 of 2: editor` / `Pane 2 of 2: b.md`, separate editor/status nodes, and `Open docs: 2`; the connection remained live.
 - **BLOCKED — native dialog steps (F1/F2/F16/F23):** this host's portal path could open a dialog but could not safely target/select its UI from the agent, so file-picker selection/cancellation was not re-run. No product failure inferred.
 - **FAIL/BLOCKER — dirty close path:** typing into `a.txt` and pressing `Ctrl+Alt+W` reproduced a client panic, `accesskit_consumer-0.31.0/src/tree.rs:34:13: Focused ID #4 is not in the node list`; the isolated server stayed alive. Evidence: `code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log`. Clean pane close passed separately and announced `Closed pane; 1 pane remains`.
 - **PASS — negative checks:** status/entry labels showed sanitized basenames and bounded diagnostics, not `/tmp` paths or document secrets. HOME/XDG config/data roots were isolated under the mode-700 temporary root; no ambient config was used.
+
+## Linux execution record (Plan 087 task 11, 2026-08-15)
+
+- **PASS — F32/F33/F34/F37:** from the welcome state, AT-SPI `click` on the `Open File` button opened the native Nautilus Open File dialog (no implicit authority — a real user dialog was required); typing the workspace path into the dialog's location box and accepting opened `review.md` as `doc 3` (`DocumentOpened` in the client log, entry `Clay — Connected — Editable — review.md — doc 3 — v1`, welcome hidden). AT-SPI names showed only basenames — no `/tmp/…` or `/home/…` segments.
+- **Coverage note:** F35 (Open Folder) and F36 (close-last-pane returns to welcome) were not re-run this session; F36's welcome-return is covered by unit tests (`close_pane` resets to welcome) and S35 below.
 
 ## Negative checks
 

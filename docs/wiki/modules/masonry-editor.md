@@ -198,6 +198,21 @@ Client Views](tabs-and-clients.md)). `EditorAction` carries `DriverSession`
 reconnect and open-tab events stay testable. Reconnect delegates
 (`reconnect`, `documents_for_reopen`) proxy to the pane views.
 
+## Plan 087: Clay-owned welcome entry surface
+
+A bootstrap `ClientInitialState` with an empty server-owned welcome document is rendered as a retained `WelcomeWidget` rather than editable product-copy text. `PaneDocumentView` keeps the server document and lease authority, while `src/masonry_welcome.rs` owns only native presentation: a token-driven card, Open File/Open Folder buttons, shortcut help, basename-only workspace text, and connection/access/runtime state. Button actions use the existing client-local command IDs `documents.clientOpenFileDialog` and `workspace.clientOpenFolderDialog`; no filesystem query, recent-path lookup, JavaScript, or IPC runs in paint/layout.
+
+`EditorWidget` registers the welcome pod as a real Masonry child. While visible, the view stashes the native editor surface, rejects editor pointer/text input, exposes a `Role::Group` root, and exposes button `Click` actions plus a polite bounded status node. `DocumentOpened` flips visibility off, restores `Role::MultilineTextInput`, and leaves canonical document/session/lease handling unchanged. Hidden welcome pods remain registered but stashed, matching Masonry's child traversal invariant. `WelcomeState` is refreshed on status/theme/typography changes outside paint/layout; workspace names use `sanitize_document_display_name`, runtime text uses the shared recovery sanitizer, and the shared truncator keeps its ellipsis inside the 256-character ceiling.
+
+Tests in `src/masonry_welcome.rs` cover client-local routes, bounded/sanitized state, and narrow geometry. `src/masonry_editor.rs::welcome_entry_exposes_actions_and_hides_after_document_open` checks exact AccessKit roles/actions, runs the first tree through `accesskit_consumer::Tree`, and verifies document replacement. Server/client bootstrap tests assert the empty sentinel. Run `cargo test --lib masonry_welcome` and `cargo test --lib masonry_editor::tests::welcome_entry_exposes_actions_and_hides_after_document_open -- --exact --test-threads=1`.
+
+Plan 087 completion overlays reuse this same chrome boundary: `EditorWidget`
+publishes the pane view's IME-aware caret anchor after view layout through a
+small `Rc<Cell<Option<Rect>>>`, while `PackageOverlayHost` owns placement and
+retained scrolling. No completion geometry or row work runs in the server,
+package JavaScript, or ordinary editor paint path; centered Command Centre
+sessions still use their separate window-layer host.
+
 ## Related
 
 - [Masonry Shell Runtime](masonry-shell.md)

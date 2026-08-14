@@ -66,6 +66,8 @@ Core tokens live in `core_theme_value` (`src/shell/theme.rs`) and are the only s
 
 Editor base UI color keys (`src/editor/theme.rs` `BaseUiColors`, theme-package contributed): `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`, plus syntax tokens. The editor `StyleRegistry` is the single source of color for editor paint paths and is separate from SDUI typed tokens.
 
+Legacy `textStyles` themes are projected into modern UI roles by `ResolvedUiTheme::with_base_ui` (`src/shell/theme.rs`) when no typed `designTokens` override wins: panel/list/overlay surfaces use `panelBg`, controls/badges/kbd use `statusBg`, selection/state surfaces use `selection`, focus/accent uses `caret`, feedback uses the diagnostic colors, and text roles use `text`/`placeholder`/`statusText`. UI `text.muted` promotes a low-contrast legacy placeholder to `text` so the same WCAG AA gate applies to light and dark themes. This compatibility projection changes no package-facing token names and keeps theme overrides cached before paint/layout.
+
 ### Spacing
 
 4pt base scale (Phase 20.1) plus legacy named spacing.

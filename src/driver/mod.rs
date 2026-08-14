@@ -602,14 +602,24 @@ pub(crate) fn advance_pending_close_after_saves(
     }
 }
 
-/// Phase 22.3: the tab card label for a workspace root path: the final path
-/// segment, or the full path when it has none.
+/// Phase 22.3: the tab card label for a workspace root path. Keep only a
+/// sanitized final segment; falling back to the full path would leak host
+/// filesystem layout into visible and accessible shell chrome.
 pub(crate) fn tab_card_display_name(workspace_root: &str) -> String {
-    std::path::Path::new(workspace_root)
+    let candidate = std::path::Path::new(workspace_root)
         .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| workspace_root.to_string())
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default();
+    let safe: String = candidate
+        .chars()
+        .filter(|ch| !ch.is_control() && *ch != '/' && *ch != '\\')
+        .take(64)
+        .collect();
+    if safe.is_empty() {
+        "Workspace".to_string()
+    } else {
+        safe
+    }
 }
 
 pub(crate) fn spawn_client_connection_event_bridge(

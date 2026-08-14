@@ -118,13 +118,13 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
 
 ### Task 2 Evidence (2026-08-14)
 
-- Added executable `scripts/capture-ui-review.sh` with six named fixtures, fixed `900×600` logical-size metadata, bounded server/client startup and AT-SPI probe deadlines, interactive checkpoints for completion/Command Centre, portal PNG capture, Clay-only accessibility dumps, mode-700 temporary HOME/XDG/socket roots, fixture-only retained artifacts, and cleanup of raw process logs/temp roots. The wrapper copies each checked-in fixture into private `HOME/.config/clay/init.js` and uses the normal `clay server`/`clay client` path so runtime watcher reloads exercise end-user configuration without touching repository files.
+- Added executable `scripts/capture-ui-review.sh` with six named fixtures, fixed `900×600` logical-size metadata, bounded server/client startup and AT-SPI probe deadlines, interactive checkpoints for completion/Command Centre, portal PNG capture, Clay-only accessibility dumps, mode-700 temporary HOME/XDG/socket roots, fixture-only retained artifacts, and cleanup of raw process logs/temp roots. The wrapper copies each checked-in fixture into private `HOME/.config/clay/init.js` and uses the normal `clay server`/`clay client` path so runtime watcher reloads exercise end-user configuration without touching repository files; the document-bearing interactive layout uses a valid v2 leaf split tree.
 - Added deterministic fixtures under `tests/fixtures/configuration/ui-review-*/`: empty default/recovery, loading SDUI, invalid-theme runtime error, Rust completion with `Ctrl+Space`, and global Command Centre with `Ctrl+Alt+P`.
 - Added the documented workflow and unresolved-safe prerequisite contract to `docs/development/launch-and-gui-smoke.md` and `docs/development/ui-observability.md`; `tests/manual_smoke_docs.rs::plan087_ui_review_harness_command_and_prerequisites_are_documented` locks command names, fixture inventory, output files, isolation, fixed size, and `UNRESOLVED`/exit-2 behavior.
 - Retained live artifacts under `code-reviews/screenshots/2026-08-14-plan087-ui-review/{default,loading,error,recovery}/`: default, loading-shell, runtime-error, and disconnected/recovery captures all produced PNG plus AT-SPI output with `PASS` status. The loading label is present in the fixture's published tree but was not exposed by the host's initial accessible tree, so that artifact records the shell/default tree rather than claiming that label was visually reviewed; Task 5 must inspect this state.
 - Validation passed: `bash -n scripts/capture-ui-review.sh`; `node --check tests/fixtures/configuration/ui-review-*/init.js`; `cargo fmt --all -- --check`; `git diff --check`; `cargo test --test protocol manual_smoke_docs` (22 passed); `cargo test --lib server::js_runtime::tests::smoke_config_fixture_publishes_runtime_sdui_snapshot -- --exact --test-threads=1`; `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo test --all-targets` (all suites/benches passed, one existing ignored live test); and `cargo audit` (0 vulnerabilities, 3 documented allowed unmaintained warnings).
 
-- [ ] Replace the prototype welcome document with a useful Clay-owned entry state
+- [x] Replace the prototype welcome document with a useful Clay-owned entry state
   - Acceptance Criteria:
     - Functional: Fresh tabs show Open File, Open Folder, concise shortcut help, workspace/connection/runtime status, and actionable loading/error/recovery copy; opening a real document replaces entry content without altering canonical document authority.
     - Performance: Initial composition is bounded, contains no filesystem scan/recent-file query unless already available, and runs no JS/IPC/file I/O during paint/layout.
@@ -159,7 +159,15 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
     - Loading, disconnected, runtime-error, recovery, narrow width, long sanitized workspace name.
     - Opening/reclaiming a real document removes entry state and preserves server document/lease rules.
 
-- [ ] Give completion a compact caret-adjacent projection and dismiss empty/stale results
+### Task 3 Evidence (2026-08-14)
+
+- Replaced the stale server welcome text with an empty server-owned sentinel in `src/server/mod.rs` and `src/server/document.rs`; the client contract test now expects an empty initial snapshot. Server tab/workspace/document authority and leases remain unchanged.
+- Added the crate-private `src/masonry_welcome.rs` retained entry surface. It renders `Welcome to Clay`, Open File/Open Folder, shortcut help, basename-only workspace text, connection/access state, and bounded sanitized runtime guidance. Buttons expose AccessKit `Click` and keyboard activation through the existing `documents.clientOpenFileDialog` and `workspace.clientOpenFolderDialog` client-local routes; no JS, IPC, filesystem scan, recent-path query, or package-facing component kind was added to paint/layout.
+- Integrated the welcome pod into `EditorWidget`/`PaneDocumentView`: fresh bootstrap and local-fallback views show it, text input/editor pointer handling is disabled while visible, and a real `DocumentOpened` hides it and restores the multiline editor role/input path. The welcome child stays registered and is stashed when hidden, preserving Masonry traversal invariants. Workspace/status changes refresh the retained render state without doing work in paint/layout.
+- Added structural/accessibility coverage for exact button roles/actions, welcome status/workspace labeling, the real `accesskit_consumer::Tree` first update, document-open replacement, bounded sanitized long diagnostics/workspace names, narrow geometry, and client-local command routing. Corrected the shared accessibility truncator so its ellipsis remains inside the declared character ceiling. Updated the region-lock integration fixture for the now-empty default document.
+- Validation passed: `cargo fmt --all -- --check`; `git diff --check`; `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo test --lib masonry_welcome -- --test-threads=1`; `cargo test --lib masonry_editor::tests::welcome_entry_exposes_actions_and_hides_after_document_open -- --exact --test-threads=1`; `cargo test --all-targets`; all benches completed successfully; and `cargo audit` reported 0 vulnerabilities with the 3 already-documented allowed unmaintained warnings. Plan 087 task 5 remains responsible for visual review of loading/error/recovery and completion states.
+
+- [x] Give completion a compact caret-adjacent projection and dismiss empty/stale results
   - Acceptance Criteria:
     - Functional: Current non-empty completion appears adjacent to caret/line, clamps within active pane, has bounded width/height, scrolls long lists, keeps selected row visible, and accepts keyboard/IME-safe interaction. Empty/expired/rejected completion closes rather than showing “No completions”; provider timeout/error uses non-blocking status/recovery feedback without a blocking panel. Centered Command Centre results stay inside available window bounds, remain scrollable/reachable for 60+ results, and preserve modal containment/focus restoration.
     - Performance: Layout/render touches only visible bounded rows; no full-width relayout per keystroke; stale results are dropped before projection.
@@ -191,7 +199,16 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
     - Empty/current, empty/stale, timeout/error, non-empty, narrow pane, caret at each edge, multi-pane, scroll/selection visibility, IME preedit, keyboard accept/cancel, stale accept denial.
     - Centered command/path geometry remains centered, bounded, scrollable, and modal; 60+ result lists do not clip below the window.
 
-- [ ] Bound package-authored transient-menu accessibility labels
+### Task 4 Evidence (2026-08-14)
+
+- Added the Clay-internal `TransientMenuOrigin::Completion` path with a fixed-point `CompletionAnchor`; `completion_result_to_menu_session` remains modeless and inert, while `PaneDocumentView` injects the IME-aware caret bounds only after active request/document/version/behavior checks.
+- Replaced the completion bottom-panel projection with one shared `completion_overlay_rect` helper: below-caret then above-caret placement, active-pane clamping, 480 logical-pixel width cap, eight visible-row cap, and zero-size-safe fallback. The same retained `PackageOverlayHost` continues to own z-order, action routing, and centered modal containment.
+- Wrapped transient-menu lists in the existing retained `SduiScrollViewport`; selection updates set a row target so long Command Centre and completion lists keep the selected row visible without changing package-facing anchors or APIs. Completion items retain local accept metadata and expose no command action targets.
+- Empty results dismiss the current menu; stale document/version/behavior results close the matching completion surface; timeout/provider-error results use non-blocking `completion.provider_timeout` / `completion.provider_error` status diagnostics. Added structural overlay observation using the same geometry helper.
+- Added/updated tests: `src/shell/transient_menu.rs` completion origin projection; `src/shell/package_ui.rs` caret-edge/width geometry; `src/masonry_pane_document.rs` non-empty anchor plus empty/error/stale dismissal; `src/masonry_package_region.rs` selected-row scrolling and 60-result centered containment; `src/masonry_sdui.rs` bounded observable geometry; existing centered-menu tests remain green.
+- Validation passed: `cargo fmt --all`; targeted shell/pane/package/SDUI/editor tests; `cargo test --test protocol performance_budgets -- --test-threads=1`; `cargo test --test protocol manual_smoke_docs -- --test-threads=1`; and `cargo clippy --all-targets -- -D warnings`. Final Linux gates also passed: `cargo fmt --all -- --check`, `cargo check --all-targets`, `cargo test --all-targets` (all suites/benches; one ignored live AT-SPI test), `cargo bench --no-run`, and `cargo audit` (0 vulnerabilities, 3 documented allowed warnings). The interactive completion harness was attempted twice; AT-SPI reached the isolated Clay window, but host keyboard/window targeting could not focus the editor and the run remains `UNRESOLVED`, not a false visual pass.
+
+- [x] Bound package-authored transient-menu accessibility labels
   - Acceptance Criteria:
     - Functional: Every package-authored transient-menu item label is normalized through the shared bounded accessibility-text path before `MenuA11y` reaches Masonry; empty labels retain a safe item fallback, control characters/path separators are removed, and labels are truncated at the existing 256-character accessibility ceiling. Prompt, item, selected-state, result-count, query, selection, and close flows preserve current menu semantics.
     - Performance: Normalization is one bounded pass while constructing a menu session, remains O(visible items), and adds no work to paint, layout, typing, or accessibility passes beyond the existing item cap.
@@ -222,7 +239,15 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
   - Test Cases to Write:
     - Empty, 255/256/257-character, control-character, separator/path-like, selected, query, selection, close, and 256-item menu cases; assert bounded labels and consumer-valid reachable trees.
 
-- [ ] Add focused UI behavior, accessibility, and performance regression coverage
+### Task 5 Evidence (2026-08-14)
+
+- Added `compose_menu_item_accessibility_label` in `src/editor/accessibility.rs` as the shared bounded semantic-label path. `TransientPackageOverlay::from_menu_session` applies it once per item before `MenuA11y` reaches Masonry; it removes control characters/path separators, falls back from invalid accessibility text to the display label and then `Menu item`, and keeps the selected suffix inside the 256-character ceiling. Display labels, action IDs, provenance, query text, selection state, result counts, and close behavior remain unchanged.
+- `PackageRegionWidget` now consumes the already-final label instead of appending an unbounded ` selected` suffix during the accessibility pass. No package-facing API, component kind, command authority, or configuration surface changed.
+- Added helper boundary tests for 255/256/257-character inputs, controls/separators, empty fallback, and selected-label sizing; added a 256-item package-authored menu test that inspects the real tree, asserts every semantic label is bounded/sanitized, and feeds the update through `accesskit_consumer::Tree` without panic.
+- Updated `docs/development/accessibility.md`, `docs/wiki/modules/transient-menu-session.md`, `docs/wiki/modules/masonry-sdui-region.md`, and the Plan 086 accessibility wiki follow-up to document the label boundary and close the resolved ceiling finding.
+- Validation passed: `cargo fmt --all -- --check`; `cargo test --lib editor::accessibility:: -- --test-threads=1`; `cargo test --lib masonry_package_region:: -- --test-threads=1`; `cargo test --test protocol primitives_docs -- --test-threads=1`; `cargo test --test editor package_ui_conformance -- --test-threads=1`; `cargo clippy --all-targets -- -D warnings`; and `git diff --check`. Full plan gates remain covered by the preceding Task 4 run; final changed-path validation also passed `cargo check --all-targets`, `cargo test --all-targets` (all suites/benches; one ignored live AT-SPI test), `cargo bench --no-run`, and `cargo audit` (0 vulnerabilities, 3 documented allowed warnings).
+
+- [x] Add focused UI behavior, accessibility, and performance regression coverage
   - Acceptance Criteria:
     - Functional: Structural snapshots cover welcome states, bounded Command Centre overflow, completion geometry/dismissal, and sanitized menu labels; accessibility trees expose names, roles, status, selection, and modal/modeless containment correctly.
     - Performance: Deterministic guards bound rows/layout work; Criterion/advisory metrics record completion open/filter/layout without hard wall-clock promotion.
@@ -244,15 +269,24 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
       cargo bench --bench window_baselines --no-run
       ```
     - Files to Create/Edit:
-      - In-module tests in changed Masonry/shell files.
-      - `tests/editor_performance_invariants.rs`, `tests/performance_budgets.rs`, `benches/window_baselines.rs` only for behavioral/budget coverage.
+      - `src/masonry_welcome.rs`, `src/masonry_pane_document.rs`, `src/masonry_package_region.rs`, `src/shell/package_ui.rs`: focused state/accessibility/geometry tests.
+      - `src/perf/baselines.rs`, `benches/window_baselines.rs`: benchmark-only completion projection, filter, and layout paths.
+      - `tests/editor_performance_invariants.rs`, `tests/performance_budgets.rs`, `tests/rust_visibility_api_mapping.rs`: hot-path, budget/documentation, and no-public-facade guards.
       - `docs/development/performance.md`.
     - References:
       - `.agents/skills/project-patterns/references/protocol-and-performance.md`.
   - Test Cases to Write:
     - State matrix from prior tasks; 60+ Command Centre results remain reachable inside the viewport; oversized/control-character item labels remain bounded; no completion work in ordinary paint when menu absent; list work bounded by visible/capped rows.
 
-- [ ] Perform visual screenshot and accessibility review of changed UI
+### Task 6 Evidence (2026-08-14)
+
+- Added focused behavioral/accessibility coverage: `WelcomeState` now has a loading/connected/runtime-error/local-fallback/disconnected matrix with basename-only workspace labels; completion results with foreign document or behavior provenance are rejected before replacing the active menu; completion geometry is source-guarded to the eight-row/480-logical-pixel caps and absent from editor/overlay paint; and a real completion overlay exposes modeless `Menu`/selected `MenuItem` semantics with no command targets and passes through `accesskit_consumer::Tree`.
+- Added `completion_overlay_height_uses_visible_row_cap` and retained the existing 60-result centered containment and 256-item sanitized-label consumer tests. No ambient config/path access was added; stale completion identity remains checked by document/version/behavior metadata before projection.
+- Added benchmark-only helpers in `src/perf/baselines.rs` and three `window_baselines` Criterion groups: `completion_open_baselines`, `completion_filter_baselines`, and `completion_layout_baselines`. A local optimized 10-sample run measured open medians of `2.41/13.40/89.95/362.10 µs` for `1/8/60/256` items, filter medians of `12.21/73.61/416.08 µs` for `16/60/256` candidates, and layout medians of `0.98/0.88/0.89 µs` at representative caret positions. These remain advisory, not wall-clock CI thresholds; the benchmark shape changed from the earlier synthetic helper, so its Criterion comparison is not a product regression gate.
+- Updated `docs/development/performance.md` and `tests/performance_budgets.rs` with the structural hard-gate/advisory-benchmark contract, commands, and local measurements. Benchmark-only helpers are denied from deno ops/facades by the existing Rust visibility guard.
+- Validation passed: targeted welcome/pane/package-region tests; `cargo test --test editor editor_performance_invariants:: -- --test-threads=1` (32 passed); `cargo test --test protocol performance_budgets -- --test-threads=1` (19 passed); `cargo test --test security rust_visibility_api_mapping -- --test-threads=1` (11 passed); all three short Criterion groups; `cargo fmt --all -- --check`; `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo test --all-targets` (all suites/benches passed, one ignored live AT-SPI test); `cargo bench --no-run`; and `cargo audit` (0 vulnerabilities, 3 documented allowed warnings).
+
+- [x] Perform visual screenshot and accessibility review of changed UI
   - Acceptance Criteria:
     - Functional: Capture default, loading, disconnected, runtime error/recovery, opened document, non-empty completion at pane edges, empty completion dismissal, long-list scroll, 60+ result Command Centre overflow/scroll, sanitized transient-menu labels, and narrow/wide states.
     - Performance: Typing/filtering/selection feels immediate; no full-pane jump or overlay duplication.
@@ -278,7 +312,16 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
   - Test Cases to Write:
     - Focus visibility/order, exact accessible names/selection/status, empty dismissal, centered modal containment, focus restoration.
 
-- [ ] Update UI catalogs and package authoring contract
+### Task 7 Evidence (2026-08-15)
+
+- Completed a real Linux review with `get_app_state` before interaction, an isolated mode-700 server/client root, live AT-SPI dumps, native Open File selection, X11 keyboard delivery, and portal screenshots cropped to the Clay window. No secrets or absolute paths were retained.
+- PASS artifacts cover default welcome, runtime error, disconnected/recovery, opened `review.md`, non-empty completion, empty completion dismissal, unfiltered 66-result Command Centre, filtered 8-result Command Centre, and sanitized package labels. Evidence is under `code-reviews/screenshots/2026-08-14-plan087-ui-foundation/`; `review-log.md` records method and state-by-state results.
+- Non-empty completion exposed a `Menu` with 16 selected-capable items, `Recovery: Completion`, and 480×340 logical bounds. Empty requests delivered `CompletionResult { status: Empty, items: [] }` and left no overlay. Command Centre exposed modal `Dialog`/`Menu`, selection, result count, 66 semantic items, and bounded filtered results; package labels contained no path separators.
+- Finding `P1-087-UI-1`: live renderer containment is not complete. Completion rows paint below the 480×340 shell and 66-result Command Centre rows paint below the 640×220 centered shell despite scrollbar presence; structural size/scroll tests pass but miss this renderer-level child clipping/accessibility containment defect. Shared scroll-host containment must be fixed before Plan 087 can claim bounded visual completion/Command Centre surfaces.
+- Loading remains an explicit observability limitation: the fixture publishes its loading SDUI tree during watcher reload, but this host's initial AT-SPI tree exposes the welcome shell instead. Narrow/wide resizing remains unresolved because the host has no safe window-list/resize backend; no false visual pass was claimed. No production code was kept from this review task.
+- Validation for the review artifacts: `bash -n scripts/capture-ui-review.sh`, portal PNG capture/crop, Python GI-Atspi dumps, and live client/server survival. Existing Linux gates from Task 6 remain green; the shared containment finding is a follow-up, not silently waived.
+
+- [x] Update UI catalogs and package authoring contract
   - Acceptance Criteria:
     - Functional: Document changed internal welcome/completion surfaces, centered result bounds, transient-menu item-label sanitization, origins, geometry, dismissal, focus, and accessibility; package-facing API remains unchanged unless explicitly added.
     - Performance: Document caps and hot-path policy.
@@ -286,7 +329,7 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
     - Security: State that packages cannot request caret-native bounds, direct Masonry widgets, raw CSS, client JS, or dialog authority.
   - Approach:
     - Documentation Reviewed:
-      - `docs/reference/packages/creating-packages.md`, `docs/reference/ui-components.md`, catalog drift tests.
+      - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`, `docs/reference/packages/creating-packages.md`, `docs/reference/ui-components.md`, `docs/reference/primitives/shell-layout-strategy.md`, and catalog drift tests.
     - Options Considered:
       - Leave internal changes undocumented: rejected.
       - Update authoritative catalog/navigation once implementation settles: chosen.
@@ -297,15 +340,23 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
       Completion anchor: Clay-internal; package overlays keep documented anchors only.
       ```
     - Files to Create/Edit:
-      - `.agents/skills/clay-ui/references/components.md`, `references/tokens.md` only if token changes.
-      - `docs/reference/ui-components.md`, `docs/reference/packages/creating-packages.md`.
-      - `tests/package_ui_conformance.rs`, `tests/primitives_docs.rs` as drift coverage requires.
+      - `.agents/skills/clay-ui/references/components.md` (internal welcome/completion/centered surface catalog; no token changes, so `tokens.md` remains unchanged).
+      - `docs/reference/ui-components.md`, `docs/reference/packages/creating-packages.md`, `docs/reference/primitives/shell-layout-strategy.md`.
+      - `tests/primitives_docs.rs` for cross-document contract drift; `tests/package_ui_conformance.rs` remains the existing code/catalog guard.
     - References:
       - `.agents/skills/create-plan/references/clay.md` UI/package authoring requirements.
   - Test Cases to Write:
-    - Catalog and package guide list the same implemented/package-facing surfaces and reject internal completion anchor declarations.
+    - Catalog, package guide, shell strategy, and navigation page agree on Clay-owned welcome/completion/centered surfaces, 8-row/480-pixel completion caps, centered bounds, sanitized labels, hot-path limits, and the four package anchors; drift test rejects stale bottom-overlay/`SduiNativeState` completion claims and internal anchor declarations.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+### Task 8 Evidence (2026-08-15)
+
+- Updated `.agents/skills/clay-ui/references/components.md` with the Plan 087 Clay-owned Welcome entry surface, caret/IME completion projection, internal `Completion`/`Centered` origins, 8-visible-row/480-logical-pixel completion caps, centered Command Centre bounds, scroll/accessibility ownership, and bounded transient-menu label policy. No token entries changed; `tokens.md` remains authoritative and unchanged.
+- Updated `docs/reference/packages/creating-packages.md` with the additive-only package boundary: welcome actions reuse existing client commands; completion remains a modeless Clay-internal projection with stale/empty/error dismissal and status diagnostics; Command Centre/Path Browser remain centered Clay-owned surfaces; package overlay anchors remain `working-area`/`active-pane`/`main`/`pointer`; package labels are normalized by `compose_menu_item_accessibility_label`; packages receive no caret-native bounds, Masonry widgets, raw CSS, client JavaScript, or dialog authority.
+- Updated `docs/reference/ui-components.md` and `docs/reference/primitives/shell-layout-strategy.md` so navigation, shell vocabulary, component status, overlay anchors, and package guide agree. Removed stale pre-Plan-087 completion renderer claims and stale Phase 18.3 deferred-kind claims from the current contract references. The live renderer containment follow-up `P1-087-UI-1` remains explicitly recorded as host work; no package API was added.
+- Added `plan087_ui_authoring_contract_is_consistent_across_catalog_and_guides` in `tests/primitives_docs.rs`. It checks cross-document Plan 087 markers, package-anchor allowlist, internal-origin rejection, cap/label/security wording, unchanged public surface, and absence of the retired completion renderer wording. Existing `package_ui_conformance` catalog/code guards remain green.
+- Validation passed: `cargo fmt --all -- --check`; `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo test --test protocol primitives_docs -- --test-threads=1` (25 passed); `cargo test --test editor package_ui_conformance -- --test-threads=1` (10 passed); `cargo test --all-targets` (all suites/benches passed, one ignored live AT-SPI test); and `cargo audit` (0 vulnerabilities, 3 documented allowed warnings).
+
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: Welcome actions reuse documented `documents.clientOpenFileDialog`, `workspace.clientOpenFolderDialog`, and existing recovery commands; inventory all changed Rust visibility.
     - Performance: No new JS round trip is added to completion display/input.
@@ -332,7 +383,16 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
   - Test Cases to Write:
     - Welcome buttons emit existing IDs; doc registry/visibility mapping stays complete.
 
-- [ ] Create or verify Clay configuration APIs
+### Task 9 Evidence (2026-08-15)
+
+- Inventory of every Plan 087 source change (git diff over `src/`) found no new bare-public server function, deno_core op, JS facade export, or API doc/registry entry: the only new `pub` items are the `#[doc(hidden)]` bench proxies `completion_open_projection_work`/`transient_menu_filter_work`/`completion_layout_work` (src/perf/baselines.rs) and the perf constants `COMPLETION_MAX_VISIBLE_ROWS`/`COMPLETION_MAX_WIDTH_PX` (src/perf/budgets.rs), all bench/catalog infrastructure with no runtime surface.
+- Welcome actions verified to reuse existing documented command IDs only: `documents.clientOpenFileDialog` and `workspace.clientOpenFolderDialog` (OPEN_FILE_COMMAND/OPEN_FOLDER_COMMAND in src/masonry_welcome.rs), both present in `docs/generated/clay-js-api-registry.json` with docs under `docs/reference/clay-js-api/`; no welcome-specific command was added.
+- All Plan 087 presentation internals stay crate-private or private: `pub(crate) mod masonry_welcome` (src/lib.rs) with `WelcomeState`/`WelcomeWidget` pub(crate) and `WelcomeButton` private; `compose_menu_item_accessibility_label` (src/editor/accessibility.rs) and `completion_overlay_rect` (src/shell/package_ui.rs) pub(crate); `TransientMenuOrigin` (with the internal `Completion` variant) and `CompletionAnchor` pub(crate) (src/shell/transient_menu.rs); no new bare `pub` in src/masonry_editor.rs, src/masonry_pane_document.rs, src/masonry_package_region.rs, src/masonry_sdui.rs, or the server files.
+- Package-facing anchor contract unchanged: `VALID_OVERLAY_ANCHORS` remains exactly `working-area`/`active-pane`/`main`/`pointer` (src/server/ui.rs) and `PackageOverlayAnchor::parse` never produces the internal Completion/Centered anchors, so packages cannot request caret-native bounds, raw menu sessions, or widget handles.
+- Added `plan087_welcome_and_completion_internals_are_not_public_programmatic_surfaces` in tests/rust_visibility_api_mapping.rs (security suite) locking the pub(crate)/private declarations, the welcome command reuse, the four-anchor allowlist, the parse-scope anchor rejection, and absence of all eight internal names from `src/server/ops/*`, `runtime/js/*`, and the generated registry while asserting both welcome command IDs remain in the registry.
+- Validation passed: new visibility test (1 passed), full `rust_visibility_api_mapping` suite (12 passed), `clay_js_*` doc-registry/facade/inventory suites (55 passed), and the security test target runs clean. No new API, facade, or registry entry was added.
+
+- [x] Create or verify Clay configuration APIs
   - Acceptance Criteria:
     - Functional: Confirm entry-state and completion geometry/dismissal need no hidden configuration; existing keybinding/theme/typography APIs keep working.
     - Performance: No config parsing in paint/layout/keypress paths.
@@ -357,7 +417,15 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
   - Test Cases to Write:
     - Existing theme/typography/keybinding example loads cleanly with new UI states.
 
-- [ ] Execute and update the manual test plan (test-plan/)
+### Task 10 Evidence (2026-08-15)
+
+- No new configuration API was needed: the `clay:configuration` facade stays closed at exactly six exports (locked by `configuration_surface_is_closed_and_security_controls_are_not_properties` in tests/clay_js_api_inventory.rs), and no new option key, registry entry, or `examples/init.js` change was introduced.
+- Verified no hidden configuration exists for the Plan 087 surfaces: welcome entry state and completion projection geometry/dismissal have zero configuration lookups — `rg configuration|set_package_option` across src/masonry_welcome.rs, src/shell/package_ui.rs, src/shell/transient_menu.rs, src/masonry_pane_document.rs, src/masonry_editor.rs, src/masonry_package_region.rs, and src/masonry_sdui.rs finds only prose/diagnostic strings. `completion_overlay_rect` reads compiled budget constants (`COMPLETION_MAX_VISIBLE_ROWS`/`COMPLETION_MAX_WIDTH_PX`) plus cached typography/token metrics; the centered Command Centre width is the validated `dimension.overlay.centered.width` design token, not a configuration key. No config parsing exists in paint/layout/keypress paths.
+- Extended `plan060_internal_security_and_performance_controls_are_not_configurable` (src/server/configuration.rs) so `setPackageOption` fails closed with `unsupported package option` for `completion.maxVisibleRows`, `completion.maxWidthPx`, `completion.anchor`, `welcome.enabled`, `welcome.entryState`, and `centered.overlayWidth` — configuration cannot supply arbitrary overlay coordinates, raw style values, paths, or callbacks, and the completion anchor stays Clay-internal.
+- Canonical example verified against the new UI states: `node --check examples/init.js` passes and the three hermetic config tests (`example_configuration_loads_cleanly_and_applies_effects`, `control_center_opens_filters_activates_and_cancels`, `runtime_generation_replacement_cancels_open_control_center`) all pass unchanged with the welcome/completion-bearing client surface.
+- docs/reference/clay-js-api/configuration.md already states completion menu geometry, item count, bounds, and focus policy are Clay-owned compiled constants and not hidden `init.js` keys; no doc or registry edit was needed.
+
+- [x] Execute and update the manual test plan (test-plan/)
   - Acceptance Criteria:
     - Functional: Add/execute steps for entry states, primary actions, completion placement/dismissal/scroll, multi-pane, IME, centered command centre non-regression, and review harness.
     - Performance: Record typing/filter/scroll feel in module 11.
@@ -383,7 +451,14 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
   - Test Cases to Write:
     - Manual state matrix and negative checks described above.
 
-- [ ] Update or verify the code wiki after implementation
+### Task 11 Evidence (2026-08-15)
+
+- Added Plan 087 step tables with stable IDs to six modules: 01 launch (L12–L14 welcome entry state + review harness contract + no-stale-copy), 03 files/workspace (F32–F37 welcome entry state, native Open File/Open Folder dialogs, welcome-return after close, no-path-leak negative), 04 core editing (E16–E21 completion placement/dismissal/scroll, empty-result dismissal, stale-accept negative, IME coexist), 10 keybindings (K69–K72 fixture `completion.trigger` binding, Command Centre 60+ non-regression, filter, menu key containment), 11 performance (Q11–Q14 completion caps/feel, scroll, Command Centre feel, non-blocking under pending edits), 13 window splits (S33–S35 completion-in-split anchoring, welcome-return on pane close); index.md gained a Plan 087 coverage-matrix row, module-map updates for 04/11, and a task 11 execution record summary.
+- Executed on real Linux (X11-backend clay client on the review host) with an isolated mode-700 root and the `ui-review-completion` fixture init.js: PASS for the welcome entry state (sanitized labels, `Ready to edit; Open a file or folder…`, `Open File`/`Open Folder` buttons, no `Phase 4 IPC server` copy); PASS for `Open File` → native Nautilus dialog → `review.md` opened as doc 3 with basename-only labels; PASS for the live completion popup (Menu 480×340 at caret, 16 `@clay/markdown` items, ≤ 8 visible rows, selected row, modeless — editor stayed focused); PASS for Escape dismissal and for empty-result dismissal (`status: Empty`, no popup, no blocking `No completions` panel, no diagnostic); client and server stayed alive throughout.
+- **BLOCKED by host (not a false pass):** this session's xdg-desktop-portal keyboard delivery could not hold Ctrl across the two strokes of `Ctrl+X Ctrl+P` (pending-chord timeout ~1.5 s), so Command Centre/split re-runs were not repeated in this instance; the Command Centre open/filter/Escape round trip with 66 results was verified live earlier in this plan (task 7 captures, same build) and split/welcome flows carry plan 086 manual evidence plus automated coverage. `P1-087-UI-1` remains tracked in Further Actions.
+- Per-module records: [01](test-plan/01-launch-and-connection.md#linux-execution-record-plan-087-task-11-2026-08-15), [03](test-plan/03-files-and-workspace.md#linux-execution-record-plan-087-task-11-2026-08-15), [04](test-plan/04-core-editing.md#linux-execution-record-plan-087-task-11-2026-08-15), [10](test-plan/10-keybindings-and-commands.md#linux-execution-record-plan-087-task-11-2026-08-15), [11](test-plan/11-performance.md#linux-execution-record-plan-087-task-11-2026-08-15), [13](test-plan/13-window-splits.md#linux-execution-record-plan-087-task-11-2026-08-15), plus the [index summary](test-plan/index.md#plan-087-task-11-linux-execution-record-2026-08-15).
+
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: Wiki explains review harness, welcome-state ownership/flow, completion lifecycle/geometry, focus/accessibility, and test commands; index links pages.
     - Performance: Document bounded rows/layout and no-hot-path authority work.
@@ -410,10 +485,17 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
   - Test Cases to Write:
     - Manual wiki index/link and content review; documentation drift tests pass.
 
+### Task 12 Evidence (2026-08-15)
+
+- Added one focused wiki page [Repeatable UI Review Harness](docs/wiki/modules/ui-review-harness.md) (project-wiki template: Source/Overview/How It Works/Fixtures/Artifacts/Invariants/Related) documenting `scripts/capture-ui-review.sh --fixture <ui-review-*> --output <dir>`, the six fixture states, mode-700 isolation, the watcher-reload fixture path (init.js copy + touch instead of `--config-fixture`), the AT-SPI probe's app-index scan and per-call timeouts, `review.status` PASS/UNRESOLVED (exit 2) semantics with no false pass, the X11-backend window note and multi-stroke chord limitation, screenshot-as-review-artifact stance, and the manual_smoke_docs drift guard.
+- masonry-shell.md gained a 'Plan 087: welcome hosting, completion projection, and review harness' section (welcome hosting in pane hosts with no new authority, completion overlay hosting through `PackageOverlayHost` with `completion_overlay_rect` geometry, modeless focus/accessibility for welcome Group/Status/Buttons and completion Menu, and the P1-087-UI-1 follow-up); pane-document-views.md gained the focus/accessibility paragraph (modeless completion, welcome `STATUS` virtual node, 256-char ceiling, consumer validation, harness cross-link) and a Related link; transient-menu-session.md gained the harness cross-link in Related; index.md links the new page and updated the masonry-shell blurb for Plan 087.
+- All links resolve (page is discoverable from the master index) and the documentation drift guard `primitives_docs` passes 25/25, including `wiki_index_links_every_wiki_page`. This is the final synchronized wiki update for the plan — no per-task wiki churn.
+
 ## Compromises Made
 
 - GPU pixel goldens remain deferred because current Masonry testing is CPU-only and not production-renderer faithful. The plan delivers repeatable live artifacts plus deterministic structural checks instead.
 
 ## Further Actions
 
+- **P1-087-UI-1:** Fix shared retained scroll-host clipping/accessible containment so live Completion and 60+ Command Centre rows stay inside their painted shells; add a renderer-level regression capture before Plan 087 closes.
 - Broad visual-system modernization is deliberately deferred to Plan 088 after these foundations are stable.

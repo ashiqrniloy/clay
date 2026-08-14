@@ -139,9 +139,13 @@ not an undocumented key.
   path separators filtered, capped at
   `ACCESSIBILITY_DISPLAY_NAME_MAX_CHARS` (64). Absolute host paths never
   reach labels.
-- Announcement strings are capped at
+- Announcement strings and transient-menu item labels are capped at
   `TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS` (256), defined in
-  `src/perf/budgets.rs` — the same constant the transient menu uses.
+  `src/perf/budgets.rs`. Item labels pass through
+  `compose_menu_item_accessibility_label` at `MenuA11y` construction: controls
+  and path separators are removed, empty/invalid labels fall back to the
+  display label or `Menu item`, and the selected suffix stays inside the same
+  256-character ceiling. Display/action data is unchanged.
 
 ## Verification
 

@@ -1,0 +1,46 @@
+0|application|-|clay|/org/a11y/atspi/accessible/root|clay
+1|frame|-||/org/a11y/atspi/accessible/0/14|clay
+2|panel|-|Clay working area shell. Active pane 1.|/org/a11y/atspi/accessible/0/12|clay
+3|panel|-|Pane 1 of 1: editor|/org/a11y/atspi/accessible/0/11|clay
+4|entry|-|Clay — Connected — Editable — review.md — doc 2 — v1 — Recovery: Completion. Theme theme-modus-vivendi. # Completion review fn hello hello_world helper |/org/a11y/atspi/accessible/0/10|clay
+5|panel|-|Server-driven UI region|/org/a11y/atspi/accessible/0/4|clay
+6|label|-||/org/a11y/atspi/accessible/0/15|clay
+5|panel|-|Package panels|/org/a11y/atspi/accessible/0/5|clay
+5|panel|-|Package overlays|/org/a11y/atspi/accessible/0/6|clay
+6|menu|-|Completion|/org/a11y/atspi/accessible/0/40|clay
+7|label|-||/org/a11y/atspi/accessible/0/18|clay
+7|label|-||/org/a11y/atspi/accessible/0/19|clay
+7|list item|-|# |/org/a11y/atspi/accessible/0/20|clay
+7|list item|-|## |/org/a11y/atspi/accessible/0/21|clay
+7|list item|-|### |/org/a11y/atspi/accessible/0/22|clay
+7|list item|-|#### |/org/a11y/atspi/accessible/0/23|clay
+7|list item|-|##### |/org/a11y/atspi/accessible/0/24|clay
+7|list item|-|###### |/org/a11y/atspi/accessible/0/25|clay
+7|list item|-|- |/org/a11y/atspi/accessible/0/26|clay
+7|list item|-|* |/org/a11y/atspi/accessible/0/27|clay
+7|list item|-|1. |/org/a11y/atspi/accessible/0/28|clay
+7|list item|-|> |/org/a11y/atspi/accessible/0/29|clay
+7|list item|-|```|/org/a11y/atspi/accessible/0/30|clay
+7|list item|-|~~~|/org/a11y/atspi/accessible/0/31|clay
+7|list item|-|---|/org/a11y/atspi/accessible/0/32|clay
+7|list item|-|**|/org/a11y/atspi/accessible/0/33|clay
+7|list item|-|__|/org/a11y/atspi/accessible/0/34|clay
+7|list item|-|`|/org/a11y/atspi/accessible/0/35|clay
+7|menu item|selected|Completion # selected|/org/a11y/atspi/accessible/0/14987979559889031170|clay
+7|menu item|-|Completion ##|/org/a11y/atspi/accessible/0/14987979559889031171|clay
+7|menu item|-|Completion ###|/org/a11y/atspi/accessible/0/14987979559889031172|clay
+7|menu item|-|Completion ####|/org/a11y/atspi/accessible/0/14987979559889031173|clay
+7|menu item|-|Completion #####|/org/a11y/atspi/accessible/0/14987979559889031174|clay
+7|menu item|-|Completion ######|/org/a11y/atspi/accessible/0/14987979559889031175|clay
+7|menu item|-|Completion -|/org/a11y/atspi/accessible/0/14987979559889031176|clay
+7|menu item|-|Completion *|/org/a11y/atspi/accessible/0/14987979559889031177|clay
+7|menu item|-|Completion 1.|/org/a11y/atspi/accessible/0/14987979559889031178|clay
+7|menu item|-|Completion >|/org/a11y/atspi/accessible/0/14987979559889031179|clay
+7|menu item|-|Completion ```|/org/a11y/atspi/accessible/0/14987979559889031180|clay
+7|menu item|-|Completion ~~~|/org/a11y/atspi/accessible/0/14987979559889031181|clay
+7|menu item|-|Completion ---|/org/a11y/atspi/accessible/0/14987979559889031182|clay
+7|menu item|-|Completion **|/org/a11y/atspi/accessible/0/14987979559889031183|clay
+7|menu item|-|Completion __|/org/a11y/atspi/accessible/0/14987979559889031184|clay
+7|menu item|-|Completion `|/org/a11y/atspi/accessible/0/14987979559889031185|clay
+5|status bar|-|Clay — Connected — Editable — review.md — doc 2 — v1 — Recovery: Completion|/org/a11y/atspi/accessible/0/14987979559889015809|clay
+3|status bar|-||/org/a11y/atspi/accessible/0/14987979559889016834|clay

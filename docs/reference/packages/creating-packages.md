@@ -768,7 +768,59 @@ or obtain Path Browser authority. Supported package overlay anchors remain
 `working-area`, `active-pane`, `main`, and `pointer`; `centered` is not part of
 the package `OverlayAnchor` type or manifest validation. The centered host uses
 one scrim fill and no blur/filter/offscreen pass; package JavaScript never runs
-in its paint/layout/input paths.
+in its paint/layout/input paths. Its default centered result surface is 640
+logical pixels wide and 220 logical pixels high before available-window
+clamping; the retained result list is scrollable and modal input remains
+Clay-owned.
+
+### Plan 087 package-facing contract: entry, completion, and bounded built-ins
+
+Plan 087 changes Clay's native presentation and accessibility plumbing without
+expanding package authority. There is no new `ComponentKind`, style variable,
+token, manifest field, or JS API, and no package-facing `Completion` or
+`Centered` overlay anchor.
+
+- **Welcome entry state:** `WelcomeWidget` is a Clay-owned native Group/Status
+  surface shown for an empty connected pane and local fallback. It sanitizes the
+  workspace basename and recovery copy, then routes `Open File` and `Open
+  Folder` through Clay's existing `documents.clientOpenFileDialog` and
+  `workspace.clientOpenFolderDialog` client commands. Packages cannot replace
+  or inject the welcome surface and receive no native dialog authority.
+- **Completion projection:** package completion providers contribute only the
+  existing bounded inert result data. Clay projects non-empty results through
+  `completion_result_to_menu_session` with `TransientMenuOrigin::Completion`,
+  `CompletionAnchor`, and `TransientMenuFocusPolicy::Modeless`; the anchor comes
+  from the active pane's IME/caret geometry and is clamped below or above the
+  caret inside the pane. `completion_overlay_rect` enforces
+  `COMPLETION_MAX_VISIBLE_ROWS` = 8 and `COMPLETION_MAX_WIDTH_PX` = 480, and
+  the retained `scroll` child keeps selection navigation in the popup.
+  Completion anchor is Clay-internal; packages cannot request caret-native
+  bounds or add a completion widget. Empty/stale results dismiss the popup;
+  timeout/provider-error results leave status diagnostics such as
+  `completion.provider_timeout` or `completion.provider_error` instead of a
+  blocking empty panel. Package JavaScript never runs in this projection's
+  paint/layout/input paths.
+- **Command Centre and Path Browser:** these built-in server sessions remain
+  Clay-owned. The centered host uses the cached
+  `dimension.overlay.centered.width` token (640 logical-pixel default), a
+  bounded 220-pixel default surface height, one token-driven scrim, retained
+  scrolling for long result lists, and modal Dialog/Menu/Status accessibility.
+  Package commands may appear in the catalogue, but packages cannot open,
+  populate, filter, intercept, configure, or receive the session's paths or
+  menu intents. The centered anchor is Clay-internal and is not part of the
+  package `OverlayAnchor` type or manifest validation.
+- **Transient-menu accessibility labels:** package-authored item labels are
+  normalized once when Clay constructs `MenuA11y` through
+  `compose_menu_item_accessibility_label`. Control characters and path
+  separators are removed, empty values use a safe fallback, and the selected
+  suffix stays inside the existing 256-character ceiling. This does not change
+  package display/action data or add a package-facing label API.
+- **Package anchors and containment:** package transient overlays remain limited
+  to `working-area`, `active-pane`, `main`, and `pointer`; no package-facing
+  `centered` or completion anchor is accepted. Clay owns bounds, focus,
+  dismissal, selection, role/name/state exposure, and scroll containment. The
+  live renderer containment follow-up `P1-087-UI-1` is host work and does not
+  change the package contract.
 
 ## Conflict and Precedence Contract
 
@@ -1348,7 +1400,7 @@ Phase 20.1 expanded the typed token catalog additively from five domains to ten.
 
 **Typography hierarchy**: the seven `UiTextVariant` tokens (`typography.body`, `typography.title`, `typography.status`, `typography.display`, `typography.section`, `typography.detail`, `typography.caption`) are semantic variant selectors, not absolute sizes. Their scale ratios form `UiTypographyHierarchy`, which is user-owned via [`setTypography`](../clay-js-api/theme/set-typography.md) and travels atomically with `ActiveTypography`. Packages select a variant name only; they **cannot** supply concrete scale ratios. A `clay.contributions.designTokens` entry targeting any `typography.*` token is rejected as a typography (variant) override, not a scale value.
 
-**Typed UI design-token overrides** (`clay.contributions.designTokens` / `UiDesignTokenOverride`): a theme package may ship typed UI overrides that resolve client-side into `ResolvedUiTheme`. Each override carries a core Clay token name, a typed value variant (`Color`, `Scalar`, `Opacity`, or `Level`), and provenance. Validation rejects unknown tokens, value/type mismatch against the core token, raw CSS/color/size fields, duplicates, out-of-range scalars (dimension ordering, opacity `[0,1]`, `motion-duration` `[0,1000]`), invalid level names, and any `typography.*` override. Existing Gruvbox themes ship no `designTokens` and resolve through core fallbacks unchanged — no package migration is required.
+**Typed UI design-token overrides** (`clay.contributions.designTokens` / `UiDesignTokenOverride`): a theme package may ship typed UI overrides that resolve client-side into `ResolvedUiTheme`. Each override carries a core Clay token name, a typed value variant (`Color`, `Scalar`, `Opacity`, or `Level`), and provenance. Validation rejects unknown tokens, value/type mismatch against the core token, raw CSS/color/size fields, duplicates, out-of-range scalars (dimension ordering, opacity `[0,1]`, `motion-duration` `[0,1000]`), invalid level names, and any `typography.*` override. Existing themes that ship only `textStyles` remain compatible: their base colors are projected into modern surface/state/focus/feedback roles below typed overrides, with low-contrast legacy placeholders promoted for UI muted text before the AA gate. No package migration is required.
 
 **Token-backed panel/sidebar/density defaults**: `dimension.sidebar.default`, `dimension.panel.side.*`, `dimension.panel.vertical.*`, and `density.default` replace the prior hardcoded panel constants. Packages do not set these directly; theme/configuration overrides flow through `designTokens` or future documented configuration APIs. Invalid dimension ordering (`min > default` or `max < default`) falls back to the matching Clay constant tuple per domain before layout. `density.default` selects compact/default/spacious; it scales the token-owned UI spacing rhythm only and never scales panel dimensions or document typography. Phase 20.3 implemented resize/collapse persistence and split interaction on top of these defaults.
 
@@ -1405,7 +1457,7 @@ Validation rejects: missing/wrong package prefix on `id`, duplicate `id`, invali
 
 Phase 20.4 restyles every implemented `ComponentKind` to the minimalist design language using the Phase 20.1 tokens and Phase 20.2 primitives, **without changing component kinds, style-variable schemas, or token names**. It is a restyle, not a catalog expansion: no new kind, no new style variable, no new token was added.
 
-**Active-theme routing**: SDUI component paint reads the active `ResolvedUiTheme` (the design-token registry layered over the core fallback catalog by the active theme/configuration), not core fallbacks. The prior `SduiThemeStyle::default()` core-fallback paint path is gone; `SduiThemeStyle::from_ui_theme(&ResolvedUiTheme)` resolves typed values from the active theme at each `&self` paint entry point. Theme packages (e.g. `@clay/theme-gruvbox-material-dark`) that contribute `clay.contributions.designTokens` overrides now flow through to SDUI component paint automatically — no manifest change required.
+**Active-theme routing**: SDUI component paint reads the active `ResolvedUiTheme` (the design-token registry layered over the core fallback catalog and optional legacy `textStyles` base palette by the active theme/configuration), not core fallbacks. The prior `SduiThemeStyle::default()` core-fallback paint path is gone; `SduiThemeStyle::from_ui_theme(&ResolvedUiTheme)` resolves typed values from the active theme at each `&self` paint entry point. Theme packages that contribute `clay.contributions.designTokens` overrides win over the compatibility projection automatically; legacy-only themes remain usable without a manifest change.
 
 **State-complete components**: every interactive component derives all five `InteractionState` variants from state tokens:
 
@@ -1966,9 +2018,9 @@ Package UI contributions use three distinct shell surfaces:
 
 - **Fixed panels** participate in `PaneSlotLayout` and reduce the size of the `main` slot while visible. Register them with `ui.serverRegisterPanelContribution` for `left`, `right`, `top`, or `bottom` slots.
 - **Transient overlays** overlay the pane or working area and are dismissible/focus-scoped. Register them with `ui.serverRegisterTransientOverlayContribution` for command palettes, dropdowns, hover docs, modals, or temporary find/replace bars.
-- **Transient menus** are Clay-owned active sessions for bottom-pane command browsing and future picker workflows. They reuse the overlay/component primitives for rendering but are managed as a `TransientMenuSession` with prompt, query, bounded items, selection, status, and inert activation actions. The Control Center is the first consumer; future completion, file search, symbol search, and Git pickers can reuse the same generic session model.
+- **Transient menus** are Clay-owned dynamic sessions for the server-routed Control Center and Path Browser. They reuse the retained overlay/component primitives and carry prompt, query, bounded items, selection, status, focus policy, accessibility labels, and inert activation actions. Completion results reuse the renderer model but are a client-local `TransientMenuOrigin::Completion` projection with a caret/IME anchor, modeless focus, and no server menu session; package code cannot open or drive either surface.
 
-A transient menu is not a fixed bottom panel and does not consume fixed `PaneSlotLayout` geometry unless a later explicit declaration installs fixed bottom chrome. It is also not a generic `TransientOverlayContribution`; the overlay contribution declares static overlay metadata, while the transient menu session owns dynamic query/selection/activation state.
+A transient menu is not a fixed bottom panel and does not consume fixed `PaneSlotLayout` geometry unless a later declaration installs fixed bottom chrome. It is also not a generic `TransientOverlayContribution`; the overlay contribution declares static package overlay metadata, while a Clay-owned menu session owns dynamic query/selection/activation state.
 
 ### Command execution lifecycle
 
@@ -2340,7 +2392,7 @@ Use the documented `clay:syntax` API for engine preference. Do not add hidden JS
 
 Phase 18.11 adds the `CompletionTriggerAndResult` primitive and server-side completion framework; Phase 18.18 extends its metadata-only package contract with bounded static text items. A package declares provider metadata, trigger/word-boundary parameters, and optional inert `items`, and Clay owns trigger classification, result computation scheduling, and the completion picker UI. Package authors do **not** ship an executable completion handler, raw callback, raw op, native handle, client JavaScript, snippet with executable transforms, command side effect on accept, CSS, or any completion-specific popup widget.
 
-Completion reuses the Phase 18.8 `TransientMenuSession` bottom overlay and `SduiNativeState` active-menu rendering with `KeyBindingContext::CompletionMenu`; do not add a completion-specific Masonry widget tree, custom popup, or fixed bottom panel for completions. Accepting a completion commits a validated text replacement in the active document only — it never executes a command, raw op, or provider code.
+Completion uses Clay's shared retained menu renderer with `TransientMenuOrigin::Completion`, a caret/IME-derived active-pane anchor, `TransientMenuFocusPolicy::Modeless`, and a bounded `scroll` component; it is not a package `TransientOverlayContribution`, a fixed bottom panel, or a package-specific Masonry widget tree. The host caps the projection at `COMPLETION_MAX_VISIBLE_ROWS` = 8 visible rows and `COMPLETION_MAX_WIDTH_PX` = 480 logical pixels. Accepting a completion commits a validated text replacement in the active document only — it never executes a command, raw op, or provider code. Stale document/version/behavior results and empty items dismiss the popup; timeout/provider-error states use sanitized Clay status diagnostics instead of a blocking empty panel.
 
 Declare completion provider contributions under `clay.contributions.completionProviders` and register the metadata from the package load entry through `completion.serverRegisterCompletionProvider`:
 
@@ -2482,7 +2534,7 @@ Recommended test categories:
 3. **Runtime loader tests** — `serverLoadPackage` remains a lower-level validation helper for fixtures, while `loadPackage(specifier)` is the implemented runtime-backed end-user default. Customization after the one-line load uses `setPackageOption` / `serverSetLayoutOverride`, and the module loader only accepts resolver-validated package load entries.
 4. **Mode tests** — classification, activation, behavior manifest composition. For Phase 18.9: assert unknown/plain-text files fall back to `core.text` and code-like extensions/shebangs to `core.code`; assert a package-declared pattern wins precedence over built-ins; assert electric/pair/comment transforms execute client-side from the manifest without IPC; assert `core.*`/`clay.*` mode IDs are rejected at registration; assert oversize behavior manifests are rejected at the payload budget.
 5. **Input tests** — key routing, command routing, mouse/component actions.
-6. **UI tests** — slot placement, fixed/transient panel behavior, overlay geometry, action validation, and observability privacy. Phase 18.12 package UI tests should also cover Clay-owned file-browser coexistence. Phase 20 package UI docs/tests should assert coexistence with Clay-owned multi-document switcher, dirty/save status chrome, and recovery menus without package-owned tabs, native save dialogs, or paint-path session scans.
+6. **UI tests** — slot placement, fixed/transient panel behavior, overlay geometry, action validation, and observability privacy. Phase 18.12 package UI tests should also cover Clay-owned file-browser coexistence. Phase 20 package UI docs/tests should assert coexistence with Clay-owned multi-document switcher, dirty/save status chrome, and recovery menus without package-owned tabs, native save dialogs, or paint-path session scans. Plan 087 adds contract coverage for the Clay-owned welcome state, caret-adjacent completion anchor/caps, empty/stale/error dismissal, centered result bounds, scroll containment, exact accessibility labels/selection/status, and the absence of package-facing completion/centered anchors.
 7. **Theme/style tests** — token validation, same-type fallback mapping, typed style variables, and raw CSS/color rejection.
 8. **Package metadata tests** — `clay.contributions.ui.panels`, `ui.components`, `ui.overlays`, `themeTokens`, duplicate fixed slot claims, and bounded payload diagnostics.
 9. **Parse/render tests** — bounded snapshots, stale result rejection, decoration payload budgets.
@@ -2792,6 +2844,9 @@ Do not:
 - Execute commands from UI callbacks or transient menu items without routing through the server-owned `CommandExecution` path.
 - Bypass command permission/provenance validation from package code.
 - Treat a transient menu session as a fixed bottom panel or as a generic `TransientOverlayContribution` that owns dynamic query state.
+- Request or declare the Clay-internal `centered` or `Completion` overlay anchors, caret-native bounds, or a completion-specific widget.
+- Treat package-authored accessibility labels as a path/HTML escape hatch; Clay sanitizes and bounds them before accessibility publication.
+- Treat the Clay-owned welcome surface or native file/folder dialogs as package-owned UI or dialog authority.
 - Treat the Clay-owned file browser as a package-owned panel, package workspace-root provider, package marker/ignore-rule extension point, raw directory-listing API, or custom Masonry widget.
 - Treat multi-document sessions, dirty/save status chrome, conflict recovery menus, or pending-edit/disconnect/resync recovery as package-owned layout surfaces, native widgets, or clipboard/filesystem authority grants.
 - Open native save dialogs, write arbitrary files, invent package clipboard-contents APIs, or run reconnect/resync loops from package UI in place of Clay's documented command IDs and recovery menus.

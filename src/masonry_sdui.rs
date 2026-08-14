@@ -393,12 +393,24 @@ impl SduiNativeState {
             && menu.is_active()
         {
             let overlay = crate::shell::TransientPackageOverlay::from_menu_session(menu);
+            let rect = match overlay.anchor {
+                crate::shell::PackageOverlayAnchor::Completion => {
+                    crate::shell::package_ui::completion_overlay_rect(
+                        slot_geometry.main_rect,
+                        menu.completion_anchor(),
+                        menu.items().len(),
+                        &self.typography,
+                        &self.ui_theme,
+                    )
+                }
+                _ => overlay
+                    .anchor
+                    .rect(widget_size.to_rect(), slot_geometry.main_rect),
+            };
             overlays.push(PackageUiOverlayObservation {
                 id: overlay.id,
                 anchor: overlay.anchor,
-                rect: overlay
-                    .anchor
-                    .rect(widget_size.to_rect(), slot_geometry.main_rect),
+                rect,
                 component_id: overlay.component.id,
                 component_kind: overlay.component.kind,
                 focus_policy: overlay.focus_policy,
@@ -673,7 +685,27 @@ pub fn editor_region(size: Size, sdui: &SduiNativeState) -> Rect {
 pub fn editor_region_for_document(
     size: Size,
     sdui: &SduiNativeState,
+    document_id: DocumentId,
+) -> Rect {
+    editor_region_for_document_with_workspace_sidebar(size, sdui, document_id, true)
+}
+
+/// Compute the document rect while keeping package-owned fixed slots but
+/// omitting the Clay-owned workspace browser slot. Welcome uses this path so
+/// an empty entry surface is full width without covering package panels.
+pub(crate) fn editor_region_without_workspace_sidebar(
+    size: Size,
+    sdui: &SduiNativeState,
+    document_id: DocumentId,
+) -> Rect {
+    editor_region_for_document_with_workspace_sidebar(size, sdui, document_id, false)
+}
+
+fn editor_region_for_document_with_workspace_sidebar(
+    size: Size,
+    sdui: &SduiNativeState,
     _document_id: DocumentId,
+    include_workspace_sidebar: bool,
 ) -> Rect {
     // Reserve the Clay-owned left file-browser slot whenever a sidebar panel
     // exists, even if its editor binding still points at the bootstrap document
@@ -683,7 +715,9 @@ pub fn editor_region_for_document(
     let defaults = sdui.ui_theme.panel_defaults();
     let full_rect = size.to_rect();
     let layout = sdui.package_ui.slot_layout(&defaults);
-    let want_left = sdui.has_sidebar_panel() && size.width > defaults.sidebar_width + 100.0;
+    let want_left = include_workspace_sidebar
+        && sdui.has_sidebar_panel()
+        && size.width > defaults.sidebar_width + 100.0;
     with_default_left_slot(layout, &defaults, want_left)
         .compute_geometry(full_rect)
         .main_rect
@@ -1886,6 +1920,29 @@ mod tests {
         assert_eq!(overlays[0].id, "menu.3");
         assert_eq!(overlays[0].anchor, PackageOverlayAnchor::Bottom);
         assert_eq!(overlays[0].component_kind, "stack");
+    }
+
+    #[test]
+    fn completion_menu_observation_uses_caret_bounded_geometry() {
+        use crate::shell::transient_menu::{TransientMenuAction, TransientMenuItem};
+
+        let mut state = SduiNativeState::empty();
+        let menu = TransientMenuSession::new(TransientMenuSessionId(6), "Completion")
+            .with_items(vec![TransientMenuItem::new(
+                "a",
+                "Alpha",
+                TransientMenuAction::new("completion.accept"),
+            )])
+            .with_completion_anchor(Rect::new(700.0, 500.0, 701.0, 520.0));
+        state.set_active_menu(menu);
+
+        let overlay = &state
+            .observable_snapshot(Size::new(900.0, 600.0))
+            .package_transient_overlays[0];
+        assert_eq!(overlay.anchor, PackageOverlayAnchor::Completion);
+        assert!(overlay.rect.x1 <= 900.0);
+        assert!(overlay.rect.y1 <= 600.0);
+        assert!(overlay.rect.y0 >= 0.0);
     }
 
     #[test]

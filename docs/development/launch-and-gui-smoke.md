@@ -447,7 +447,7 @@ This smoke validates the six-step app workflow on Linux, Clay's primary developm
 
 
 1. Open the Clay app.
-2. See the Clay-owned Workspace file browser. It starts hidden; press `Ctrl+B` to show it, confirm the header contains the workspace folder name and full location, then press `Ctrl+B` again to hide it.
+2. See the Clay-owned Workspace file browser. It starts hidden; press `Ctrl+B` to show it, confirm the header contains the workspace folder name and current relative directory (never the absolute host location), then press `Ctrl+B` again to hide it.
 3. Select a folder from the system.
 4. Navigate different folders and files.
 5. See file contents when the selected file is Rust, TypeScript, or JavaScript.

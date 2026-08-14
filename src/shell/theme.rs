@@ -1032,23 +1032,24 @@ pub(crate) fn theme_meets_contrast(theme: &ResolvedUiTheme) -> Result<(), Contra
 }
 
 /// Validate an [`crate::protocol::ActiveTheme`] snapshot's contrast by
-/// resolving its `design_tokens` overrides through the core catalog and
-/// checking [`theme_meets_contrast`]. Shared by the `setTheme` apply path and
-/// the canonical-default resolver so both enforce the same AA floor. The
-/// snapshot's design tokens are already package-parse-validated, so resolution
-/// only fails if the wire snapshot was malformed (defensive: mapped to a
-/// contrast failure so the caller rejects without crashing).
+/// resolving both typed `design_tokens` and legacy `textStyles` colors through
+/// the same cached UI-theme projection used by the client. Shared by the
+/// `setTheme` apply path and the canonical-default resolver so both enforce the
+/// same AA floor. The snapshot's contributions are package-parse-validated, so
+/// resolution only fails if the wire snapshot was malformed (defensive: mapped
+/// to a contrast failure so the caller rejects without crashing).
 pub fn validate_active_theme_contrast(
     snapshot: &crate::protocol::ActiveTheme,
 ) -> Result<(), ContrastFailure> {
-    let resolved = ResolvedUiTheme::from_active_theme(&snapshot.design_tokens).map_err(|_| {
-        ContrastFailure {
+    let base = crate::editor::theme::StyleRegistry::from_active_theme(snapshot).base;
+    let resolved = ResolvedUiTheme::from_active_theme(&snapshot.design_tokens)
+        .map_err(|_| ContrastFailure {
             foreground: "<malformed override>",
             background: "<malformed override>",
             ratio: 0.0,
             threshold: TEXT_CONTRAST_MIN,
-        }
-    })?;
+        })?
+        .with_base_ui(&base);
     theme_meets_contrast(&resolved)
 }
 
@@ -1100,9 +1101,9 @@ impl PanelDefaults {
 /// Cached resolved UI design-token registry built from an [`ActiveTheme`] override
 /// set layered over the core fallback catalog. Constructed once during
 /// bootstrap/reload/theme-switch; paint and layout read cached typed values via
-/// the accessors without parsing strings or allocating maps. Themes that omit
-/// overrides (including both Gruvbox packages) resolve every value from core
-/// fallbacks unchanged.
+/// the accessors without parsing strings or allocating maps. Legacy `textStyles`
+/// colors are layered below typed overrides through `with_base_ui` so existing
+/// themes also drive modern state/focus/feedback tokens.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct ResolvedUiTheme {
     overrides: BTreeMap<String, ResolvedThemeValue>,
@@ -1159,17 +1160,40 @@ impl ResolvedUiTheme {
     }
 
     /// Map a shell color token onto the editor base palette, if one is installed.
+    /// This compatibility projection keeps legacy `textStyles` themes coherent
+    /// across modern state/focus/feedback tokens until a theme supplies a typed
+    /// `designTokens` override. Low-contrast legacy placeholders are promoted to
+    /// the base text color for UI muted text; the editor's own placeholder color
+    /// remains unchanged in `StyleRegistry`.
     fn base_color(&self, token: &str) -> Option<Color> {
         let base = self.base_ui.as_ref()?;
+        let muted_text = if crate::editor::theme::contrast_ratio(base.placeholder, base.panel_bg)
+            >= TEXT_CONTRAST_MIN
+        {
+            base.placeholder
+        } else {
+            base.text
+        };
         Some(match token {
-            "surface.panel" | "surface.list" | "surface.tooltip" => base.panel_bg,
             "surface.main" => base.shell_bg,
-            "surface.selected" => base.selection,
-            "surface.control" | "surface.overlay" => base.status_bg,
+            "surface.panel" | "surface.list" | "surface.overlay" | "surface.tooltip" => {
+                base.panel_bg
+            }
+            "surface.control" | "surface.badge" | "surface.kbd" => base.status_bg,
+            "surface.selected" | "surface.hover" | "surface.active" => base.selection,
+            "surface.disabled" => base.panel_bg,
             "surface.scrollbar" => base.scrollbar,
             "surface.scrollbar.track" => base.scrollbar_track,
             "text.primary" => base.text,
-            "text.muted" | "text.disabled" => base.placeholder,
+            "text.muted" => muted_text,
+            "text.disabled" | "accent.muted" | "text.icon" | "border.kbd" => base.placeholder,
+            "text.badge" | "text.kbd" => base.status_text,
+            "text.tooltip" => base.text,
+            "accent.primary" | "focus.ring" | "border.focus" => base.caret,
+            "border.hairline" | "border.subtle" | "border.strong" => base.scrollbar,
+            "diagnostic.error" => base.diagnostic_error,
+            "diagnostic.warning" => base.diagnostic_warning,
+            "diagnostic.info" => base.diagnostic_info,
             _ => return None,
         })
     }
@@ -2023,6 +2047,9 @@ mod tests {
             scrollbar_track: Color::from_rgb8(0x11, 0x00, 0x08),
             status_bg: Color::from_rgb8(0x11, 0x00, 0x09),
             status_text: Color::from_rgb8(0x11, 0x00, 0x0a),
+            diagnostic_error: Color::from_rgb8(0x11, 0x00, 0x0b),
+            diagnostic_warning: Color::from_rgb8(0x11, 0x00, 0x0c),
+            diagnostic_info: Color::from_rgb8(0x11, 0x00, 0x0d),
         };
         let ui = ResolvedUiTheme::from_active_theme(&[])
             .expect("empty ok")
@@ -2042,7 +2069,21 @@ mod tests {
             Some(base.scrollbar_track)
         );
         assert_eq!(ui.color("text.primary"), Some(base.text));
-        assert_eq!(ui.color("text.muted"), Some(base.placeholder));
+        let expected_muted =
+            if crate::editor::theme::contrast_ratio(base.placeholder, base.panel_bg)
+                >= TEXT_CONTRAST_MIN
+            {
+                base.placeholder
+            } else {
+                base.text
+            };
+        assert_eq!(ui.color("text.muted"), Some(expected_muted));
+        assert_eq!(ui.color("text.disabled"), Some(base.placeholder));
+        assert_eq!(ui.color("surface.hover"), Some(base.selection));
+        assert_eq!(ui.color("surface.active"), Some(base.selection));
+        assert_eq!(ui.color("accent.primary"), Some(base.caret));
+        assert_eq!(ui.color("border.focus"), Some(base.caret));
+        assert_eq!(ui.color("diagnostic.error"), Some(base.diagnostic_error));
         // Non-color tokens are not in the base palette: core catalog still wins.
         assert_eq!(ui.scalar_f64("spacing.panel"), Some(14.0));
 
@@ -2059,6 +2100,41 @@ mod tests {
         );
         // Sibling token without an override still tracks the base palette.
         assert_eq!(ui.color("surface.scrollbar"), Some(base.scrollbar));
+    }
+
+    #[test]
+    fn legacy_text_style_contrast_is_checked_before_install() {
+        let same = Some([0x10, 0x0f, 0x17, 0xff]);
+        let snapshot = crate::protocol::ActiveTheme {
+            specifier: "@clay/theme-low-contrast-legacy".to_string(),
+            overrides: vec![
+                crate::protocol::TextThemeOverride {
+                    token: "shellBg".to_string(),
+                    color: same,
+                    bold: None,
+                    italic: None,
+                    underline: None,
+                    strike: None,
+                    provenance: "theme-low-contrast-legacy".to_string(),
+                },
+                crate::protocol::TextThemeOverride {
+                    token: "text".to_string(),
+                    color: same,
+                    bold: None,
+                    italic: None,
+                    underline: None,
+                    strike: None,
+                    provenance: "theme-low-contrast-legacy".to_string(),
+                },
+            ],
+            design_tokens: Vec::new(),
+        };
+
+        let failure = validate_active_theme_contrast(&snapshot)
+            .expect_err("legacy textStyles must use the same contrast gate");
+        assert_eq!(failure.foreground, "text.primary");
+        assert_eq!(failure.background, "surface.main");
+        assert!(failure.ratio < TEXT_CONTRAST_MIN);
     }
 
     #[test]

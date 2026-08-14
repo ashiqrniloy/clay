@@ -544,3 +544,86 @@ pub fn centered_overlay_geometry_work(overlay_count: usize) -> usize {
     // One scrim fill rect + one centered surface rect + one rect per overlay.
     1 + 1 + overlay_count * usize::from(centered.width() > 0.0)
 }
+
+// ── Plan 087: focused completion/menu regression baselines ────────────────
+//
+// These helpers are benchmark-only projections of the real bounded menu,
+// fuzzy-filter, and caret geometry paths. Their wall-clock results remain
+// local/advisory; hard CI coverage lives in the row/geometry/source guards.
+
+fn completion_session_for_benchmark(item_count: usize) -> crate::shell::TransientMenuSession {
+    use crate::protocol::{
+        CompletionItem, CompletionProvenance, CompletionReplacementRange, CompletionResultSet,
+        CompletionStatus,
+    };
+
+    let provenance = CompletionProvenance::builtin_core();
+    let items = (0..item_count.min(crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS))
+        .map(|index| {
+            CompletionItem::new(
+                format!("completion-{index}"),
+                format!("Completion item {index}"),
+                provenance.clone(),
+            )
+        })
+        .collect();
+    let result = CompletionResultSet {
+        request_id: 1,
+        client_id: 1,
+        document_id: 7,
+        document_version: 1,
+        behavior_version: 0,
+        provider_generation: 1,
+        replacement_range: CompletionReplacementRange::new(0, 0),
+        status: CompletionStatus::Ok,
+        items,
+        provenance,
+    };
+    crate::shell::completion_result_to_menu_session(&result)
+        .with_completion_anchor(Rect::new(320.0, 280.0, 321.0, 300.0))
+}
+
+/// Construct and project one bounded completion menu for Criterion.
+#[doc(hidden)]
+pub fn completion_open_projection_work(item_count: usize) -> usize {
+    let session = completion_session_for_benchmark(item_count);
+    let overlay = crate::shell::package_ui::TransientPackageOverlay::from_menu_session(&session);
+    let semantic_items = overlay
+        .menu_a11y
+        .as_ref()
+        .map_or(0, |menu| menu.items.len());
+    std::hint::black_box(semantic_items + overlay.component.children.len())
+}
+
+/// Score one bounded transient-menu candidate set with the production fuzzy
+/// matcher. Command Centre filtering uses the same matcher and caps.
+#[doc(hidden)]
+pub fn transient_menu_filter_work(candidate_count: usize, query: &str) -> usize {
+    let matches = (0..candidate_count.min(crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS))
+        .filter(|index| {
+            let label = format!("Command {index:03} split pane");
+            let command_id = format!("shell.command{index}");
+            crate::shell::fuzzy::fuzzy_score_fields(query, [label.as_str(), command_id.as_str()])
+                .is_some()
+        })
+        .count();
+    std::hint::black_box(matches)
+}
+
+/// Resolve one completion popup rect through the production caret geometry
+/// helper. The returned bit pattern keeps Criterion from eliding the work.
+#[doc(hidden)]
+pub fn completion_layout_work(item_count: usize, caret_y: f64) -> usize {
+    let main = Rect::new(0.0, 0.0, 900.0, 600.0);
+    let caret = Rect::new(320.0, caret_y, 321.0, caret_y + 20.0);
+    let typography = crate::editor::typography::TypographyRegistry::default();
+    let ui_theme = crate::shell::theme::ResolvedUiTheme::default();
+    let rect = crate::shell::package_ui::completion_overlay_rect(
+        main,
+        Some(caret),
+        item_count,
+        &typography,
+        &ui_theme,
+    );
+    std::hint::black_box(rect.width().to_bits() as usize ^ rect.height().to_bits() as usize)
+}

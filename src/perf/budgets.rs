@@ -162,6 +162,11 @@ pub const COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS: usize = 128;
 pub const COMPLETION_RESULT_MAX_ITEM_INSERT_TEXT_CHARS: usize = 256;
 pub const COMPLETION_RESULT_MAX_ITEM_DETAIL_CHARS: usize = 256;
 pub const COMPLETION_RESULT_MAX_ITEM_COMMIT_CHARS: usize = 32;
+/// Maximum completion rows visible before the shared scroll viewport takes
+/// over. The result list remains capped by `COMPLETION_RESULT_MAX_ITEMS`.
+pub const COMPLETION_MAX_VISIBLE_ROWS: usize = 8;
+/// Maximum logical width of the Clay-owned caret-adjacent completion surface.
+pub const COMPLETION_MAX_WIDTH_PX: f64 = 480.0;
 pub const FOLDING_RANGE_PAYLOAD_BUDGET_BYTES: usize = 2048;
 
 // Phase 18.20 engine-neutral language-intelligence budgets. Canonical

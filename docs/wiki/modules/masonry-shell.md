@@ -15,6 +15,10 @@ The Masonry shell runtime is Clay's native root container for a window working a
 
 Phase 18.2 implements the `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` runtime foundations needed for a default one-editor pane, generic horizontal/vertical split topology, and leaf-pane slot geometry. Phase 18.3 adds crate-internal slot-aware package UI runtime state in `src/shell/package_ui.rs`: accepted fixed panel contributions are installed as versioned `FixedPackagePanel` records for explicit `left`, `right`, `top`, or `bottom` slots, and accepted transient overlays are installed separately so overlays do not consume fixed slot geometry. User-visible shell configuration remains planned in later tasks/phases. `ClayShellWidget` is `#[doc(hidden)]` and Rust-public only because the Cargo package's `clay` binary target constructs the library-owned native root; this binary-boundary visibility is not a Clay JS API, package extension point, op, facade, or registry entry.
 
+## Plan 088 shell chrome modernization
+
+The welcome entry state now uses the full pane width and suppresses the empty workspace-browser slot until a real document is mounted; package-owned fixed panels still retain their slots. Split-pane focus rings paint in `post_paint`, after pane hosts, so the active pane remains visibly distinct without relying on fill color. The pinned `+` tab action uses the shared state palette on hover, while tab labels remain workspace basenames and tab overflow keeps its existing bounded strip geometry.
+
 ## Responsibilities
 
 - Own the internal Rust layout state for a working area, pane split tree, per-pane slot layout, and slot-aware package UI runtime state.
@@ -692,3 +696,65 @@ gate (the `bindKey` config path).
   30 → 20 fields, mechanical delegation, focused unit tests
   `request_bookkeeping_allocates_unique_ids`,
   `menu_sync_pending_semantics` (see the pane-document-views page).
+
+## Plan 087: welcome hosting, completion projection, and review harness
+
+Plan 087 (2026-08-15) replaces the prototype welcome document with a
+Clay-owned entry state, gives completion a compact caret-adjacent popup,
+and adds the repeatable review harness. The shell's role is hosting, not
+new authority:
+
+### Welcome entry state hosting
+
+Pane hosts mount `PaneDocumentView`s that may show the retained
+`WelcomeWidget` (`src/masonry_welcome.rs`) instead of the native editor:
+empty-tab bootstrap snapshots and local-fallback windows enter the welcome
+state, and a real `DocumentOpened` transitions the same pane view back to
+the editor. The shell sees only the pane's accessibility label and its
+usual `Pane N of M` numbering — welcome state is a pane-content concern
+(see [Pane Document Views](pane-document-views.md)). The server keeps
+owning tab/workspace/document state; welcome buttons submit the existing
+client-local `documents.clientOpenFileDialog` /
+`workspace.clientOpenFolderDialog` commands, so no new welcome authority
+or dialog capability exists.
+
+### Completion overlay hosting
+
+Completion popups are not shell-owned: `PaneDocumentView` publishes a
+fixed-point caret/IME `CompletionAnchor` (via `EditorWidget`) to the
+chrome-level `PackageOverlayHost`, which re-lays the popup when the anchor
+or item count changes. `completion_overlay_rect` (src/shell/package_ui.rs)
+is the single geometry helper — below/above-caret placement clamped inside
+the active pane, 480 logical-pixel width cap, eight visible-row cap. The
+popup is modeless: Masonry focus stays on the editor Entry, and the
+`SduiScrollViewport` keeps the selected row visible. The shell itself does
+not size or place the popup; it only hosts the retained overlay region.
+
+### Accessibility
+
+- Welcome: pane view exposes `Role::Group` (`Welcome to Clay`) with two
+  `Role::Button` children (Click actions) and a polite `Status` virtual
+  node (slot `STATUS`, deterministic `virtual_a11y_node_id` identity); the
+  native editor node is stashed while visible and the pane refuses text
+  input.
+- Completion: modeless `Menu` with `MenuItem` rows and a polite status;
+  selected row carries the `selected` state; no `Dialog` role, no modal
+  trap — the editor Entry keeps AT-SPI focus.
+- Both surfaces are consumer-validated through
+  `accesskit_consumer::Tree` in unit tests and appear in the live harness
+  captures.
+
+### Review harness
+
+`scripts/capture-ui-review.sh --fixture <ui-review-*>` boots isolated
+fixtures and captures AT-SPI dumps + screenshots with `review.status`
+PASS/UNRESOLVED semantics; see
+[Repeatable UI Review Harness](ui-review-harness.md) and
+`docs/development/launch-and-gui-smoke.md`. Manual step IDs covering
+welcome, completion, Command Centre non-regression, and splits live in
+test-plan modules 01 (L12–L14), 03 (F32–F37), 04 (E16–E21), 10 (K69–K72),
+11 (Q11–Q14), and 13 (S33–S35).
+
+Known visual follow-up (not fixed by this plan): `P1-087-UI-1` — live
+completion and 60+ Command Centre rows paint below their popup shells;
+tracked in the plan's Further Actions.

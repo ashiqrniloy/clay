@@ -323,6 +323,66 @@ fn completion_hot_paths_use_inert_state_and_nonblocking_enqueue_only() {
 }
 
 #[test]
+fn completion_projection_is_bounded_and_stays_out_of_paint() {
+    let session =
+        fs::read_to_string("src/shell/transient_menu.rs").expect("transient menu source readable");
+    assert!(session.contains("take(MAX_ITEMS)"));
+
+    let package = fs::read_to_string("src/masonry_package_region.rs")
+        .expect("package region source readable");
+    let package_impl = package
+        .split("impl Widget for PackageOverlayHost")
+        .nth(1)
+        .expect("PackageOverlayHost widget implementation present")
+        .split("#[cfg(test)]")
+        .next()
+        .expect("PackageOverlayHost production body");
+    let package_layout = package_impl
+        .split("fn layout(")
+        .nth(1)
+        .and_then(|body| body.split("fn paint(").next())
+        .expect("PackageOverlayHost layout body");
+    let package_paint = package_impl
+        .split("fn paint(")
+        .nth(1)
+        .and_then(|body| body.split("fn accessibility_role(").next())
+        .expect("PackageOverlayHost paint body");
+    assert!(package_layout.contains("completion_overlay_rect"));
+    assert!(!package_paint.contains("completion_overlay_rect"));
+    assert!(!package_paint.contains("menu_item_count"));
+    for forbidden in [
+        "Deno.core",
+        "write_client_message",
+        "std::fs",
+        "Command::new",
+    ] {
+        assert!(
+            !package_paint.contains(forbidden),
+            "completion overlay paint must not perform JS, IPC, filesystem, or shell work: {forbidden}"
+        );
+    }
+
+    let geometry =
+        fs::read_to_string("src/shell/package_ui.rs").expect("package UI source readable");
+    let geometry_body = geometry
+        .split("pub(crate) fn completion_overlay_rect(")
+        .nth(1)
+        .and_then(|body| body.split("\n}\n").next())
+        .expect("completion geometry helper body");
+    assert!(geometry_body.contains("item_count.clamp(1, COMPLETION_MAX_VISIBLE_ROWS)"));
+    assert!(geometry_body.contains("COMPLETION_MAX_WIDTH_PX"));
+
+    let editor = fs::read_to_string("src/masonry_editor.rs").expect("editor source readable");
+    let editor_paint = editor
+        .split("fn paint(&mut self, ctx: &mut PaintCtx")
+        .nth(1)
+        .and_then(|body| body.split("fn accessibility_role(").next())
+        .expect("EditorWidget paint body");
+    assert!(!editor_paint.contains("completion_overlay_rect"));
+    assert!(!editor_paint.contains("TransientMenuSession"));
+}
+
+#[test]
 fn language_server_process_work_is_absent_from_editor_hot_paths() {
     let surface_source = fs::read_to_string("src/editor/surface.rs").expect("surface readable");
     let widget_source =

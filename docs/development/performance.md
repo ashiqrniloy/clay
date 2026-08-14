@@ -461,6 +461,23 @@ cargo bench --bench first_party_language_baselines -- --baseline-lenient pre-lsp
 - Real rust-analyzer / typescript-language-server / marksman open/init/request latency is measured only under `CLAY_LSP_REAL_SMOKE=1` via `cargo test --test runtime lsp_real_servers:: -- --nocapture`. Do not promote those timings to Criterion CI gates.
 - Edit acknowledgement and local paint must never wait on worker/JS/subprocess work; see `tests/editor_performance_invariants.rs`.
 
+## Plan 087 completion projection budgets
+
+The Clay-owned completion surface uses the shared transient-menu item cap and
+adds only small geometry ceilings. `COMPLETION_MAX_VISIBLE_ROWS` bounds the
+rows exposed in the caret-adjacent viewport before scrolling; the underlying
+result remains capped by `COMPLETION_RESULT_MAX_ITEMS`. `COMPLETION_MAX_WIDTH_PX`
+keeps the surface compact while the active pane clamps its final rect. Neither
+budget adds work to ordinary typing, paint, or layout when no completion menu is
+active.
+
+| Focus area | Budget | Enforcement |
+| --- | --- | --- |
+| Caret-adjacent visible rows | 8 visible rows (`COMPLETION_MAX_VISIBLE_ROWS`) | `cargo test --test protocol performance_budgets::plan087_completion_surface_budgets_are_documented` |
+| Caret-adjacent width | 480 logical px (`COMPLETION_MAX_WIDTH_PX`) | same budget lock + `shell::package_ui` geometry tests |
+| Completion result items | <= 256 (`COMPLETION_RESULT_MAX_ITEMS`) | completion protocol/result validation + transient-menu cap |
+| Completion projection work | bounded item list; no IPC/JS/file I/O in paint/layout | `tests/editor_performance_invariants.rs` and pane/menu unit tests |
+
 ## Phase 19 hot-reload runtime-state budgets
 
 Phase 19 keeps reload evaluation/commit off the ordinary edit and paint paths. Complete runtime-generation snapshots reuse the existing 1 MiB IPC frame ceiling; the 768 KiB payload / 16 ms install figures are review thresholds for a future diff upgrade, not soft pass/fail gates.
@@ -583,8 +600,54 @@ no orphan root layers.
 
 `window_baselines` gained the advisory `centered_overlay_baselines` group
 (`centered_overlay_geometry_work`, one scrim rect + one surface rect + one
-rect per hosted overlay — O(overlay count), no document text). Wall-clock
-menu-open latency stays advisory and belongs to Phase 24.5.
+rect per hosted overlay — O(overlay count), no document text).
+
+## Plan 087 focused UI regression coverage
+
+Plan 087 keeps UI regression in two layers: deterministic structural and
+accessibility guards are blocking, while Criterion timings are local/advisory
+signals. No pixel goldens are added because the available Masonry harness is
+CPU-only and does not exercise Clay's production GPU renderer.
+
+Blocking coverage includes:
+
+- `masonry_welcome::tests::welcome_state_matrix_has_actionable_accessible_statuses`
+  checks loading, connected, runtime-error, local-fallback, and disconnected
+  entry states with basename-only workspace labels and no ambient path leakage.
+- `masonry_pane_document::tests::completion_result_rejects_foreign_document_and_behavior_provenance`
+  rejects completion results carrying a foreign document or behavior version
+  before replacing the current menu.
+- `editor_performance_invariants::completion_projection_is_bounded_and_stays_out_of_paint`
+  checks the shared eight-row/480-pixel geometry caps and keeps completion
+  projection, filesystem, JavaScript, IPC, and shell work out of paint.
+- `masonry_package_region::tests::completion_menu_accessibility_is_modeless_and_consumer_valid`
+  checks caret anchoring, modeless containment, selected-state labels, absent
+  command targets, and `accesskit_consumer` acceptance. Existing 60-result
+  centered containment and 256-item sanitized-label tests remain blocking.
+
+`window_baselines` also records advisory `completion_open_baselines`,
+`completion_filter_baselines`, and `completion_layout_baselines` groups. They
+exercise the real bounded transient-menu projection, shared fuzzy matcher, and
+caret geometry helper at 1/8/60/256-item scales and edge-adjacent caret
+positions. Run short local samples with:
+
+```text
+cargo bench --bench window_baselines completion_open_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+cargo bench --bench window_baselines completion_filter_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+cargo bench --bench window_baselines completion_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
+Local advisory run (2026-08-14, optimized Criterion profile, 10 samples, 1 s
+warm-up, 2 s measurement) produced these median estimates:
+
+| Group | Input | Median |
+| --- | --- | ---: |
+| `completion_open_baselines` | 1 / 8 / 60 / 256 items | 2.41 / 13.40 / 89.95 / 362.10 µs |
+| `completion_filter_baselines` | 16 empty-query / 60 `split` / 256 `split pane` candidates | 12.21 / 73.61 / 416.08 µs |
+| `completion_layout_baselines` | 1@20 / 8@280 / 256@560 caret positions | 0.98 / 0.88 / 0.89 µs |
+
+These wall-clock results remain local/advisory; deterministic row, geometry,
+accessibility-tree, stale-provenance, and no-hot-path checks are the hard gate.
 
 ## Phase 24.5 Command Centre budgets, guards, and browse-grant authority review
 

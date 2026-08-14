@@ -19,8 +19,10 @@
 //! state; the live routing (hosting at the sidebar rect, scroll clip, pointer
 //! routing) is the rendering-cutover step (task 6.5 remainder).
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::{Discriminant, discriminant};
+use std::rc::Rc;
 
 use masonry::accesskit::{Node, Role};
 #[cfg(test)]
@@ -52,6 +54,8 @@ use crate::shell::{
     InteractionState, component_state_color, disabled_text_color, list_row_fill_color,
     paint_focus_ring,
 };
+
+type ScrollSelectionTarget = Rc<Cell<Option<(f64, f64)>>>;
 
 /// A child position key in a reconciled container's child list (plan 070 step
 /// 11b). Real SDUI children key by [`SduiNodeId`]; synthetic children created by
@@ -908,10 +912,27 @@ pub(crate) struct SduiScrollViewport {
     ui_theme: ResolvedUiTheme,
     pointer_pos: Option<Point>,
     pointer_pressed: bool,
+    selection_target: Option<ScrollSelectionTarget>,
 }
 
 impl SduiScrollViewport {
     pub(crate) fn new(child: NewWidget<dyn Widget>, ui_theme: ResolvedUiTheme) -> Self {
+        Self::with_selection_target_option(child, ui_theme, None)
+    }
+
+    pub(crate) fn with_selection_target(
+        child: NewWidget<dyn Widget>,
+        ui_theme: ResolvedUiTheme,
+        selection_target: ScrollSelectionTarget,
+    ) -> Self {
+        Self::with_selection_target_option(child, ui_theme, Some(selection_target))
+    }
+
+    fn with_selection_target_option(
+        child: NewWidget<dyn Widget>,
+        ui_theme: ResolvedUiTheme,
+        selection_target: Option<ScrollSelectionTarget>,
+    ) -> Self {
         Self {
             child: child.to_pod(),
             scroll_offset: 0.0,
@@ -919,13 +940,23 @@ impl SduiScrollViewport {
             ui_theme,
             pointer_pos: None,
             pointer_pressed: false,
+            selection_target,
         }
+    }
+
+    pub(crate) fn set_ui_theme(&mut self, ui_theme: ResolvedUiTheme) {
+        self.ui_theme = ui_theme;
     }
 
     /// Mutable access to the content child, mirroring `Portal::child_mut`, so
     /// the reconciler can reach the subtree inside the viewport.
     pub(crate) fn content_mut<'w>(this: &'w mut WidgetMut<'_, Self>) -> WidgetMut<'w, dyn Widget> {
         this.ctx.get_mut(&mut this.widget.child)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scroll_offset_for_test(&self) -> f64 {
+        self.scroll_offset
     }
 
     fn max_scroll(&self, viewport_height: f64) -> f64 {
@@ -1037,6 +1068,17 @@ impl Widget for SduiScrollViewport {
         let child_bc = BoxConstraints::new(Size::ZERO, viewport);
         self.content_size = ctx.run_layout(&mut self.child, &child_bc);
         let max = self.max_scroll(viewport.height);
+        if let Some((target_y0, target_y1)) = self
+            .selection_target
+            .as_ref()
+            .and_then(|target| target.get())
+        {
+            if target_y0 < self.scroll_offset {
+                self.scroll_offset = target_y0;
+            } else if target_y1 > self.scroll_offset + viewport.height {
+                self.scroll_offset = target_y1 - viewport.height;
+            }
+        }
         self.scroll_offset = self.scroll_offset.clamp(0.0, max);
         ctx.set_clip_path(viewport.to_rect());
         ctx.place_child(&mut self.child, Point::ZERO);

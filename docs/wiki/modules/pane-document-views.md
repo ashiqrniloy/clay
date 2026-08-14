@@ -18,6 +18,10 @@ Phase 22.2 (2026-08-05) turns pane leaves from placeholders into live document v
 
 The architecture keeps ONE `EditorWidget` per connection as **connection chrome** (SDUI sidebar, package panels, overlays, shell preferences, runtime-snapshot validation) and extracts a lightweight `PaneDocumentView` per pane that owns the per-document editing state. A single `ClientEditQueue` is shared by all panes; its `ClientSyncState` was refactored from single-document to a per-document map so edits for different documents can be in flight concurrently.
 
+## Plan 088 status chrome
+
+`PaneDocumentView::paint_status_line` reads cached `ResolvedUiTheme` tokens (`surface.control`, `text.primary`, spacing, and border) with legacy `StyleRegistry` fallbacks. The status string still carries connection, access, document/version, dirty, diagnostic, pending-edit, and recovery text, so state is never communicated by color alone. Welcome layout bypasses only the Clay-owned workspace-browser slot; package fixed slots remain authoritative.
+
 ## How It Works
 
 ### Per-document sync state (`src/client/mod.rs`)
@@ -31,12 +35,20 @@ The per-pane view encapsulates what used to be `EditorWidget`'s document state:
 - One `EditorSurface` (buffer, caret/selection, viewport, decorations, diagnostics, history, typography, theme) — the pane's live document, or a `blank_surface()` placeholder when no document is open.
 - One `DocumentSessionStore` (Phase 20 shadow sessions, LRU-capped at 64 per pane) with `stash_active_session` / `activate_document` preserving the existing stash semantics locally.
 - One `EditorStatus` painted as the pane's own status line at the bottom of its rect (`paint_status_line`).
-- Local transient menus (completion, save-conflict, sync-recovery) mirrored to the chrome's overlay via `pending_menu_sync` (the chrome drains them on `MenuStateChanged`).
+- Local transient menus (completion, save-conflict, sync-recovery) mirrored to the chrome's overlay via `pending_menu_sync` (the chrome drains them on `MenuStateChanged`). Completion menus also carry fixed-point caret/IME bounds so the shared overlay host can place them beside the active line.
 - Request-id allocators and the `last_decoration_viewport` dedup for decoration requests.
 
 `RuntimeBaseline` (behavior manifest, active theme, active typography) seeds freshly mounted views from the chrome's current runtime state. The view's Widget trait methods are invoked through inherent `handle_*`/`on_*` methods delegated by the chrome or the driver, avoiding Widget-trait resolution across widget boundaries.
 
 `close_pane()` sends capability-gated close requests for the active document AND every retained session in the store (`DocumentSessionStore::document_ids()` + `clear()`), then resets to a blank surface. `guard_pane_close()` returns true when the active document is dirty — the driver blocks the close and shows the save-conflict menu instead (no topology change, no lease release until resolved).
+
+### Clay-owned welcome entry state (`src/masonry_welcome.rs`)
+
+The server's per-tab welcome document is an empty editable sentinel; the client presents it through a retained `WelcomeWidget` until a real `DocumentOpened` event arrives. `PaneDocumentView::with_initial_state` marks an empty bootstrap snapshot as welcome-visible and carries a sanitized workspace basename into `WelcomeState`. `EditorWidget::default` also uses the entry surface for local-fallback/no-server windows.
+
+The welcome surface is bounded and local: it paints a token-driven card, shortcut help, connection/access/runtime guidance, and two buttons routed through existing client-local commands (`documents.clientOpenFileDialog` and `workspace.clientOpenFolderDialog`). It performs no filesystem scan, recent-path query, JavaScript, IPC, or file authority operation in layout/paint. Workspace and status changes refresh the `Rc<RefCell<WelcomeState>>` before rendering; diagnostics pass through shared accessibility sanitization and the final label remains within the 256-character recovery ceiling.
+
+While visible, the view stashes the native editor, rejects editor pointer/text input, exposes a group with a polite status child and button `Click` actions, and keeps the welcome pod registered for Masonry traversal. A real `DocumentOpened` sets `welcome_visible = false`, restores the multiline editor/input path, and preserves server-owned document IDs, leases, and session routing. The child remains registered but stashed when hidden, avoiding an orphaned accessibility walk.
 
 ### Event routing (`src/driver/mod.rs` Driver + `src/masonry_editor.rs` chrome)
 
@@ -134,21 +146,51 @@ current request id) and `menu_sync_pending_semantics` (one-shot tri-state
 `take_pending`, `next_session_id` allocation) in
 `src/masonry_pane_document.rs`.
 
+## Plan 087: bounded completion projection
+
+`PaneDocumentView::apply_completion_result` consumes only the current request ID,
+then rechecks document ID, document version, and behavior version before building
+a menu. Empty, rejected, stale, and expired results clear the current completion
+surface before the driver reconciles overlays. Provider timeout/error statuses use
+sanitized non-blocking status diagnostics rather than a `No completions` panel.
+
+For non-empty results, `completion_anchor()` uses the editor's IME cursor area
+(including bounded preedit width) and the view publishes it after layout to the
+retained `PackageOverlayHost`. `completion_overlay_rect` clamps the result to
+the active pane, prefers below/above-caret placement, caps width at 480 logical
+pixels, and exposes at most eight visible rows. The shared `SduiScrollViewport`
+keeps the selected list row visible; completion items remain local accept payloads,
+not command targets. Centered Command Centre/path sessions continue using the
+window-level modal layer, scrim, and focus-restoration path.
+
+Focus/accessibility: the completion popup is modeless by construction — the pane
+never takes Masonry or AT-SPI focus away from the editor Entry, the menu is a
+non-Dialog `Menu` with `MenuItem` rows and a polite status, and the selected row
+carries the `selected` state. The welcome surface (also hosted by this view)
+exposes a `Group` with two `Button` children and a polite `Status` virtual node
+(slot `STATUS`) and refuses text input while visible; its label stays within the
+256-character sanitized ceiling. Both surfaces are fed through
+`accesskit_consumer::Tree` in tests and appear in the live review harness
+captures (`scripts/capture-ui-review.sh`, see
+[Repeatable UI Review Harness](ui-review-harness.md)).
+
 ## Known Ceilings
 
 - SDUI sidebars and package panels/overlays are window-scoped chrome (per-client), not per-pane; packages cannot contribute per-pane chrome yet.
 - No per-pane tab strips or document chrome beyond the status line until Phase 22.3.
-- Completion/transient menus anchor to the window's main rect, not the pane's rect.
+- Completion rows are retained widgets rather than virtualized; the shared result cap (256 items) and eight visible-row budget bound work.
 - No topology or per-pane document persistence until Phase 22.5.
 
 ## Tests
 
-- `src/masonry_pane_document.rs`: event isolation, session stash/activate, close-pane release + blank reset, dirty-close gate with conflict menu, per-document edit queueing, duplicate-open no-op, cross-pane menu aggregation + routing, failed-opens leave state unchanged, runtime-snapshot baseline restore, scope-aware manifest install. Command: `cargo test --lib masonry_pane_document --quiet`.
+- `src/masonry_pane_document.rs`: event isolation, session stash/activate, close-pane release + blank reset, dirty-close gate with conflict menu, per-document edit queueing, duplicate-open no-op, cross-pane menu aggregation + routing, failed-opens leave state unchanged, runtime-snapshot baseline restore, scope-aware manifest install, and completion empty/error/stale dismissal. Command: `cargo test --lib masonry_pane_document --quiet`.
 - `src/masonry_shell.rs`: panes host independent document views with document-scoped routing, typing isolation hot-path guard, routing-target cleanup on pane close, concurrent per-pane major modes isolated across behavior manifests. Command: `cargo test --lib masonry_shell --quiet`.
 - `src/client/mod.rs`: per-document sync state, stale-ack filtering by document, per-document reload updates. Command: `cargo test --lib client --quiet`.
 - `src/driver/mod.rs`: `decide_open_route` pure-function tests (owner > pending > active, path matching);
   Phase 22.6 label routing (`route_document_event`/`route_document_opened`
   keep `(pane, target)` pairs and set display names).
+- `src/masonry_package_region.rs`: `menu_selection_keeps_selected_row_in_scroll_viewport` and `centered_command_center_scrolls_60_results_without_overflow` verify long-menu selection visibility and centered containment.
+- `src/masonry_sdui.rs`: `completion_menu_observation_uses_caret_bounded_geometry` verifies structural overlay bounds.
 - Guard suites scanning the new module: `tests/editor_performance_invariants.rs`, `tests/ui_primitive_conformance.rs`.
 - Full suite: `cargo test --all-targets` (1916 passing).
 
@@ -161,3 +203,4 @@ current request id) and `menu_sync_pending_semantics` (one-shot tri-state
 - [Server Document State](server-document-state.md) — server lease/duplicate authority
 - `docs/reference/primitives/shell-layout-strategy.md` (Phase 22.2 section), `docs/reference/clay-js-api/editor/client-show-open-documents.md`, `docs/reference/clay-js-api/shell/client-close-pane.md`
 - `test-plan/13-window-splits.md` (D1–D15), `test-plan/03-files-and-workspace.md` (F3a–F3c, F12a)
+- [Repeatable UI Review Harness](ui-review-harness.md) — plan 087 fixture/capture workflow (welcome and completion states)

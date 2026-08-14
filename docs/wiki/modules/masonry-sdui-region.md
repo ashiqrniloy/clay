@@ -99,8 +99,9 @@ The active menu (`TransientMenuSession`) is the only real runtime overlay — ze
 
 The legacy `collect_active_menu_accessibility_entries` (Menu > MenuItem with custom accessibility labels + `' selected'` suffix) is deleted. Menu a11y now flows through the hosted `PackageRegionWidget` subtree via `MenuA11y`:
 
-- `TransientPackageOverlay.menu_a11y: Option<MenuA11y>` carries `prompt`, `items: Vec<MenuA11yItem>` (resolved `accessibility_label` + `selected`), and optional `status`.
-- `PackageRegionWidget.set_menu_a11y(Some(...))` switches `accessibility_role` to `Role::Menu` and builds synthetic Menu/MenuItem/Status AccessKit nodes through the shared `virtual_a11y_node_id` owner-plus-slot policy. Menu rows and result-count status therefore remain stable across snapshots; selected rows expose AccessKit `selected` and retain the `' selected'` label suffix.
+- `TransientPackageOverlay.menu_a11y: Option<MenuA11y>` carries `prompt`, `items: Vec<MenuA11yItem>` (final bounded/sanitized label + `selected`), and optional `status`.
+- `TransientPackageOverlay::from_menu_session` calls `compose_menu_item_accessibility_label` once per item before `MenuA11y` reaches Masonry. The semantic label removes controls/path separators, uses safe empty-label fallbacks, and includes the selected suffix within 256 characters; display/action fields stay unchanged.
+- `PackageRegionWidget.set_menu_a11y(Some(...))` switches `accessibility_role` to `Role::Menu` and builds synthetic Menu/MenuItem/Status AccessKit nodes through the shared `virtual_a11y_node_id` owner-plus-slot policy. Menu rows and result-count status therefore remain stable across snapshots; selected rows expose AccessKit `selected` and retain the already-bounded `' selected'` label suffix.
 - When menu semantics are active, the reconciled root pod remains in the region's child list alongside the virtual semantic nodes. This keeps the Masonry walk attached instead of emitting an orphaned package subtree.
 - Centered Command Centre menus add a bounded `0 results`/`1 result`/`{n} results` `Status` node with `Live::Polite`; the centered root `PackageOverlayHost` reports a named modal `Dialog`. The host paints one scrim, swallows outside pointer hits, and keeps server-owned keyboard routing on the originating pane.
 - `EditorWidget::accessibility` always includes `region.id()`, `panel_host.id()`, and `overlay_host.id()` in its children; the legacy `append_accessibility_children` path is deleted.
@@ -131,7 +132,8 @@ The legacy `collect_active_menu_accessibility_entries` (Menu > MenuItem with cus
 ## Tests
 
 - `src/masonry_sdui_region.rs`: `stable_identity_nodes_keep_widget_ids_across_inplace_update`, `stable_identity_preserves_focus_across_unrelated_update`, `container_child_list_add_remove_reorder_reconciles_correctly`, `prop_update_changes_label_text_without_recreating_the_widget`, `retained_layout_matches_legacy_row_geometry`, `reconciled_containers_use_zero_gap_for_scroll_parity`, scroll-viewport + lifecycle spike tests.
-- `src/masonry_package_region.rs`: `overlay_host_reconcile_updates_menu_selection`, `hosted_menu_overlay_exposes_menu_role_and_item_accessibility_labels`, package widget interaction + collapse/dropdown/textInput/modal tests, panel-host/overlay-host reconcile tests.
+- `src/masonry_package_region.rs`: `overlay_host_reconcile_updates_menu_selection`, `hosted_menu_overlay_exposes_menu_role_and_item_accessibility_labels`, `package_menu_accessibility_labels_are_sanitized_bounded_and_consumer_valid`, package widget interaction + collapse/dropdown/textInput/modal tests, panel-host/overlay-host reconcile tests.
+- `src/editor/accessibility.rs`: `menu_item_accessibility_labels_are_safe_and_bounded`.
 - `src/masonry_sdui.rs`: SDUI snapshot/update application + observability tests (`sdui_snapshot_replaces_native_tree_state`, `slot_ui_observation_omits_document_text_native_handles_and_raw_authority`, layout regression tests).
 - `src/masonry_editor.rs`: `sync_region`/`sync_panels`/`sync_overlays` wiring tests, `MenuStateChanged` re-sync, completion-overlay z-order.
 - Conformance: `tests/ui_primitive_conformance.rs`, `tests/package_ui_conformance.rs` (run via `cargo test --test editor`).

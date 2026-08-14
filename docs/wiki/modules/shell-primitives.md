@@ -109,6 +109,10 @@ Phase 20.4 adds three `pub(crate)` helpers (re-exported from `src/shell/mod.rs`)
 
 `paint_scroll_chrome` maps Rest/Disabled → `opacity.disabled` (dim, near-invisible) and Hover/Active/Focus → `opacity.full`. No dedicated `opacity.scrollbar.rest` token was added — Rest reuses `opacity.disabled`. `paint_vertical_scrollbar` in `src/editor/surface.rs` now threads `EditorSurface::scrollbar_interaction_state` (O(1) pointer hit-test against `scrollbar_thumb_rect`) instead of a hardcoded `InteractionState::Rest`.
 
+## Shell chrome consumers (Plan 088)
+
+Tab cards and the pinned new-tab affordance consume `component_state_color`, `list_row_fill_color`, `tab_card_chrome`, and cached radius/text tokens. Split focus rings are painted after child panes so active focus remains visible. These are still Clay-internal paint paths; no package-facing primitive or JavaScript API was added.
+
 ## Accessibility Roles
 
 Primitives map to accessibility roles:

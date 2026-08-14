@@ -492,9 +492,9 @@ pub struct RuntimeReloadOutcome {
     pub refreshed_documents: Vec<ReloadedDocumentRefresh>,
 }
 
-/// Server-owned content state for one stable tab identity. The welcome
-/// document is separate from file-backed documents in the tab workspace, so
-/// each tab can bootstrap and retain its own document set.
+/// Server-owned content state for one stable tab identity. The empty welcome
+/// document is separate from file-backed documents in the tab workspace; the
+/// client renders its Clay-owned entry surface until a real document opens.
 #[derive(Debug, Clone)]
 pub(crate) struct TabServerState {
     pub(crate) welcome: Arc<Mutex<DocumentState>>,
@@ -511,7 +511,7 @@ impl TabServerState {
         Self {
             welcome: Arc::new(Mutex::new(DocumentState::new(
                 welcome_id,
-                "Welcome to Clay's Phase 4 IPC server.\n".to_string(),
+                String::new(),
                 DocumentAccess::Editable { lease_id: 1 },
             ))),
             workspace: Arc::new(Mutex::new(workspace)),
@@ -5821,7 +5821,11 @@ mod tests {
     #[tokio::test]
     async fn real_server_end_to_end_region_locked_edit_rejected() {
         let socket_path = unique_socket_path("region-lock");
-        let mut document = DocumentState::default();
+        let mut document = DocumentState::new(
+            1,
+            "welcome".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
         let lock_id = document
             .register_region_lock(0, 7, LockOwner::Server)
             .unwrap();
@@ -5919,7 +5923,7 @@ mod tests {
                     behavior_version,
                     transaction_id: 12,
                     operation: EditOperation::Insert {
-                        byte_offset: 1,
+                        byte_offset: 0,
                         text: "x".to_string(),
                     },
                 },

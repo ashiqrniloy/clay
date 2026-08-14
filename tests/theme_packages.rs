@@ -9,7 +9,9 @@ use clay::editor::theme::{
     status_chrome_contrast_ratio, status_chrome_meets_contrast, validate_active_theme_contrast,
 };
 use clay::packages::record::{PackageRecord, assemble_package_record};
-use clay::protocol::{ActiveTheme, TokenType, UiDesignTokenOverride, WireDesignTokenValue};
+use clay::protocol::{
+    ActiveTheme, TextThemeOverride, TokenType, UiDesignTokenOverride, WireDesignTokenValue,
+};
 
 const EXPECTED_BASE_UI_KEYS: &[&str] = &[
     "shellBg",
@@ -342,12 +344,10 @@ fn gruvbox_themes_status_chrome_meets_aa_contrast() {
     }
 }
 
-/// Phase 20.7 task 3: every bundled theme package's SDUI color-role palette
-/// meets WCAG AA on every required foreground/background pair. The bundled
-/// themes declare `designTokens` overrides for editor chrome/syntax only
-/// (zero SDUI `designTokens`), so each resolves to the core SDUI palette —
-/// this pins the core palette to AA and guards any future `designTokens`
-/// theme against a sub-AA install.
+/// Plan 088 task 3: every bundled theme package's full editor/base palette
+/// meets WCAG AA on every required foreground/background pair. Legacy
+/// `textStyles` are included in the snapshot so the compatibility projection
+/// used by the client is validated, not only the core fallback palette.
 #[test]
 fn bundled_themes_sdui_pairs_meet_aa_contrast() {
     let bundled = [
@@ -363,13 +363,25 @@ fn bundled_themes_sdui_pairs_meet_aa_contrast() {
         ("@clay/theme-modus-vivendi", "theme-modus-vivendi"),
     ];
     for (specifier, dir) in bundled {
-        // Validates the package parses; the parsed design-token set is empty
-        // for every bundled theme, so the snapshot resolves to core fallbacks.
         let value = read_theme_package(specifier, dir);
-        assemble_package_record(&value).expect("theme validates");
+        let record = assemble_package_record(&value).expect("theme validates");
+        let overrides = record
+            .contributions
+            .text_styles
+            .iter()
+            .map(|entry| TextThemeOverride {
+                token: entry.token.clone(),
+                color: entry.color,
+                bold: entry.bold,
+                italic: entry.italic,
+                underline: entry.underline,
+                strike: entry.strike,
+                provenance: entry.provenance.clone(),
+            })
+            .collect();
         let snapshot = ActiveTheme {
             specifier: specifier.to_string(),
-            overrides: Vec::new(),
+            overrides,
             design_tokens: Vec::new(),
         };
         validate_active_theme_contrast(&snapshot).unwrap_or_else(|failure| {

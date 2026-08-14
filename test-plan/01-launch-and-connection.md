@@ -32,6 +32,14 @@ cargo build
 | L10 | Put a syntax error in `~/.config/clay/init.js`, restart | GUI still opens; status/terminal shows `runtime.syntax_error` diagnostic, previous generation behavior retained as documented |
 | L11 | No server reachable for a client-only invocation | `Local Fallback` state |
 
+## Plan 087 UI foundation steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| L12 | Fresh isolated launch with an empty-document tab (no restore) | Welcome entry state shows instead of a stale prototype document: `Welcome to Clay` group with `Open File` / `Open Folder` buttons, polite status `Ready to edit; Open a file or folder to start editing.; Workspace: <basename>; Connection: Connected; Access: Editable.`; status bar shows `Connected — Editable`; no ambient config/socket used |
+| L13 | Review harness launch: `scripts/capture-ui-review.sh --fixture ui-review-default --output <dir>` | Documented repeatable command (module reference `docs/development/launch-and-gui-smoke.md`) boots isolated server+client, captures AT-SPI dump + screenshot, writes `review.status PASS`; UNRESOLVED (exit 2) with a stated reason when the desktop accessibility bus is unavailable — never a false pass |
+| L14 | Watch the AT-SPI tree while idle (welcome state) | No `Welcome to Clay's Phase 4 IPC server.` copy anywhere; entry/status labels contain no absolute paths |
+
 ## Negative checks
 
 - Status line never shows absolute paths, source snippets, secrets, tokens,
@@ -44,6 +52,11 @@ cargo build
 - **PASS — L6/L7/L8:** isolated `clay server <temp-socket>` + `clay client <temp-socket>` launch (HOME, XDG config/data, and socket under a mode-700 `/tmp/clay-plan086-manual-*` root) produced a live AT-SPI `clay` application. The initial tree showed `Connected — Editable`, version text, two restored tabs, two panes, the attached `Server-driven UI region`, and no startup panic. Text insertion updated the document/status tree and the server/client stayed alive.
 - **PASS — isolation/negative:** the custom `init.js` was loaded from the isolated HOME (the client log contained the custom `Ctrl+O`, `Ctrl+S`, `Ctrl+Alt+P`, and `Alt+P` bindings); no ambient `~/.config/clay` or default socket was used. AT-SPI labels exposed basenames/status text, not host paths or secrets.
 - **Coverage note:** observer/restart/local-fallback flows (L2–L5, L9–L11) were not re-run in this pass; their automated/Task 8 live coverage remains unchanged. Native window focus/input limitations blocked a clean second-client keyboard run.
+
+## Linux execution record (Plan 087 task 11, 2026-08-15)
+
+- **PASS — L12/L14 welcome entry state:** fresh isolated launch (mode-700 root, X11-backend client, `ui-review-completion` fixture init.js, no restored document) showed the Clay-owned welcome: Frame `Clay` (active+focused), `Pane 1 of 1: editor`, `Welcome to Clay` panel with polite status `Ready to edit; Open a file or folder to start editing.; Workspace: workspace; Connection: Connected; Access: Editable.` plus `Open File`/`Open Folder` buttons and status bar `Clay — Connected — Editable — doc 2 — v1`. No `Phase 4 IPC server` copy and no absolute path in any AT-SPI label. Server/client stayed alive throughout.
+- **PASS — L13 harness contract:** the documented `scripts/capture-ui-review.sh` flow was exercised earlier this plan (task 7/2 evidence: default/loading/error/recovery/completion/command-centre all `review.status PASS`, UNRESOLVED reported for interactive states that could not be driven).
 
 ## Known ceilings
 

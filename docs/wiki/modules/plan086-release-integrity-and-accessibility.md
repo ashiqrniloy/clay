@@ -62,7 +62,7 @@ The consumer regression helpers in `src/masonry_shell.rs` feed real `TreeUpdate`
 
 ### Label and announcement safety
 
-`sanitize_document_display_name` keeps a basename only, removes separators/control characters, falls back to `untitled`, and caps names at 64 characters. Recovery/menu/status summaries use the 256-character transient-menu budget. `compose_announcement` emits bounded action text such as `Split pane vertically`, `Closed pane; 1 pane remains`, and `Switched to tab 2: syntax-grammars`; it never includes absolute workspace paths, clipboard contents, or raw preedit text.
+`sanitize_document_display_name` keeps a basename only, removes separators/control characters, falls back to `untitled`, and caps names at 64 characters. Recovery/menu/status summaries use the 256-character transient-menu budget. Hosted transient-menu item labels additionally pass through `compose_menu_item_accessibility_label` before `MenuA11y`: controls and path separators are removed, invalid/empty labels fall back to safe display text or `Menu item`, and selected-state suffixes stay inside 256 characters while display/action data remains unchanged. `compose_announcement` emits bounded action text such as `Split pane vertically`, `Closed pane; 1 pane remains`, and `Switched to tab 2: syntax-grammars`; it never includes absolute workspace paths, clipboard contents, or raw preedit text.
 
 ### Checked IPC decoding
 
@@ -87,7 +87,7 @@ The three connection/configuration workflows use unique mode-700 temporary roots
 - No per-pass global virtual-ID allocation; IDs are owner-plus-slot derived.
 - Inactive tabs remain registered for Masonry lifecycle/reconnect behavior but are stashed and unreachable to assistive technology.
 - Menu, region, shell, and editor semantic nodes must be emitted in the same update as their owner attachment.
-- Accessibility labels remain basename-only/bounded; safety controls are not configuration options.
+- Accessibility labels remain sanitized/bounded; hosted menu item labels remove controls/path separators and keep selected suffixes within 256 characters; safety controls are not configuration options.
 - The 1 MiB default frame budget and checked decode path remain in force for malformed input.
 - Consumer validation is deterministic and blocking; real AT-SPI smoke is environment-gated and reports missing prerequisites instead of passing falsely.
 - No new public JS facade, raw op, package permission, or configuration API was introduced by Plan 086.
@@ -95,7 +95,8 @@ The three connection/configuration workflows use unique mode-700 temporary roots
 ## Tests and Verification
 
 - `src/masonry_shell.rs`: consumer-accepted initial and incremental accessibility trees, stable virtual IDs, inactive-tab stashing, tab/menu/status reachability, and stale-node removal.
-- `src/masonry_package_region.rs`: menu query/selection/close updates through `accesskit_consumer::Tree`.
+- `src/masonry_package_region.rs`: menu query/selection/close updates and 256-item sanitized-label projection through `accesskit_consumer::Tree`.
+- `src/editor/accessibility.rs`: shared bounded menu-item label helper and fallback tests.
 - `src/protocol/codec.rs`: malformed/truncated/mutated/misaligned corpus and oversized declaration rejection.
 - `src/server/configuration.rs`: internal accessibility/archive-validation settings fail closed.
 - `tests/live_atspi_smoke.rs`: isolated server/client, live AT-SPI tree query, tab/status/region assertions, stability re-dump, and child liveness.
@@ -117,7 +118,7 @@ The live test is intentionally ignored unless `CLAY_LIVE_A11Y_SMOKE=1` is set an
 
 - A top-level frame `grab_focus` can still produce a Masonry focus event for a removed/nonexistent widget on the reviewed GNOME host; focusing the editor Entry is safe. Evidence: `code-reviews/screenshots/2026-08-14-plan086-a11y/focus-frame-crash.log`.
 - Dirty active-pane close exposed a separate `accesskit_consumer` panic (`Focused ID #4 is not in the node list`) while the server survived. Evidence: `code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log`.
-- Transient menu item labels still rely on package-provided text without the missing per-item character ceiling; item count remains bounded. These are follow-up findings, not configuration bypasses.
+- The prior transient-menu item-label ceiling follow-up is resolved by Plan 087 Task 5; dirty-pane-close focus reconciliation and top-level frame focus-event guarding remain deferred to Plan 089.
 
 ## Related
 

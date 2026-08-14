@@ -55,6 +55,21 @@ bench group, `pane_paint_baselines` + `tab_switch_baselines`).
 | Q9 | 4-pane window, 2 tabs each at 4 panes; rapid `Ctrl+Tab` + `Ctrl+\\` + `Ctrl+Alt+W` while typing | No perceptible stall; pane/decoration work stays bounded — pane count is the only driver (per-pane paint is O(1) placeholder/chrome fills, never document-size work) |
 | Q10 | Centered Command Centre surface (Phase 24.4): open command/path mode, type a filter, resize the window (incl. below 640 px wide), then close — repeat with 4 panes and 2 tabs | One centered panel + one full-window scrim appear immediately with no visible duplicate overlay per pane/tab; width clamps smoothly to the window with no reflow of the dimmed editor behind; close restores instantly; no blur-related jank (no backdrop filter runs). Automated cross-references: `centered_overlay_work_is_bounded_and_scrim_is_single_pass`, `centered_scrim_routes_through_token_driven_primitive_without_blur` (ui_primitive_conformance), `centered_layer_theme_switch_keeps_layer_and_updates_surface_geometry`, `centered_layer_repeated_open_close_cycles_leave_no_orphan_layers` — guards are not replacements for this visual check |
 
+## Plan 087 completion feel steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| Q11 | Trigger completion in a document with many provider items (e.g. 16 markdown items) | Popup appears immediately with ≤ 8 visible rows and ≤ 480 logical px width (`COMPLETION_MAX_VISIBLE_ROWS` / `COMPLETION_MAX_WIDTH_PX`); typing/filtering stays responsive; no per-frame layout/paint cost from the popup (geometry is a pure function of caret + item count) |
+| Q12 | Scroll the popup with the mouse wheel or selection movement on a long list | Scroll stays inside the popup shell; no editor text scrolls; feel is immediate (advisory; see `completion_*_baselines` bench groups in `benches/window_baselines.rs`) |
+| Q13 | Command Centre with 60+ entries: open, filter to a short list, scroll, close | Filter/scroll feel stays immediate and bounded (advisory; `centered_overlay_baselines` + `completion_filter_baselines`); known visual containment follow-up `P1-087-UI-1` is tracked in the plan, not silently waived |
+| Q14 | Repeat Q11–Q13 while `Pending edits` > 0 or typing rapidly | No perceptible stall; completion/menu work never blocks the edit queue |
+
+## Linux execution record (Plan 087 task 11, 2026-08-15)
+
+- **PASS — Q11 caps:** the live popup was `480x340` logical px (width exactly `COMPLETION_MAX_WIDTH_PX`, height = 8 visible rows at 36 px + chrome) with 16 items; opening and dismissing were immediate and typing stayed local-optimistic (`Pending edits` tracked normally; doc version advanced v1→v6 during the session with no stall).
+- **Advisory benches:** `completion_open_baselines` / `completion_filter_baselines` / `completion_layout_baselines` and `centered_overlay_baselines` record medians (see `benches/window_baselines.rs` and `docs/development/performance.md` Plan 087 section); wall-clock results are advisory only.
+- **Finding carried forward:** live rows below the popup shell (`P1-087-UI-1`) were observed in task 7's captures; the fix is a follow-up in this plan's Further Actions, not silently waived.
+
 ## Known ceilings
 
 - Very large files beyond documented open limits are rejected by design

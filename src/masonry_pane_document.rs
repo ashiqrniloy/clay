@@ -18,14 +18,14 @@
 //! the current session to the connection owner's overlay via
 //! [`Self::take_pending_menu`]; the app driver forwards it to the chrome.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use masonry::accesskit::{Node, Role};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, BrushIndex, ChildrenIds, EventCtx, LayoutCtx, PaintCtx,
     PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef, RegisterCtx, ScrollDelta,
-    TextEvent, Update, UpdateCtx, Widget, render_text,
+    TextEvent, Update, UpdateCtx, Widget, WidgetPod, render_text,
 };
 use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::parley::style::{LineHeight, StyleProperty};
@@ -45,6 +45,7 @@ use crate::masonry_editor::{
     ClipboardCommandOutcome, EditorAction, EditorClientCommand, EditorConnectionStatus,
     EditorStatus, SduiStatusObservation,
 };
+use crate::masonry_welcome::{WelcomeRenderContext, WelcomeState, WelcomeWidget};
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
     ActiveTheme, ActiveTypography, BehaviorManifest, CompletionRequestId, CompletionResultSet,
@@ -272,6 +273,11 @@ pub struct PaneDocumentView {
     /// bookkeeping (grouped; see [`PaneRequestBookkeeping`]).
     requests: PaneRequestBookkeeping,
     status: EditorStatus,
+    welcome: WidgetPod<WelcomeWidget>,
+    welcome_state: Rc<RefCell<WelcomeState>>,
+    welcome_render: Rc<RefCell<WelcomeRenderContext>>,
+    welcome_visible: bool,
+    welcome_workspace: String,
     /// Phase 22.7 (C4): transient-menu state — session copy, pending push,
     /// session-id allocator (grouped; see [`PaneMenuSync`]).
     menu_sync: PaneMenuSync,
@@ -304,6 +310,15 @@ impl Default for PaneDocumentView {
             editor.document_state().document_version,
             editor.document_state().access.clone(),
         );
+        let welcome_state = Rc::new(RefCell::new(WelcomeState::default()));
+        let welcome_render = Rc::new(RefCell::new(WelcomeRenderContext {
+            typography: editor.typography().clone(),
+            ui_theme: editor.ui_theme().clone(),
+        }));
+        let welcome = WidgetPod::new(WelcomeWidget::new(
+            welcome_state.clone(),
+            welcome_render.clone(),
+        ));
         Self {
             pane_id: PaneId(1),
             editor,
@@ -313,6 +328,11 @@ impl Default for PaneDocumentView {
             last_decoration_viewport: None,
             requests: PaneRequestBookkeeping::default(),
             status,
+            welcome,
+            welcome_state,
+            welcome_render,
+            welcome_visible: false,
+            welcome_workspace: "Workspace".to_string(),
             menu_sync: PaneMenuSync::default(),
             layout_invalidated: false,
             sessions: DocumentSessionStore::default(),
@@ -341,6 +361,7 @@ impl PaneDocumentView {
                 ..PaneMenuSync::default()
             },
             sdui_ui_version,
+            welcome_visible: true,
             ..Self::default()
         }
     }
@@ -353,6 +374,23 @@ impl PaneDocumentView {
         self.editor.caret_animates()
     }
 
+    pub(crate) fn completion_anchor(&self) -> Option<Rect> {
+        if self.welcome_visible
+            || self.editor_rect.width() <= 0.0
+            || self.editor_rect.height() <= 0.0
+        {
+            return None;
+        }
+        let caret = self
+            .editor
+            .ime_cursor_area(self.editor_rect.width(), self.editor_rect.height());
+        let x0 = (self.editor_rect.x0 + caret.x0).clamp(self.editor_rect.x0, self.editor_rect.x1);
+        let y0 = (self.editor_rect.y0 + caret.y0).clamp(self.editor_rect.y0, self.editor_rect.y1);
+        let x1 = (self.editor_rect.x0 + caret.x1).clamp(x0, self.editor_rect.x1);
+        let y1 = (self.editor_rect.y0 + caret.y1).clamp(y0, self.editor_rect.y1);
+        Some(Rect::new(x0, y0, x1, y1))
+    }
+
     pub fn with_edit_queue(mut self, edit_queue: ClientEditQueue) -> Self {
         self.edit_queue = Some(edit_queue);
         self
@@ -360,10 +398,12 @@ impl PaneDocumentView {
 
     pub(crate) fn with_status(mut self, status: EditorStatus) -> Self {
         self.status = status;
+        self.refresh_welcome_state();
         self
     }
 
     pub(crate) fn with_initial_state(mut self, initial_state: ClientInitialState) -> Self {
+        let welcome_visible = initial_state.text.is_empty();
         self.editor.load_snapshot(
             initial_state.document_id,
             initial_state.document_version,
@@ -378,12 +418,22 @@ impl PaneDocumentView {
             .editor
             .set_typography(initial_state.active_typography.clone());
         self.active_typography = Some(initial_state.active_typography);
+        self.welcome_visible = welcome_visible;
+        self.welcome_workspace = if initial_state.workspace_root.trim().is_empty() {
+            "Workspace".to_string()
+        } else {
+            crate::editor::accessibility::sanitize_document_display_name(
+                &initial_state.workspace_root,
+            )
+        };
         self.status = EditorStatus::connected(
             self.editor.document_state().document_id,
             self.editor.document_state().document_version,
             self.editor.document_state().access.clone(),
         );
         self.has_opened_document = true;
+        self.refresh_welcome_state();
+        self.sync_welcome_render_context();
         self
     }
 
@@ -396,6 +446,7 @@ impl PaneDocumentView {
             .editor
             .set_typography(baseline.active_typography.clone());
         self.active_typography = Some(baseline.active_typography.clone());
+        self.sync_welcome_render_context();
         self
     }
 
@@ -541,7 +592,9 @@ impl PaneDocumentView {
             self.editor.document_state().document_version,
             self.editor.document_state().access.clone(),
         );
+        self.welcome_visible = true;
         self.has_opened_document = false;
+        self.refresh_welcome_state();
         self.menu_sync.menu = None;
         self.menu_sync.pending = Some(None);
         self.last_decoration_viewport = None;
@@ -568,6 +621,7 @@ impl PaneDocumentView {
         if let Some(manifest) = behavior {
             self.editor.install_behavior_manifest(manifest);
         }
+        self.sync_welcome_render_context();
     }
 
     // -- pending menu push to the connection owner's overlay --
@@ -713,6 +767,7 @@ impl PaneDocumentView {
             ClientConnectionEvent::ActiveTheme(theme) => {
                 self.active_theme = Some(theme.clone());
                 self.editor.set_active_theme(&theme);
+                self.sync_welcome_render_context();
                 true
             }
             ClientConnectionEvent::ActiveTypography(typography) => {
@@ -869,6 +924,7 @@ impl PaneDocumentView {
         self.editor.set_active_theme(theme);
         self.active_typography = Some(typography.clone());
         let changed = self.editor.install_runtime_typography(typography.clone());
+        self.sync_welcome_render_context();
         self.layout_invalidated |= changed;
         changed
     }
@@ -943,7 +999,7 @@ impl PaneDocumentView {
             // re-opened document reinstalls fresh server state.
             return false;
         }
-        if self.has_opened_document {
+        if self.has_opened_document && !self.welcome_visible {
             eviction_notice = self.stash_active_session();
             // Server-authored open replaces any stale retained copy for this id.
             let _ = self.sessions.remove(incoming_id);
@@ -968,6 +1024,7 @@ impl PaneDocumentView {
             self.editor.install_behavior_manifest(manifest);
         }
         self.has_opened_document = true;
+        self.welcome_visible = false;
         self.active_document_path = Some((metadata.workspace_root_id, metadata.path.clone()));
         self.pending_reconnect_resync = false;
 
@@ -1212,7 +1269,7 @@ impl PaneDocumentView {
 
     /// Phase 22.2: active document summary for cross-pane menu aggregation.
     pub fn active_document_info(&self) -> Option<(DocumentId, String, bool)> {
-        self.has_opened_document.then(|| {
+        (self.has_opened_document && !self.welcome_visible).then(|| {
             (
                 self.editor.document_state().document_id,
                 self.status
@@ -1989,11 +2046,36 @@ impl PaneDocumentView {
             return false;
         }
         self.status = status;
+        self.refresh_welcome_state();
         true
     }
 
+    fn refresh_welcome_state(&mut self) {
+        *self.welcome_state.borrow_mut() =
+            WelcomeState::from_status(&self.status, &self.welcome_workspace);
+    }
+
+    fn sync_welcome_render_context(&mut self) {
+        *self.welcome_render.borrow_mut() = WelcomeRenderContext {
+            typography: self.editor.typography().clone(),
+            ui_theme: self.editor.ui_theme().clone(),
+        };
+    }
+
+    pub(crate) fn welcome_visible(&self) -> bool {
+        self.welcome_visible
+    }
+
+    pub(crate) fn welcome_widget_id(&self) -> masonry::core::WidgetId {
+        self.welcome.id()
+    }
+
+    pub(crate) fn register_welcome_child(&mut self, ctx: &mut RegisterCtx<'_>) {
+        ctx.register_child(&mut self.welcome);
+    }
+
     fn apply_completion_result(&mut self, result: CompletionResultSet) -> bool {
-        if self.requests.active_completion_request_id != Some(result.request_id) {
+        if !self.requests.take_completion_if_current(result.request_id) {
             return false;
         }
         let document = self.editor.document_state();
@@ -2001,10 +2083,51 @@ impl PaneDocumentView {
             || result.document_version != document.document_version
             || result.behavior_version != document.behavior_version
         {
-            return false;
+            self.push_menu(None);
+            return true;
         }
-        self.push_menu(Some(completion_result_to_menu_session(&result)));
+
+        let _ = self.update_completion_diagnostic(result.status);
+        if result.items.is_empty() {
+            self.push_menu(None);
+            return true;
+        }
+
+        let mut menu = completion_result_to_menu_session(&result);
+        if let Some(anchor) = self.completion_anchor() {
+            menu = menu.with_completion_anchor(anchor);
+        }
+        self.push_menu(Some(menu));
         true
+    }
+
+    fn update_completion_diagnostic(&mut self, status: crate::protocol::CompletionStatus) -> bool {
+        let diagnostic = match status {
+            crate::protocol::CompletionStatus::Timeout => Some(RuntimeDiagnostic::warning(
+                "completion.provider_timeout",
+                "Completion provider timed out",
+            )),
+            crate::protocol::CompletionStatus::ProviderError => Some(RuntimeDiagnostic::warning(
+                "completion.provider_error",
+                "Completion provider error",
+            )),
+            crate::protocol::CompletionStatus::Ok | crate::protocol::CompletionStatus::Empty => {
+                None
+            }
+        };
+        let mut next_status = self.status.clone();
+        match diagnostic {
+            Some(diagnostic) => next_status.runtime_diagnostic = Some(diagnostic),
+            None if next_status
+                .runtime_diagnostic
+                .as_ref()
+                .is_some_and(|current| current.code.starts_with("completion.")) =>
+            {
+                next_status.runtime_diagnostic = None;
+            }
+            None => return false,
+        }
+        self.set_status(next_status)
     }
 
     fn apply_language_intelligence_result(&mut self, result: LanguageIntelligenceResult) -> bool {
@@ -2675,6 +2798,9 @@ impl PaneDocumentView {
         _props: &mut PropertiesMut<'_>,
         event: &PointerEvent,
     ) {
+        if self.welcome_visible {
+            return;
+        }
         ctx.request_focus();
 
         let (changed, handled) = match event {
@@ -2778,6 +2904,9 @@ impl PaneDocumentView {
         _props: &mut PropertiesMut<'_>,
         event: &TextEvent,
     ) {
+        if self.welcome_visible {
+            return;
+        }
         use masonry::core::keyboard::{Key, KeyState, NamedKey};
         let modal_server_menu = self.menu_sync.server_owned
             && self
@@ -3157,6 +3286,7 @@ impl PaneDocumentView {
         } else {
             bc.constrain(Size::new(900.0, 600.0))
         };
+        self.sync_welcome_render_context();
         self.editor_rect = rect;
         let local = self.editor.ime_cursor_area(rect.width(), rect.height());
         ctx.set_ime_area(Rect::new(
@@ -3165,6 +3295,21 @@ impl PaneDocumentView {
             rect.x0 + local.x1,
             rect.y0 + local.y1,
         ));
+        ctx.set_stashed(&mut self.welcome, !self.welcome_visible);
+        if self.welcome_visible {
+            let status_height = self
+                .editor
+                .typography()
+                .ui_text_metrics(FontRole::Ui, UiTextVariant::Status)
+                .status_height();
+            let welcome_size = Size::new(
+                rect.width().max(0.0),
+                (rect.height() - status_height).max(0.0),
+            );
+            let constraints = BoxConstraints::tight(welcome_size);
+            let _ = ctx.run_layout(&mut self.welcome, &constraints);
+            ctx.place_child(&mut self.welcome, Point::new(rect.x0, rect.y0));
+        }
         size
     }
 
@@ -3181,7 +3326,9 @@ impl PaneDocumentView {
             None,
             &rect,
         );
-        self.editor.paint_in_rect(ctx, scene, rect);
+        if !self.welcome_visible {
+            self.editor.paint_in_rect(ctx, scene, rect);
+        }
     }
 
     pub(crate) fn post_paint_in(&mut self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
@@ -3201,6 +3348,9 @@ impl PaneDocumentView {
     }
 
     pub(crate) fn accessibility_label(&self) -> String {
+        if self.welcome_visible {
+            return self.welcome_state.borrow().accessibility_label();
+        }
         let observation = self.status_observation();
         crate::editor::accessibility::compose_editor_accessibility_label(
             crate::editor::accessibility::EditorAccessibilityLabelParts {
@@ -3228,15 +3378,21 @@ impl PaneDocumentView {
             .ui_text_metrics(FontRole::Ui, UiTextVariant::Status);
         let y0 = (rect.y1 - metrics.status_height()).max(rect.y0);
         let status_rect = masonry::kurbo::Rect::new(rect.x0, y0, rect.x1.max(rect.x0), rect.y1);
+        let ui_theme = self.editor.ui_theme();
+        let status_background = ui_theme
+            .color("surface.control")
+            .unwrap_or(self.editor.theme().base.status_bg);
+        let status_text_color = ui_theme
+            .color("text.primary")
+            .unwrap_or(self.editor.theme().base.status_text);
         scene.fill(
             Fill::NonZero,
             Affine::IDENTITY,
-            self.editor.theme().base.status_bg,
+            status_background,
             None,
             &status_rect,
         );
 
-        let ui_theme = self.editor.ui_theme();
         let inset =
             ui_theme.scalar_f64("spacing.sm").unwrap_or(12.0) * ui_theme.spacing_scale() as f64;
         crate::shell::primitives::paint_divider(
@@ -3267,7 +3423,7 @@ impl PaneDocumentView {
                 y0 + (metrics.status_height() - metrics.line_height) / 2.0,
             )),
             &layout,
-            &[self.editor.theme().base.status_text.into()],
+            &[status_text_color.into()],
             true,
         );
     }
@@ -3315,7 +3471,9 @@ impl Widget for PaneDocumentView {
         self.handle_anim_frame(ctx, props, interval);
     }
 
-    fn register_children(&mut self, _ctx: &mut RegisterCtx<'_>) {}
+    fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
+        ctx.register_child(&mut self.welcome);
+    }
 
     fn layout(
         &mut self,
@@ -3345,7 +3503,11 @@ impl Widget for PaneDocumentView {
     }
 
     fn accessibility_role(&self) -> Role {
-        Role::MultilineTextInput
+        if self.welcome_visible {
+            Role::Group
+        } else {
+            Role::MultilineTextInput
+        }
     }
 
     fn accessibility(
@@ -3379,11 +3541,15 @@ impl Widget for PaneDocumentView {
             y1: rect.y1.max(rect.y0),
         });
         ctx.tree_update().nodes.push((status_id, status));
-        node.set_children(vec![status_id]);
+        let mut children = vec![status_id];
+        if self.welcome_visible {
+            children.push(self.welcome.id().into());
+        }
+        node.set_children(children);
     }
 
     fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::new()
+        ChildrenIds::from_slice(&[self.welcome.id()])
     }
 
     fn accepts_focus(&self) -> bool {
@@ -3391,7 +3557,7 @@ impl Widget for PaneDocumentView {
     }
 
     fn accepts_text_input(&self) -> bool {
-        true
+        !self.welcome_visible
     }
 }
 
@@ -3598,6 +3764,25 @@ mod tests {
                 text: text.to_string(),
             })
         );
+    }
+
+    fn completion_result(
+        request_id: CompletionRequestId,
+        status: crate::protocol::CompletionStatus,
+        document_version: DocumentVersion,
+    ) -> CompletionResultSet {
+        CompletionResultSet {
+            request_id,
+            client_id: 1,
+            document_id: 7,
+            document_version,
+            behavior_version: 0,
+            provider_generation: 1,
+            replacement_range: crate::protocol::CompletionReplacementRange::new(0, 0),
+            status,
+            items: Vec::new(),
+            provenance: crate::protocol::CompletionProvenance::builtin_core(),
+        }
     }
 
     #[test]
@@ -4250,6 +4435,125 @@ mod tests {
         // The document is still open (never silently dropped).
         assert_eq!(view.visible_text_for_test(), "xalpha");
         assert!(view.has_opened_document());
+    }
+
+    #[test]
+    fn non_empty_completion_result_carries_caret_anchor_to_menu() {
+        let (queue, _receiver) = ClientEditQueue::bounded(8);
+        let mut view = view_with_queue(queue);
+        open(&mut view, 7, "alpha");
+        view.editor_rect = Rect::new(0.0, 0.0, 400.0, 300.0);
+        view.requests.active_completion_request_id = Some(11);
+        let mut result = completion_result(11, crate::protocol::CompletionStatus::Ok, 1);
+        result.items.push(crate::protocol::CompletionItem::new(
+            "alpha",
+            "alpha",
+            crate::protocol::CompletionProvenance::builtin_core(),
+        ));
+
+        assert!(view.apply_completion_result(result));
+        let menu = view
+            .take_pending_menu()
+            .expect("completion menu pending")
+            .expect("completion menu present");
+        assert_eq!(
+            menu.origin(),
+            crate::shell::transient_menu::TransientMenuOrigin::Completion
+        );
+        assert!(menu.completion_anchor().is_some());
+    }
+
+    #[test]
+    fn empty_completion_result_dismisses_current_overlay() {
+        let (queue, _receiver) = ClientEditQueue::bounded(8);
+        let mut view = view_with_queue(queue);
+        open(&mut view, 7, "alpha");
+        view.push_menu(Some(TransientMenuSession::new(
+            TransientMenuSessionId(90),
+            "Completion",
+        )));
+        let _ = view.take_pending_menu();
+        view.requests.active_completion_request_id = Some(12);
+
+        assert!(view.apply_completion_result(completion_result(
+            12,
+            crate::protocol::CompletionStatus::Empty,
+            1,
+        )));
+        assert!(view.menu_sync.menu.is_none());
+        assert_eq!(view.take_pending_menu(), Some(None));
+        assert!(view.requests.active_completion_request_id.is_none());
+    }
+
+    #[test]
+    fn completion_provider_failure_uses_status_without_overlay() {
+        let (queue, _receiver) = ClientEditQueue::bounded(8);
+        let mut view = view_with_queue(queue);
+        open(&mut view, 7, "alpha");
+        view.requests.active_completion_request_id = Some(13);
+
+        assert!(view.apply_completion_result(completion_result(
+            13,
+            crate::protocol::CompletionStatus::Timeout,
+            1,
+        )));
+        assert!(view.menu_sync.menu.is_none());
+        assert_eq!(
+            view.status
+                .runtime_diagnostic
+                .as_ref()
+                .map(|diagnostic| diagnostic.code.as_str()),
+            Some("completion.provider_timeout")
+        );
+    }
+
+    #[test]
+    fn stale_completion_result_closes_matching_current_menu() {
+        let (queue, _receiver) = ClientEditQueue::bounded(8);
+        let mut view = view_with_queue(queue);
+        open(&mut view, 7, "alpha");
+        view.push_menu(Some(TransientMenuSession::new(
+            TransientMenuSessionId(91),
+            "Completion",
+        )));
+        let _ = view.take_pending_menu();
+        view.requests.active_completion_request_id = Some(14);
+
+        assert!(view.apply_completion_result(completion_result(
+            14,
+            crate::protocol::CompletionStatus::Ok,
+            99,
+        )));
+        assert!(view.menu_sync.menu.is_none());
+        assert_eq!(view.take_pending_menu(), Some(None));
+    }
+
+    #[test]
+    fn completion_result_rejects_foreign_document_and_behavior_provenance() {
+        for (document_id, behavior_version) in [(8, 0), (7, 1)] {
+            let (queue, _receiver) = ClientEditQueue::bounded(8);
+            let mut view = view_with_queue(queue);
+            open(&mut view, 7, "alpha");
+            view.push_menu(Some(TransientMenuSession::new(
+                TransientMenuSessionId(92),
+                "Completion",
+            )));
+            let _ = view.take_pending_menu();
+            view.requests.active_completion_request_id = Some(15);
+
+            let mut result = completion_result(15, crate::protocol::CompletionStatus::Ok, 1);
+            result.document_id = document_id;
+            result.behavior_version = behavior_version;
+            result.items.push(crate::protocol::CompletionItem::new(
+                "foreign",
+                "foreign",
+                crate::protocol::CompletionProvenance::builtin_core(),
+            ));
+
+            assert!(view.apply_completion_result(result));
+            assert!(view.menu_sync.menu.is_none());
+            assert_eq!(view.take_pending_menu(), Some(None));
+        }
     }
 
     #[test]

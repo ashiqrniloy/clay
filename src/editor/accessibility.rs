@@ -121,10 +121,15 @@ pub(crate) fn theme_marker(theme_label: &str) -> String {
 }
 
 pub(crate) fn truncate_accessibility_text(value: &str, max_chars: usize) -> String {
-    let mut out: String = value.chars().take(max_chars).collect();
-    if value.chars().count() > max_chars {
-        out.push('…');
+    let char_count = value.chars().count();
+    if char_count <= max_chars {
+        return value.to_string();
     }
+    if max_chars == 0 {
+        return String::new();
+    }
+    let mut out: String = value.chars().take(max_chars - 1).collect();
+    out.push('…');
     out
 }
 
@@ -139,6 +144,41 @@ pub(crate) fn sanitize_recovery_summary(summary: &str) -> Option<String> {
         None
     } else {
         Some(truncated)
+    }
+}
+
+/// Build one bounded accessible label for a transient-menu item.
+///
+/// Display/action data stays unchanged; only the semantic MenuItem label is
+/// normalized. Separators and controls are removed, invalid/empty input falls
+/// back to the display label and then `Menu item`, and the selected suffix is
+/// included inside the same 256-character ceiling.
+pub(crate) fn compose_menu_item_accessibility_label(
+    accessibility_label: &str,
+    display_label: &str,
+    selected: bool,
+) -> String {
+    const SELECTED_SUFFIX: &str = " selected";
+
+    let sanitize = |value: &str| {
+        let without_separators: String = value
+            .chars()
+            .filter(|ch| !ch.is_control() && *ch != '/' && *ch != '\\')
+            .collect();
+        sanitize_recovery_summary(&without_separators)
+    };
+    let base = sanitize(accessibility_label)
+        .or_else(|| sanitize(display_label))
+        .unwrap_or_else(|| "Menu item".to_string());
+    if selected {
+        let max_base = ACCESSIBILITY_RECOVERY_SUMMARY_MAX_CHARS
+            .saturating_sub(SELECTED_SUFFIX.chars().count());
+        format!(
+            "{}{SELECTED_SUFFIX}",
+            truncate_accessibility_text(&base, max_base)
+        )
+    } else {
+        truncate_accessibility_text(&base, ACCESSIBILITY_RECOVERY_SUMMARY_MAX_CHARS)
     }
 }
 
@@ -248,5 +288,37 @@ mod tests {
         assert_eq!(compose_menu_result_count(0), "0 results");
         assert_eq!(compose_menu_result_count(1), "1 result");
         assert_eq!(compose_menu_result_count(2), "2 results");
+    }
+
+    #[test]
+    fn menu_item_accessibility_labels_are_safe_and_bounded() {
+        for length in [255, 256, 257] {
+            let label = "x".repeat(length);
+            let accessible = compose_menu_item_accessibility_label(&label, "fallback", false);
+            assert!(accessible.chars().count() <= 256);
+        }
+
+        let selected = compose_menu_item_accessibility_label(&"x".repeat(256), "fallback", true);
+        assert_eq!(selected.chars().count(), 256);
+        assert!(selected.ends_with(" selected"));
+        assert!(!selected.contains('/'));
+        assert!(!selected.contains('\\'));
+
+        assert_eq!(
+            compose_menu_item_accessibility_label(
+                "Open /home/user/secret\nfile",
+                "fallback",
+                false
+            ),
+            "Open homeusersecretfile"
+        );
+        assert_eq!(
+            compose_menu_item_accessibility_label("/\\", "Fallback item", false),
+            "Fallback item"
+        );
+        assert_eq!(
+            compose_menu_item_accessibility_label("", "", false),
+            "Menu item"
+        );
     }
 }

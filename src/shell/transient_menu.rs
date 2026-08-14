@@ -13,6 +13,7 @@
 
 #![allow(dead_code)]
 
+use masonry::kurbo::Rect;
 use serde_json::Value;
 
 use crate::perf::budgets::{
@@ -47,6 +48,9 @@ pub struct TransientMenuSession {
     focus_policy: TransientMenuFocusPolicy,
     /// Phase 20.5: surface origin (command palette, context menu, menu bar).
     origin: TransientMenuOrigin,
+    /// Clay-native caret bounds for completion projection. Stored as fixed
+    /// point so the session remains `Eq` without making geometry user-facing.
+    completion_anchor: Option<CompletionAnchor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,8 +98,10 @@ pub(crate) enum TransientMenuFocusPolicy {
 /// Determines overlay anchor and focus policy defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TransientMenuOrigin {
-    /// Bottom-anchored command palette / completion picker (default).
+    /// Bottom-anchored command palette (default).
     CommandPalette,
+    /// Clay-native completion picker, anchored to the active caret.
+    Completion,
     /// Pointer-anchored context menu.
     ContextMenu,
     /// Main-area-anchored menu bar dropdown.
@@ -112,6 +118,36 @@ pub(crate) enum TransientMenuStatus {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CompletionAnchor {
+    x0: i64,
+    y0: i64,
+    x1: i64,
+    y1: i64,
+}
+
+impl CompletionAnchor {
+    const SCALE: f64 = 1024.0;
+
+    pub(crate) fn from_rect(rect: Rect) -> Self {
+        Self {
+            x0: (rect.x0 * Self::SCALE).round() as i64,
+            y0: (rect.y0 * Self::SCALE).round() as i64,
+            x1: (rect.x1 * Self::SCALE).round() as i64,
+            y1: (rect.y1 * Self::SCALE).round() as i64,
+        }
+    }
+
+    pub(crate) fn rect(self) -> Rect {
+        Rect::new(
+            self.x0 as f64 / Self::SCALE,
+            self.y0 as f64 / Self::SCALE,
+            self.x1 as f64 / Self::SCALE,
+            self.y1 as f64 / Self::SCALE,
+        )
+    }
+}
+
 impl TransientMenuSession {
     pub(crate) fn new(session_id: TransientMenuSessionId, prompt: impl Into<String>) -> Self {
         Self {
@@ -125,6 +161,7 @@ impl TransientMenuSession {
             },
             focus_policy: TransientMenuFocusPolicy::Modal,
             origin: TransientMenuOrigin::CommandPalette,
+            completion_anchor: None,
         }
     }
 
@@ -225,6 +262,16 @@ impl TransientMenuSession {
     pub(crate) fn with_origin(mut self, origin: TransientMenuOrigin) -> Self {
         self.origin = origin;
         self
+    }
+
+    pub(crate) fn with_completion_anchor(mut self, anchor: Rect) -> Self {
+        self.origin = TransientMenuOrigin::Completion;
+        self.completion_anchor = Some(CompletionAnchor::from_rect(anchor));
+        self
+    }
+
+    pub(crate) fn completion_anchor(&self) -> Option<Rect> {
+        self.completion_anchor.map(CompletionAnchor::rect)
     }
 
     pub(crate) fn with_items(mut self, items: Vec<TransientMenuItem>) -> Self {
@@ -402,6 +449,7 @@ pub(crate) fn completion_result_to_menu_session(
     let session =
         TransientMenuSession::new(TransientMenuSessionId(result.request_id), "Completion")
             .with_focus_policy(TransientMenuFocusPolicy::Modeless)
+            .with_origin(TransientMenuOrigin::Completion)
             .with_items(items);
     if !result.items.is_empty() {
         return session;
@@ -1015,6 +1063,7 @@ mod tests {
 
         assert_eq!(session.prompt(), "Completion");
         assert_eq!(session.focus_policy(), TransientMenuFocusPolicy::Modeless);
+        assert_eq!(session.origin(), TransientMenuOrigin::Completion);
         assert_eq!(session.items()[0].label, "println");
         assert_eq!(session.items()[0].accessibility_label, "Completion println");
         let accept = session.items()[0]

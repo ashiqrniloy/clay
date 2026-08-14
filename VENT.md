@@ -29,3 +29,15 @@ Baseline timing command hit missing /usr/bin/time three times; workaround used s
 ## 26-08-14 19:49 — atspi-probe-hang
 
 Plan 087 harness runs hit the host's Python GI AT-SPI cache edge: walking desktop children hangs on GNOME Shell/stale `/org/a11y/atspi/cache` even while computer-use `get_app_state` works. Workaround now probes top-level app indices in timed subprocesses, then walks only Clay; missing/hung probes write UNRESOLVED. Prefer a stable app-enumeration/targeted AT-SPI API for future capture tooling.
+## 26-08-14 20:21 — cargo-test-filter
+
+Cargo test accepts one positional filter only; attempting to pass multiple module filters fails before running tests. Workaround: use one shared prefix filter (for example `masonry_`) or run separate commands; a small helper/documented convention would prevent repeated wasted retries.
+## 26-08-14 21:31 — ui-review-window-targeting
+
+Plan 087 completion visual capture retried twice: isolated Clay and AT-SPI tree came up, but computer-use-linux could not target/focus Wayland windows because GNOME Shell Introspect/window backend is unavailable; un-targeted portal key events reached the wrong focus and could not prove completion. Workaround was structural/accessibility tests plus an explicit UNRESOLVED artifact. Prevent with a working GNOME window-target backend or a fixture-level deterministic keyboard-input hook; never treat blind portal input as visual validation.
+## 26-08-15 04:01 — computer-use-window-targeting
+
+Two UI-baseline attempts hit same GNOME window-targeting failure: `list_windows` and targeted `press_key` both cannot access a supported window list (GNOME Introspect denied; extension unavailable). Workaround was fixture-only captures and explicitly unresolved settings/narrow/wide states. Prevent recurrence by enabling the computer-use GNOME window-targeting extension/session permission or documenting this host as visual-review-limited before agents start interactive capture.
+## 26-08-15 04:44 — ui-review-harness-repo-resolution
+
+Temporary UI capture scripts copied to /tmp fail because capture-ui-review.sh derives repo from its own location, yielding `/` and `cargo build` cannot find Cargo.toml. Repeated workaround hardcodes `/home/arn/Projects/clay`; prevent by adding a `--repo`/environment override or resolving Git root before relocating the harness.

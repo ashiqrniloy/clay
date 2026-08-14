@@ -6,6 +6,10 @@ Approved constraint: `decision-logs/2026-08-14-0331-ui-modernization-preserves-t
 
 Source review: P1-4 and related P1/P2 UI/performance/test requirements in `code-reviews/2026-08-14-comprehensive-implementation-and-ui-ux-review.md`.
 
+## UI Skill Gate (mandatory for every task)
+
+Before reviewing existing UI, planning, designing, or changing any UI-related task in this plan — including theme, typography, tokens, components, layout, SDUI, overlays, accessibility, or visual evidence — run `npx ui-skills start`. Then inspect the relevant category, load the smallest useful set (prefer 1, never more than 3), and apply the loaded guidance in Clay's native Masonry/token context. Repeat this gate for each independently executed task; prior task evidence does not satisfy it. Record the command, category, selected skill slugs, and any routing blocker in that task's evidence. Load `.agents/skills/clay-ui/` plus its component/token references after routing.
+
 ## Objectives
 
 - Create a coherent, restrained, editor-first native visual language across all core Clay surfaces.
@@ -22,7 +26,7 @@ Source review: P1-4 and related P1/P2 UI/performance/test requirements in `code-
 
 ## Tasks
 
-- [ ] Establish visual baseline, state matrix, and measurable direction
+- [x] Establish visual baseline, state matrix, and measurable direction
   - Acceptance Criteria:
     - Functional: Capture every core surface/state before edits: light/dark, empty/editor, file browser, tabs/panes/status, completion/menu/Command Centre, dialogs/settings/diagnostics/package panels, loading/busy/error/recovery, narrow/wide, multi-tab/pane.
     - Performance: Record advisory typing, tab-switch, menu filter, and layout baseline commands; no implementation work yet.
@@ -53,7 +57,47 @@ Source review: P1-4 and related P1/P2 UI/performance/test requirements in `code-
   - Test Cases to Write:
     - Baseline checklist covers every named surface/state/theme/layout before implementation.
 
-- [ ] Review catalog composition and approve only generic primitive/token gaps
+### Task 1 Evidence (2026-08-15)
+
+- Ran `npx ui-skills start`, then loaded `vercel-labs/web-design-guidelines` and `ibelick/fixing-accessibility`; translated their hierarchy, focus, long-content, contrast, keyboard, and semantic-control guidance to Masonry tokens and AccessKit roles rather than web/CSS constructs. Reviewed the Clay catalog/token policy, Plan 087 harness/wiki, relevant shell/overlay/pane wiki pages, UI patterns, and the approved theme-configuration decision before recording direction.
+- Captured the current light-theme welcome state with an isolated mode-700 harness root and `theme.setTheme("@clay/theme-gruvbox-material-light")`. Baseline PNGs are retained under `code-reviews/screenshots/2026-08-14-plan088-baseline/`; existing Plan 087/086 live captures were privacy-cropped to the Clay window before reuse. New retained images contain no host paths or fixture secrets. An isolated `@clay/settings` fixture was also launched; `get_app_state` found Clay, but targeted `Ctrl+Alt+S` input was refused because this GNOME session has no window-list backend. No settings screenshot was retained or misreported as a pass.
+
+  | Matrix state | Evidence | Baseline result |
+  |---|---|---|
+  | Light empty/welcome | `light-welcome.png` | Captured; theme resolves through the existing light package. The unused left column and low-contrast secondary copy are visible. |
+  | Dark empty/welcome | `dark-default.png` | Captured; actionable entry state/status work, but the same unexplained left column consumes space. |
+  | Open editor + status | `dark-opened-document.png` | Captured from the isolated document fixture; editor/status are readable, but document hierarchy is sparse. |
+  | Loading/busy | `dark-loading.png` | Captured; Plan 087's host exposed the welcome shell rather than the published loading SDUI tree. This is an observability gap, not a loading visual pass. |
+  | Runtime error/diagnostic | `dark-error.png` | Captured; diagnostic text and recovery guidance are present and sanitized. |
+  | Disconnect/recovery | `dark-recovery.png` | Captured; recovery menu is visible, but its bottom-sheet treatment competes with editor space. |
+  | Completion/menu | `dark-completion-overflow.png` | Captured; live rows escape the compact shell despite the scrollbar (`P1-087-UI-1`). |
+  | Command Centre/dialog | `dark-command-centre-overflow.png` | Captured; centered modal hierarchy is clear, but long rows escape its shell (`P1-087-UI-1`). |
+  | Multi-tab + active/inactive status | `dark-multi-tab-status.png` | Captured before welcome substitution; valid chrome baseline, but must be recaptured after tab-chrome edits. |
+  | Multi-pane + focus | `dark-multi-pane.png` | Captured before welcome substitution; valid split/focus baseline, but must be recaptured after pane-chrome edits. |
+  | File browser, settings, package panels, modal variants | No current isolated fixture/targetable keyboard sequence | No visual pass. Add fixture coverage only if later surface work needs it; do not invent a second UI path for baseline capture. |
+  | Narrow/wide, high DPI, typography extremes | No safe window-list/resize backend on this host | No visual pass. Existing structural geometry checks remain the only evidence until a targetable desktop backend is available. |
+
+- **Direction mapped to existing system:**
+
+  | Need | Existing token/component mapping | Rule |
+  |---|---|---|
+  | Editor-first hierarchy | `typography.display`/`section`/`body`/`detail`/`caption`, `text.primary`/`text.muted` | Promote active document, active tab/pane, and recovery action; keep ancillary metadata quiet. Concrete font families and sizes remain user-owned. |
+  | Surface rhythm | `surface.main`/`panel`/`overlay`, `border.hairline`/`subtle`/`strong`, `spacing.xs` through `xxl`, `radius.*`, density scale | One restrained background/panel/overlay ladder; remove unexplained empty gutters before adding cards or decoration. |
+  | Interaction | Existing Rest/Hover/Active/Focus/Disabled palettes, `border.focus`, `focus.ring`, semantic diagnostic tokens | Active/inactive state needs contrast, focus ring, and text/shape/status support—never color alone. |
+  | Commands, overlays, recovery | `TransientMenuSession`, `PackageOverlayHost`, `scroll`, `list`, `statusItem`, `paint_tooltip_shell` | Keep completion modeless/caret-adjacent and Command Centre modal/centered; fix shared clipping before cosmetic restyling. |
+  | Icons and content | Existing `paint_icon_slot` only when a generic internal slot is already warranted; labels, `paint_kbd_hint`, bounded accessibility text | No icon library or unlabeled glyph controls. Decorative icons are presentation-only; actions retain visible text/accessibility names. |
+  | Theme/responsiveness | Cached `ResolvedUiTheme`, `StyleRegistry`, semantic typography roles, Masonry constraints | No raw colors/sizes/fonts or per-frame resolution; treat light/dark, user typography, pane width, and DPI as first-class acceptance states. |
+
+- **Advisory performance baseline commands** (not CI thresholds):
+  ```bash
+  cargo bench --bench editor_baselines editor_render_adjacent -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+  cargo bench --bench window_baselines tab_switch_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+  cargo bench --bench window_baselines completion_filter_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+  cargo bench --bench window_baselines completion_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+  ```
+  Plan 087's latest local reference remains completion open `2.41/13.40/89.95/362.10 µs` for `1/8/60/256` items, filter `12.21/73.61/416.08 µs` for `16/60/256` candidates, and layout `0.98/0.88/0.89 µs`; compare only on the same machine.
+
+- [x] Review catalog composition and approve only generic primitive/token gaps
   - Acceptance Criteria:
     - Functional: Map each redesign element to existing components/primitives; identify missing generic needs only after composition attempts. Evaluate actionable empty-state composition, compact metadata row, icon policy, toast/progress, badge/kbd/tooltip planned entries without assuming new kinds.
     - Performance: Any new primitive is allocation-free/deterministic in paint and cached-token-driven.
@@ -81,7 +125,24 @@ Source review: P1-4 and related P1/P2 UI/performance/test requirements in `code-
   - Test Cases to Write:
     - Catalog drift/state completeness/token-only conformance for each approved addition.
 
-- [ ] Modernize theme defaults and token consumption without breaking configurability
+### Task 2 Evidence (2026-08-15)
+
+- Traced the actual owners before approving anything: `ComponentKind`/style validation, `ResolvedUiTheme` core fallbacks and contrast gate, retained `PackageRegionWidget`, `WelcomeWidget`, file-browser SDUI, and `TransientMenuSession`/`PackageOverlayHost`. The catalog remains additive-only and package contributions remain inert.
+- **Approved additions: none.** Every Task 088 redesign element either composes from an implemented owner or is a repair to an existing owner. No `ComponentKind`, style variable, primitive, token, public API, or package contract is approved by this task; consequently, the catalog/token references remain unchanged.
+
+  | Review item | Existing composition / evidence | Decision |
+  |---|---|---|
+  | Actionable empty/recovery state | Clay-native `WelcomeWidget` already combines panel chrome, semantic UI typography, visible `Open File`/`Open Folder` buttons, existing client command routes, and a polite status. A declarative equivalent is `panel` + `flex` + `label` + `button` + `statusItem`. | Reuse; no `emptyState` kind or token. |
+  | Compact metadata row | `PackageUiListItem` carries `label` + optional `detail`; file-browser rows and `TransientMenuSession` projections already consume it through `list`/`scroll`. | Reuse; no metadata-row, description, or divider kind. |
+  | Menus, completion, dialogs, selectors, text entry | `TransientMenuSession` projects to existing `stack` + `scroll` + `list`/`statusItem`; `overlay`/`portal`, `modal`, `dropdown`, `collapse`, and `textInput` already own the required focus, dismissal, and typed validation paths. | Reuse; P1-087-UI-1 is shared scroll-host containment repair, not a component/token gap. |
+  | Busy/error/recovery feedback | `WelcomeState` headline/detail and existing `statusItem`/semantic diagnostic tokens express current loading, error, and recovery states. There is no current Task 088 consumer needing a determinate progress model. | Reuse status treatment; do not add toast/progress state, timer, or token. |
+  | Badge, `kbd`, icon, tooltip | Existing typed badge/`kbd`/tooltip/icon color, spacing, dimension, typography, z-level, and contrast entries cover Clay-native chrome. `paint_badge`, `paint_kbd_hint`, and `paint_icon_slot` have no production caller and intentionally leave text/glyph drawing deferred; `paint_tooltip_shell` already hosts overlays, but no Task 088 surface needs a hover-trigger API. | Keep catalog entries planned/internal; do not promote a half-used primitive or add an icon library. |
+  | Table and directional package layout | `table` remains the lone reserved kind with no first-party consumer. `PackageRegionWidget` currently lays package `flex` and `stack` as vertical Masonry columns, so Task 088 must not assume a package-facing horizontal-flex contract. | No new primitive/token. If a real package needs horizontal composition, correct that existing catalog/runtime parity separately before using it. |
+
+- The token inventory already supplies the required surface ladder, state/focus/disabled treatment, diagnostics, spacing/radius/density, semantic typography, overlay z-levels, and contrast enforcement. Adding visual aliases before a concrete reusable consumer would create token debt and violate the approved configurable-theme constraint.
+- Verification passed: `cargo test --test editor package_ui_conformance` (10), `cargo test --test editor ui_primitive_conformance` (12), and `cargo test --lib shell::components` (7). No new test is needed because this task approves no addition; the existing catalog/status-partition and code↔catalog drift tests enforce the retained decision.
+
+- [x] Modernize theme defaults and token consumption without breaking configurability
   - Acceptance Criteria:
     - Functional: Improve default surface hierarchy, text/border contrast, spacing, radii, focus, selection, density, and typography role usage; existing Gruvbox dark/light selection and typed overrides produce coherent results across every modernized surface.
     - Performance: Theme resolves once at install/reload; paint/layout reads cached `ResolvedUiTheme`/`StyleRegistry`; unchanged theme causes no invalidation churn.
@@ -91,6 +152,8 @@ Source review: P1-4 and related P1/P2 UI/performance/test requirements in `code-
     - Documentation Reviewed:
       - `docs/reference/clay-js-api/theme/set-theme.md`, `set-typography.md`.
       - `.agents/skills/clay-ui/references/tokens.md`; `src/shell/theme.rs`, `src/editor/theme.rs`, `src/editor/typography.rs`.
+      - UI preflight rerun for this task: `npx ui-skills start`; inspected `systems` and `accessibility`; loaded `ibelick/baseline-ui` and `ibelick/fixing-accessibility`.
+      - Context7 `/ibelick/ui-skills` CLI reference: `categories` lists routing topics and `get <slug>` loads selected skill content; root protocol requires route → inspect → select → load → implement.
       - Project patterns `ui-modernization.md`, `typography-role-ownership.md`, `configuration-system.md`.
     - Options Considered:
       - Fixed redesigned palette: rejected by approved decision.
@@ -113,7 +176,31 @@ Source review: P1-4 and related P1/P2 UI/performance/test requirements in `code-
   - Test Cases to Write:
     - Default/dark/light/custom typed override, invalid override fallback/rejection, contrast, unchanged revision, large/small UI font, missing-font fallback.
 
-- [ ] Modernize shell, tab, pane, browser, and status chrome
+### Task 3 Evidence (2026-08-15)
+
+- Kept public configuration unchanged: `theme.setTheme`, `theme.setAppearance`, typed `designTokens`, cached `ResolvedUiTheme`, `StyleRegistry`, and user-owned `setTypography`/`UiTypographyHierarchy` remain the authority. No new token, component kind, style variable, API, package permission, or fixed font value was added.
+- Fixed legacy-theme consumption at the shared resolver instead of patching callers. `validate_active_theme_contrast` now validates the same `textStyles` → `ResolvedUiTheme::with_base_ui` projection used by the client. Existing text-style themes now feed surface/list/control/selection, focus/accent, border, diagnostic, badge/kbd, tooltip, scrollbar, and semantic text roles; typed design-token overrides still win. Low-contrast legacy placeholders fall back to base text for UI `text.muted`, while editor placeholder paint remains user/theme-owned.
+- Fixed radius-domain consumption: focus rings, panel chrome, scrollbars, badges, kbd hints, tooltips, and tab cards now read `radius.*` through `scalar_f64`; panel resize grip geometry uses existing spacing/border tokens. No raw redesign palette or new token was introduced.
+- Typography role usage was re-verified rather than duplicated: `TypographyRegistry` continues to resolve all UI variants from the user-selected `ui` profile and hierarchy, while editor/package roles remain semantic and cached. Existing invalid-hierarchy, large/small-size, missing-font, revision/no-churn, and geometry tests remain green.
+- Updated `.agents/skills/clay-ui/references/tokens.md`, `docs/reference/packages/creating-packages.md`, `docs/reference/primitives/ui-chrome-primitives.md`, and `docs/wiki/modules/editor-theme-registry.md` with compatibility projection, contrast, and radius-domain rules. Visual screenshot/accessibility acceptance remains for the later dedicated review task; no visual pass is claimed here.
+- Verification passed:
+  - `cargo fmt --all -- --check`
+  - `cargo check --all-targets`
+  - `cargo clippy --all-targets -- -D warnings`
+  - `cargo test --lib --quiet` — 1548 passed, 2 ignored
+  - `cargo test --test editor --quiet` — 163 passed
+  - `cargo test --test protocol --quiet` — 156 passed
+  - `cargo test --test editor theme_packages --quiet` — 9 passed
+  - `cargo test --test editor ui_primitive_conformance --quiet` — 12 passed
+
+### Task 3 UI-skill Re-evaluation (2026-08-15)
+
+- Re-ran the mandatory preflight before this review: `npx ui-skills start`; inspected `systems` and `accessibility`; loaded `ibelick/baseline-ui` and `ibelick/fixing-accessibility` (2 skills, within the routing limit). Their web-specific rules were translated to Clay's catalog-first, typed-token, semantic-role, Masonry-native constraints.
+- Review result: Task 3's implementation still uses existing component/chrome primitives, cached theme resolution, semantic typography roles, visible focus rings, keyboard-accessible named controls, and host-side contrast validation. No new component, token, raw style, native widget, renderer callback, or package authority is justified. Task 3 remains complete; no code changes were required by this re-evaluation.
+- Fresh representative evidence is retained under `code-reviews/screenshots/2026-08-14-plan088-task3-reevaluation/`: `dark-default/` and `light-default/` both report `PASS`, contain Clay-window-only 913×1151 PNGs, and expose named `Open File`/`Open Folder` buttons plus status/panel semantics in AT-SPI dumps. Both themes remain readable; the known empty left column remains a Task 1/Task 4 shell-layout finding, not a Task 3 token-resolution failure. Full changed-state visual/accessibility acceptance remains delegated to the dedicated later review task; these captures are not a full-plan visual pass.
+- Recheck passed: `cargo test --test editor theme_packages --quiet` (9), `cargo test --test editor ui_primitive_conformance --quiet` (12), `cargo test --lib shell::theme --quiet` (21), `cargo test --lib editor::typography --quiet` (17), and `git diff --check`.
+
+- [x] Modernize shell, tab, pane, browser, and status chrome
   - Acceptance Criteria:
     - Functional: Active/inactive tabs and panes are unmistakable; overflow/close/add/focus states remain complete; browser hierarchy and status information are compact/readable; dirty/recovery/connection state never relies on color alone.
     - Performance: Tab/pane geometry remains O(visible tabs/panes), no document serialization on switch, no JS/IPC/filesystem work in paint/layout.
@@ -122,6 +209,8 @@ Source review: P1-4 and related P1/P2 UI/performance/test requirements in `code-
   - Approach:
     - Documentation Reviewed:
       - `docs/wiki/modules/masonry-shell.md`, `tabs-and-clients.md`, `pane-document-views.md`, `shell-primitives.md`.
+      - `docs/reference/ui-components.md`, `docs/development/launch-and-gui-smoke.md`.
+      - UI preflight for this task: `npx ui-skills start`; inspected `systems` and `accessibility`; loaded `ibelick/baseline-ui` and `ibelick/fixing-accessibility`.
       - `test-plan/13-window-splits.md`, `14-tabs.md`.
     - Options Considered:
       - Restructure pane/tab model during visual pass: rejected.
@@ -134,13 +223,21 @@ Source review: P1-4 and related P1/P2 UI/performance/test requirements in `code-
       pane host focus → existing Masonry focus + Role::Pane
       ```
     - Files to Create/Edit:
-      - `src/masonry_shell.rs`, `src/masonry_pane_host.rs`, `src/masonry_pane_document.rs`.
-      - `src/shell/primitives.rs`, `src/shell/file_browser.rs`, `src/shell/layout.rs` only where visual geometry belongs.
+      - `src/masonry_shell.rs`, `src/masonry_editor.rs`, `src/masonry_pane_document.rs`, `src/masonry_sdui.rs`, `src/driver/mod.rs`, `src/driver/reconcile.rs`.
+      - `src/shell/primitives.rs`, `src/shell/file_browser.rs` only where visual geometry/labels belong; pane topology remains unchanged.
+      - `docs/wiki/modules/masonry-shell.md`, `pane-document-views.md`, `shell-primitives.md`, `workspace-file-browser.md`, and the file-browser smoke contract.
       - Tests/benchmarks adjacent to changed modules.
     - References:
       - `.agents/skills/project-patterns/references/package-ui-layout.md`.
   - Test Cases to Write:
     - Single/multi tab, overflow, active/inactive/dirty/focus/disabled, split focus, browser hidden/visible, connection/recovery status, narrow/wide and font-scale layouts.
+
+### Task 4 Evidence (2026-08-15)
+
+- Re-ran the mandatory UI preflight before source review: `npx ui-skills start`; inspected `systems` and `accessibility`; loaded `ibelick/baseline-ui` and `ibelick/fixing-accessibility` (2 skills, within the limit). Applied their hierarchy, state, accessible-name, keyboard, contrast, and minimal-change guidance to Clay's native Masonry/token paths rather than web/CSS constructs.
+- Modernized the existing shell without changing pane/tab ownership or public APIs: welcome now reclaims stale workspace-browser space while preserving package fixed slots; split focus rings paint after pane children; the pinned `+` tab affordance uses cached state tokens on hover; status chrome reads `surface.control`, `text.primary`, spacing, and border tokens with legacy fallbacks; workspace and tab labels are basename/relative, bounded, control-free, and never fall back to absolute host paths.
+- Fresh representative captures are retained under `code-reviews/screenshots/2026-08-15-plan088-task4-welcome/` and `code-reviews/screenshots/2026-08-15-plan088-task4-light/`. Both report `PASS`, contain Clay-window-only 913×1151 PNGs for dark/light welcome states, and expose named `Open File`/`Open Folder` controls plus status/pane semantics. No host path or secret appears in retained text evidence. Full opened-editor, browser-list, multi-tab/pane, narrow/wide, and interactive focus-state visual acceptance remains for the dedicated later review task; this is not a full-plan visual pass. The host still lacks safe window-targeting/portal keyboard control for those interactions.
+- Verification passed: `cargo fmt --all -- --check`; `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo test --all-targets --quiet`; focused shell/editor/SDUI/file-browser/pane tests; and the tab-label sanitization regression. No new component kind, style variable, token, package authority, JS API, filesystem operation, IPC, document serialization, or paint/layout hot-path work was introduced.
 
 - [ ] Modernize overlays, dialogs, settings, diagnostics, and package panels
   - Acceptance Criteria:
