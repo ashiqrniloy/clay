@@ -21,11 +21,11 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use masonry::accesskit::{Node, NodeId, Role};
+use masonry::accesskit::{Node, Role};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, BrushIndex, ChildrenIds, EventCtx, LayoutCtx, PaintCtx,
     PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef, RegisterCtx, ScrollDelta,
-    TextEvent, Update, UpdateCtx, Widget, WidgetId, render_text,
+    TextEvent, Update, UpdateCtx, Widget, render_text,
 };
 use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::parley::style::{LineHeight, StyleProperty};
@@ -3360,7 +3360,10 @@ impl Widget for PaneDocumentView {
             .typography()
             .ui_text_metrics(FontRole::Ui, UiTextVariant::Status);
         let rect = self.editor_rect;
-        let status_id = NodeId::from(WidgetId::next());
+        let status_id = crate::editor::accessibility::virtual_a11y_node_id(
+            ctx.widget_id(),
+            crate::editor::accessibility::virtual_a11y_slots::STATUS,
+        );
         let observation = self.status_observation();
         let mut status = Node::new(Role::Status);
         status.set_label(

@@ -986,6 +986,13 @@ mod tests {
             "sandbox.frameBytes",
             "dialog.maxInFlight",
             "clipboard.backend",
+            // Plan 086 task 10: accessibility and archive-validation safety
+            // are unconditional; these must remain rejected configuration keys.
+            "accessibility.enabled",
+            "accessibility.validation",
+            "protocol.archiveValidation",
+            "protocol.codecValidation",
+            "protocol.rkyvValidation",
             "build.debugProfile",
             "build.targetDirectory",
         ] {

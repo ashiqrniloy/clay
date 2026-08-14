@@ -18,9 +18,12 @@ tree updates) enforce the exact tree shape described here.
 | Announcement node | `Status` | Current announcement label (empty until the first announcement) | Always present as the last child; `live` = `polite`. |
 
 Tree order is `TabList` (when present), then the active tab's pane hosts in
-pane order. Hosts of inactive tabs stay in the widget tree (zero-size) but
-are unreachable from the accessibility root — an inactive tab's panes are
-never announced or visited.
+pane order. Hosts of inactive tabs are **stashed** (`LayoutCtx::set_stashed`
+in `ClayShellWidget::layout`): Masonry skips stashed subtrees in paint and
+in the accessibility walk, so an inactive tab's panes are never announced or
+visited, while the widgets stay registered in `children_ids` (which
+`register_children` requires) for reconnect continuity. Unstashing on tab
+activation requests layout and accessibility automatically.
 
 ### Focus model
 
@@ -30,6 +33,49 @@ through the Phase 22.4 tab commands (`TabNext`/`TabPrev`/`TabActivate`),
 not per-card widget focus. Focus traversal therefore matches the keyboard
 model: TabList nodes precede the active pane hosts, and no new focus
 targets were introduced.
+
+## Virtual node identity (plan 086 task 3)
+
+All synthetic nodes (TabList/Tab, live announcement, status lines, menu
+items/status) use one deterministic derivation,
+`editor::accessibility::virtual_a11y_node_id(owner, slot)`:
+
+- Layout: prefix `0xD000_0000_0000_0000` | `(owner.to_raw() & 0x0000_7FFF_FFFF_FFFF) << 9` | slot.
+- The owner is the retained widget that attaches the node, so identity is
+  stable across accessibility passes and dies with its owner; the prefix is
+  unreachable by real widget IDs (masonry's counter starts at 1), so
+  synthetic and widget nodes never collide.
+- Slot namespaces per owner are defined in `virtual_a11y_slots` (shell:
+  TabList = 1, announcement = 2, Tab(i) = 3 + client_id; editor/pane
+  document: status = 1; region: status = 1, item(i) = 2 + i). Slots fit the
+  9-bit space under the existing caps (tabs ≤ 64 connections, menu ≤ 256
+  items); the helper asserts the bound.
+- Tab slots derive from the connection id, so a card keeps its node id
+  across registry reorders and selection changes.
+
+## Consumer-validation contract (plan 086 task 3)
+
+The tree is validated exactly as a desktop AT sees it: unit tests feed the
+real `TreeUpdate` through `accesskit_consumer::Tree` (dev-dependency,
+same version as the live adapter) on every mutation. The invariant:
+**every node the walk emits must be attached — a child of an updated node
+or already in the consumer tree.** Three classes of mismatch caused the
+startup crash and are now structural:
+
+1. A parent's `accessibility()` children must cover every child the walk
+   emits. The editor always lists its region child (even without a
+   sidebar), the region always attaches its reconciled pod alongside the
+   semantic menu nodes, and the shell lists the active tab's hosts plus
+   its synthetic nodes.
+2. Subtrees that must not be reachable are stashed, not listed (inactive
+   tab hosts, pending orphans).
+3. Every emitted node keeps a stable id; churning ids would re-register
+   live regions and drop Tab selection on every pass.
+
+Consumer tests cover: initial single- and multi-tab trees, unchanged
+redraws, announcement, tab add/reorder/remove, selected-tab, pane
+name/status updates, and menu query/selection/close — all without panic,
+with stale and inactive nodes absent from the reachable tree.
 
 ## Centered Command Centre dialog (Phase 24.4)
 
@@ -48,11 +94,13 @@ swallowed and restore/retain originating-pane focus, so they cannot mutate the
 editor. Closing removes the root layer and leaves focus on the originating
 pane.
 
-Menu and item/status virtual node IDs are derived from the retained region ID,
-so query snapshots and selection-only snapshots reuse identity. Selection-only
-updates with unchanged result count keep the same status label; a changed count
-updates that same node. Construction is bounded by the existing 256-item menu
-cap and runs only during accessibility passes.
+Menu and item/status virtual node IDs are derived from the retained region ID
+via the shared `virtual_a11y_node_id` policy, so query snapshots and
+selection-only snapshots reuse identity. Selection-only updates with
+unchanged result count keep the same status label; a changed count updates
+that same node. The reconciled pod stays attached while the menu is open
+(consumer-validation contract above). Construction is bounded by the
+existing 256-item menu cap and runs only during accessibility passes.
 
 ## Announcements
 
@@ -103,10 +151,15 @@ not an undocumented key.
   per-tab host filtering, and pane labels including the numbered `of M`
   form. Announcement tests assert the exact label strings and that focus
   moves/repaints do not re-announce.
-- Real assistive technology: out of scope for 22.6 (known ceiling). Orca
-  and screen-reader verification of live-region behavior is deferred; the
-  announcement node is a single persistent `Live::Polite` node so AT
-  registration is stable across tree rebuilds.
+- Consumer: the `consumer_accepts_*` tests run every mutation through
+  `accesskit_consumer::Tree` (see contract above) — the desktop adapter's
+  exact validation, catching unattached-node failures structural tests
+  cannot.
+- Real assistive technology: plan 086 added a live check on the Linux
+  desktop with the AT-SPI bus active — the app must stay alive through
+  startup and tab/pane/menu/announcement updates and expose a queryable
+  tree (`clay` application, shell `Group`, pane `Pane`, editor `Entry`,
+  status `StatusBar`).
 
 ## Known ceilings (`ponytail:`)
 

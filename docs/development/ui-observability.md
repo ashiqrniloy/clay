@@ -42,6 +42,16 @@ Manual and app-managed window smoke validation remains documented in [Launch and
 
 The automated structural tests do not replace window smoke runs. They provide deterministic coverage for tree shape, update handling, accessibility labels, status observations, and payload guardrails; window smoke validates that those states are visible through the native application shell.
 
+Plan 087's repeatable live review wrapper is `scripts/capture-ui-review.sh`. It
+uses the existing `clay server`/`clay client` launch path with a mode-700
+private root, fixed `900×600` logical window request, fixture-only documents,
+and bounded cleanup. It stores a portal PNG plus a Clay-only AT-SPI dump under
+a caller-selected artifact directory. Missing desktop capture prerequisites
+produce `review.status`=`UNRESOLVED` and exit 2; they never weaken structural
+CI coverage or become a false visual pass. See [Launch and GUI Smoke
+Validation](launch-and-gui-smoke.md#repeatable-ui-review-harness-plan-087-task-2)
+for fixture names, interaction checkpoints, and output files.
+
 ## Deferred GPU-backed pixel snapshot path
 
 Phase 20 revisited Masonry 0.4 `TestHarness` / `assert_render_snapshot` and **re-deferred** pixel / GPU snapshots with evidence (`decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`):

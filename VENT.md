@@ -14,3 +14,18 @@ Context7 library lookup could not resolve Linebender Masonry after two targeted 
 ## 26-08-13 07:28 — plan-doc-sync
 
 Plan 084 task execution needed repeated manual doc/catalog synchronization and task checkbox/record edits across plan, wiki, reference docs, and test-plan files; one manual-step number collision was introduced and fixed, and static guard tests initially overfit implementation strings then were simplified. Add a plan-completion helper/checker that validates task records, numbered manual tables, and required catalog/wiki paths before final gates.
+## 26-08-14 17:18 — plan086-task8
+
+Visual review required repeated workarounds: GNOME window introspection/targeting unavailable, portal clicks refused coordinate mapping, and every shell command raised another desktop window so screenshots had to be captured before bash then cropped with a custom PNG tool. More importantly, AT-SPI grab_focus on Clay's top-level Frame crashed Clay (`Cannot send event to non-existent widget #8`), while focusing the editor Entry worked. Prevent by making window targeting/raise available in the host and guarding top-level accessibility focus events in Masonry/Clay.
+## 26-08-14 17:47 — test-filter-path
+
+Targeted lib test filter with `--exact` matched zero because Clay's test path includes `server::configuration::tests`; the successful workaround was rerunning with the bare function-name filter. This exact-name mismatch already occurred for prior config tests; add a documented test-filter helper or make suite commands use fully qualified names so zero-test runs cannot look like verification.
+## 26-08-14 18:05 — plan086-task11-manual-run
+
+Manual task 11 repeated host friction: computer-use portal/window-targeting could not safely focus or select Clay controls, so native dialog, observer, and full quit/relaunch steps had to be marked blocked; AT-SPI entry grab_focus only changed accessibility focus, not OS keyboard focus. Separate product blocker surfaced during dirty Ctrl+Alt+W pane close: client panicked in accesskit_consumer with 'Focused ID #4 is not in the node list' while server survived. Prevent recurrence by exposing reliable Wayland window targeting and adding a regression test/guard for focus reconciliation when removing a dirty focused pane.
+## 26-08-14 19:02 — missing-timing-tool
+
+Baseline timing command hit missing /usr/bin/time three times; workaround used shell date +%s%N. Prefer a portable timing helper or document coreutils as a host prerequisite for repeatable benchmark scripts.
+## 26-08-14 19:49 — atspi-probe-hang
+
+Plan 087 harness runs hit the host's Python GI AT-SPI cache edge: walking desktop children hangs on GNOME Shell/stale `/org/a11y/atspi/cache` even while computer-use `get_app_state` works. Workaround now probes top-level app indices in timed subprocesses, then walks only Clay; missing/hung probes write UNRESOLVED. Prefer a stable app-enumeration/targeted AT-SPI API for future capture tooling.

@@ -27,6 +27,18 @@ Clay now treats all-target Clippy as a runnable repository gate. Linux is the re
 - Documentation validation is schema-driven: `api-inventory.toml` plus generated registry metadata covers every public API; `documentation-contracts.json` enumerates every primitive/package reference page and the small security-marker set. Generic validators report IDs/paths/fields, recursively check wiki indexing, and ignore ordinary prose. Tests never run the mutating registry updater.
 - Focused commands select the group and then the original source-module prefix, for example `cargo test --test security package_loading::`. Full source mapping, measurements, and cleanup guidance live in `docs/development/build-and-test.md`.
 
+## Plan 086 Release-Integrity Gate
+
+Plan 086 keeps the Linux blocking gate serial and adds release-integrity evidence rather than weakening existing checks. The gate includes checked `rkyv 0.8.17` decoding, malformed-frame corpus coverage at `Codec::decode_frame`, AccessKit consumer validation for initial/incremental trees, hermetic configuration/Control Center workflows, dependency-warning documentation, and an environment-gated real AT-SPI smoke test. No audit ignore was added for the three directly fixed rkyv advisories; `cargo audit` reports zero vulnerabilities and the remaining unmaintained warnings are classified in `docs/development/security.md`.
+
+The live test is an explicit integration source registered in the security suite because `Cargo.toml` sets `autotests = false`:
+
+```bash
+CLAY_LIVE_A11Y_SMOKE=1 cargo test --test security live_atspi_smoke::live_atspi_accessibility_smoke -- --ignored --exact --test-threads=1
+```
+
+When the host lacks a usable AT-SPI bus, the test reports a prerequisite skip rather than a false pass. Consumer checks remain deterministic/blocking. Manual Linux evidence and host limitations are recorded in `test-plan/` and `docs/wiki/modules/plan086-release-integrity-and-accessibility.md`.
+
 ## Plan 060 Comprehensive Review Closure
 
 The 2026-07-19 P0–P3 review is closed through executable evidence recorded in `plans/060-Comprehensive-Codebase-Review-Remediation.md`; documentation alone closes no behavioral finding. Final implementation areas and their detailed wiki owners are:

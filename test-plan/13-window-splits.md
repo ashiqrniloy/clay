@@ -200,6 +200,13 @@ bindKey("Ctrl+Shift+Down", "shell.clientSplitPaneDown", { scope: "global" });
 | S31 | Fresh launch WITHOUT the alias bindings (or with the lines commented), press `Ctrl+Shift+Right` | NO-OP — the aliases ship with no default chords; nothing binds, nothing splits, no diagnostic |
 | S32 | Replace the string forms with the facade helpers: `import { clientSplitPaneRight, clientSplitPaneDown } from "clay:shell"; bindKey("Ctrl+Shift+Right", clientSplitPaneRight(), { scope: "global" }); bindKey("Ctrl+Shift+Down", clientSplitPaneDown(), { scope: "global" });`, reload | Same behavior as S29 — the helpers return the alias command IDs |
 
+## Linux execution record (Plan 086 task 11, 2026-08-14)
+
+- **PASS — S1/S3/S23/S24:** the real AT-SPI tree showed restored two-pane geometry and numbered pane labels; activating `Split Pane Vertical` through Control Center produced a third placeholder and `Split pane vertically` in the stable live announcement node. No malformed tree occurred.
+- **PASS — S5:** clean `Ctrl+Alt+W` removed one pane, left the survivor filling the working area, kept client/server alive, and exposed `Closed pane; 1 pane remains` once.
+- **FAIL/BLOCKER — D10/S5 dirty-close variant:** a dirty active pane close crashed the client in `accesskit_consumer` with `Focused ID #4 is not in the node list`; server survived. See `code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log`. This needs a follow-up focus/a11y update fix before dirty-pane close can be called green.
+- **PASS — security/labels:** pane names and announcements used sanitized basenames/action text; no absolute workspace path or document contents appeared in the pane/status labels. Isolated HOME/XDG roots were used.
+
 ## Negative checks
 
 - A 5th pane is never created (cap = 4; S4).

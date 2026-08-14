@@ -1694,14 +1694,19 @@ impl Widget for ClayShellWidget {
         let area = self.working_area(size);
         // Phase 22.1: place each pane host at its pane's main-slot rect; fixed
         // slots keep their Phase 20.3 geometry inside each pane.
-        // Phase 22.3: the active tab's hosts get their pane rects; inactive
-        // tabs' hosts are retained at zero size (the `pending_orphans`
-        // protocol) so their widgets stay in the tree and keep receiving
-        // connection events without painting or hit-testing.
+        // Phase 22.3 + plan 086 task 3: the ACTIVE tab's hosts get their pane
+        // rects; inactive tabs' hosts and pending orphans are STASHED — not
+        // laid out, painted, or emitted by the accessibility walk (Masonry
+        // propagates the stash through their subtrees), so the consumer never
+        // sees an unattached node. Stashing is the only lever that keeps
+        // inactive tabs out of the reachable a11y tree while they stay in
+        // `children_ids` (which `register_children` requires). Unstashing on
+        // tab activation requests layout + accessibility automatically.
         for (client_id, tab) in self.tabs.iter_mut() {
             let active = *client_id == self.active_tab;
             for (pane_id, host) in tab.pane_hosts.iter_mut() {
                 if active {
+                    ctx.set_stashed(host, false);
                     let Some(host_rect) = tab
                         .layout
                         .pane_slot_geometry(*pane_id, area)
@@ -1714,13 +1719,11 @@ impl Widget for ClayShellWidget {
                     ctx.run_layout(host, &constraints);
                     ctx.place_child(host, Point::new(host_rect.x0, host_rect.y0));
                 } else {
-                    ctx.run_layout(host, &BoxConstraints::tight(Size::ZERO));
-                    ctx.place_child(host, Point::ZERO);
+                    ctx.set_stashed(host, true);
                 }
             }
             for orphan in &mut tab.pending_orphans {
-                ctx.run_layout(orphan, &BoxConstraints::tight(Size::ZERO));
-                ctx.place_child(orphan, Point::ZERO);
+                ctx.set_stashed(orphan, true);
             }
             for orphan in &mut tab.chrome_orphans {
                 ctx.run_layout(orphan, &BoxConstraints::tight(Size::ZERO));
@@ -2172,22 +2175,35 @@ impl Widget for ClayShellWidget {
                 .collect()
         };
         // Phase 22.6: the accessibility tree exposes only the mounted tab's
-        // panes. Inactive tabs' hosts stay in the widget tree at zero size
-        // for reconnect continuity but must not be announced. The tab bar
-        // (visible with 2+ tabs) is exposed as a TabList of Tab nodes with
-        // sanitized workspace names and the active card selected; tab
-        // operations stay keyboard-command-driven (Phase 22.4), so the tab
-        // nodes are informational, matching the status-line precedent.
+        // panes. Inactive tabs' hosts stay in the arena at zero size (the
+        // `children_ids` contract below) for reconnect continuity but are
+        // never walked, painted, or announced. The tab bar (visible with 2+
+        // tabs) is exposed as a TabList of Tab nodes with sanitized workspace
+        // names and the active card selected; tab operations stay
+        // keyboard-command-driven (Phase 22.4), so the tab nodes are
+        // informational, matching the status-line precedent.
         if self.tab_cards.len() >= 2
             && let Some(geometry) = self.tab_bar_geometry(node_window_size(node))
         {
-            let list_id = NodeId::from(WidgetId::next());
+            let list_id = crate::editor::accessibility::virtual_a11y_node_id(
+                ctx.widget_id(),
+                crate::editor::accessibility::virtual_a11y_slots::SHELL_TAB_LIST,
+            );
             let mut list = Node::new(Role::TabList);
             list.set_label("Workspace tabs");
             list.set_bounds(accesskit_rect(geometry.bar));
             let mut tab_ids = Vec::with_capacity(geometry.cards.len());
             for (card, card_geometry) in self.tab_cards.iter().zip(&geometry.cards) {
-                let tab_id = NodeId::from(WidgetId::next());
+                // Slot derives from the connection id so a card keeps its ID
+                // across reorders and selection changes; client ids are
+                // bounded by `MAX_ACTIVE_CONNECTIONS` (64), far below the
+                // 9-bit slot space.
+                let tab_id = crate::editor::accessibility::virtual_a11y_node_id(
+                    ctx.widget_id(),
+                    crate::editor::accessibility::virtual_a11y_slots::SHELL_TAB_BASE
+                        + u16::try_from(card.client_id)
+                            .expect("tab client id exceeds u16 slot space"),
+                );
                 let mut tab = Node::new(Role::Tab);
                 tab.set_label(
                     crate::editor::accessibility::sanitize_document_display_name(&card.name),
@@ -2212,7 +2228,10 @@ impl Widget for ClayShellWidget {
         if let Some(text) = &self.announcement {
             announce.set_label(text.as_str());
         }
-        let announce_id = NodeId::from(WidgetId::next());
+        let announce_id = crate::editor::accessibility::virtual_a11y_node_id(
+            ctx.widget_id(),
+            crate::editor::accessibility::virtual_a11y_slots::SHELL_ANNOUNCEMENT,
+        );
         ctx.tree_update().nodes.push((announce_id, announce));
         children.push(announce_id);
         node.set_children(children);
@@ -3835,7 +3854,8 @@ mod tests {
 
         render_root.edit_widget(shell_id, |mut widget| {
             let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
-            // The new tab is mounted (active); the previous tab is retained.
+            // The new tab is mounted (active); the previous tab is retained
+            // (stashed, not announced).
             assert_eq!(shell.widget.editor_widget_id(), second_chrome_id);
             assert_eq!(shell.widget.tab_for_chrome(first_chrome_id), Some(0));
             assert_eq!(shell.widget.tab_for_chrome(second_chrome_id), Some(2));
@@ -5062,6 +5082,9 @@ mod tests {
     #[test]
     fn shell_accessibility_tree_leads_with_tablist_and_hides_inactive_tabs() {
         let (mut render_root, shell_id, _captured) = tab_bar_two_card_root();
+        // Inactive tab hosts stay in `children_ids` (register_children
+        // requires it) but are stashed by shell::layout, so the walk never
+        // emits them and the consumer never sees an unattached node.
         let (all_hosts, active_hosts) = render_root.edit_widget(shell_id, |mut widget| {
             let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
             let all: Vec<WidgetId> = shell.widget.children_ids().iter().copied().collect();
@@ -5097,6 +5120,11 @@ mod tests {
                 "inactive tab host {host:?} must not be announced"
             );
         }
+        assert_eq!(
+            nodes_with_role(&update, Role::Pane).len(),
+            1,
+            "the walk emits only the active tab's pane host"
+        );
     }
 
     #[test]
@@ -5121,6 +5149,287 @@ mod tests {
         // The live region is present from tree start (so ATs register it)
         // with no text until the first window-model action.
         assert_eq!(announcement_label(&update), None);
+    }
+
+    // -- Plan 086 task 3: consumer-valid incremental updates -----------------
+
+    /// No-op consumer change handler: validation is the panic-free update.
+    struct NoopChangeHandler;
+
+    impl accesskit_consumer::TreeChangeHandler for NoopChangeHandler {
+        fn node_added(&mut self, _node: &accesskit_consumer::Node) {}
+        fn node_updated(
+            &mut self,
+            _old: &accesskit_consumer::Node,
+            _new: &accesskit_consumer::Node,
+        ) {
+        }
+        fn focus_moved(
+            &mut self,
+            _old: Option<&accesskit_consumer::Node>,
+            _new: Option<&accesskit_consumer::Node>,
+        ) {
+        }
+        fn node_removed(&mut self, _node: &accesskit_consumer::Node) {}
+    }
+
+    /// Run the real first update through `accesskit_consumer::Tree` exactly
+    /// as `accesskit_unix` does on the live desktop; panics on any orphaned
+    /// or unattached node.
+    fn consumer_tree(render_root: &mut RenderRoot) -> accesskit_consumer::Tree {
+        accesskit_consumer::Tree::new(access_tree(render_root), false)
+    }
+
+    fn consumer_update(tree: &mut accesskit_consumer::Tree, render_root: &mut RenderRoot) {
+        tree.update_and_process_changes(access_tree(render_root), &mut NoopChangeHandler);
+    }
+
+    /// Every node reachable from the tree root (the consumer itself rejects
+    /// unreachable nodes on update; this walks the accepted tree).
+    fn reachable_ids(tree: &accesskit_consumer::Tree) -> std::collections::HashSet<NodeId> {
+        let mut ids = std::collections::HashSet::new();
+        let mut stack = vec![tree.state().root_id()];
+        while let Some(id) = stack.pop() {
+            if !ids.insert(id) {
+                continue;
+            }
+            if let Some(node) = tree.state().node_by_id(id) {
+                stack.extend(node.child_ids());
+            }
+        }
+        ids
+    }
+
+    fn reachable_labels_with_role(tree: &accesskit_consumer::Tree, role: Role) -> Vec<String> {
+        let mut out = Vec::new();
+        for id in reachable_ids(tree) {
+            if let Some(node) = tree.state().node_by_id(id) {
+                let data = node.data();
+                if data.role() == role {
+                    out.push(data.label().unwrap_or("").to_string());
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn consumer_accepts_single_tab_initial_tree_with_region_attached() {
+        // P0-1 regression: the first update used to panic in
+        // accesskit_consumer ("neither in the current tree nor a child of
+        // another node from the update: [#1]") because Masonry's walk
+        // emitted the package region while the editor's accessibility()
+        // omitted it from its children when no sidebar was present.
+        let editor = crate::masonry_editor::EditorWidget::default();
+        let (mut render_root, editor_widget_id) = render_root_for_shell(editor);
+        let mut tree = consumer_tree(&mut render_root);
+
+        // The editor node and its stable status node are attached and
+        // reachable; an unchanged redraw produces no churn and no panic.
+        let editor_node_id = NodeId::from(editor_widget_id);
+        let reachable = reachable_ids(&tree);
+        assert!(reachable.contains(&editor_node_id));
+        let status_id = crate::editor::accessibility::virtual_a11y_node_id(
+            editor_widget_id,
+            crate::editor::accessibility::virtual_a11y_slots::STATUS,
+        );
+        assert!(
+            reachable.contains(&status_id),
+            "stable status node reachable"
+        );
+        let children: Vec<NodeId> = tree
+            .state()
+            .node_by_id(editor_node_id)
+            .expect("editor node present")
+            .child_ids()
+            .collect();
+        assert!(
+            children.contains(&status_id),
+            "status node attached to editor"
+        );
+        consumer_update(&mut tree, &mut render_root);
+    }
+
+    #[test]
+    fn consumer_accepts_multi_tab_incremental_updates_and_drops_stale_nodes() {
+        // P0-1 regression: the two-tab first update used to panic with three
+        // orphans (both regions plus the inactive tab's host) because the
+        // walk emitted every tab's hosts while the shell attached only the
+        // active tab's.
+        let (mut render_root, shell_id, _captured) = tab_bar_shell_root();
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.install_tab(
+                &mut shell.ctx,
+                2,
+                TabChrome::single_editor(crate::masonry_editor::EditorWidget::default(), false),
+            );
+            shell.widget.set_tab_cards(
+                &mut shell.ctx,
+                vec![
+                    TabCard {
+                        client_id: 0,
+                        name: "alpha".to_string(),
+                        closable: true,
+                    },
+                    TabCard {
+                        client_id: 2,
+                        name: "beta".to_string(),
+                        closable: true,
+                    },
+                ],
+            );
+            shell.widget.set_active_tab(&mut shell.ctx, 2);
+        });
+        let mut tree = consumer_tree(&mut render_root);
+
+        // Initial tree: both Tabs reachable; exactly ONE pane node (the
+        // active tab's host) — the inactive host is never emitted.
+        let tabs = reachable_labels_with_role(&tree, Role::Tab);
+        assert_eq!(tabs.len(), 2);
+        assert!(tabs.iter().any(|label| label == "alpha"));
+        assert!(tabs.iter().any(|label| label == "beta"));
+        assert_eq!(
+            reachable_labels_with_role(&tree, Role::Pane).len(),
+            1,
+            "inactive tab host must not be reachable"
+        );
+
+        // Unchanged redraw: accepted without churn.
+        consumer_update(&mut tree, &mut render_root);
+
+        // Announcement: the polite live region updates.
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.announce_tab_created(&mut shell.ctx, "gamma");
+        });
+        consumer_update(&mut tree, &mut render_root);
+        assert!(
+            reachable_labels_with_role(&tree, Role::Status)
+                .iter()
+                .any(|label| label.contains("Opened tab")),
+            "announcement reaches the live region"
+        );
+
+        // Tab-add + selected-tab: install client 3 and activate it.
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.install_tab(
+                &mut shell.ctx,
+                3,
+                TabChrome::single_editor(crate::masonry_editor::EditorWidget::default(), false),
+            );
+            shell.widget.set_tab_cards(
+                &mut shell.ctx,
+                vec![
+                    TabCard {
+                        client_id: 0,
+                        name: "alpha".to_string(),
+                        closable: true,
+                    },
+                    TabCard {
+                        client_id: 2,
+                        name: "beta".to_string(),
+                        closable: true,
+                    },
+                    TabCard {
+                        client_id: 3,
+                        name: "gamma".to_string(),
+                        closable: true,
+                    },
+                ],
+            );
+            shell.widget.set_active_tab(&mut shell.ctx, 3);
+        });
+        consumer_update(&mut tree, &mut render_root);
+        assert_eq!(reachable_labels_with_role(&tree, Role::Tab).len(), 3);
+
+        // Tab-reorder: registry order changes; ids are client-derived, so
+        // the same tabs keep their node ids (no remove/add churn).
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.set_tab_cards(
+                &mut shell.ctx,
+                vec![
+                    TabCard {
+                        client_id: 3,
+                        name: "gamma".to_string(),
+                        closable: true,
+                    },
+                    TabCard {
+                        client_id: 0,
+                        name: "alpha".to_string(),
+                        closable: true,
+                    },
+                    TabCard {
+                        client_id: 2,
+                        name: "beta".to_string(),
+                        closable: true,
+                    },
+                ],
+            );
+        });
+        consumer_update(&mut tree, &mut render_root);
+        assert_eq!(reachable_labels_with_role(&tree, Role::Tab).len(), 3);
+
+        // Tab-remove: alpha leaves; its Tab node must vanish from the
+        // reachable tree (stale removed virtual nodes absent).
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.remove_tab(&mut shell.ctx, 0);
+            shell.widget.set_tab_cards(
+                &mut shell.ctx,
+                vec![
+                    TabCard {
+                        client_id: 3,
+                        name: "gamma".to_string(),
+                        closable: true,
+                    },
+                    TabCard {
+                        client_id: 2,
+                        name: "beta".to_string(),
+                        closable: true,
+                    },
+                ],
+            );
+        });
+        consumer_update(&mut tree, &mut render_root);
+        let tabs = reachable_labels_with_role(&tree, Role::Tab);
+        assert_eq!(tabs.len(), 2);
+        assert!(!tabs.iter().any(|label| label == "alpha"));
+
+        // Status/label update: mount a live document view (driver mount
+        // flow) and set its display name; the change flows through the
+        // consumer and stays basename-sanitized (no host path leaks).
+        let active_pane_id = render_root.edit_widget(shell_id, |mut widget| {
+            let shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.pane_host_ids()[0].0
+        });
+        let view = PaneDocumentView::new(
+            active_pane_id,
+            std::rc::Rc::new(std::cell::Cell::new(1)),
+            std::rc::Rc::new(std::cell::Cell::new(0)),
+        );
+        mount_document_view(&mut render_root, shell_id, active_pane_id, view);
+        render_root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget.try_downcast::<ClayShellWidget>().expect("shell");
+            shell.widget.set_pane_document_name(
+                &mut shell.ctx,
+                3,
+                active_pane_id,
+                Some("/home/user/secret/report.md"),
+            );
+        });
+        consumer_update(&mut tree, &mut render_root);
+        let panes = reachable_labels_with_role(&tree, Role::Pane);
+        assert!(
+            panes.iter().any(|label| label.contains("report.md")),
+            "pane label updates through the consumer"
+        );
+        assert!(
+            !panes.iter().any(|label| label.contains("/home/")),
+            "host paths never reach the tree"
+        );
     }
 
     #[test]

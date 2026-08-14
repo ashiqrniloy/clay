@@ -128,6 +128,12 @@ Tab command policy table (module 14 steps in parentheses):
   route consumes arrows/Enter/Escape/printable/Backspace before editor
   dispatch (keys leak only for unhandled keys; e2e asserts the menu path).
 
+## Linux execution record (Plan 086 task 11, 2026-08-14)
+
+- **PASS — K19–K24/K29/K47 representative path:** the real Wayland/AT-SPI review instance opened Control Center with the isolated fixture binding, filtered `60` results to `7`, and closed with Escape. The menu/status tree updated through stable virtual IDs (status `14987979559889054209`, items in the following slots); no editor text leaked from menu input and responsiveness was immediate. Evidence: `code-reviews/screenshots/2026-08-14-plan086-a11y/control-center-menu.png`, `control-center-filtered.png`, and `review-log.md`.
+- **PASS — manifest/isolation:** the manual instance's `BehaviorManifestInstalled` contained the default `Ctrl+X Ctrl+P` / `Ctrl+X Ctrl+F` sequence bindings plus the isolated fixture overrides. No package or raw-op surface was added; menu labels/status did not expose host paths.
+- **Coverage note:** native path/file dialog selection and a second-client observer keyboard flow were blocked by this host's window-targeting backend. Automated chord/deny-by-default coverage remains green.
+
 ## Known ceilings
 
 - Function keys (PageUp/PageDown/F-keys) remain unsupported by the chord

@@ -871,3 +871,119 @@ fn phase18_20_language_intelligence_smoke_marks_phase18_21_compatibility() {
         );
     }
 }
+
+#[test]
+fn plan086_live_atspi_smoke_command_and_prerequisites_are_documented() {
+    let launch_doc = launch_smoke_doc();
+
+    for expected in [
+        "CLAY_LIVE_A11Y_SMOKE=1",
+        "cargo test --test security live_atspi_smoke::live_atspi_accessibility_smoke -- --ignored --exact --test-threads=1",
+        "org.a11y.Bus",
+        "python3-gi",
+        "gir1.2-atspi-2.0",
+        "mode-700 temporary IPC/config home",
+        "Workspace tabs",
+        "tests/live_atspi_smoke.rs",
+        "CLAY_LIVE_A11Y_SMOKE",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must define the plan 086 live AT-SPI smoke marker `{expected}`"
+        );
+    }
+
+    let fixture = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/configuration/runtime-sdui/init.js"
+    ))
+    .expect("read runtime-sdui smoke fixture");
+    assert!(
+        fixture.contains("publishTree"),
+        "runtime-sdui fixture must keep publishing an SDUI tree for the live AT-SPI smoke"
+    );
+}
+
+#[test]
+fn plan087_ui_review_harness_command_and_prerequisites_are_documented() {
+    let launch_doc = launch_smoke_doc();
+    let observability_doc = wiki_doc("docs/development/ui-observability.md");
+    let script = wiki_doc("scripts/capture-ui-review.sh");
+
+    for expected in [
+        "scripts/capture-ui-review.sh --fixture ui-review-default",
+        "scripts/capture-ui-review.sh --fixture ui-review-completion",
+        "ui-review-default",
+        "ui-review-loading",
+        "ui-review-error",
+        "ui-review-recovery",
+        "ui-review-completion",
+        "ui-review-command-centre",
+        "screenshot.png",
+        "accessibility.txt",
+        "review.status",
+        "mode-700 temporary",
+        "xdg-desktop-portal",
+        "UNRESOLVED",
+        "exits 2",
+        "900×600",
+        "not GPU goldens",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "launch smoke docs must define Plan 087 review marker `{expected}`"
+        );
+    }
+
+    assert!(
+        observability_doc.contains("scripts/capture-ui-review.sh")
+            && observability_doc.contains("review.status`=`UNRESOLVED")
+            && observability_doc.contains("exit 2"),
+        "UI observability docs must link the unresolved-safe Plan 087 harness"
+    );
+
+    for fixture in [
+        "ui-review-default",
+        "ui-review-loading",
+        "ui-review-error",
+        "ui-review-recovery",
+        "ui-review-completion",
+        "ui-review-command-centre",
+    ] {
+        let path = format!(
+            "{}/tests/fixtures/configuration/{fixture}/init.js",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        assert!(
+            std::path::Path::new(&path).is_file(),
+            "Plan 087 review fixture is missing: {path}"
+        );
+    }
+
+    for expected in [
+        "target/debug/clay",
+        "HOME=",
+        "XDG_CONFIG_HOME=",
+        "XDG_DATA_HOME=",
+        "TMPDIR=",
+        "chmod 700",
+        "atspi_probe.py",
+        "portal_capture.py",
+        "timeout 2s",
+        "UNRESOLVED",
+        "review.status",
+        "tests/fixtures/configuration/",
+        "Ctrl+Space",
+        "Ctrl+Alt+P",
+        "900×600",
+    ] {
+        assert!(
+            script.contains(expected),
+            "UI review harness must retain safety/fixture marker `{expected}`"
+        );
+    }
+    assert!(
+        !script.contains("cargo run -- smoke-gui"),
+        "UI review wrapper must not create a second Cargo/build target path"
+    );
+}

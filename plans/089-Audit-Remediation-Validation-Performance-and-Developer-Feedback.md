@@ -16,7 +16,7 @@ Source review: P1-5, P2 performance, security warning follow-through, and test g
 - Developers/agents use one documented command for quick feedback and one lock-protected command for release validation.
 - CI and local automation cannot accidentally overlap full GUI/V8 verification in the same checkout.
 - Timeouts identify leaked session/generation/channel state instead of hanging indefinitely.
-- Deterministic budgets and compact generated cases cover trust boundaries/state machines; live Linux UI checks cover platform behavior without claiming Windows is blocking.
+- Plan 086 focus/accessibility follow-ups have one shared reconciliation boundary with consumer regression coverage; deterministic budgets and compact generated cases cover trust boundaries/state machines; live Linux UI checks cover platform behavior without claiming Windows is blocking.
 
 ## Tasks
 
@@ -106,6 +106,37 @@ Source review: P1-5, P2 performance, security warning follow-through, and test g
   - Test Cases to Write:
     - Deliberately pending future produces useful diagnostics and cleanup; normal scenarios remain below deadline.
 
+- [ ] Close Plan 086 focus and accessibility follow-ups before platform validation
+  - Acceptance Criteria:
+    - Functional: Dirty active-pane close, including a focused dirty pane, reconciles focus to a surviving valid widget or clears it before the next AccessKit update; `accesskit_consumer` never receives a stale focused ID. Top-level Frame/window focus events cannot dispatch to a nonexistent Masonry widget, while the working editor-Entry focus path remains valid.
+    - Performance: Focus repair is event/reconciliation-driven and bounded by changed focus/child state; no per-frame tree scan, synchronous IPC, JavaScript, or document work is added.
+    - Code Quality: Fix the shared focus-removal/event-ingress seam rather than adding caller-specific guards; keep consumer validation and live smoke checks separate from production focus ownership.
+    - Security: Removed, stashed, and inactive widgets cannot remain reachable or focused; valid keyboard/accessibility focus is not hidden by a broad event suppression rule.
+  - Approach:
+    - Documentation Reviewed:
+      - Plan 086 Task 8/11 evidence and `docs/development/accessibility.md`.
+      - `src/masonry_shell.rs`, `src/masonry_editor.rs`, `src/masonry_pane_document.rs`, app event routing in `src/main.rs`, and local `accesskit_consumer` 0.31.0 tree/focus behavior.
+      - Project patterns `authority-boundaries.md`, `protocol-and-performance.md`, and `ui-visual-review.md`.
+    - Options Considered:
+      - Suppress every focus event after pane removal: rejected; it masks valid focus and would hide future regressions.
+      - Patch only the dirty-close caller or only the consumer test: rejected; sibling removal and top-level focus paths would remain unsafe.
+      - Repair shared focus reconciliation and validate both removal and ingress paths: chosen.
+    - Chosen Approach:
+      - Establish one valid-focus reconciliation point before tree updates/events, explicitly handle top-level window focus without a widget target, and retain the existing editor-entry focus behavior as a control case.
+    - API Notes and Examples:
+      ```text
+      remove focused pane → reconcile focus → publish TreeUpdate
+      frame Focus without widget target → ignore safely or route to a valid window owner
+      ```
+    - Files to Create/Edit:
+      - `src/masonry_shell.rs`, `src/masonry_editor.rs`, `src/masonry_pane_document.rs`, or `src/main.rs`: exact owner determined by the event trace; keep the fix at the shared seam.
+      - Existing consumer/accessibility tests in the owning module and `tests/live_atspi_smoke.rs` only for live regression coverage.
+      - `docs/development/accessibility.md`: document the focus invariant and regression command.
+    - References:
+      - `code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log` and `focus-frame-crash.log`.
+  - Test Cases to Write:
+    - Focused dirty-pane removal, dirty-close rejection, clean focused-pane removal, survivor focus restoration, stale focused-ID consumer update, top-level Frame focus event, editor Entry focus control, and repeated tab/pane removal without panic.
+
 - [ ] Measure and guard editor, menu, tab, completion, and accessibility costs
   - Acceptance Criteria:
     - Functional: Bench/metrics cover typing/local paint proxy, command/filter updates, tab switch, completion projection/selection, and accessibility tree update after stable IDs.
@@ -164,7 +195,7 @@ Source review: P1-5, P2 performance, security warning follow-through, and test g
 
 - [ ] Add real Linux multi-window, DPI, font-scale, and Wayland validation
   - Acceptance Criteria:
-    - Functional: Environment-gated smoke opens representative multi-window/tab/pane states on Wayland, verifies logical/physical bounds, scale change, user font-scale layout, focus, and accessibility; fixed fixtures support manual screenshots.
+    - Functional: Environment-gated smoke opens representative multi-window/tab/pane states on Wayland, verifies logical/physical bounds, scale change, user font-scale layout, focus, and accessibility; fixed fixtures support manual screenshots. The review/manual workflow provides safe Clay window target/raise/focus controls or reports the exact unavailable-backend prerequisite, never relying on blind portal input.
     - Performance: Smoke has bounded startup/cleanup and adds no production per-frame work.
     - Code Quality: Extend existing GUI/review fixtures; no second event loop or platform abstraction.
     - Security: Isolated sockets/config/documents, no ambient user paths, no remote listener; accessibility names sanitized.
@@ -175,8 +206,9 @@ Source review: P1-5, P2 performance, security warning follow-through, and test g
     - Options Considered:
       - Treat Linux-host Windows cross-compile as blocking: rejected by project policy.
       - Linux Wayland live smoke plus documented non-blocking Windows preservation: chosen.
+      - Blind portal/coordinate input as a substitute for window targeting: rejected; it cannot prove which Clay window received the action.
     - Chosen Approach:
-      - Add deterministic structural event tests and environment-gated real desktop smoke.
+      - Add deterministic structural event tests, environment-gated real desktop smoke, and a safe window-targeting prerequisite for manual dialog/focus flows.
     - API Notes and Examples:
       ```bash
       CLAY_LIVE_WINDOW_SMOKE=1 cargo test --lib live_multi_window_scale_smoke -- --ignored --exact --test-threads=1
@@ -184,11 +216,12 @@ Source review: P1-5, P2 performance, security warning follow-through, and test g
     - Files to Create/Edit:
       - Existing smoke/window test owner in `src/main.rs` or `tests/window_management_protocol.rs` (tentative).
       - `docs/development/launch-and-gui-smoke.md`, `docs/development/windows.md` if behavior notes change.
+      - `scripts/capture-ui-review.sh` or the existing review-tooling owner (tentative): safe target/raise/focus orchestration, never blind portal input.
       - Plan 087 fixture/capture files.
     - References:
       - Audit test gap 5; Linux platform policy.
   - Test Cases to Write:
-    - 1x/2x scale, UI typography extremes, two windows, multi-pane, focus transfer, close cleanup, Wayland launch, accessibility bounds.
+    - 1x/2x scale, UI typography extremes, two windows, multi-pane, focus transfer, close cleanup, Wayland launch, accessibility bounds, safe window raise/target/focus, native dialog selection, observer/restart/local-fallback keyboard flows, and full quit/relaunch persistence when the host targeting prerequisite is available.
 
 - [ ] Report and control build artifact size
   - Acceptance Criteria:
@@ -269,10 +302,10 @@ Source review: P1-5, P2 performance, security warning follow-through, and test g
 
 - [ ] Execute and update the manual test plan (test-plan/)
   - Acceptance Criteria:
-    - Functional: Update/execute modules 01, 07, 10, 11, 13, and 14 for quick/full workflow, timeout diagnostics, performance feel, multi-window/scale/Wayland fixtures.
+    - Functional: Update/execute modules 01, 07, 10, 11, 13, and 14 for quick/full workflow, timeout diagnostics, performance feel, multi-window/scale/Wayland fixtures, and the Plan 086 native-dialog, observer/restart, local-fallback, and quit/relaunch cases once safe window targeting is available; retain explicit blocked status otherwise.
     - Performance: Record advisory measurements and perceived behavior without promoting unstable wall-clock gates.
     - Code Quality: Manual steps point to one supported workflow and exact artifact paths.
-    - Security: Include isolated config/socket and no-debug-surface negative checks.
+    - Security: Include isolated config/socket and no-debug-surface negative checks; reject blind keyboard/coordinate workarounds that could operate on an ambient window.
   - Approach:
     - Documentation Reviewed:
       - `test-plan/index.md` and listed modules.

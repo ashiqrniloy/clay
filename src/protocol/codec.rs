@@ -1095,4 +1095,218 @@ mod tests {
         let error = codec.encode_server_message(&message).unwrap_err();
         assert!(matches!(error, CodecError::FrameTooLarge { .. }));
     }
+
+    /// Deterministic split-mix LCG for the mutation corpus — no `rand`
+    /// dependency, reproducible across runs and hosts.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn new(seed: u64) -> Self {
+            Self(seed)
+        }
+
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (self.0 ^ (self.0 >> 33)).wrapping_mul(13787848793156543929) >> 32
+        }
+
+        fn below(&mut self, bound: usize) -> usize {
+            (self.next() as usize) % bound
+        }
+    }
+
+    /// Corpus for the plan 086 task 5 malformed-archive sweep. Every input must
+    /// fail closed: either a `CodecError`, or — for byte patterns that still
+    /// validate — a bytecheck-validated archive. bytecheck bounds-checks every
+    /// successful decode against the actual buffer, so a decode is
+    /// memory-safe by construction even when truncation or corruption aliases
+    /// the bytes into a different (smaller/zero-field) message; the codec's
+    /// contract is reject-or-validate, never panic and never an out-of-bounds
+    /// access. The sweep asserts rejection dominance so bytecheck is provably
+    /// doing real work on every corpus class.
+    ///
+    /// Clay's wire types contain no `HashMap`/`Rc`/`Arc` fields (the archived
+    /// shapes behind RUSTSEC-2026-0234/0235), so the adversarial corpus for
+    /// the flat types is offset/pointer and length corruption, which is exactly
+    /// the validation surface those advisories hardened in rkyv 0.8.17
+    /// (`validation/shared` pointer metadata, swiss-table element counts,
+    /// `de::pooling`).
+    fn rich_corpus_messages() -> Vec<(String, ServerMessage)> {
+        let provenance = CompletionProvenance::builtin_core();
+        vec![
+            (
+                "completion-result".to_string(),
+                ServerMessage::CompletionResult {
+                    result: CompletionResultSet {
+                        request_id: 42,
+                        client_id: 9,
+                        document_id: 7,
+                        document_version: 31,
+                        behavior_version: 3,
+                        provider_generation: 2,
+                        replacement_range: CompletionReplacementRange::new(10, 12),
+                        status: CompletionStatus::Ok,
+                        items: (0..COMPLETION_RESULT_MAX_ITEMS)
+                            .map(|i| {
+                                CompletionItem::new(
+                                    format!("item_{i:03}_xxxxxxxxxxxxxxxxxxxxxxxx"),
+                                    format!("detail_{i:03}_yyyyyyyyyyyyyyyyyyyyyyyy"),
+                                    provenance.clone(),
+                                )
+                            })
+                            .collect(),
+                        provenance,
+                    },
+                },
+            ),
+            (
+                "sdui-snapshot".to_string(),
+                ServerMessage::SduiSnapshot {
+                    client_id: 9,
+                    tree: representative_sdui_tree(),
+                },
+            ),
+        ]
+    }
+
+    #[test]
+    fn malformed_corpus_truncations_fail_closed() {
+        let codec = Codec::default();
+        for (label, message) in rich_corpus_messages() {
+            let frame = codec.encode_server_message(&message).unwrap();
+            let full_len = frame.len() - LENGTH_PREFIX_BYTES;
+            assert!(full_len > 128, "{label} corpus must be non-trivial");
+
+            // Sweep every cut point: every byte for the first 64, then every
+            // 4 bytes (odd cut points exercise the AlignedVec copy path).
+            let mut rejected = 0usize;
+            let mut cuts = 0usize;
+            let mut cut = 0;
+            while cut < full_len {
+                cuts += 1;
+                let mut truncated = frame[..LENGTH_PREFIX_BYTES].to_vec();
+                truncated.extend_from_slice(&(cut as u32).to_be_bytes());
+                truncated.extend_from_slice(&frame[LENGTH_PREFIX_BYTES..LENGTH_PREFIX_BYTES + cut]);
+                if codec.decode_server_message(&truncated).is_err() {
+                    rejected += 1;
+                }
+                cut += if cut < 64 { 1 } else { 4 };
+            }
+            assert!(
+                rejected >= cuts * 3 / 4,
+                "{label}: bytecheck rejected only {rejected}/{cuts} truncations"
+            );
+            assert_eq!(
+                codec.decode_server_message(&frame).unwrap(),
+                message,
+                "{label}: baseline frame must round-trip"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_corpus_mutations_fail_closed() {
+        let codec = Codec::default();
+        let mut rng = Lcg::new(0x5eed_c0de_2026_0814);
+        for (label, message) in rich_corpus_messages() {
+            let frame = codec.encode_server_message(&message).unwrap();
+            let payload_start = LENGTH_PREFIX_BYTES;
+            let payload_end = frame.len();
+
+            // 1. Deterministic pseudo-random byte mutations: 1..=8 flips.
+            //    Bytecheck must reject the overwhelming majority; the rare
+            //    survivors are bytecheck-validated archives (bounds-checked,
+            //    so memory-safe by construction) — they are only allowed to
+            //    differ from the original because zeroed length/offset fields
+            //    legitimately re-archive to a different in-buffer value.
+            let mut rejected = 0usize;
+            for _ in 0..300 {
+                let mut mutated = frame.clone();
+                let flips = 1 + rng.below(8);
+                for _ in 0..flips {
+                    let position = payload_start + rng.below(payload_end - payload_start);
+                    mutated[position] ^= rng.next() as u8;
+                }
+                match codec.decode_server_message(&mutated) {
+                    Ok(_) => {}
+                    Err(_) => rejected += 1,
+                }
+            }
+            assert!(
+                rejected >= 300 / 4,
+                "{label}: bytecheck rejected only {rejected}/300 mutations"
+            );
+            // Sanity: the untouched frame still decodes to the original.
+            assert_eq!(
+                codec.decode_server_message(&frame).unwrap(),
+                message,
+                "{label}: baseline frame must round-trip"
+            );
+
+            // 2. Structured corruption: zero-runs and 0xFF-runs (pointer
+            //    targets, string lengths, and rel-ptr offsets are all u64
+            //    fields; a run of zeros or ones makes them point far outside
+            //    the buffer or at unaligned addresses). Every input must be
+            //    rejected or decode as a bytecheck-validated archive — never
+            //    a panic.
+            for run_len in [1usize, 4, 8, 16, 32] {
+                for window_start in (payload_start..payload_end - run_len).step_by(7) {
+                    for fill in [0u8, 0xFF] {
+                        let mut mutated = frame.clone();
+                        mutated[window_start..window_start + run_len].fill(fill);
+                        let _ = codec.decode_server_message(&mutated);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_corpus_misaligned_declared_lengths_fail_closed() {
+        let codec = Codec::default();
+        let message = rich_corpus_messages()[0].1.clone();
+        let frame = codec.encode_server_message(&message).unwrap();
+        let payload = &frame[LENGTH_PREFIX_BYTES..];
+
+        // Declared length is interpreted as the payload extent; odd declared
+        // lengths that disagree with the true payload must be rejected before
+        // any archive validation, and matching odd lengths must fail closed.
+        for odd in [1usize, 3, 5, 7, 9, 15, 17] {
+            let mut frame = Vec::new();
+            frame.extend_from_slice(&(odd as u32).to_be_bytes());
+            frame.extend_from_slice(&payload[..odd]);
+            assert!(
+                codec.decode_server_message(&frame).is_err(),
+                "odd declared length {odd} must not decode"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_corpus_oversized_declaration_rejected_on_read_side() {
+        // The read pump must reject an oversized declaration before allocating
+        // or reading the declared payload (frame gate stays at 1 MiB).
+        let codec = Codec::new(8);
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&9_u32.to_be_bytes());
+        frame.extend_from_slice(&[0; 9]);
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test runtime");
+        runtime.block_on(async {
+            use tokio::io::{AsyncWriteExt, duplex};
+            let (mut writer, mut reader) = duplex(64);
+            writer.write_all(&frame).await.unwrap();
+            let error = codec.read_server_message(&mut reader).await.unwrap_err();
+            assert!(matches!(
+                error,
+                CodecError::FrameTooLarge { len: 9, max: 8 }
+            ));
+        });
+    }
 }

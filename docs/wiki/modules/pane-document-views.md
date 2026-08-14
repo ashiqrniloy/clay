@@ -72,7 +72,7 @@ Major-mode manifests are now scoped: the server keeps a global manifest plus per
 - 1:1 client-local pane↔document mapping per workspace; a document never has two views.
 - Keystrokes, menus, status, and IME follow pane focus; document-scoped events follow `document_id`.
 - No cross-pane state bleed: surfaces, session stores, and behavior layers are per-pane; the shared edit queue tracks sync state per document.
-- Closing a dirty pane is blocked until the save-conflict menu resolves; clean closes release active + retained leases through the server's capability-gated close path.
+- Closing a dirty pane is blocked until the save-conflict menu resolves; clean closes release active + retained leases through the server's capability-gated close path. Plan 086 manual verification still found a follow-up focus/accessibility panic during the dirty-close path (`Focused ID #4 is not in the node list`); see [Plan 086 release integrity](plan086-release-integrity-and-accessibility.md).
 - Opens never grant authority client-side; the server's canonical-path duplicate detection and per-(client, document) leases remain authoritative.
 - Hot path: keystroke handling in a 4-pane shell touches only the focused pane, no IPC (guarded by `pane_document_typing_requires_no_server_or_js`).
 

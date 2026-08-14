@@ -100,9 +100,10 @@ The active menu (`TransientMenuSession`) is the only real runtime overlay — ze
 The legacy `collect_active_menu_accessibility_entries` (Menu > MenuItem with custom accessibility labels + `' selected'` suffix) is deleted. Menu a11y now flows through the hosted `PackageRegionWidget` subtree via `MenuA11y`:
 
 - `TransientPackageOverlay.menu_a11y: Option<MenuA11y>` carries `prompt`, `items: Vec<MenuA11yItem>` (resolved `accessibility_label` + `selected`), and optional `status`.
-- `PackageRegionWidget.set_menu_a11y(Some(...))` switches `accessibility_role` to `Role::Menu` and builds synthetic Menu/MenuItem/Status AccessKit nodes. IDs are derived from the retained region ID plus a fixed slot, so menu rows and the result-count status remain stable across snapshots; selected rows expose AccessKit `selected` and retain the `' selected'` label suffix.
+- `PackageRegionWidget.set_menu_a11y(Some(...))` switches `accessibility_role` to `Role::Menu` and builds synthetic Menu/MenuItem/Status AccessKit nodes through the shared `virtual_a11y_node_id` owner-plus-slot policy. Menu rows and result-count status therefore remain stable across snapshots; selected rows expose AccessKit `selected` and retain the `' selected'` label suffix.
+- When menu semantics are active, the reconciled root pod remains in the region's child list alongside the virtual semantic nodes. This keeps the Masonry walk attached instead of emitting an orphaned package subtree.
 - Centered Command Centre menus add a bounded `0 results`/`1 result`/`{n} results` `Status` node with `Live::Polite`; the centered root `PackageOverlayHost` reports a named modal `Dialog`. The host paints one scrim, swallows outside pointer hits, and keeps server-owned keyboard routing on the originating pane.
-- `EditorWidget::accessibility` includes `overlay_host.id()` in its children (gated on sidebar/overlay presence); the legacy `append_accessibility_children` path is deleted.
+- `EditorWidget::accessibility` always includes `region.id()`, `panel_host.id()`, and `overlay_host.id()` in its children; the legacy `append_accessibility_children` path is deleted.
 
 ## Sync Wiring
 

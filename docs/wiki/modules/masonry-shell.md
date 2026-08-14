@@ -285,7 +285,7 @@ Phase 22.2 (2026-08-05) wires document views into the pane hosts and makes the s
 
 Phase 22.3 (2026-08-06) makes each tab an independent client view with its own server connection. The server side (protocol v11, `src/server/tab_registry.rs`) is covered in the tab-registry task; this section covers the client-side multi-connection model:
 
-- `ClayShellWidget` now owns `tabs: BTreeMap<ClientId, TabChrome>` + `active_tab: ClientId`. `TabChrome` (new, `src/masonry_shell.rs`) bundles one tab's `WorkingAreaLayout`, `pane_hosts`, `pane_targets`, `pane_focus_policy`, and `pending_orphans` — everything that was previously shell-level single-tab state. The shell hosts **every** tab's hosts as registered children; only the active tab's hosts are laid out at their pane rects, inactive tabs' hosts are laid out at zero size (the Phase 22.1 `pending_orphans` protocol) so their widgets stay in the tree and keep receiving connection events without painting or hit-testing.
+- `ClayShellWidget` now owns `tabs: BTreeMap<ClientId, TabChrome>` + `active_tab: ClientId`. `TabChrome` (new, `src/masonry_shell.rs`) bundles one tab's `WorkingAreaLayout`, `pane_hosts`, `pane_targets`, `pane_focus_policy`, and `pending_orphans` — everything that was previously shell-level single-tab state. The shell hosts **every** tab's hosts as registered children; only the active tab's hosts are laid out at their pane rects, inactive tabs' hosts remain registered but are stashed during layout, so they keep connection/reconnect continuity without painting, hit-testing, or accessibility emission.
 - Tabs are keyed by the connection's `ClientId` (the client-known identity at mount time; the server-assigned `TabId` arrives asynchronously via the registry snapshot and is tracked by the app driver). `install_tab` mounts a tab's chrome (first tab becomes active; later tabs are retained until `set_active_tab`), `set_active_tab` switches with one layout pass and resets in-flight drag sessions, `tab_for_chrome` resolves an event's tab from its chrome id, and per-tab queries (`pane_targets_for`, `pane_host_id_for`, `editor_widget_id_for`, `set_pane_focus_policy_for`, …) scope routing to one tab. The no-arg routing methods delegate to the active tab, so single-tab behavior is the pre-22.3 experience.
 - `src/driver/mod.rs` `Driver` owns `tabs: BTreeMap<ClientId, TabState>`
   (`TabState` = the connection's `ClientEditQueue` clone, per-tab
@@ -322,7 +322,7 @@ single keyboard route and close restores the original focus target.
 ### Key Invariants
 
 - One connection per tab: separate `ClientEditQueue`/sync state, chrome (SDUI region, panels, overlays, runtime generation), split tree, pane targets, focus policy, and pending-open attribution. Editing in one tab never mutates another tab's state.
-- Inactive tabs are retained in-tree at zero size: stable `WidgetId`s across switches, no paint/layout/hit-test work, but connection events still apply so a switched-in tab is current.
+- Inactive tabs remain registered for connection/reconnect continuity but are stashed: no paint, hit-test, or accessibility walk occurs until activation unstashes and re-lays out the hosts.
 - The client-side tab map is view/routing state and grants nothing; the server registry is authoritative for tab order/active/ids.
 - `layout.json` v2 persistence runs at any tab count (Phase 22.5) — the
   shell signals `PersistenceDue` on committed layout mutations; the driver
@@ -333,7 +333,7 @@ single keyboard route and close restores the original focus target.
 
 ### Source Paths
 
-- `src/masonry_shell.rs`: `TabChrome`, `tabs`/`active_tab`, `install_tab`/`set_active_tab`/`tab_for_chrome`, per-tab routing queries, zero-size inactive layout; tab bar: `TabCard`, `set_tab_cards`, `remove_tab`, `tab_bar_geometry`/`tab_bar_hit_test`, bar paint + pointer handling, `TAB_BAR_*` constants.
+- `src/masonry_shell.rs`: `TabChrome`, `tabs`/`active_tab`, `install_tab`/`set_active_tab`/`tab_for_chrome`, per-tab routing queries, inactive-host stashing; tab bar: `TabCard`, `set_tab_cards`, `remove_tab`, `tab_bar_geometry`/`tab_bar_hit_test`, bar paint + pointer handling, `TAB_BAR_*` constants.
 - `src/shell/primitives.rs`: `tab_card_chrome` state resolver (`TabCardChrome`).
 - `src/masonry_pane_document.rs`: `reconnect` (queue swap + reinstall re-arm + menu clear), `documents_for_reopen`, per-session `workspace_root_id`/`path` retention.
 - `src/editor/document_session.rs`: `RetainedDocumentSession` open identity; `reopen_documents`.
@@ -346,7 +346,7 @@ single keyboard route and close restores the original focus target.
 
 ### Tests
 
-- `src/masonry_shell.rs`: install-then-activate, stable chrome/host ids across switches, inactive hosts laid out at zero size, single-tab shape unchanged, per-tab routing-target and focus-policy isolation; tab bar: hidden below two cards (single-tab geometry unchanged), geometry/carve with two cards, activate/close/no-op click actions, hover tracking, remove-tab uninstall + active fallback. Command: `cargo test --lib masonry_shell --quiet`.
+- `src/masonry_shell.rs`: install-then-activate, stable chrome/host ids across switches, inactive hosts stashed and hidden from accessibility, single-tab shape unchanged, per-tab routing-target and focus-policy isolation; tab bar: hidden below two cards (single-tab geometry unchanged), geometry/carve with two cards, activate/close/no-op click actions, hover tracking, remove-tab uninstall + active fallback. Command: `cargo test --lib masonry_shell --quiet`.
 - `src/shell/primitives.rs`: `tab_card_chrome` resolves every state (Rest/Hover/Active/Focus/Disabled × selected). Command: `cargo test --lib shell::primitives --quiet`.
 - `src/client/mod.rs`: real-server tab command end-to-end — handshake-bound `New` registers the selected root, a rejected `Activate` pushes a reconciling snapshot, `Close` ends the connection + removes the registry entry (observed on an unbound fresh replay), a dropped connection is reclaimed by `connect_for_reclaim` (`Reclaim` keeps `TabId`, rebinds `ClientId`), server restart falls back to root-scoped `New`, and the connection cap refuses excess connections. Command: `cargo test --lib client::tests::real_server_tab --quiet`, `cargo test --lib real_server_ --quiet`.
 - `src/driver/reconcile.rs`: registry reconciliation — fills tab ids +
@@ -454,23 +454,28 @@ this section documents the implementation.
 
 ### Structural tree (`ClayShellWidget::accessibility`)
 
-- **Virtual-node pattern**: the shell reuses the synthetic-child precedent
-  from `PaneDocumentView::accessibility` (`NodeId::from(WidgetId::next())`,
-  push into `ctx.tree_update().nodes`). AccessKit 0.21 has no
-  `insert_children`, so the shell collects `node.children().to_vec()` and
-  calls `node.set_children(once(tablist_id).chain(active_hosts).chain(
-  once(status_id)))`. Children are rebuilt on every a11y pass (cheap; the
-  pass only runs when the tree is active).
-- **Inactive-tab fix**: pre-22.6 every tab's pane hosts appeared in the
-  tree (inactive chromes are laid out at zero size, not stashed, so they
-  were in `children_ids`). The shell now filters to the ACTIVE tab's hosts,
-  so an inactive tab's panes are never announced or visited. The filter
-  needs the arena-insertion truth: `TabChrome.registered_panes`
-  (`BTreeSet<PaneId>`) records which hosts a register pass actually
-  inserted — `MutateCtx::get_mut` panics on pods not yet in the parent's
-  children arena, and `apply_layout_update` syncing hosts before reconcile
-  was too late (task-3 regression). Reconcile updates counts only for
-  registered hosts.
+- **Virtual-node pattern**: synthetic nodes use
+  `crate::editor::accessibility::virtual_a11y_node_id(owner, slot)`, not
+  `WidgetId::next()` per pass. The helper uses the `0xD000…` virtual prefix,
+  retained owner ID, and a bounded 9-bit slot; shell slots are TabList `1`,
+  announcement `2`, and Tab `3 + client_id`. The retained owner keeps IDs
+  stable across redraws while replacing the owner intentionally retires its
+  namespace. AccessKit 0.21 has no `insert_children`, so the shell still
+  builds semantic nodes in `ctx.tree_update().nodes` and attaches their IDs
+  with `node.set_children(...)`.
+- **Reachable-child invariant**: Masonry walks every `children_ids()` child
+  during accessibility. The shell keeps all registered pane hosts and
+  pending orphans there for the arena contract, while `layout()` calls
+  `ctx.set_stashed(host, true)` for inactive-tab hosts and pending orphans.
+  Active hosts are unstashed and laid out normally. Stashed subtrees are not
+  painted or emitted by the accessibility walk, so inactive panes cannot
+  become orphaned nodes.
+- **Registration truth**: `TabChrome.registered_panes`
+  (`BTreeSet<PaneId>`) records which hosts a register pass inserted. The
+  reconcile path updates registered hosts through `MutateCtx::get_mut` only;
+  newly synced pods receive their pane count at creation and are updated on a
+  later register pass. This avoids the Masonry arena panic found when
+  `apply_layout_update` synced hosts before reconciliation.
 - **TabList/Tab**: when `tab_cards.len() >= 2`, one `Role::TabList`
   (`Workspace tabs`) precedes the pane hosts with one `Role::Tab` per card
   in card order — sanitized workspace basename, `selected` on
@@ -488,9 +493,9 @@ this section documents the implementation.
   `set_pane_document_name(path)` which runs `sanitize_document_display_name`
   (pub(crate) in `src/editor/accessibility.rs`, invisible to the bin crate,
   so sanitization happens at the shell boundary).
-- **Geometry**: `node_window_size` uses `AccessCtx::size()` (no
-  `node.bounds()` needed); `accesskit_rect` builds `Rect` literals
-  (accesskit Rect has no `new`).
+- **Geometry**: `node_window_size` uses the root node bounds;
+  `accesskit_rect` builds AccessKit `Rect` literals (AccessKit has no
+  `Rect::new`).
 
 ### Announcements (task 4)
 
@@ -560,17 +565,19 @@ this section documents the implementation.
   announcement call site, `route_document_opened`/`route_document_event`
   label routing;
   `src/client/mod.rs`: `ClientConnectionEvent::metadata_path`.
-- `src/editor/accessibility.rs`: `sanitize_document_display_name`
-  (pub(crate), 64-char cap).
+- `src/editor/accessibility.rs`: `virtual_a11y_node_id`,
+  `virtual_a11y_slots`, and `sanitize_document_display_name` (all
+  crate-private; 64-character display-name cap).
 
 ### Tests
 
-- `src/masonry_shell.rs` (`cargo test --lib masonry_shell --quiet`): 10
-  a11y tests via the `access_tree` helper (`EnableAccessTree` event then
-  `redraw()` → `TreeUpdate`) — single-tab no-TabList, TabList/Tab selected
-  state, inactive-tab hiding, pane `N of M` labels, exact announcement
-  strings (builder table, cap/path-free, switch/close, split no-op
-  silence, focus-move silence), `tab_switch_submits_no_actions_or_messages`.
+- `src/masonry_shell.rs` (`cargo test --lib masonry_shell --quiet`): a11y
+  tests via the `access_tree` helper (`EnableAccessTree` event then
+  `redraw()` → `TreeUpdate`) cover single-tab/no-TabList, selected TabList,
+  inactive-tab stashing/hiding, pane `N of M` labels, exact bounded
+  announcements, and no-op silence. Consumer tests additionally apply real
+  updates through `accesskit_consumer::Tree` for initial region attachment,
+  tab add/reorder/remove, status changes, and stale-node removal.
 - `src/masonry_pane_host.rs`: pane-count defaulting and label updates.
 - `tests/performance_budgets.rs` (pins), `tests/editor_performance_
   invariants.rs` (linear chrome work, tab-switch no-reserialization source

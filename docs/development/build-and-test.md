@@ -44,6 +44,12 @@ cargo test --all-targets
 cargo audit
 ```
 
+The gates are run once serially (never as concurrent Cargo invocations).
+
+### Bounded configuration and Control Center tests (plan 086 task 7)
+
+Green baseline recorded 2026-08-14 (all serial): `example_configuration_loads_cleanly_and_applies_effects` (0.06 s), `control_center_opens_filters_activates_and_cancels` (0.03 s), `runtime_generation_replacement_cancels_open_control_center` (0.03 s). Each runs under a 5 s whole-workflow `tokio::time::timeout` whose message names pending session/runtime cleanup instead of waiting indefinitely, uses mode-700 hermetic config/workspace roots (never ambient `~/.config/clay`), and asserts cleanup (`drain_bounded` + `close`) plus a sentinel-typography check proving the reloaded generation came from the hermetic root.
+
 Security/adversarial coverage remains in the normal gate: package authority and sandbox tests are under `security`; multi-client, filesystem, and queue tests remain library tests; audit exceptions are checked under `protocol` and by `cargo audit`.
 
 ## Measured build shape

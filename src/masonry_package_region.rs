@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 
-use masonry::accesskit::{Live, Node, NodeId, Role};
+use masonry::accesskit::{Live, Node, Role};
 use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, MutateCtx, NewWidget,
@@ -85,16 +85,8 @@ struct PackagePodRecord {
     kind: String,
 }
 
-const MENU_A11Y_NODE_PREFIX: u64 = 0xD000_0000_0000_0000;
-const MENU_A11Y_REGION_MASK: u64 = 0x0000_7FFF_FFFF_FFFF;
-
-fn stable_menu_a11y_node_id(region_id: WidgetId, slot: u16) -> NodeId {
-    NodeId::from(
-        MENU_A11Y_NODE_PREFIX
-            | ((region_id.to_raw() & MENU_A11Y_REGION_MASK) << 9)
-            | u64::from(slot),
-    )
-}
+// Slots 1 = status, 2+ = items (legacy numbering, kept for test stability),
+// derived through the shared `virtual_a11y_node_id` policy.
 
 /// Clay-owned container reconciling a package_ui component tree into a retained
 /// Masonry subtree. `pub(crate)` only; packages never see Masonry handles.
@@ -763,16 +755,28 @@ impl Widget for PackageRegionWidget {
         node: &mut Node,
     ) {
         // Plan 070 step 13f + Phase 24.4: a hosted transient menu reports a
-        // stable `Menu`/`MenuItem`/`Status` subtree built from the menu payload,
-        // excluding the generic reconciled subtree.
+        // stable `Menu`/`MenuItem`/`Status` subtree built from the menu
+        // payload. The reconciled pod ALWAYS stays attached (when present):
+        // Masonry's walk emits every `children_ids` child and the consumer
+        // rejects nodes the region does not attach, so the pod must be
+        // listed even while the semantic menu nodes are exposed (the pod
+        // subtree remains in the tree alongside them — the semantic nodes
+        // are the screen-reader surface).
+        let mut children = Vec::new();
+        if let Some(pod) = &self.root_pod {
+            children.push(pod.id().into());
+        }
         if let Some(menu) = &self.menu_a11y {
             node.set_label(menu.prompt.clone());
             if menu.result_count.is_some() {
                 node.set_modal();
             }
-            let mut children = Vec::with_capacity(menu.items.len() + 1);
             for (index, item) in menu.items.iter().enumerate() {
-                let id = stable_menu_a11y_node_id(ctx.widget_id(), 2 + index as u16);
+                let id = crate::editor::accessibility::virtual_a11y_node_id(
+                    ctx.widget_id(),
+                    crate::editor::accessibility::virtual_a11y_slots::REGION_MENU_ITEM_BASE
+                        + index as u16,
+                );
                 let label = if item.selected {
                     format!("{} selected", item.label)
                 } else {
@@ -785,7 +789,10 @@ impl Widget for PackageRegionWidget {
                 children.push(id);
             }
             if let Some(status) = menu.result_count.as_ref().or(menu.status.as_ref()) {
-                let id = stable_menu_a11y_node_id(ctx.widget_id(), 1);
+                let id = crate::editor::accessibility::virtual_a11y_node_id(
+                    ctx.widget_id(),
+                    crate::editor::accessibility::virtual_a11y_slots::REGION_MENU_STATUS,
+                );
                 let mut status_node = Node::new(Role::Status);
                 status_node.set_label(status.clone());
                 if menu.result_count.is_some() {
@@ -797,6 +804,7 @@ impl Widget for PackageRegionWidget {
             node.set_children(children);
         } else {
             node.set_label("Package UI region");
+            node.set_children(children);
         }
     }
 
@@ -4625,6 +4633,144 @@ mod tests {
                 n.role() == Role::MenuItem && n.label() == Some("Keep dirty buffer")
             }),
             "non-selected menu item uses its accessibility label"
+        );
+    }
+
+    /// Plan 086 task 3: menu updates stay consumer-valid. Query/selection
+    /// churn reuses stable node ids; closing the menu removes the subtree
+    /// from the reachable tree (no panic, no stale nodes).
+    #[test]
+    fn consumer_accepts_menu_query_selection_and_close_updates() {
+        use crate::shell::transient_menu::{
+            TransientMenuAction, TransientMenuItem, TransientMenuSession, TransientMenuSessionId,
+        };
+
+        struct NoopChangeHandler;
+        impl accesskit_consumer::TreeChangeHandler for NoopChangeHandler {
+            fn node_added(&mut self, _node: &accesskit_consumer::Node) {}
+            fn node_updated(
+                &mut self,
+                _old: &accesskit_consumer::Node,
+                _new: &accesskit_consumer::Node,
+            ) {
+            }
+            fn focus_moved(
+                &mut self,
+                _old: Option<&accesskit_consumer::Node>,
+                _new: Option<&accesskit_consumer::Node>,
+            ) {
+            }
+            fn node_removed(&mut self, _node: &accesskit_consumer::Node) {}
+        }
+
+        fn reachable_menu_item_labels(tree: &accesskit_consumer::Tree) -> Vec<String> {
+            let mut out = Vec::new();
+            let mut stack = vec![tree.state().root_id()];
+            let mut seen = std::collections::HashSet::new();
+            while let Some(id) = stack.pop() {
+                if !seen.insert(id) {
+                    continue;
+                }
+                let Some(node) = tree.state().node_by_id(id) else {
+                    continue;
+                };
+                let data = node.data();
+                if data.role() == Role::MenuItem {
+                    out.push(data.label().unwrap_or("").to_string());
+                }
+                stack.extend(node.child_ids());
+            }
+            out
+        }
+
+        let menu = TransientMenuSession::new(TransientMenuSessionId(9), "Conflict recovery")
+            .with_items(vec![
+                TransientMenuItem::new(
+                    "reload",
+                    "Reload",
+                    TransientMenuAction::new("documents.serverReloadDocument"),
+                )
+                .with_accessibility_label("Reload from disk"),
+                TransientMenuItem::new(
+                    "keep",
+                    "Keep editing",
+                    TransientMenuAction::new("documents.dismissConflict"),
+                )
+                .with_accessibility_label("Keep dirty buffer"),
+            ]);
+        let cell = Rc::new(Cell::new(Rect::new(0.0, 0.0, 900.0, 600.0)));
+        let host_widget = NewWidget::new(PackageOverlayHost::new(cell));
+        let host_id = host_widget.id();
+        let mut rr = RenderRoot::new(host_widget, |_| {}, render_root_options());
+        let sync = |rr: &mut RenderRoot, overlays: Vec<TransientPackageOverlay>| {
+            rr.edit_widget(host_id, |mut w| {
+                let mut host = w
+                    .try_downcast::<PackageOverlayHost>()
+                    .expect("overlay host");
+                host.widget.sync_overlays(
+                    &mut host.ctx,
+                    overlays,
+                    TypographyRegistry::default(),
+                    ResolvedUiTheme::default(),
+                );
+            });
+        };
+        sync(
+            &mut rr,
+            vec![TransientPackageOverlay::from_menu_session(&menu)],
+        );
+        rr.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+
+        let (_, update) = rr.redraw();
+        let mut tree = accesskit_consumer::Tree::new(update.expect("tree active"), false);
+        let initial = reachable_menu_item_labels(&tree);
+        assert_eq!(initial.len(), 2);
+        assert!(
+            initial
+                .iter()
+                .any(|label| label == "Reload from disk selected")
+        );
+
+        // Menu-selection: re-sync the same session with the second row
+        // selected; item ids stay stable (no churn) and the suffix moves.
+        let selected = menu.clone().with_selected_index(1);
+        sync(
+            &mut rr,
+            vec![TransientPackageOverlay::from_menu_session(&selected)],
+        );
+        let (_, update) = rr.redraw();
+        tree.update_and_process_changes(update.expect("tree active"), &mut NoopChangeHandler);
+        let after_selection = reachable_menu_item_labels(&tree);
+        assert_eq!(after_selection.len(), 2);
+        assert!(
+            after_selection
+                .iter()
+                .any(|label| label == "Keep dirty buffer selected")
+        );
+
+        // Menu-query: a narrowed item list reuses item slots 2+.
+        let narrowed = TransientMenuSession::new(TransientMenuSessionId(9), "Conflict recovery")
+            .with_items(vec![TransientMenuItem::new(
+                "keep",
+                "Keep editing",
+                TransientMenuAction::new("documents.dismissConflict"),
+            )]);
+        sync(
+            &mut rr,
+            vec![TransientPackageOverlay::from_menu_session(&narrowed)],
+        );
+        let (_, update) = rr.redraw();
+        tree.update_and_process_changes(update.expect("tree active"), &mut NoopChangeHandler);
+        assert_eq!(reachable_menu_item_labels(&tree).len(), 1);
+
+        // Menu-close: the overlay leaves the tree; no stale menu nodes stay
+        // reachable.
+        sync(&mut rr, vec![]);
+        let (_, update) = rr.redraw();
+        tree.update_and_process_changes(update.expect("tree active"), &mut NoopChangeHandler);
+        assert!(
+            reachable_menu_item_labels(&tree).is_empty(),
+            "closed menu leaves no reachable items"
         );
     }
 }

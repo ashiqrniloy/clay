@@ -229,6 +229,13 @@ roots containing distinct filenames/content.
 | Split/multi-document, restore/reconnect (D16–D19, T64–T67) | AUTOMATED COVERAGE / MANUAL FOLLOW-UP | Real-server restore/reconnect and split isolation suites pass; visual multi-tab selection and pane/session checks require human interaction. |
 | Cross-tab denial (T68–T69) | AUTOMATED COVERAGE / MANUAL FOLLOW-UP | `cross_tab_workspace_and_document_authority_is_fail_closed` passes the same negative cases; manual UI attempt remains required when portal/file selection is available. |
 
+## Linux execution record (Plan 086 task 11, 2026-08-14)
+
+- **PASS — T1/T3/T4/T50:** the isolated v2 layout restored two workspaces and the live tree exposed `Workspace tabs` as a `page tab list` with two `page tab` children, exactly one selected, plus per-tab pane/document status nodes. Shell IDs stayed stable at TabList `14987979559889014273`, announcement `14987979559889014274`, and cards `14987979559889014276/14277` in the deterministic `0xD000…` space.
+- **PASS — T25/T30/T51/T52 representative updates:** the real AT-SPI review exercised tab activation and close; `Switched to tab 2: syntax-grammars` and `Closed tab 1: runtime-sdui; 1 tab open` were exposed as bounded status announcements. TabList and announcement paths stayed stable across updates; inactive-tab panes were absent.
+- **PASS — isolation/negative:** tab cards/statuses exposed workspace basenames only; the isolated server/client used mode-700 temporary HOME/XDG roots and a private socket. No host path, secret, or cross-tab document content appeared in the tree.
+- **Coverage note:** full quit/relaunch persistence and native folder-picker creation of a third tab were not re-run because portal/window targeting is unavailable on this host; the two-tab restore shape is covered by the live AT-SPI smoke and this launch.
+
 ## Negative checks
 
 - The last tab can never be closed (T7) — the editor always keeps one tab.

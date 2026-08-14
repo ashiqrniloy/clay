@@ -1049,7 +1049,6 @@ impl IpcServer {
     async fn reload_runtime_generation_inner(&self) -> RuntimeReloadOutcome {
         #[cfg(test)]
         self.reload_barrier.wait_if_armed().await;
-
         let previous_generation_id = self.runtime_generation.generation_id().await;
         let next_generation_id = previous_generation_id.saturating_add(1);
         // Trusted-generation reload shares the live third-party domain so
@@ -1057,7 +1056,6 @@ impl IpcServer {
         // sessions survive untouched (Plan 061 task 12).
         let current_service = self.runtime_generation.current_service().await;
         let next_service = ClayJsRuntimeService::production_reload(&current_service);
-
         let (evaluation, configuration_diagnostics) =
             match self.load_configuration_for_service(&next_service).await {
                 Ok(evaluation) => {
@@ -1079,7 +1077,6 @@ impl IpcServer {
                     };
                 }
             };
-
         let candidate = match self
             .prepare_runtime_generation_candidate(
                 previous_generation_id,
@@ -1105,7 +1102,6 @@ impl IpcServer {
                 };
             }
         };
-
         match self.commit_runtime_generation(candidate).await {
             Ok(refreshed_documents) => RuntimeReloadOutcome {
                 previous_generation_id,
@@ -3000,6 +2996,21 @@ await loadPackage("@clay/typescript");"#,
 
     #[tokio::test]
     async fn example_configuration_loads_cleanly_and_applies_effects() {
+        // Plan 086 task 7: whole-workflow bound. A hang here means pending
+        // session/runtime cleanup, not a slow machine (measured ~0.06s); the
+        // timeout names the failure instead of waiting indefinitely.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            example_configuration_loads_cleanly_and_applies_effects_scenario(),
+        )
+        .await
+        .expect(
+            "example_configuration_loads_cleanly_and_applies_effects exceeded its 5s whole-workflow bound; \
+             look for pending session or runtime-replacement cleanup",
+        );
+    }
+
+    async fn example_configuration_loads_cleanly_and_applies_effects_scenario() {
         // The examples/ tree (init.js + packages/) is the canonical
         // user-facing configuration. Any edit to it — or to the APIs it
         // calls — must keep it loading through the real runtime-generation

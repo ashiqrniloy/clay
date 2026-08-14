@@ -108,6 +108,13 @@ ln -s /tmp/clay-manual/a.txt /tmp/clay-manual/link.txt
 | F30 | Open Path Browser and inspect its surface/accessibility tree | One centered Spotlight-style panel dims full window; exactly one named modal Dialog contains Menu/MenuItems and a polite Status with `0 results`, `1 result`, or `{n} results`; path prompt is bounded/sanitized. |
 | F31 | Click scrim, type unsupported modifier/function input, paste, or start IME while Path Browser is open | Scrim/input is contained; no editor text/caret/selection mutation or path authority change. Escape closes and returns focus to originating pane. |
 
+## Linux execution record (Plan 086 task 11, 2026-08-14)
+
+- **PASS — restored multi-document panes:** the isolated v2 layout restored `a.txt` and `b.md` into separate panes. AT-SPI exposed `Pane 1 of 2: editor` / `Pane 2 of 2: b.md`, separate editor/status nodes, and `Open docs: 2`; the connection remained live.
+- **BLOCKED — native dialog steps (F1/F2/F16/F23):** this host's portal path could open a dialog but could not safely target/select its UI from the agent, so file-picker selection/cancellation was not re-run. No product failure inferred.
+- **FAIL/BLOCKER — dirty close path:** typing into `a.txt` and pressing `Ctrl+Alt+W` reproduced a client panic, `accesskit_consumer-0.31.0/src/tree.rs:34:13: Focused ID #4 is not in the node list`; the isolated server stayed alive. Evidence: `code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log`. Clean pane close passed separately and announced `Closed pane; 1 pane remains`.
+- **PASS — negative checks:** status/entry labels showed sanitized basenames and bounded diagnostics, not `/tmp` paths or document secrets. HOME/XDG config/data roots were isolated under the mode-700 temporary root; no ambient config was used.
+
 ## Negative checks
 
 - Opening files grants access to the selected file + workspace roots only —

@@ -1,0 +1,10 @@
+Plan 086 task 8 sanitized AT-SPI focus probe
+
+Probe: tool-only Atspi.Accessible.grab_focus() on Clay top-level Frame.
+Result: Clay client exited.
+Panic: masonry_core-0.4.0/src/passes/event.rs:88:9: Cannot send event to non-existent widget #8.
+
+Control probe: grab_focus() on the real Clay editor Entry.
+Result: true; subsequent Focus event completed with focused_widget=15; client remained alive.
+
+This edge probe is not part of ordinary keyboard-only interaction. No ambient paths, document contents, or credentials retained.

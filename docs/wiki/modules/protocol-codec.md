@@ -53,6 +53,10 @@ Phase 19 adds `src/protocol/runtime.rs` with `RuntimeGenerationId`, `RuntimeStat
 
 `Codec` in `src/protocol/codec.rs` serializes a client or server message with `rkyv::to_bytes`, checks the payload against `max_frame_size`, then prefixes the payload with its 32-bit length. Decode first validates the declared length against the configured maximum and the actual payload size. It then copies the payload into an aligned `rkyv::util::AlignedVec` before calling `rkyv::from_bytes`, which performs checked archived-byte validation through `bytecheck` before deserializing to the owned message type. Behavior manifest publications and behavior-version rejection messages cross this same boundary; there is no manifest-specific serialization side channel.
 
+### Plan 086 archive hardening
+
+Clay pins `rkyv = 0.8.17`. The decode boundary retains generic `CheckBytes<HighValidator>` and `Deserialize` bounds, rejects oversized declarations before payload copy, and has no unchecked fallback. `src/protocol/codec.rs` adds deterministic truncation, mutation, misaligned-length, and read-side oversized-declaration corpus tests. These assert rejection-or-validated-decode without panics or out-of-bounds access rather than requiring every corrupted byte sequence to fail: rkyv can validate a mutated archive whose fields still describe a different valid message. The fixed rkyv 0.8.16 advisories are never placed in `.cargo/audit.toml`; `docs/development/security.md` records the upgrade and evidence.
+
 ## Code Examples
 
 ```rust
@@ -86,7 +90,8 @@ stream ──tokio::io::split──▶ reader ──[read-pump task]──▶ mp
 
 - `Codec` is the only protocol serialization boundary; client/server code should not call `rkyv` directly for wire messages.
 - Adding, removing, or reordering a wire enum variant requires incrementing `PROTOCOL_VERSION`; handshake rejection prevents stale server processes from decoding changed discriminants.
-- `DEFAULT_MAX_FRAME_SIZE` is 1 MiB to prevent accidental unbounded allocation from malformed IPC frames.
+- `DEFAULT_MAX_FRAME_SIZE` is 1 MiB to prevent accidental unbounded allocation from malformed IPC frames; the read-side declaration gate runs before payload allocation/copy.
+- `rkyv` stays pinned at 0.8.17 for the fixed shared-pointer and hash-table validation advisories; archive validation cannot be disabled through configuration.
 - The 4-byte frame prefix is not part of the archived payload, so decode realigns payload bytes before validation.
 - Framed reads (`read_exact`) must be isolated in a spawned read-pump task that survives `select!` cancellation. Main loops race only cancellation-safe `mpsc::recv()` calls. `ReadPumpGuard` aborts the pump on `Drop` so no orphan task outlives the connection.
 - Behavior manifests are inert declarations of built-in behavior and do not execute JavaScript, WASM, extensions, commands, or filesystem/network operations.
@@ -112,7 +117,7 @@ stream ──tokio::io::split──▶ reader ──[read-pump task]──▶ mp
 - `tests/decoration_transport.rs::decoration_transport_round_trips_through_protocol_codec`: verifies `ServerMessage::DecorationSet` uses the shared codec boundary.
 - `tests/typography_protocol.rs`: codec round trip for all profiles/revision plus invalid profile and role-layer rejection coverage.
 - `src/client/mod.rs` and `src/server/connection.rs`: bootstrap ordering and live-delivery tests consume the fifth `ActiveTypography` frame before post-bootstrap SDUI/capability traffic.
-- `src/protocol/codec.rs`: rejection tests for oversized Phase 5 frames, oversized manifest messages, invalid client archived bytes, and invalid server/manifest archived bytes.
+- `src/protocol/codec.rs`: rejection tests for oversized Phase 5 frames, oversized manifest messages, invalid client archived bytes, invalid server/manifest archived bytes, truncation sweeps, deterministic byte mutations, misaligned declared lengths, and read-side oversized declarations.
 - Relevant command: `cargo test protocol`.
 
 ## Related

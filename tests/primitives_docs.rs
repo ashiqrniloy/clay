@@ -753,6 +753,59 @@ fn audit_exceptions_are_documented_and_unexpired() {
     }
 }
 
+/// Plan 086 task 6: every current dependency warning is classified in
+/// `docs/development/security.md` with path, upstream reference, and recheck
+/// date; directly fixed advisories appear only in the remediated table and
+/// can never be re-introduced as ignores.
+#[test]
+fn classified_dependency_warnings_and_remediated_ids_are_documented() {
+    let security_doc = read("docs/development/security.md");
+    let audit_toml = read(".cargo/audit.toml");
+
+    for id in [
+        "RUSTSEC-2025-0141",
+        "RUSTSEC-2024-0436",
+        "RUSTSEC-2026-0192",
+    ] {
+        let row = security_doc
+            .lines()
+            .find(|line| line.contains(id))
+            .unwrap_or_else(|| panic!("{id} missing from docs/development/security.md"));
+        assert!(
+            row.contains("→"),
+            "{id} classification row needs the dependency path"
+        );
+        assert!(
+            row.contains("https://"),
+            "{id} classification row needs the upstream reference"
+        );
+        assert!(
+            row.contains("recheck") && row.contains("**2026-"),
+            "{id} classification row needs a recheck date"
+        );
+    }
+
+    let classified = security_doc
+        .split("## Remediated vulnerabilities")
+        .next()
+        .expect("remediated section present");
+    for id in [
+        "RUSTSEC-2026-0221",
+        "RUSTSEC-2026-0233",
+        "RUSTSEC-2026-0234",
+        "RUSTSEC-2026-0235",
+    ] {
+        assert!(
+            !classified.contains(id),
+            "{id} must not appear outside the remediated table"
+        );
+        assert!(
+            !audit_toml.contains(id),
+            "directly fixed advisory {id} must never be added to .cargo/audit.toml"
+        );
+    }
+}
+
 #[test]
 fn documentation_validators_do_not_mutate_files() {
     let contract_path = root().join("docs/reference/documentation-contracts.json");

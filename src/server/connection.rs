@@ -7466,13 +7466,34 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn control_center_opens_filters_activates_and_cancels() {
+        // Plan 086 task 7: whole-workflow bound. A hang here means pending
+        // session cleanup, not a slow machine (measured ~0.03s); the timeout
+        // names the failure instead of waiting indefinitely.
+        timeout(
+            Duration::from_secs(5),
+            control_center_opens_filters_activates_and_cancels_scenario(),
+        )
+        .await
+        .expect(
+            "control_center_opens_filters_activates_and_cancels exceeded its 5s whole-workflow bound; \
+             look for pending session or reply-receiver cleanup",
+        );
+    }
+
+    async fn control_center_opens_filters_activates_and_cancels_scenario() {
         let root = temp_workspace("control-center");
         // Hermetic configuration root (Phase 24.5, task 8): without an
         // explicit root this test fell back to the real ~/.config/clay and
         // hung whenever that directory contains an init.js (reload evaluates
-        // the live user config). An empty init.js reloads cleanly and fast.
+        // the live user config). The sentinel typography proves the hermetic
+        // root — not ambient ~/.config/clay — is the generation source: an
+        // ambient fallback would load the default 20px monospace, not 21px.
         let config_root = temp_workspace("control-center-config");
-        fs::write(config_root.join("init.js"), "").unwrap();
+        fs::write(
+            config_root.join("init.js"),
+            "import { setTypography } from \"clay:theme\"; setTypography({ monospace: { families: [\"MartianMono Nerd Font\", \"monospace\"], size: 21 }, proportional: { families: [\"Noto Sans\", \"sans-serif\"], size: 17 }, ui: { families: [\"system-ui\"], size: 13 } });",
+        )
+        .unwrap();
         let mut config = super::super::ServerConfig::new(crate::ipc::IpcEndpoint::from_argument(
             "control-center-open",
         ));
@@ -7591,6 +7612,18 @@ await loadPackage("@clay/markdown");"#,
         assert!(
             saw_reload_diagnostic && saw_runtime_snapshot,
             "reload fanout must deliver the diagnostic and snapshot"
+        );
+        // The hermetic root (not ambient ~/.config/clay) was the reload
+        // source: the sentinel typography from its init.js is now live.
+        assert_eq!(
+            server
+                .runtime_generation
+                .active_typography()
+                .await
+                .monospace
+                .size,
+            21.0,
+            "reloaded generation must come from the hermetic config root"
         );
 
         // Reopening after the generation replacement yields a fresh session
@@ -7795,10 +7828,31 @@ await loadPackage("@clay/markdown");"#,
 
     #[tokio::test]
     async fn runtime_generation_replacement_cancels_open_control_center() {
+        // Plan 086 task 7: whole-workflow bound. A hang here means the
+        // replacement left a pending session or reply receiver; the timeout
+        // names that instead of waiting indefinitely.
+        timeout(
+            Duration::from_secs(5),
+            runtime_generation_replacement_cancels_open_control_center_scenario(),
+        )
+        .await
+        .expect(
+            "runtime_generation_replacement_cancels_open_control_center exceeded its 5s whole-workflow bound; \
+             look for pending session or reply-receiver cleanup",
+        );
+    }
+
+    async fn runtime_generation_replacement_cancels_open_control_center_scenario() {
         // Hermetic configuration root (Phase 24.5, task 8): same real-config
         // fallback hazard as control_center_opens_filters_activates_and_cancels.
+        // Sentinel typography proves the hermetic root is the generation
+        // source (ambient ~/.config/clay must never load).
         let config_root = temp_workspace("control-center-generation-config");
-        fs::write(config_root.join("init.js"), "").unwrap();
+        fs::write(
+            config_root.join("init.js"),
+            "import { setTypography } from \"clay:theme\"; setTypography({ monospace: { families: [\"MartianMono Nerd Font\", \"monospace\"], size: 21 }, proportional: { families: [\"Noto Sans\", \"sans-serif\"], size: 17 }, ui: { families: [\"system-ui\"], size: 13 } });",
+        )
+        .unwrap();
         let mut config = super::super::ServerConfig::new(crate::ipc::IpcEndpoint::from_argument(
             "control-center-generation",
         ));
@@ -7864,6 +7918,18 @@ await loadPackage("@clay/markdown");"#,
             saw_reload_diagnostic && saw_menu_close && saw_runtime_snapshot,
             "generation replacement must close the open menu and replay state"
         );
+        // The hermetic root (not ambient ~/.config/clay) was the reload
+        // source: the sentinel typography from its init.js is now live.
+        assert_eq!(
+            server
+                .runtime_generation
+                .active_typography()
+                .await
+                .monospace
+                .size,
+            21.0,
+            "replaced generation must come from the hermetic config root"
+        );
 
         // The reopened menu is stamped with the replacement generation and
         // gets a distinct session id.
@@ -7881,6 +7947,22 @@ await loadPackage("@clay/markdown");"#,
             panic!("expected reopened TransientMenuSnapshot");
         };
         assert_ne!(reopened.session_id, session_id);
+
+        // No pending session survives the replacement: a stale selection
+        // against the cancelled session id is a bounded diagnostic, never a
+        // reply from a live session or a hang.
+        connection
+            .send(&ClientMessage::MenuSelectionMove {
+                client_id: 11,
+                session_id,
+                delta: 1,
+            })
+            .await;
+        assert!(matches!(
+            connection.receive().await,
+            ServerMessage::RuntimeDiagnostic(ref diagnostic)
+                if diagnostic.code == "menu.unknown_session"
+        ));
         connection.drain_bounded().await;
         connection.close().await;
     }

@@ -6,7 +6,49 @@
 
 use std::path::Path;
 
+use masonry::accesskit::NodeId;
+use masonry::core::WidgetId;
+
 use crate::perf::budgets::TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS;
+
+/// Deterministic IDs for clay-owned synthetic accessibility nodes
+/// (TabList/Tab, live announcement, status lines, menu items/status).
+///
+/// Real widget IDs are small sequential integers (masonry's global counter
+/// starts at 1), so the high-bit prefix can never collide with a widget node.
+/// The owner is the retained widget that attaches the synthetic node, so IDs
+/// are stable across accessibility passes — the consumer never sees churn —
+/// and die with their owner (a replaced widget gets fresh IDs). Slot is a
+/// typed per-owner index; the 9-bit space is enough for every bounded list:
+/// tabs <= `MAX_ACTIVE_CONNECTIONS` (64), menu items <= `TRANSIENT_MENU_MAX_ITEMS` (256).
+pub(crate) const VIRTUAL_A11Y_NODE_PREFIX: u64 = 0xD000_0000_0000_0000;
+const VIRTUAL_A11Y_OWNER_MASK: u64 = 0x0000_7FFF_FFFF_FFFF;
+const VIRTUAL_A11Y_SLOT_BITS: u32 = 9;
+
+pub(crate) fn virtual_a11y_node_id(owner: WidgetId, slot: u16) -> NodeId {
+    assert!(
+        u64::from(slot) < (1u64 << VIRTUAL_A11Y_SLOT_BITS),
+        "virtual accessibility slot {slot} exceeds the 9-bit per-owner space"
+    );
+    NodeId::from(
+        VIRTUAL_A11Y_NODE_PREFIX
+            | ((owner.to_raw() & VIRTUAL_A11Y_OWNER_MASK) << VIRTUAL_A11Y_SLOT_BITS)
+            | u64::from(slot),
+    )
+}
+
+/// Per-owner slot namespaces (must be unique within one owner widget).
+pub(crate) mod virtual_a11y_slots {
+    // Shell: TabList = 1, live announcement = 2, Tab(i) = 3 + client_id.
+    pub(crate) const SHELL_TAB_LIST: u16 = 1;
+    pub(crate) const SHELL_ANNOUNCEMENT: u16 = 2;
+    pub(crate) const SHELL_TAB_BASE: u16 = 3;
+    // Editor / pane-document: status line = 1.
+    pub(crate) const STATUS: u16 = 1;
+    // Package region: status = 1, Item(i) = 2 + i (legacy numbering).
+    pub(crate) const REGION_MENU_STATUS: u16 = 1;
+    pub(crate) const REGION_MENU_ITEM_BASE: u16 = 2;
+}
 
 pub(crate) const ACCESSIBILITY_DISPLAY_NAME_MAX_CHARS: usize = 64;
 pub(crate) const ACCESSIBILITY_RECOVERY_SUMMARY_MAX_CHARS: usize =

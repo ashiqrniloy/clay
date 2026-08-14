@@ -908,3 +908,77 @@ fn phase24_5_keybinding_internals_stay_crate_private() {
         );
     }
 }
+
+#[test]
+fn plan086_virtual_accessibility_helpers_are_not_public_programmatic_surfaces() {
+    let root = repository_root();
+    let accessibility =
+        fs::read_to_string(root.join("src/editor/accessibility.rs")).expect("read accessibility");
+    assert!(
+        accessibility.contains("pub(crate) fn virtual_a11y_node_id"),
+        "virtual a11y ID derivation must stay crate-private"
+    );
+    assert!(
+        accessibility.contains("pub(crate) mod virtual_a11y_slots"),
+        "virtual a11y slot namespace must stay crate-private"
+    );
+    assert!(
+        !accessibility.contains("pub fn virtual_a11y_node_id")
+            && !accessibility.contains("pub mod virtual_a11y_slots"),
+        "virtual a11y helpers must not become bare-public Rust APIs"
+    );
+
+    for entry in fs::read_dir(root.join("src/server/ops")).expect("read server ops") {
+        let path = entry.expect("server ops entry").path();
+        if path.extension().and_then(|value| value.to_str()) != Some("rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read server ops source");
+        for internal_name in [
+            "virtual_a11y_node_id",
+            "VIRTUAL_A11Y_NODE_PREFIX",
+            "virtual_a11y_slots",
+        ] {
+            assert!(
+                !source.contains(internal_name),
+                "{} must not wrap accessibility internal {internal_name} in a deno_core op",
+                path.display()
+            );
+        }
+    }
+
+    for entry in fs::read_dir(root.join("runtime/js")).expect("read runtime/js") {
+        let path = entry.expect("runtime/js entry").path();
+        if !matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("js" | "ts")
+        ) {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read facade source");
+        for internal_name in [
+            "virtual_a11y_node_id",
+            "VIRTUAL_A11Y_NODE_PREFIX",
+            "virtual_a11y_slots",
+        ] {
+            assert!(
+                !source.contains(internal_name),
+                "{} must not expose accessibility internal {internal_name} to JavaScript",
+                path.display()
+            );
+        }
+    }
+
+    let registry = fs::read_to_string(root.join("docs/generated/clay-js-api-registry.json"))
+        .expect("read generated registry");
+    for internal_name in [
+        "virtual_a11y_node_id",
+        "VIRTUAL_A11Y_NODE_PREFIX",
+        "virtual_a11y_slots",
+    ] {
+        assert!(
+            !registry.contains(internal_name),
+            "generated registry must not contain accessibility internal {internal_name}"
+        );
+    }
+}

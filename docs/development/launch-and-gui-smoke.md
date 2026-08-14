@@ -43,6 +43,89 @@ cargo run -- client
 cargo run -- client
 ```
 
+## Live AT-SPI accessibility regression check (plan 086 task 4)
+
+On a Linux desktop session with a real AT-SPI bus, run the environment-gated
+live accessibility smoke — the same check that caught the P0 startup crash:
+
+```bash
+CLAY_LIVE_A11Y_SMOKE=1 cargo test --test security live_atspi_smoke::live_atspi_accessibility_smoke -- --ignored --exact --test-threads=1
+```
+
+Prerequisites (missing ones print an explicit skip reason — never a false
+pass):
+
+- A desktop session with a live AT-SPI bus (GNOME/KDE; `org.a11y.Bus`
+  reachable on the session bus).
+- Python 3 with the AT-SPI GI bindings (`python3-gi`, `gir1.2-atspi-2.0`).
+- The clay binaries built (`cargo build`); the test spawns the real
+  `clay server` and `clay client`.
+
+What it verifies against the real desktop accessibility stack:
+
+- The window starts, restores a two-tab window from an isolated
+  `layout.json`, and stays alive past startup (the pre-fix behavior was a
+  panic on the first tree within ~2 s).
+- The AT-SPI tree exposes the shell, the `Workspace tabs` TabList with both
+  restored cards (one selected), the active pane, the connected status
+  line, and the attached server-driven region.
+- Node identities stay stable across a second query (no per-pass virtual
+  node churn).
+- Every run uses a mode-700 temporary IPC/config home — never the ambient
+  `~/.config/clay`, `~/.local/share/clay`, or default socket — and kills
+  both child processes and removes the temp directory on every exit path.
+
+The deterministic `accesskit_consumer` unit tests (plan 086 task 3)
+remain the blocking coverage for input-driven tab/menu/status updates;
+this check (implemented in `tests/live_atspi_smoke.rs`) proves the real
+desktop adapter path stays alive.
+
+## Repeatable UI review harness (Plan 087 task 2)
+
+The repeatable live-artifact harness launches one fixed-size review state, waits
+for its Clay accessibility tree, captures a full-screen PNG through the native
+`xdg-desktop-portal` Screenshot API, and writes a Clay-only AT-SPI dump:
+
+```bash
+scripts/capture-ui-review.sh --fixture ui-review-default \
+  --output code-reviews/screenshots/plan087-ui-review/default
+scripts/capture-ui-review.sh --fixture ui-review-completion \
+  --output code-reviews/screenshots/plan087-ui-review/completion
+```
+
+`--fixture` accepts `ui-review-default`, `ui-review-loading`,
+`ui-review-error`, `ui-review-recovery`, `ui-review-completion`, and
+`ui-review-command-centre`. The fixtures live under
+`tests/fixtures/configuration/ui-review-*/`:
+
+| Fixture | State and capture step |
+|---|---|
+| `ui-review-default` | Empty config, Clay-owned welcome/shell baseline. |
+| `ui-review-loading` | Runtime SDUI loading-state fixture with label `Loading workspace…`; no timer or production-only hook is added. |
+| `ui-review-error` | Invalid theme specifier; Clay stays alive and exposes a sanitized `Runtime packages.not_installed` diagnostic. |
+| `ui-review-recovery` | Connects normally, stops only its private server, then captures `Disconnected`/recovery status. |
+| `ui-review-completion` | Loads `@clay/rust` and binds `Ctrl+Space`; focus editor, trigger completion, then press Enter in the terminal to capture. |
+| `ui-review-command-centre` | Binds global `Ctrl+Alt+P`; open the centered Command Centre, then press Enter in the terminal to capture. |
+
+Each run copies its named `init.js` into a mode-700 temporary
+`HOME/.config/clay`, uses a mode-700 temporary XDG config/data/socket root,
+creates only bounded fixture documents, and removes the launch root and raw
+process logs on exit. The script writes `instructions.md`, `metadata.txt`,
+`screenshot.png`, `accessibility.txt`, and `review.status` under the caller's
+output directory. A missing AT-SPI GI binding, live AT-SPI bus, interactive TTY,
+or portal Screenshot capability writes `UNRESOLVED` and exits 2; it never counts
+missing visual/accessibility tooling as a pass. `accessibility.txt` contains
+only nodes from the Clay application. The normal `smoke-gui` path remains the
+quick app-managed smoke; this wrapper uses explicit `clay server`/`clay client`
+arguments because review capture needs a caller-selected artifact directory,
+private socket, process cleanup, and an interaction checkpoint while the
+window remains open. Both paths use the existing `WINDOW_WIDTH`/`WINDOW_HEIGHT`
+logical-size constants (`900×600`).
+
+These PNGs are review artifacts, not GPU goldens or CI pixel assertions.
+Structural SDUI/accessibility tests remain the blocking automated layer; inspect
+both the image and the AT-SPI dump before recording a visual result.
+
 ## Default End-User Configuration
 
 The commands above launch the app or run dev-only smoke fixtures. The actual end-user product setup is a small `~/.config/clay/init.js` that loads Markdown defaults through the runtime-backed generic package loader and binds the Windows open-file command:

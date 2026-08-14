@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use masonry::accesskit::{Node, NodeId, Role};
+use masonry::accesskit::{Node, Role};
 use masonry::app::RenderRoot;
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, MutateCtx, NewWidget,
@@ -1255,15 +1255,14 @@ impl Widget for EditorWidget {
     ) {
         node.set_label(self.accessibility_label());
         // The reconciled SDUI tree's accessibility flows through the region
-        // child's scroll-viewport subtree. Include it only when a sidebar tree
-        // is present so an empty region doesn't contribute an empty group;
-        // package fixed panels flow through the `panel_host` child (step 13b),
-        // and transient overlays/menus flow through the `overlay_host` child
-        // (step 13f).
+        // child's scroll-viewport subtree. The region is ALWAYS listed, even
+        // when no sidebar tree is present: Masonry's accessibility walk emits
+        // every `children_ids` child and the consumer rejects any node the
+        // editor does not attach (the startup crash reproduced in plan 086
+        // task 2), and empty group children are the same convention the
+        // panel/overlay hosts already follow.
         let mut children = Vec::new();
-        if self.sdui.sidebar_geometry(ctx.size()).is_some() {
-            children.push(self.region.id().into());
-        }
+        children.push(self.region.id().into());
         children.push(self.panel_host.id().into());
         children.push(self.overlay_host.id().into());
         let metrics = self
@@ -1271,7 +1270,10 @@ impl Widget for EditorWidget {
             .typography()
             .ui_text_metrics(FontRole::Ui, UiTextVariant::Status);
         let size = ctx.size();
-        let status_id = NodeId::from(masonry::core::WidgetId::next());
+        let status_id = crate::editor::accessibility::virtual_a11y_node_id(
+            ctx.widget_id(),
+            crate::editor::accessibility::virtual_a11y_slots::STATUS,
+        );
         let observation = self.status_observation();
         let mut status = Node::new(Role::Status);
         status.set_label(

@@ -220,7 +220,7 @@ The driver lives in `src/driver/` (Phase 22.7 extraction — see the
   arrives).
 - The shell mirrors this as `tabs: BTreeMap<ClientId, TabChrome>` +
   `active_tab`; see the masonry-shell page for `install_tab`,
-  `set_active_tab`, `tab_for_chrome`, and zero-size inactive retention.
+  `set_active_tab`, `tab_for_chrome`, and stashed inactive retention.
 - `mount_tab` (new-tab flow): connect a fresh session already bound with
   `TabCommand::New(workspace_root)` → install + activate the chrome → spawn the
   per-tab event bridge. The bootstrap tab binds before `run_editor` mounts it;
@@ -500,7 +500,7 @@ tests: `pane_commands_only_mutate_the_active_tab`,
 
 - [Driver Module Map](driver.md) — the `src/driver/` tab subsystem
   (lifecycle, reconcile, restore).
-- [Masonry Shell Runtime](masonry-shell.md) — tab chrome, tab bar, zero-size
+- [Masonry Shell Runtime](masonry-shell.md) — tab chrome, tab bar, stashed
   inactive retention, per-tab routing queries.
 - [Multi-Document Sessions](multi-document-sessions.md) — reconnect document
   identity retention and re-open.
@@ -558,8 +558,11 @@ changed in tasks 6–7 — guards only.
 The shell exposes `Role::TabList` (`Workspace tabs`) with one `Role::Tab`
 per card (sanitized workspace basename, `selected` on the active card) when
 2+ cards exist; single-tab windows keep the old tree. Inactive tabs' pane
-hosts are unreachable from the a11y root. Announcements (single persistent
-polite `Status` node): `Switched to tab {position}: {name}` /
+hosts are unreachable from the a11y root: they remain registered for
+Masonry lifecycle/reconnect continuity but are stashed during layout. Shell
+TabList, Tab, and announcement IDs use the retained shell owner plus fixed
+virtual slots, so redraws do not churn assistive-technology nodes.
+Announcements (single persistent polite `Status` node): `Switched to tab {position}: {name}` /
 `Opened tab {position}: {name}` / `Closed tab {position}: {name};
 {n} tabs open` — fired only from user-initiated driver paths after a REAL
 change (`activate_tab` after `switch_tab -> true`, `mount_tab`'s single

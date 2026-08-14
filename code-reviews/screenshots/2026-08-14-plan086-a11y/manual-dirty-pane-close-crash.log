@@ -1,0 +1,13 @@
+Plan 086 task 11 manual Linux evidence — sanitized excerpt
+Date: 2026-08-14
+Flow: isolated manual instance; type into restored a.txt; press Ctrl+Alt+W (dirty active pane close)
+
+Observed:
+  clay client IPC event: FileOperationFailed { code: DirtyDocument, ... document_id: Some(4) }
+  thread 'main' panicked at accesskit_consumer-0.31.0/src/tree.rs:34:13:
+  Focused ID #4 is not in the node list
+  thread '...accesskit_atspi_common...' panicked with PoisonError
+
+Result: FAIL/BLOCKER. Client exited; isolated server remained alive.
+Control flow: clean active-pane close on a fresh relaunch removed one pane, left the survivor visible, announced "Closed pane; 1 pane remains", and kept client/server alive.
+No document contents or host paths retained here.

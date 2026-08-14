@@ -63,6 +63,14 @@ ligature glyphs, IME feel, native dialogs, focus, timing.
 | Pane document views / concurrent modes / duplicate-open routing | 13, 03, 09 |
 | Anything user-visible | 01 always (launch gate) |
 
+## Plan 086 task 11 Linux execution record (2026-08-14)
+
+Real Linux/Wayland execution used isolated `clay server <temp-socket>` and `clay client <temp-socket>` processes with mode-700 temporary HOME/XDG roots, a private socket, and a v2 two-tab/two-pane layout. The live AT-SPI tree was queryable and showed deterministic TabList/Tab, pane, status, menu, and announcement nodes. Representative stable IDs were shell TabList `14987979559889014273`, announcement `14987979559889014274`, cards `14987979559889014276/14277`, and Control Center status/items beginning `14987979559889054209`.
+
+- **PASS:** representative launch/status, restored multi-document panes, Control Center open/filter/cancel, split creation/clean close, tab selection/close, bounded announcements, stable virtual object paths, and no-path/ambient-config negative checks. Module-specific records: [01](01-launch-and-connection.md#linux-execution-record-plan-086-task-11-2026-08-14), [03](03-files-and-workspace.md#linux-execution-record-plan-086-task-11-2026-08-14), [10](10-keybindings-and-commands.md#linux-execution-record-plan-086-task-11-2026-08-14), [13](13-window-splits.md#linux-execution-record-plan-086-task-11-2026-08-14), [14](14-tabs.md#linux-execution-record-plan-086-task-11-2026-08-14).
+- **FAIL/BLOCKER:** dirty active-pane close crashed the client with `Focused ID #4 is not in the node list` in `accesskit_consumer`; isolated server survived. Evidence is retained under `code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log` and is not a false pass.
+- **BLOCKED:** native dialog selection, observer/restart/local-fallback keyboard flows, and full quit/relaunch persistence were not manually re-run because this host's window-targeting/portal backend cannot safely target Clay controls; automated coverage remains separate.
+
 ## Conventions
 
 - Steps are numbered `<module><step>` (e.g. `E3`) so failures can cite them.
