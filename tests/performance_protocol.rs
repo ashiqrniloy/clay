@@ -8,6 +8,7 @@ use clay::{
         baselines::representative_sdui_tree,
         budgets::{
             BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, CLIENT_EDIT_PAYLOAD_BUDGET_BYTES,
+            COMPLETION_RECENCY_MAX_ITEM_CHARS, COMPLETION_RECENCY_MAX_ITEMS,
             COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
             DECORATION_NEAR_VIEWPORT_GUARD_BYTES, DECORATION_PAYLOAD_BUDGET_BYTES,
             DIAGNOSTIC_PAYLOAD_BUDGET_BYTES, DOCUMENT_ANALYSIS_INPUT_MAX_BYTES,
@@ -16,7 +17,9 @@ use clay::{
             DOCUMENT_ANALYSIS_MAX_TEXT_BYTES_PER_WORKER, DOCUMENT_ANALYSIS_MAX_WORKERS,
             DOCUMENT_ANALYSIS_OUTPUT_MAX_BYTES, DOCUMENT_ANALYSIS_OUTPUT_MAX_EVENTS,
             DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES, EDIT_ACK_PAYLOAD_BUDGET_BYTES,
-            INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS,
+            INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+            INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES,
+            LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS,
             LANGUAGE_INTELLIGENCE_RESULT_PAYLOAD_BUDGET_BYTES, LANGUAGE_SERVER_MAX_SESSIONS,
             LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES, LANGUAGE_SERVER_STDERR_BUDGET_BYTES,
             MAX_OPENABLE_FILE_BYTES, PREVIOUS_BEHAVIOR_GRACE_MAX_TRANSACTIONS,
@@ -111,6 +114,7 @@ fn markdown_parse_update_from_notification(
         syntax_tree_delta: Some("windowed:visible".to_string()),
         decoration_updates: Vec::new(),
         diagnostic_update: None,
+        folding_update: None,
     }
 }
 
@@ -349,6 +353,7 @@ fn combined_parse_update_stays_within_incremental_payload_budget() {
                 provenance,
             }],
         }),
+        folding_update: None,
     };
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&update)
         .expect("combined update serializes")
@@ -439,6 +444,11 @@ fn completion_request_payload_stays_bounded() {
         replacement_range: CompletionReplacementRange::new(10, 12),
         trigger: CompletionTrigger::Character(".".to_string()),
         provider_generation: 2,
+        recent_completions: vec![
+            "r".repeat(COMPLETION_RECENCY_MAX_ITEM_CHARS);
+            COMPLETION_RECENCY_MAX_ITEMS
+        ]
+        .into_boxed_slice(),
     };
     let message = ClientMessage::CompletionRequest { request };
     let payload = payload_len(&codec.encode_client_message(&message).unwrap());
@@ -735,6 +745,11 @@ fn first_party_decoration_payloads_stay_within_budget_per_language() {
             !update.decoration_updates.is_empty(),
             "{label} emits decorations"
         );
+        let update_budget = if update.folding_update.is_some() {
+            INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES
+        } else {
+            INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES
+        };
         for decoration in &update.decoration_updates {
             let decoration_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(decoration)
                 .unwrap_or_else(|error| panic!("serialize {label} decorations: {error}"))
@@ -745,8 +760,14 @@ fn first_party_decoration_payloads_stay_within_budget_per_language() {
                 .unwrap_or_else(|error| panic!("serialize {label} update: {error}"))
                 .len();
 
-            assert!(decoration_bytes <= DECORATION_PAYLOAD_BUDGET_BYTES);
-            assert!(update_bytes <= INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES);
+            assert!(
+                decoration_bytes <= DECORATION_PAYLOAD_BUDGET_BYTES,
+                "{label} decoration payload {decoration_bytes} exceeds {DECORATION_PAYLOAD_BUDGET_BYTES}"
+            );
+            assert!(
+                update_bytes <= update_budget,
+                "{label} parse update {update_bytes} exceeds {update_budget}"
+            );
         }
         assert!(text.len() <= SYNTAX_CACHE_BUDGET_BYTES);
     }
@@ -814,6 +835,7 @@ async fn first_party_open_parse_does_not_block_initial_render_per_language() {
                         syntax_tree_delta: None,
                         decoration_updates: Vec::new(),
                         diagnostic_update: None,
+                        folding_update: None,
                     })
                 },
             )
@@ -925,6 +947,8 @@ fn fake_server_bridge_matrix_stays_within_deterministic_latency_budget() {
     let started = Instant::now();
     let output = std::process::Command::new("node")
         .args([
+            "--import",
+            "./tests/fixtures/lsp/register-lsp-shared.mjs",
             "--test",
             "tests/fixtures/lsp/fake-server/fake-server.test.mjs",
             "tests/fixtures/lsp/fake-server/matrix.test.mjs",

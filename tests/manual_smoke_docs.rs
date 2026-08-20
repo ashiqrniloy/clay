@@ -884,6 +884,7 @@ fn plan086_live_atspi_smoke_command_and_prerequisites_are_documented() {
         "gir1.2-atspi-2.0",
         "mode-700 temporary IPC/config home",
         "Workspace tabs",
+        "EditableText",
         "tests/live_atspi_smoke.rs",
         "CLAY_LIVE_A11Y_SMOKE",
     ] {
@@ -905,6 +906,46 @@ fn plan086_live_atspi_smoke_command_and_prerequisites_are_documented() {
 }
 
 #[test]
+fn plan089_live_multi_window_scale_smoke_and_targeting_prerequisites_are_documented() {
+    let launch_doc = launch_smoke_doc();
+    for expected in [
+        "Plan 089 Linux multi-window, DPI, font-scale, and Wayland smoke",
+        "CLAY_LIVE_WINDOW_SMOKE=1 cargo test --test security",
+        "live_atspi_smoke::live_multi_window_scale_smoke",
+        "two real Clay clients",
+        "900×600 logical window",
+        "Rescale(2.0)",
+        "physical 1800×1200",
+        "theme.setTypography",
+        "WAYLAND_DISPLAY",
+        "computer-use-linux doctor",
+        "computer-use-linux setup-window-targeting",
+        "can_query_windows",
+        "can_focus_windows",
+        "org.freedesktop.DBus.Error.ServiceUnknown",
+        "portal coordinates and unscoped chords must not be used",
+        "UNRESOLVED",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "Plan 089 platform docs must contain `{expected}`"
+        );
+    }
+
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/configuration/ui-review-large-typography/init.js");
+    let fixture_text = std::fs::read_to_string(&fixture)
+        .unwrap_or_else(|error| panic!("read {}: {error}", fixture.display()));
+    assert!(
+        fixture_text.contains("setTypography")
+            && fixture_text.contains("size: 24")
+            && fixture_text.contains("size: 20")
+            && fixture_text.contains("size: 21"),
+        "large typography review fixture must use the complete three-profile API"
+    );
+}
+
+#[test]
 fn plan087_ui_review_harness_command_and_prerequisites_are_documented() {
     let launch_doc = launch_smoke_doc();
     let observability_doc = wiki_doc("docs/development/ui-observability.md");
@@ -917,6 +958,7 @@ fn plan087_ui_review_harness_command_and_prerequisites_are_documented() {
         "ui-review-loading",
         "ui-review-error",
         "ui-review-recovery",
+        "ui-review-large-typography",
         "ui-review-completion",
         "ui-review-command-centre",
         "screenshot.png",
@@ -947,8 +989,10 @@ fn plan087_ui_review_harness_command_and_prerequisites_are_documented() {
         "ui-review-loading",
         "ui-review-error",
         "ui-review-recovery",
+        "ui-review-large-typography",
         "ui-review-completion",
         "ui-review-command-centre",
+        "ui-review-rust",
     ] {
         let path = format!(
             "{}/tests/fixtures/configuration/{fixture}/init.js",
@@ -976,6 +1020,7 @@ fn plan087_ui_review_harness_command_and_prerequisites_are_documented() {
         "Ctrl+Space",
         "Ctrl+Alt+P",
         "900×600",
+        "ui-review-large-typography",
     ] {
         assert!(
             script.contains(expected),
@@ -985,5 +1030,137 @@ fn plan087_ui_review_harness_command_and_prerequisites_are_documented() {
     assert!(
         !script.contains("cargo run -- smoke-gui"),
         "UI review wrapper must not create a second Cargo/build target path"
+    );
+}
+
+#[test]
+fn check_script_reports_artifacts_without_deleting_or_masking_failures() {
+    let script_source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/check.sh");
+    let root =
+        std::env::temp_dir().join(format!("clay-build-artifact-report-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("scripts")).expect("create report test root");
+    let script = root.join("scripts/check.sh");
+    std::fs::copy(&script_source, &script).expect("copy check wrapper");
+
+    let run_report = || {
+        std::process::Command::new("bash")
+            .arg(&script)
+            .arg("report")
+            .current_dir(&root)
+            .output()
+            .expect("run artifact report")
+    };
+
+    let missing = run_report();
+    assert!(
+        missing.status.success(),
+        "missing target must not fail report"
+    );
+    let missing_stdout = String::from_utf8_lossy(&missing.stdout);
+    assert!(missing_stdout.contains("target: missing"));
+    assert!(missing_stdout.contains("debug-deps: missing"));
+    assert!(missing_stdout.contains("debug-incremental: missing"));
+
+    std::fs::create_dir_all(root.join("target/debug/deps")).expect("create deps report fixture");
+    std::fs::create_dir_all(root.join("target/debug/incremental"))
+        .expect("create incremental report fixture");
+    let present = run_report();
+    assert!(
+        present.status.success(),
+        "present target must not fail report"
+    );
+    let present_stdout = String::from_utf8_lossy(&present.stdout);
+    assert!(present_stdout.contains("target: "));
+    assert!(present_stdout.contains("debug-deps: "));
+    assert!(present_stdout.contains("debug-incremental: "));
+    assert!(present_stdout.contains("executable files (target/debug/deps): 0"));
+
+    let ci = wiki_doc(".github/workflows/ci.yml");
+    let docs = wiki_doc("docs/development/build-and-test.md");
+    let script_text = wiki_doc("scripts/check.sh");
+    assert!(ci.contains("if: always()") && ci.contains("scripts/check.sh report"));
+    for expected in [
+        "report)",
+        "report_artifacts",
+        "target/debug/deps",
+        "target/debug/incremental",
+        "advisory; no cleanup performed",
+    ] {
+        assert!(
+            script_text.contains(expected),
+            "artifact report must retain marker `{expected}`"
+        );
+    }
+    for expected in [
+        "50 GiB",
+        "20 GiB",
+        "cargo clean --profile debugging",
+        "Never set `CARGO_TARGET_DIR`",
+    ] {
+        assert!(
+            docs.contains(expected),
+            "build docs must retain cleanup marker `{expected}`"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_script_pins_quick_and_full_gates_and_ci_parity() {
+    let script = wiki_doc("scripts/check.sh");
+
+    for expected in [
+        "quick)",
+        "full)",
+        "cargo fmt --check",
+        "cargo test --lib --quiet",
+        "cargo audit",
+        "cargo check --all-targets",
+        "cargo clippy --all-targets -- -D warnings",
+        "cargo test --all-targets --quiet",
+        "cargo bench --no-run",
+        "flock 9",
+        "target/.clay-full-check.lock",
+        "set -eu",
+    ] {
+        assert!(
+            script.contains(expected),
+            "scripts/check.sh must keep marker `{expected}`"
+        );
+    }
+
+    // Full-gate stage order within the `full)` branch: audit, fmt, check,
+    // clippy, test, bench compile — never reordered or parallelized.
+    let full_branch = &script[script.find("full)").expect("full branch")..];
+    let mut pos = 0;
+    for stage in [
+        "cargo audit",
+        "cargo fmt --check",
+        "cargo check --all-targets",
+        "cargo clippy --all-targets -- -D warnings",
+        "cargo test --all-targets --quiet",
+        "cargo bench --no-run",
+    ] {
+        let at = full_branch
+            .find(stage)
+            .unwrap_or_else(|| panic!("full branch must run stage `{stage}`"));
+        assert!(
+            at >= pos,
+            "full branch stages must be serial in gate order: `{stage}`"
+        );
+        pos = at;
+    }
+
+    assert!(
+        !script.contains("CARGO_TARGET_DIR"),
+        "check wrapper must reuse the repository target/"
+    );
+
+    let ci = wiki_doc(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("scripts/check.sh full"),
+        "CI must invoke the same full gate script"
     );
 }

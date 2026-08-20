@@ -16,21 +16,22 @@ export const DEFAULT_WINDOWED_MARKDOWN_POLICY = Object.freeze({
   timeoutMs: 5000
 });
 
-const STYLE_TOKENS = Object.freeze({
-  strong: "markup.strong",
-  emphasis: "markup.emphasis",
-  inlineCode: "markup.inline-code",
-  codeBlock: "markup.code-block",
-  listMarker: "markup.list-marker"
+const TOKENS = Object.freeze({
+  strong: Object.freeze({ tokenType: "Paragraph", modifiers: Object.freeze(["Bold"]) }),
+  emphasis: Object.freeze({ tokenType: "Paragraph", modifiers: Object.freeze(["Italic"]) }),
+  inlineCode: Object.freeze({ tokenType: "CodeSpan", modifiers: Object.freeze([]), fontRole: "monospace" }),
+  codeBlock: Object.freeze({ tokenType: "CodeBlock", modifiers: Object.freeze([]), fontRole: "monospace" }),
+  listMarker: Object.freeze({ tokenType: "ListItem", modifiers: Object.freeze([]) }),
+  link: Object.freeze({ tokenType: "Link", modifiers: Object.freeze([]) })
 });
 
-const HEADING_STYLE_TOKENS = Object.freeze({
-  1: "markup.heading.1",
-  2: "markup.heading.2",
-  3: "markup.heading.3",
-  4: "markup.heading.4",
-  5: "markup.heading.5",
-  6: "markup.heading.6"
+const HEADING_TOKENS = Object.freeze({
+  1: Object.freeze({ tokenType: "Heading1", modifiers: Object.freeze([]) }),
+  2: Object.freeze({ tokenType: "Heading2", modifiers: Object.freeze([]) }),
+  3: Object.freeze({ tokenType: "Heading3", modifiers: Object.freeze([]) }),
+  4: Object.freeze({ tokenType: "Heading4", modifiers: Object.freeze([]) }),
+  5: Object.freeze({ tokenType: "Heading5", modifiers: Object.freeze([]) }),
+  6: Object.freeze({ tokenType: "Heading6", modifiers: Object.freeze([]) })
 });
 
 function utf8ByteLengthForCodePoint(codePoint) {
@@ -176,15 +177,37 @@ function pushSpan(spans, span, viewport) {
   });
 }
 
-function syntaxSpan(source, codeUnitStart, codeUnitEnd, styleToken, priority) {
+function tokenKey(token) {
+  return `${token.tokenType}:${(token.modifiers ?? []).join(",")}`;
+}
+
+function classifyHref(href) {
+  const text = String(href ?? "").trim();
+  if (!text) return undefined;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(text) || text.startsWith("/") || text.startsWith("\\") || text.includes(":") || text.includes("..") || text.startsWith("#")) {
+    return { kind: "displayOnly", text };
+  }
+  return { kind: "workspacePath", relativePath: text.replace(/\\/g, "/") };
+}
+
+function childHref(child) {
+  if (typeof child?.attrGet === "function") {
+    return child.attrGet("href");
+  }
+  const attrs = Array.isArray(child?.attrs) ? child.attrs : [];
+  const href = attrs.find((entry) => Array.isArray(entry) && entry[0] === "href");
+  return href?.[1];
+}
+
+function syntaxSpan(source, codeUnitStart, codeUnitEnd, token, priority, extras = {}) {
   return {
     byteStart: codeUnitToAbsoluteByte(source, codeUnitStart),
     byteEnd: codeUnitToAbsoluteByte(source, codeUnitEnd),
-    kind: "syntax",
-    styleToken,
-    ...(styleToken === STYLE_TOKENS.inlineCode || styleToken === STYLE_TOKENS.codeBlock
-      ? { fontRole: "monospace" }
-      : {}),
+    kind: extras.kind ?? "syntax",
+    tokenType: token.tokenType,
+    modifiers: token.modifiers ?? [],
+    ...(token.fontRole ? { fontRole: token.fontRole } : {}),
+    ...(extras.target ? { target: extras.target } : {}),
     priority
   };
 }
@@ -207,7 +230,7 @@ function addHeadingSpan(spans, token, source, viewport) {
   const spanEnd = Math.max(heading.start + match[1].length + match[2].length, contentEnd);
   pushSpan(
     spans,
-    syntaxSpan(source, heading.start + match[1].length, spanEnd, HEADING_STYLE_TOKENS[depth], 90 - depth),
+    syntaxSpan(source, heading.start + match[1].length, spanEnd, HEADING_TOKENS[depth], 90 - depth),
     viewport
   );
 }
@@ -219,7 +242,7 @@ function addFenceSpan(spans, token, source, viewport) {
   const openingLine = lineText(source, token.map[0]);
   const marker = typeof token.markup === "string" && token.markup.length > 0 ? token.markup : null;
   if (marker && !openingLine.text.slice(firstNonWhitespaceOffset(openingLine.text)).startsWith(marker)) return;
-  pushSpan(spans, syntaxSpan(source, range.start, range.end, STYLE_TOKENS.codeBlock, 70), viewport);
+  pushSpan(spans, syntaxSpan(source, range.start, range.end, TOKENS.codeBlock, 70), viewport);
 }
 
 function addListMarkerSpan(spans, token, source, viewport) {
@@ -232,7 +255,7 @@ function addListMarkerSpan(spans, token, source, viewport) {
   const markerOffset = markerMatch[0].search(/[-+*\d]/);
   const markerStart = line.start + markerOffset;
   const markerEnd = line.start + markerMatch[0].trimEnd().length;
-  pushSpan(spans, syntaxSpan(source, markerStart, markerEnd, STYLE_TOKENS.listMarker, 80), viewport);
+  pushSpan(spans, syntaxSpan(source, markerStart, markerEnd, TOKENS.listMarker, 80), viewport);
 }
 
 function inlineSourceBase(token, source) {
@@ -279,9 +302,9 @@ function advanceCursorToContent(inlineContent, content, cursor) {
   return start < 0 ? cursor : start + content.length;
 }
 
-function popInlineStack(stack, style) {
+function popInlineStack(stack, token) {
   for (let index = stack.length - 1; index >= 0; index -= 1) {
-    if (stack[index].style === style) {
+    if (stack[index].token === token) {
       return stack.splice(index, 1)[0];
     }
   }
@@ -300,25 +323,38 @@ function walkMarkdownItInlineChildren(token, source, viewport, spans) {
   for (const child of token.children) {
     if (!child || child.hidden) continue;
 
-    if (child.type === "strong_open" || child.type === "em_open") {
-      const style = child.type === "strong_open" ? STYLE_TOKENS.strong : STYLE_TOKENS.emphasis;
-      const marker = markerForInlineToken(child, child.type === "strong_open" ? "**" : "*");
+    if (child.type === "strong_open" || child.type === "em_open" || child.type === "link_open") {
+      const token = child.type === "strong_open"
+        ? TOKENS.strong
+        : child.type === "em_open"
+          ? TOKENS.emphasis
+          : TOKENS.link;
+      const marker = markerForInlineToken(child, child.type === "strong_open" ? "**" : child.type === "em_open" ? "*" : "[");
       const openStart = inlineContent.indexOf(marker, cursor);
       if (openStart >= 0) {
-        stack.push({ style, marker, start: openStart });
+        stack.push({ token, marker, start: openStart, href: childHref(child) });
         cursor = openStart + marker.length;
       }
       continue;
     }
 
-    if (child.type === "strong_close" || child.type === "em_close") {
-      const style = child.type === "strong_close" ? STYLE_TOKENS.strong : STYLE_TOKENS.emphasis;
-      const opener = popInlineStack(stack, style);
-      const marker = markerForInlineToken(child, opener?.marker ?? (child.type === "strong_close" ? "**" : "*"));
+    if (child.type === "strong_close" || child.type === "em_close" || child.type === "link_close") {
+      const token = child.type === "strong_close"
+        ? TOKENS.strong
+        : child.type === "em_close"
+          ? TOKENS.emphasis
+          : TOKENS.link;
+      const opener = popInlineStack(stack, token);
+      const fallbackMarker = child.type === "strong_close" ? "**" : child.type === "em_close" ? "*" : "]";
+      const marker = markerForInlineToken(child, opener?.marker === "[" ? "]" : opener?.marker ?? fallbackMarker);
       const closeStart = inlineContent.indexOf(marker, cursor);
       if (opener && closeStart >= 0) {
         const end = closeStart + marker.length;
-        pushSpan(spans, syntaxSpan(source, base + opener.start, base + end, style, style === STYLE_TOKENS.strong ? 60 : 50), viewport);
+        const priority = token === TOKENS.strong ? 60 : token === TOKENS.emphasis ? 50 : 80;
+        const extras = token === TOKENS.link
+          ? { kind: "link", target: classifyHref(opener.href) }
+          : {};
+        pushSpan(spans, syntaxSpan(source, base + opener.start, base + end, token, priority, extras), viewport);
         cursor = end;
       }
       continue;
@@ -329,7 +365,7 @@ function walkMarkdownItInlineChildren(token, source, viewport, spans) {
       const content = String(child.content ?? "");
       const range = findDelimitedRange(inlineContent, marker, content, cursor);
       if (range) {
-        pushSpan(spans, syntaxSpan(source, base + range.start, base + range.end, STYLE_TOKENS.inlineCode, 65), viewport);
+        pushSpan(spans, syntaxSpan(source, base + range.start, base + range.end, TOKENS.inlineCode, 65), viewport);
         cursor = range.end;
       }
       continue;
@@ -346,7 +382,7 @@ function sortSpans(spans) {
     right.priority - left.priority ||
     left.byteStart - right.byteStart ||
     left.byteEnd - right.byteEnd ||
-    left.styleToken.localeCompare(right.styleToken)
+    tokenKey(left).localeCompare(tokenKey(right))
   );
   return spans;
 }
@@ -356,7 +392,7 @@ function dedupeSortedSpans(spans) {
   const deduped = [];
   let previousKey = null;
   for (const span of spans) {
-    const key = `${span.byteStart}:${span.byteEnd}:${span.kind}:${span.styleToken}:${span.priority}`;
+    const key = `${span.byteStart}:${span.byteEnd}:${span.kind}:${tokenKey(span)}:${span.priority}`;
     if (key !== previousKey) deduped.push(span);
     previousKey = key;
   }

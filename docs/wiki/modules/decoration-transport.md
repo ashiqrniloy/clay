@@ -4,13 +4,16 @@
 
 - `src/protocol/decorations.rs`
 - `src/server/decorations.rs`
+- `src/server/folding.rs`
 - `src/server/ops/decorations.rs`
 - `runtime/js/decorations.js`
 - `src/client/mod.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/editor/layout.rs`
 - `src/masonry_editor.rs`
+- `src/masonry_pane_document.rs`
 - `tests/decoration_transport.rs`
+- `tests/decoration_intent_authority.rs`
 - `packages/markdown/dist/parser.js`
 - `src/server/syntax.rs`
 - `runtime/js/web-tree-sitter-host.ts`
@@ -18,7 +21,7 @@
 
 ## Overview
 
-The decoration transport carries package-produced inline editor decorations as bounded inert data. Phase 18.17 range diagnostics use a parallel `DiagnosticSet` transport and client cache (see [Range Diagnostics](range-diagnostics.md)); they remain an additive paint layer and must not be folded into `DecorationSet` for source-keyed lifecycle. Phase 18.16.5 adds an optional closed document font-role override for syntax/semantic spans; it remains separate from user-owned concrete font profiles. The server validates a `DecorationSet` for document version, viewport/chunk range, payload size, package provenance, known style tokens/kinds, and `render-decorations` permission before it crosses the normal `rkyv` protocol codec. Phase 18 exposes the public `decorations.serverPublishDecorations` facade/op contract so server-side packages can publish validated spans without calling raw Deno ops. Phase 18.18 moves first-party Markdown's default decoration role to native Tree-sitter; its package parser uses this path only as Tier 3 fallback. Phase 18.10 Tree-sitter syntax highlighting established this shared transport; Phase 18.16 reuses it for all syntax-engine tiers: native Tree-sitter and the web-tree-sitter host adapter produce capture records, while the shared mapper emits Phase 18.15 `TokenType` + `Modifiers` spans; Tier 3 package-JavaScript handlers publish through the same validation path. The transport enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion/publication, and the parse coordinator publishes only inert updates. Phase 18.5 treats each viewport-bounded `DecorationSet` as a decoration chunk: server/runtime state and the editor retain only visible or near-viewport chunks under `SYNTAX_CACHE_BUDGET_BYTES` while each IPC payload remains under `DECORATION_PAYLOAD_BUDGET_BYTES`. The client stores validated chunks and applies them in the native editor render path without invoking package JavaScript. When scrolling changes the visible byte range, `EditorWidget` sends one deduplicated best-effort `DecorationViewportRequest` while reserving one outbound queue slot for workspace actions, edits, and other user intent; the server schedules the already-registered document-selected native grammar against that bounded nonzero window, so large files gain decoration chunks incrementally instead of relying on the opening 4 KiB window.
+The decoration transport carries package-produced inline editor decorations as bounded inert data. Phase 18.17 range diagnostics use a parallel `DiagnosticSet` transport and client cache (see [Range Diagnostics](range-diagnostics.md)); they remain an additive paint layer and must not be folded into `DecorationSet` for source-keyed lifecycle. Phase 18.16.5 adds an optional closed document font-role override for syntax/semantic spans; it remains separate from user-owned concrete font profiles. The server validates a `DecorationSet` for document version, viewport/chunk range, payload size, package provenance, known style tokens/kinds, and `render-decorations` permission before it crosses the normal `rkyv` protocol codec. Phase 18 exposes the public `decorations.serverPublishDecorations` facade/op contract so server-side packages can publish validated spans without calling raw Deno ops. Phase 18.18 moves first-party Markdown's default decoration role to native Tree-sitter; its package parser uses this path only as Tier 3 fallback. Phase 18.10 Tree-sitter syntax highlighting established this shared transport; Phase 18.16 reuses it for all syntax-engine tiers: native Tree-sitter and the web-tree-sitter host adapter produce capture records, while the shared mapper emits Phase 18.15 `TokenType` + `Modifiers` spans; Tier 3 package-JavaScript handlers publish through the same validation path. Phase 28 extends the same transport with Link targets and inert InlayHint overlays; packages publish data while Clay owns hover/activate intent, tooltip chrome, and overlay paint. The transport enforces `DECORATION_PAYLOAD_BUDGET_BYTES` before cache insertion/publication, and the parse coordinator publishes only inert updates. Phase 18.5 treats each viewport-bounded `DecorationSet` as a decoration chunk: server/runtime state and the editor retain only visible or near-viewport chunks under `SYNTAX_CACHE_BUDGET_BYTES` while each IPC payload remains under `DECORATION_PAYLOAD_BUDGET_BYTES`. The client stores validated chunks and applies them in the native editor render path without invoking package JavaScript. When scrolling changes the visible byte range, `EditorWidget` sends one deduplicated best-effort `DecorationViewportRequest` while reserving one outbound queue slot for workspace actions, edits, and other user intent; the server schedules the already-registered document-selected native grammar against that bounded nonzero window, so large files gain decoration chunks incrementally instead of relying on the opening 4 KiB window.
 
 ## Responsibilities
 
@@ -29,6 +32,7 @@ The decoration transport carries package-produced inline editor decorations as b
 - Provide the runtime-backed `clay:decorations` facade and explicit `op_clay_decorations_publish_decorations` wrapper for package-side publication.
 - Route `ServerMessage::DecorationSet` through the client connection event loop into `EditorWidget::apply_connection_event`.
 - Store current validated spans in `EditorSurface` and normalize viewport-bounded syntax/semantic presentation runs into cached Parley foreground brushes for `LayoutState::paint_text`.
+- Preserve optional `DecorationTarget` and `InlayHintPayload` fields on Link/InlayHint spans; these remain inert until Clay's client intent/overlay paths consume them.
 
 ## Primitive Coverage
 
@@ -53,6 +57,37 @@ The decoration transport carries package-produced inline editor decorations as b
 Phase 18.20 semantic intelligence reuses this path directly. `DecorationSpan::from_vocabulary` and `serverPublishDecorations({ kind: "semantic", tokenType, modifiers })` publish scope-less two-axis spans; legacy `styleToken` input remains compatible. `StyleRegistry` resolves both Syntax and Semantic through the same per-`TokenType` color table, while additive chunks retain syntax beneath semantic refinements. The `language-server` permission does not bypass `render-decorations`.
 
 Phase 18.21 LSP bridge packages publish semantic tokens through the document-analysis worker's output channel. The worker receives LSP `textDocument/semanticTokens` responses (full or delta), converts them to Clay vocabulary via `mapping.js`, and routes the resulting `DecorationSet` through `validate_decoration_publication`. Semantic token publication is background/viewport-bounded work; paint consumes only cached validated inert state.
+
+## Phase 28 link and inlay extensions
+
+`DecorationKind::Link` spans may carry a sanitized `DecorationTarget`:
+`WorkspacePath` with an optional byte range, `DocumentRange`, or `DisplayOnly`.
+`MasonryPaneDocument` hit-tests the visible span at the caret/pointer and
+applies `DecorationIntent::{Hover, Activate}`. Hover uses the separate
+`paint_link_hover`/`paint_tooltip_shell` chrome path; activation jumps, focuses,
+or opens only a safe in-root/open-document target. Absolute paths, URLs,
+fragments, and `..` traversal are display-only or denied, and activation never
+mints a browse/filesystem grant. A missing bound root (`WorkspaceRootId == 0`)
+is denied before an `OpenDocument` intent is queued; a nonzero root is still
+revalidated by the server's existing workspace-grant path.
+
+`DecorationKind::InlayHint` spans carry `InlayHintPayload { label, placement }`.
+The server strips controls and caps labels at `INLAY_LABEL_MAX_CHARS`; the
+client paints the label after the main token layout as a muted decorative
+overlay, without Parley reflow. Inlays use a separate decoration set so they do
+not evict semantic/syntax chunks, and `EditorSurface::inlay_hints_visible`
+controls the code-on/prose-off default plus local toggle. LSP bridge refresh is
+opt-in via `createLspBridge({ features: ["inlayHint"] })`, which publishes
+`textDocument/inlayHint` results through the same validated facade. No package
+JavaScript runs in paint/layout/pointer paths.
+
+The Phase 28.7 P2 review confirms the current accessibility boundary: Link
+spans remain inert inline decoration targets with underline/rest styling and a
+Clay-owned caret/keyboard activation path, but `PaneDocumentView` does not
+publish separate AT-SPI Link nodes or link-purpose announcements. Safe
+workspace activation and HTTP/absolute/traversal denial remain covered by the
+existing structural/security tests. Any future link semantics must be a generic
+host-owned AccessKit addition; packages still publish only bounded targets.
 
 After each accepted workspace edit, `refresh_native_syntax_after_edit` schedules the existing native syntax handler around the changed byte offset, capped by the grammar's `ParsePolicy.max_window_bytes`. Before that asynchronous result exists, `EditorDecorationState::apply_edit` performs bounded provisional interpolation over retained chunks only. Insert/delete/replace arithmetic is byte-based, overflow-checked, UTF-8 text lengths come from the already accepted local operation, and reversed ranges fail closed. `EditAck` advances both state and chunk-key versions instead of clearing colors. No full-document state, parser, IPC wait, package JavaScript, or language/delimiter branch enters this client path.
 
@@ -79,15 +114,32 @@ let message = ServerMessage::DecorationSet(set);
 ## Tests
 
 - `tests/decoration_transport.rs`: oversized payload rejection, stale-version rejection, invalid range/unknown token rejection, off-viewport rejection, generic non-Markdown language package syntax-span acceptance, representative Markdown decoration payload budget coverage, near-viewport client pruning, stale-version cache clearing, protocol codec round trip, client render-hook application, and optimistic comment continuity through authoritative empty replacement.
+- `tests/editor_intelligence_protocol.rs::link_and_inlay_decoration_messages_round_trip_through_codec`: version-23 Link/InlayHint `DecorationSet` and `DecorationBatch` round trips, all inert target DTO variants, and bounded oversize rejection.
+- `src/protocol/decorations.rs` / `src/server/decorations.rs`: Link target round trips, unsafe activation denial, inlay label sanitization, and Link/Inlay validation stay within the shared decoration budget.
+- `src/masonry_pane_document.rs` / `src/editor/surface/mod.rs`: visible Link intent hit-testing, separate hover chrome, inlay overlay paint, and local inlay visibility toggle do not enter package-JavaScript or reflow paths; hover is local to the inert target and activation queues only the existing workspace-root `OpenDocument` path.
+- `tests/decoration_intent_authority.rs`: `render-decorations` covers Link/InlayHint publication without filesystem/network/parse/process grants; rootless, URL, and display-only activation deny; `render-folding` remains distinct.
 - `tests/syntax_grammar.rs`: native Tree-sitter fixtures for Rust, TypeScript, TSX, JavaScript, and Markdown produce bounded vocabulary decorations; tier selection, unmapped captures, complete payload-safe dense fan-out, scroll-sized source output, cached parsing, package provenance, semantic style-map roles, and concrete-font rejection are covered.
 - `tests/typography_protocol.rs::decoration_font_role_is_limited_to_syntax_and_semantic_layers`: rejects diagnostic/search font-role transport before publication.
-- `src/editor/surface.rs`: verifies UTF-8 interior insertion, broad edge inheritance, narrow edge behavior, syntax delete/replace resizing, exact half-open authoritative subtraction, crossing-span residual splits, local residual coalescing and bounded chunk count, package/layer isolation, reversed edit rejection, resync clearing, edit-ack survival, deterministic overlap composition, scroll safety, and font-role validation; `src/editor/layout.rs` verifies typography/style/default-role cache invalidation.
-- `src/masonry_editor.rs::scrolling_enqueues_new_decoration_viewport_once`, `src/masonry_editor.rs::local_commands_request_decorations_for_keyboard_driven_viewport_changes`, `src/client/mod.rs::decoration_viewport_request_emits_bounded_range_metadata`, `src/server/connection.rs::native_windows_schedule_once_for_each_first_party_language`, and `src/server/syntax.rs::same_version_markdown_scroll_reuses_full_document_tree_context` cover deduplicated client requests, bounded query output, full Markdown block context, one cached parse across scroll, correct prose after a closing fence, and multi-chunk output for nonzero native parse windows.
+- `src/editor/surface/mod.rs`: verifies UTF-8 interior insertion, broad edge inheritance, narrow edge behavior, syntax delete/replace resizing, exact half-open authoritative subtraction, crossing-span residual splits, local residual coalescing and bounded chunk count, package/layer isolation, reversed edit rejection, resync clearing, edit-ack survival, deterministic overlap composition, scroll safety, and font-role validation; `src/editor/layout.rs` verifies typography/style/default-role cache invalidation.
+- `src/masonry_editor.rs::scrolling_enqueues_new_decoration_viewport_once`, `src/masonry_editor.rs::local_commands_request_decorations_for_keyboard_driven_viewport_changes`, `src/client/mod.rs::decoration_viewport_request_emits_bounded_range_metadata`, `src/server/connection/mod.rs::native_windows_schedule_once_for_each_first_party_language`, and `src/server/syntax.rs::same_version_markdown_scroll_reuses_full_document_tree_context` cover deduplicated client requests, bounded query output, full Markdown block context, one cached parse across scroll, correct prose after a closing fence, and multi-chunk output for nonzero native parse windows.
 - `src/server/decorations.rs::tests::large_file_decoration_cache_respects_30_mib_budget`: verifies server-side chunk-cache budget accounting and LRU eviction.
 - `tests/performance_protocol.rs::decoration_chunk_protocol_payload_stays_bounded_for_large_file_viewport`: verifies chunk IPC payloads remain under the decoration transport budget.
 - `tests/editor_performance_invariants.rs::paint_uses_cached_inert_spans_without_package_javascript`: guards paint/layout source against package JavaScript, parser, server, or op calls.
-- `src/server/js_runtime.rs::phase18_parse_and_decoration_facades_are_runtime_backed`: controlled-runtime facade/op smoke for the public API.
+- `src/server/js_runtime/mod.rs::phase18_parse_and_decoration_facades_are_runtime_backed`: controlled-runtime facade/op smoke for the public API.
+- `src/server/js_runtime/mod.rs::third_party_runtime_cannot_see_trusted_ops_or_admin_modules`: third-party packages can see only the public decoration/folding contribution ops; trusted document/workspace/configuration ops remain absent.
+- `src/server/folding.rs::tests::render_decorations_does_not_grant_render_folding`: inverse permission separation for folding publication.
 - Relevant commands: `cargo test large_file_decoration_cache_respects_30_mib_budget --lib`, `cargo test --test editor decoration_transport::`, `cargo test --test protocol performance_protocol::`, `cargo test --test editor editor_performance_invariants::`, and `cargo test phase18_parse_and_decoration_facades_are_runtime_backed --lib`.
+
+## Phase 26: background axis stays theme-resolved
+
+Phase 26.3 adds a decoration **background** axis without touching the transport: `DecorationSpan` still carries only vocabulary (`TokenType` + `Modifiers` + optional `font_role`), and `StyleRegistry::background_for` resolves the fill at paint time from the active theme (`SearchMatch` layer color; `deprecated_background` for `Modifiers::DEPRECATED`; per-`TokenType` `syntax_background` for `Syntax`/`Semantic`; `None` for `Diagnostic`). `VisibleTextStyleRun` carries the resolved `background: Option<Color>` into `LayoutState::paint_text`, which paints fills between selection rects and glyphs. Consequences:
+
+- No `DecorationSpan` field, no rkyv change, no `DECORATION_PAYLOAD_BUDGET_BYTES` growth — `decoration_span_wire_shape_has_no_background_field` locks the wire shape.
+- The same span meaning renders different fills under different themes; packages cannot send raw colors.
+- Phase 26.4 adds a per-token `scale` multiplier (Heading1 1.50 … CodeSpan 0.90) resolved by `StyleRegistry::size_scale` and pushed as `FontSize(profile.size() * scale)` per run — again theme-side only, with `u16` milli-unit wire representation in `TextThemeOverride`/`TextStyleOverrideDescriptor`.
+- Advisory paint budgets `GUTTER_PAINT_P95_BUDGET_MS`/`ACTIVE_LINE_PAINT_P95_BUDGET_MS`/`BRACKET_MATCH_PAINT_P95_BUDGET_MS`/`DECORATION_BACKGROUND_FILL_P95_BUDGET_MS` (`src/perf/budgets.rs`) bound the new fill paths; their sum is asserted inside the 16 ms keypress-to-paint envelope.
+
+See [Editor Theme Registry](editor-theme-registry.md) and [Editor Chrome and Layout Geometry](editor-chrome-and-layout.md).
 
 ## Related
 

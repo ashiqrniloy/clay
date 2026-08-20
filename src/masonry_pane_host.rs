@@ -131,6 +131,7 @@ impl PaneContentHost {
     ) {
         self.content = PaneContent::Document(view.to_pod());
         ctx.children_changed();
+        ctx.request_accessibility_update();
     }
 
     /// Remove the mounted document view (document → placeholder). The view pod

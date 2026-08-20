@@ -5,7 +5,7 @@
 - `src/shell/theme.rs` (`validate_active_theme_contrast`, `ContrastFailure`, `TEXT_CONTRAST_MIN`, `UI_CONTRAST_MIN`, `core_fallback_matches_type`, `validate_design_token_override`, `core_theme_value`)
 - `src/shell/components.rs` (`ComponentKind::as_str`, `applicable_states`, `ComponentCatalogError::reject`, `sanitize_rejected`, `json_value_kind`, `reject_raw_style_token`, `validate_component_kind`, `validate_style_variables`, `validate_style_variable`, `validate_enum_style_variable`)
 - `src/server/ops/theme.rs` (`enforce_contrast`, `format_contrast_failure`, `apply_theme`, `resolve_canonical_default_theme`)
-- `src/packages/record.rs` (`parse_design_token_contributions`, local `json_value_kind`/`sanitize_rejected`)
+- `src/packages/record/mod.rs` (`parse_design_token_contributions`, local `json_value_kind`/`sanitize_rejected`)
 - `src/server/ui.rs` (`register_component` `ComponentCatalogError` → `UiContributionRule` mapping)
 - `src/masonry_sdui.rs` (`component_state_palette`, `SduiThemeStyle::from_ui_theme`, `each_component_kind_renders_all_five_states`)
 - `src/editor/theme.rs` (`pub use crate::shell::theme::{ContrastFailure, validate_active_theme_contrast}`)
@@ -97,7 +97,7 @@ Every `ComponentCatalogError` site that omitted the rejected value was enriched:
 style.background = `#ff00aa` rejected: expected color-role token; raw colors or raw CSS are not allowed; reference a Clay token (e.g. surface.main)
 ```
 
-`src/packages/record.rs::parse_design_token_contributions` does its own per-type validation and builds `PackageRecordError` directly (it never reaches `DesignTokenError`, which is `pub(crate)` and only used by the client revalidation path). The `json_value_kind`/`sanitize_rejected` pair is **duplicated locally** in `record.rs` (ponytail: an 8-line pair duplicated across two validation modules rather than promoting a shared module; marked `// ponytail:` to fold into a shared diagnostic module if a third author-JSON validator appears). Each design-token `value`-rejection message appends `; got {actual}` (e.g. `got number 12`, `got \`#zz\``), naming the rejected value kind while preserving every existing substring assertion.
+`src/packages/record/mod.rs::parse_design_token_contributions` does its own per-type validation and builds `PackageRecordError` directly (it never reaches `DesignTokenError`, which is `pub(crate)` and only used by the client revalidation path). The `json_value_kind`/`sanitize_rejected` pair is **duplicated locally** in `record/mod.rs` (ponytail: an 8-line pair duplicated across two validation modules rather than promoting a shared module; marked `// ponytail:` to fold into a shared diagnostic module if a third author-JSON validator appears). Each design-token `value`-rejection message appends `; got {actual}` (e.g. `got number 12`, `got \`#zz\``), naming the rejected value kind while preserving every existing substring assertion.
 
 ### 4. Runtime-path mapping (preserved contract)
 
@@ -170,7 +170,7 @@ assert!(conformance_ops.is_empty(), "no conformance helper may be exposed as a d
 
 - **Contrast / legibility floor:** owning module `src/shell/theme.rs` (`validate_active_theme_contrast`, `ContrastFailure`, `TEXT_CONTRAST_MIN`/`UI_CONTRAST_MIN`) + `src/server/ops/theme.rs` (`enforce_contrast`/`format_contrast_failure`). No JS facade/op. Permission: none. Hot path: theme-apply (configuration/reload) only. Validation: WCAG relative-luminance ratio over resolved status-chrome pairs. Reference docs: `creating-packages.md` § Phase 20.7, `tokens.md` Rule 7.
 - **State-completeness contract:** owning module `src/shell/components.rs` (`applicable_states`, `ComponentKind::as_str`). No JS facade/op. Conformance primitive, test-consumed. Reference docs: `components.md` `Package-Facing Component Kinds` notes, `creating-packages.md` § Phase 20.7.
-- **Author diagnostics:** owning module `src/shell/components.rs` (`ComponentCatalogError::reject`, `sanitize_rejected`, `json_value_kind`) + `src/packages/record.rs` (local duplicate pair + `; got {actual}` appends). Surfaced through `PackageRecordError` (parse path) and `UiContributionDiagnostic` (runtime path). Reference docs: `creating-packages.md` § Phase 20.7 (diagnostic message format + example).
+- **Author diagnostics:** owning module `src/shell/components.rs` (`ComponentCatalogError::reject`, `sanitize_rejected`, `json_value_kind`) + `src/packages/record/mod.rs` (local duplicate pair + `; got {actual}` appends). Surfaced through `PackageRecordError` (parse path) and `UiContributionDiagnostic` (runtime path). Reference docs: `creating-packages.md` § Phase 20.7 (diagnostic message format + example).
 - **Drift lint:** owning test `tests/package_ui_conformance.rs` (3 guards) + `src/masonry_sdui.rs::tests` (`applicable_states_match_component_state_palette`). Source-scan, no runtime work. Reference docs: `components.md` conformance contract, `tokens.md` Rule 8.
 - **Trust-domain invariants:** owning test `tests/package_ui_conformance.rs` (3 tests). Source-scan + boundary rejection. Reference docs: `creating-packages.md` § Phase 20.7 (authority boundaries), `components.md` conformance contract.
 - **Reuse rule:** future guardrails extend `ComponentCatalogError::reject` or add a drift guard to `tests/package_ui_conformance.rs` rather than introducing a package-facing validation API. Conformance diagnostics surface through the existing server runtime diagnostics channel — no new broadcast primitive.
@@ -182,7 +182,7 @@ assert!(conformance_ops.is_empty(), "no conformance helper may be exposed as a d
 - Guardrails are non-user-disableable (no config toggle to relax contrast thresholds).
 - `applicable_states` is the per-kind state contract; `InteractionState` is derived from pointer/focus hit-testing, never from package descriptors — packages declare no interaction states.
 - The rejected value in a diagnostic is sanitized (trimmed, backticks stripped, ≤80 chars) so an author string cannot break the message shape or inject markdown.
-- The `json_value_kind`/`sanitize_rejected` pair is duplicated across `src/shell/components.rs` and `src/packages/record.rs` (`ponytail:` comment); fold into a shared diagnostic module if a third author-JSON validator appears.
+- The `json_value_kind`/`sanitize_rejected` pair is duplicated across `src/shell/components.rs` and `src/packages/record/mod.rs` (`ponytail:` comment); fold into a shared diagnostic module if a third author-JSON validator appears.
 - The `ui.rs` `error.message.contains("raw CSS")` substring-sniff maps raw-color rejections to `ProhibitedAuthority`; it is pre-existing and fragile — a discriminant on `ComponentCatalogError` is the upgrade path (follow-up candidate).
 - Pre-existing test baselines unrelated to this phase: `--test protocol` 132/4 and `--test security` 121/1 both verified identical on a clean tree (all Phase 20.7 changes stashed).
 

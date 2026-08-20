@@ -5,12 +5,12 @@
 - `runtime/js/ui.js`
 - `src/server/ops/ui.rs`
 - `src/server/ui.rs`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `src/shell/components.rs`
 - `src/shell/theme.rs`
 - `src/shell/package_ui.rs`
 - `src/masonry_sdui.rs`
-- `src/packages/record.rs`
+- `src/packages/record/mod.rs`
 - `src/packages/conflict.rs`
 - `docs/reference/clay-js-api/ui/server-register-panel-contribution.md`
 - `docs/reference/clay-js-api/ui/server-register-component-contribution.md`
@@ -50,7 +50,7 @@ The model is deliberately not a direct Masonry, CSS, HTML, or client-side JavaSc
 
 ## How It Works
 
-1. A package imports `clay:ui` inside Clay's constrained server-side JavaScript runtime. `runtime/js/ui.js` defines the TypeScript-facing facade shape, while `src/server/js_runtime.rs` supplies the embedded module source for the controlled runtime.
+1. A package imports `clay:ui` inside Clay's constrained server-side JavaScript runtime. `runtime/js/ui.js` defines the TypeScript-facing facade shape, while `src/server/js_runtime/mod.rs` supplies the embedded module source for the controlled runtime.
 2. The facade encodes the package manifest and declarative contribution object as JSON and calls one Clay-owned op from `src/server/ops/ui.rs`. Raw `Deno.core.ops` names are implementation details; package code should use the documented facade exports.
 3. Each op parses JSON, validates the package manifest with existing package-manifest rules, and delegates to `PackageUiRegistry` in `src/server/ui.rs`.
 4. `PackageUiRegistry` validates the declaration against the package prefix/provenance and the already-registered package commands. It rejects unsupported slots/policies, unregistered command actions, duplicate IDs, duplicate fixed-slot claims, raw op/native/widget/CSS/client-JS authority fields, unsupported/deferred component kinds, invalid typed style variables, raw colors, type-incompatible theme token fallbacks, and payloads over SDUI/component budget expectations.
@@ -161,10 +161,30 @@ Centered paint reuses the generic `paint_scrim` and `paint_tooltip_shell`
 primitives with cached typed theme tokens; package overlays remain on the
 existing local host and stacking/anchor behavior is unchanged.
 
+## Plan 088 catalog and authoring-contract maintenance
+
+Plan 088's catalog update is documentation and validation maintenance, not a
+new package surface. The authoritative component/token catalogs record that
+Tasks 3–7 consume existing kinds and typed tokens only. The package guide and
+UI navigation page repeat the boundary for authors: Clay owns shell geometry,
+responsive slot yielding, tab/status/file-browser/welcome/completion/centered
+surfaces, focus containment, and path sanitization; packages provide inert
+validated declarations and semantic tokens.
+
+The retained hosts now clip package/SDUI children to their owner bounds and
+mark clipped-child semantics for accessibility. A nested `scroll` child gets
+bounded flex space in a panel; `PackageModalDismiss` carries only its declared
+inert action intent; `statusItem` and disabled controls retain AccessKit
+semantics. These are host guarantees, not package APIs. Package overlays remain
+limited to `working-area`, `active-pane`, `main`, and `pointer`; `completion`
+and `centered` stay internal.
+
+The parity gate is `tests/primitives_docs.rs::plan088_ui_catalog_and_package_authoring_contract_are_consistent`, alongside the existing component/token drift and package-boundary tests. It must fail when catalog markers, package-guide limits, UI navigation links, or the exact package anchor contract drift from source/docs.
+
 ## Tests
 
-- `src/server/js_runtime.rs::runtime_imports_clay_ui_facade_and_registers_contributions`: imports `clay:ui`, registers panel/component/overlay/token declarations, and verifies registry snapshots preserve accepted records.
-- `src/server/js_runtime.rs::runtime_clay_ui_rejects_invalid_prefix_unregistered_action_and_raw_css`: verifies invalid package prefixes, stale/unregistered actions, and raw CSS-style input fail.
+- `src/server/js_runtime/mod.rs::runtime_imports_clay_ui_facade_and_registers_contributions`: imports `clay:ui`, registers panel/component/overlay/token declarations, and verifies registry snapshots preserve accepted records.
+- `src/server/js_runtime/mod.rs::runtime_clay_ui_rejects_invalid_prefix_unregistered_action_and_raw_css`: verifies invalid package prefixes, stale/unregistered actions, and raw CSS-style input fail.
 - `src/server/ui.rs` unit tests: validate accepted contribution records, input contribution records, UI state-scope lifecycle records, duplicate IDs/slots, prohibited authority fields, hidden state key rejection, key-routing rejection, action target validation, payload budgets, component tree bounds, and typed theme-token fallback rules.
 - `src/shell/components.rs` unit tests: validate supported/deferred component kinds and typed style variables.
 - `src/shell/theme.rs` unit tests: validate core token resolution, package-token fallback resolution, type mismatch rejection, design-token validation, panel-default resolution, density spacing scale, and Gruvbox core-fallback compatibility.

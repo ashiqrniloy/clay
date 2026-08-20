@@ -15,6 +15,7 @@ pub mod diagnostics;
 pub(crate) mod document;
 pub(crate) mod document_analysis;
 mod facades;
+pub(crate) mod folding; // FOLDING_RANGE_PAYLOAD_BUDGET_BYTES
 #[allow(dead_code)]
 pub(crate) mod git;
 #[allow(dead_code)]
@@ -335,6 +336,20 @@ impl RuntimeGenerationStore {
     /// Current runtime caret override (connection initial sync / lag replay).
     pub(crate) async fn caret_style_override(&self) -> Option<crate::protocol::CaretStyle> {
         self.current_service().await.caret_style_override()
+    }
+
+    /// Phase 26: subscribe to user-owned editor wrap-policy override updates.
+    /// The channel is shared across runtime generations.
+    pub(crate) async fn subscribe_editor_layout(
+        &self,
+    ) -> broadcast::Receiver<Option<crate::protocol::WrapPolicy>> {
+        self.current_service().await.subscribe_editor_layout()
+    }
+
+    /// Current editor wrap-policy override (connection initial sync / lag
+    /// replay).
+    pub(crate) async fn editor_layout_override(&self) -> Option<crate::protocol::WrapPolicy> {
+        self.current_service().await.editor_layout_override()
     }
 
     /// Phase 22.1: subscribe to shell-preferences updates.
@@ -1456,6 +1471,7 @@ impl IpcServer {
                 messages.extend(
                     self.document_analysis
                         .open_document(
+                            Arc::clone(&self.bootstrap_state.workspace),
                             generation_id,
                             &snapshot.metadata,
                             active_mode,
@@ -2355,6 +2371,7 @@ mod runtime_outputs_tests {
             published_sdui_tree: Some(default_document_tree(1, 1)),
             published_decoration_set: None,
             published_diagnostic_set: None,
+            published_folding_set: None,
             parse_handlers: vec![],
             js_parse_handlers: vec![],
             behavior_manifest: Some(valid_manifest()),
@@ -2398,6 +2415,7 @@ mod runtime_outputs_tests {
             published_sdui_tree: Some(default_document_tree(2, 1)),
             published_decoration_set: Some(empty_decoration_set(1)),
             published_diagnostic_set: None,
+            published_folding_set: None,
             parse_handlers: vec![],
             js_parse_handlers: vec![],
             behavior_manifest: Some(valid_manifest()),
@@ -2443,6 +2461,7 @@ mod runtime_outputs_tests {
             published_sdui_tree: Some(default_document_tree(2, 1)),
             published_decoration_set: None,
             published_diagnostic_set: None,
+            published_folding_set: None,
             parse_handlers: vec![],
             js_parse_handlers: vec![],
             behavior_manifest: None,
@@ -2487,6 +2506,7 @@ mod runtime_outputs_tests {
             published_sdui_tree: None,
             published_decoration_set: Some(set.clone()),
             published_diagnostic_set: None,
+            published_folding_set: None,
             parse_handlers: vec![],
             js_parse_handlers: vec![],
             behavior_manifest: None,
@@ -2527,8 +2547,8 @@ mod runtime_generation_tests {
         ipc::IpcEndpoint,
         packages::record::assemble_package_record,
         protocol::{
-            ActiveTheme, BehaviorManifest, FontProfile, IncrementalParseUpdate, ParseByteRange,
-            ParseEditNotification, ServerMessage,
+            ActiveTheme, BehaviorManifest, FontProfile, IncrementalParseUpdate, KeyCode,
+            KeyModifiers, KeyStroke, ParseByteRange, ParseEditNotification, ServerMessage,
         },
         server::{
             command_execution::{
@@ -2608,12 +2628,45 @@ await loadPackage("@clay/typescript");"#,
         };
 
         // Markdown family: package-owned IDs carry exact package provenance
-        // and the package-declared key-routing descriptor (the chord string
-        // label; parsed modifiers stay a manifest-metadata concern).
-        for (command_id, chord) in [
-            ("markdown.togglePreview", "Ctrl+Shift+M"),
-            ("markdown.insertHeading", "Ctrl+Alt+1"),
-            ("markdown.toggleList", "Ctrl+Shift+8"),
+        // and the package-declared key-routing descriptor with parsed
+        // modifiers.
+        for (command_id, chord, expected_stroke) in [
+            (
+                "markdown.togglePreview",
+                "Ctrl+Shift+M",
+                KeyStroke {
+                    key: KeyCode::Character("m".to_string()),
+                    modifiers: KeyModifiers {
+                        control: true,
+                        shift: true,
+                        ..KeyModifiers::NONE
+                    },
+                },
+            ),
+            (
+                "markdown.insertHeading",
+                "Ctrl+Alt+1",
+                KeyStroke {
+                    key: KeyCode::Character("1".to_string()),
+                    modifiers: KeyModifiers {
+                        control: true,
+                        alt: true,
+                        ..KeyModifiers::NONE
+                    },
+                },
+            ),
+            (
+                "markdown.toggleList",
+                "Ctrl+Shift+8",
+                KeyStroke {
+                    key: KeyCode::Character("8".to_string()),
+                    modifiers: KeyModifiers {
+                        control: true,
+                        shift: true,
+                        ..KeyModifiers::NONE
+                    },
+                },
+            ),
         ] {
             let command = find(command_id);
             assert_eq!(command.package_name, "@clay/markdown");
@@ -2624,9 +2677,11 @@ await loadPackage("@clay/typescript");"#,
                 crate::protocol::RoutingPolicy::ServerFirst
             );
             assert!(
-                command.key_bindings.iter().any(|rule| rule.sequence[0].key
-                    == crate::protocol::KeyCode::Character(chord.to_string())),
-                "{command_id} should keep its declared key-routing descriptor"
+                command
+                    .key_bindings
+                    .iter()
+                    .any(|rule| rule.sequence == vec![expected_stroke.clone()]),
+                "{command_id} should keep its declared key-routing descriptor ({chord})"
             );
         }
         // Toggle-comment (no default binding) and the settings family
@@ -2726,6 +2781,50 @@ await loadPackage("@clay/typescript");"#,
         IpcServer::new(config)
     }
 
+    /// Poll `condition` every 10 ms under a bounded deadline. On timeout the
+    /// panic names the scenario plus live server state (generation id and
+    /// diagnostic codes) so a stalled watcher/menu/runtime test points at
+    /// pending session/runtime-replacement cleanup instead of a bare
+    /// `Elapsed` panic. Test-only; adds no production work. Callers capture
+    /// the server by reference in the closure (non-`move` async block).
+    async fn wait_until<C, F>(
+        server: &IpcServer,
+        scenario: &str,
+        deadline: std::time::Duration,
+        mut condition: C,
+    ) where
+        C: FnMut() -> F,
+        F: std::future::Future<Output = bool>,
+    {
+        let timed_out = tokio::time::timeout(deadline, async {
+            loop {
+                if condition().await {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_err();
+
+        if timed_out {
+            let generation_id = server.runtime_generation.generation_id().await;
+            let diagnostics: Vec<String> = server
+                .runtime_diagnostics
+                .lock()
+                .await
+                .snapshot()
+                .iter()
+                .map(|diagnostic| diagnostic.code.clone())
+                .collect();
+            panic!(
+                "{scenario} exceeded its {deadline:?} bound; \
+                 generation_id={generation_id} diagnostics={diagnostics:?} — \
+                 look for pending session/runtime-replacement cleanup"
+            );
+        }
+    }
+
     async fn bind_test_tab(
         client: &mut tokio::io::DuplexStream,
         codec: crate::protocol::codec::Codec,
@@ -2737,6 +2836,7 @@ await loadPackage("@clay/typescript");"#,
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::TabRegistry(_)
@@ -2751,6 +2851,7 @@ await loadPackage("@clay/typescript");"#,
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::TabRegistry(_) => {}
@@ -3042,6 +3143,13 @@ await loadPackage("@clay/typescript");"#,
         // setTypography call replaced the default monospace profile.
         let typography = server.runtime_generation.active_typography().await;
         assert_eq!(typography.monospace.size, 16.0);
+        assert_eq!(typography.proportional.size, 17.0);
+        assert_eq!(typography.ui.size, 13.0);
+        assert_eq!(
+            typography.hierarchy,
+            crate::protocol::UiTypographyHierarchy::DEFAULT,
+            "canonical example hierarchy must preserve the documented defaults"
+        );
         assert!(
             typography
                 .monospace
@@ -3051,6 +3159,31 @@ await loadPackage("@clay/typescript");"#,
             "example typography families missing: {:?}",
             typography.monospace.families
         );
+        assert!(
+            typography
+                .proportional
+                .families
+                .iter()
+                .any(|family| family == "Noto Sans"),
+            "example proportional families missing: {:?}",
+            typography.proportional.families
+        );
+        assert!(
+            typography
+                .ui
+                .families
+                .iter()
+                .any(|family| family == "system-ui"),
+            "example UI families missing: {:?}",
+            typography.ui.families
+        );
+        let active_theme = server
+            .active_theme
+            .lock()
+            .await
+            .clone()
+            .expect("canonical example must install its explicit theme");
+        assert_eq!(active_theme.specifier, "@clay/theme-gruvbox-material-dark");
         // And the first-party package module actually loaded: the markdown
         // package registers a mode (grant-before-loadPackage ordering held).
         let current = server.runtime_generation.current().await;
@@ -3353,16 +3486,13 @@ await loadPackage("@clay/rust");"#,
         )
         .unwrap();
 
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                if server.runtime_generation.generation_id().await >= 3 {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("watcher reloads changed configuration");
+        wait_until(
+            &server,
+            "watcher reloads changed configuration",
+            std::time::Duration::from_secs(5),
+            || async { server.runtime_generation.generation_id().await >= 3 },
+        )
+        .await;
         watcher.abort();
 
         let current = server.runtime_generation.current().await;
@@ -3401,23 +3531,21 @@ await loadPackage("@clay/rust");"#,
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
         fs::write(root.join("init.js"), "export const = ;").unwrap();
 
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                if server
+        wait_until(
+            &server,
+            "watcher records failed reload diagnostic",
+            std::time::Duration::from_secs(5),
+            || async {
+                server
                     .runtime_diagnostics
                     .lock()
                     .await
                     .snapshot()
                     .iter()
                     .any(|diagnostic| diagnostic.code == "runtime.syntax_error")
-                {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("watcher records failed reload diagnostic");
+            },
+        )
+        .await;
         assert_eq!(server.runtime_generation.generation_id().await, 2);
 
         fs::write(
@@ -3425,16 +3553,13 @@ await loadPackage("@clay/rust");"#,
             r#"Deno.core.ops.op_clay_runtime_record("recovered");"#,
         )
         .unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                if server.runtime_generation.generation_id().await >= 3 {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("watcher reloads after fixing configuration");
+        wait_until(
+            &server,
+            "watcher reloads after fixing configuration",
+            std::time::Duration::from_secs(5),
+            || async { server.runtime_generation.generation_id().await >= 3 },
+        )
+        .await;
         watcher.abort();
         fs::remove_dir_all(root).unwrap();
     }
@@ -3472,25 +3597,44 @@ await loadPackage("@clay/rust");"#,
         )
         .unwrap();
 
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
+        wait_until(
+            &server,
+            "watcher reloads a newly created module",
+            std::time::Duration::from_secs(5),
+            || async {
                 let current = server.runtime_generation.current().await;
-                if current.id >= 3
+                current.id >= 3
                     && current.evaluation.as_ref().is_some_and(|evaluation| {
                         evaluation
                             .op_records
                             .iter()
                             .any(|record| record == "new module")
                     })
-                {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("watcher reloads a newly created module");
+            },
+        )
+        .await;
         watcher.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "deliberately pending scenario")]
+    async fn wait_until_panics_with_scenario_and_server_state_on_timeout() {
+        let root = temp_config_root("wait-until-timeout", "");
+        let server = server_with_config(root.clone());
+        assert!(server.reload_runtime_generation().await.reloaded);
+
+        // A deliberately pending condition must time out with the scenario
+        // name and live server state (generation id, diagnostics) in the
+        // panic, never a bare Elapsed.
+        wait_until(
+            &server,
+            "deliberately pending scenario",
+            std::time::Duration::from_millis(50),
+            || async { false },
+        )
+        .await;
+
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -3685,10 +3829,13 @@ Deno.core.ops.op_clay_runtime_record("still-cached");"#,
         let root = temp_config_root(
             "one-line-rebuild",
             r#"import { loadPackage } from "clay:packages";
+import { serverActivateClassifiedMode, serverClassifyDocument } from "clay:modes";
 await loadPackage("@clay/markdown");
 await loadPackage("@clay/rust");
 await loadPackage("@clay/typescript");
-await loadPackage("@clay/javascript");"#,
+await loadPackage("@clay/javascript");
+const classification = serverClassifyDocument({ documentId: 1, path: "README.md" });
+serverActivateClassifiedMode(classification, { path: "README.md" });"#,
         );
         let server = server_with_config(root);
 
@@ -3863,6 +4010,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                         syntax_tree_delta: None,
                         decoration_updates: Vec::new(),
                         diagnostic_update: None,
+                        folding_update: None,
                     })
                 },
             )
@@ -4009,6 +4157,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                         syntax_tree_delta: None,
                         decoration_updates: Vec::new(),
                         diagnostic_update: None,
+                        folding_update: None,
                     })
                 },
             )
@@ -4405,6 +4554,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                     | ServerMessage::BehaviorManifest(_)
                     | ServerMessage::DecorationSet(_)
                     | ServerMessage::DiagnosticSet(_)
+                    | ServerMessage::FoldingRangeSet(_)
                     | ServerMessage::RuntimeDiagnostic(_)
                     | ServerMessage::SduiSnapshot { .. }
                     | ServerMessage::SduiUpdate { .. } => {}
@@ -5164,6 +5314,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                     | ServerMessage::BehaviorManifest(_)
                     | ServerMessage::DecorationSet(_)
                     | ServerMessage::DiagnosticSet(_)
+                    | ServerMessage::FoldingRangeSet(_)
                     | ServerMessage::RuntimeDiagnostic(_)
                     | ServerMessage::SduiSnapshot { .. }
                     | ServerMessage::SduiUpdate { .. } => {}
@@ -5607,6 +5758,7 @@ mod tests {
                 ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::TabRegistry(_) => {}
@@ -5863,13 +6015,15 @@ mod tests {
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::DecorationSet(_)
                 | ServerMessage::DecorationBatch(_)
-                | ServerMessage::DiagnosticSet(_) => {}
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_) => {}
                 message => panic!("expected file-open capability, got {message:?}"),
             }
         }
@@ -5901,13 +6055,15 @@ mod tests {
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::DecorationSet(_)
                 | ServerMessage::DecorationBatch(_)
-                | ServerMessage::DiagnosticSet(_) => {}
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_) => {}
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             }
         };
@@ -5950,12 +6106,14 @@ mod tests {
                 | ServerMessage::DecorationSet(_)
                 | ServerMessage::DecorationBatch(_)
                 | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. } => {}
                 other => panic!("expected region-lock rejection, got {other:?}"),
@@ -5991,7 +6149,7 @@ mod tests {
 
     #[test]
     fn production_server_binaries_use_fallible_constructor() {
-        for path in ["src/main.rs", "src/bin/clay-server.rs"] {
+        for path in ["src/launch.rs", "src/bin/clay-server.rs"] {
             let source = std::fs::read_to_string(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path),
             )
@@ -6121,6 +6279,7 @@ mod tests {
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::TabRegistry(_) => {}

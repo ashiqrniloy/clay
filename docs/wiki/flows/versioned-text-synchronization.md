@@ -4,9 +4,9 @@
 
 - `src/protocol/mod.rs`
 - `src/client/mod.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/masonry_editor.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/server/document.rs`
 - `src/protocol/codec.rs`
 

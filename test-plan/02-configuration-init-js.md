@@ -52,6 +52,17 @@ cp -r examples/. ~/.config/clay/   # init.js + packages/first-party.js + package
 | C18 | Break a watched file with an invalid `bindKey` (e.g. `bindKey("Ctrl+X", "nonexistent.command", { scope: "global" })`) and save | Watcher reloads; server stderr shows `runtime reload failed [keybindings.unknown_command]`; previous generation stays active; fix the file and the next reload is clean |
 | C19 | GUI: with no custom binding, press `Ctrl+Shift+R` | `runtime.reloadConfiguration` executes (reload succeeded, server stderr clean if config is valid); the Control Center command list shows `runtime.reloadConfiguration` with the `Ctrl+Shift+R` chord |
 
+## Plan 088 configuration compatibility steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| C20 | Copy `examples/.` into an isolated config root, run `node --check examples/init.js`, and launch the configuration fixture | Explicit Gruvbox dark theme, all three typography profiles, complete seven-field hierarchy, caret settings, bindings, and optional modules apply once; no runtime diagnostics |
+| C21 | Review the commented `setAppearance("light")`, `setAppearance("dark")`, and `setAppearance("system")` alternatives; enable one only after commenting out explicit `setTheme` | Appearance values are limited to the documented enum; canonical defaults resolve without a second configuration surface, and explicit `setTheme` precedence is clear |
+| C22 | Reload with valid large UI typography (`ui.size: 24`) and a complete hierarchy | Reload is atomic; shell/editor geometry reflows once, remains bounded, and the active generation retains all three profiles |
+| C23 | Remove one hierarchy field or set a scale to `0`, `NaN`, or `>4`; reload | Validation rejects the whole update; the prior valid theme/typography generation remains active and no partial hierarchy reaches layout |
+| C24 | Add an unknown config key or raw `Deno.core.ops.op_clay_*` call | Deny-by-default diagnostic; no undocumented authority, native widget, filesystem, network, shell, or raw-op access is granted |
+| C25 | Confirm `init.js` has no `setPackagePreset` / `clay.preset` knob; presets live in package.json | One-line `loadPackage` still enough; no new configuration key |
+
 ## Negative checks
 
 - Configuration JavaScript runs ONLY at startup/reload — typing, scrolling,
@@ -81,6 +92,16 @@ log.
 | C17 | PASS | 5 rapid writes to `packages/first-party.js` collapsed into exactly ONE reload (one `configuration.module_failed` pair in the log, not five) |
 | C18 | PASS | Invalid `bindKey` → `keybindings.unknown_command`; fix → clean reload |
 | C4–C8, C13–C15, C19 | NOT RUN headless | GUI/client-interaction steps; covered by automated integration tests (`example_configuration_*`, `configuration_watcher_*`, `configuration_default_reload_binding_is_present_and_overridable`, `control_center_includes_built_in_commands`, `typography_update_reaches_connected_clients_once`) — run on a desktop session |
+
+## Plan 088 task 12 Linux execution record (2026-08-15)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| C20 | PASS | `node --check` passed for the canonical tree; `cargo test --lib example_configuration_loads_cleanly_and_applies_effects -- --test-threads=1` passed and asserted explicit dark theme, all profiles, families, and default hierarchy; `cargo test --test protocol clay_js_doc_registry` passed (41) |
+| C21 | PASS | Existing theme-package tests cover all four bundled themes and appearance resolution; light/dark visual artifacts are retained under `code-reviews/screenshots/2026-08-14-plan088-modernization/`; no new API or registry entry was needed |
+| C22 | PASS — strongest available evidence | Large-typography capture at `code-reviews/screenshots/2026-08-14-plan088-modernization/large-typography/` and typography/layout structural tests pass; direct reload/key delivery was not re-run because window targeting is unavailable |
+| C23 | PASS automated / NOT RUN manually | `invalid_init_typography_reports_actionable_validation_error` and existing atomic-install tests pass; targeted GUI reload is blocked by the host input backend |
+| C24 | PASS automated / NOT RUN manually | Existing raw-op/authority-denial and configuration registry tests pass; no manual raw-op execution was attempted |
 
 ## Cleanup
 

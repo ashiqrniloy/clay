@@ -2,9 +2,9 @@
 
 ## Source
 
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `src/server/mod.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/server/parse_coordinator.rs`
 - `src/server/workspace.rs`
 - `runtime/js/packages.js`

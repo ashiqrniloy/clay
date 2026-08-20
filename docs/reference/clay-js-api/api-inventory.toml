@@ -25,7 +25,7 @@ key_bindings = []
 custom_properties = ["normalizeLineEndings:boolean=true"]
 permissions = ["document-edit"]
 security_notes = "Requires edit authority for the target document and a valid lease once runtime permission checks exist; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::insert_text_with_event; src/server/document.rs::DocumentState::apply_edit"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::insert_text_with_event; src/server/document.rs::DocumentState::apply_edit"
 registry_public = true
 
 [[api]]
@@ -40,7 +40,7 @@ authority = "server-authoritative-document-mutation-with-behavior-context"
 runtime_path = "client-first-predictable-hot-path-and-server-ack"
 hot_path_policy = "Enter is routed locally through the active behavior manifest for indentation/comment continuation, then emitted asynchronously as an edit transaction."
 facade_path = "runtime/js/editor.js::serverInsertNewline"
-backing_rust = "src/editor/surface.rs::EditorSurface::insert_newline_with_event; src/server/document.rs::DocumentState::apply_edit"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::insert_newline_with_event; src/server/document.rs::DocumentState::apply_edit"
 deno_op = "op_clay_editor_insert_newline"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_insert_newline"
 documentation_path = "docs/reference/clay-js-api/editor/server-insert-newline.md"
@@ -48,7 +48,7 @@ key_bindings = ["Enter"]
 custom_properties = ["enterRule:manifest=PreserveLeadingWhitespace", "commentContinuation:manifest=//"]
 permissions = ["document-edit"]
 security_notes = "Uses inert behavior manifest rules for hot-path newline shaping and still requires document edit authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::newline_text_at; src/client/behavior.rs::ClientBehaviorState::route_key"
+current_rust_owner = "src/editor/surface/mod.rs::newline_text_at; src/client/behavior.rs::ClientBehaviorState::route_key"
 registry_public = true
 
 [[api]]
@@ -71,7 +71,7 @@ key_bindings = ["Backspace", "Delete"]
 custom_properties = []
 permissions = ["document-edit"]
 security_notes = "Requires document edit authority, valid byte/scalar boundaries, and an editable lease; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::backspace_with_event; src/editor/surface.rs::EditorSurface::delete_forward_with_event; src/server/document.rs::DocumentState::apply_edit"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::backspace_with_event; src/editor/surface/mod.rs::EditorSurface::delete_forward_with_event; src/server/document.rs::DocumentState::apply_edit"
 registry_public = true
 
 [[api]]
@@ -86,7 +86,7 @@ authority = "client-local-ui-state"
 runtime_path = "client-local-hot-path"
 hot_path_policy = "Arrow/Home/End and Ctrl+arrow word/paragraph movement update local caret/viewport state without IPC, server work, or JavaScript."
 facade_path = "runtime/js/editor.js::clientMoveCursor"
-backing_rust = "src/editor/surface.rs::EditorSurface::move_word_start"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::move_word_start"
 deno_op = "op_clay_editor_move_cursor"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_move_cursor"
 documentation_path = "docs/reference/clay-js-api/editor/client-move-cursor.md"
@@ -94,7 +94,7 @@ key_bindings = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"
 custom_properties = ["direction:enum", "granularity:enum", "extend:boolean=false", "count:number=1"]
 permissions = []
 security_notes = "Changes only client-local caret/selection/viewport state and grants no document mutation or external authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::move_word_start; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::move_word_start; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
@@ -109,7 +109,7 @@ authority = "client-local-ui-state"
 runtime_path = "client-local-hot-path"
 hot_path_policy = "Shift-arrow, pointer-drag, Ctrl+L (line), and Ctrl+D (word) selection update local state and are not serialized unless followed by a document edit."
 facade_path = "runtime/js/editor.js::clientSetSelection"
-backing_rust = "src/editor/surface.rs::EditorSurface::select_word"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::select_word"
 deno_op = "op_clay_editor_set_selection"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_set_selection"
 documentation_path = "docs/reference/clay-js-api/editor/client-set-selection.md"
@@ -117,7 +117,7 @@ key_bindings = ["Shift+ArrowLeft", "Shift+ArrowRight", "PrimaryPointerDrag", "Ct
 custom_properties = ["action:enum", "extend:boolean=false", "direction:enum=current"]
 permissions = []
 security_notes = "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::select_word; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::select_word; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
@@ -132,7 +132,7 @@ authority = "client-local-ui-state"
 runtime_path = "client-local-hot-path"
 hot_path_policy = "Ctrl+Alt+Down/Up add a caret on the adjacent line at the same column, updating local selection state without IPC, server work, or JavaScript."
 facade_path = "runtime/js/editor.js::clientAddCursor"
-backing_rust = "src/editor/surface.rs::EditorSurface::add_cursor_line"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::add_cursor_line"
 deno_op = "op_clay_editor_add_cursor"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_add_cursor"
 documentation_path = "docs/reference/clay-js-api/editor/client-add-cursor.md"
@@ -140,7 +140,7 @@ key_bindings = ["Ctrl+Alt+Down", "Ctrl+Alt+Up"]
 custom_properties = ["direction:enum"]
 permissions = []
 security_notes = "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::add_cursor_line; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::add_cursor_line; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
@@ -155,7 +155,7 @@ authority = "client-local-ui-state"
 runtime_path = "client-local-hot-path"
 hot_path_policy = "Shift+Alt+Down/Up grow the column box one line; Shift+Alt+Left/Right move every caret one scalar; all update local selection state without IPC, server work, or JavaScript."
 facade_path = "runtime/js/editor.js::clientColumnSelect"
-backing_rust = "src/editor/surface.rs::EditorSurface::add_cursor_line"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::add_cursor_line"
 deno_op = "op_clay_editor_column_select"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_column_select"
 documentation_path = "docs/reference/clay-js-api/editor/client-column-select.md"
@@ -163,7 +163,7 @@ key_bindings = ["Shift+Alt+Down", "Shift+Alt+Up", "Shift+Alt+Left", "Shift+Alt+R
 custom_properties = ["direction:enum"]
 permissions = []
 security_notes = "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::add_cursor_line; src/editor/surface.rs::EditorSurface::move_all_carets; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::add_cursor_line; src/editor/surface/mod.rs::EditorSurface::move_all_carets; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
@@ -178,7 +178,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the selection change runs client-local after explicit user routing and stays off server IPC and JavaScript."
 facade_path = "runtime/js/editor.js::clientSelectNextMatch"
-backing_rust = "src/editor/surface.rs::EditorSurface::select_next_match"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::select_next_match"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-select-next-match.md"
@@ -186,7 +186,7 @@ key_bindings = ["Ctrl+D"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::select_next_match; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::select_next_match; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
@@ -201,7 +201,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the selection change runs client-local after explicit user routing and stays off server IPC and JavaScript."
 facade_path = "runtime/js/editor.js::clientSelectPrevMatch"
-backing_rust = "src/editor/surface.rs::EditorSurface::select_next_match"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::select_next_match"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-select-prev-match.md"
@@ -209,7 +209,7 @@ key_bindings = []
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::select_next_match; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::select_next_match; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
@@ -224,7 +224,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the selection change runs client-local after explicit user routing and stays off server IPC and JavaScript."
 facade_path = "runtime/js/editor.js::clientSelectAllMatches"
-backing_rust = "src/editor/surface.rs::EditorSurface::select_all_matches"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::select_all_matches"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-select-all-matches.md"
@@ -232,7 +232,7 @@ key_bindings = ["Ctrl+Shift+L"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::select_all_matches; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::select_all_matches; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
@@ -247,7 +247,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the selection collapse runs client-local after explicit user routing and stays off server IPC and JavaScript."
 facade_path = "runtime/js/editor.js::clientCancelMultipleSelections"
-backing_rust = "src/editor/surface.rs::EditorSurface::cancel_multiple_selections"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::cancel_multiple_selections"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-cancel-multiple-selections.md"
@@ -255,7 +255,7 @@ key_bindings = ["Escape"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::cancel_multiple_selections; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::cancel_multiple_selections; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
@@ -270,7 +270,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the selection change runs client-local after explicit user routing and stays off server IPC and JavaScript."
 facade_path = "runtime/js/editor.js::clientKeepSelection"
-backing_rust = "src/editor/surface.rs::EditorSurface::keep_selection"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::keep_selection"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-keep-selection.md"
@@ -278,7 +278,7 @@ key_bindings = []
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::keep_selection; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::keep_selection; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
@@ -293,7 +293,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the selection change runs client-local after explicit user routing and stays off server IPC and JavaScript."
 facade_path = "runtime/js/editor.js::clientRemoveSelection"
-backing_rust = "src/editor/surface.rs::EditorSurface::remove_selection"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::remove_selection"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-remove-selection.md"
@@ -301,7 +301,7 @@ key_bindings = []
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it changes transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::remove_selection; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::remove_selection; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
@@ -316,7 +316,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the selection-set restore runs client-local after explicit user routing and stays off server IPC and JavaScript."
 facade_path = "runtime/js/editor.js::clientUndoCursorMove"
-backing_rust = "src/editor/surface.rs::EditorSurface::undo_cursor_move"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::undo_cursor_move"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-undo-cursor-move.md"
@@ -324,7 +324,7 @@ key_bindings = ["Ctrl+U"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it restores transient client selection state; does not grant filesystem/workspace authority, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::undo_cursor_move; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::undo_cursor_move; src/masonry_editor.rs::EditorWidget::apply_editor_client_command"
 registry_public = true
 
 [[api]]
@@ -347,7 +347,7 @@ key_bindings = []
 custom_properties = ["object:enum", "around:boolean", "direction:enum"]
 permissions = []
 security_notes = "Changes only transient client selection state from a read-only server grammar query; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/server/connection.rs handle SelectionQueryRequest; src/masonry_editor.rs::EditorWidget::apply_selection_query_result"
+current_rust_owner = "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/server/connection/documents.rs handle SelectionQueryRequest; src/masonry_editor.rs::EditorWidget::apply_selection_query_result"
 registry_public = true
 
 [[api]]
@@ -370,7 +370,7 @@ key_bindings = []
 custom_properties = ["action:enum"]
 permissions = []
 security_notes = "Changes only transient client selection state from a read-only server tree walk; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/server/connection.rs handle SelectionQueryRequest; src/masonry_editor.rs::EditorWidget::apply_selection_query_result"
+current_rust_owner = "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/server/connection/documents.rs handle SelectionQueryRequest; src/masonry_editor.rs::EditorWidget::apply_selection_query_result"
 registry_public = true
 
 [[api]]
@@ -393,7 +393,7 @@ key_bindings = []
 custom_properties = ["commandId:string"]
 permissions = ["editor-control"]
 security_notes = "Gated programmatic cursor/selection control: package callers need approved editor-control and a declared active mode (clay.editorControl.modes); changes only transient client cursor/selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/server/ops/editor.rs::op_clay_editor_execute_command; src/server/connection.rs EditorCommandRequest fanout; src/masonry_editor.rs::EditorWidget::apply_editor_command_request"
+current_rust_owner = "src/server/ops/editor.rs::op_clay_editor_execute_command; src/server/connection/mod.rs EditorCommandRequest fanout; src/masonry_editor.rs::EditorWidget::apply_editor_command_request"
 registry_public = true
 
 [[api]]
@@ -416,7 +416,7 @@ key_bindings = ["PointerScroll"]
 custom_properties = ["line:number", "column:number", "revealCursor:boolean=false"]
 permissions = []
 security_notes = "Changes only client viewport/visual scroll state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::scroll_lines; src/editor/surface.rs::EditorSurface::scroll_vertical_pixels"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::scroll_lines; src/editor/surface/mod.rs::EditorSurface::scroll_vertical_pixels"
 registry_public = true
 
 [[api]]
@@ -431,7 +431,7 @@ authority = "client-local-ui-state"
 runtime_path = "client-local-layout-paint"
 hot_path_policy = "Resize recomputes visible line count and bounded visible extraction locally in layout/paint, never with full-document IPC."
 facade_path = "runtime/js/editor.js::clientSetViewport"
-backing_rust = "src/editor/surface.rs::EditorSurface::update_visible_line_count_for_height"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::update_visible_line_count_for_height"
 deno_op = "op_clay_editor_set_viewport"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_set_viewport"
 documentation_path = "docs/reference/clay-js-api/editor/client-set-viewport.md"
@@ -454,7 +454,7 @@ authority = "configuration-driven-client-ui-state"
 runtime_path = "configuration-api-to-client-ui"
 hot_path_policy = "Cursor styling is paint-time UI metadata; changing it must not route ordinary keypresses through JavaScript."
 facade_path = "runtime/js/editor.js::clientSetCursorStyle"
-backing_rust = "src/editor/surface.rs::EditorSurface::set_caret_style_override"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::set_caret_style_override"
 deno_op = "op_clay_editor_set_cursor_style"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_set_cursor_style"
 documentation_path = "docs/reference/clay-js-api/editor/client-set-cursor-style.md"
@@ -462,7 +462,30 @@ key_bindings = []
 custom_properties = ["shape:enum=bar", "blink:enum=solid", "widthPx:number=1.5", "heightPct:number=1", "hollow:boolean=false", "stopBlinkOnTyping:boolean=true"]
 permissions = []
 security_notes = "Configuration-only UI customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority."
-current_rust_owner = "src/editor/surface.rs::EditorSurface::paint_caret; src/editor/layout.rs::caret_cell_for_visible_byte_offset"
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::paint_caret; src/editor/layout.rs::caret_cell_for_visible_byte_offset"
+registry_public = true
+
+[[api]]
+id = "editor.clientSetEditorLayout"
+category = "editor-layout-customization"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:editor"
+js_export = "clientSetEditorLayout"
+user_facing_name = "Set Editor Layout"
+authority = "configuration-driven-client-ui-state"
+runtime_path = "configuration-api-to-client-ui"
+hot_path_policy = "Wrap policy is layout-affecting geometry; changing it invalidates the layout cache key and repaints, but must not route ordinary keypresses through JavaScript."
+facade_path = "runtime/js/editor.js::clientSetEditorLayout"
+backing_rust = "src/editor/surface/mod.rs::EditorSurface::set_editor_layout"
+deno_op = "op_clay_editor_set_editor_layout"
+deno_op_path = "src/server/ops/editor.rs::op_clay_editor_set_editor_layout"
+documentation_path = "docs/reference/clay-js-api/editor/client-set-editor-layout.md"
+key_bindings = []
+custom_properties = ["wrapPolicy:enum=required", "columnCap:number=72"]
+permissions = []
+security_notes = "Configuration-only rendering customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority. The op is registered in the trusted runtime extension only, so the user override is package-unforgeable."
+current_rust_owner = "src/editor/surface/mod.rs::EditorSurface::resolved_wrap; src/editor/surface/mod.rs::EditorSurface::layout_max_width"
 registry_public = true
 
 [[api]]
@@ -717,7 +740,7 @@ key_bindings = ["Escape"]
 custom_properties = []
 permissions = []
 security_notes = "Requests application shutdown only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/masonry_editor.rs::EditorWidget::on_text_event; src/main.rs::Driver::on_action"
+current_rust_owner = "src/masonry_editor.rs::EditorWidget::on_text_event; src/app_driver.rs::Driver::on_action"
 registry_public = true
 
 [[api]]
@@ -740,7 +763,7 @@ key_bindings = []
 custom_properties = []
 permissions = ["workspace-read", "document-read"]
 security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+current_rust_owner = "src/protocol/mod.rs; src/server/connection/mod.rs; src/server/workspace.rs"
 registry_public = true
 
 [[api]]
@@ -763,7 +786,7 @@ key_bindings = []
 custom_properties = []
 permissions = ["workspace-write", "document-read"]
 security_notes = "The trusted-only documents facade uses server-internal save authority, validates any explicit knownVersion against canonical server state, confines writes to an already-authorized open workspace document with path traversal rejection, and performs exclusive same-directory atomic replacement with target-identity revalidation; it is absent from the third-party package runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+current_rust_owner = "src/protocol/mod.rs; src/server/connection/mod.rs; src/server/workspace.rs"
 registry_public = true
 
 [[api]]
@@ -786,7 +809,7 @@ key_bindings = []
 custom_properties = []
 permissions = ["workspace-read", "document-read"]
 security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+current_rust_owner = "src/protocol/mod.rs; src/server/connection/mod.rs; src/server/workspace.rs"
 registry_public = true
 
 [[api]]
@@ -809,7 +832,7 @@ key_bindings = []
 custom_properties = []
 permissions = ["document-read"]
 security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+current_rust_owner = "src/protocol/mod.rs; src/server/connection/mod.rs; src/server/workspace.rs"
 registry_public = true
 
 [[api]]
@@ -832,7 +855,7 @@ key_bindings = []
 custom_properties = []
 permissions = ["document-read"]
 security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+current_rust_owner = "src/protocol/mod.rs; src/server/connection/mod.rs; src/server/workspace.rs"
 registry_public = true
 
 [[api]]
@@ -855,7 +878,7 @@ key_bindings = []
 custom_properties = []
 permissions = ["workspace-read"]
 security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
-current_rust_owner = "src/protocol/mod.rs; src/server/connection.rs; src/server/workspace.rs"
+current_rust_owner = "src/protocol/mod.rs; src/server/connection/mod.rs; src/server/workspace.rs"
 registry_public = true
 
 [[api]]
@@ -1077,7 +1100,7 @@ authority = "client-local-rendering-implementation-detail"
 runtime_path = "masonry-paint-layout-hot-path"
 hot_path_policy = "Masonry paint/layout and Parley/Vello rendering remain native Rust implementation details, not Clay JS APIs."
 facade_path = ""
-backing_rust = "src/editor/layout.rs::LayoutState; src/editor/surface.rs::EditorSurface::paint"
+backing_rust = "src/editor/layout.rs::LayoutState; src/editor/surface/mod.rs::EditorSurface::paint"
 deno_op = ""
 deno_op_path = ""
 documentation_path = "docs/wiki/modules/clay-js-facade-skeleton.md"
@@ -1085,7 +1108,7 @@ key_bindings = []
 custom_properties = []
 permissions = []
 security_notes = "Not a public registry API and grants no authority."
-current_rust_owner = "src/editor/layout.rs; src/editor/surface.rs"
+current_rust_owner = "src/editor/layout.rs; src/editor/surface/mod.rs"
 registry_public = false
 
 [[api]]
@@ -1136,8 +1159,9 @@ registry_public = false
 
 # Phase 16.5 primitive gate API surfaces. Package, mode, and command
 # validation/registration APIs are runtime-backed through stable Clay JS facades
-# and explicit deno_core op wrappers. Package loading and Phase 18 rendering,
-# parse, and folding provider APIs remain planned/unavailable stubs.
+# and explicit deno_core op wrappers. Package loading and the promoted Phase 18
+# rendering, parse, and folding publication APIs are runtime-backed; mode
+# manifest selection and other unpromoted provider hooks remain planned stubs.
 
 [[api]]
 id = "packages.serverValidatePackageManifest"
@@ -1197,7 +1221,7 @@ authority = "server-first-package-record-validation"
 runtime_path = "server-first-package-load-time-validation"
 hot_path_policy = "Package record loading validates package.json-shaped metadata at package fixture/enable/load time and must not appear on ordinary edit, keypress, layout, scroll, text-event, or paint hot paths."
 facade_path = "runtime/js/packages.js::serverLoadPackage"
-backing_rust = "src/packages/record.rs::assemble_package_record"
+backing_rust = "src/packages/record/mod.rs::assemble_package_record"
 deno_op = "op_clay_packages_load_package"
 deno_op_path = "src/server/ops/packages.rs::op_clay_packages_load_package"
 documentation_path = "docs/reference/clay-js-api/packages/server-load-package.md"
@@ -1205,7 +1229,7 @@ key_bindings = []
 custom_properties = ["packageJson:PackageJson=required", "clay.apiPrefix:string=required", "clay.docs:string=required", "clay.performance.estimatedManifestBytes:number=required"]
 permissions = []
 security_notes = "Validates a Clay package record through server validation and returns inert summary metadata only; package installation, enable/disable mutation, external package-manager execution, and package JavaScript execution remain separate and it does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, remote listener, native widget mutation, package installation, enable/disable, or package execution authority."
-current_rust_owner = "src/packages/record.rs::PackageRecord; src/packages/record.rs::assemble_package_record; src/server/ops/packages.rs::op_clay_packages_load_package"
+current_rust_owner = "src/packages/record/mod.rs::PackageRecord; src/packages/record/mod.rs::assemble_package_record; src/server/ops/packages.rs::op_clay_packages_load_package"
 registry_public = true
 
 [[api]]
@@ -1412,7 +1436,7 @@ key_bindings = []
 custom_properties = ["module:object=required-for-runtime-bridge", "exportName:string=default", "modeId:string=required", "parseUnit:enum=line-group", "timeoutMs:number=50", "viewportPriority:boolean=true", "maxWindowBytes:number=65536", "guardBytes:number=4096", "memoryBudgetBytes:number=31457280", "resultBudgetBytes:number=4096"]
 permissions = ["parse-document"]
 security_notes = "Requires parse-document permission and server validation of handler provenance, cancellation, timeout, document-version reads, bounded parse-window snapshots, syntax memory budget, and bounded DecorationUpdate output; handler functions stay in the persistent server runtime behind a server-issued token and executable handler/callback/onParse/function payload keys are rejected; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond open document content provided by Clay."
-current_rust_owner = "src/server/parse_coordinator.rs::ParseCoordinator; src/server/js_runtime.rs"
+current_rust_owner = "src/server/parse_coordinator.rs::ParseCoordinator; src/server/js_runtime/mod.rs"
 registry_public = true
 
 [[api]]
@@ -1557,24 +1581,139 @@ registry_public = true
 id = "folding.serverPublishFoldingRanges"
 category = "folding-range-publication"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:folding"
 js_export = "serverPublishFoldingRanges"
 user_facing_name = "Publish Folding Ranges"
 authority = "server-first-folding-range-publication"
-runtime_path = "server-first-op-wrapper-planned"
+runtime_path = "server-first-op-wrapper"
 hot_path_policy = "Folding range publication is background/UI-reactive and viewport-aware; local expand/collapse state is client-local after validated ranges arrive."
-facade_path = "runtime/js/folding.ts::serverPublishFoldingRanges"
+facade_path = "runtime/js/folding.js::serverPublishFoldingRanges"
 backing_rust = "src/server/folding.rs::FoldingRangeRegistry::publish_ranges"
 deno_op = "op_clay_folding_publish_ranges"
 deno_op_path = "src/server/ops/folding.rs::op_clay_folding_publish_ranges"
 documentation_path = "docs/reference/clay-js-api/folding/server-publish-folding-ranges.md"
 key_bindings = []
-custom_properties = ["documentId:string=required", "documentVersion:number=required", "ranges:FoldingRange[]=bounded", "packagePrefix:string=required"]
+custom_properties = ["documentId:number=required", "documentVersion:number=required", "ranges:FoldingRange[]=bounded", "packagePrefix:string=package-context"]
 permissions = ["render-folding"]
 security_notes = "Requires render-folding permission and server validation of document version, byte ranges, nesting, payload size, and package provenance; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary GPU draw calls, or native widget mutation authority."
-current_rust_owner = "planned: src/server/folding.rs::FoldingRangeRegistry; src/protocol/folding.rs::FoldingRangeUpdate"
-registry_public = false
+current_rust_owner = "src/server/folding.rs::FoldingRangeRegistry; src/protocol/folding.rs::FoldingRangeSet"
+registry_public = true
+
+[[api]]
+id = "editor.toggleComment"
+category = "text-transform"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "toggleComment"
+user_facing_name = "Toggle Comment"
+authority = "client-first-predictable-editor-command"
+runtime_path = "configuration-bindKey-to-client-first-editor-command"
+hot_path_policy = "Synchronous command-id helper; manifest-driven local line transforms use the existing editor edit path without package JavaScript or IPC before paint."
+facade_path = "runtime/js/editor.js::toggleComment"
+backing_rust = "src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command; src/editor/surface/mod.rs::EditorSurface::command(EditorCommand::ToggleComment)"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/toggle-comment.md"
+key_bindings = ["Ctrl+/"]
+custom_properties = []
+permissions = []
+security_notes = "Bindable client-first command ID only; routed line-prefix edits use inert behavior-manifest data and do not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/masonry_pane_document.rs::PaneDocumentView; src/editor/surface/mod.rs::EditorSurface"
+registry_public = true
+
+[[api]]
+id = "editor.toggleListMarker"
+category = "text-transform"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "toggleListMarker"
+user_facing_name = "Toggle List Marker"
+authority = "client-first-predictable-editor-command"
+runtime_path = "configuration-bindKey-to-client-first-editor-command"
+hot_path_policy = "Synchronous command-id helper; manifest-driven local line transforms use the existing editor edit path without package JavaScript or IPC before paint."
+facade_path = "runtime/js/editor.js::toggleListMarker"
+backing_rust = "src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command; src/editor/surface/mod.rs::EditorSurface::command(EditorCommand::ToggleListMarker)"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/toggle-list-marker.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Bindable client-first command ID only; routed list-prefix edits use inert behavior-manifest data and do not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/masonry_pane_document.rs::PaneDocumentView; src/editor/surface/mod.rs::EditorSurface"
+registry_public = true
+
+[[api]]
+id = "editor.rotateHeading"
+category = "text-transform"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "rotateHeading"
+user_facing_name = "Rotate Heading"
+authority = "client-first-predictable-editor-command"
+runtime_path = "configuration-bindKey-to-client-first-editor-command"
+hot_path_policy = "Synchronous command-id helper; manifest-driven local line transforms use the existing editor edit path without package JavaScript or IPC before paint."
+facade_path = "runtime/js/editor.js::rotateHeading"
+backing_rust = "src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command; src/editor/surface/mod.rs::EditorSurface::command(EditorCommand::RotateHeading)"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/rotate-heading.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Bindable client-first command ID only; routed heading-prefix edits use inert behavior-manifest data and do not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/masonry_pane_document.rs::PaneDocumentView; src/editor/surface/mod.rs::EditorSurface"
+registry_public = true
+
+[[api]]
+id = "editor.clientToggleFold"
+category = "folding"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "clientToggleFold"
+user_facing_name = "Toggle Fold"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "Synchronous command-id helper; collapse state changes locally after validated inert ranges arrive and never run package JavaScript or IPC on paint/layout."
+facade_path = "runtime/js/editor.js::clientToggleFold"
+backing_rust = "src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command; src/editor/surface/mod.rs::EditorSurface::toggle_fold"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/client-toggle-fold.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only; changes client-local state for server-validated inert fold ranges and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/masonry_pane_document.rs::PaneDocumentView; src/editor/surface/mod.rs::EditorSurface"
+registry_public = true
+
+[[api]]
+id = "editor.toggleInlayHints"
+category = "inlay-hints"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:editor"
+js_export = "toggleInlayHints"
+user_facing_name = "Toggle Inlay Hints"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-client-ui-command"
+hot_path_policy = "Synchronous command-id helper; local inlay visibility changes use overlay state after inert decoration publication and do not reflow or run package JavaScript in paint."
+facade_path = "runtime/js/editor.js::toggleInlayHints"
+backing_rust = "src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command; src/editor/surface/mod.rs::EditorSurface::toggle_inlay_hints"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/editor/toggle-inlay-hints.md"
+key_bindings = []
+custom_properties = []
+permissions = []
+security_notes = "Bindable client UI command ID only; changes local visibility for inert inlay decorations and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/masonry_pane_document.rs::PaneDocumentView; src/editor/surface/mod.rs::EditorSurface"
+registry_public = true
 
 # Phase 16 configuration review: package options, mode preferences, decoration theme preferences,
 # and parse policy preferences are preserved as planned `clay:configuration` APIs through
@@ -1598,7 +1737,7 @@ deno_op = "op_clay_configuration_set_package_option"
 deno_op_path = "src/server/ops/configuration.rs::op_clay_configuration_set_package_option"
 documentation_path = "docs/reference/clay-js-api/configuration/set-package-option.md"
 key_bindings = []
-custom_properties = ["packagePrefix:string=required", "option:string=package-prefixed", "value:json=required", "source:enum=init-js"]
+custom_properties = ["packagePrefix:string=required", "option:string=package-prefixed", "value:json=required", "source:enum=init-js|package-default|clay-default|ui-session"]
 permissions = ["package-configuration"]
 security_notes = "Requires package-configuration permission when the option changes package behavior and server validation through the ~/.config/clay/init.js configuration model; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, package installation, or enable/disable authority."
 current_rust_owner = "src/server/configuration.rs::ConfigurationRuntime"
@@ -1703,7 +1842,7 @@ key_bindings = []
 custom_properties = ["windowId:string=active", "paneTreeVersion:number=generated", "rootPaneId:string=required", "source:enum=package|user-config|clay"]
 permissions = []
 security_notes = "Planned unavailable Clay JS API only; future server validation will validate bounded WorkingAreaLayout state with package provenance and conflict metadata and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, or package layout mutation authority."
-current_rust_owner = "planned: src/shell/layout.rs::WorkingAreaLayout (internal runtime implemented; public API unavailable); src/main.rs shell root integration"
+current_rust_owner = "planned: src/shell/layout.rs::WorkingAreaLayout (internal runtime implemented; public API unavailable); src/masonry_shell/mod.rs shell root integration"
 registry_public = false
 
 [[api]]
@@ -1950,7 +2089,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "Binding/routing is a local behavior-manifest lookup; dialog/open work happens only after an explicit user command, selected-file opening sends one initial UTF-8 snapshot, Markdown parse/decorations are background and viewport-bounded, and ordinary editing remains delta-based."
 facade_path = "runtime/js/documents.js::clientOpenFileDialog"
-backing_rust = "src/client/file_dialog.rs::FileDialogResult; src/client/file_dialog.rs::open_markdown_file_dialog; src/main.rs::handle_client_ui_command"
+backing_rust = "src/client/file_dialog.rs::FileDialogResult; src/client/file_dialog.rs::open_markdown_file_dialog; src/app_driver.rs::handle_client_ui_command"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/documents/client-open-file-dialog.md"
@@ -1958,7 +2097,7 @@ key_bindings = []
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; native dialog execution requires explicit user key routing, selected files are server-validated as single-file grants, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, broad filesystem/workspace authority, or client-side JavaScript authority."
-current_rust_owner = "src/client/file_dialog.rs; src/main.rs::handle_client_ui_command; src/client/behavior.rs::ClientBehaviorState::route_key; src/server/workspace.rs::WorkspaceState::open_selected_file"
+current_rust_owner = "src/client/file_dialog.rs; src/app_driver.rs::handle_client_ui_command; src/client/behavior.rs::ClientBehaviorState::route_key; src/server/workspace.rs::WorkspaceState::open_selected_file"
 registry_public = true
 
 [[api]]
@@ -1973,7 +2112,7 @@ authority = "source-aware-user-authorized-package-load-runtime"
 runtime_path = "server-side-package-validation-and-load-entry-execution"
 hot_path_policy = "Package loading, enabling, and load-entry execution are startup/load/configuration-time work only; no package JavaScript runs in keypress, paint, layout, IPC, or text-event handlers."
 facade_path = "runtime/js/packages.js::loadPackage"
-backing_rust = "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime.rs::ClayModuleLoader::resolve; src/server/js_runtime.rs::ClayModuleLoader::load"
+backing_rust = "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime/source.rs::ClayModuleLoader::resolve; src/server/js_runtime/source.rs::ClayModuleLoader::load"
 deno_op = "op_clay_packages_load_package_by_specifier"
 deno_op_path = "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier"
 documentation_path = "docs/reference/clay-js-api/packages/load-package.md"
@@ -1981,7 +2120,7 @@ key_bindings = []
 custom_properties = ["specifier:string=required"]
 permissions = []
 security_notes = "The trusted-only packages facade cannot be imported by third-party code. Bundled trust requires an exact compiled inventory/provenance/integrity match; every other source remains third-party and must have a current durable user adoption record before enable or execution. Approved third-party load entries execute only in the shared third-party runtime, never the trusted runtime, and are not mutually isolated from sibling third-party packages. Graph relations and first-party mutations require declared extension scope plus durable user consent; stale/revoked approval fails closed. Root-confined loading grants no filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, or implicit package-control authority."
-current_rust_owner = "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime.rs::ClayModuleLoader::resolve; src/server/js_runtime.rs::ClayModuleLoader::load"
+current_rust_owner = "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime/source.rs::ClayModuleLoader::resolve; src/server/js_runtime/source.rs::ClayModuleLoader::load"
 registry_public = true
 
 [[api]]
@@ -2387,7 +2526,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; actual copy runs only after explicit native user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/editor.js::clientCopySelection"
-backing_rust = "src/masonry_editor.rs::EditorWidget::copy_selection_to_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface.rs::EditorSurface::selected_text"
+backing_rust = "src/masonry_editor.rs::EditorWidget::copy_selection_to_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface/mod.rs::EditorSurface::selected_text"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-copy-selection.md"
@@ -2410,7 +2549,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; actual cut runs only after explicit native user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary key-insertion hot paths."
 facade_path = "runtime/js/editor.js::clientCutSelection"
-backing_rust = "src/masonry_editor.rs::EditorWidget::cut_selection_to_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface.rs::EditorSurface::selected_text"
+backing_rust = "src/masonry_editor.rs::EditorWidget::cut_selection_to_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface/mod.rs::EditorSurface::selected_text"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-cut-selection.md"
@@ -2433,7 +2572,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; actual paste reads the OS clipboard only after explicit native user routing and stays off paint, layout, scroll, and ordinary key-insertion hot paths."
 facade_path = "runtime/js/editor.js::clientPasteClipboard"
-backing_rust = "src/masonry_editor.rs::EditorWidget::paste_from_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface.rs::EditorSurface::paste_text_with_event"
+backing_rust = "src/masonry_editor.rs::EditorWidget::paste_from_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface/mod.rs::EditorSurface::paste_text_with_event"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-paste-clipboard.md"
@@ -2456,7 +2595,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; actual undo applies a client-local inverse edit after explicit native user routing and stays off full-document IPC, package JavaScript, paint, and layout hot paths beyond ordinary local edits."
 facade_path = "runtime/js/editor.js::clientUndo"
-backing_rust = "src/masonry_editor.rs::EditorWidget::undo; src/editor/surface.rs::EditorSurface::undo_with_event; src/editor/history.rs::EditHistory"
+backing_rust = "src/masonry_editor.rs::EditorWidget::undo; src/editor/surface/mod.rs::EditorSurface::undo_with_event; src/editor/history.rs::EditHistory"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-undo.md"
@@ -2479,7 +2618,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; actual redo reapplies a client-local forward edit after explicit native user routing and stays off full-document IPC, package JavaScript, paint, and layout hot paths beyond ordinary local edits."
 facade_path = "runtime/js/editor.js::clientRedo"
-backing_rust = "src/masonry_editor.rs::EditorWidget::redo; src/editor/surface.rs::EditorSurface::redo_with_event; src/editor/history.rs::EditHistory"
+backing_rust = "src/masonry_editor.rs::EditorWidget::redo; src/editor/surface/mod.rs::EditorSurface::redo_with_event; src/editor/history.rs::EditHistory"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-redo.md"
@@ -2503,7 +2642,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; opening the retained-session switcher and activating a document stay client-local after explicit user routing and must not run filesystem scans, full-document reloads, package JavaScript, paint, or layout hot-path work."
 facade_path = "runtime/js/editor.js::clientShowOpenDocuments"
-backing_rust = "src/masonry_pane_document.rs::PaneDocumentView::show_open_documents_menu; src/editor/document_session.rs::DocumentSessionStore; src/masonry_pane_document.rs::PaneDocumentView::activate_document; src/main.rs::Driver (cross-pane aggregation and ActivateDocumentInPane routing)"
+backing_rust = "src/masonry_pane_document.rs::PaneDocumentView::show_open_documents_menu; src/editor/document_session.rs::DocumentSessionStore; src/masonry_pane_document.rs::PaneDocumentView::activate_document; src/app_driver.rs::Driver (cross-pane aggregation and ActivateDocumentInPane routing)"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/editor/client-show-open-documents.md"
@@ -2572,7 +2711,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; native folder selection runs only after explicit user routing and server workspace root validation is asynchronous action work, never ordinary edit or paint/layout work."
 facade_path = "runtime/js/workspace.js::clientOpenFolderDialog"
-backing_rust = "src/client/file_dialog.rs::open_folder_dialog; src/main.rs::handle_client_ui_command; src/server/connection.rs::ClientMessage::AddSelectedWorkspaceRoot"
+backing_rust = "src/client/file_dialog.rs::open_folder_dialog; src/app_driver.rs::handle_client_ui_command; src/server/connection/workspace.rs::ClientMessage::AddSelectedWorkspaceRoot"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/workspace/client-open-folder-dialog.md"
@@ -2595,7 +2734,7 @@ authority = "server-authoritative-workspace-navigation"
 runtime_path = "server-first-op-wrapper"
 hot_path_policy = "Asynchronous server action work; must not run in ordinary typing, Masonry paint, layout, pointer, scroll, keypress, or text-event hot paths."
 facade_path = "runtime/js/commands.js::serverOpenDirectory"
-backing_rust = "src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::list_directory; src/server/connection.rs::file_browser_snapshot_message"
+backing_rust = "src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::list_directory; src/server/connection/workspace.rs::file_browser_snapshot_message"
 deno_op = "op_clay_commands_execute_command"
 deno_op_path = "src/server/ops/commands.rs::op_clay_commands_execute_command"
 documentation_path = "docs/reference/clay-js-api/commands/server-open-directory.md"
@@ -2781,7 +2920,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; actual split runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientSplitPaneVertical"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-split-pane-vertical.md"
@@ -2789,7 +2928,7 @@ key_bindings = ["Ctrl+\\"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no package JavaScript, no IPC for topology). Dirty panes are protected; clean panes release their document lease only through the server's existing capability-gated close path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority; does not open files or grant document authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -2804,7 +2943,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; actual split runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientSplitPaneRight"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-split-pane-right.md"
@@ -2812,7 +2951,7 @@ key_bindings = []
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only (Phase 22.7 alias of clientSplitPaneVertical, canonical binding Ctrl+\ unchanged); after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no package JavaScript, no IPC for topology). Dirty panes are protected; clean panes release their document lease only through the server's existing capability-gated close path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority; does not open files or grant document authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -2827,7 +2966,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; actual split runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientSplitPaneDown"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-split-pane-down.md"
@@ -2835,7 +2974,7 @@ key_bindings = []
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only (Phase 22.7 alias of clientSplitPaneHorizontal, canonical binding Ctrl+- unchanged); after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no package JavaScript, no IPC for topology). Dirty panes are protected; clean panes release their document lease only through the server's existing capability-gated close path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority; does not open files or grant document authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -2850,7 +2989,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; actual split runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientSplitPaneHorizontal"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-split-pane-horizontal.md"
@@ -2858,7 +2997,7 @@ key_bindings = ["Ctrl+-"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no package JavaScript, no IPC for topology). Dirty panes are protected; clean panes release their document lease only through the server's existing capability-gated close path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority; does not open files or grant document authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -2873,7 +3012,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; actual redivide runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientAddEqualPane"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-add-equal-pane.md"
@@ -2881,7 +3020,7 @@ key_bindings = ["Ctrl+Shift+\\"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no package JavaScript, no IPC for topology). Dirty panes are protected; clean panes release their document lease only through the server's existing capability-gated close path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority; does not open files or grant document authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -2896,7 +3035,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; actual close runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientClosePane"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree; src/main.rs::Driver (dirty guard, document release, conflict-menu sync); src/masonry_pane_document.rs::PaneDocumentView::guard_pane_close / close_pane"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree; src/app_driver.rs::Driver (dirty guard, document release, conflict-menu sync); src/masonry_pane_document.rs::PaneDocumentView::guard_pane_close / close_pane"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-close-pane.md"
@@ -2904,7 +3043,7 @@ key_bindings = ["Ctrl+Alt+W"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned pane/split tree on the client (no package JavaScript, no IPC for topology). Dirty panes are protected; clean panes release their document lease only through the server's existing capability-gated close path. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority; does not open files or grant document authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -2919,7 +3058,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; focus change runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientFocusPaneNext"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-focus-pane-next.md"
@@ -2927,7 +3066,7 @@ key_bindings = ["Ctrl+Alt+Right"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it changes only the active pane focus on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -2942,7 +3081,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; focus change runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientFocusPanePrev"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-focus-pane-prev.md"
@@ -2950,7 +3089,7 @@ key_bindings = ["Ctrl+Alt+Left"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it changes only the active pane focus on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -2965,7 +3104,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; resize runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientResizePaneLeft"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-resize-pane-left.md"
@@ -2973,7 +3112,7 @@ key_bindings = ["Ctrl+Alt+Shift+Left"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it adjusts only the Clay-owned split ratio on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -2988,7 +3127,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; resize runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientResizePaneRight"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-resize-pane-right.md"
@@ -2996,7 +3135,7 @@ key_bindings = ["Ctrl+Alt+Shift+Right"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it adjusts only the Clay-owned split ratio on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -3011,7 +3150,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; resize runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientResizePaneUp"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-resize-pane-up.md"
@@ -3019,7 +3158,7 @@ key_bindings = ["Ctrl+Alt+Shift+Up"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it adjusts only the Clay-owned split ratio on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -3034,7 +3173,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; resize runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientResizePaneDown"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-resize-pane-down.md"
@@ -3042,7 +3181,7 @@ key_bindings = ["Ctrl+Alt+Shift+Down"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it adjusts only the Clay-owned split ratio on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -3057,7 +3196,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; pane swap runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientMovePaneNext"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-move-pane-next.md"
@@ -3065,7 +3204,7 @@ key_bindings = ["Ctrl+Alt+]"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it swaps only pane leaf IDs in the Clay-owned tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 [[api]]
@@ -3080,7 +3219,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; pane swap runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths."
 facade_path = "runtime/js/shell.js::clientMovePanePrev"
-backing_rust = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
+backing_rust = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-move-pane-prev.md"
@@ -3088,7 +3227,7 @@ key_bindings = ["Ctrl+Alt+["]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; after explicit user routing it swaps only pane leaf IDs in the Clay-owned tree on the client (no server round-trip, no package JavaScript, no IPC). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command"
+current_rust_owner = "src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command"
 registry_public = true
 
 # Phase 22.1: Clay shell pane-focus policy configuration API.
@@ -3105,7 +3244,7 @@ authority = "configuration"
 runtime_path = "configuration-init-js"
 hot_path_policy = "The helper calls one bounded Deno op during init.js evaluation only; it stays off paint, layout, scroll, keypress, text-event, and edit-ack hot paths."
 facade_path = "runtime/js/shell.js::setPaneFocusPolicy"
-backing_rust = "src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy; src/masonry_shell.rs::ClayShellWidget::set_pane_focus_policy"
+backing_rust = "src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy; src/masonry_shell/mod.rs::ClayShellWidget::set_pane_focus_policy"
 deno_op = "op_clay_shell_set_pane_focus_policy"
 deno_op_path = "src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy"
 documentation_path = "docs/reference/clay-js-api/shell/set-pane-focus-policy.md"
@@ -3130,7 +3269,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the tab operation runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths (server-confirmed snapshot reconciliation is user-initiated work)."
 facade_path = "runtime/js/shell.js::clientTabNext"
-backing_rust = "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)"
+backing_rust = "src/driver/restore.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell/window_tabs.rs::ShellClientCommand (command mapping)"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-tab-next.md"
@@ -3138,7 +3277,7 @@ key_bindings = ["Ctrl+Tab"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only;  Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/main.rs::Driver::apply_tab_command"
+current_rust_owner = "src/driver/restore.rs::Driver::apply_tab_command"
 registry_public = true
 
 # Phase 22.4: Clay shell tab-management command facade (Previous Tab).
@@ -3155,7 +3294,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the tab operation runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths (server-confirmed snapshot reconciliation is user-initiated work)."
 facade_path = "runtime/js/shell.js::clientTabPrev"
-backing_rust = "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)"
+backing_rust = "src/driver/restore.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell/window_tabs.rs::ShellClientCommand (command mapping)"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-tab-prev.md"
@@ -3163,7 +3302,7 @@ key_bindings = ["Ctrl+Shift+Tab"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only;  Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/main.rs::Driver::apply_tab_command"
+current_rust_owner = "src/driver/restore.rs::Driver::apply_tab_command"
 registry_public = true
 
 # Phase 22.4: Clay shell tab-management command facade (New Tab).
@@ -3180,7 +3319,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the tab operation runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths (server-confirmed snapshot reconciliation is user-initiated work)."
 facade_path = "runtime/js/shell.js::clientTabNew"
-backing_rust = "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)"
+backing_rust = "src/driver/restore.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell/window_tabs.rs::ShellClientCommand (command mapping)"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-tab-new.md"
@@ -3188,7 +3327,7 @@ key_bindings = ["Ctrl+T"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only;  Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/main.rs::Driver::apply_tab_command"
+current_rust_owner = "src/driver/restore.rs::Driver::apply_tab_command"
 registry_public = true
 
 # Phase 22.4: Clay shell tab-management command facade (Close Tab).
@@ -3205,7 +3344,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the tab operation runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths (server-confirmed snapshot reconciliation is user-initiated work)."
 facade_path = "runtime/js/shell.js::clientTabClose"
-backing_rust = "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)"
+backing_rust = "src/driver/restore.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell/window_tabs.rs::ShellClientCommand (command mapping)"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-tab-close.md"
@@ -3213,7 +3352,7 @@ key_bindings = ["Ctrl+Shift+W"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only;  Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/main.rs::Driver::apply_tab_command"
+current_rust_owner = "src/driver/restore.rs::Driver::apply_tab_command"
 registry_public = true
 
 # Phase 22.4: Clay shell tab-management command facade (Move Tab Left).
@@ -3230,7 +3369,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the tab operation runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths (server-confirmed snapshot reconciliation is user-initiated work)."
 facade_path = "runtime/js/shell.js::clientTabMoveLeft"
-backing_rust = "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)"
+backing_rust = "src/driver/restore.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell/window_tabs.rs::ShellClientCommand (command mapping)"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-tab-move-left.md"
@@ -3238,7 +3377,7 @@ key_bindings = ["Ctrl+Shift+["]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only;  Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/main.rs::Driver::apply_tab_command"
+current_rust_owner = "src/driver/restore.rs::Driver::apply_tab_command"
 registry_public = true
 
 # Phase 22.4: Clay shell tab-management command facade (Move Tab Right).
@@ -3255,7 +3394,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the tab operation runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths (server-confirmed snapshot reconciliation is user-initiated work)."
 facade_path = "runtime/js/shell.js::clientTabMoveRight"
-backing_rust = "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)"
+backing_rust = "src/driver/restore.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell/window_tabs.rs::ShellClientCommand (command mapping)"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-tab-move-right.md"
@@ -3263,7 +3402,7 @@ key_bindings = ["Ctrl+Shift+]"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only;  Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/main.rs::Driver::apply_tab_command"
+current_rust_owner = "src/driver/restore.rs::Driver::apply_tab_command"
 registry_public = true
 
 # Phase 22.4: Clay shell tab-management command facade (Activate Tab).
@@ -3280,7 +3419,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the tab operation runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths (server-confirmed snapshot reconciliation is user-initiated work)."
 facade_path = "runtime/js/shell.js::clientTabActivate"
-backing_rust = "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)"
+backing_rust = "src/driver/restore.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell/window_tabs.rs::ShellClientCommand (command mapping)"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-tab-activate.md"
@@ -3288,7 +3427,7 @@ key_bindings = ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctr
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; The numbered family is documented in the page body. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/main.rs::Driver::apply_tab_command"
+current_rust_owner = "src/driver/restore.rs::Driver::apply_tab_command"
 registry_public = true
 
 # Phase 22.4: Clay shell tab-management command facade (Move Tab to Position).
@@ -3305,7 +3444,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; the tab operation runs only after explicit user routing and stays off server IPC, JS execution, filesystem, paint, layout, and ordinary edit hot paths (server-confirmed snapshot reconciliation is user-initiated work)."
 facade_path = "runtime/js/shell.js::clientTabMoveTo"
-backing_rust = "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)"
+backing_rust = "src/driver/restore.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell/window_tabs.rs::ShellClientCommand (command mapping)"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-tab-move-to.md"
@@ -3313,5 +3452,5 @@ key_bindings = ["Ctrl+Shift+1", "Ctrl+Shift+2", "Ctrl+Shift+3", "Ctrl+Shift+4", 
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; The numbered family is documented in the page body. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
-current_rust_owner = "src/main.rs::Driver::apply_tab_command"
+current_rust_owner = "src/driver/restore.rs::Driver::apply_tab_command"
 registry_public = true

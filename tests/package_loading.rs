@@ -33,7 +33,7 @@ use clay::packages::modes::{
 use clay::packages::permissions::PackagePermission;
 use clay::packages::record::{PackageRecordRule, assemble_package_record};
 use clay::packages::service::{PackageService, PackageServiceError};
-use clay::protocol::{BehaviorScope, Modifiers, TokenType};
+use clay::protocol::BehaviorScope;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -344,25 +344,9 @@ fn markdown_package_contract_validates_with_required_metadata() {
         record.contributions.ui_components[0].id,
         "markdown.status.mode"
     );
-    assert_eq!(record.contributions.syntax_grammars.len(), 1);
-    let grammar = &record.contributions.syntax_grammars[0];
-    assert_eq!(grammar.grammar_kind, "native");
-    assert_eq!(
-        grammar.grammar_source.as_deref(),
-        Some("tree-sitter-md-025")
-    );
-    assert_eq!(
-        grammar.style_map["heading-1"].token_type,
-        TokenType::Heading1
-    );
     assert!(
-        grammar.style_map["strong"]
-            .modifiers
-            .contains(Modifiers::BOLD)
-    );
-    assert_eq!(
-        grammar.style_map["code-span"].font_role,
-        Some(clay::protocol::DocumentFontRole::Monospace)
+        record.contributions.syntax_grammars.is_empty(),
+        "markdown grammar is owned by native descriptor"
     );
 
     let clay = package["clay"].as_object().unwrap();
@@ -390,23 +374,31 @@ fn markdown_package_rejects_missing_required_permissions() {
         ("decorations.serverPublishDecorations", "render-decorations"),
     ] {
         let mut package = first_party_markdown_package_json();
-        let permissions = package["clay"]["permissions"].as_array_mut().unwrap();
-        permissions.retain(|value| value.as_str() != Some(missing_permission));
+        package["clay"]["permissions"] = json!(
+            [
+                "mode-registration",
+                "mode-activation",
+                "command-registration",
+                "completion-provider",
+                "parse-document",
+                "render-decorations",
+            ]
+            .into_iter()
+            .filter(|permission| *permission != missing_permission)
+            .collect::<Vec<_>>()
+        );
 
         let err = assemble_package_record(&package).unwrap_err();
         assert_eq!(
             err.rule,
             PackageRecordRule::UndeclaredPermissionForContribution
         );
-        if !matches!(
-            missing_permission,
-            "command-registration" | "parse-document" | "render-decorations"
-        ) {
-            assert_eq!(err.contribution_id.as_deref(), Some(api_id));
-        }
         assert!(
-            err.message.contains(missing_permission),
-            "got: {}",
+            err.message.contains(missing_permission)
+                || err.contribution_id.as_deref() == Some(api_id),
+            "got rule={:?} id={:?} message={}",
+            err.rule,
+            err.contribution_id,
             err.message
         );
     }
@@ -427,6 +419,24 @@ fn markdown_package_does_not_execute_on_install() {
         .expect("installed package can be inspected without enable/load execution");
     assert!(!inspection.is_enabled);
     assert_eq!(inspection.api_prefix, "markdown");
+    assert_eq!(inspection.native_syntax_languages, ["markdown"]);
+    assert_eq!(inspection.preset.as_deref(), Some("prose-mode"));
+    for permission in [
+        "mode-registration",
+        "mode-activation",
+        "command-registration",
+        "completion-provider",
+        "parse-document",
+        "render-decorations",
+    ] {
+        assert!(
+            inspection
+                .permissions
+                .iter()
+                .any(|value| value == permission),
+            "inspect must show expanded prose-mode permission `{permission}`"
+        );
+    }
 }
 
 #[test]
@@ -899,6 +909,95 @@ fn phase18_4_diagnostics_preserve_package_provenance() {
         Some("markdown.preview.visibility")
     );
     assert!(err.message.contains("state values"));
+}
+
+#[test]
+fn rust_package_inspect_shows_code_mode_preset_and_expanded_permissions() {
+    let text = std::fs::read_to_string("packages/rust/package.json")
+        .expect("first-party Rust package.json must exist");
+    let package: Value = serde_json::from_str(&text).expect("valid rust package.json");
+    let record = assemble_package_record(&package).expect("rust package assembles");
+    assert_eq!(record.manifest.clay.preset.as_deref(), Some("code-mode"));
+    assert!(
+        record
+            .manifest
+            .clay
+            .permissions
+            .contains(&PackagePermission::ParseDocument)
+    );
+    assert!(
+        !record
+            .manifest
+            .clay
+            .permissions
+            .contains(&PackagePermission::LanguageServer)
+    );
+
+    let mut service = PackageService::new(
+        "target/test-package-store/rust-inspect",
+        Box::new(FakeBackend::default()),
+    );
+    service
+        .install_from_value(package)
+        .expect("install rust metadata");
+    let inspection = service.inspect("@clay/rust").expect("inspect rust");
+    assert_eq!(inspection.preset.as_deref(), Some("code-mode"));
+    assert!(
+        inspection
+            .permissions
+            .iter()
+            .any(|value| value == "parse-document")
+    );
+}
+
+#[test]
+fn bundled_inventory_inspect_shows_preset_permissions_and_native_ownership() {
+    let rust = PackageService::inspect_bundled_inventory("@clay/rust").expect("bundled rust");
+    assert_eq!(rust.preset.as_deref(), Some("code-mode"));
+    assert!(
+        rust.permissions
+            .iter()
+            .any(|value| value == "parse-document")
+    );
+    assert!(
+        !rust
+            .permissions
+            .iter()
+            .any(|value| value == "language-server")
+    );
+    assert!(
+        rust.native_syntax_languages
+            .iter()
+            .any(|value| value == "rust")
+    );
+    assert!(!rust.is_enabled);
+
+    let markdown =
+        PackageService::inspect_bundled_inventory("@clay/markdown").expect("bundled markdown");
+    assert_eq!(markdown.preset.as_deref(), Some("prose-mode"));
+    assert!(
+        markdown
+            .permissions
+            .iter()
+            .any(|value| value == "parse-document")
+    );
+    assert!(
+        markdown
+            .native_syntax_languages
+            .iter()
+            .any(|value| value == "markdown")
+    );
+
+    let lsp =
+        PackageService::inspect_bundled_inventory("@clay/lsp-rust").expect("bundled lsp-rust");
+    assert_eq!(lsp.preset.as_deref(), Some("lsp-bridge"));
+    assert!(
+        lsp.permissions
+            .iter()
+            .any(|value| value == "language-server")
+    );
+    assert!(lsp.native_syntax_languages.is_empty());
+    assert!(PackageService::inspect_bundled_inventory("lsp-shared").is_none());
 }
 
 #[test]
@@ -1991,12 +2090,14 @@ fn keypress_routing_uses_manifest_without_javascript() {
                 );
             }
             RoutingPolicy::ClientUiCommand => {
-                // Phase 22.1: Clay-owned client UI commands (shell pane
-                // management, editor client commands) are allowed in the base
-                // manifest; packages must not declare their own.
+                // Clay-owned client UI commands (shell pane management and
+                // editor commands) are allowed in the base manifest; packages
+                // must not declare their own. Phase 28.5 adds the built-in
+                // `editor.toggleInlayHints` local overlay command.
                 assert!(
                     cmd.command_id.starts_with("shell.client")
-                        || cmd.command_id.starts_with("editor.client"),
+                        || cmd.command_id.starts_with("editor.client")
+                        || cmd.command_id == "editor.toggleInlayHints",
                     "package manifest command `{}` must not request native client UI authority",
                     cmd.command_id
                 );

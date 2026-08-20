@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientPasteClipboard
 js_facade: runtime/js/editor.js::clientPasteClipboard
-backing_rust: src/masonry_editor.rs::EditorWidget::paste_from_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface.rs::EditorSurface::paste_text_with_event
+backing_rust: src/masonry_editor.rs::EditorWidget::paste_from_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface/mod.rs::EditorSurface::paste_text_with_event
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientPasteClipboard
@@ -104,7 +104,7 @@ Use `editor.clientPasteClipboard` only as a documented command ID for `bindKey`.
 
 - JS facade: `runtime/js/editor.js::clientPasteClipboard`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/masonry_editor.rs::EditorWidget::paste_from_system_clipboard`; `src/client/clipboard.rs::SystemClipboard`; `src/editor/surface.rs::EditorSurface::paste_text_with_event`
+- Backing Rust/current owner: `src/masonry_editor.rs::EditorWidget::paste_from_system_clipboard`; `src/client/clipboard.rs::SystemClipboard`; `src/editor/surface/mod.rs::EditorSurface::paste_text_with_event`
 
 ## Lookup metadata
 

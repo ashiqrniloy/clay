@@ -264,7 +264,12 @@ impl PackageRegionWidget {
                         keys.push(PackageChildKey::PanelTitle);
                     }
                     for child in &component.children {
-                        column = column.with_child(self.build_component(child, depth + 1));
+                        let child_widget = self.build_component(child, depth + 1);
+                        column = if child.kind == "scroll" {
+                            column.with_flex_child(child_widget, 1.0)
+                        } else {
+                            column.with_child(child_widget)
+                        };
                         keys.push(Self::component_key(child));
                     }
                     (NewWidget::new(column).erased(), keys)
@@ -277,7 +282,12 @@ impl PackageRegionWidget {
                     let mut column = Flex::column().with_gap(Length::ZERO);
                     let mut keys = Vec::new();
                     for child in &component.children {
-                        column = column.with_child(self.build_component(child, depth));
+                        let child_widget = self.build_component(child, depth);
+                        column = if child.kind == "scroll" {
+                            column.with_flex_child(child_widget, 1.0)
+                        } else {
+                            column.with_child(child_widget)
+                        };
                         keys.push(Self::component_key(child));
                     }
                     (NewWidget::new(column).erased(), keys)
@@ -344,7 +354,12 @@ impl PackageRegionWidget {
                     let mut column = Flex::column().with_gap(Length::ZERO);
                     let mut keys = Vec::new();
                     for child in &component.children {
-                        column = column.with_child(self.build_component(child, depth + 1));
+                        let child_widget = self.build_component(child, depth + 1);
+                        column = if child.kind == "scroll" {
+                            column.with_flex_child(child_widget, 1.0)
+                        } else {
+                            column.with_child(child_widget)
+                        };
                         keys.push(Self::component_key(child));
                     }
                     let collapse = NewWidget::new(PackageCollapse::from_component(
@@ -367,7 +382,12 @@ impl PackageRegionWidget {
                     let mut column = Flex::column().with_gap(Length::ZERO);
                     let mut keys = Vec::new();
                     for child in &component.children {
-                        column = column.with_child(self.build_component(child, depth + 1));
+                        let child_widget = self.build_component(child, depth + 1);
+                        column = if child.kind == "scroll" {
+                            column.with_flex_child(child_widget, 1.0)
+                        } else {
+                            column.with_child(child_widget)
+                        };
                         keys.push(Self::component_key(child));
                     }
                     let focusable = self.focusable_sink[start..].to_vec();
@@ -560,6 +580,10 @@ impl PackageRegionWidget {
         }
     }
 
+    fn is_flexible_child(key: &PackageChildKey) -> bool {
+        matches!(key, PackageChildKey::Component(_, kind) if kind == "scroll")
+    }
+
     /// The child key for a real component (id hash + kind).
     fn component_key(component: &PackageUiComponentTree) -> PackageChildKey {
         PackageChildKey::Component(
@@ -632,11 +656,19 @@ impl PackageRegionWidget {
                 Flex::remove_child(flex, from);
                 current.remove(from);
                 let child = self.build_child(parent, key, child_depth);
-                Flex::insert_child(flex, target, child);
+                if Self::is_flexible_child(key) {
+                    Flex::insert_flex_child(flex, target, child, 1.0);
+                } else {
+                    Flex::insert_child(flex, target, child);
+                }
                 current.insert(target, key.clone());
             } else {
                 let child = self.build_child(parent, key, child_depth);
-                Flex::insert_child(flex, target, child);
+                if Self::is_flexible_child(key) {
+                    Flex::insert_flex_child(flex, target, child, 1.0);
+                } else {
+                    Flex::insert_child(flex, target, child);
+                }
                 current.insert(target, key.clone());
             }
         }
@@ -778,12 +810,16 @@ impl Widget for PackageRegionWidget {
             return Size::ZERO;
         };
         let child_size = ctx.run_layout(pod, bc);
-        ctx.place_child(pod, Point::ZERO);
-        if bc.is_width_bounded() && bc.is_height_bounded() {
+        let size = if bc.is_width_bounded() && bc.is_height_bounded() {
             bc.max()
         } else {
             bc.constrain(child_size)
-        }
+        };
+        // Keep long package rows inside the fixed panel/overlay frame. Scroll
+        // components still own internal movement; this is the outer boundary.
+        ctx.set_clip_path(size.to_rect());
+        ctx.place_child(pod, Point::ZERO);
+        size
     }
 
     fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _scene: &mut Scene) {
@@ -813,6 +849,7 @@ impl Widget for PackageRegionWidget {
         // subtree remains in the tree alongside them — the semantic nodes
         // are the screen-reader surface).
         let mut children = Vec::new();
+        node.set_clips_children();
         if let Some(pod) = &self.root_pod {
             children.push(pod.id().into());
         }
@@ -868,8 +905,9 @@ pub(crate) struct PackageLeaf {
     text: String,
     font_role: FontRole,
     variant: UiTextVariant,
-    /// Panel title rows use the primary text color; other leaves use muted.
+    /// Panel title and status rows use the primary text color; other leaves use muted.
     title: bool,
+    status_item: bool,
     disabled: bool,
     depth: usize,
     typography: TypographyRegistry,
@@ -883,6 +921,7 @@ impl PackageLeaf {
         font_role: FontRole,
         variant: UiTextVariant,
         title: bool,
+        status_item: bool,
         disabled: bool,
         depth: usize,
         typography: TypographyRegistry,
@@ -893,6 +932,7 @@ impl PackageLeaf {
             font_role,
             variant,
             title,
+            status_item,
             disabled,
             depth,
             typography,
@@ -948,6 +988,7 @@ impl PackageLeaf {
             font_role,
             variant,
             false,
+            component.kind == "statusItem",
             component.disabled,
             depth,
             typography,
@@ -968,6 +1009,7 @@ impl PackageLeaf {
             component.font_role,
             component.text_variant.unwrap_or(style.title_text),
             true,
+            false,
             component.disabled,
             depth,
             typography,
@@ -992,6 +1034,7 @@ impl PackageLeaf {
                 .unwrap_or_else(|| component.id.clone()),
             component.font_role,
             component.text_variant.unwrap_or(style.body_text),
+            false,
             false,
             true, // render transient placeholders dimmed until migrated
             depth,
@@ -1047,7 +1090,7 @@ impl Widget for PackageLeaf {
         let style = self.style();
         let color = if self.disabled {
             disabled_text_color(&self.ui_theme)
-        } else if self.title {
+        } else if self.title || self.status_item {
             style.text_color
         } else {
             style.muted_text_color
@@ -1069,7 +1112,11 @@ impl Widget for PackageLeaf {
     }
 
     fn accessibility_role(&self) -> Role {
-        Role::Label
+        if self.status_item {
+            Role::Status
+        } else {
+            Role::Label
+        }
     }
 
     fn accessibility(
@@ -1079,6 +1126,9 @@ impl Widget for PackageLeaf {
         node: &mut Node,
     ) {
         node.set_label(self.text.clone());
+        if self.disabled {
+            node.set_disabled();
+        }
     }
 
     fn children_ids(&self) -> ChildrenIds {
@@ -1309,6 +1359,8 @@ impl Widget for PackageButton {
         node.set_label(self.label.clone());
         if self.intent.is_some() {
             node.add_action(masonry::accesskit::Action::Click);
+        } else {
+            node.set_disabled();
         }
     }
 
@@ -1567,6 +1619,8 @@ impl Widget for PackageListRow {
         node.set_label(self.label.clone());
         if self.intent.is_some() {
             node.add_action(masonry::accesskit::Action::Click);
+        } else {
+            node.set_disabled();
         }
     }
 
@@ -1815,6 +1869,8 @@ impl Widget for PackageCollapse {
         node.set_expanded(self.expanded);
         if !self.disabled {
             node.add_action(masonry::accesskit::Action::Click);
+        } else {
+            node.set_disabled();
         }
     }
 
@@ -2250,6 +2306,8 @@ impl Widget for PackageDropdown {
         node.set_expanded(self.open);
         if !self.disabled {
             node.add_action(masonry::accesskit::Action::Click);
+        } else {
+            node.set_disabled();
         }
     }
 
@@ -2268,8 +2326,9 @@ impl Widget for PackageDropdown {
 /// server-driven (the package re-renders without it), so this action is the
 /// client-side hook a real package modal would route.
 #[derive(Debug)]
-pub(crate) struct PackageModalDismiss {
-    pub(crate) id_hash: u64,
+pub struct PackageModalDismiss {
+    pub id_hash: u64,
+    pub intent: Option<SduiActionIntent>,
 }
 
 /// A retained package `modal` (plan 070 step 13e): a focus-trapped `Role::Dialog`
@@ -2288,6 +2347,7 @@ pub(crate) struct PackageModalDismiss {
 pub(crate) struct PackageModal {
     id_hash: u64,
     title: String,
+    dismiss_intent: Option<SduiActionIntent>,
     disabled: bool,
     content: WidgetPod<Flex>,
     /// Focusable descendant widget ids in tree order, recorded by the
@@ -2315,6 +2375,14 @@ impl PackageModal {
                 .clone()
                 .or(component.label.clone())
                 .unwrap_or_else(|| component.id.clone()),
+            dismiss_intent: (!component.disabled)
+                .then(|| {
+                    component
+                        .action_command_id
+                        .as_deref()
+                        .map(|command_id| package_action_intent(command_id, &component.id))
+                })
+                .flatten(),
             disabled: component.disabled,
             content: WidgetPod::new(content),
             focusable,
@@ -2341,6 +2409,14 @@ impl PackageModal {
             .clone()
             .or(component.label.clone())
             .unwrap_or_else(|| component.id.clone());
+        self.dismiss_intent = (!component.disabled)
+            .then(|| {
+                component
+                    .action_command_id
+                    .as_deref()
+                    .map(|command_id| package_action_intent(command_id, &component.id))
+            })
+            .flatten();
         self.disabled = component.disabled;
         self.typography = typography.clone();
         self.ui_theme = ui_theme.clone();
@@ -2373,6 +2449,7 @@ impl PackageModal {
         self.focus_index = None;
         ctx.submit_action::<PackageModalDismiss>(PackageModalDismiss {
             id_hash: self.id_hash,
+            intent: self.dismiss_intent.clone(),
         });
         ctx.set_handled();
     }
@@ -2464,6 +2541,10 @@ impl Widget for PackageModal {
     ) {
         node.set_label(self.title.clone());
         node.set_modal();
+        node.set_clips_children();
+        if self.disabled {
+            node.set_disabled();
+        }
     }
 
     fn accepts_focus(&self) -> bool {
@@ -2669,7 +2750,7 @@ impl Widget for PackageTextInput {
         };
         let height = metrics.button_height();
         let field = sdui_row_rect(padding, self.depth, 0.0, width, 0.0, height);
-        let hpad = 6.0;
+        let hpad = self.ui_theme.scalar_f64("spacing.xs").unwrap_or(8.0);
         let area_width = (field.width() - hpad * 2.0).max(1.0);
         // An empty `TextArea` computes a zero content height, so pin it to the
         // line height — otherwise the field has no hit area to click into.
@@ -2706,12 +2787,19 @@ impl Widget for PackageTextInput {
         // Border: validation state > focus > subtle (plan 070 step 13c).
         let border_color = self.border_color();
         scene.stroke(
-            &Stroke::new(1.0),
+            &Stroke::new(
+                self.ui_theme
+                    .dimension("dimension.border.hairline")
+                    .unwrap_or(1.0),
+            ),
             Affine::IDENTITY,
             border_color,
             None,
             &rect,
         );
+        if self.is_focused {
+            paint_focus_ring(scene, rect, &self.ui_theme);
+        }
         // Placeholder hint when the field is empty.
         if self.is_empty && !self.placeholder.is_empty() {
             let color = if self.disabled {
@@ -2751,6 +2839,9 @@ impl Widget for PackageTextInput {
     ) {
         if !self.placeholder.is_empty() {
             node.set_label(self.placeholder.clone());
+        }
+        if self.disabled {
+            node.set_disabled();
         }
     }
 
@@ -2964,6 +3055,7 @@ impl Widget for PackagePanelHost {
     ) {
         // Children (the panel regions) flow into the a11y tree by default.
         node.set_label("Package panels");
+        node.set_clips_children();
     }
 
     fn children_ids(&self) -> ChildrenIds {
@@ -3244,6 +3336,7 @@ impl Widget for PackageOverlayHost {
         node: &mut Node,
     ) {
         // Children (the overlay regions) flow into the a11y tree by default.
+        node.set_clips_children();
         if self.centered {
             node.set_label(self.dialog_label.as_deref().unwrap_or("Command Centre"));
             node.set_modal();
@@ -3329,6 +3422,25 @@ mod tests {
             result = region.widget.pod_id_for(id_hash);
         });
         result
+    }
+
+    #[test]
+    fn package_region_accessibility_marks_children_as_clipped() {
+        let tree = component(json!({
+            "kind": "panel", "id": "panel", "title": "Settings",
+            "children": [{"kind": "label", "id": "panel.body", "text": "body"}]
+        }));
+        let (mut rr, _) = hosted_region(&tree);
+        rr.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+        let (_, update) = rr.redraw();
+        let update = update.expect("accessibility tree is active");
+        assert!(
+            update
+                .nodes
+                .iter()
+                .any(|(_, node)| node.role() == Role::Group && node.clips_children()),
+            "package region must expose renderer/accessibility child containment"
+        );
     }
 
     #[test]
@@ -4244,12 +4356,14 @@ mod tests {
 
         let tree = component(json!({
             "kind": "modal", "id": "m", "title": "Confirm",
+            "action": {"commandId": "dialog.dismiss"},
             "children": [
                 { "kind": "button", "id": "ok", "label": "OK", "action": {"commandId": "app.ok"} },
                 { "kind": "button", "id": "cancel", "label": "Cancel", "action": {"commandId": "app.cancel"} }
             ]
         }));
-        let dismissed: Rc<RefCell<Vec<u64>>> = Rc::new(RefCell::new(Vec::new()));
+        type Dismissed = (u64, Option<SduiActionIntent>);
+        let dismissed: Rc<RefCell<Vec<Dismissed>>> = Rc::new(RefCell::new(Vec::new()));
         let sink = dismissed.clone();
         let mut region = PackageRegionWidget::new();
         region.reconcile_tree(&tree);
@@ -4268,7 +4382,7 @@ mod tests {
                 if let RenderRootSignal::Action(action, _id) = signal
                     && let Ok(d) = action.downcast::<PackageModalDismiss>()
                 {
-                    sink.borrow_mut().push(d.id_hash);
+                    sink.borrow_mut().push((d.id_hash, d.intent.clone()));
                 }
             },
             render_root_options(),
@@ -4303,8 +4417,11 @@ mod tests {
         type_key(&mut rr, Key::Named(NamedKey::Escape), Code::Escape);
         assert_eq!(
             dismissed.borrow().as_slice(),
-            &[stable_package_source_id("m")],
-            "Escape emits the dismiss action for the modal"
+            &[(
+                stable_package_source_id("m"),
+                Some(package_action_intent("dialog.dismiss", "m")),
+            )],
+            "Escape emits the modal dismiss action and preserves its command intent"
         );
     }
 

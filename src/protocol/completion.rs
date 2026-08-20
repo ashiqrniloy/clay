@@ -23,6 +23,7 @@
 //! permissions and an approved decision log before reuse.
 
 use crate::perf::budgets::{
+    COMPLETION_RECENCY_MAX_ITEM_CHARS, COMPLETION_RECENCY_MAX_ITEMS,
     COMPLETION_RESULT_MAX_ITEM_COMMIT_CHARS, COMPLETION_RESULT_MAX_ITEM_DETAIL_CHARS,
     COMPLETION_RESULT_MAX_ITEM_INSERT_TEXT_CHARS, COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS,
     COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
@@ -118,6 +119,10 @@ pub struct CompletionRequest {
     /// Stale results whose `provider_generation` differs are dropped before UI
     /// publication.
     pub provider_generation: CompletionProviderGeneration,
+    /// Bounded process-local recency hints. The client records accepted insert
+    /// text and sends this small ring on the next request; the server never
+    /// persists it or treats it as authority.
+    pub recent_completions: Box<[String]>,
 }
 
 /// How a [`CompletionItem`]'s `insert_text` is interpreted on accept. `PlainText`
@@ -338,6 +343,10 @@ pub enum CompletionRequestRejection {
     /// The cursor offset lies before the replacement range start or after the
     /// replacement range end.
     CursorOutOfRange,
+    /// The client supplied more recency entries than the bounded request ring.
+    TooManyRecentCompletions,
+    /// A recency entry exceeded the bounded request-ring character cap.
+    RecentCompletionTooLong,
 }
 
 impl CompletionRequest {
@@ -351,6 +360,16 @@ impl CompletionRequest {
             || self.cursor_byte_offset > self.replacement_range.byte_end
         {
             return Err(CompletionRequestRejection::CursorOutOfRange);
+        }
+        if self.recent_completions.len() > COMPLETION_RECENCY_MAX_ITEMS {
+            return Err(CompletionRequestRejection::TooManyRecentCompletions);
+        }
+        if self
+            .recent_completions
+            .iter()
+            .any(|item| item.chars().count() > COMPLETION_RECENCY_MAX_ITEM_CHARS)
+        {
+            return Err(CompletionRequestRejection::RecentCompletionTooLong);
         }
         Ok(())
     }
@@ -402,6 +421,7 @@ mod tests {
             replacement_range: CompletionReplacementRange::new(10, 12),
             trigger: CompletionTrigger::Character(".".to_string()),
             provider_generation: 1,
+            recent_completions: Vec::<String>::new().into_boxed_slice(),
         }
     }
 
@@ -445,6 +465,24 @@ mod tests {
         assert_eq!(
             request.validate(),
             Err(CompletionRequestRejection::CursorOutOfRange)
+        );
+    }
+
+    #[test]
+    fn recent_completion_hints_are_bounded() {
+        let mut request = sample_request(4);
+        request.recent_completions =
+            vec!["item".to_string(); COMPLETION_RECENCY_MAX_ITEMS + 1].into_boxed_slice();
+        assert_eq!(
+            request.validate(),
+            Err(CompletionRequestRejection::TooManyRecentCompletions)
+        );
+
+        request.recent_completions =
+            vec!["x".repeat(COMPLETION_RECENCY_MAX_ITEM_CHARS + 1)].into_boxed_slice();
+        assert_eq!(
+            request.validate(),
+            Err(CompletionRequestRejection::RecentCompletionTooLong)
         );
     }
 

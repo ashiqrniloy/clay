@@ -208,6 +208,25 @@ bindKey("Ctrl+Shift+Down", "shell.clientSplitPaneDown", { scope: "global" });
 | S34 | Move focus to pane 2 (click / `Ctrl+Alt+Arrow`), trigger completion there | Popup re-anchors to pane 2's caret; only the active pane's caret is used (`completion_anchor` comes from the active pane) |
 | S35 | Close the last pane's document, then close the pane | The pane returns to the welcome entry state; splitting again from welcome yields a normal editable pane |
 
+## Plan 088 responsive split/pane steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| S36 | Compare a narrow working area and a wide working area with the workspace browser visible | Browser/sidebar yields before the main editor becomes unusable; split ratios and pane hosts stay inside the working-area frame |
+| S37 | Repeat S1–S18 with large UI typography | Tab/status/pane labels, dividers, focus ring, and hit targets remain in bounds; fixed slots do not cover editor content |
+| S38 | Run the representative 2× logical-window layout checks | Pane hosts and tab bar use logical bounds; no physical-pixel overflow or duplicate scale compensation occurs |
+| S39 | Split a document pane and trigger completion in each focused pane | Completion anchors to the active pane caret and is clipped inside that pane; inactive pane content/focus is unchanged |
+| S40 | Inspect split/pane accessibility after focus, split, move, close, and placeholder transitions | Pane roles/names, active-pane state, focus ring, and one-per-action announcements stay synchronized; sanitized names contain no host paths |
+
+## Plan 088 task 12 Linux execution record (2026-08-15)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| S36/S37 | PASS structural / NOT RUN visually | Responsive layout tests cover 320/900/1200 widths and 12/24/96 UI sizes; current host cannot resize/focus the Clay window for a live narrow/wide pass |
+| S38 | PASS structural | `high_dpi_layout_uses_logical_window_bounds` passes; production visual 2× capture is unavailable because the review host window is fixed and targeted resize is disabled |
+| S39 | UNRESOLVED live / PASS structural | Completion pane-anchor/clamp tests pass; interactive split/completion keyboard delivery remains blocked. Retained Plan 087 split evidence is comparison-only |
+| S40 | PASS structural / partial live | Shell/pane AccessKit tests pass and current welcome tree is clean; live multi-pane focus/announcement re-run is blocked by window targeting and the host has no screen reader |
+
 ## Linux execution record (Plan 086 task 11, 2026-08-14)
 
 - **PASS — S1/S3/S23/S24:** the real AT-SPI tree showed restored two-pane geometry and numbered pane labels; activating `Split Pane Vertical` through Control Center produced a third placeholder and `Split pane vertically` in the stable live announcement node. No malformed tree occurred.
@@ -252,12 +271,9 @@ bindKey("Ctrl+Shift+Down", "shell.clientSplitPaneDown", { scope: "global" });
 - **Window-scoped chrome**: SDUI sidebars and package panels/overlays are
   connection-wide chrome, not per-pane; they do not move or duplicate when
   panes split (packages cannot contribute per-pane chrome yet).
-- **No topology/document persistence**: pane trees and per-pane document
-  layout reset on restart; persistence arrives with Phase 22.5 (layout.json
-  extension).
-- **Persistence restored (22.5)**: pane trees, ratios, user-modified slots,
-  and per-pane documents now survive restart per tab (`layout.json` v2,
-  module 14 S22/T41); unsaved edits and caret/viewport positions still do
+- **Persistence scope**: pane trees, ratios, user-modified slots, and
+  per-pane documents survive restart per tab through `layout.json` v2
+  (module 14 S22/T41); unsaved edits and caret/viewport positions still do
   not (module 14 ceilings).
 - **Global bindings need editor focus**: `Global`-context chords route through
   the focused pane's editor key path; with a placeholder pane active (no
@@ -278,3 +294,50 @@ bindKey("Ctrl+Shift+Down", "shell.clientSplitPaneDown", { scope: "global" });
 - **Open-documents switcher follows pane focus**: `clientShowOpenDocuments`
   opens on the focused pane; cross-pane entries switch the owning pane instead
   of creating local duplicates (22.2 semantics).
+
+## Plan 089 validation steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| S41 | Run `CLAY_LIVE_WINDOW_SMOKE=1 cargo test --test security live_atspi_smoke::live_multi_window_scale_smoke -- --ignored --exact --test-threads=1` on a Wayland host with AT-SPI prereqs | Two real Clay client processes launch; AT-SPI exposes two distinct frames (PID-separated); both frames have positive physical bounds with scale factors between 0.5 and 4.0 |
+| S42 | Inspect the responsive narrow/wide captures (`code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/responsive/`) | Narrow (500 px) and wide (1200 px) captures show the welcome card, status bar, and pane hosts within bounds; the narrow welcome shortcut text adapts to card width |
+
+## Plan 089 task 9 Linux execution record (2026-08-17)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| S36–S38 | PASS structural + partial live | Responsive layout tests pass; Plan 089 visual review captured narrow (500 px) and wide (1200 px) states with PASS artifacts showing the welcome card and status bar within bounds |
+| S39 | PASS structural | Completion pane-anchor/clamp tests pass; live split+completion is covered by the completion capture (module 04 E22 Plan 089 record) |
+| S40 | PASS structural + partial live | Shell/pane AccessKit tests pass; Plan 089 focus repair fix (`request_welcome_render`, focus-on-remove) ensures the welcome status and pane focus stay synchronized after connection events and pane removal |
+| S41 | PASS live | `CLAY_LIVE_WINDOW_SMOKE=1` multi-window smoke test launched two real Clay clients; AT-SPI exposed two PID-separated frames with positive bounds and scale factors within 0.5–4.0 |
+| S42 | PASS | `code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/responsive/` shows narrow and wide captures with the welcome card, status bar, and pane hosts within bounds |
+
+## Phase 26 dirty-pane close fix and per-pane chrome steps
+
+Deep references: `docs/development/accessibility.md` (focus/consumer tree),
+`docs/reference/primitives/rendering-strategy.md` (chrome axis),
+`docs/reference/packages/creating-packages.md` (editorRules.chrome).
+Background: Plan 086 task 11 recorded a BLOCKER — closing a dirty active
+pane crashed the client in `accesskit_consumer` (`Focused ID #4 is not in
+the node list`; crash log
+`code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log`).
+Phase 26.7 fixed the root cause (stashed-widget early return in the
+accessibility pass + focus clamp + layout invalidation on document open).
+
+| # | Action | Expected |
+|---|--------|----------|
+| S43 | Repeat the Plan 086 crash sequence: open a document in a pane, type to make it dirty, `Ctrl+Alt+W` | NO crash — the save-conflict menu appears on that pane; the client and server stay alive; the accessibility consumer tree keeps a live focus at every step (menu shown, `FileOperationFailed DirtyDocument`, discard, close) |
+| S44 | From the S43 state, discard and close the pane | Pane closes; the survivor fills the working area; focus moves to a live node; no orphaned focus ID in the AT tree |
+| S45 | 2 panes, code document in one, markdown in the other | Chrome follows each pane's document mode: gutter/active-line/indent guides/bracket match in the code pane, none in the prose pane; chrome is per-pane, never cross-pane bleed |
+| S46 | Split a code pane and scroll the gutter side | Gutter digits stay right-aligned and clipped to the pane; the active-line wash tracks the caret line in the focused pane only |
+
+Negative: closing a dirty pane never loses edits (D10–D12 unchanged); the
+last pane is never closed (S6 unchanged); chrome grants no authority and is
+not SDUI — packages contribute chrome only as inert manifest data.
+
+## Phase 26 Linux execution record (2026-08-19)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| S43/S44 | PASS automated regression; live partial | `dirty_focused_pane_menu_and_discard_keep_consumer_focus_live` exercises the exact crash path (dirty pane → save-conflict menu via `apply_menu_sync` → `FileOperationFailed DirtyDocument` → discard → close) asserting the consumer focus stays live at every step; `dirty_pane_close_rejection_and_discarded_removal_keep_focus_consumer_safe` covers the rejection path. The Plan 086 crash log is superseded — the panic no longer reproduces in the automated suite. Live attempt (2026-08-19): a real Clay instance with an open document accepted typed input (doc v2, dirty) and stayed alive with an intact AT-SPI tree; the `Ctrl+Alt+W` chord itself is host-blocked (portal delivers single keys only — review-log V9), so the live menu path was not re-driven |
+| S45/S46 | PASS live (single-pane) / structural (multi-pane) | `code-reviews/screenshots/2026-08-18-phase26-review/rust-*` (chrome on) vs `markdown-*` (chrome off) show per-mode chrome; per-pane chrome isolation is covered by the pane-scoped paint tests (`pane_paint_baselines`, per-pane decoration aggregate guard) |

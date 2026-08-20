@@ -134,7 +134,7 @@ Current client rendering is split between the editor surface and the retained SD
 
 - `src/masonry_editor.rs::EditorWidget::apply_connection_event` applies server events before paint and syncs the hosted child widgets (`SduiRegionWidget`, `PackagePanelHost`, `PackageOverlayHost`) in place via `MutateCtx`. A future `DecorationUpdate` event should be handled here or in an editor-specific connection event path, then forwarded to `EditorSurface` as validated cached data.
 - `src/masonry_editor.rs::EditorWidget::paint` fills the background and paints the editor canvas (`self.editor.paint_in_rect`); the SDUI sidebar, fixed package panels, and transient overlays render through hosted Masonry child widgets (children pass, after `paint`); `post_paint` draws the status line. No package work belongs in this function.
-- `src/editor/surface.rs::EditorSurface::paint` computes visible lines and delegates text rendering to the layout layer. A future decoration hook should attach at the visible snapshot/layout-cache boundary so only visible spans are translated into Parley style ranges.
+- `src/editor/surface/mod.rs::EditorSurface::paint` computes visible lines and delegates text rendering to the layout layer. A future decoration hook should attach at the visible snapshot/layout-cache boundary so only visible spans are translated into Parley style ranges.
 - `src/masonry_sdui_region.rs::SduiRegionWidget` reconciles the SDUI tree into retained Masonry widgets (`SduiLabel`/`SduiButton`/`SduiListRow`/`EditorViewWidget` under `SduiScrollViewport`) which paint themselves with Parley text layout and Vello `Scene` fills/text draws; sidebar chrome is painted by the region widget. `SduiNativeState` (`src/masonry_sdui.rs`) holds inert validated state and drives reconciliation; it no longer has an immediate-mode paint path.
 
 New inline decoration rendering should map validated spans to known Parley style attributes and Vello scene primitives inside Rust. The hook should not allocate or parse unbounded package data during paint; all range validation, priority resolution, stale-version checks, and viewport filtering happen before the next paint.
@@ -219,6 +219,20 @@ Validation runs outside paint/key/text hot paths and remains bounded by `DECORAT
 4. `DecorationSet` validation and payload checks run before insertion into `SyntaxChunkCache` or delivery to the existing decoration transport. Open itself returns before this work completes; failures become sanitized `RuntimeDiagnostic` values such as `parse.open_failed`.
 
 Invalid or unsupported queries, artifacts, or captures fail closed for that package: Clay keeps the document editable through its active major mode and publishes no syntax decorations for the failed grammar. Runtime performs no network fetch, shell/package-manager build, native-library load, or client-side JavaScript execution.
+
+## Phase 26 rendering axes (implemented)
+
+Status: **implemented** in Phase 26.1–26.6. These stay theme/layout primitives — no new `DecorationKind`, no package pixels, no paint-path JS.
+
+| Axis | Primitive | Where |
+| --- | --- | --- |
+| Opaque syntax colors | `StyleSpec.color` | `src/editor/theme.rs` |
+| Background fill | `StyleSpec.background` → `VisibleTextStyleRun.background`, painted before glyphs | `src/editor/layout.rs` |
+| Size ladder | `StyleSpec.scale` on Syntax/Semantic only | `src/editor/layout.rs` FontSize |
+| Editor chrome | `EditorChrome` (gutter / active line / indent guides / bracket match) | `src/editor/surface/chrome.rs` |
+| Wrap / insets | `WrapPolicy` + token-aligned insets | `src/editor/surface/mod.rs` |
+
+`DecorationSpan` is unchanged (no rkyv background/scale fields). Themes contribute `background` and `scale` through `textStyles`. Chrome and wrap are `editorRules` data, not SDUI.
 
 ## Phase 17/18 Follow-Up
 

@@ -81,7 +81,7 @@
         },
         {
           "token": "Operator",
-          "color": "#ffffff"
+          "color": "#feffff"
         },
         {
           "token": "Comment",
@@ -105,11 +105,11 @@
         },
         {
           "token": "Method",
-          "color": "#feacd0"
+          "color": "#ffacd0"
         },
         {
           "token": "Macro",
-          "color": "#ff7f86"
+          "color": "#ff8086"
         },
         {
           "token": "Namespace",
@@ -137,11 +137,11 @@
         },
         {
           "token": "TypeParameter",
-          "color": "#00d3d0"
+          "color": "#00d3d1"
         },
         {
           "token": "Parameter",
-          "color": "#00d3d0"
+          "color": "#00d4d0"
         },
         {
           "token": "Variable",
@@ -149,7 +149,7 @@
         },
         {
           "token": "Property",
-          "color": "#00d3d0"
+          "color": "#01d3d0"
         },
         {
           "token": "EnumMember",
@@ -161,37 +161,43 @@
         },
         {
           "token": "Decorator",
-          "color": "#ff7f86"
+          "color": "#ff7f87"
         },
         {
           "token": "Heading1",
           "color": "#ffffff",
-          "bold": true
+          "bold": true,
+          "scale": 1.5
         },
         {
           "token": "Heading2",
           "color": "#d2b580",
-          "bold": true
+          "bold": true,
+          "scale": 1.33
         },
         {
           "token": "Heading3",
           "color": "#c6daff",
-          "bold": true
+          "bold": true,
+          "scale": 1.17
         },
         {
           "token": "Heading4",
           "color": "#feacd0",
-          "bold": true
+          "bold": true,
+          "scale": 1.08
         },
         {
           "token": "Heading5",
           "color": "#88ca9f",
-          "bold": true
+          "bold": true,
+          "scale": 1.0
         },
         {
           "token": "Heading6",
           "color": "#ff9580",
-          "bold": true
+          "bold": true,
+          "scale": 0.92
         },
         {
           "token": "ListItem",
@@ -199,15 +205,18 @@
         },
         {
           "token": "Quote",
-          "color": "#989898"
+          "color": "#989898",
+          "background": "#98989828"
         },
         {
           "token": "CodeBlock",
-          "color": "#ffffff"
+          "color": "#ffffff",
+          "background": "#ffffff18"
         },
         {
           "token": "CodeSpan",
-          "color": "#00c06f"
+          "color": "#00c06f",
+          "scale": 0.9
         },
         {
           "token": "Link",
@@ -217,6 +226,10 @@
         {
           "token": "Paragraph",
           "color": "#ffffff"
+        },
+        {
+          "token": "searchMatch",
+          "color": "#d2a70055"
         }
       ]
     },

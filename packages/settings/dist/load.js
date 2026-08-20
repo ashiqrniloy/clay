@@ -1,12 +1,11 @@
 // @clay/settings package load entry (Phase 20.6).
 //
-// Registers the settings commands and the catalog-composed settings overlay.
-// The surface is composed entirely of implemented ComponentKind kinds
+// The host applies settings commands from package.json; this entry registers
+// the catalog-composed settings overlay. The surface is composed entirely of implemented ComponentKind kinds
 // (modal/collapse/dropdown/textInput/label/button/flex) declared in
 // `clay.contributions.ui.panels`; no executable render surface runs on the
 // hot path. Control actions emit inert `settings.*` command intents
 // validated by the server-side settings command executor.
-import { serverRegisterCommand } from "clay:commands";
 import { serverRegisterPanelContribution } from "clay:ui";
 
 export const packageName = "@clay/settings";
@@ -40,7 +39,10 @@ const SETTINGS_PANEL = Object.freeze({
     kind: "panel",
     id: "settings.root",
     title: "Settings",
-    children: [
+    children: [{
+      kind: "scroll",
+      id: "settings.scroll",
+      children: [
       {
         kind: "collapse",
         id: "settings.section.theme",
@@ -97,7 +99,8 @@ const SETTINGS_PANEL = Object.freeze({
           { kind: "button", id: "settings.button.close", label: "Close", action: { commandId: "settings.close" }, style: { variant: "default" } }
         ]
       }
-    ]
+      ]
+    }]
   }
 });
 
@@ -106,14 +109,8 @@ export function settingsPackageContract() {
 }
 
 export async function loadSettingsPackage(_options = {}) {
-  for (const command of SETTINGS_COMMANDS) {
-    await serverRegisterCommand({
-      commandId: command.id,
-      displayName: command.displayName,
-      routingPolicy: command.routingPolicy,
-      permissions: []
-    });
-  }
+  // Commands come from the host-applied package.json record. The execute-only
+  // entry owns the panel contribution, avoiding duplicate command registration.
   await serverRegisterPanelContribution(SETTINGS_PANEL);
   return settingsPackageContract();
 }

@@ -51,7 +51,7 @@
 // diagnostics). Paths are relative to the config root (~/.config/clay).
 //
 // This example loads its package configuration from two modules at the end
-// of this file (section 10), both with optional: true so a broken or missing
+// of this file (section 11), both with optional: true so a broken or missing
 // package module records configuration.module_failed and never blocks the
 // base configuration or app launch.
 //
@@ -78,10 +78,12 @@ setTheme("@clay/theme-gruvbox-material-dark");
 // setTheme("@clay/theme-modus-vivendi");
 // setTheme({ specifier: "@clay/theme-modus-vivendi" }); // object form
 
-// setAppearance selects the appearance variant within the active theme.
-// Usually left to the settings panel (it persists the choice and reloads);
-// setting it here applies it at startup.
-// setAppearance("dark");
+// setAppearance selects the canonical appearance variant. To use it here,
+// comment out the explicit setTheme above; an explicit theme always wins.
+// Usually leave this to the settings panel (it persists the choice and reloads).
+// setAppearance("light");  // canonical Modus Operandi
+// setAppearance("dark");   // canonical Modus Vivendi
+// setAppearance("system"); // OS signal, dark fallback
 
 // ----------------------------------------------------------------------------
 // 3. Typography + ligatures — clay:theme setTypography
@@ -117,6 +119,17 @@ setTypography({
   },
   proportional: { families: ["Noto Sans", "sans-serif"], size: 17 },
   ui: { families: ["system-ui"], size: 13 },
+  // Optional UI hierarchy. When present, all seven bounded ratios are required.
+  // Each ratio is finite, > 0, and <= 4; these values preserve Clay defaults.
+  hierarchy: {
+    display: 1.5,
+    title: 14 / 12,
+    section: 13 / 12,
+    body: 1,
+    status: 1,
+    detail: 10 / 12,
+    caption: 0.75,
+  },
 });
 
 // ----------------------------------------------------------------------------
@@ -143,7 +156,33 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 // clientSetCursorStyle({ shape: "bar", blink: "solid", widthPx: 2.5 });
 
 // ----------------------------------------------------------------------------
-// 5. Key bindings — clay:keybindings
+// 5. Editor layout — clay:editor clientSetEditorLayout
+// ----------------------------------------------------------------------------
+// User-owned wrap-policy override. Resolution order:
+// runtime override (this call) > per-mode editorRules.layout.wrap (package
+// manifests) > WrapPolicy::from_font_role default (monospace → none,
+// proportional → column 72).
+//
+// Options:
+//   wrapPolicy  "none" | "viewport" | "column"   (required)
+//     "none"      no wrapping — horizontal scrolling for code
+//     "viewport"  wrap at the pane content width
+//     "column"    wrap at columnCap average character widths (prose)
+//   columnCap   number   column cap for "column" (default 72, clamped to
+//                        16–240; ignored for "none"/"viewport")
+//
+// The override is package-unforgeable: the op lives in the trusted runtime
+// extension only, so third-party package code cannot resolve it. It survives
+// configuration reload. Comment the call out to keep per-mode defaults.
+import { clientSetEditorLayout } from "clay:editor";
+
+clientSetEditorLayout({ wrapPolicy: "column", columnCap: 72 });
+// clientSetEditorLayout({ wrapPolicy: "none" });      // code: horizontal scroll
+// clientSetEditorLayout({ wrapPolicy: "viewport" });  // wrap at pane width
+// clientSetEditorLayout({ wrapPolicy: "column" });   // default 72-column prose
+
+// ----------------------------------------------------------------------------
+// 6. Key bindings — clay:keybindings
 // ----------------------------------------------------------------------------
 // bindKey(key, commandId, options?)              — bind one chord (single form).
 // bindKey({ scope, bindings: { chord: id, ... } }) — bind a whole table in one
@@ -287,14 +326,36 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 
 import { bindKey, unbindKey } from "clay:keybindings";
 
+// Phase 28 editor command bindings:
+//   editor.toggleComment    argless client-first edit; default Ctrl+/; uses the
+//                           active mode's manifest line-prefix comment rule
+//   editor.toggleListMarker argless client-first edit; no core default chord;
+//                           uses the active mode's manifest list prefix
+//   editor.rotateHeading    argless client-first edit; no core default chord;
+//                           cycles the active mode's manifest heading prefixes
+//   editor.clientToggleFold argless client-UI command; no core default chord;
+//                           toggles the validated fold containing the caret
+//   editor.toggleInlayHints argless client-UI command; no core default chord;
+//                           code modes default visible, prose modes hidden
+// These IDs are inert command names until a user chord invokes them. Clay owns
+// routing, local edits, collapse state, and overlay paint; bindings add no
+// package/filesystem/network authority.
+
 // Editor-scope defaults (batch table form — one call, scope typed once):
 bindKey({
   scope: "editor",
   bindings: {
     "Enter": "text.insert_newline",
     "Tab": "text.insert_tab",
+    "Ctrl+/": "editor.toggleComment",
   },
 });
+
+// Optional Phase 28 editor commands — no shipped chord; uncomment to opt in:
+// bindKey("Ctrl+Shift+8", "editor.toggleListMarker", { scope: "editor" });
+// bindKey("Ctrl+Alt+1", "editor.rotateHeading", { scope: "editor" });
+// bindKey("Ctrl+Shift+F", "editor.clientToggleFold", { scope: "editor" });
+// bindKey("Ctrl+Alt+I", "editor.toggleInlayHints", { scope: "editor" });
 
 // Global-scope defaults — Phase 22.1 splits and pane focus:
 bindKey({
@@ -394,7 +455,7 @@ bindKey("Alt+R", "editor.clientSmartSelect.shrink", { scope: "editor" });
 // bindKey("Alt+P", "controlCenter.openPath", { scope: "global" });
 
 // ----------------------------------------------------------------------------
-// 6. Window split pane focus — clay:shell
+// 7. Window split pane focus — clay:shell
 // ----------------------------------------------------------------------------
 // Pane focus policy for split panes (Phase 22.1). One option:
 // Since Phase 22.3 the policy applies per active tab (each tab carries its
@@ -413,7 +474,7 @@ import { setPaneFocusPolicy } from "clay:shell";
 // setPaneFocusPolicy({ paneFocusPolicy: "cursor" });
 
 // ----------------------------------------------------------------------------
-// 7. Syntax engine preference — clay:syntax
+// 8. Syntax engine preference — clay:syntax
 // ----------------------------------------------------------------------------
 // Force the parser tier for a language or first-party package.
 //   target: language/package name (e.g. "rust")
@@ -426,7 +487,7 @@ import { setSyntaxEnginePreference } from "clay:syntax";
 // setSyntaxEnginePreference("rust", "wasm");
 
 // ----------------------------------------------------------------------------
-// 8. Programmatic editor control — clay:editor
+// 9. Programmatic editor control — clay:editor
 // ----------------------------------------------------------------------------
 // These run through the `editor-control` trust boundary. init.js is trusted
 // user configuration (no package context), so it passes the gate without a
@@ -435,7 +496,7 @@ import { setSyntaxEnginePreference } from "clay:syntax";
 //
 // clientExecuteEditorCommand({ commandId }) pushes ONE known editor command
 // ID through the gated server→client channel (advisory; dropped silently if
-// unknown or undeliverable). Only the command IDs listed in section 7 are
+// unknown or undeliverable). Only the command IDs listed in section 6 are
 // accepted.
 
 import { clientExecuteEditorCommand } from "clay:editor";
@@ -464,7 +525,7 @@ import { clientExecuteEditorCommand } from "clay:editor";
 //   clientRemoveSelection() clientUndoCursorMove()
 
 // ----------------------------------------------------------------------------
-// 9. Planned — NOT callable yet (documented placeholders)
+// 10. Planned — NOT callable yet (documented placeholders)
 // ----------------------------------------------------------------------------
 // These clay:configuration exports exist as facade stubs and inventory
 // entries but have no server-side validators yet. Calling them throws.
@@ -476,7 +537,7 @@ import { clientExecuteEditorCommand } from "clay:editor";
 // Do not write hidden-key workarounds for them; hidden keys are rejected.
 
 // ----------------------------------------------------------------------------
-// 10. Package configuration modules — fault-isolated optional loads
+// 11. Package configuration modules — fault-isolated optional loads
 // ----------------------------------------------------------------------------
 // Package configuration is segregated from the base config and loaded as
 // optional modules: a broken or missing module records a

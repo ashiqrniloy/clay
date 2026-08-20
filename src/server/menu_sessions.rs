@@ -479,6 +479,45 @@ mod tests {
         snapshot.session_id
     }
 
+    struct MenuIntentLcg(u64);
+
+    impl MenuIntentLcg {
+        fn new(seed: u64) -> Self {
+            Self(seed)
+        }
+
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            self.0 ^ (self.0 >> 29)
+        }
+    }
+
+    fn assert_menu_invariants(store: &mut ServerMenuSessions, active_id: Option<u64>) {
+        assert_eq!(
+            store.active.len(),
+            if active_id.is_some() { 1 } else { 0 },
+            "one-active-session invariant"
+        );
+        if let Some(id) = active_id {
+            assert!(id & SERVER_MENU_SESSION_ID_HIGH_BIT != 0);
+            let session = store.get_mut(id).expect("tracked menu session is live");
+            let snapshot = session.session();
+            if snapshot.items().is_empty() {
+                assert_eq!(snapshot.selected_index(), 0);
+                assert!(matches!(
+                    snapshot.status(),
+                    TransientMenuStatus::Empty { .. }
+                ));
+            } else {
+                assert!(snapshot.selected_index() < snapshot.items().len());
+                assert_eq!(snapshot.status(), &TransientMenuStatus::Active);
+            }
+        }
+    }
+
     #[test]
     fn open_allocates_high_bit_ids_and_replaces() {
         let mut store = ServerMenuSessions::new();
@@ -884,16 +923,13 @@ mod tests {
                 1,
             )
             .expect("activate selected");
-        let ServerMenuActivateOutcome::Dispatch(ServerMenuActivation::Command(request)) =
-            activation
+        let ServerMenuActivateOutcome::Dispatch(ServerMenuActivation::ShellClientCommand(
+            command_id,
+        )) = activation
         else {
-            panic!("expected command activation")
+            panic!("expected client command activation")
         };
-        assert_eq!(request.command_id, "markdown.toggleList");
-        assert_eq!(
-            request.target,
-            CommandExecutionTarget::ActiveDocument { document_id: 1 }
-        );
+        assert_eq!(command_id, "markdown.toggleList");
 
         // Activation does not consume; the handler removes the session and
         // pushes TransientMenuClosed (asserted at the connection level).
@@ -965,6 +1001,142 @@ mod tests {
         assert_eq!(store.cancel_active(), Some(id));
         assert!(store.get_mut(id).is_none());
         assert_eq!(store.cancel_active(), None, "nothing active");
+    }
+
+    #[test]
+    fn generated_menu_intent_ordering_preserves_lifecycle_and_authority() {
+        let mut store = ServerMenuSessions::new();
+        let registry = registry_with_commands();
+        let catalogue = catalogue_for_registry(&registry);
+        let mut generation = 1_u64;
+        let mut active_id = None;
+        let mut last_id = SERVER_MENU_SESSION_ID_HIGH_BIT | 7;
+
+        // Fixed seeds and a short action cap cover every operation ordering
+        // without introducing a property-testing dependency or unbounded
+        // corpus. Reload first probes stale-generation rejection, then
+        // performs the same cancel sweep as the live connection loop.
+        for seed in 0..64_u64 {
+            let mut rng = MenuIntentLcg::new(0x0890_cafe_2026_0816_u64 ^ seed);
+            for step in 0..18_u64 {
+                match (seed + step) % 6 {
+                    0 => {
+                        let previous = active_id;
+                        let (snapshot, replaced) =
+                            store.open_control_center(&catalogue, generation);
+                        assert_eq!(replaced, previous);
+                        if let Some(previous) = previous {
+                            assert!(store.get_mut(previous).is_none());
+                        }
+                        assert!(snapshot.session_id & SERVER_MENU_SESSION_ID_HIGH_BIT != 0);
+                        last_id = snapshot.session_id;
+                        active_id = Some(snapshot.session_id);
+                    }
+                    1 => {
+                        let id = active_id.unwrap_or(last_id);
+                        let query = match rng.next() % 5 {
+                            0 => String::new(),
+                            1 => "markdown".to_string(),
+                            2 => "toggle".to_string(),
+                            3 => "zzz-no-match".to_string(),
+                            _ => "control".to_string(),
+                        };
+                        if let Some(session) = store.get_mut(id) {
+                            let edit = session.set_query(&query);
+                            assert_eq!(edit.snapshot.query(), query);
+                        }
+                    }
+                    2 => {
+                        let delta = match rng.next() % 7 {
+                            0 => i64::MIN,
+                            1 => -3,
+                            2 => -1,
+                            3 => 0,
+                            4 => 1,
+                            5 => 3,
+                            _ => i64::MAX,
+                        };
+                        if let Some(id) = active_id {
+                            let _ = store.get_mut(id).unwrap().move_selection(delta);
+                        }
+                    }
+                    3 => {
+                        if let Some(id) = active_id {
+                            let result = store.get_mut(id).unwrap().activate(
+                                CommandExecutionTarget::Global,
+                                TransientMenuActivationData::Primary,
+                                generation,
+                            );
+                            match result {
+                                Err(CommandExecutionDiagnostic {
+                                    rule: CommandExecutionRule::UnknownCommand,
+                                    ..
+                                }) => {}
+                                Ok(ServerMenuActivateOutcome::Dispatch(
+                                    ServerMenuActivation::Command(request),
+                                )) => {
+                                    assert!(catalogue
+                                        .commands()
+                                        .iter()
+                                        .any(|command| command.command_id == request.command_id));
+                                    assert!(request.provenance.is_none());
+                                    assert!(request.expected_permissions.is_empty());
+                                    assert!(store.cancel(id).is_some());
+                                    active_id = None;
+                                }
+                                Ok(ServerMenuActivateOutcome::Dispatch(
+                                    ServerMenuActivation::ShellClientCommand(command_id),
+                                )) => {
+                                    assert!(
+                                        catalogue
+                                            .commands()
+                                            .iter()
+                                            .any(|command| command.command_id == command_id)
+                                    );
+                                    assert!(store.cancel(id).is_some());
+                                    active_id = None;
+                                }
+                                other => panic!("unexpected generated activation: {other:?}"),
+                            }
+                        } else {
+                            assert!(store.get_mut(last_id).is_none());
+                        }
+                    }
+                    4 => {
+                        let id = active_id.unwrap_or(last_id);
+                        let removed = store.cancel(id);
+                        if active_id == Some(id) {
+                            assert!(removed.is_some());
+                            active_id = None;
+                        } else {
+                            assert!(removed.is_none());
+                        }
+                    }
+                    5 => {
+                        let next_generation = generation + 1;
+                        if let Some(id) = active_id {
+                            let stale = store.get_mut(id).unwrap().activate(
+                                CommandExecutionTarget::Global,
+                                TransientMenuActivationData::Primary,
+                                next_generation,
+                            );
+                            assert!(matches!(
+                                stale,
+                                Err(CommandExecutionDiagnostic {
+                                    rule: CommandExecutionRule::StaleRuntimeGeneration,
+                                    ..
+                                })
+                            ));
+                            assert_eq!(store.cancel_active(), Some(id));
+                            active_id = None;
+                        }
+                        generation = next_generation;
+                    }
+                    _ => unreachable!(),
+                }
+                assert_menu_invariants(&mut store, active_id);
+            }
+        }
     }
 
     #[test]

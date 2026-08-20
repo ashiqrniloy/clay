@@ -90,7 +90,7 @@ A future `src/server/parse_coordinator.rs` is the preferred attachment point bec
 - **Priority:** Visible viewport ranges are processed first, adjacent ranges second, and off-viewport/cache refresh work last.
 - **Backpressure:** Queues are bounded per document and per package. When the queue is full, older stale work is dropped before newer viewport-relevant work.
 
-`src/server/js_runtime.rs` is the runtime boundary for executing package JavaScript through `deno_core`; it should remain the place where controlled server-side module execution, facade import allowlists, diagnostics, and raw-op restrictions are enforced. The parse coordinator should call into this runtime boundary instead of embedding parser JavaScript execution in `DocumentState`.
+`src/server/js_runtime/mod.rs` is the runtime boundary for executing package JavaScript through `deno_core`; it should remain the place where controlled server-side module execution, facade import allowlists, diagnostics, and raw-op restrictions are enforced. The parse coordinator should call into this runtime boundary instead of embedding parser JavaScript execution in `DocumentState`.
 
 ## Parse Result Shape
 
@@ -113,7 +113,7 @@ ParseResult {
 
 Publication rules:
 
-- Serialized parse result metadata and incremental tree/update data must fit within `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`.
+- Serialized parse result metadata and incremental tree/update data must fit within `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` when no folding set is attached. An update carrying `folding_ranges` uses the derived `INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES` envelope; the folding set remains independently capped by `FOLDING_RANGE_PAYLOAD_BUDGET_BYTES`.
 - Decoration spans derived from the result must fit within `DECORATION_PAYLOAD_BUDGET_BYTES` after server validation and viewport filtering.
 - Optional diagnostic side channels map to `IncrementalParseUpdate.diagnostic_update` / `DiagnosticSet` and must fit within `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES` after centralized validation; see [Range Diagnostics](diagnostics.md).
 - `syntax_tree_delta` is server/cache metadata unless a later primitive explicitly exposes syntax trees. The Rust client receives only validated rendering/folding/diagnostic declarations it knows how to apply.
@@ -126,7 +126,7 @@ Before publishing any parse-produced rendering update, the server validates:
 - Package provenance: `package_prefix` matches the loaded package and active mode contribution.
 - Permissions: parse handlers require the declared parse permission (for example `parse-document`) and cannot access filesystem, network, shell, AI, WASM, remote listeners, or raw `Deno.core.ops` unless a future decision explicitly grants and validates that authority.
 - Version metadata: `document_id`, `document_version`, and `behavior_version` are current or safely compatible.
-- Payload bounds: `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, and any related folding budget are enforced before allocation/publication.
+- Payload bounds: `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, the derived `INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES` when needed, `DECORATION_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, and `FOLDING_RANGE_PAYLOAD_BUDGET_BYTES` are enforced before allocation/publication.
 - Ranges: byte ranges are valid for the server-canonical document version and intersect the delivered viewport unless deliberately cached server-side.
 - Shape: decoration kinds, style tokens, priorities, folding kinds, and diagnostic severities are known inert schema values.
 - Security: executable JavaScript, client-side callbacks, raw ops, arbitrary draw commands, native widget mutation, and unbounded strings are stripped or rejected.
@@ -160,7 +160,7 @@ Lagging package work must be visually safe and predictable:
 No code is added in Phase 16, but later phases should attach parsing at these boundaries:
 
 - `src/server/document.rs`: after accepted edits in `DocumentState::apply_edit`, expose compact accepted-edit metadata to the coordinator. Do not run JavaScript here.
-- `src/server/js_runtime.rs`: extend the controlled `deno_core` runtime/facade allowlist with future `clay:parse` APIs such as `parse.serverRegisterParseHandler`; preserve server-side execution and sanitized diagnostics.
+- `src/server/js_runtime/mod.rs`: extend the controlled `deno_core` runtime/facade allowlist with future `clay:parse` APIs such as `parse.serverRegisterParseHandler`; preserve server-side execution and sanitized diagnostics.
 - `src/server/parse_coordinator.rs`: new module recommended for per-document parse queues, cancellation tokens/generations, timeout policy, viewport priority, cache management, and result validation/publication.
 - Future protocol modules: define `ParseEditNotification`, `ParseResult`, and `DecorationUpdate`/folding/diagnostic publication messages as bounded protocol shapes.
 

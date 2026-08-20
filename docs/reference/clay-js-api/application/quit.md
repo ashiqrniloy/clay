@@ -98,7 +98,7 @@ Use `application.quit` when the user asks for quit clay through the Clay JS API.
 - JS facade: `runtime/js/application.js::quit`
 - Future Deno op: `src/server/ops/application.rs::op_clay_application_quit` (`op_clay_application_quit`)
 - Backing Rust/current owner: `src/masonry_editor.rs::EditorAction::ExitRequested`
-- Current implementation audit path: `src/masonry_editor.rs::EditorWidget::on_text_event; src/main.rs::Driver::on_action`
+- Current implementation audit path: `src/masonry_editor.rs::EditorWidget::on_text_event; src/app_driver.rs::Driver::on_action`
 
 ## Lookup metadata
 

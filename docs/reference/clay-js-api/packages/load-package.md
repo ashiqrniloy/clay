@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:packages"
 js_export: loadPackage
 js_facade: runtime/js/packages.js::loadPackage
-backing_rust: src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime.rs::ClayModuleLoader::resolve; src/server/js_runtime.rs::ClayModuleLoader::load
+backing_rust: src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime/source.rs::ClayModuleLoader::resolve; src/server/js_runtime/source.rs::ClayModuleLoader::load
 deno_op: op_clay_packages_load_package_by_specifier
 deno_op_path: src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier
 name: loadPackage
@@ -37,7 +37,7 @@ Resolve and activate an installed, user-authorized package from a single specifi
 
 ## Description
 
-`loadPackage("@clay/markdown")` is the one-line end-user default for loading a package from `~/.config/clay/init.js`; installed source-aware packages can use the same API, e.g. `loadPackage("@vendor/foo")` or `loadPackage("github:user/repo")` after install and authorization. The resolver validates package metadata through Clay-owned `PackageService` validators, checks user-approved capability grants, enables the package (recording its contributions in a validated, conflict-checked set), and imports and executes the package's declared `loadEntry` so that its mode, commands, parse handler, and keymaps are registered under Clay's authority. No inline manifest object, no per-primitive registration, and no manual `clay` facade plumbing are required in user configuration.
+`loadPackage("@clay/markdown")` is the one-line end-user default for loading a package from `~/.config/clay/init.js`; installed source-aware packages can use the same API, e.g. `loadPackage("@vendor/foo")` or `loadPackage("github:user/repo")` after install and authorization. The resolver validates package metadata through Clay-owned `PackageService` validators, checks user-approved capability grants, enables the package, applies host-owned `package.json` contributions (modes, commands, completion, syntax, UI), and then imports the execute-only `loadEntry` for work that cannot be JSON (parse-handler module import, document analyzer). No inline manifest object, no per-primitive registration, and no manual `clay` facade plumbing are required in user configuration.
 
 The resolved `loadEntry` is confined to the validated package root for its own imports; it cannot load modules outside its root or escape the config root for any non-package specifier. Bundled trust comes only from Clay's compiled exact inventory/root/integrity check. Every other source executes in one shared adopted-third-party runtime after durable approval; third-party packages are a disclosed trust cohort and are not mutually isolated from sibling packages.
 
@@ -123,7 +123,7 @@ Use this API as the one-line default when a user or script needs to load a packa
 - JS facade: `runtime/js/packages.js::loadPackage` (included by `src/server/facades.rs`)
 - Deno op: `src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`
 - Rust validation: `src/packages/service.rs::PackageService::enable` (calls `assemble_package_record` + authorization checks + `check_enabled_packages`)
-- Module loader gate: `src/server/js_runtime.rs::ClayModuleLoader` (package allowlist branch via `PackageLoadEntryAllowlist`)
+- Module loader gate: `src/server/js_runtime/source.rs::ClayModuleLoader` (package allowlist branch via `PackageLoadEntryAllowlist`)
 
 ## Lookup metadata
 

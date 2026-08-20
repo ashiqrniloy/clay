@@ -4,6 +4,8 @@ mod clay_js_api_inventory;
 mod clay_js_doc_registry;
 #[path = "../clay_js_facade_layout.rs"]
 mod clay_js_facade_layout;
+#[path = "../editor_intelligence_protocol.rs"]
+mod editor_intelligence_protocol;
 #[path = "../manual_smoke_docs.rs"]
 mod manual_smoke_docs;
 #[path = "../package_loading_docs.rs"]

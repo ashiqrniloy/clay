@@ -26,7 +26,10 @@ use crate::editor::{
     EditorSelectionQueryRequestEvent,
 };
 use crate::ipc::IpcEndpoint;
-use crate::perf::metrics::{MetricMetadata, global_recorder};
+use crate::perf::{
+    budgets::{COMPLETION_RECENCY_MAX_ITEM_CHARS, COMPLETION_RECENCY_MAX_ITEMS},
+    metrics::{MetricMetadata, global_recorder},
+};
 use crate::protocol::{
     ActiveTypography, BehaviorManifest, BehaviorScope, BehaviorVersion, CaretStyle, ClientId,
     ClientMessage, CompletionRejection, CompletionRequest, CompletionRequestId,
@@ -324,6 +327,7 @@ pub struct ClientEditQueue {
     lease_id: Option<crate::protocol::LeaseId>,
     sync_state: Arc<Mutex<ClientSyncState>>,
     file_open_capability: Arc<Mutex<Option<String>>>,
+    completion_recency: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl ClientEditQueue {
@@ -336,6 +340,7 @@ impl ClientEditQueue {
                 lease_id: None,
                 sync_state: Arc::new(Mutex::new(ClientSyncState::new(0))),
                 file_open_capability: Arc::new(Mutex::new(None)),
+                completion_recency: Arc::new(Mutex::new(VecDeque::new())),
             },
             receiver,
         )
@@ -352,6 +357,7 @@ impl ClientEditQueue {
             lease_id: None,
             sync_state: Arc::new(Mutex::new(ClientSyncState::new(0))),
             file_open_capability: Arc::new(Mutex::new(None)),
+            completion_recency: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
@@ -529,6 +535,37 @@ impl ClientEditQueue {
             })
     }
 
+    pub(crate) fn record_completion_accept(&self, insert_text: &str) {
+        // ponytail: keep only four 64-char entries; send the full ring only if
+        // completion quality proves this request-budget ceiling too restrictive.
+        let text: String = insert_text
+            .chars()
+            .take(COMPLETION_RECENCY_MAX_ITEM_CHARS)
+            .collect();
+        if text.is_empty() {
+            return;
+        }
+        let mut recency = self
+            .completion_recency
+            .lock()
+            .expect("completion recency poisoned");
+        if let Some(index) = recency.iter().position(|item| item == &text) {
+            recency.remove(index);
+        }
+        recency.push_front(text);
+        recency.truncate(COMPLETION_RECENCY_MAX_ITEMS);
+    }
+
+    fn recent_completion_texts(&self) -> Box<[String]> {
+        self.completion_recency
+            .lock()
+            .expect("completion recency poisoned")
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_boxed_slice()
+    }
+
     pub(crate) fn enqueue_completion_request(
         &self,
         event: EditorCompletionRequestEvent,
@@ -552,6 +589,7 @@ impl ClientEditQueue {
                 replacement_range: event.replacement_range,
                 trigger: event.trigger,
                 provider_generation: 0,
+                recent_completions: self.recent_completion_texts(),
             },
         })
     }
@@ -848,6 +886,7 @@ pub enum ClientConnectionEvent {
     DecorationSet(DecorationSet),
     DecorationBatch(Vec<DecorationSet>),
     DiagnosticSet(DiagnosticSet),
+    FoldingRangeSet(crate::protocol::FoldingRangeSet),
     CompletionResult(CompletionResultSet),
     CompletionRejected {
         request_id: CompletionRequestId,
@@ -867,6 +906,9 @@ pub enum ClientConnectionEvent {
     /// Plan 071 caret-transport fix: runtime caret appearance override from
     /// `clientSetCursorStyle`; `None` clears back to manifest/theme layers.
     CaretStyleOverride(Option<CaretStyle>),
+    /// Phase 26 user-owned editor wrap-policy override from `setEditorLayout`;
+    /// `None` clears back to the per-mode manifest then `from_font_role`.
+    EditorLayoutOverride(Option<crate::protocol::WrapPolicy>),
     /// Phase 22.1 shell-level user preferences from `setPaneFocusPolicy`.
     ShellPreferences(ShellPreferences),
     /// Phase 22.3: server-authoritative tab registry snapshot. Broadcast to
@@ -917,6 +959,7 @@ impl ClientConnectionEvent {
             ClientConnectionEvent::DecorationSet(set) => Some(set.document_id),
             ClientConnectionEvent::DecorationBatch(sets) => sets.first().map(|set| set.document_id),
             ClientConnectionEvent::DiagnosticSet(set) => Some(set.document_id),
+            ClientConnectionEvent::FoldingRangeSet(set) => Some(set.document_id),
             ClientConnectionEvent::CompletionResult(result) => Some(result.document_id),
             ClientConnectionEvent::LanguageIntelligenceResult(result) => Some(result.document_id),
             ClientConnectionEvent::SelectionQueryResult(result) => Some(result.document_id),
@@ -1420,6 +1463,9 @@ fn pending_handshake_event(
         {
             Some(ClientConnectionEvent::CaretStyleOverride(style))
         }
+        ServerMessage::EditorLayoutOverride(wrap) => {
+            Some(ClientConnectionEvent::EditorLayoutOverride(wrap))
+        }
         ServerMessage::ShellPreferences(preferences) => {
             Some(ClientConnectionEvent::ShellPreferences(preferences))
         }
@@ -1634,6 +1680,9 @@ async fn run_connection<S>(
                     Ok(ServerMessage::DiagnosticSet(set)) => {
                         let _ = events.send(ClientConnectionEvent::DiagnosticSet(set)).await;
                     }
+                    Ok(ServerMessage::FoldingRangeSet(set)) => {
+                        let _ = events.send(ClientConnectionEvent::FoldingRangeSet(set)).await;
+                    }
                     Ok(ServerMessage::CompletionResult { result }) => {
                         let _ = events.send(ClientConnectionEvent::CompletionResult(result)).await;
                     }
@@ -1662,6 +1711,11 @@ async fn run_connection<S>(
                             .await;
                     }
                     Ok(ServerMessage::CaretStyleOverride(_)) => {}
+                    Ok(ServerMessage::EditorLayoutOverride(wrap)) => {
+                        let _ = events
+                            .send(ClientConnectionEvent::EditorLayoutOverride(wrap))
+                            .await;
+                    }
                     Ok(ServerMessage::ShellPreferences(prefs)) => {
                         let _ = events.send(ClientConnectionEvent::ShellPreferences(prefs)).await;
                     }
@@ -2032,8 +2086,40 @@ mod tests {
                     replacement_range: CompletionReplacementRange::new(7, 9),
                     trigger: CompletionTrigger::Manual,
                     provider_generation: 0,
+                    recent_completions: Vec::<String>::new().into_boxed_slice(),
                 }
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_request_carries_bounded_accept_recency() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(1);
+        let queue = queue.with_authority(42, &DocumentAccess::Editable { lease_id: 1 });
+        queue.record_completion_accept("recent");
+        queue
+            .enqueue_completion_request(
+                EditorCompletionRequestEvent {
+                    document_id: 4,
+                    document_version: 5,
+                    behavior_version: 6,
+                    cursor_byte_offset: 9,
+                    replacement_range: CompletionReplacementRange::new(7, 9),
+                    trigger: CompletionTrigger::Manual,
+                },
+                12,
+            )
+            .unwrap();
+        let ClientMessage::CompletionRequest { request } = receiver.recv().await.unwrap() else {
+            panic!("expected completion request");
+        };
+        assert_eq!(
+            request
+                .recent_completions
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["recent"]
         );
     }
 
@@ -3942,6 +4028,7 @@ mod tests {
             event,
             ClientConnectionEvent::SduiSnapshot { .. }
                 | ClientConnectionEvent::CaretStyleOverride(_)
+                | ClientConnectionEvent::EditorLayoutOverride(_)
                 | ClientConnectionEvent::ShellPreferences(_)
                 | ClientConnectionEvent::TabRegistry(_)
                 | ClientConnectionEvent::BehaviorManifestInstalled { .. }
@@ -3951,6 +4038,7 @@ mod tests {
                 | ClientConnectionEvent::DecorationSet(_)
                 | ClientConnectionEvent::DecorationBatch(_)
                 | ClientConnectionEvent::DiagnosticSet(_)
+                | ClientConnectionEvent::FoldingRangeSet(_)
         ) {
             event = session.events.recv().await.unwrap();
         }
@@ -4151,6 +4239,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
             event,
             ClientConnectionEvent::SduiSnapshot { .. }
                 | ClientConnectionEvent::CaretStyleOverride(_)
+                | ClientConnectionEvent::EditorLayoutOverride(_)
                 | ClientConnectionEvent::ShellPreferences(_)
                 | ClientConnectionEvent::TabRegistry(_)
         ) {
@@ -4249,13 +4338,15 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::DecorationSet(_)
                 | ServerMessage::DecorationBatch(_)
-                | ServerMessage::DiagnosticSet(_) => {}
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_) => {}
                 message => panic!("expected file-open capability, got {message:?}"),
             }
         }
@@ -4288,13 +4379,15 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::DecorationSet(_)
                 | ServerMessage::DecorationBatch(_)
-                | ServerMessage::DiagnosticSet(_) => {}
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_) => {}
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             }
         };
@@ -4330,13 +4423,15 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::DecorationSet(_)
                 | ServerMessage::DecorationBatch(_)
-                | ServerMessage::DiagnosticSet(_) => continue,
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),
             }
         };
@@ -4385,13 +4480,15 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::DecorationSet(_)
                 | ServerMessage::DecorationBatch(_)
-                | ServerMessage::DiagnosticSet(_) => {}
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_) => {}
                 message => panic!("expected ResyncSnapshot, got {message:?}"),
             }
         }
@@ -4537,6 +4634,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::RuntimeDiagnostic(_) => {}
                 message => panic!("expected registry replay, got {message:?}"),
@@ -4751,6 +4849,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::RuntimeDiagnostic(_) => {}
                 message => panic!("expected registry replay, got {message:?}"),
@@ -5163,13 +5262,15 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::DecorationSet(_)
                 | ServerMessage::DecorationBatch(_)
-                | ServerMessage::DiagnosticSet(_) => {}
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_) => {}
                 message => panic!("expected file-open capability, got {message:?}"),
             }
         }
@@ -5202,13 +5303,15 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::SduiSnapshot { .. }
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::DecorationSet(_)
                 | ServerMessage::DecorationBatch(_)
-                | ServerMessage::DiagnosticSet(_) => {}
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_) => {}
                 message => panic!("expected editable InitialDocument, got {message:?}"),
             }
         };
@@ -5244,13 +5347,15 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::DecorationSet(_)
                 | ServerMessage::DecorationBatch(_)
-                | ServerMessage::DiagnosticSet(_) => continue,
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_) => continue,
                 message => panic!("expected EditRejected, got {message:?}"),
             }
         };
@@ -5299,13 +5404,15 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 | ServerMessage::ActiveTheme(_)
                 | ServerMessage::ActiveTypography(_)
                 | ServerMessage::CaretStyleOverride(_)
+                | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. }
                 | ServerMessage::RuntimeDiagnostic(_)
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::DecorationSet(_)
                 | ServerMessage::DecorationBatch(_)
-                | ServerMessage::DiagnosticSet(_) => {}
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_) => {}
                 message => panic!("expected ResyncSnapshot, got {message:?}"),
             }
         }

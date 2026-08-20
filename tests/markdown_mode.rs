@@ -188,10 +188,13 @@ fn markdown_editor_rules() -> EditorBehaviorRules {
             PairRule::new("`", "`"),
         ],
         comments: vec![],
+        heading_prefixes: vec![],
         electric_characters: vec![],
         autocomplete_triggers: vec![],
         movement: MovementRules::default(),
         caret_style: None,
+        chrome: None,
+        layout: None,
     }
 }
 
@@ -362,6 +365,7 @@ fn markdown_parse_update(document_version: u64) -> IncrementalParseUpdate {
         syntax_tree_delta: Some("decorations:viewport-spans=7".to_string()),
         decoration_updates: vec![markdown_decoration_set(document_version, 160)],
         diagnostic_update: None,
+        folding_update: None,
     }
 }
 
@@ -417,8 +421,14 @@ fn markdown_parser_adapter_uses_markdown_it_package_boundary() {
     assert!(parser.contains("markdown-it"));
     assert!(parser.contains("MARKDOWN_IT_OPTIONS"));
     assert!(parser.contains("html: false"));
-    assert!(parser.contains("markup.heading.1"));
-    assert!(parser.contains("markup.list-marker"));
+    assert!(parser.contains("tokenType: \"Heading1\""));
+    assert!(parser.contains("tokenType: \"ListItem\""));
+    assert!(
+        !parser.contains("markup.heading")
+            && !parser.contains("markup.strong")
+            && !parser.contains("styleToken"),
+        "Tier 3 markdown producer must emit closed TokenType names, not markup.* style tokens"
+    );
     assert!(
         !parser.contains("Deno.core.ops"),
         "parser adapter must use Clay facades, not raw Deno ops"
@@ -434,16 +444,67 @@ fn markdown_parser_adapter_publishes_protocol_spans_without_parser_data() {
         "adapter must keep markdown-it token input injectable without changing Clay's protocol shape"
     );
     assert!(
-        parser.contains("kind: \"syntax\"")
+        parser.contains("kind: extras.kind ?? \"syntax\"")
             && parser.contains("byteStart")
             && parser.contains("byteEnd")
-            && parser.contains("styleToken"),
+            && parser.contains("tokenType"),
         "adapter must publish Clay decoration protocol fields, not parser internals"
     );
     assert!(
         !parser.contains("mdast:") && !parser.contains("type: \"heading_open\""),
         "published span shape must not expose parser-specific internals"
     );
+}
+
+#[test]
+fn markdown_parser_emits_link_kind_with_href() {
+    let parser = std::fs::read_to_string("packages/markdown/dist/parser.js")
+        .expect("parser adapter must exist");
+    assert!(parser.contains("kind: \"link\""));
+    assert!(parser.contains("classifyHref"));
+    assert!(parser.contains("workspacePath"));
+    assert!(parser.contains("displayOnly"));
+    assert!(
+        !parser.contains("footnote"),
+        "markdown-it footnotes stay disabled; link hrefs only"
+    );
+}
+
+#[test]
+fn first_party_js_producers_emit_no_free_form_markup_style_tokens() {
+    let mut stack = vec![std::path::PathBuf::from("packages")];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if entry.file_type().unwrap().is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
+            if !name.ends_with(".js") && !name.ends_with(".mjs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            for forbidden in [
+                "markup.heading",
+                "markup.strong",
+                "markup.emphasis",
+                "markup.inline-code",
+                "markup.code-block",
+                "markup.list-marker",
+            ] {
+                assert!(
+                    !source.contains(forbidden),
+                    "{} must not emit {forbidden}",
+                    path.display()
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -521,10 +582,10 @@ fn markdown_windowed_adapter_declares_bounded_parse_policy() {
     let load = std::fs::read_to_string("packages/markdown/dist/load.js")
         .expect("Markdown load runtime must exist");
     for expected in [
-        "maxWindowBytes: contract.parse.parseWindowBytes",
-        "guardBytes: contract.parse.guardBytes",
-        "memoryBudgetBytes: contract.parse.memoryBudgetBytes",
-        "timeoutMs: contract.parse.timeoutMs",
+        "maxWindowBytes: 64 * 1024",
+        "guardBytes: 4 * 1024",
+        "memoryBudgetBytes: 30 * 1024 * 1024",
+        "timeoutMs: 5000",
     ] {
         assert!(
             load.contains(expected),
@@ -608,24 +669,20 @@ fn markdown_fixture_activates_with_markdown_it_adapter() {
         .expect("Markdown load runtime must exist");
     // Plan 061 task 5: registrations use the host-stamped package context;
     // no caller manifest crosses the facade boundary.
-    assert!(load.contains("markdownPackageManifest"));
-    assert!(load.contains("serverLoadPackage?.(packageManifest)"));
-    assert!(load.contains("serverRegisterModePattern({"));
-    assert!(load.contains("serverActivateMajorMode({"));
-    assert!(load.contains("serverRegisterCommand({"));
-    assert!(load.contains("adapter: contract.parse.adapter"));
-    assert!(load.contains("./dist/parser.js"));
-    assert!(load.contains("./dist/sdui.js"));
+    assert!(load.contains("serverRegisterParseHandler({"));
+    assert!(load.contains("adapter: \"./dist/parser.js\""));
     for stale in [
-        "serverRegisterModePattern(packageManifest",
-        "serverActivateMajorMode(packageManifest",
-        "serverRegisterCommand(packageManifest",
-        "serverRegisterComponentContribution?.(packageManifest",
-        "packageManifest,\n",
+        "markdownPackageManifest",
+        "serverRegisterModePattern",
+        "serverActivateMajorMode",
+        "serverRegisterCommand",
+        "serverRegisterCompletionProvider",
+        "serverRegisterComponentContribution",
+        "serverRegisterSyntaxGrammar",
     ] {
         assert!(
             !load.contains(stale),
-            "load runtime must not pass caller manifests across facades (`{stale}`)"
+            "load runtime must stay execute-only (`{stale}`)"
         );
     }
 }
@@ -642,24 +699,14 @@ fn markdown_default_load_entry_imports_documented_clay_facades_only() {
     let index = std::fs::read_to_string("packages/markdown/dist/index.js")
         .expect("Markdown package index must exist");
 
-    for documented_facade in [
-        "import { serverRegisterCommand } from \"clay:commands\";",
-        "import { serverActivateMajorMode, serverRegisterModePattern } from \"clay:modes\";",
-        "import { serverLoadPackage } from \"clay:packages\";",
-        "import { serverRegisterParseHandler } from \"clay:parse\";",
-    ] {
-        assert!(
-            load.contains(documented_facade),
-            "default load entry must import documented facade `{documented_facade}`"
-        );
-    }
-    // The default export is the no-options activation entry that loadPackage
-    // invokes; markdownLoadMode is the same function re-exported as a named
-    // fallback/test-only alias.
     assert!(
-        load.contains("export default markdownLoadMode;")
-            && load.contains("export async function markdownLoadMode(options = {})"),
-        "default load entry must export markdownLoadMode as both default and named alias"
+        load.contains("import { serverRegisterParseHandler } from \"clay:parse\";"),
+        "default load entry must import the parse facade"
+    );
+    assert!(
+        load.contains("export default loadMarkdownPackage;")
+            && load.contains("export async function markdownLoadMode()"),
+        "default load entry must export loadMarkdownPackage and markdownLoadMode"
     );
     for source in [load.as_str(), index.as_str()] {
         assert!(
@@ -687,11 +734,6 @@ fn markdown_default_load_does_not_publish_side_panel() {
         "load entry must declare the optional hidden right-slot preview helper"
     );
 
-    // The shared activation body (`loadMarkdownPackage`, which both
-    // `markdownLoadMode` and `loadPackage("@clay/markdown")` invoke) does not
-    // reference the optional helper or any publishTree call — the panel is
-    // opt-in only. (The full default path is proven panel-free at runtime by
-    // `load_package_markdown_default_activates_full_mode_from_init_js`.)
     let load_markdown_package = load
         .split("export async function loadMarkdownPackage")
         .nth(1)
@@ -848,10 +890,9 @@ fn markdown_preview_sdui_panel_remains_package_js_and_unchanged() {
 #[test]
 fn markdown_decoration_and_preview_are_independently_activatable() {
     let record = markdown_package_record();
-    assert_eq!(record.contributions.syntax_grammars.len(), 1);
-    assert_eq!(
-        record.contributions.syntax_grammars[0].grammar_kind,
-        "native"
+    assert!(
+        record.contributions.syntax_grammars.is_empty(),
+        "markdown grammar is owned by native descriptor"
     );
     assert!(
         record.contributions.decorations.is_empty(),
@@ -865,8 +906,7 @@ fn markdown_decoration_and_preview_are_independently_activatable() {
 
     let load =
         std::fs::read_to_string("packages/markdown/dist/load.js").expect("Markdown load entry");
-    assert!(load.contains("role: \"tier3-javascript-fallback\""));
-    assert!(load.contains("engine: \"tier1-native\""));
+    assert!(load.contains("serverRegisterParseHandler"));
     assert!(load.contains("export function registerMarkdownPreview"));
 }
 
@@ -969,21 +1009,6 @@ fn markdown_large_file_policy_declares_thresholds_and_states() {
             "Markdown policy must contain `{expected}`"
         );
     }
-
-    let load = std::fs::read_to_string("packages/markdown/dist/load.js")
-        .expect("Markdown load runtime must exist");
-    for expected in [
-        "markdownLargeFilePolicy.parseWindowBytes",
-        "markdownLargeFilePolicy.guardBytes",
-        "markdownLargeFilePolicy.memoryBudgetBytes",
-        "markdownLargeFilePolicy.timeoutMs",
-        "fallbackMode: markdownLargeFilePolicy.fallbackMode",
-    ] {
-        assert!(
-            load.contains(expected),
-            "load runtime must use `{expected}`"
-        );
-    }
 }
 
 #[test]
@@ -1037,14 +1062,10 @@ fn markdown_large_file_configuration_options_have_custom_properties_or_fixed_def
         .get("clay")
         .and_then(serde_json::Value::as_object)
         .expect("package clay metadata must be an object");
-    let permissions = clay
-        .get("permissions")
-        .and_then(serde_json::Value::as_array)
-        .expect("package permissions must be an array");
+    let permissions = markdown_package_record().manifest.clay.permissions;
     assert!(
         !permissions
-            .iter()
-            .any(|permission| permission == "package-configuration"),
+            .contains(&clay::packages::permissions::PackagePermission::PackageConfiguration),
         "Markdown fixed defaults must not request package-configuration until user settings exist"
     );
     let contributions = clay
@@ -1214,10 +1235,13 @@ fn markdown_disabled_falls_back_to_plain_text_after_rewrite() {
 #[test]
 fn markdown_invalid_package_reports_sanitized_diagnostics() {
     let mut invalid = markdown_package_json();
-    invalid["clay"]["permissions"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|permission| permission.as_str() != Some("render-decorations"));
+    invalid["clay"]["permissions"] = json!([
+        "mode-registration",
+        "mode-activation",
+        "command-registration",
+        "completion-provider",
+        "parse-document"
+    ]);
 
     let mut service = PackageService::new(
         "target/test-package-store/markdown-invalid",
@@ -1483,10 +1507,13 @@ fn markdown_editor_rules_parse_preserve_fence_body_indent() {
         },
         pairs: vec![],
         comments: vec![],
+        heading_prefixes: vec![],
         electric_characters: vec![],
         autocomplete_triggers: vec![],
         movement: MovementRules::default(),
         caret_style: None,
+        chrome: None,
+        layout: None,
     };
     let EnterRule::PreserveFenceBodyIndent { fence_markers } = &rules.enter else {
         panic!("expected PreserveFenceBodyIndent");

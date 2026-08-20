@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientUndoCursorMove
 js_facade: runtime/js/editor.js::clientUndoCursorMove
-backing_rust: src/editor/surface.rs::EditorSurface::undo_cursor_move
+backing_rust: src/editor/surface/mod.rs::EditorSurface::undo_cursor_move
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientUndoCursorMove
@@ -90,7 +90,7 @@ Use `editor.clientUndoCursorMove` when the user asks for Undo Cursor Move throug
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientUndoCursorMove`
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::undo_cursor_move`
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::undo_cursor_move`
 - Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
 
 ## Lookup metadata

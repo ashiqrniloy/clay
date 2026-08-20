@@ -177,10 +177,12 @@ pub(super) fn op_clay_modes_activate_major_mode(
         .activate_major_mode(&input)
         .map_err(mode_error("modes.activation_failed"))?;
 
-    // If the package supplied editor rules, publish an updated behavior manifest
-    // with those rules applied.  This is mode-agnostic: any package for any mode
-    // can shape the manifest's enter/pair/comment/tab rules by passing editorRules.
-    if let Some(rules) = editor_rules_override {
+    // Caller-supplied editorRules win (init.js / registerModePattern cache).
+    // Otherwise use the host-enabled package record so loadPackage apply-record
+    // does not need a JS activationRegistry entry.
+    let record_behavior = op_state.record_behavior_for_activation(&activation);
+    let rules = editor_rules_override.or(record_behavior.as_ref().map(|b| b.0.clone()));
+    if let Some(rules) = rules {
         let commands_for_activation: Vec<_> = value
             .get("commands")
             .and_then(Value::as_array)
@@ -194,7 +196,7 @@ pub(super) fn op_clay_modes_activate_major_mode(
                             .get("routingPolicy")
                             .and_then(Value::as_str)
                             .unwrap_or("server-first");
-                        let policy = parse_routing_policy_str(routing).ok()?;
+                        let policy = RoutingPolicy::parse(routing).ok()?;
                         Some(crate::protocol::CommandDeclaration {
                             command_id: id.to_string(),
                             display_name: display_name.to_string(),
@@ -204,12 +206,16 @@ pub(super) fn op_clay_modes_activate_major_mode(
                     })
                     .collect()
             })
+            .or_else(|| record_behavior.as_ref().map(|b| b.1.clone()))
             .unwrap_or_default();
 
         let keymaps_for_activation: Vec<_> = value
             .get("keymaps")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(|km| parse_keymap(km).ok()).collect())
+            .map(|arr| arr.iter().map(parse_keymap).collect::<Result<Vec<_>, _>>())
+            .transpose()
+            .map_err(JsErrorBox::generic)?
+            .or_else(|| record_behavior.as_ref().map(|b| b.2.clone()))
             .unwrap_or_default();
 
         op_state
@@ -243,7 +249,7 @@ pub(super) fn op_clay_modes_activate_major_mode(
 // into `EditorBehaviorRules`.  All rule kinds are language-agnostic;
 // no mode-specific names appear here.
 
-fn parse_editor_rules(value: &Value) -> Result<EditorBehaviorRules, String> {
+pub(crate) fn parse_editor_rules(value: &Value) -> Result<EditorBehaviorRules, String> {
     let enter = match value.get("enter") {
         None => EnterRule::PreserveLeadingWhitespace,
         Some(enter_value) => parse_enter_rule(enter_value)?,
@@ -328,10 +334,59 @@ fn parse_editor_rules(value: &Value) -> Result<EditorBehaviorRules, String> {
         },
         pairs,
         comments,
+        heading_prefixes: string_array_field(value, "headingPrefixes")?,
         electric_characters,
         autocomplete_triggers,
         movement: parse_movement_rules(value.get("movement")),
         caret_style: parse_caret_style(value.get("caretStyle")),
+        chrome: parse_chrome(value.get("chrome")),
+        layout: parse_layout(value.get("layout")),
+    })
+}
+
+fn parse_layout(value: Option<&Value>) -> Option<crate::protocol::EditorLayoutRules> {
+    let Some(Value::Object(obj)) = value else {
+        return None;
+    };
+    let policy = obj.get("wrapPolicy").and_then(Value::as_str)?;
+    let wrap = match policy {
+        "none" => crate::protocol::WrapPolicy::None,
+        "viewport" => crate::protocol::WrapPolicy::Viewport,
+        "column" => {
+            let cap = obj
+                .get("columnCap")
+                .and_then(Value::as_u64)
+                .and_then(|n| u16::try_from(n).ok())
+                .unwrap_or(crate::protocol::WrapPolicy::DEFAULT_COLUMN);
+            crate::protocol::WrapPolicy::Column(crate::protocol::WrapPolicy::clamp_column(cap))
+        }
+        _ => return None,
+    };
+    Some(crate::protocol::EditorLayoutRules { wrap })
+}
+
+fn parse_chrome(value: Option<&Value>) -> Option<crate::protocol::EditorChrome> {
+    let Some(Value::Object(obj)) = value else {
+        return None;
+    };
+    Some(crate::protocol::EditorChrome {
+        gutter: obj.get("gutter").and_then(Value::as_bool).unwrap_or(false),
+        active_line: obj
+            .get("activeLine")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        indent_guides: obj
+            .get("indentGuides")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        bracket_match: obj
+            .get("bracketMatch")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        inlay_hints: obj
+            .get("inlayHints")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -541,8 +596,8 @@ fn string_array_field(value: &Value, key: &str) -> Result<Vec<String>, String> {
     }
 }
 
-fn parse_keymap(value: &Value) -> Result<crate::protocol::KeyBindingRule, String> {
-    use crate::protocol::{KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers, KeyStroke};
+pub(crate) fn parse_keymap(value: &Value) -> Result<crate::protocol::KeyBindingRule, String> {
+    use crate::protocol::{KeyBindingContext, KeyBindingRule};
     let command_id = value
         .get("commandId")
         .and_then(Value::as_str)
@@ -555,26 +610,16 @@ fn parse_keymap(value: &Value) -> Result<crate::protocol::KeyBindingRule, String
         .get("routingPolicy")
         .and_then(Value::as_str)
         .unwrap_or("server-first");
-    let routing_policy = parse_routing_policy_str(routing)
+    let routing_policy = RoutingPolicy::parse(routing)
+        .map_err(|e| format!("modes.invalid_activation: keymap {e}"))?;
+    let sequence = super::keybindings::parse_key_sequence(key_str)
         .map_err(|e| format!("modes.invalid_activation: keymap {e}"))?;
     Ok(KeyBindingRule {
         command_id: command_id.to_string(),
-        sequence: vec![KeyStroke {
-            key: KeyCode::Character(key_str.to_string()),
-            modifiers: KeyModifiers::NONE,
-        }],
+        sequence,
         context: KeyBindingContext::EditorTextFocus,
         routing_policy,
     })
-}
-
-fn parse_routing_policy_str(value: &str) -> Result<RoutingPolicy, String> {
-    match value {
-        "server-first" | "ServerFirst" => Ok(RoutingPolicy::ServerFirst),
-        "background" | "Background" => Ok(RoutingPolicy::Background),
-        "ui-reactive-priority" | "UiReactivePriority" => Ok(RoutingPolicy::UiReactivePriority),
-        other => Err(format!("unsupported routingPolicy '{other}'")),
-    }
 }
 
 fn parse_declaration(
@@ -710,5 +755,147 @@ mod tests {
         assert_eq!(style.blink, BlinkStyle::Solid);
         assert_eq!(style.width_px, CaretStyle::default().width_px);
         assert!(!style.hollow);
+    }
+
+    fn stroke(json: &str) -> crate::protocol::KeyBindingRule {
+        parse_keymap(&serde_json::from_str(json).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn parse_keymap_ctrl_shift_m_has_modifiers() {
+        let rule = stroke(
+            r#"{"commandId":"markdown.togglePreview","key":"Ctrl+Shift+M","routingPolicy":"server-first"}"#,
+        );
+        assert_eq!(rule.sequence.len(), 1);
+        assert_eq!(
+            rule.sequence[0].key,
+            crate::protocol::KeyCode::Character("m".into())
+        );
+        assert!(rule.sequence[0].modifiers.control);
+        assert!(rule.sequence[0].modifiers.shift);
+        assert!(!rule.sequence[0].modifiers.alt);
+    }
+
+    #[test]
+    fn parse_keymap_multi_stroke_sequence() {
+        let rule = stroke(r#"{"commandId":"x","key":"Ctrl+X Ctrl+F"}"#);
+        assert_eq!(rule.sequence.len(), 2);
+        assert_eq!(
+            rule.sequence[0],
+            super::super::keybindings::parse_key_chord("Ctrl+X").unwrap()
+        );
+        assert_eq!(
+            rule.sequence[1],
+            super::super::keybindings::parse_key_chord("Ctrl+F").unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_keymap_rejects_empty_and_malformed() {
+        for json in [
+            r#"{"commandId":"x","key":""}"#,
+            r#"{"commandId":"x","key":"Ctrl+"}"#,
+            r#"{"commandId":"x","key":"Ctrl+Shift+Moo"}"#,
+            r#"{"commandId":"x","key":"Ctrl+Shift+M","routingPolicy":"not-a-policy"}"#,
+        ] {
+            assert!(
+                parse_keymap(&serde_json::from_str(json).unwrap()).is_err(),
+                "{json}"
+            );
+        }
+    }
+
+    #[test]
+    fn markdown_default_keymaps_match_key_events() {
+        let preview = stroke(
+            r#"{"commandId":"markdown.togglePreview","key":"Ctrl+Shift+M","routingPolicy":"server-first"}"#,
+        );
+        let heading = stroke(
+            r#"{"commandId":"markdown.insertHeading","key":"Ctrl+Alt+1","routingPolicy":"server-first"}"#,
+        );
+        let list = stroke(
+            r#"{"commandId":"markdown.toggleList","key":"Ctrl+Shift+8","routingPolicy":"server-first"}"#,
+        );
+        assert_eq!(
+            preview.sequence[0].key,
+            crate::protocol::KeyCode::Character("m".into())
+        );
+        assert!(preview.sequence[0].modifiers.control && preview.sequence[0].modifiers.shift);
+        assert_eq!(
+            heading.sequence[0].key,
+            crate::protocol::KeyCode::Character("1".into())
+        );
+        assert!(heading.sequence[0].modifiers.control && heading.sequence[0].modifiers.alt);
+        assert_eq!(
+            list.sequence[0].key,
+            crate::protocol::KeyCode::Character("8".into())
+        );
+        assert!(list.sequence[0].modifiers.control && list.sequence[0].modifiers.shift);
+    }
+
+    #[test]
+    fn first_party_package_keymaps_match_parsed_sequences_and_key_events() {
+        let package: Value =
+            serde_json::from_str(include_str!("../../../packages/markdown/package.json"))
+                .expect("Markdown package manifest must be valid JSON");
+        let keymaps = package["clay"]["contributions"]["keyRouting"]
+            .as_array()
+            .expect("Markdown package must declare keyRouting");
+
+        for keymap in keymaps {
+            let command_id = keymap["commandId"]
+                .as_str()
+                .expect("keyRouting commandId must be a string");
+            let key = keymap["key"]
+                .as_str()
+                .expect("keyRouting key must be a string");
+            let parsed = parse_keymap(keymap).expect("package keymap must parse");
+            let expected = super::super::keybindings::parse_key_sequence(key)
+                .expect("shared key sequence parser must accept package key");
+            assert_eq!(
+                parsed.sequence, expected,
+                "sequence parity for {command_id}"
+            );
+
+            let mut manifest = crate::protocol::BehaviorManifest::minimal_text_editing(1);
+            manifest
+                .commands
+                .push(crate::protocol::CommandDeclaration::server_intent(
+                    command_id, command_id,
+                ));
+            manifest.keymaps.push(parsed);
+            let state = crate::client::behavior::ClientBehaviorState::new(manifest)
+                .expect("package keymap must produce a valid manifest");
+            let mut pending = Vec::new();
+            for (index, stroke) in expected.iter().enumerate() {
+                let event = match &stroke.key {
+                    crate::protocol::KeyCode::Character(text) => crate::protocol::KeyStroke {
+                        key: crate::protocol::KeyCode::Character(text.to_uppercase()),
+                        modifiers: stroke.modifiers,
+                    },
+                    key => crate::protocol::KeyStroke {
+                        key: key.clone(),
+                        modifiers: stroke.modifiers,
+                    },
+                };
+                let outcome = state.route_key_sequence(&pending, &event);
+                if index + 1 == expected.len() {
+                    assert!(
+                        matches!(
+                            outcome,
+                            crate::client::behavior::ChordRouteOutcome::Matched(_)
+                        ),
+                        "parsed {key:?} must match its key event for {command_id}"
+                    );
+                } else {
+                    assert_eq!(
+                        outcome,
+                        crate::client::behavior::ChordRouteOutcome::Pending,
+                        "parsed {key:?} must hold a prefix for {command_id}"
+                    );
+                    pending.push(stroke.clone());
+                }
+            }
+        }
     }
 }

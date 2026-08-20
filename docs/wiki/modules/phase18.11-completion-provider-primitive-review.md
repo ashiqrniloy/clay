@@ -38,16 +38,16 @@
 - `src/server/ops/completion.rs`
 - `src/server/ops/mod.rs`
 - `src/server/ops/keybindings.rs`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `src/server/syntax.rs`
 - `src/server/control_center.rs`
 - `src/server/document.rs`
 - `src/packages/permissions.rs`
 - `src/packages/service.rs`
-- `src/packages/record.rs`
+- `src/packages/record/mod.rs`
 - `src/masonry_sdui.rs`
 - `src/masonry_editor.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/editor.rs`
 - `runtime/js/completion.js`
 - `runtime/js/mod.ts`
@@ -104,7 +104,7 @@ The first implementation ships one minimal built-in buffer-word provider. LSP, A
 
 ### Syntax grammar registry and package provenance
 
-- `src/server/syntax.rs` owns `SyntaxGrammarRegistry`, active syntax grammar selection, package-provenance records, and `TreeSitterSyntaxHandler`; `src/packages/record.rs` parses and validates `SyntaxGrammarContributionDescriptor` metadata.
+- `src/server/syntax.rs` owns `SyntaxGrammarRegistry`, active syntax grammar selection, package-provenance records, and `TreeSitterSyntaxHandler`; `src/packages/record/mod.rs` parses and validates `SyntaxGrammarContributionDescriptor` metadata.
 - `docs/wiki/modules/syntax-grammar-registry.md` documents the registry/provenance/active-selection pattern. Completion provider registration should reuse the same package-prefixed ID, provenance, permission, and disable/revocation withdrawal model.
 - Active completion providers are separate from active major mode and active syntax grammar: a document may have `active_major_mode = core.code`, `active_syntax_grammar = rust`, and `active_completion_providers = [core.bufferWords]` independently.
 
@@ -117,7 +117,7 @@ The first implementation ships one minimal built-in buffer-word provider. LSP, A
 
 - `src/packages/permissions.rs` already defines `PackagePermission::CompletionProvider` parsed from `completion-provider`.
 - `src/packages/service.rs` already counts a `completions` withdrawal when a package with `CompletionProvider` permission is disabled/revoked, so package disable/revocation already removes completion contributions.
-- `src/packages/record.rs` and `src/packages/manifest.rs` validate package identity, `apiPrefix`, entry/load-entry confinement, capabilities, package graph metadata, and bounded manifest payloads.
+- `src/packages/record/mod.rs` and `src/packages/manifest.rs` validate package identity, `apiPrefix`, entry/load-entry confinement, capabilities, package graph metadata, and bounded manifest payloads.
 - `docs/wiki/modules/package-loading.md` documents first-party `loadPackage("@clay/*")` loading, package record assembly, provenance, rollback, and tests. Completion provider packages should reuse this loading boundary and must not auto-load silently.
 
 ### Performance budgets and protocol codec
@@ -177,7 +177,7 @@ The public Clay JS API is `clay:completion.serverRegisterCompletionProvider` (`c
 
 Phase 18.11 implements metadata-only package registration. The op reuses `assemble_package_record`, validates `clay.contributions.completionProviders`, requires `completion-provider`, enforces package-owned provider IDs and duplicate rejection, stores `CompletionProviderMeta` snapshots in `ClayOpState`, and exposes them on `ClayRuntimeEvaluation` for tests. It rejects arbitrary executable handler values (`handler`, `callback`, `complete`, `function`, `module`), raw ops, client JavaScript, native handles, snippets/commands, URLs, shell/network/AI/WASM/native/package-manager authority, and does not grant a package execution token. The built-in `core.bufferWords` provider is Phase 18.11's only computed provider; a future constrained handler bridge is still required for package-supplied computation.
 
-Phase 18.18 extends this same metadata boundary with bounded package-owned `items: string[]`. `src/packages/record.rs` validates unique non-empty strings against `CompletionItem` field/count and contribution payload limits; `src/server/ops/completion.rs` normalizes them to provenance-bearing `CompletionProviderMeta.items: Vec<CompletionItem>`. `ClayJsRuntimeService` retains the successful evaluation's inert snapshot, and `src/server/connection.rs::static_package_completion_result` selects the active package/trigger, prefix-filters items, and returns a bounded result without invoking package JavaScript. This does not add callbacks or external authority: first-party base providers remain priority-0 inert static text data, and snippet transforms remain deferred to Phase 18.19.
+Phase 18.18 extends this same metadata boundary with bounded package-owned `items: string[]`. `src/packages/record/mod.rs` validates unique non-empty strings against `CompletionItem` field/count and contribution payload limits; `src/server/ops/completion.rs` normalizes them to provenance-bearing `CompletionProviderMeta.items: Vec<CompletionItem>`. `ClayJsRuntimeService` retains the successful evaluation's inert snapshot, and `src/server/connection/runtime.rs::static_package_completion_result` selects the active package/trigger, prefix-filters items, and returns a bounded result without invoking package JavaScript. This does not add callbacks or external authority: first-party base providers remain priority-0 inert static text data, and snippet transforms remain deferred to Phase 18.19.
 
 ## Hot-Path Classification
 
@@ -215,7 +215,7 @@ All Phase 18.11 plan tasks are now complete. The protocol shapes (`CompletionReq
 
 - `tests/primitives_docs.rs`: static coverage that this review is linked from the wiki index and primitive architecture page; registry/backlog mention `CompletionTriggerAndResult` and Phase 18.11; the review records existing inventory, generic completion gaps, hot-path split, and the `completion-provider` permission/security boundary.
 - `tests/completion_provider.rs`: covers completion registry/coordinator behavior plus `core.bufferWords` unique sorted prefix matches, empty status, result payload cap, bounded-window rejection, stale document-version rejection after newer requests, duplicate provider-ID conflict diagnostics, disabled package provider fallback to built-in buffer words, oversized result rejection before publication, package cancellation preserving built-in fallback, and registry budget validation.
-- `src/server/js_runtime.rs`: `completion_facade_registers_provider_metadata_without_raw_ops`, `completion_facade_rejects_callbacks_missing_permission_and_bad_prefix`, and `load_package_completion_provider_fixture_registers_metadata` cover the runtime facade/op metadata registration path, authority rejection, and explicit `loadPackage` fixture path.
+- `src/server/js_runtime/mod.rs`: `completion_facade_registers_provider_metadata_without_raw_ops`, `completion_facade_rejects_callbacks_missing_permission_and_bad_prefix`, and `load_package_completion_provider_fixture_registers_metadata` cover the runtime facade/op metadata registration path, authority rejection, and explicit `loadPackage` fixture path.
 - `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, and `tests/clay_js_facade_layout.rs`: cover the public `clay:completion` facade, registry/docs entry, generated registry freshness, and source-tree facade layout.
 - `tests/rust_visibility_api_mapping.rs`: allowlists `src/server/completion.rs` public items as non-JS server infrastructure (only `op_clay_completion_register_completion_provider` is the public JS API backing) and verifies `TransientMenuSession` stays `pub(crate)`.
 - `tests/manual_smoke_docs.rs`: `phase18_11_manual_completion_smoke_has_runnable_contract` verifies `docs/development/launch-and-gui-smoke.md` defines the Phase 18.11 completion smoke contract (manual trigger binding, menu display/navigation/commit/dismiss, trigger-character local-first edit, stale-result drop, disabled-provider fallback, performance/security contract, and automated coverage list).

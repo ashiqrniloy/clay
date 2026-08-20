@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientColumnSelect
 js_facade: runtime/js/editor.js::clientColumnSelect
-backing_rust: src/editor/surface.rs::EditorSurface::add_cursor_line
+backing_rust: src/editor/surface/mod.rs::EditorSurface::add_cursor_line
 deno_op: op_clay_editor_column_select
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_column_select
 name: clientColumnSelect
@@ -100,7 +100,7 @@ Use `editor.clientColumnSelect` when the user asks for column/box selection thro
 
 - JS facade: `runtime/js/editor.js::clientColumnSelect`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_column_select`
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::add_cursor_line` (down/up), `EditorSurface::move_all_carets` (left/right)
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::add_cursor_line` (down/up), `EditorSurface::move_all_carets` (left/right)
 - Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
 
 ## Lookup metadata

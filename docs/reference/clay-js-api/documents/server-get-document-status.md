@@ -97,7 +97,7 @@ Use `documents.serverGetDocumentStatus` only through the documented Clay JS faca
 - JS facade: `runtime/js/documents.js::serverGetDocumentStatus`
 - Deno op: `src/server/ops/documents.rs::op_clay_documents_get_document_status` (`op_clay_documents_get_document_status`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::document_metadata`
-- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
+- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection/mod.rs`, and `src/server/workspace.rs`
 
 ## Lookup metadata
 

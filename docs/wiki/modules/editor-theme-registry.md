@@ -5,15 +5,15 @@
 - `src/editor/theme.rs`
 - `src/editor/typography.rs`
 - `src/editor/layout.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/protocol/decorations.rs`
 - `src/protocol/mod.rs`
-- `src/packages/record.rs`
+- `src/packages/record/mod.rs`
 - `src/server/ops/theme.rs`
 - `src/server/ops/mod.rs`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `src/server/mod.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/client/mod.rs`
 - `src/masonry_editor.rs`
 - `runtime/js/theme.js`
@@ -40,7 +40,7 @@ The authoritative package authoring and vocabulary references are:
 
 ## Responsibilities
 
-- Resolve two-axis decoration data (`TokenType` + `Modifiers`) into `StyleSpec { color, bold, italic, underline, strike }`.
+- Resolve two-axis decoration data (`TokenType` + `Modifiers`) into `StyleSpec { color, background, bold, italic, underline, strike, scale }` — foreground color, theme-owned background fill, and per-token size multiplier (Phase 26).
 - Store base editor UI colors (`shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`).
 - Resolve range-diagnostic severity colors through `StyleRegistry::diagnostic_style(DiagnosticSeverity)` for native squiggle paint.
 - Preserve legacy style-token compatibility through `DecorationSpan::from_style_token` and `TokenType::classify_style_token` while rendering through the new vocabulary.
@@ -74,9 +74,9 @@ The registry stores syntax colors in a `[Color; 35]` table indexed by `TokenType
 
 ### 3. Theme packages contribute inert `textStyles`
 
-The shipped first-party themes are `@clay/theme-gruvbox-material-dark` and `@clay/theme-gruvbox-material-light`.
+The shipped first-party themes are `@clay/theme-gruvbox-material-dark`, `@clay/theme-gruvbox-material-light`, `@clay/theme-modus-operandi`, and `@clay/theme-modus-vivendi`. All four are inert validated `textStyles` packages; the Modus pair supplies canonical light/dark appearance defaults while explicit `setTheme` remains user-authoritative.
 
-`src/packages/record.rs` parses `clay.contributions.textStyles` into `TextStyleOverrideDescriptor` values. Validation rejects:
+`src/packages/record/mod.rs` parses `clay.contributions.textStyles` into `TextStyleOverrideDescriptor` values. Validation rejects:
 
 - unknown base UI keys or `TokenType` names;
 - invalid hex color strings;
@@ -111,7 +111,7 @@ Theme packages require no special permission. They are inert manifest data plus 
 
 ### 6. Paint uses the registry
 
-`src/editor/surface.rs` owns an `EditorSurface { theme: StyleRegistry, ... }`. Paint reads:
+`src/editor/surface/mod.rs` owns an `EditorSurface { theme: StyleRegistry, ... }`. Paint reads:
 
 - `self.theme.base.panel_bg` for editor background;
 - `self.theme.base.text` and `placeholder` for text;
@@ -163,7 +163,7 @@ let color = style.color;
 - **Public JS API:** `theme.setTheme` in `runtime/js/theme.js`; authoritative docs in `docs/reference/clay-js-api/theme/set-theme.md`.
 - **Deno op:** `op_clay_theme_set_theme` in `src/server/ops/theme.rs`.
 - **Protocol shape:** `TextThemeOverride` and `ActiveTheme` in `src/protocol/mod.rs`; sent as `ServerMessage::ActiveTheme`.
-- **Package contribution:** `clay.contributions.textStyles` parsed by `src/packages/record.rs`.
+- **Package contribution:** `clay.contributions.textStyles` parsed by `src/packages/record/mod.rs`.
 - **Permissions:** none for theme packages; `setTheme` only resolves bundled first-party `@clay/*` themes.
 - **Validation:** known token/base key, valid hex, duplicate rejection, no-op rejection, executable/raw CSS/native authority rejection, manifest payload budget.
 - **Hot path:** resolved once at configuration/reload/bootstrap; normalized visible presentation runs are retained with the Parley layout, so cache-hit paint does no package JavaScript, package loading, filesystem, server IPC, font-family parsing, or decoration-span rescan.
@@ -182,11 +182,11 @@ let color = style.color;
 ## Tests
 
 - `src/editor/theme.rs`: default baseline, kind/token dispatch, modifier attributes, hex parsing, override routing, last-wins merge, unknown-token no-op, and theme text-attribute defaults.
-- `src/editor/surface.rs`: mixed Markdown-code role runs, deterministic overlap/attribute composition, and diagnostic/invalid-UTF-8 font-role rejection; `src/editor/layout.rs` covers typography/style/default-role cache invalidation.
-- `tests/theme_packages.rs`: Gruvbox Material Dark/Light validate as inert full 48-entry mappings, produce distinct palettes, change the registry, make keywords bold, and preserve per-prose-token color overrides.
+- `src/editor/surface/mod.rs`: mixed Markdown-code role runs, deterministic overlap/attribute composition, and diagnostic/invalid-UTF-8 font-role rejection; `src/editor/layout.rs` covers typography/style/default-role cache invalidation.
+- `tests/theme_packages.rs`: all four bundled themes validate as inert full 48-entry mappings, produce distinct palettes and AA status chrome, preserve per-prose-token overrides, and retain the Gruvbox-only keyword-bold distinction.
 - `tests/decoration_transport.rs`: two-axis `DecorationSpan` protocol round trip and compatibility construction.
 - `tests/editor_performance_invariants.rs`: `style_registry_is_single_source_of_color_for_paint_paths` and `paint_uses_cached_inert_spans_without_package_javascript`.
-- `src/server/js_runtime.rs`: `set_theme_resolves_first_party_gruvbox_theme` validates runtime facade/op resolution.
+- `src/server/js_runtime/mod.rs`: `set_theme_resolves_first_party_gruvbox_theme` validates runtime facade/op resolution.
 - `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_facade_layout.rs`: Clay JS API documentation, generated registry, and facade coverage.
 - `tests/selected_file_markdown_smoke.rs`: selected-file bootstrap skips `ActiveTheme` while waiting for file-open capability.
 - Commands: `cargo test --lib editor::theme`, `cargo test --test editor theme_packages::`, `cargo test --test editor decoration_transport::`, `cargo test --test editor editor_performance_invariants::`, `cargo test --test protocol`.
@@ -202,7 +202,7 @@ Phase 20.1 extends the same `ActiveTheme` snapshot and `setTheme` path with a se
 ### Typed catalog and wire shape
 
 - `ThemeTokenType` now has ten domains: `color-role`, `spacing`, `radius`, `typography`, `opacity`, `dimension`, `elevation`, `motion-duration`, `z-level`, and `density`. The core fallback catalog in `core_theme_value()` holds 73 named tokens (4pt spacing scale, restrained radii, panel/sidebar dimension defaults, near-invisible elevation, bounded motion durations, overlay z-levels, compact/default/spacious density, and seven typography variant tokens).
-- `ActiveTheme` gained `design_tokens: Vec<UiDesignTokenOverride>` with typed `WireDesignTokenValue` variants (`Color`, `Scalar`, `Opacity`, `Level`). Theme packages may declare static `clay.contributions.designTokens` entries (parsed in `src/packages/record.rs` as `DesignTokenOverrideDescriptor` with Eq-friendly bit-encoded floats). Package `themeTokens` remain semantic aliases only; `designTokens` carry resolved override values for theme packages.
+- `ActiveTheme` gained `design_tokens: Vec<UiDesignTokenOverride>` with typed `WireDesignTokenValue` variants (`Color`, `Scalar`, `Opacity`, `Level`). Theme packages may declare static `clay.contributions.designTokens` entries (parsed in `src/packages/record/mod.rs` as `DesignTokenOverrideDescriptor` with Eq-friendly bit-encoded floats). Package `themeTokens` remain semantic aliases only; `designTokens` carry resolved override values for theme packages.
 - `setTheme` (`src/server/ops/theme.rs`) converts descriptors to wire values, validates token existence, value-type match, and domain bounds, then stores the full snapshot. Telemetry includes `designTokenCount` alongside `overrideCount`.
 
 ### `ResolvedUiTheme` construction and resolution
@@ -215,7 +215,7 @@ Packages cannot override `typography.*` design tokens (`DesignTokenError::Typogr
 
 ### Client install and hot-path policy
 
-`SduiNativeState` owns `ui_theme: ResolvedUiTheme`, installed atomically with `StyleRegistry` at three `masonry_editor.rs` sites: bootstrap (`with_initial_state`), live `ClientConnectionEvent::ActiveTheme`, and runtime snapshot install. Paint/layout/input hot paths read cached fields only; they do not call `core_theme_value()`, `ThemeTokenResolver`, or color parsers. Source guard `ui_design_tokens_resolve_without_package_javascript_in_paint_layout_or_input_hot_paths` in `tests/editor_performance_invariants.rs` enforces this for `masonry_sdui.rs`, `masonry_editor.rs`, and `masonry_shell.rs`.
+`SduiNativeState` owns `ui_theme: ResolvedUiTheme`, installed atomically with `StyleRegistry` at three `masonry_editor.rs` sites: bootstrap (`with_initial_state`), live `ClientConnectionEvent::ActiveTheme`, and runtime snapshot install. Paint/layout/input hot paths read cached fields only; they do not call `core_theme_value()`, `ThemeTokenResolver`, or color parsers. Source guard `ui_design_tokens_resolve_without_package_javascript_in_paint_layout_or_input_hot_paths` in `tests/editor_performance_invariants.rs` enforces this for `masonry_sdui.rs`, `masonry_editor.rs`, and `masonry_shell/mod.rs`.
 
 `theme_switch_does_not_parse_or_execute_package_code_in_paint_paths` (1000-iteration cached read lock) verifies theme switches stay on installed native values.
 
@@ -226,7 +226,7 @@ Authoritative token catalog: `.agents/skills/clay-ui/references/tokens.md`. Pack
 ### Phase 20.1 tests
 
 - `src/shell/theme.rs`: catalog uniqueness, four-point spacing defaults, design-token validation/rejection, Gruvbox core-fallback compatibility, panel geometry from overrides, density spacing scale without typography revision churn, atomic theme install.
-- `src/packages/record.rs`: `designTokens` parse/round-trip and rejection of unknown/type-mismatch/invalid/raw/duplicate/typography overrides.
+- `src/packages/record/mod.rs`: `designTokens` parse/round-trip and rejection of unknown/type-mismatch/invalid/raw/duplicate/typography overrides.
 - `src/protocol/codec.rs`: `active_theme_round_trips_typed_ui_token_overrides`.
 - `tests/editor_performance_invariants.rs`: hot-path source guard above.
 - `tests/primitives_docs.rs`: token catalog completeness against `core_theme_value()` match block.
@@ -235,11 +235,65 @@ Commands: `cargo test --lib shell::theme`, `cargo test --test editor editor_perf
 
 ## Phase 20.6 canonical Modus defaults and appearance
 
-Phase 20.6 segregates the canonical default themes into dedicated first-party packages `@clay/theme-modus-operandi` (canonical light default) and `@clay/theme-modus-vivendi` (canonical dark default), shipped alongside the existing Gruvbox packages using the same inert `textStyles` + no-op ESM structure. A bounded `light` | `dark` | `system` appearance preference (`src/protocol/mod.rs::Appearance`) resolves these canonical defaults without any `loadPackage` call: `src/server/ops/theme.rs::canonical_default_specifier` + `resolve_canonical_default_theme` build the `ActiveTheme` snapshot from the bundled inventory, injected into the evaluation harvest in `src/server/js_runtime.rs` when no explicit theme was set. `System` falls back to dark (Modus Vivendi) when no OS signal is present. An explicit `setTheme` sets `explicit_theme_active = true` and always wins over the appearance-derived default. The new `theme.setAppearance` facade (`op_clay_theme_set_appearance`) exposes the preference; `settings.setTheme`/`settings.setAppearance` from the `@clay/settings` panel persist to `~/.config/clay/preferences.json` and reload the runtime so changes apply live via the existing `ServerMessage::ActiveTheme` / `RuntimeStateSnapshot` fanout. Full implementation, persistence/precedence, and settings surface details: [Phase 20.6 Theme Package Segregation and Settings UI](phase20.6-theme-segregation-settings-ui.md).
+Phase 20.6 segregates the canonical default themes into dedicated first-party packages `@clay/theme-modus-operandi` (canonical light default) and `@clay/theme-modus-vivendi` (canonical dark default), shipped alongside the existing Gruvbox packages using the same inert `textStyles` + no-op ESM structure. A bounded `light` | `dark` | `system` appearance preference (`src/protocol/mod.rs::Appearance`) resolves these canonical defaults without any `loadPackage` call: `src/server/ops/theme.rs::canonical_default_specifier` + `resolve_canonical_default_theme` build the `ActiveTheme` snapshot from the bundled inventory, injected into the evaluation harvest in `src/server/js_runtime/mod.rs` when no explicit theme was set. `System` falls back to dark (Modus Vivendi) when no OS signal is present. An explicit `setTheme` sets `explicit_theme_active = true` and always wins over the appearance-derived default. The new `theme.setAppearance` facade (`op_clay_theme_set_appearance`) exposes the preference; `settings.setTheme`/`settings.setAppearance` from the `@clay/settings` panel persist to `~/.config/clay/preferences.json` and reload the runtime so changes apply live via the existing `ServerMessage::ActiveTheme` / `RuntimeStateSnapshot` fanout. Full implementation, persistence/precedence, and settings surface details: [Phase 20.6 Theme Package Segregation and Settings UI](phase20.6-theme-segregation-settings-ui.md).
+
+## Plan 088 theme/token modernization
+
+Plan 088 changed consumption and validation, not the public theme model. One `ActiveTheme` snapshot still feeds two cached client registries: `StyleRegistry` remains the editor color/text-attribute authority, while `ResolvedUiTheme` owns shell/SDUI semantic colors, dimensions, spacing, density, radii, z-levels, and elevation. `EditorSurface`, `ClayShellWidget`, and retained SDUI/package hosts install these views together at bootstrap, live `ActiveTheme`, and runtime-generation replacement; paint/layout/input read cached accessors only.
+
+Legacy `textStyles` themes pass through `StyleRegistry::from_active_theme(...).base` and `ResolvedUiTheme::with_base_ui`. Typed `designTokens` override the projected roles only after server/client type and bounds validation. `validate_active_theme_contrast` resolves both layers before activation; `apply_theme` preserves the prior valid theme on failure and canonical-default resolution falls back to the Clay core theme. Required pairs enforce `TEXT_CONTRAST_MIN = 4.5` for text and `UI_CONTRAST_MIN = 3.0` for non-text UI. Theme packages cannot override `typography.*`; concrete families and sizes remain on `theme.setTypography`.
+
+Task 3's WCAG regression targets were low-contrast Gruvbox/core placeholders; the compatibility projection promotes an insufficient legacy placeholder to the base text role for UI contrast without changing editor-owned placeholder paint. Task 4–6 consumers use the same cached theme/typography state for status chrome, panel geometry, sidebar yielding, tab cards, completion/centered surfaces, and large-type logical bounds. Plan 088 adds no token, component kind, style variable, package permission, JS API, or raw-color authority.
+
+Verification: `cargo test --lib shell::theme`, `cargo test --test editor theme_packages`, `cargo test --test editor ui_primitive_conformance`, `cargo test --test protocol primitives_docs`, and `tests/editor_performance_invariants.rs` hot-path guards. Public usage remains documented in [`theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md), [`theme.setAppearance`](../../reference/clay-js-api/theme/set-appearance.md), and [`theme.setTypography`](../../reference/clay-js-api/theme/set-typography.md); this page documents internals rather than duplicating those API contracts.
 
 ## Plan 071 caret styling
 
 Plan 071 (task 6) adds caret **shape and blink** as editor chrome resolved through this registry's theme default. `StyleRegistry` carries a `caret_style` default (Bar in `StyleRegistry::clay_default()`); `EditorSurface::effective_caret_style` layers runtime override (`clientSetCursorStyle`) → per-mode manifest `caret_style` → this theme default. Caret **color** remains `theme.base.caret` — `CaretStyle` controls geometry/blink only, so theme packages still own caret color through the existing `caret` key without any new token. See [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md).
+
+## Phase 26 rendering axes: background, size ladder, chrome colors
+
+Phase 26 extends the same `StyleRegistry`/`textStyles` model with three additive axes, all resolved through the existing theme snapshot — no new protocol decoration field, no rkyv change, no payload growth.
+
+### Background axis (26.3)
+
+`StyleSpec` gained `background: Option<Color>` (theme-resolved fill behind the run; `None` is transparent). `StyleRegistry::background_for(kind, token_type, modifiers)` resolves it per `DecorationKind`:
+
+- `SearchMatch` → the `search_match` layer color;
+- `Diagnostic` → `None` (diagnostics stay squiggle/underline-only);
+- `Syntax`/`Semantic` → `deprecated_background` when `Modifiers::DEPRECATED` is set, else the per-`TokenType` `syntax_background` table (Quote, CodeBlock, CodeSpan, headings, etc.).
+
+`VisibleTextStyleRun` carries the resolved `background` into `LayoutState::paint_text`, which paints background fills **between selection rects and glyphs** (paint order: selection rects → background fills → text → squiggles). `DecorationSpan` deliberately has no background field: the axis is theme-owned, so a span's meaning (`TokenType` + `Modifiers`) resolves to different fills under different themes. `decoration_span_wire_shape_has_no_background_field` locks the wire shape; `style_run_backgrounds_paint_before_glyphs` locks the paint order.
+
+### Size ladder (26.4)
+
+`StyleSpec` gained `scale: f32` — a theme-owned multiplier over the active document profile size. `StyleRegistry::size_scale(token_type)` returns the per-token ladder, clamped to the UI hierarchy range `(0, 4.0]`:
+
+| Token | Scale |
+| --- | --- |
+| Heading1 | 1.50 |
+| Heading2 | 1.33 |
+| Heading3 | 1.17 |
+| Heading4 | 1.08 |
+| Heading5 | 1.00 |
+| Heading6 | 0.92 |
+| CodeSpan | 0.90 |
+| all others | 1.00 |
+
+Scale applies **only** to `Syntax` and `Semantic` `DecorationKind` spans (`style_for` returns 1.0 for `Diagnostic`/`SearchMatch`), so non-syntax decorations never split style runs. `LayoutState::rebuild` pushes `FontSize(profile.size() * run.scale)` per run; `document_line_height()` stays unscaled (the conservative baseline), so viewport extraction and scrollbar geometry remain stable. Wire representation is `u16` milli-units (`TextThemeOverride.scale`, `TextStyleOverrideDescriptor.scale`); the client-side `TextStyleOverride.scale` is `Option<f32>`. Theme parser validation: finite, in `(0, 4.0]`.
+
+### Chrome colors (26.5)
+
+Five `BaseUiColorKey` variants were added: `GutterFg`, `GutterFgActive`, `LineHighlight`, `IndentGuide`, `BracketMatch`, with `clay_default()` values (gutter `0x8d86a3`, gutter-active `0xf4f1ff`, line highlight `0xffffff12`, indent guide `0xffffff22`, bracket match `0x8a6fff55`). Theme packages override them through ordinary `textStyles` entries; the editor chrome layer (`src/editor/surface/chrome.rs`) reads them via `gutter_foreground`/`gutter_foreground_active`/`line_highlight`/`indent_guide`/`bracket_match` accessors. `with_text_overrides` handles `SearchMatch`/`Unused` base keys and applies `set_syntax_background` for Syntax targets with a background field. See [Editor Chrome and Layout Geometry](editor-chrome-and-layout.md).
+
+### Phase 26 tests
+
+- `src/editor/theme.rs`: `style_for_resolves_theme_owned_backgrounds`, `text_style_overrides_can_set_background_axis`, `size_scale_ladder_descends_headings_and_clamps_theme_overrides`.
+- `src/editor/surface/mod.rs`: `search_match_and_quote_backgrounds_join_style_runs`.
+- `src/protocol/decorations.rs`: `decoration_span_wire_shape_has_no_background_field` (payload stays under `DECORATION_PAYLOAD_BUDGET_BYTES`).
+- `src/editor/layout.rs`: `style_run_backgrounds_paint_before_glyphs`, `heading_scale_increases_parley_line_height`.
+- `tests/theme_packages.rs`: dormant tokens stay distinct across all four bundled themes.
+- Advisory budgets: `GUTTER_PAINT_P95_BUDGET_MS = 2`, `ACTIVE_LINE_PAINT_P95_BUDGET_MS = 1`, `BRACKET_MATCH_PAINT_P95_BUDGET_MS = 1`, `DECORATION_BACKGROUND_FILL_P95_BUDGET_MS = 2` in `src/perf/budgets.rs`; their sum is asserted inside `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` (16 ms) by `tests/editor_performance_invariants.rs`.
 
 ## Related
 

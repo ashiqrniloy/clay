@@ -110,27 +110,17 @@ fn parse_declaration(
         api_prefix: package.clay.api_prefix.clone(),
         command_id: required_string(value, "commandId")?,
         display_name: required_string(value, "displayName")?,
-        routing_policy: parse_routing_policy(
+        routing_policy: RoutingPolicy::parse(
             value
                 .get("routingPolicy")
                 .and_then(Value::as_str)
                 .unwrap_or("server-first"),
-        )?,
+        )
+        .map_err(|e| JsErrorBox::generic(format!("commands.invalid_declaration: {e}")))?,
         key_bindings: Vec::new(),
         custom_properties: BTreeMap::new(),
         permissions,
     })
-}
-
-fn parse_routing_policy(value: &str) -> Result<RoutingPolicy, JsErrorBox> {
-    match value {
-        "server-first" | "ServerFirst" => Ok(RoutingPolicy::ServerFirst),
-        "background" | "Background" => Ok(RoutingPolicy::Background),
-        "ui-reactive-priority" | "UiReactivePriority" => Ok(RoutingPolicy::UiReactivePriority),
-        other => Err(JsErrorBox::generic(format!(
-            "commands.invalid_declaration: unsupported routingPolicy `{other}`"
-        ))),
-    }
 }
 
 fn parse_execute_request(json_text: &str) -> Result<CommandExecutionRequest, JsErrorBox> {

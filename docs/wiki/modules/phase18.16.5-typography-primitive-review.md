@@ -5,10 +5,10 @@
 - Plan: `plans/048-Phase18.16.5-Semantic-Font-Roles-and-User-Owned-Typography.md` (task 2).
 - Decision: `decision-logs/2026-07-11-1418-semantic-font-roles-and-user-owned-typography.md`.
 - Pattern: `.agents/skills/project-patterns/references/typography-role-ownership.md`.
-- `src/protocol/mod.rs`, `src/protocol/decorations.rs`, `src/client/mod.rs`, `src/server/connection.rs`.
-- `src/editor/layout.rs`, `src/editor/surface.rs`, `src/editor/theme.rs`, `src/editor/viewport.rs`.
+- `src/protocol/mod.rs`, `src/protocol/decorations.rs`, `src/client/mod.rs`, `src/server/connection/mod.rs`.
+- `src/editor/layout.rs`, `src/editor/surface/mod.rs`, `src/editor/theme.rs`, `src/editor/viewport.rs`.
 - `src/masonry_editor.rs`, `src/masonry_sdui.rs`, `src/shell/theme.rs`, `src/shell/components.rs`, `src/shell/package_ui.rs`.
-- `src/packages/record.rs`, `src/server/modes.rs`, `src/server/syntax.rs`.
+- `src/packages/record/mod.rs`, `src/server/modes.rs`, `src/server/syntax.rs`.
 - `tests/primitives_docs.rs`, `tests/editor_performance_invariants.rs`, `tests/decoration_transport.rs`.
 
 ## Overview
@@ -21,7 +21,7 @@ This review pins reusable primitives before implementation. It also locks the na
 
 ### Configuration, bootstrap, and live client delivery
 
-`runtime/js/theme.js`, `src/server/ops/theme.rs`, `src/server/js_runtime.rs`, `src/server/mod.rs`, `src/server/connection.rs`, `src/client/mod.rs`, and `src/masonry_editor.rs` already carry one inert appearance snapshot end-to-end. `setTheme` validates and stores `ActiveTheme`, bootstrap sends `ServerMessage::ActiveTheme`, and `ClientConnectionEvent::ActiveTheme` installs a new `StyleRegistry` before paint.
+`runtime/js/theme.js`, `src/server/ops/theme.rs`, `src/server/js_runtime/mod.rs`, `src/server/mod.rs`, `src/server/connection/mod.rs`, `src/client/mod.rs`, and `src/masonry_editor.rs` already carry one inert appearance snapshot end-to-end. `setTheme` validates and stores `ActiveTheme`, bootstrap sends `ServerMessage::ActiveTheme`, and `ClientConnectionEvent::ActiveTheme` installs a new `StyleRegistry` before paint.
 
 That delivery path is reusable for configuration evaluation, atomic replacement, bootstrap ordering, runtime reload, and live event application. `ActiveTheme` itself is not reusable typography state: it contains a theme specifier and `TextThemeOverride` color/attribute data, while a font-stack/size change changes shaping and geometry. Typography therefore needs a separate snapshot and event, not fields added to `ActiveTheme`.
 
@@ -33,7 +33,7 @@ These are reusable semantic carriers. `StyleRegistry` remains color/text-attribu
 
 ### Cached Parley editor layout and UTF-8 geometry
 
-`src/editor/layout.rs::LayoutState` owns the visible-text Parley `Layout`, shaping, wrapping, cursor hit testing, caret geometry, selection geometry, and visual metrics. `LayoutCacheKey` already invalidates by text revision, viewport revision, and width; `PaintCtx::fonts_changed()` also forces a rebuild. `src/editor/surface.rs` keeps extraction viewport-bounded and translates validated visible decoration byte ranges into layout-local offsets. Parley remains source of truth for UTF-8 caret, hit-test, selection, wrapping, and visible layout geometry.
+`src/editor/layout.rs::LayoutState` owns the visible-text Parley `Layout`, shaping, wrapping, cursor hit testing, caret geometry, selection geometry, and visual metrics. `LayoutCacheKey` already invalidates by text revision, viewport revision, and width; `PaintCtx::fonts_changed()` also forces a rebuild. `src/editor/surface/mod.rs` keeps extraction viewport-bounded and translates validated visible decoration byte ranges into layout-local offsets. Parley remains source of truth for UTF-8 caret, hit-test, selection, wrapping, and visible layout geometry.
 
 Initial gap: `TEXT_FONT_SIZE` and `LineHeight::FontSizeRelative(1.4)` were fixed defaults; the cache key had no typography/layout-style revision; and the paint hook passed decoration colors, not normalized role/style runs. Replacing all layout code or shaping a full document remains unnecessary and would regress the bounded extraction contract.
 
@@ -51,7 +51,7 @@ This is the reusable Clay-owned UI pipeline. Existing typed `typography` tokens 
 
 ### Package validation and authority boundary
 
-`src/packages/record.rs`, `src/server/ui.rs`, and `reject_ui_prohibited_authority` already enforce package provenance, bounded declarations, typed style values, and rejection of raw CSS, raw ops, native handles/widgets, renderer callbacks, and client JavaScript. `docs/reference/primitives/package-security.md` supplies shared permission/hot-path rules.
+`src/packages/record/mod.rs`, `src/server/ui.rs`, and `reject_ui_prohibited_authority` already enforce package provenance, bounded declarations, typed style values, and rejection of raw CSS, raw ops, native handles/widgets, renderer callbacks, and client JavaScript. `docs/reference/primitives/package-security.md` supplies shared permission/hot-path rules.
 
 Reuse these validators for enum role declarations. A role carries no permission and must not introduce font-file paths/bytes/URLs, downloads, installed-font discovery requests, native handles, raw CSS, raw Parley values, or renderer callbacks.
 
@@ -131,7 +131,7 @@ This phase adds no font-file/byte/path/URL authority, font download, network, fi
 - `src/masonry_sdui.rs`: `ui_size_change_scales_row_hit_and_accessibility_bounds_together` and `package_component_font_role_uses_selected_profile_without_concrete_sizes` lock shared UI geometry and package role use.
 - `src/server/ui.rs`: `package_component_font_role_is_semantic_and_text_only` rejects concrete and structural-component typography.
 - `src/editor/layout.rs`: `mixed_role_line_height_keeps_largest_inline_profile_in_bounds` confirms Parley preserves the largest inline role's line metrics; `unicode_and_emoji_shape_with_unavailable_named_font_fallback` verifies generic fallback shapes UTF-8 without rendering failure.
-- `src/editor/surface.rs`: custom-typography viewport/scrollbar/reset and placeholder-caret tests retain bounded editor geometry; `mixed_role_normalization_stays_bounded_by_visible_span_boundaries` locks visible-span normalization bounds.
+- `src/editor/surface/mod.rs`: custom-typography viewport/scrollbar/reset and placeholder-caret tests retain bounded editor geometry; `mixed_role_normalization_stays_bounded_by_visible_span_boundaries` locks visible-span normalization bounds.
 - `tests/editor_performance_invariants.rs`: `typography_geometry_uses_shared_profile_baseline_not_fixed_font_size` prevents fixed font-size geometry returning; `typography_updates_do_not_enter_editor_hot_paths` excludes JavaScript, IPC, filesystem, network, shell, and font-discovery work.
 - `tests/manual_smoke_docs.rs::phase18_16_5_typography_smoke_covers_fallback_geometry_and_authority` locks the Linux GUI matrix for themes, sizes, code/prose/Markdown/UI, fallback, reload/reconnect, geometry, and authority.
 

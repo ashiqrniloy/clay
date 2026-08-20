@@ -4,8 +4,8 @@
 
 - `src/client/file_dialog.rs`
 - `src/client/mod.rs`
-- `src/main.rs`
-- `src/server/js_runtime.rs`
+- `src/app_driver.rs`
+- `src/server/js_runtime/mod.rs`
 - `runtime/js/documents.js`
 - `runtime/js/workspace.js`
 - `docs/reference/clay-js-api/documents/client-open-file-dialog.md`
@@ -61,11 +61,11 @@ On Linux, both `open_markdown_file_dialog()` and `open_folder_dialog()` use `xdg
 - `src/main.rs::tests::file_dialog_result_conversion_reports_selected_and_sanitized_failures`
 - `src/main.rs::tests::native_dialog_generations_limit_duplicates_and_reject_stale_results`
 - `src/main.rs::tests::unsupported_platform_client_open_file_dialog_command_reports_status_diagnostic` on non-Windows/Linux/macOS targets
-- `src/server/js_runtime.rs::tests::configuration_binds_client_ui_file_folder_and_copy_commands` imports the `clientOpenFileDialog()` and `clientOpenFolderDialog()` sources included by `src/server/facades.rs`; `tests/clay_js_facade_layout.rs` prevents source/declaration/include drift
+- `src/server/js_runtime/mod.rs::tests::configuration_binds_client_ui_file_folder_and_copy_commands` imports the `clientOpenFileDialog()` and `clientOpenFolderDialog()` sources included by `src/server/facades.rs`; `tests/clay_js_facade_layout.rs` prevents source/declaration/include drift
 - `src/client/mod.rs::tests::selected_file_open_request_emits_non_edit_message`
 - `src/client/mod.rs::tests::selected_folder_root_request_emits_non_edit_message`
-- `src/server/connection.rs::tests::connection_add_selected_workspace_root_sends_file_browser_snapshot`
-- `src/server/connection.rs::tests::connection_add_selected_workspace_root_rejects_stale_capability`
+- `src/server/connection/mod.rs::tests::connection_add_selected_workspace_root_sends_file_browser_snapshot`
+- `src/server/connection/mod.rs::tests::connection_add_selected_workspace_root_rejects_stale_capability`
 - Commands used during implementation/verification:
   - `cargo test file_dialog --quiet`
   - `cargo test --test protocol manual_smoke_docs:: --quiet`

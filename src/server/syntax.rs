@@ -199,6 +199,10 @@ pub enum SyntaxGrammarRegistryError {
     InvalidSnapshotArtifact {
         id: String,
     },
+    OwnedByNativeDescriptor {
+        language_id: String,
+        package_prefix: String,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -416,6 +420,27 @@ const DEFAULT_NATIVE_STYLE_MAP: &[(
         None,
         70,
     ),
+    (
+        "punctuation.bracket",
+        TokenType::Operator,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
+    (
+        "punctuation.delimiter",
+        TokenType::Operator,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
+    (
+        "punctuation.special",
+        TokenType::Operator,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
     ("text", TokenType::Paragraph, Modifiers::NONE, None, 70),
     ("function", TokenType::Function, Modifiers::NONE, None, 70),
     (
@@ -425,8 +450,70 @@ const DEFAULT_NATIVE_STYLE_MAP: &[(
         None,
         70,
     ),
+    (
+        "function.macro",
+        TokenType::Macro,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
+    (
+        "function.method",
+        TokenType::Method,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
     ("type", TokenType::Type, Modifiers::NONE, None, 70),
+    ("type.builtin", TokenType::Type, Modifiers::NONE, None, 70),
+    (
+        "type.lifetime",
+        TokenType::TypeParameter,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
+    (
+        "type.parameter",
+        TokenType::TypeParameter,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
     ("number", TokenType::Number, Modifiers::NONE, None, 70),
+    ("constant", TokenType::EnumMember, Modifiers::NONE, None, 70),
+    (
+        "constant.builtin",
+        TokenType::EnumMember,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
+    ("property", TokenType::Property, Modifiers::NONE, None, 70),
+    (
+        "variable.parameter",
+        TokenType::Parameter,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
+    (
+        "variable.builtin",
+        TokenType::Variable,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
+    ("variable", TokenType::Variable, Modifiers::NONE, None, 40),
+    ("operator", TokenType::Operator, Modifiers::NONE, None, 70),
+    ("attribute", TokenType::Decorator, Modifiers::NONE, None, 70),
+    (
+        "string.regexp",
+        TokenType::Regexp,
+        Modifiers::NONE,
+        None,
+        70,
+    ),
 ];
 
 // Narrow inline captures (code-span/strong/emphasis/link) outrank broad
@@ -461,6 +548,7 @@ const MARKDOWN_NATIVE_STYLE_MAP: &[(
         Some(crate::protocol::DocumentFontRole::Monospace),
         80,
     ),
+    ("code-label", TokenType::String, Modifiers::NONE, None, 80),
     ("heading-1", TokenType::Heading1, Modifiers::NONE, None, 70),
     ("heading-2", TokenType::Heading2, Modifiers::NONE, None, 70),
     ("heading-3", TokenType::Heading3, Modifiers::NONE, None, 70),
@@ -483,7 +571,9 @@ const MARKDOWN_NATIVE_STYLE_MAP: &[(
         70,
     ),
     ("link", TokenType::Link, Modifiers::NONE, None, 80),
-    ("quote", TokenType::Quote, Modifiers::NONE, None, 70),
+    ("link-url", TokenType::String, Modifiers::NONE, None, 85),
+    ("quote", TokenType::Quote, Modifiers::NONE, None, 90),
+    ("quote-marker", TokenType::Quote, Modifiers::NONE, None, 90),
 ];
 
 #[derive(Debug, Clone, Default)]
@@ -512,6 +602,22 @@ impl SyntaxGrammarRegistry {
 
     pub fn first_party_native_descriptors() -> &'static [NativeGrammarDescriptor] {
         FIRST_PARTY_NATIVE_GRAMMARS
+    }
+
+    pub fn native_owned_syntax_languages(package_prefix: &str) -> Vec<&'static str> {
+        FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .filter(|descriptor| descriptor.package_prefix == package_prefix)
+            .map(|descriptor| descriptor.language_id)
+            .collect()
+    }
+
+    pub fn native_owned_grammar_ids(package_prefix: &str) -> Vec<&'static str> {
+        FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .filter(|descriptor| descriptor.package_prefix == package_prefix)
+            .map(|descriptor| descriptor.id)
+            .collect()
     }
 
     pub(crate) fn validate_snapshot(
@@ -609,7 +715,10 @@ impl SyntaxGrammarRegistry {
             let tier2_override = contribution.engine_tier == SyntaxEngineTier::Wasm
                 && (explicit_tier2_override || preference == Some(SyntaxEngineTier::Wasm));
             if self.is_shadowed_by_native_first_party(&contribution) && !tier2_override {
-                continue;
+                return Err(SyntaxGrammarRegistryError::OwnedByNativeDescriptor {
+                    language_id: contribution.language_id.clone(),
+                    package_prefix: contribution.package_prefix.clone(),
+                });
             }
             self.validate_no_conflict_ignoring_overridden_native(&contribution, tier2_override)?;
             for staged_contribution in &staged {
@@ -1622,6 +1731,11 @@ impl TreeSitterSyntaxHandler {
                 .byte_start
                 .saturating_add(replacement_ranges.last().map_or(0, |range| range.end) as u64),
         );
+        let folding_update = Some(crate::server::folding::folds_from_syntax_tree(
+            &tree,
+            notification.document_id,
+            notification.document_version,
+        ));
         self.trees
             .lock()
             .expect("syntax tree cache lock poisoned")
@@ -1652,6 +1766,7 @@ impl TreeSitterSyntaxHandler {
             // fragments. Diagnostics remain reserved for explicit analyzers
             // (including future LSP packages), not syntax highlighting.
             diagnostic_update: None,
+            folding_update,
         })
     }
 
@@ -1746,7 +1861,10 @@ impl TreeSitterSyntaxHandler {
         }
 
         let spans = captures_to_decoration_spans(&self.contribution, syntax_captures)?;
-        let mut sets = decoration_sets_for_ranges(notification, window, replacement_ranges, spans);
+        let mut sets = decoration_sets_for_ranges(notification, window, replacement_ranges, spans)
+            .into_iter()
+            .flat_map(|set| split_decoration_set_to_update_budget(notification, set))
+            .collect::<Vec<_>>();
         sets.sort_by_key(|set| {
             !notification.invalidated_ranges.iter().any(|range| {
                 range.intersects(ParseByteRange::new(
@@ -2138,6 +2256,8 @@ fn captures_to_decoration_spans(
             font_role: vocabulary.font_role,
             priority: vocabulary.priority,
             provenance: provenance.clone(),
+            target: None,
+            inlay: None,
         });
     }
     Ok(spans)
@@ -2174,6 +2294,41 @@ fn decoration_sets_for_ranges(
             }
         })
         .collect()
+}
+
+fn update_with_single_set(
+    notification: &ParseEditNotification,
+    set: DecorationSet,
+) -> IncrementalParseUpdate {
+    let mut update = empty_update(notification.clone());
+    update.decoration_updates = vec![set];
+    update
+}
+
+fn decoration_set_fits_update_budget(
+    notification: &ParseEditNotification,
+    set: &DecorationSet,
+) -> bool {
+    rkyv::to_bytes::<rkyv::rancor::Error>(&update_with_single_set(notification, set.clone()))
+        .map(|bytes| bytes.len() <= INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES)
+        .unwrap_or(false)
+}
+
+fn split_decoration_set_to_update_budget(
+    notification: &ParseEditNotification,
+    set: DecorationSet,
+) -> Vec<DecorationSet> {
+    if set.spans.len() <= 1 || decoration_set_fits_update_budget(notification, &set) {
+        return vec![set];
+    }
+    let mid = set.spans.len() / 2;
+    let mut left = set.clone();
+    let mut right = set;
+    left.spans.truncate(mid);
+    right.spans.drain(..mid);
+    let mut out = split_decoration_set_to_update_budget(notification, left);
+    out.extend(split_decoration_set_to_update_budget(notification, right));
+    out
 }
 
 impl crate::server::parse_coordinator::ParseHandler for TreeSitterSyntaxHandler {
@@ -2214,6 +2369,7 @@ fn empty_update(notification: ParseEditNotification) -> IncrementalParseUpdate {
         syntax_tree_delta: None,
         decoration_updates: Vec::new(),
         diagnostic_update: None,
+        folding_update: None,
     }
 }
 
@@ -2797,6 +2953,47 @@ mod tests {
                     .unwrap_or_else(|error| {
                         panic!("{} textobjects failed: {error:?}", descriptor.id)
                     });
+            }
+        }
+    }
+
+    #[test]
+    fn first_party_highlight_captures_resolve_through_native_style_maps() {
+        // Phase 26.2: every highlight capture must resolve through the closed
+        // vocabulary map. Unmapped names are silently dropped at emit time.
+        for descriptor in FIRST_PARTY_NATIVE_GRAMMARS {
+            let query = Query::new(&(descriptor.language)(), descriptor.highlights_query)
+                .unwrap_or_else(|error| {
+                    panic!("{} highlights query failed: {error}", descriptor.id)
+                });
+            let mapped: std::collections::HashSet<&str> = descriptor
+                .style_map
+                .iter()
+                .map(|(name, ..)| *name)
+                .collect();
+            for name in query.capture_names() {
+                assert!(
+                    mapped.contains(name),
+                    "{} capture @{name} missing from native style map",
+                    descriptor.id
+                );
+            }
+        }
+        for embedded in FIRST_PARTY_EMBEDDED_GRAMMARS {
+            let query = Query::new(&(embedded.language)(), embedded.highlights_query)
+                .unwrap_or_else(|error| {
+                    panic!("{} highlights query failed: {error}", embedded.name)
+                });
+            let mapped: std::collections::HashSet<&str> = MARKDOWN_NATIVE_STYLE_MAP
+                .iter()
+                .map(|(name, ..)| *name)
+                .collect();
+            for name in query.capture_names() {
+                assert!(
+                    mapped.contains(name),
+                    "{} capture @{name} missing from markdown style map",
+                    embedded.name
+                );
             }
         }
     }

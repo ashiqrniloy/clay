@@ -99,9 +99,12 @@ fn assert_run(
     expected: clay::editor::theme::StyleSpec,
     font_role: FontRole,
 ) {
-    let (_, role, [bold, italic, underline, strike], color) = run_covering(runs, source, needle);
+    let (_, role, [bold, italic, underline, strike], color, background, scale) =
+        run_covering(runs, source, needle);
     assert_eq!(*role, font_role, "{needle:?} font role");
     assert_eq!(*color, Some(expected.color), "{needle:?} color");
+    assert_eq!(*background, expected.background, "{needle:?} background");
+    assert_eq!(*scale, expected.scale, "{needle:?} scale");
     assert_eq!(
         [*bold, *italic, *underline, *strike],
         [

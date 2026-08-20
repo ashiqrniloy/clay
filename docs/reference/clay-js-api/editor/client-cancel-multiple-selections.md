@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientCancelMultipleSelections
 js_facade: runtime/js/editor.js::clientCancelMultipleSelections
-backing_rust: src/editor/surface.rs::EditorSurface::cancel_multiple_selections
+backing_rust: src/editor/surface/mod.rs::EditorSurface::cancel_multiple_selections
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientCancelMultipleSelections
@@ -90,7 +90,7 @@ Use `editor.clientCancelMultipleSelections` when the user asks for Cancel Multip
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientCancelMultipleSelections`
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::cancel_multiple_selections`
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::cancel_multiple_selections`
 - Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
 
 ## Lookup metadata

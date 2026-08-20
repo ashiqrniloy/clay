@@ -271,6 +271,8 @@ pub struct PackageInspection {
     pub requested_capabilities: Vec<String>,
     pub approved_capabilities: Vec<String>,
     pub runtime_profile: Option<String>,
+    pub native_syntax_languages: Vec<String>,
+    pub preset: Option<String>,
 }
 
 /// Adoption state of an installed package for inspection surfaces.
@@ -1170,6 +1172,47 @@ impl PackageService {
             .map(|installed| self.inspection_from_installed(package_name, installed, false))
     }
 
+    /// Inspect a compiled bundled inventory package without a store or pnpm.
+    /// Does not enable, authorize, or execute the package.
+    pub fn inspect_bundled_inventory(package_name: &str) -> Option<PackageInspection> {
+        let entry = crate::packages::bundled::bundled_entry(package_name)?;
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("packages")
+            .join(entry.root);
+        let bytes = std::fs::read(root.join("package.json")).ok()?;
+        let json: Value = serde_json::from_slice(&bytes).ok()?;
+        let record = assemble_package_record(&json).ok()?;
+        let permissions: Vec<String> = record
+            .manifest
+            .clay
+            .permissions
+            .iter()
+            .map(|permission| permission.as_str().to_string())
+            .collect();
+        Some(PackageInspection {
+            name: record.manifest.name.clone(),
+            version: record.manifest.version.clone(),
+            api_prefix: record.manifest.clay.api_prefix.clone(),
+            is_enabled: false,
+            modes: record.manifest.clay.modes.clone(),
+            permissions: permissions.clone(),
+            docs_path: Some(record.docs.docs_path.clone()),
+            command_count: record.contributions.commands.len(),
+            configuration_count: record.contributions.configuration.len(),
+            provenance: PackageProvenance::from_package_json(
+                package_name,
+                &json,
+                root,
+                "bundled inventory",
+            ),
+            requested_capabilities: permissions,
+            approved_capabilities: Vec::new(),
+            runtime_profile: None,
+            native_syntax_languages: native_syntax_languages(&record.manifest.clay.api_prefix),
+            preset: record.manifest.clay.preset.clone(),
+        })
+    }
+
     /// Return all currently enabled package records.
     pub fn enabled_records(&self) -> impl Iterator<Item = &PackageRecord> {
         self.enabled.values()
@@ -1547,6 +1590,8 @@ impl PackageService {
                 .unwrap_or_default(),
             runtime_profile: authorization
                 .map(|record| record.runtime_profile.as_str().to_string()),
+            native_syntax_languages: native_syntax_languages(&record.manifest.clay.api_prefix),
+            preset: record.manifest.clay.preset.clone(),
         }
     }
 
@@ -1567,8 +1612,22 @@ impl PackageService {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let requested_capabilities = requested_capability_names(json);
+        let expanded = crate::packages::manifest::expand_capability_preset(
+            json,
+            &crate::packages::manifest::DiagnosticContext::new(
+                Some(name.to_string()),
+                Some(version.clone()),
+                Some(api_prefix.clone()),
+            ),
+        )
+        .unwrap_or_else(|_| json.clone());
+        let requested_capabilities = requested_capability_names(&expanded);
         let authorization = self.authorization_for(name);
+        let native_syntax_languages = native_syntax_languages(&api_prefix);
+        let preset = json
+            .pointer("/clay/preset")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
         PackageInspection {
             name: name.to_string(),
             version,
@@ -1586,6 +1645,8 @@ impl PackageService {
                 .unwrap_or_default(),
             runtime_profile: authorization
                 .map(|record| record.runtime_profile.as_str().to_string()),
+            native_syntax_languages,
+            preset,
         }
     }
 }
@@ -1598,6 +1659,13 @@ fn authorization_matches(
         && authorization.requested_spec == provenance.requested_spec
         && authorization.source_kind == provenance.source_kind
         && authorization.resolved_version == provenance.resolved_version
+}
+
+fn native_syntax_languages(api_prefix: &str) -> Vec<String> {
+    crate::server::syntax::SyntaxGrammarRegistry::native_owned_syntax_languages(api_prefix)
+        .into_iter()
+        .map(str::to_string)
+        .collect()
 }
 
 fn requested_capability_names(package_json: &Value) -> Vec<String> {

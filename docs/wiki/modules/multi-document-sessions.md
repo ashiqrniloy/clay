@@ -80,7 +80,7 @@ A tab whose connection drops auto-reconnects (driver `start_tab_reconnect` → `
 - `src/masonry_editor.rs`: `document_switch_restores_edit_history_and_dirty_state` validates undo stack and dirty flag restoration.
 - `src/masonry_editor.rs`: `show_open_documents_menu_lists_all_sessions_with_active_and_dirty_markers` validates transient menu composition.
 - `src/masonry_editor.rs`: `session_eviction_drops_least_recently_used` validates LRU eviction at `CLIENT_DOCUMENT_SESSION_MAX`; queue tests cover forwarding evicted IDs as `CloseDocument`.
-- `src/server/connection.rs`: close/disconnect tests prove shared-document survival, final-holder registry teardown, access loss, and cleanup when peer close races asynchronous output.
+- `src/server/connection/mod.rs`: close/disconnect tests prove shared-document survival, final-holder registry teardown, access loss, and cleanup when peer close races asynchronous output.
 - `src/client/mod.rs`: `stale_ack_for_backgrounded_document_is_silently_ignored` validates document-scoped sync acks.
 - `src/client/mod.rs`: `client_forwards_document_opened_without_replacing_live_sync_state` validates `DocumentOpened` no longer resets sync at connection layer.
 - `src/masonry_editor.rs`: `resync_event_replaces_editor_snapshot` and `opened_file_edits_continue_as_deltas` validate multi-doc bootstrap guards.

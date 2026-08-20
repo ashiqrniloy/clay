@@ -55,7 +55,9 @@ impl ControlCenter {
         let all_items = catalogue
             .commands()
             .iter()
-            .filter(|command| is_executable_from_control_center(&command.routing_policy))
+            .filter(|command| {
+                is_executable_from_control_center(&command.command_id, &command.routing_policy)
+            })
             .map(|command| {
                 (
                     command_to_menu_item(command),
@@ -182,7 +184,10 @@ impl ControlCenter {
                 rule: CommandExecutionRule::UnknownCommand,
                 message: "selected item is not in the Control Center catalogue".to_string(),
             })?;
-        if *routing == RoutingPolicy::ClientUiCommand {
+        if *routing == RoutingPolicy::ClientUiCommand
+            || crate::masonry_editor::EditorClientCommand::from_command_id(&action.command_id)
+                .is_some()
+        {
             return Ok(ServerMenuActivation::ShellClientCommand(
                 action.command_id.clone(),
             ));
@@ -197,11 +202,12 @@ impl ControlCenter {
     }
 }
 
-fn is_executable_from_control_center(routing_policy: &RoutingPolicy) -> bool {
-    !matches!(
-        routing_policy,
-        RoutingPolicy::ClientFirstPredictable | RoutingPolicy::ClientFirstRequiresAck
-    )
+fn is_executable_from_control_center(command_id: &str, routing_policy: &RoutingPolicy) -> bool {
+    crate::masonry_editor::EditorClientCommand::from_command_id(command_id).is_some()
+        || !matches!(
+            routing_policy,
+            RoutingPolicy::ClientFirstPredictable | RoutingPolicy::ClientFirstRequiresAck
+        )
 }
 
 fn command_to_menu_item(command: &RegisteredCommand) -> TransientMenuItem {
@@ -604,7 +610,10 @@ mod tests {
             custom_properties: std::collections::BTreeMap::new(),
             permissions: vec![PackagePermission::ParseDocument],
         };
-        assert!(!is_executable_from_control_center(&command.routing_policy));
+        assert!(!is_executable_from_control_center(
+            &command.command_id,
+            &command.routing_policy
+        ));
 
         let command = RegisteredCommand {
             package_name: "@clay/markdown".to_string(),
@@ -617,7 +626,10 @@ mod tests {
             custom_properties: std::collections::BTreeMap::new(),
             permissions: vec![PackagePermission::ParseDocument],
         };
-        assert!(is_executable_from_control_center(&command.routing_policy));
+        assert!(is_executable_from_control_center(
+            &command.command_id,
+            &command.routing_policy
+        ));
     }
 
     #[test]

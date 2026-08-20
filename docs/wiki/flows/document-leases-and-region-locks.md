@@ -5,9 +5,9 @@
 - `src/protocol/mod.rs`
 - `src/server/document.rs`
 - `src/server/locks.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/client/mod.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 
 ## Overview
 
@@ -75,7 +75,7 @@ let response = document.apply_edit(
 - `src/server/document.rs`: `second_client_receives_read_only_access` validates observer access.
 - `src/server/document.rs`: `server_rejects_edit_without_current_lease` validates missing/wrong lease rejection.
 - `src/server/document.rs`: `lease_released_or_retained_on_disconnect_matches_policy` validates deterministic lease release behavior.
-- `src/editor/surface.rs`: `read_only_editor_allows_navigation_but_not_mutation` validates observer UI behavior.
+- `src/editor/surface/mod.rs`: `read_only_editor_allows_navigation_but_not_mutation` validates observer UI behavior.
 - `src/client/mod.rs`: `read_only_client_queue_does_not_emit_edit_message` validates queue-side authority enforcement.
 - `src/server/document.rs`: region-lock tests validate insert/delete conflicts, non-overlapping edits, invalid lock range rejection, and conflict metadata.
 - `src/server/locks.rs`: tests validate range/document/workspace conflict rules and behavior-lock RAII release.

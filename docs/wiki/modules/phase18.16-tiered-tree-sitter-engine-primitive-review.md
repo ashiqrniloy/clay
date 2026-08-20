@@ -19,10 +19,10 @@
 - `docs/wiki/modules/editor-theme-registry.md`
 - `src/server/syntax.rs`
 - `src/server/parse_coordinator.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/protocol/decorations.rs`
 - `src/editor/theme.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/server/ops/syntax.rs`
 - `runtime/js/syntax.js`
 - `runtime/js/parse.js`
@@ -50,7 +50,7 @@ Tier 1 is native compiled-in first-party Tree-sitter grammar data, Tier 2 is a h
 
 ### Grammar registry and package grammar metadata
 
-- `src/packages/record.rs::SyntaxGrammarContributionDescriptor` already parses package `clay.contributions.syntaxGrammars` metadata: `languageId`, `filePatterns`, grammar artifact path, query paths, `styleMap`, budgets, and package provenance.
+- `src/packages/record/mod.rs::SyntaxGrammarContributionDescriptor` already parses package `clay.contributions.syntaxGrammars` metadata: `languageId`, `filePatterns`, grammar artifact path, query paths, `styleMap`, budgets, and package provenance.
 - `src/server/syntax.rs::SyntaxGrammarRegistry` indexes validated grammar contributions by contribution ID, language ID, extension, and exact filename.
 - `SyntaxGrammarRegistry::select_for_document` keeps active syntax grammar separate from active major mode, so `core.code` / `core.text` editability remains available when highlighting is absent or invalid.
 - Existing first-party packages provide partial grammar metadata: `@clay/rust`, `@clay/typescript`, and `@clay/javascript` have `queries/highlights.scm` and placeholder `grammars/README.md`; `@clay/markdown` currently has a markdown-it JS parser package and no Tree-sitter grammar metadata/artifact yet.
@@ -61,14 +61,14 @@ Tier 1 is native compiled-in first-party Tree-sitter grammar data, Tier 2 is a h
 - `src/server/parse_coordinator.rs::ParseCoordinator` already owns background scheduling, handler registration, generation replacement, cancellation, stale-version rejection, bounded parse windows, payload validation, and `ParseCoordinatorStats`.
 - `ParseCoordinator::schedule_parse_with_windows` delivers server-prepared `ParseWindowSnapshot` values to handlers and enforces `ParsePolicy`, `SYNTAX_CACHE_BUDGET_BYTES`, and window metadata checks before parser code sees document text.
 - `ParseCoordinator::finish_task` validates successful updates and records handler failures, but Phase 18.16 still needs visible sanitized `RuntimeDiagnostic` publication for handler errors/timeouts rather than silent failed-task stats only.
-- `src/server/connection.rs` already has selected-file/open follow-up paths and runtime diagnostic plumbing. Phase 18.16 must ensure open document text renders first and syntax work follows asynchronously.
+- `src/server/connection/mod.rs` already has selected-file/open follow-up paths and runtime diagnostic plumbing. Phase 18.16 must ensure open document text renders first and syntax work follows asynchronously.
 
 ### Decoration transport and vocabulary/theme registry
 
 - `src/protocol/decorations.rs::DecorationSpan` already carries `token_type`, `modifiers`, optional `scope`, `kind`, priority, and provenance. Compatibility helpers still map legacy `style_token` values through `DecorationSpan::from_style_token`.
 - `src/server/decorations.rs` validates document version, byte ranges, viewport/chunk bounds, payload size, permissions, and provenance before decoration publication.
 - `src/editor/theme.rs::StyleRegistry` is the single source of color and maps `TokenType + Modifiers` to `StyleSpec`.
-- `src/editor/surface.rs` stores validated decoration chunks outside paint and resolves style through `StyleRegistry` during native rendering.
+- `src/editor/surface/mod.rs` stores validated decoration chunks outside paint and resolves style through `StyleRegistry` during native rendering.
 - Phase 18.16 should keep one capture-to-vocabulary mapper. It may preserve `scope` for compatibility but must emit first-party syntax through `TokenType` and `Modifiers`, not legacy free-form-only `style_token` families.
 
 ### Package loading and JS parse bridge

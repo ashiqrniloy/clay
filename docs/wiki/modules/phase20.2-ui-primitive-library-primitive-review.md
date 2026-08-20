@@ -9,9 +9,9 @@
 - `src/shell/transient_menu.rs`
 - `src/editor/theme.rs`
 - `src/editor/typography.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/masonry_sdui.rs`
-- `src/masonry_shell.rs`
+- `src/masonry_shell/mod.rs`
 - `docs/reference/primitives/typography.md`
 - `docs/reference/primitives/shell-layout-strategy.md`
 - `.agents/skills/clay-ui/references/components.md`
@@ -31,7 +31,7 @@ ActiveTypography + UiTypographyHierarchy -> TypographyRegistry -> cached Parley/
 package semantic token -> same-typed core fallback -> resolved component style
 ```
 
-Phase 20.2 adds a small `pub(crate)` paint-primitive module (`src/shell/primitives.rs`) that reads cached resolved token values and paints chrome (dividers, focus rings, panel chrome, scroll chrome, badges, `kbd` hints, icon slots, tooltip shells). Existing one-off chrome draws in `src/masonry_sdui.rs`, `src/editor/surface.rs`, `src/shell/package_ui.rs`, and `src/shell/transient_menu.rs` route through these primitives. Package-declared components map onto primitives by construction because the SDUI paint path calls the primitive helpers.
+Phase 20.2 adds a small `pub(crate)` paint-primitive module (`src/shell/primitives.rs`) that reads cached resolved token values and paints chrome (dividers, focus rings, panel chrome, scroll chrome, badges, `kbd` hints, icon slots, tooltip shells). Existing one-off chrome draws in `src/masonry_sdui.rs`, `src/editor/surface/mod.rs`, `src/shell/package_ui.rs`, and `src/shell/transient_menu.rs` route through these primitives. Package-declared components map onto primitives by construction because the SDUI paint path calls the primitive helpers.
 
 ## Existing Primitive Inventory
 
@@ -63,7 +63,7 @@ Current primitives already provide:
 - Clay-owned pane/slot geometry with min/default/max validation and fixed/transient separation;
 - implemented package components sufficient for this foundation phase;
 - bounded inert protocol/package records and structural regression observations;
-- existing source guard (`style_registry_is_single_source_of_color_for_paint_paths` in `tests/editor_performance_invariants.rs:510-560`) covering `masonry_sdui.rs`, `masonry_shell.rs`, and editor files.
+- existing source guard (`style_registry_is_single_source_of_color_for_paint_paths` in `tests/editor_performance_invariants.rs:510-560`) covering `masonry_sdui.rs`, `masonry_shell/mod.rs`, and editor files.
 
 No new component kind, custom Masonry widget, renderer callback, theme selector, typography setter, or layout model is needed for Phase 20.2.
 
@@ -77,9 +77,9 @@ No new component kind, custom Masonry widget, renderer callback, theme selector,
 
 4. **Token-driven paint.** Primitives consume tokens only: colors from `ResolvedUiTheme`, spacing/radius/dimension from resolved tokens, typography from `UiTextVariant` + `FontRole`, elevation from `elevation.*`, z-level from `z.*` where stacking is needed. Additive-only token additions (if any) with same-typed core fallbacks; no existing token renames.
 
-5. **Route existing paint paths.** Replace one-off chrome draws in `src/masonry_sdui.rs` (SDUI panel/container/scroll chrome, sidebar/`SIDEBAR_WIDTH`-derived chrome), `src/editor/surface.rs` (scrollbar, status bar, and editor chrome that overlaps shell chrome), `src/shell/package_ui.rs` (fixed panel and overlay chrome), and `src/shell/transient_menu.rs` (bottom-pane prompt chrome, completion pop-up chrome) with calls to the new primitives. `SIDEBAR_WIDTH` and the `package_ui.rs` side/vertical defaults continue to resolve through Phase 20.1 `dimension.*` tokens; chrome around them now uses primitives.
+5. **Route existing paint paths.** Replace one-off chrome draws in `src/masonry_sdui.rs` (SDUI panel/container/scroll chrome, sidebar/`SIDEBAR_WIDTH`-derived chrome), `src/editor/surface/mod.rs` (scrollbar, status bar, and editor chrome that overlaps shell chrome), `src/shell/package_ui.rs` (fixed panel and overlay chrome), and `src/shell/transient_menu.rs` (bottom-pane prompt chrome, completion pop-up chrome) with calls to the new primitives. `SIDEBAR_WIDTH` and the `package_ui.rs` side/vertical defaults continue to resolve through Phase 20.1 `dimension.*` tokens; chrome around them now uses primitives.
 
-6. **Conformance contract.** Add/extend a deterministic test enforcing that primitives are the only way to paint UI chrome: shell/SDUI chrome paint files (`src/shell/primitives.rs`, `src/shell/package_ui.rs`, `src/shell/transient_menu.rs`, `src/shell/file_browser.rs`, `src/masonry_sdui.rs`, `src/masonry_shell.rs`) contain no `Color::from_rgb8`/`Color::from_rgba8` literals and no hardcoded `f64` chrome sizes outside the primitive module and `src/shell/theme.rs` (the token-definition module). Package components map onto primitives by construction — assert `paint_package_component` routes chrome through primitive helpers.
+6. **Conformance contract.** Add/extend a deterministic test enforcing that primitives are the only way to paint UI chrome: shell/SDUI chrome paint files (`src/shell/primitives.rs`, `src/shell/package_ui.rs`, `src/shell/transient_menu.rs`, `src/shell/file_browser.rs`, `src/masonry_sdui.rs`, `src/masonry_shell/mod.rs`) contain no `Color::from_rgb8`/`Color::from_rgba8` literals and no hardcoded `f64` chrome sizes outside the primitive module and `src/shell/theme.rs` (the token-definition module). Package components map onto primitives by construction — assert `paint_package_component` routes chrome through primitive helpers.
 
 7. **Structural primitive tests.** Add structural tests proving each primitive consumes tokens (no raw values) and renders all interaction states. Primitives panic-free on zero-size rects; `InteractionState::Disabled` applies `opacity.disabled`.
 
@@ -92,7 +92,7 @@ No new component kind, custom Masonry widget, renderer callback, theme selector,
 | `paint_divider` | `border.hairline` (color), `dimension.border.hairline` (width) | None (static) | `Role::Separator` | Inline divider draws in `masonry_sdui.rs` panel separators, `package_ui.rs` panel dividers |
 | `paint_focus_ring` | `focus.ring` (color), `dimension.border.focus` (width), `radius.xs` (corner radius) | `Focus` only | `Role::Focusable` (implicit via focus state) | Inline focus-ring draws in `masonry_sdui.rs` focused panel/button chrome |
 | `paint_panel_chrome` | `surface.panel` (background), `border.subtle` (border), `radius.sm` (corner radius), `spacing.panel` (padding), `typography.title` (title text), `PanelDefaults` (title row height, collapse affordance size, resize handle size) | `Rest`/`Hover`/`Active`/`Focus`/`Disabled` for collapse affordance and resize handle | `Role::Pane` (panel), `Role::Button` (collapse affordance) | Inline panel title row, collapse affordance, resize handle chrome in `masonry_sdui.rs`, `package_ui.rs` |
-| `paint_scroll_chrome` | `surface.scrollbar` (thumb), `surface.scrollbar.track` (track), `dimension.scrollbar.width` (thumb width), `radius.xs` (thumb corner radius), `opacity.disabled` (disabled state) | `Rest`/`Hover`/`Active`/`Disabled` for thumb | `Role::ScrollBar` | Inline scrollbar draws in `editor/surface.rs` (`SCROLLBAR_WIDTH`, `SCROLLBAR_MARGIN`, `SCROLLBAR_MIN_THUMB`), `masonry_sdui.rs` SDUI scroll chrome |
+| `paint_scroll_chrome` | `surface.scrollbar` (thumb), `surface.scrollbar.track` (track), `dimension.scrollbar.width` (thumb width), `radius.xs` (thumb corner radius), `opacity.disabled` (disabled state) | `Rest`/`Hover`/`Active`/`Disabled` for thumb | `Role::ScrollBar` | Inline scrollbar draws in `editor/surface/mod.rs` (`SCROLLBAR_WIDTH`, `SCROLLBAR_MARGIN`, `SCROLLBAR_MIN_THUMB`), `masonry_sdui.rs` SDUI scroll chrome |
 | `paint_badge` | `surface.badge` (background), `text.badge` (text color), `radius.xs` (corner radius), `spacing.badge` (padding), `typography.detail` or `typography.caption` (text), `opacity.disabled` (disabled state) | `Rest`/`Hover`/`Active`/`Disabled` when clickable | `Role::Status` | Inline badge/tag draws in `masonry_sdui.rs` status items, `package_ui.rs` status components |
 | `paint_kbd_hint` | `surface.kbd` (background), `text.kbd` (text color), `border.kbd` (border), `radius.xs` (corner radius), `dimension.kbd.height` (height), `typography.caption` (text) | None (static) | `Role::Label` (implicit via text) | Inline `kbd` hint draws in `masonry_sdui.rs` keybinding hints, `transient_menu.rs` menu item details |
 | `paint_icon_slot` | `text.icon` (glyph color), `dimension.icon.size` (slot size), `opacity.disabled` (disabled state) | `Rest`/`Hover`/`Active`/`Disabled` when clickable | `Role::Image` | Inline icon slot draws in `masonry_sdui.rs` panel icons, `package_ui.rs` component icons |

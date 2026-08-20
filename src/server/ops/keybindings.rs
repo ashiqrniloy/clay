@@ -248,7 +248,7 @@ fn reject_when_clause(value: Option<&Value>, code: &str) -> Result<(), JsErrorBo
     Ok(())
 }
 
-fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
+pub(crate) fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
     let trimmed = chord.trim();
     if trimmed.is_empty() {
         return Err(JsErrorBox::generic(
@@ -304,7 +304,7 @@ fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
 /// chord parses as a one-element vec. Leading/trailing/multiple whitespace
 /// collapses via `split_ascii_whitespace`. An empty sequence and any
 /// empty/malformed stroke reject the whole sequence.
-fn parse_key_sequence(chord: &str) -> Result<Vec<KeyStroke>, JsErrorBox> {
+pub(crate) fn parse_key_sequence(chord: &str) -> Result<Vec<KeyStroke>, JsErrorBox> {
     let strokes: Vec<KeyStroke> = chord
         .split_ascii_whitespace()
         .map(parse_key_chord)
@@ -339,6 +339,9 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
     // Plan 071 task 10: the text-object/smart-select command-ID surface is
     // generated (kind x scope x direction), so parse instead of enumerating.
     if crate::protocol::SelectionQuery::from_command_id(command_id).is_some() {
+        return true;
+    }
+    if crate::masonry_editor::EditorClientCommand::from_command_id(command_id).is_some() {
         return true;
     }
     // Phase 22.4: the numbered tab families parse the same way (1..=9 only).
@@ -490,6 +493,8 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
             | "editor.clientKeepSelection"
             | "editor.clientRemoveSelection"
             | "editor.clientUndoCursorMove"
+            | "editor.clientToggleFold"
+            | "editor.toggleInlayHints"
             | "shell.clientSplitPaneVertical"
             | "shell.clientSplitPaneHorizontal"
             // Phase 22.7 (F3): aliases route ClientUiCommand like the canonical IDs.
@@ -513,6 +518,8 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
             | "shell.clientTabMoveRight"
     ) {
         Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
+    } else if crate::masonry_editor::EditorClientCommand::from_command_id(command_id).is_some() {
+        Ok(crate::protocol::RoutingPolicy::ClientFirstPredictable)
     } else {
         Ok(crate::protocol::RoutingPolicy::ServerFirst)
     }
@@ -702,6 +709,32 @@ mod tests {
                 command_routing_policy(command).unwrap(),
                 RoutingPolicy::ClientUiCommand
             );
+        }
+    }
+
+    #[test]
+    fn phase28_editor_configuration_commands_are_bindable_and_routed() {
+        for command in [
+            "editor.toggleComment",
+            "editor.toggleListMarker",
+            "editor.rotateHeading",
+        ] {
+            assert!(is_runtime_bindable_command(command));
+            assert_eq!(
+                command_routing_policy(command).unwrap(),
+                RoutingPolicy::ClientFirstPredictable,
+                "{command} must remain on the client-first text-transform lane"
+            );
+            assert_eq!(validate_command_id(command).unwrap(), command);
+        }
+        for command in ["editor.clientToggleFold", "editor.toggleInlayHints"] {
+            assert!(is_runtime_bindable_command(command));
+            assert_eq!(
+                command_routing_policy(command).unwrap(),
+                RoutingPolicy::ClientUiCommand,
+                "{command} must remain a client UI command"
+            );
+            assert_eq!(validate_command_id(command).unwrap(), command);
         }
     }
 

@@ -144,6 +144,18 @@ impl SduiNativeState {
         SduiThemeStyle::from_ui_theme(&self.ui_theme)
     }
 
+    /// Keep a readable editor region beside the fixed workspace browser. This
+    /// ponytail: fixed 8-em minimum; measure localized browser labels only if
+    /// sidebar content grows beyond this bounded rule. At large user UI sizes
+    /// the sidebar yields its slot before text becomes a zero-width or unusable
+    /// editor.
+    fn minimum_main_width(&self) -> f64 {
+        let metrics = self
+            .typography
+            .ui_text_metrics(FontRole::Ui, self.theme_style().body_text);
+        (f64::from(metrics.font_size) * 8.0).max(100.0)
+    }
+
     /// Return and clear the panels-dirty flag (plan 070 step 13b). The host
     /// calls this from the event loop to decide whether to reconcile the
     /// retained fixed-panel children.
@@ -626,6 +638,16 @@ pub(crate) fn paint_sdui_text(
     builder.push_default(StyleProperty::Brush(BrushIndex(0)));
     let mut layout = builder.build(text);
     layout.break_all_lines(Some(max_width));
+    // Component rows have fixed, typography-derived heights. Clip wrapped
+    // long labels to that row so they cannot paint over siblings or escape a
+    // narrow panel; the full string remains available through accessibility.
+    let clip = Rect::new(
+        origin_x,
+        y,
+        (origin_x + width.max(0.0)).max(origin_x),
+        y + metrics.row_height.max(metrics.line_height),
+    );
+    scene.push_clip_layer(Affine::IDENTITY, &clip);
     render_text(
         scene,
         Affine::translate((origin_x + panel_padding + depth as f64 * 10.0, y)),
@@ -633,6 +655,7 @@ pub(crate) fn paint_sdui_text(
         &[color.into()],
         true,
     );
+    scene.pop_layer();
 }
 
 /// Shared SDUI row-rect geometry (see [`SduiNativeState::row_rect`]).
@@ -717,7 +740,7 @@ fn editor_region_for_document_with_workspace_sidebar(
     let layout = sdui.package_ui.slot_layout(&defaults);
     let want_left = include_workspace_sidebar
         && sdui.has_sidebar_panel()
-        && size.width > defaults.sidebar_width + 100.0;
+        && size.width > defaults.sidebar_width + sdui.minimum_main_width();
     with_default_left_slot(layout, &defaults, want_left)
         .compute_geometry(full_rect)
         .main_rect
@@ -727,10 +750,10 @@ fn editor_region_for_document_with_workspace_sidebar(
 ///
 /// Task 6 (plan 070): the three slot-layout entry points previously each
 /// open-coded the same `contains_slot` + `with_fixed_slot(fixed_sdui_left_slot)`
-/// block. They keep their distinct *gates* (which differ intentionally: the
-/// editor main region reserves on root-or-binding plus a width guard, the panel
-/// sidebar on root only) but share this one application site so the default-left
-/// construction cannot drift between them.
+/// block. The editor entry keeps its explicit welcome/document gate while the
+/// sidebar viewport and document region now share the same pane-width and
+/// typography-aware left-slot decision, so the panel cannot overlap a narrow
+/// editor.
 fn with_default_left_slot(
     layout: PaneSlotLayout,
     defaults: &PanelDefaults,
@@ -746,14 +769,9 @@ fn with_default_left_slot(
 fn sdui_slot_layout(size: Size, sdui: &SduiNativeState) -> PaneSlotLayout {
     let defaults = sdui.ui_theme.panel_defaults();
     let layout = sdui.package_ui.slot_layout(&defaults);
-    let want_left = sdui.has_sidebar_panel() && size.width > defaults.sidebar_width + 100.0;
+    let want_left =
+        sdui.has_sidebar_panel() && size.width > defaults.sidebar_width + sdui.minimum_main_width();
     with_default_left_slot(layout, &defaults, want_left)
-}
-
-fn sdui_panel_slot_layout(sdui: &SduiNativeState) -> PaneSlotLayout {
-    let defaults = sdui.ui_theme.panel_defaults();
-    let layout = sdui.package_ui.slot_layout(&defaults);
-    with_default_left_slot(layout, &defaults, sdui.has_sidebar_panel())
 }
 
 fn fixed_sdui_left_slot(defaults: &PanelDefaults) -> FixedSlotState {
@@ -769,7 +787,7 @@ fn fixed_sdui_left_slot(defaults: &PanelDefaults) -> FixedSlotState {
 }
 
 fn sdui_panel_left_slot_rect(size: Size, sdui: &SduiNativeState) -> Option<Rect> {
-    sdui_panel_slot_layout(sdui)
+    sdui_slot_layout(size, sdui)
         .compute_geometry(size.to_rect())
         .fixed_slots
         .into_iter()
@@ -1558,6 +1576,47 @@ mod tests {
         assert_eq!(
             editor_region_for_document(size, &state, 7),
             Rect::new(0.0, 0.0, 900.0, 600.0)
+        );
+    }
+
+    #[test]
+    fn narrow_workspace_browser_yields_its_slot_without_overlapping_editor() {
+        let mut state = SduiNativeState::empty();
+        state.apply_snapshot(sample_tree());
+        let size = Size::new(320.0, 600.0);
+
+        assert!(state.sidebar_geometry(size).is_none());
+        assert!(!state.scrolls_point(size, Point::new(12.0, 12.0)));
+        assert_eq!(editor_region_for_document(size, &state, 7), size.to_rect());
+    }
+
+    #[test]
+    fn large_ui_typography_yields_sidebar_before_main_region_is_unusable() {
+        let mut state = SduiNativeState::empty();
+        state.apply_snapshot(sample_tree());
+        let default = crate::protocol::ActiveTypography::default();
+        let active = crate::protocol::ActiveTypography {
+            revision: 1,
+            ui: crate::protocol::FontProfile {
+                size: 96.0,
+                ..default.ui.clone()
+            },
+            ..default
+        };
+        state.set_typography(TypographyRegistry::from_active_typography(active).unwrap());
+
+        let narrow = Size::new(900.0, 600.0);
+        assert!(state.sidebar_geometry(narrow).is_none());
+        assert_eq!(
+            editor_region_for_document(narrow, &state, 7),
+            narrow.to_rect()
+        );
+
+        let wide = Size::new(1200.0, 600.0);
+        assert!(state.sidebar_geometry(wide).is_some());
+        assert_eq!(
+            editor_region_for_document(wide, &state, 7).x0,
+            SIDEBAR_WIDTH
         );
     }
 

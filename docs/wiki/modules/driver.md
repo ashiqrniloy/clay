@@ -7,7 +7,12 @@ persistence orchestration. Phase 22.7 (2026-08-09) extracted it out of
 `src/main.rs` (6194 → 3603 lines) into `src/driver/` so the crate root keeps
 only window/run-loop/dialog/CLI concerns. Phase 22.8 keeps this orchestration
 client-local while binding every restored/reconnected connection to its own
-server `TabServerState` before document/SDUI installation.
+server `TabServerState` before document/SDUI installation. Plan 090 (task 7)
+then split the remaining crate-root concerns out of `src/main.rs` into three
+sibling modules — `src/cli.rs` (CLI parsing), `src/launch.rs` (server/client
+startup, window creation, lifecycle), and `src/app_driver.rs` (app event
+dispatch + native dialog/action routing) — leaving `src/main.rs` as a thin
+composition root (`main()` + the collocated test module).
 
 ## Module layout
 
@@ -17,12 +22,13 @@ server `TabServerState` before document/SDUI installation.
 | `src/driver/reconcile.rs` | Registry reconciliation: `accept_registry_snapshot`, `apply_tab_registry` (pure fill/removal/active/card computation), `apply_registry_reconcile` (shell-side uninstall/switch/focus/card refresh), `ordered_tab_clients`; focused registry tests |
 | `src/driver/restore.rs` | Restore state machine (`advance_restore`, `mount_restored_tab`, `reopen_restored_documents`, `finish_restore`, `abandon_restore`) + `persist_window_state` (the `layout.json` v2 writer) + dirty-inventory/close-confirm helpers (`dirty_documents_in_tab`, `collect_window_state`, `show_tab_close_confirm_menu`, `save_all_then_close_tab`); focused restore tests |
 
-`main.rs` keeps: window/run-loop/`DriverCtx` plumbing, `run_editor`,
-native dialog reservation (`reserve_folder_dialog` / `finish_folder_dialog`),
-menu sync (`apply_menu_sync`), `connect_with_retry_while`,
-`is_linux_portal_dialog_command`, `apply_connection_to_chrome`, and the
-`EditorAction` dispatch arms that route into `src/driver/` methods
-(including the one-line `self.reconnect_tab(...)` arm).
+`src/app_driver.rs` keeps the crate-root-side app concerns that were not
+moved into `src/driver/`: window/run-loop/`DriverCtx` plumbing, `run_editor`
+(now in `src/launch.rs`), native dialog reservation (`reserve_folder_dialog` /
+`finish_folder_dialog`), menu sync (`apply_menu_sync`), `connect_with_retry_while`
+(now in `src/launch.rs`), `is_linux_portal_dialog_command`,
+`apply_connection_to_chrome`, and the `EditorAction` dispatch arms that route
+into `src/driver/` methods (including the one-line `self.reconnect_tab(...)` arm).
 
 ## Visibility rules
 
@@ -31,8 +37,9 @@ cannot reach descendant-private items: every moved type, field, method, and
 free fn the root calls is `pub(crate)` (`Driver`, `TabState`,
 `PendingOpenRequest`, `RESTORE_CONFIRM_TIMEOUT`, the bridge fns, the typed
 helpers). Crate-root-private items (`apply_connection_to_chrome`,
-`apply_menu_sync`, dialog fns, `connect_with_retry_while`) stay private in
-`main.rs` — the child module can see them. Shared test helpers
+`apply_menu_sync`, dialog fns, `connect_with_retry_while`) are `pub(crate)`
+in `src/app_driver.rs` / `src/launch.rs` so the sibling modules and the
+`main.rs` test module can reach them. Shared test helpers
 (`test_driver_with_tabs`, `tab_state_with_queue`, `tab_snapshot`) are
 `pub(crate)` in `driver::tests` so `driver::reconcile::tests`,
 `driver::restore::tests`, and `main.rs` tests reuse them.

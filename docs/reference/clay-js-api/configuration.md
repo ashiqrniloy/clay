@@ -793,7 +793,7 @@ User-visible Phase 18.11 configuration surfaces:
 | Completion result/item budgets | compiled security boundaries | `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES`, `COMPLETION_RESULT_MAX_ITEMS`, per-field char caps in `src/perf/budgets.rs` | Enforced before client publication; not tunable from `init.js` |
 | Completion request payload budget | compiled security boundary | `COMPLETION_REQUEST_PAYLOAD_BUDGET_BYTES` in `src/perf/budgets.rs` | Not tunable from `init.js` |
 | Completion coordinator/menu state | internal | `CompletionCoordinator` (`src/server/completion.rs`, `pub(crate)`), `TransientMenuSession` completion projection (`src/shell/transient_menu.rs`, `pub(crate)`) | Clay-owned scheduling/cancellation/stale-drop/menu state; not user configuration |
-| Completion acceptance | internal | `EditorSurface::accept_completion_with_event` (`src/editor/surface.rs`, `pub(crate)`) | Commits a validated text replacement in the active document only; never executes a command, raw op, or provider code |
+| Completion acceptance | internal | `EditorSurface::accept_completion_with_event` (`src/editor/surface/mod.rs`, `pub(crate)`) | Commits a validated text replacement in the active document only; never executes a command, raw op, or provider code |
 
 The expected end-user manual completion configuration is a normal `~/.config/clay/init.js` binding:
 
@@ -1117,3 +1117,103 @@ polling scan (≤ 256 files, depth ≤ 8, skipping dotfiles/temp files) does zer
 work on keypress, paint, layout, scroll, text-event, edit-acknowledgement,
 parse-result, or decoration-rendering paths, and a completed reload
 re-baselines the snapshot so the watcher never loops.
+
+## Phase 26 editor layout configuration review
+
+### What changed
+
+Phase 26.6 introduced the `WrapPolicy` primitive (`none` | `viewport` |
+`column`) with per-mode defaults declared in behavior manifests
+(`editorRules.layout.wrap`, `columnCap`), and Phase 26 added the user-owned
+runtime override `editor.clientSetEditorLayout` (`clientSetEditorLayout` in
+`clay:editor`). The canonical `examples/init.js` documents the override in
+its editor-layout section (section 5) with options/types/defaults annotated
+and non-default examples commented.
+
+### Configuration surfaces
+
+- `clientSetEditorLayout({ wrapPolicy, columnCap? })` — user-owned wrap
+  override. Resolution order: runtime override (this call) > per-mode
+  `editorRules.layout.wrap` (package manifests) > `WrapPolicy::from_font_role`
+  default (monospace → `none`, proportional → `column` 72). `wrapPolicy` is
+  required and deny-by-default; `columnCap` defaults to 72 and is clamped to
+  16–240. The override survives configuration reload (the editor-layout lane
+  and current-value store are shared across runtime generations).
+- Chrome toggles (gutter, active line, indent guides, bracket match) are NOT
+  init.js options: they are per-mode manifest data (`editorRules.chrome`) with
+  no runtime override authority — see `creating-packages.md`.
+- Theme `textStyles` `background` and `scale` entry fields are theme-package
+  manifest data (authoring surface), activated through the existing
+  `theme.setTheme` API — see `creating-packages.md`.
+
+### Rejected hidden configuration keys
+
+There are no hidden keys: wrap policy and column cap are configurable only
+through the documented `clientSetEditorLayout` API (or the per-mode manifest
+fields), never through ad hoc JSON/TOML keys or raw ops. Unknown
+`wrapPolicy` values fail evaluation with a deny-by-default diagnostic;
+out-of-range `columnCap` values are clamped, not silently accepted.
+
+### Security
+
+`clientSetEditorLayout` is configuration-only rendering customization; it
+grants no filesystem, network, shell, package-install, AI, workspace, or
+client-side JavaScript authority. The op is registered in the trusted
+runtime extension only, so third-party package code cannot resolve it — the
+user override is package-unforgeable. Chrome toggles and theme
+`textStyles` entries are inert manifest data and execute no code.
+
+### Performance
+
+Configuration evaluation remains startup/reload-only. The editor-layout
+override is one validated op call during evaluation; it does zero work on
+keypress, paint, layout, scroll, text-event, edit-acknowledgement,
+parse-result, or decoration-rendering paths. Applying the override
+invalidates the layout cache key once and repaints; the
+`RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS` advisory budget covers the
+evaluation cost of the new options.
+
+## Phase 28 editor command configuration review
+
+Phase 28 adds no new `clay:configuration` option keys. User-visible editor
+customization stays on existing documented Clay JS APIs and behavior-manifest
+fields:
+
+- [`editor.toggleComment`](editor/toggle-comment.md) is the built-in editor
+  command with default `Ctrl+/`. Bind or replace it through
+  [`keybindings.bindKey`](keybindings/bind-key.md) and
+  [`keybindings.unbindKey`](keybindings/unbind-key.md); its comment prefix
+  comes from the active mode's manifest, not from a hidden configuration key.
+- [`editor.toggleListMarker`](editor/toggle-list-marker.md),
+  [`editor.rotateHeading`](editor/rotate-heading.md),
+  [`editor.clientToggleFold`](editor/client-toggle-fold.md), and
+  [`editor.toggleInlayHints`](editor/toggle-inlay-hints.md) are documented,
+  bindable command-ID helpers. They have no core default chord; users may bind
+  them with `bindKey` using the `clay:editor` helper or the stable command ID.
+  Fold ranges and inlay data remain inert host-validated data, while collapse
+  and inlay visibility state remain client-local.
+- [`editor.clientSetEditorLayout`](editor/client-set-editor-layout.md)
+  remains the only user runtime override for wrapping. Per-mode
+  `editorRules.layout` and `editorRules.chrome.inlayHints` remain manifest data;
+  chrome defaults are
+  resolved by the active mode/font role. There is no separate inlay, folding,
+  comment, list, heading, or chrome package option.
+- `configuration.setPackageOption` keeps its existing closed, package-prefixed
+  schema for real package-owned defaults only. Phase 28 adds no package option;
+  unsupported/ad hoc keys continue to fail closed.
+
+All five command helpers and `clientSetEditorLayout` expose their
+behavior-changing metadata through Clay JS API docs, `docs/index.md`, the
+inventory, and the generated registry. Configuration evaluation and binding
+validation stay on startup/reload/configuration paths; ordinary typing, fold
+painting, inlay overlay painting, layout, and parse work do not execute user
+configuration JavaScript. These surfaces grant no filesystem, network, shell,
+package enable/disable, extension-loading, AI, workspace, WASM, raw-op, or
+client-side JavaScript authority.
+
+### Rejected hidden configuration keys
+
+The following are not configuration APIs: `editor.commentPrefix`,
+`editor.fold.enabled`, `editor.inlayHints.enabled`, `editor.headingPrefixes`,
+`editor.chrome`, and `editor.wrapPolicy`. Use the documented command helpers,
+`clientSetEditorLayout`, or package-owned `editorRules` manifest fields instead.

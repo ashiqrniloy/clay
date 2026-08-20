@@ -24,6 +24,15 @@ Current implemented package API status: `packages.loadPackage` / `loadPackage("@
 
 Clay packages can contribute editor modes, commands, behavior manifests, parsers, decorations, UI, layout, actions, configuration, theme tokens, and documentation. They do so through Clay JS APIs and inert validated declarations, not through direct native widget access.
 
+## Authoring contract (single-manifest)
+
+- `package.json` `clay.contributions` is the only registration data path. First-party `loadEntry` is execute-only: import a parse module, call `serverRegisterParseHandler` / `serverRegisterDocumentAnalyzer`, or export an empty default. Do not copy `*PackageManifest()` or call `serverRegisterModePattern` / `serverRegisterCommand` / `serverRegisterCompletionProvider` / `serverRegisterSyntaxGrammar` from first-party load ceremony.
+- Use `clay.preset`: `code-mode`, `prose-mode`, or `lsp-bridge`. Explicit keys win (permissions replace; `apiDependencies` union; `extensionPoints` replace-if-present). Presets never grant `language-server`.
+- Trusted first-party helpers import inventory specifiers (`lsp-shared/bridge.js`). Do not vendor copies. New language-server adoption is one `languageServers` contribution plus one `createLspBridge({ diagnostics: "push"|"pull" })` config.
+- First-party syntax producers emit closed `tokenType` + `modifiers`. Free-form `styleToken` / `markup.*` is a frozen compat path for old packages.
+- `clay package inspect <name>` prints preset, expanded permissions, and native-grammar ownership. Bundled first-party packages inspect from inventory without `pnpm` or a user store. Inspect does not enable, adopt, or start children. Language-server children are not a sandbox.
+- `clay.preset` is package.json, not an `init.js` knob. No new configuration keys.
+
 ## Core Architecture
 
 Clay's package model has three hard boundaries:
@@ -107,7 +116,7 @@ Phase 18.2 has implemented internally:
 
 Phase 18.3 now adds runtime-backed public APIs for package-owned slot UI contributions:
 
-- `clay:ui` facade imports are available in the server-side package runtime through `runtime/js/ui.js` and `src/server/js_runtime.rs`.
+- `clay:ui` facade imports are available in the server-side package runtime through `runtime/js/ui.js` and `src/server/js_runtime/mod.rs`.
 - `serverRegisterPanelContribution(manifest, declaration)` validates a fixed `PanelContribution` targeting `left`, `right`, `top`, or `bottom` slots and stores package provenance.
 - `serverRegisterComponentContribution(manifest, declaration)` validates a bounded Clay component tree/catalog contribution.
 - `serverRegisterTransientOverlayContribution(manifest, declaration)` validates an overlay/menu/dialog-like transient contribution with anchor, focus, and dismissal policies.
@@ -146,10 +155,11 @@ Expected shell/layout/package guide updates by phase:
 | Phase 20.3 | Document layout primitives: split divider drag, fixed slot resize/collapse, layout persistence, inert versioned `LayoutIntent` API (`serverRequestLayoutIntent`), focus/input routing across splits, transient surface anchoring, and package limitations (no native layout mutation, no raw widget access). |
 | Phase 20.4 | Document the core component uplift: every implemented `ComponentKind` now honors the active theme (SDUI paint reads `ResolvedUiTheme`, not core fallbacks), is state-complete (`Rest`/`Hover`/`Active`/`Focus`/`Disabled` from state tokens), and follows the 4pt spacing rhythm scaled by `density`/`spacing_scale()`; the status bar uses token-driven insets; editor chrome (caret/selection/scrollbar/diagnostics) stays on the editor `StyleRegistry`. Compatibility guarantee: no `ComponentKind`, style-variable, or token-name change — packages require no manifest or style edit. |
 | Phase 22.2 | Document the pane document-view contract: each pane hosts at most one document of its tab's workspace (`PaneDocumentView`; the pane↔document mapping is client-local view state, server authority unchanged), duplicate opens focus the existing pane, all open flows target the focused pane, and major modes run concurrently per pane via per-document behavior-manifest layers. Packages gain no new surface: they still cannot own panes, open documents into panes, or contribute per-pane chrome (SDUI sidebar/panels/overlays remain window-scoped; per-pane package chrome stays planned). |
-| Phase 22.3 | Document the tab contract: tabs are independent client views — each tab owns its own server connection, workspace, split tree, chrome, and pending-open attribution; the server holds an in-memory server-authoritative tab registry (order, active tab, per-tab workspace + client binding) that survives client reconnects (disk persistence is 22.5); the tab bar is a shell-owned chrome row below the top fixed panel slot above the working area, hidden at ≤1 tab. Packages cannot own or contribute tab bar chrome and cannot open/close/move tabs (inert `serverRequestLayoutIntent` remains the only package layout surface); per-tab package chrome is still-planned (needs a later phase). |
+| Phase 22.3 | Document the tab contract: tabs are independent client views — each tab owns its own server connection, workspace, split tree, chrome, and pending-open attribution; the server holds an in-memory server-authoritative tab registry (order, active tab, per-tab workspace + client binding) that survives client reconnects (disk persistence is 22.5); the tab bar is a shell-owned chrome row below the top fixed panel slot above the working area, hidden at ≤1 tab. Plan 088 Task 6 makes its geometry follow user UI typography and logical window bounds. Packages cannot own or contribute tab bar chrome and cannot open/close/move tabs (inert `serverRequestLayoutIntent` remains the only package layout surface); per-tab package chrome is still-planned (needs a later phase). |
 | Phase 22.4 | Document keyboard tab management: 24 Clay-owned `client_ui` tab command IDs (`clientTabNext`/`Prev`/`New`/`Close`/`MoveLeft`/`MoveRight` plus the numbered `clientTabActivate.1..9` and `clientTabMoveTo.1..9` families) with Global-scope default chords, server-registry reorder ops, explicit numbering/bounds/wraparound policies, and a driver-owned dirty-close confirm/save flow. Packages gain no surface: binding is a **user** configuration-time API (`keybindings.bindKey`/`unbindKey` in `~/.config/clay/init.js`), packages cannot bind or issue tab commands, cannot open/close/move/reorder tabs, and receive no new authority from the tab command IDs. The tab commands are `ClientUiCommand`-routed and — like the pane commands — are listed in the Control Center catalogue since Phase 24.2, with activation bridged back to the client shell driver through the server-approved `ShellClientCommandRequest` frame (packages still cannot emit that frame). |
 | Phase 24.2 | Document the Control Center catalogue contract: every validated registered command appears automatically in the menu when its package is loaded (built-ins, `shell.client*`, trusted/third-party registrations merged into one generation-stamped catalogue with effective keybindings and provenance detail); listing grants no authority; query/selection movement uses the shared bounded fuzzy subsequence matcher on the installed snapshot only; activation dispatches through the shared server execution path or the narrow server-approved `ShellClientCommandRequest` frame. Packages cannot open, drive, or intercept the menu session and cannot emit the shell-client frame. |
 | Phase 24.3 | Document the Path Browser contract (`controlCenter.openPath`, “Browse Filesystem”): a built-in session over the same transient-menu round trip with an editable path bar seeded from the active document's parent (then tab workspace root, then server cwd), bounded depth-1 listings, primary/secondary activation, and Backspace ascent. Browse authority is ephemeral and user-authorized by the built-in surface itself; navigation creates no grant, a file open converts it into one `SingleFile` grant, and Alt+Enter on a directory converts it into one `Directory` root grant for the bound tab only (other tabs untouched). Packages cannot open, populate, intercept, or receive paths from this built-in session, cannot emit its `MenuBackspace`/`MenuActivate` kind intents meaningfully (session ids are per-connection opaque), and gain no filesystem authority from it; the native file/folder dialogs remain the fallback. |
+| Phase 28 | Document the shared package key-routing grammar, manifest-driven line-prefix transforms, command-backing/fail-closed policy, `render-folding` publication, Link/Inlay decoration data, Clay-owned decoration intent and editor chrome, and opt-in `createLspBridge({ features: ["inlayHint"] })` refresh behavior. |
 | Phase 20.5 | Document the overlay, menu, and input component phase: `dropdown`, `collapse`, `modal` promoted from reserved to implemented; `textInput` added (focus, placeholder, `style.validationState`/`style.placeholderColor`); `table` remains reserved (no first-party need); all transient surfaces (command palette, context menu, menu bar, completion pop-up) uplifted onto shared `paint_package_overlays` + `paint_tooltip_shell` with z-level stacking (`z.overlay`<`z.modal`<`z.tooltip`); `TransientMenuOrigin` selects overlay anchor; keyboard nav complete for all new surfaces (dropdown ArrowUp/Down/Enter/Space, collapse Enter/Space, modal Tab focus-trap). Compatibility guarantee: no existing `ComponentKind`, style-variable, or token-name change; `placeholderColor` and `validationState` are additive. |
 | Plan 070 | Document the retained reconciliation cutover: SDUI kinds and package component trees now render through retained reconciled Masonry subtrees (`SduiRegionWidget` in `src/masonry_sdui_region.rs`, `PackageRegionWidget`/`PackagePanelHost`/`PackageOverlayHost` in `src/masonry_package_region.rs`) hosted as real children of `EditorWidget`, replacing the earlier immediate-mode `SduiNativeState::paint` compatibility bridge. Each kind maps to a real Masonry widget (`SduiLabel`/`SduiButton`/`SduiListRow`/`EditorViewWidget`, `PackageButton`/`PackageListRow`/`PackageCollapse`/`PackageDropdown`/`PackageTextInput`/`PackageModal`); Masonry routes layout/paint/pointer/focus/scroll/a11y through the standard widget tree. Compatibility guarantee: no `ComponentKind`, style-variable, token-name, or package-facing contract change — packages require no manifest or style edit; the cutover is a client-internal substrate change. |
 | Phase 22.1 | Document equal-area window splits: Clay-owned `PaneSplitTree` now supports `split_pane` (capped at 4 panes per tab), `close_pane`, `add_equal_pane` (comb tree, N+1 equal areas), `move_pane` (reading-order swap), and `keyboard_resize` (deepest-bordering divider, clamped). `ClayShellWidget` hosts one `PaneContentHost` per pane leaf (editor or placeholder); panes are generic content hosts, not just editor views — a future terminal emulator or other workspace app can occupy a pane without a new shell primitive. Packages **cannot** own, create, close, move, or directly mutate panes/splits; they interact only through the inert `serverRequestLayoutIntent` API (Phase 20.3). Direct topology mutation (`serverRegisterPaneSplitTree`) stays a planned stub. Default split/focus/resize keybindings are Clay-owned and user-overridable via `bindKey`. |
@@ -175,15 +185,9 @@ Example:
   },
   "clay": {
     "apiPrefix": "markdown",
+    "preset": "prose-mode",
     "entry": "./dist/index.js",
     "loadEntry": "./dist/load.js",
-    "permissions": [
-      "mode-registration",
-      "mode-activation",
-      "command-registration",
-      "parse-document",
-      "render-decorations"
-    ],
     "modes": ["markdown"],
     "docs": "./docs/index.md",
     "performance": {
@@ -233,14 +237,15 @@ Phase 18.4 accepts detailed object descriptors for `input`, `uiStateScopes`, `la
 - `type`: normally `module`.
 - `exports`: package JS entry points.
 - `clay.apiPrefix`: short package-owned prefix, such as `markdown`.
+- `clay.preset` (optional): `code-mode`, `prose-mode`, or `lsp-bridge`. Expands at validate/assemble time into the standard permissions, `apiDependencies`, and extension-point families. Explicit `permissions` replace the preset list. Explicit `apiDependencies` union with the preset. Explicit `extensionPoints` replace the generated set. Unknown presets fail validation. Presets never grant `language-server`; `lsp-bridge` packages still declare `capabilities: ["language-server"]` and stay deny-by-default at grant time.
 - `clay.entry`: runtime entry.
 - `clay.loadEntry`: load/default setup entry.
-- `clay.permissions`: explicit permissions required by contributions.
+- `clay.permissions`: explicit permissions required by contributions when not using a preset, or a replacing override of a preset list.
 - `clay.modes`: package-owned modes.
 - `clay.docs`: package docs entry point.
 - `clay.performance.estimatedManifestBytes`: static budget estimate.
-- `clay.apiDependencies`: Clay JS APIs the package depends on.
-- `clay.contributions`: inert contribution descriptors for validation/conflict checking.
+- `clay.apiDependencies`: Clay JS APIs the package depends on. Omitted when a preset supplies the standard set.
+- `clay.contributions`: inert contribution descriptors for validation/conflict checking. Presets do not inject contribution records.
 
 Clay validates this metadata before package contributions become active. Phase 18.3 UI metadata is inert: it lets Clay diagnose duplicate panel/component/overlay/token IDs, fixed-slot collisions, unsupported component/style fields, invalid token fallbacks, and payload estimates during package load, but it does not install a package, execute package JavaScript, or grant panel/theme override authority by itself. Phase 18.4 input/state/configuration metadata is also inert: it lets Clay diagnose duplicate input IDs, state scope IDs, layout override targets/properties, and package option schemas with package name/version/apiPrefix provenance before enable/load; runtime behavior still flows through documented `clay:ui` and `clay:configuration` APIs.
 
@@ -281,7 +286,7 @@ Common permission scopes:
 | `command-registration` | Register package commands |
 | `parse-document` | Receive bounded open-document text for parsing |
 | `render-decorations` | Publish inert decoration spans |
-| `render-folding` | Publish folding ranges when implemented |
+| `render-folding` | Publish validated folding ranges |
 | `completion-provider` | Provide completions when implemented |
 | `package-configuration` | Behavior-changing package options when implemented |
 | `editor-control` | Programmatic cursor/selection control in declared modes (see below) |
@@ -308,7 +313,7 @@ Boundary rules (enforced per call, deny-by-default):
 - Every editor op requires approved `editor-control`; visibility of the ops grants nothing.
 - The active document's major mode must be one of the declared `editorControl.modes`. Modes may be foreign (e.g. `core.code`) — a package does not need to own a mode to operate in it, but it must name it.
 - Execution is triggered with `clientExecuteEditorCommand({ commandId })` (Plan 071 follow-up round). Only known editor command IDs are accepted; the request is pushed to the client as an advisory `EditorCommandRequest` and dispatched through the same path as keybinding-routed command IDs. Unknown IDs are dropped on both sides.
-- Keybinding-driven behavior needs no push channel: a package that owns a mode contributes `keymaps` and `editorRules` through its mode declaration, and manifest routing takes precedence over built-in defaults once the package is activated.
+- Keybinding-driven behavior needs no push channel: a package that owns a mode contributes `keyRouting` and `editorRules` through its mode declaration. `keyRouting.key` uses the same shared chord parser as `bindKey`; manifest routing takes precedence over built-in defaults once the package is activated.
 - Conflicts: multiple packages may hold `editor-control` for the same mode; Clay does not arbitrate. If two packages fight over behavior in a mode, deactivate one (package disable/adoption revoke applies live via runtime reload).
 - Revocation is immediate: disabling or unadopting the package removes the capability on the next runtime generation.
 
@@ -359,13 +364,13 @@ await loadPackage("@clay/markdown");
 bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
-Phase 18.6 shipped the generic one-line loader. Phase 18.7 extends it through selected-file open-time activation: startup `~/.config/clay/init.js` evaluates on the persistent server runtime, `await loadPackage("@clay/markdown")` validates/enables the package once, imports its declared `loadEntry`, registers mode metadata and parse handlers, and leaves those registrations resident for later opens. Opening `note.md` then classifies the path through the generic `clay:modes` registry, activates the matching mode for that document, and schedules the package parse handler through `ParseCoordinator`; user config does not copy package manifests, call raw ops, perform manual primitive registration, publish representative decoration publication payloads, or build per-open runtime roots. Plan 035 generalizes the resolver so `src/server/js_runtime.rs::ClayModuleLoader` accepts resolver-validated package `loadEntry` modules through a shared `PackageLoadEntryAllowlist` gate for bundled and installed source-aware packages. `loadPackage` is idempotent per runtime generation, so repeated startup/open-time calls reuse the first validated load; Phase 19 reload replaces the runtime generation, reruns `init.js`, rebuilds the package `loadEntry` allowlist, and starts the `globalThis.__clayLoadedPackages` cache empty. The `PackageService` resolve/enable/execute path (`src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`) is implemented and wired into the `clay:packages` facade. The `packages.loadPackage` inventory entry is `status = "runtime-backed"` and `registry_public = true` with full Markdown documentation. The generic loader/API boundary is a package-root allowlist that does not grant filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, or package-manager authority without separate user-approved capabilities. See `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` for the unified authority model. The package-owned `markdownLoadMode()` fallback remains a documented convenience alias for per-load options, but `loadPackage("@clay/markdown")` is the preferred end-user path.
+Phase 18.6 shipped the generic one-line loader. Phase 18.7 extends it through selected-file open-time activation: startup `~/.config/clay/init.js` evaluates on the persistent server runtime, `await loadPackage("@clay/markdown")` validates/enables the package once, applies host-owned `package.json` contributions, runs the execute-only `loadEntry`, and leaves those registrations resident for later opens. Opening `note.md` then classifies the path through the generic `clay:modes` registry, activates the matching mode for that document, and schedules the package parse handler through `ParseCoordinator`; user config does not copy package manifests, call raw ops, perform manual primitive registration, publish representative decoration publication payloads, or build per-open runtime roots. Plan 035 generalizes the resolver so `src/server/js_runtime/source.rs::ClayModuleLoader` accepts resolver-validated package `loadEntry` modules through a shared `PackageLoadEntryAllowlist` gate for bundled and installed source-aware packages. `loadPackage` is idempotent per runtime generation, so repeated startup/open-time calls reuse the first validated load; Phase 19 reload replaces the runtime generation, reruns `init.js`, rebuilds the package `loadEntry` allowlist, and starts the `globalThis.__clayLoadedPackages` cache empty. The `PackageService` resolve/enable/execute path (`src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`) is implemented and wired into the `clay:packages` facade. The `packages.loadPackage` inventory entry is `status = "runtime-backed"` and `registry_public = true` with full Markdown documentation. The generic loader/API boundary is a package-root allowlist that does not grant filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, or package-manager authority without separate user-approved capabilities. See `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` for the unified authority model. The package-owned `markdownLoadMode()` fallback remains a documented convenience alias for per-load options, but `loadPackage("@clay/markdown")` is the preferred end-user path.
 
 If a package supports one-line loading, that is the preferred path. The lower-level setup should be documented as a fallback for advanced use or per-load customization.
 
 What the one-line default yields (Plan 071 task 11): after `await loadPackage("@clay/markdown")`, a `.md` document classifies to the Markdown mode and activates with the package-declared `editorRules` — prose word movement (`wordSeparators: "prose"`, no underscore or camelCase sub-words), the editor default bar caret, and ligatures from the mode's proportional font-role typography profile. The built-in `core.code`/`core.text` fallback modes ship the same defaults (code movement, default caret, role ligatures) with no package loaded, and a package load never changes unrelated modes. Customization is optional and declarative (`movement`/`caretStyle` in `editorRules`, ligatures via `setTypography` per font role); see the Behavior manifest bullets below.
 
-A single `loadPackage("@clay/<lang>")` activates every contribution the package's `loadEntry` registers — modes, commands, parse handlers, decorations, UI components, and any number of completion providers. A package declares multiple providers in its `completionProviders` array (for example `rust.keywords` plus `rust.snippets`) and submits that package manifest once to `serverRegisterCompletionProvider`; generic `completion_provider_metas` maps the full array and `register_completion_provider_metadata` registers all distinct IDs together while rejecting duplicates. End-user config stays one line — `await loadPackage("@clay/rust")` — with no copied manifest, manual primitive registration, or low-level facade plumbing. Phase 18.19 snippets ride this same path: `textFormat: "snippet"` is inert item data, not a separate loader, op, permission, or subsystem.
+A single `loadPackage("@clay/<lang>")` applies the host-enabled `package.json` contributions — modes, commands, completion providers, syntax grammars, and UI `{kind,id}` — then runs the package `loadEntry` for execute-only work (importing a parse-handler module, wiring a document analyzer). End-user config stays one line. Imperative `serverRegister*` calls stay public for `init.js` customization and for execute-only ops that cannot be declared as JSON; they are the fallback, not the convention. Phase 18.19 snippets ride the same `completionProviders` array: `textFormat: "snippet"` is inert item data, not a separate loader, op, permission, or subsystem.
 
 ## Package Code Shape
 
@@ -382,51 +387,14 @@ src/theme.js       optional theme token declarations
 
 Compiled packages may publish `dist/` equivalents.
 
-**Implemented persistent-runtime load entry shape** for a package `loadEntry`:
+**Implemented persistent-runtime load entry** is execute-only. Declare modes (`modePatterns` + `editorRules`), commands, completion providers, syntax grammars, and UI in `package.json`. The host applies those on `loadPackage`. The load entry imports modules and registers handlers that cannot be JSON:
 
 ```js
-import { serverRegisterCommand } from "clay:commands";
-import { serverRegisterModePattern, serverActivateMajorMode } from "clay:modes";
-import { serverLoadPackage } from "clay:packages";
 import { serverRegisterParseHandler } from "clay:parse";
-import { markdownPackageManifest } from "./index.js";
 
-export async function loadMarkdownPackage(clay, options = {}) {
-  const packageManifest = markdownPackageManifest();
-
-  await packages.serverLoadPackage(packageManifest);
-
-  await modes.serverRegisterModePattern(packageManifest, {
-    modeId: "markdown",
-    displayName: "Markdown",
-    extensions: ["md", "markdown", "mdown"],
-    mimeTypes: ["text/markdown"],
-    editorRules: MARKDOWN_EDITOR_RULES,
-    commands: MARKDOWN_COMMANDS,
-    keymaps: MARKDOWN_KEYMAPS,
-  });
-
-  // Optional load-time activation for an explicit document. Selected-file open
-  // later uses serverActivateClassifiedMode with the metadata stored above.
-  await modes.serverActivateMajorMode(packageManifest, {
-    documentId: Number(options.documentId ?? 1),
-    path: String(options.path ?? "sample.md"),
-    editorRules: MARKDOWN_EDITOR_RULES,
-    commands: MARKDOWN_COMMANDS,
-    keymaps: MARKDOWN_KEYMAPS,
-  });
-
-  for (const command of MARKDOWN_COMMANDS) {
-    await commands.serverRegisterCommand(packageManifest, {
-      commandId: command.id,
-      displayName: command.displayName,
-      routingPolicy: command.routingPolicy,
-    });
-  }
-
+export default async function load() {
   const parserModule = await import("./parser.js");
-  await parse.serverRegisterParseHandler({
-    packageManifest,
+  serverRegisterParseHandler({
     mode: "markdown",
     parseUnit: "line-group",
     viewportPriority: true,
@@ -438,63 +406,17 @@ export async function loadMarkdownPackage(clay, options = {}) {
     timeoutMs: 50,
   });
 }
+```
 
-export default async function markdownLoadMode(options = {}) {
-  return loadMarkdownPackage({
-    packages: { serverLoadPackage },
-    modes: { serverRegisterModePattern, serverActivateMajorMode },
-    commands: { serverRegisterCommand },
-    parse: { serverRegisterParseHandler },
-  }, options);
-}
+A language package with no execute-only work can export an empty default:
+
+```js
+export default async function load() {}
 ```
 
 The public registration contract is token-backed. `serverRegisterParseHandler` accepts a package module object plus `exportName`; the facade stores that function in the persistent server runtime behind a server-issued token. Rust never receives a JavaScript callback value. The op validates package identity, `PackagePermission::ParseDocument` / `"parse-document"`, parse unit, window/memory budgets, and timeout bounds before a `ParseCoordinator` handler is registered.
 
-**Generic future-mode shape** (same primitives, no Markdown-specific Rust branch):
-
-```js
-import { serverRegisterCommand } from "clay:commands";
-import { serverActivateMajorMode, serverRegisterModePattern } from "clay:modes";
-import { serverLoadPackage } from "clay:packages";
-import { serverRegisterParseHandler } from "clay:parse";
-import * as parserModule from "./parser.js";
-import { myLanguageManifest } from "./index.js";
-
-export default async function loadMyLanguage(options = {}) {
-  const packageManifest = myLanguageManifest();
-  await serverLoadPackage(packageManifest);
-  await serverRegisterModePattern(packageManifest, {
-    modeId: "my-language",
-    displayName: "My Language",
-    extensions: ["my"],
-    editorRules: MY_LANGUAGE_EDITOR_RULES,
-    commands: MY_LANGUAGE_COMMANDS,
-    keymaps: MY_LANGUAGE_KEYMAPS,
-  });
-  await serverActivateMajorMode(packageManifest, {
-    documentId: Number(options.documentId ?? 1),
-    path: String(options.path ?? "example.my"),
-    editorRules: MY_LANGUAGE_EDITOR_RULES,
-    commands: MY_LANGUAGE_COMMANDS,
-    keymaps: MY_LANGUAGE_KEYMAPS,
-  });
-  for (const command of MY_LANGUAGE_COMMANDS) {
-    await serverRegisterCommand(packageManifest, command);
-  }
-  await serverRegisterParseHandler({
-    packageManifest,
-    mode: "my-language",
-    parseUnit: "line-group",
-    module: parserModule,
-    exportName: "parseMyLanguageUpdate",
-    maxWindowBytes: 64 * 1024,
-    guardBytes: 4 * 1024,
-    memoryBudgetBytes: 30 * 1024 * 1024,
-    timeoutMs: 50,
-  });
-}
-```
+**Generic future-mode shape** (same primitives, no language-named Rust branch): put `modePatterns` / `editorRules` / `commands` / `completionProviders` in `package.json`. Load entry stays execute-only. Imperative `serverRegisterModePattern` / `serverRegisterCommand` remain public for `init.js` or packages that must register at runtime; document that longer setup as a fallback, not the default.
 
 Keep package docs current with the implemented Clay JS API reference; do not invent raw op or callback shortcuts.
 
@@ -519,7 +441,7 @@ Syntax grammar style maps and published syntax/semantic decorations may request 
 
 ```json
 {
-  "code": { "styleToken": "markup.code-block", "fontRole": "monospace" }
+  "code": { "type": "CodeBlock", "fontRole": "monospace" }
 }
 ```
 
@@ -527,8 +449,9 @@ Syntax grammar style maps and published syntax/semantic decorations may request 
 {
   byteStart: 10,
   byteEnd: 16,
-  layer: "syntax",
-  styleToken: "markup.inline-code",
+  kind: "syntax",
+  tokenType: "CodeSpan",
+  modifiers: [],
   fontRole: "monospace",
 }
 ```
@@ -680,7 +603,7 @@ The UI/layout authoring contract is identical for `@clay/*` packages and user-in
 - Native UI and client runtime are explicit capability/API work. A package does not get native widget handles, Masonry mutation, raw CSS, client-side JavaScript, or renderer callbacks merely because it was installed from npm or GitHub — those surfaces appear only when a documented `native-ui` / `client-runtime` capability is granted and a matching Clay API exists, is validated, and is revocable.
 - UI/layout declarations remain validated load/reload/configuration work. Panel, component, overlay, input, state-scope, layout-override, theme-token, and option contributions are validated at package load/enable time and applied through documented Clay JS APIs at configuration/package-update time; no package JavaScript runs in Masonry paint, layout, pointer, scroll, keypress, text-event, or edit-ack handlers.
 - UI/layout primitives stay generic and reusable. No UI/layout primitive branches on package source (no `if github_package` / `if npm_package` / `if third_party` Rust paths). Every package consumes the same shell/slot/component/theme primitives; Markdown and future modes consume these generic primitives rather than adding mode-specific Rust layout branches.
-- Editor chrome is not SDUI (Plan 071 task 12). Caret shape/blink and the font-ligature baseline are editor/typography chrome, never `ComponentKind` components or theme tokens. Packages contribute them only as inert manifest/configuration data: `editorRules.caretStyle` in the mode's behavior manifest (shape/blink/dimensions; omitted means the editor default bar) and the mode's `defaultFontRole` selecting the typography profile whose user-owned `ligatures` policy applies. Caret color remains the theme-owned `caret` token. No package capability grants caret-shape or ligature-policy override authority; omitted fields always fall back to the built-in defaults, so customization is strictly opt-in. See [UI Chrome Primitives](../primitives/ui-chrome-primitives.md#package-authoring-contract) and [Semantic Typography Roles](../primitives/typography.md#ligature-policy).
+- Editor chrome is not SDUI (Plan 071 task 12 / Phase 26.5). Caret shape/blink, gutter / active-line / indent-guide / bracket-match, and the font-ligature baseline are editor/typography chrome, never `ComponentKind` components. Packages contribute them only as inert manifest/configuration data: `editorRules.caretStyle`, optional `editorRules.chrome`, and `defaultFontRole`. Caret color remains the theme-owned `caret` token; chrome colors use `gutterFg` / `lineHighlight` / `indentGuide` / `bracketMatch`. No package capability grants paint-path authority. See [UI Chrome Primitives](../primitives/ui-chrome-primitives.md#package-authoring-contract) and [Semantic Typography Roles](../primitives/typography.md#ligature-policy).
 
 ```text
 WorkingArea
@@ -819,8 +742,9 @@ token, manifest field, or JS API, and no package-facing `Completion` or
   to `working-area`, `active-pane`, `main`, and `pointer`; no package-facing
   `centered` or completion anchor is accepted. Clay owns bounds, focus,
   dismissal, selection, role/name/state exposure, and scroll containment. The
-  live renderer containment follow-up `P1-087-UI-1` is host work and does not
-  change the package contract.
+  retained package/SDUI hosts clip child rendering and expose clipped-child
+  semantics to accessibility consumers, closing live renderer containment
+  follow-up `P1-087-UI-1` without changing the package contract.
 
 ## Conflict and Precedence Contract
 
@@ -1333,6 +1257,8 @@ A theme package declares no permissions and no modes. It contributes style data 
 | `italic` | optional | Boolean default for token text. Syntax-token targets only. |
 | `underline` | optional | Boolean default for token text. Syntax-token targets only. |
 | `strike` | optional | Boolean strikethrough default. Syntax-token targets only. |
+| `background` | optional | `#rgb`, `#rrggbb`, or `#rrggbbaa` tint painted behind the glyph run (between selection rects and text). Resolves per `DecorationKind` (Quote, CodeBlock, Deprecated, Diagnostic, SearchMatch) in `StyleRegistry::background_for`; syntax/prose targets paint as a run background. Phase 26.3. |
+| `scale` | optional | Per-token-type font-size multiplier (a finite number in `(0, 4.0]`). Multiplies the resolved profile size for Syntax and Semantic decorations only (Diagnostic/SearchMatch always scale `1.0`); the heading ladder defaults H1=1.50 … H6=0.92, CodeSpan=0.90. Phase 26.4. |
 
 Base UI keys are: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`.
 
@@ -1344,6 +1270,7 @@ Validation rules:
 - Unknown `token` names are rejected.
 - Duplicate token entries in one package are rejected with deterministic diagnostics.
 - Invalid hex colors are rejected.
+- `scale` must be a finite number in `(0, 4.0]`; out-of-range or non-finite values are rejected (Phase 26.4).
 - `rawColor`, `value`, `css`, `rawCss`, `cssText`, executable callbacks, native widget handles, raw ops, client JavaScript, filesystem/network/shell authority, and renderer callbacks are rejected.
 - `textStyles` is inert manifest data. It grants no permission and executes no styling code.
 
@@ -1387,7 +1314,7 @@ See [Configuration: Phase 20.6 precedence and persistence](../clay-js-api/config
 Users override theme, appearance, and typography through three surfaces, all bounded and authority-rejecting:
 
 - **Programmatic — `clay:theme` facades in `~/.config/clay/init.js`.** `setTheme("@clay/theme-*")` selects the active theme; `setAppearance("light" | "dark" | "system")` sets the appearance preference that drives the canonical default (and is overridden by any explicit `setTheme`); `setTypography({...})` sets the monospace/proportional/ui font stacks, base sizes, and optional bounded hierarchy. These are init.js APIs (source `init-js` in the precedence model).
-- **UI session — `@clay/settings` panel.** A first-party catalog-composed SDUI panel (`packages/settings/`) lets users switch theme, appearance, and typography from the UI. Controls emit inert `settings.*` command intents (`settings.setTheme`, `settings.setAppearance`, `settings.setTypography`, `settings.reset`) that the server validates, persists to `~/.config/clay/preferences.json` (source `ui-session`), and applies live through a runtime reload (persist → reload → `init.js` re-eval + preferences apply → `RuntimeStateSnapshot` fanout). No restart required. The panel uses only implemented `ComponentKind` kinds (`panel`, `collapse`, `dropdown`, `textInput`, `label`, `button`, `flex`) — no native chrome, no client JavaScript, no raw CSS.
+- **UI session — `@clay/settings` panel.** A first-party catalog-composed SDUI panel (`packages/settings/`) lets users switch theme, appearance, and typography from the UI. Controls emit inert `settings.*` command intents (`settings.setTheme`, `settings.setAppearance`, `settings.setTypography`, `settings.reset`) that the server validates, persists to `~/.config/clay/preferences.json` (source `ui-session`), and applies live through a runtime reload (persist → reload → `init.js` re-eval + preferences apply → `RuntimeStateSnapshot` fanout). No restart required. The panel uses only implemented `ComponentKind` kinds (`panel`, `scroll`, `collapse`, `dropdown`, `textInput`, `label`, `button`, `flex`) — no native chrome, no client JavaScript, no raw CSS.
 - **Persistence — `preferences.json`.** The closed `ui-session` store (theme, appearance, typography) overrides `init.js` on every reload, so a UI choice survives restart and beats the equivalent `init.js` call. See the package doc at `packages/settings/docs/index.md` for the catalog-composition table and command flow.
 
 Theme packages themselves declare **inert style data only** (`clay.contributions.textStyles` and optional `clay.contributions.designTokens`); they declare no permissions, no modes, and no override APIs. All override authority is user-owned through the three surfaces above. A theme package cannot promote itself, ship executable styling code, raw CSS, client JavaScript, or a third-party theme loader; `setTheme`/canonical-default resolution accepts only bundled first-party `@clay/*` specifiers.
@@ -1494,10 +1421,10 @@ Phase 20.4 restyles every implemented `ComponentKind` to the minimalist design l
 | Reserved-kind gating | Implemented | Declaring a reserved `ComponentKind` (currently `table`) | `src/shell/components.rs` (`validate_component_kind`); `InvalidContributionDescriptor` |
 | Contrast / legibility | Implemented | Active theme whose status-chrome pairs fall below `TEXT_CONTRAST_MIN` (4.5) or `UI_CONTRAST_MIN` (3.0) | `src/shell/theme.rs` (`validate_active_theme_contrast`) + `src/server/ops/theme.rs` (`enforce_contrast`); a below-AA theme is not activated and records a `theme.contrast` diagnostic |
 | State-completeness | Implemented | Catalog drift between the `applicable_states(kind)` table and the documented per-kind interaction notes | `src/shell/components.rs` (`applicable_states`); pinned by `tests/masonry_sdui.rs` against `component_state_palette` |
-| Payload budgets | Implemented | SDUI snapshot estimate > 4096 B, update estimate > 1024 B; runtime tree > 16 KiB / > 128 nodes / > 16 depth / > 4096-char text node | `src/packages/record.rs` + `src/server/ui.rs` + `src/server/ops/sdui.rs`; `PayloadBudgetExceeded` |
-| Raw-color / raw-size rejection | Implemented | Raw color values in component `style.*` variables; raw colors / raw CSS in `designTokens` overrides | `src/shell/components.rs` + `src/packages/record.rs` |
+| Payload budgets | Implemented | SDUI snapshot estimate > 4096 B, update estimate > 1024 B; runtime tree > 16 KiB / > 128 nodes / > 16 depth / > 4096-char text node | `src/packages/record/mod.rs` + `src/server/ui.rs` + `src/server/ops/sdui.rs`; `PayloadBudgetExceeded` |
+| Raw-color / raw-size rejection | Implemented | Raw color values in component `style.*` variables; raw colors / raw CSS in `designTokens` overrides | `src/shell/components.rs` + `src/packages/record/mod.rs` |
 | Code-vs-catalog drift lint | Implemented | `ComponentKind` enum, `component_state_palette` match arms, typed-style-variable match arms, or `core_theme_value` match arms drifting from `components.md`/`tokens.md` | `tests/package_ui_conformance.rs` (four drift guards) |
-| Author diagnostics | Implemented | Rejection messages that omit the rejected value, expected type, or field | `ComponentCatalogError::reject` (`src/shell/components.rs`) + `; got {actual}` appends (`src/packages/record.rs`) |
+| Author diagnostics | Implemented | Rejection messages that omit the rejected value, expected type, or field | `ComponentCatalogError::reject` (`src/shell/components.rs`) + `; got {actual}` appends (`src/packages/record/mod.rs`) |
 | Trust-domain boundaries | Implemented | Third-party raw values / oversized payloads reaching the trusted runtime; conformance exposed as a package-facing op/facade | `tests/package_ui_conformance.rs` (three trust-domain tests) |
 
 **Diagnostic message format.** Component-catalog rejections use a single stable shape via `ComponentCatalogError::reject`:
@@ -1535,6 +1462,75 @@ This is rejected at `assemble_package_record` with `InvalidContributionDescripto
 
 See `.agents/skills/clay-ui/references/components.md` (conformance contract) and `.agents/skills/clay-ui/references/tokens.md` (rules) for the enforced-check lists. The conformance suite lives at `tests/package_ui_conformance.rs` and `tests/ui_primitive_conformance.rs`.
 
+### Plan 088 UI modernization authoring contract
+
+Plan 088 modernizes Clay-owned presentation and responsive consumption without
+expanding the package contract. It adds no `ComponentKind`, style variable,
+core/package token, overlay anchor, manifest field, permission, or JS API.
+Existing packages remain valid and package authors continue to declare inert
+validated data through the documented facades.
+
+**Clay owns shell and layout.** Packages cannot create Masonry widgets, mutate
+the working area or pane/split tree, own fixed-slot geometry, contribute tab or
+pane chrome, replace the welcome/file-browser/status surfaces, or open/drive the
+Clay-owned completion and centered Command Centre surfaces. Fixed package panels
+compose into Clay's mandatory `main` slot plus optional `left`, `right`, `top`,
+and `bottom` slots; transient package overlays remain limited to
+`working-area`, `active-pane`, `main`, and `pointer`. `completion` and `centered`
+are internal origins, and `table` remains reserved.
+
+**Existing components compose the changed surfaces.** A bounded package panel
+may use `panel` + `scroll` + existing `collapse`, `dropdown`, `textInput`,
+`label`, `button`, `list`, `flex`, or `statusItem` kinds. The nested `scroll`
+child receives flex space inside the retained host and scrolls long content
+inside its owner; it does not create a new layout authority. `modal` remains a
+Clay-owned focus-trapped dialog: Escape emits `PackageModalDismiss` with the
+component's declared inert command intent, while no package callback or native
+widget handle crosses the boundary. `statusItem` maps to AccessKit `Role::Status`, and disabled package controls
+expose disabled state and gate actions.
+
+**Responsive behavior is host-owned.** Clay may yield a workspace-browser left
+slot when pane width or the user's UI typography would leave the main editor
+unusable, clip long labels to their bounded row, clamp overlays to available
+space, and keep tab-card affordances inside logical window bounds. User
+`setTypography` values and semantic `typography.*` variants remain the only
+font/scale contract. Packages cannot declare breakpoints, concrete pixel sizes,
+font families, raw CSS/colors, renderer callbacks, or responsive JavaScript.
+Workspace and tab labels are sanitized by Clay; packages do not receive host
+filesystem paths through chrome labels.
+
+**Token and hot-path rules remain unchanged.** Use existing typed surface,
+text, border, spacing, radius, opacity, density, dimension, z-level, elevation,
+and semantic typography tokens. Theme resolution and typography metrics are
+cached at install/reload; package JavaScript, parsing, raw IPC, and token
+re-resolution never run in Masonry paint, layout, pointer, scroll, keypress, or
+text-event handlers. Packages cannot supply concrete typography hierarchy
+scales or `typography.*` design-token overrides.
+
+**Accessibility and containment are host guarantees.** Retained package/SDUI
+hosts clip children to panel/overlay/region bounds and expose clipped-child
+semantics. Focus rings, modal focus trapping, selected/disabled states, status
+announcements, action provenance, and contrast remain Clay responsibilities;
+package declarations provide labels, inert command IDs, and bounded values only.
+
+The authoritative catalog and token consumption note are
+[components.md](../../../.agents/skills/clay-ui/references/components.md#plan-088-package-ui-layout-contract)
+and [tokens.md](../../../.agents/skills/clay-ui/references/tokens.md#plan-088-token-consumption-no-additions).
+The navigation contract is [UI Components, Tokens, and Conformance](../ui-components.md).
+Relevant checks are:
+
+```bash
+cargo test --test protocol primitives_docs
+cargo test --test editor package_ui_conformance
+cargo test --test editor ui_primitive_conformance
+cargo test --lib shell::package_ui
+```
+
+These checks validate source/catalog/token parity, status markers, typed-token
+and raw-style rejection, reserved/internal surface boundaries, retained
+containment, and package anchor limits. They are host-authority checks, not
+package-facing conformance APIs.
+
 ## Rendering and Decorations
 
 Inline editor rendering uses inert decoration data, not UI components.
@@ -1553,7 +1549,7 @@ Decoration span shape (implemented protocol model):
 }
 ```
 
-Current compatibility facades may still accept legacy `styleToken` strings at package/parse boundaries and map them through `DecorationSpan::from_style_token`; new package code should target `TokenType` + `Modifiers` from the vocabulary contract. Packages should translate parser-specific output into generic Clay decoration spans. Rust should not branch on Markdown-specific token names.
+First-party producers emit closed `tokenType` + `modifiers` only. Legacy `styleToken` strings remain a frozen compatibility path for old packages via `DecorationSpan::from_style_token` / `TokenType::classify_style_token` / the `scope` escape. Do not add new first-party `markup.*` producers. Packages should translate parser-specific output into generic Clay decoration spans. Rust should not branch on Markdown-specific token names.
 
 ### Phase 18.17 range diagnostics publication
 
@@ -1650,12 +1646,6 @@ packages/lsp-rust/
     index.js            # exports packageManifest() with all constants
     load.js             # calls serverRegisterDocumentAnalyzer during loadEntry
     server.js           # creates the bridge factory + default handleDocumentAnalysis export
-    shared/             # generated copy of packages/lsp-shared/
-      framing.js
-      positions.js
-      mapping.js
-      client.js
-      utf8.js
   docs/
     index.md            # setup, authorization, behavior, security, troubleshooting
 ```
@@ -1729,60 +1719,53 @@ Rules:
 - `analyzer.contribution` must match a contribution declared in `clay.contributions.languageServers`.
 - Rejected authority fields: `handler`, `callback`, `function`, `executable`, `args`, `cwd`, `environment`, `process`, `rawOps`.
 
-### server.js: bridge factory
+### server.js: thin factory wrapper
+
+New language-server adoption is one `languageServers` contribution plus one `createLspBridge` config object. Do not copy rust/markdown session loops.
 
 ```js
-// packages/lsp-rust/dist/server.js
-import { startLanguageServerSession } from "clay:language-server";
-import { serverPublishDecorations } from "clay:decorations";
-import { serverPublishDiagnostics } from "clay:diagnostics";
-import { LspClient } from "./shared/client.js";
-import { VersionedDocument } from "./shared/positions.js";
-import { semanticTokensToClay, diagnosticsToClay, completionToClay,
-         hoverToClay, definitionToClay, codeActionsToClay,
-         signatureHelpToClay } from "./shared/mapping.js";
+import { createLspBridge } from "lsp-shared/bridge.js";
+import { contributionId, lspRustPackageManifest, packageName } from "./index.js";
 
-export function createBridge(config) {
-  let client = null;
-  const documents = new Map(); // documentId → { uri, version, text, versionedDoc }
-
-  async function ensureClient() {
-    if (client) return client;
-    const session = await startLanguageServerSession({
-      package: config.packageName,
-      contribution: config.contribution,
-      workspaceRootId: config.workspaceRootId,
-    });
-    client = new LspClient(session.sendBytes.bind(session),
-                           session.readBytes.bind(session));
-    await client.initialize(config.capabilities, config.workspaceRootUri);
-    return client;
-  }
-
-  async function handle(event) {
-    // Verify identity on every event.
-    if (event.package !== config.packageName ||
-        event.analyzerId !== config.analyzerId) return;
-
-    const cl = await ensureClient();
-    switch (event.kind) {
-      case "open":   await handleOpen(cl, event); break;
-      case "change": await handleChange(cl, event); break;
-      case "close":  await handleClose(cl, event); break;
-    }
-  }
-
-  return { handle };
+export function createRustAnalyzerBridge(options) {
+  return createLspBridge({
+    ...options,
+    packageName,
+    contribution: contributionId,
+    diagnosticSource: "rust-analyzer",
+    languageId: "rust",
+    diagnostics: "pull",
+  });
 }
 
-// ... handleOpen, handleChange, handleClose, refreshSemantic,
-//     refreshDiagnostics, handleCompletion, handleIntelligence ...
+let defaultBridge;
+export async function handleDocumentAnalysis(event) {
+  if (!defaultBridge) {
+    const [
+      { startLanguageServerSession },
+      { serverPublishDecorations },
+      { serverPublishDiagnostics },
+    ] = await Promise.all([
+      import("clay:language-server"),
+      import("clay:decorations"),
+      import("clay:diagnostics"),
+    ]);
+    defaultBridge = createRustAnalyzerBridge({
+      startSession: startLanguageServerSession,
+      publishDecorations: serverPublishDecorations,
+      publishDiagnostics: serverPublishDiagnostics,
+      packageManifest: lspRustPackageManifest(),
+    });
+  }
+  return defaultBridge.handle(event);
+}
 ```
+
+`createLspBridge({ packageName, contribution, diagnosticSource, languageId | languageIds+languageIdsByExtension, diagnostics: "push"|"pull", features })` owns capabilities, document tracking, refresh, completion, and intelligence. Session start stays lazy on first open.
 
 Rules:
 
-- Use `session.sendBytes(bytes: Uint8Array)` and `session.readBytes(maxBytes, timeoutMs)` — not the text-based `send`/`read` compatibility wrappers. Lossless byte transport avoids UTF-8 corruption on split multibyte sequences.
-- Own all LSP framing (Content-Length), JSON-RPC envelope, capabilities, position encoding, URI conversion, and cancellation. Rust core stays LSP-wire neutral.
+- Use the shared factory. Do not reimplement framing, mapping, or document loops.
 - Map LSP responses through `packages/lsp-shared/mapping.js` bounded converters. Never pass raw LSP data into Clay publication channels.
 - Validate publication targets against the active document version before publishing decorations or diagnostics.
 - External/out-of-root URIs are denied at the bridge level.
@@ -1797,14 +1780,16 @@ All four first-party bridge packages share a canonical LSP 3.17 adapter at `pack
 | `positions.js` | `VersionedDocument` with UTF-8/16/32 byte-to-position | CRLF normalization, surrogate rejection |
 | `mapping.js` | LSP → Clay vocabulary converters | 128 tokens, 128 diagnostics, 256 completions, 64 definitions, 64 code actions, 16 signatures, 32 parameters, 4 KiB markdown, 8 KiB decoration payload, 8 KiB diagnostic payload, 16 KiB result payload |
 | `client.js` | `LspClient` lifecycle (initialize, sync, request, notification) | Server request allowlist, cancellation |
+| `bridge.js` | `createLspBridge` session/document/refresh factory | push or pull diagnostics; optional feature list |
+| `typescript-language-server.js` | TS/JS wrapper around `createLspBridge` | extension language IDs + tsserver init |
 | `utf8.js` | Pure-JS UTF-8 codec | No TextEncoder/TextDecoder dependency (Clay runtime lacks deno_web) |
 
-Copies are distributed to each package via `scripts/update-first-party-lsp-shared.mjs` and verified by `tests/lsp_bridge.rs`. Package code imports from `./shared/` — a deterministic copy of the canonical source, not a symlink or dynamic resolution.
+Trusted first-party bridges import the helper through inventory export specifiers (`lsp-shared/bridge.js`, `lsp-shared/client.js`, `lsp-shared/mapping.js`). The export map is the allowlist: only listed files resolve, only in the trusted runtime, and relatives stay confined to `packages/lsp-shared/`. Third-party packages cannot import helper specifiers.
 
 Never:
 - Reference `TextEncoder` or `TextDecoder` (not available in Clay's deno_core runtime).
-- Import shared modules across package boundaries at runtime.
-- Duplicate adapter logic; changes flow through the canonical source and the update script.
+- Vendor a copy of `lsp-shared` into another package.
+- Import helper modules from the third-party runtime or via path escape (`lsp-shared/../…`).
 
 ### Worker lifecycle and budgets
 
@@ -2278,7 +2263,9 @@ Mode/classification defaults are compile-time (no configuration-evaluation cost 
 
 Phase 18.10 introduced `SyntaxGrammarContribution`; Phase 18.18 promotes first-party packages to native grammar metadata and direct `TokenType` + `Modifiers` styleMaps. A grammar-only package highlights documents whose active major mode may still be `core.code` or `core.text`; it does **not** register a full major mode, commands, completions, UI, key behavior, or language-specific Rust branches.
 
-Declare grammar assets under `clay.contributions.syntaxGrammars`:
+First-party languages already compiled into `FIRST_PARTY_NATIVE_GRAMMARS` (`rust`, `typescript`/`tsx`, `javascript`, `markdown`) must **omit** `clay.contributions.syntaxGrammars`. Those grammars are owned by the native descriptor (`include_str!` queries from the package tree). `serverRegisterSyntaxGrammar` on those packages returns `syntax.owned_by_native_descriptor`. Inverting style maps from trusted package records is a future decision, not current authoring.
+
+Tier 2/3 packages still declare grammar assets under `clay.contributions.syntaxGrammars`:
 
 ```json
 {
@@ -2449,7 +2436,7 @@ Result items are inert text-replacement data only: `label`, `insertText`, `detai
 
 Trigger classification is local manifest lookup: typing a trigger character edits locally first (`ClientFirstPredictable`) and then enqueues a typed `CompletionRequest` through a bounded non-blocking channel. Manual `completion.trigger` requests completions without mutating text. Provider execution runs server-side on a cancellable `UiReactivePriority` lane that aborts or stale-drops older in-flight requests and validates results against the current document/behavior version and provider generation before publication. Provider work is UI-reactive/cancellable and never runs on keypress-to-local-paint, paint, layout, scroll, pointer, or text-event hot paths.
 
-Phase 18.11 ships one built-in `core.bufferWords` provider that suggests unique words from the bounded server-prepared document window around the cursor prefix; it is always available and is not removed by package disable/reload. Phase 18.18 package providers registered through `completion.serverRegisterCompletionProvider` remain callback-free: registered static strings normalize to provenance-bearing `CompletionItem` text replacements, and the connection path filters the active package's Rust snapshot by replacement prefix without running package JavaScript. A future constrained handler bridge may add computed package providers; current package execution is limited to bounded static text. Any future provider needing workspace, network, AI, shell, or filesystem authority must introduce explicit permissions and an approved decision log before implementation.
+Phase 18.11 ships one built-in `core.bufferWords` provider that suggests unique words from the bounded server-prepared document window around the cursor prefix; it is always available and is not removed by package disable/reload. Phase 28.6 ranks matching results with one host-owned scorer: exact/case-sensitive prefix, case-insensitive prefix, shorter labels, then a bounded in-memory recency hint from accepted insert text. Provider priority and exclusive suppression remain authoritative; the scorer only orders candidates within an eligible provider/tier. The recency ring is process-local, sent on the next request, capped at `COMPLETION_RECENCY_MAX_ITEMS` / `COMPLETION_RECENCY_MAX_ITEM_CHARS`, and never persisted. Phase 18.18 package providers registered through `completion.serverRegisterCompletionProvider` remain callback-free: registered static strings normalize to provenance-bearing `CompletionItem` text replacements, and the connection path filters the active package's Rust snapshot by replacement prefix without running package JavaScript. A future constrained handler bridge may add computed package providers; current package execution is limited to bounded static text. Any future provider needing workspace, network, AI, shell, or filesystem authority must introduce explicit permissions and an approved decision log before implementation.
 
 See [`completion.serverRegisterCompletionProvider`](../clay-js-api/completion/server-register-completion-provider.md) for the authoritative API reference, and [`docs/wiki/modules/phase18.11-completion-provider-primitive-review.md`](../../wiki/modules/phase18.11-completion-provider-primitive-review.md) for the implementation review.
 
@@ -2493,6 +2480,225 @@ serverDisableCompletion({ packagePrefix: "rust" });
 The target is recorded in a server-side disabled-provider set consulted by every trigger selection path. In-flight results are stale-dropped via a provider generation bump. Disabled state persists across runtime reloads; re-enabling requires a package reload or runtime restart. The API grants no filesystem, network, shell, AI, workspace, or other authority; it only suppresses already-registered inert metadata.
 
 See [`completion.serverDisableCompletion`](../clay-js-api/completion/server-disable-completion.md) for the full API reference.
+
+## Phase 28 authoring contract: editor commands, folding, decoration intent, and inlay hints
+
+Phase 28 extends existing generic package primitives. Packages still publish
+bounded manifest/data contributions; Clay owns command routing, collapse state,
+decoration hit-testing, tooltip/gutter chrome, and native rendering. No new
+package-facing component kind, raw renderer hook, client JavaScript path, or
+permission-bearing UI shortcut is introduced.
+
+### Shared key-routing grammar
+
+Package `clay.contributions.keyRouting` entries use the same
+`parse_key_sequence` parser as `keybindings.bindKey`. The `key` field accepts
+one stroke or a space-separated sequence, with modifier names such as `Ctrl`,
+`Alt`, `Shift`, and `Super`:
+
+```json
+{
+  "keyRouting": [
+    {
+      "commandId": "markdown.togglePreview",
+      "key": "Ctrl+X Ctrl+P",
+      "routingPolicy": "server-first"
+    }
+  ]
+}
+```
+
+`"Ctrl+O"`, `"g g"`, and `"Ctrl+X Ctrl+P"` are parsed into real
+`KeyStroke` values; the whole string is not treated as a character. Empty or
+malformed chords fail package activation/keymap installation rather than
+silently becoming a different binding. Prefix-ambiguous user bindings remain
+rejected by `bindKey`. Parsing happens at package load/configuration time, not
+on the keypress-to-local-paint path.
+
+Every `commandId` must have a real Clay backing: a registered server command,
+a documented built-in client command, or a closed Clay alias. A package must
+not declare a metadata-only command and expect `Accepted` to perform work.
+Unbacked package command IDs fail registration or execution closed (`UnknownCommand`);
+Clay never invokes a package callback in the client. Package command IDs remain
+package-prefixed, while core IDs use the bare `editor.*`/`folding.*` domains.
+
+### Manifest-driven line-prefix transforms
+
+Text behavior stays data-driven. Packages declare comment and prose prefixes
+in their mode manifest; they do not add language-specific Rust/client branches
+or send raw edit operations from JavaScript:
+
+```json
+{
+  "editorRules": {
+    "comments": [
+      { "linePrefix": "//", "continuePrefix": "// " }
+    ],
+    "enter": {
+      "kind": "continueLineMarkers",
+      "markers": ["-", "*", "+", "ordered-dot"],
+      "exitOnEmptyItem": true
+    },
+    "headingPrefixes": ["# ", "## ", "### ", "#### ", "##### ", "###### "]
+  }
+}
+```
+
+- `comments[].linePrefix` is the indent-aware prefix used by the generic
+  `editor.toggleComment` engine. The engine toggles every line touched by the
+  caret/selection; if all non-empty lines already carry the prefix it strips
+  them, otherwise it adds the prefix. `continuePrefix` controls comment
+  continuation after Enter. A missing comment rule is a safe no-op, not a
+  blind insertion of `//`.
+- `enter.kind = "continueLineMarkers"` supplies inert list markers to the
+  generic list transform. `ordered-dot` represents an ordered marker such as
+  `1. `; it is not executable package code.
+- `headingPrefixes` is an ordered ATX prefix list for the generic heading
+  rotation command. It is package data, not a hard-coded Markdown parser rule.
+
+The shipped first-party aliases are deliberately closed: Rust, TypeScript,
+and JavaScript line-comment commands, plus Markdown comment/list/heading
+commands, map to the core client transform engines. New packages must use a
+registered server command or a future documented alias; they cannot register a
+new client callback, `javascript:` command, or arbitrary `ClientLocalEdit`.
+The transforms are client-first leased edits, so no server round trip occurs
+before local paint.
+
+### Folding publication and collapse ownership
+
+A package that has extra fold ranges publishes inert, versioned byte ranges
+through `clay:folding`:
+
+```js
+import { serverPublishFoldingRanges } from "clay:folding";
+
+serverPublishFoldingRanges({
+  documentId,
+  documentVersion,
+  ranges: [
+    { byteStart: sectionStart, byteEnd: sectionEnd, label: "section" },
+  ],
+});
+```
+
+The package declares `render-folding`. Clay validates provenance, current
+document version, ordered/nested ranges, and
+`FOLDING_RANGE_PAYLOAD_BUDGET_BYTES`; stale publications drop and oversize
+publications deny rather than truncate. Core syntax-tree folds and package
+ranges merge by provenance. Packages do not publish collapse state, hide lines,
+paint chevrons, or create fold widgets; `editor.clientToggleFold` and the
+client-local collapsed set own those behaviors.
+
+### Decorations, links, and decoration intent
+
+`decorations.serverPublishDecorations` accepts the existing closed syntax /
+semantic / diagnostic / search vocabulary plus `DecorationKind::Link` and
+`DecorationKind::InlayHint`. A Link span carries an optional bounded target; an
+InlayHint span carries an inert label and placement. The package still needs
+`render-decorations` and must publish viewport/version-bounded data:
+
+```js
+import { serverPublishDecorations } from "clay:decorations";
+
+serverPublishDecorations({
+  documentId,
+  documentVersion,
+  viewport: { byteStart: 0, byteEnd: documentByteLength },
+  spans: [
+    {
+      byteStart: linkStart,
+      byteEnd: linkEnd,
+      kind: "link",
+      tokenType: "Link",
+      modifiers: ["Underline"],
+      target: {
+        kind: "workspacePath",
+        relativePath: "guide.md",
+        byteStart: 0,
+        byteEnd: 12
+      }
+    },
+    {
+      byteStart: typeStart,
+      byteEnd: typeStart + 1,
+      kind: "inlayHint",
+      tokenType: "Type",
+      modifiers: [],
+      inlay: { label: ": i32", placement: "after" }
+    }
+  ]
+});
+```
+
+Target kinds are `workspacePath` (safe relative path with an optional byte
+range), `documentRange` (in-document jump), and `displayOnly` (sanitized text).
+Packages publish target data only. Clay's typed `DecorationIntent::{Hover,
+Activate}` path hit-tests visible spans, resolves safe workspace/document
+locations, focuses or opens only an already-authorized/open target, and paints
+bounded hover text. It never mints a browse/filesystem grant from a link.
+HTTP/HTTPS, absolute paths, fragments, and traversal/`..` targets are
+display-only or denied; they never open a network URL. `DisplayOnly` targets
+cannot activate.
+
+Link presentation remains Clay-owned: the editor `TokenType::Link` styling
+keeps an underline so color is not the only cue; hover uses the token-driven
+`paint_tooltip_shell`; keyboard focus uses the existing focus-ring path; and
+pointer/key activation shares the same validated intent. A package never
+receives a pointer callback and never paints a tooltip, gutter, or link chrome.
+
+### Inlay hints through the shared LSP factory
+
+LSP bridge packages opt into inlay refresh with the existing private
+`lsp-shared` factory; `inlayHint` is a decoration refresh feature, not a new
+language-intelligence provider feature:
+
+```js
+import { createLspBridge } from "lsp-shared/bridge.js";
+
+const bridge = createLspBridge({
+  ...options,
+  features: [
+    "completion", "hover", "definition", "codeAction", "signatureHelp",
+    "inlayHint"
+  ]
+});
+```
+
+When enabled, `createLspBridge` advertises `textDocument.inlayHint`, requests
+`textDocument/inlayHint` during the existing background refresh, sanitizes
+labels to the bounded inlay payload, and publishes a separate `inlayHint`
+decoration set. LSP Parameter hints map to `placement: "before"`; Type hints
+map to `placement: "after"`. Omitting `inlayHint` keeps the capability and
+refresh disabled. Do not add `inlayHint` to the closed
+`languageIntelligenceProviders.features` list: it is not a hover/definition /
+code-action request.
+
+`@clay/lsp-rust` enables this feature in its trusted bridge factory. Other
+bridges opt in only when they support it. The decoration label is inert text;
+it is not a command, URL, callback, or client-side JavaScript hook.
+
+### Clay-owned editor chrome, performance, and security
+
+- Fold chevrons and collapsed-line hiding are Clay-owned editor gutter/layout
+  behavior. Packages publish ranges under `render-folding`; they do not add a
+  `ComponentKind`, per-line tab stop, native widget, or paint callback.
+- Inlays are muted overlay text painted after the main token layout with no
+  virtual-text reflow. They are decorative/`aria-hidden`; the toggle is the
+  Clay-owned `editor.toggleInlayHints` command.
+- Package UI, parse work, fold publication, link publication, and LSP refresh
+  run at load/configuration/background/update time. Masonry paint, layout,
+  pointer, scroll, keypress, and text-event paths read cached inert state only;
+  no package JavaScript runs there.
+- `render-folding` and `render-decorations` are narrow publication permissions,
+  not filesystem, workspace, network, shell, AI, native-widget, raw-op, or
+  client-runtime authority. Link activation is not a grant, and inlay labels
+  remain inert bounded text.
+
+Authoritative API details, backing paths, budgets, and error codes remain in
+[`serverPublishFoldingRanges`](../clay-js-api/folding/server-publish-folding-ranges.md),
+[`serverPublishDecorations`](../clay-js-api/decorations/server-publish-decorations.md),
+[UI Chrome Primitives](../primitives/ui-chrome-primitives.md), and the
+[Primitive Registry](../primitives/registry.md).
 
 ## Documentation Requirements
 
@@ -2562,9 +2768,11 @@ Optional customization is exposed through documented Clay/package JS APIs, not b
 Keep the `syntaxGrammars` block exactly as shipped in Phase 18.10. The same metadata is the Tier 2 package contribution in Phase 18.16; Tier 1 native selection and Tier 3 JavaScript fallback are host/runtime decisions. Add the following full-language surfaces through generic primitives:
 
 - **Major mode**: declare `clay.modes` and register a mode pattern with `modes.serverRegisterModePattern`. The pattern uses generic file-extension, MIME-type, and bounded shebang/leading-content probes; do not add language-specific Rust classification branches.
-- **Behavior manifest**: declare editor rules (indentation, tab, generic Enter rule, delimiter pairs, comment continuation, electric characters, movement, caret appearance) through the behavior manifest API. Use `behavior.buildCodeEditingManifest({ indentSize, enter, lineComment, pairs, electricOutdentCharacters, autocompleteTriggers, movement, caretStyle })` to produce validated inert rules for code or prose modes; do not add language-specific behavior branches in core.
+- **Behavior manifest**: declare editor rules (indentation, tab, generic Enter rule, delimiter pairs, comment continuation, electric characters, movement, caret appearance, chrome, wrap) through the behavior manifest API. Use `behavior.buildCodeEditingManifest({ indentSize, enter, lineComment, pairs, electricOutdentCharacters, autocompleteTriggers, movement, caretStyle, chrome, layout })` to produce validated inert rules for code or prose modes; do not add language-specific behavior branches in core.
   - `movement` (optional, Plan 071 task 11): word/paragraph motion policy. Prose modes (e.g. Markdown) declare `{ wordSeparators: "prose", treatUnderscoreAsWord: false, camelCaseSubWord: false }`; code modes declare `{ wordSeparators: "code" }` (identical to the built-in default; declaring it is optional and documents intent). Absent fields fall back to the code-editing defaults.
   - `caretStyle` (optional): caret shape/blink override (`shape: "bar" | "line" | "block" | "underline"`, `blink: "solid" | "blink" | "phase" | "smooth"`, `widthPx`, `heightPct`, `hollow`, `stopBlinkOnTyping`). Absent means the reduced-motion-safe editor default bar; `clientSetCursorStyle` overrides per-mode values at runtime.
+  - `chrome` (optional): `{ gutter, activeLine, indentGuides, bracketMatch }` booleans. Absent derives from `defaultFontRole` (`monospace` → all on, `proportional` → all off). Explicit object keys default to `false`. Theme packages restyle via `gutterFg` / `gutterFgActive` / `lineHighlight` / `indentGuide` / `bracketMatch`. No package JavaScript runs on the paint path.
+  - `layout` (optional): `{ wrapPolicy: "none" | "viewport" | "column", columnCap?: number }`. Absent derives from `defaultFontRole` (`monospace` → `none` + horizontal scroll, `proportional` → `column` 72). `columnCap` is clamped to 16–240. User `setEditorLayout` (client override) wins over this field; packages cannot clear a user override.
   - Ligatures are typography-owned, not mode-owned: a mode's font role (`defaultFontRole`) selects the `FontProfile` whose `ligatures` policy applies. Users customize ligatures per role with `theme.setTypography` (`ligatures: { enableStandard, enableContextual, discretionaryFeatures, rawFeatures, disableFeatures }`); packages never set ligatures directly and loading a package grants no ligature authority.
 - **Commands**: register package-prefixed commands with `commands.serverRegisterCommand`. Commands must route through the server-owned `CommandExecution` path, declare permissions, and avoid shell/network/filesystem authority unless explicitly approved.
 - **Completion providers**: register keyword/snippet providers with `completion.serverRegisterCompletionProvider`. Completion providers remain metadata-only and never ship executable handlers, raw callbacks, or client JavaScript. Derive `triggerCharacters` from the major-mode behavior manifest with `completion.completionTriggerCharactersFromEditorRules(editorRules)` so the editor's autocomplete triggers and the completion framework's provider selection stay aligned.
@@ -2781,7 +2989,7 @@ replaced once with only the current approved graph replayed.
 
 Users can inspect, disable, revoke, and roll back at any time from the same
 host UI. The CLI exposes the same single authority path:
-`clay package inspect <name>` (shows adoption state),
+`clay package inspect <name>` (preset, expanded permissions, native-grammar ownership, adoption; bundled first-party names resolve without a user store),
 `clay package adopt <name>` (writes the durable exact approval),
 `clay package revoke <name>` (revokes approval and disables the package),
 `clay package rollback <name>` (disables the active replacement of the named
@@ -2797,10 +3005,10 @@ layout) lives in
 ### `packages/lsp-shared`
 
 `packages/lsp-shared` is a private pure-JavaScript helper shared by the
-bundled LSP bridge packages. Decision (Plan 061 task 8): it stays private.
-Third-party language-server bridges use the public `clay:language-server`
-session APIs with their own approved fixed contribution; they do not import
-`lsp-shared` or any other package's modules.
+bundled LSP bridge packages. It is fingerprinted in `bundled-inventory.toml`
+and export-mapped, but not `loadPackage`-able. Third-party language-server
+bridges use the public `clay:language-server` session APIs with their own
+approved fixed contribution; they do not import `lsp-shared`.
 
 ## Minimal Package Checklist
 

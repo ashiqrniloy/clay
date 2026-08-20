@@ -17,15 +17,15 @@ The Control Center is a server-owned transient menu that lists executable comman
 - `src/server/menu_sessions.rs`: per-connection server session store (`ServerMenuSessions`) hosting the Control Center as a session kind; `ServerMenuSession::activate` produces typed activations.
 - `src/server/command_execution.rs`: shared `CommandExecutor`, the 22-entry built-in command table (incl. `controlCenter.openPath`, 24.3), and `CommandExecutionRequest` validation.
 - `src/packages/commands.rs`: `CommandRegistry`, `CommandCatalogue::from_sources`, `snapshot()`, and the later-source-wins `from_snapshots` merge used for dispatch.
-- `src/masonry_shell.rs`: `SHELL_CLIENT_COMMAND_CATALOGUE` (38 entries) and the deny-by-default `ShellClientCommand::from_command_id` parser.
+- `src/masonry_shell/window_tabs.rs`: `SHELL_CLIENT_COMMAND_CATALOGUE` (38 entries) and the deny-by-default `ShellClientCommand::from_command_id` parser.
 - `src/shell/fuzzy.rs`: the shared bounded fuzzy subsequence scorer used for query ranking.
 - `src/shell/transient_menu.rs`: generic `TransientMenuSession` and `TransientMenuItem` state model.
 - `src/shell/package_ui.rs`: projects the active session onto a bottom-anchored transient overlay.
 - `src/protocol/menu.rs` / `src/protocol/mod.rs`: inert snapshot DTO, menu intent frames, and the `ServerMessage::ShellClientCommandRequest { command_id }` wire variant.
-- `src/server/connection.rs`: `controlCenter.open` special case, the four menu-intent handlers, catalogue/dispatch wiring, and generation-replacement cancel.
-- `src/server/js_runtime.rs`: `command_registry_snapshots()` — the (trusted, third-party) inert metadata harvest from both runtime domains.
+- `src/server/connection/mod.rs`: `controlCenter.open` special case, the four menu-intent handlers, catalogue/dispatch wiring, and generation-replacement cancel.
+- `src/server/js_runtime/mod.rs`: `command_registry_snapshots()` — the (trusted, third-party) inert metadata harvest from both runtime domains.
 - `src/client/mod.rs`: `ClientConnectionEvent::ShellClientCommandRequest` forwarding.
-- `src/main.rs` / `src/masonry_shell.rs`: client re-parse and `apply_shell_client_command` driver routing.
+- `src/app_driver.rs` / `src/masonry_shell/mod.rs`: client re-parse and `apply_shell_client_command` driver routing.
 - `src/masonry_sdui.rs` / `src/masonry_pane_document.rs`: render the overlay and route keyboard navigation/activation/cancel.
 
 ## How it works
@@ -116,7 +116,7 @@ The Control Center also surfaces two built-in mode-discovery commands for diagno
 - `src/server/control_center.rs`: `opening_control_center_lists_all_executable_commands`, `control_center_includes_built_in_commands`, `filtering_matches_label_id_binding_and_provenance`, `selected_command_produces_command_activation`, `selected_shell_client_item_produces_shell_activation`, `empty_filtered_session_rejects_activation`, `client_first_command_is_not_executable_from_control_center`, `shell_client_catalogue_entries_are_visible_and_parser_allowlisted`, `item_detail_includes_key_binding_and_provenance`, `catalogue_snapshot_is_not_rebuilt_for_query_updates`
 - `src/server/menu_sessions.rs`: high-bit ids, replace, query filter, selection wrap, typed activation, cancel, projection, `cancel_active`, adversarial ordering, `stale_generation_cannot_activate_a_catalogue_item`
 - `src/server/mod.rs`: `live_command_catalogue_contains_builtins_and_exact_shell_surface`, `command_catalogue_merges_loaded_packages_with_exact_provenance`
-- `src/server/connection.rs`: `control_center_opens_filters_activates_and_cancels`, `control_center_shell_activation_sends_shell_command_request`, `control_center_lists_and_activates_loaded_package_commands`, `runtime_generation_replacement_cancels_open_control_center`, `tab_switch_cancels_the_active_server_menu_session`, `menu_intents_for_unknown_sessions_produce_bounded_diagnostics`
+- `src/server/connection/mod.rs`: `control_center_opens_filters_activates_and_cancels`, `control_center_shell_activation_sends_shell_command_request`, `control_center_lists_and_activates_loaded_package_commands`, `runtime_generation_replacement_cancels_open_control_center`, `tab_switch_cancels_the_active_server_menu_session`, `menu_intents_for_unknown_sessions_produce_bounded_diagnostics`
 - `src/shell/fuzzy.rs`: subsequence vs substring, word-boundary and consecutive bonuses, case-insensitivity, Unicode safety, empty-query and over-long-query behavior
 - `src/client/mod.rs`: event mapping for `ShellClientCommandRequest`; `src/client/behavior.rs`: default-binding routing
 - `src/server/ops/keybindings.rs`: `control_center_open_is_bindable_and_server_routed`

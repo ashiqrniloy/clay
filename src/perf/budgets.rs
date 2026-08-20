@@ -162,12 +162,22 @@ pub const COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS: usize = 128;
 pub const COMPLETION_RESULT_MAX_ITEM_INSERT_TEXT_CHARS: usize = 256;
 pub const COMPLETION_RESULT_MAX_ITEM_DETAIL_CHARS: usize = 256;
 pub const COMPLETION_RESULT_MAX_ITEM_COMMIT_CHARS: usize = 32;
+/// Recent accepted insert texts sent with completion requests. Kept small so
+/// recency cannot consume the existing 512-byte request payload budget.
+pub const COMPLETION_RECENCY_MAX_ITEMS: usize = 4;
+pub const COMPLETION_RECENCY_MAX_ITEM_CHARS: usize = 64;
 /// Maximum completion rows visible before the shared scroll viewport takes
 /// over. The result list remains capped by `COMPLETION_RESULT_MAX_ITEMS`.
 pub const COMPLETION_MAX_VISIBLE_ROWS: usize = 8;
 /// Maximum logical width of the Clay-owned caret-adjacent completion surface.
 pub const COMPLETION_MAX_WIDTH_PX: f64 = 480.0;
 pub const FOLDING_RANGE_PAYLOAD_BUDGET_BYTES: usize = 2048;
+/// Combined parse envelope when an optional folding set is attached. The
+/// ordinary parse envelope and folding publication retain separate caps; this
+/// additive ceiling accounts for both validated components without enlarging
+/// the ordinary parse-window budget.
+pub const INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES: usize =
+    INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES + FOLDING_RANGE_PAYLOAD_BUDGET_BYTES;
 
 // Phase 18.20 engine-neutral language-intelligence budgets. Canonical
 // positions are UTF-8 byte offsets against Clay documents or known
@@ -229,6 +239,15 @@ pub const TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS: usize = 256;
 pub const PRIMITIVES_REGISTRY_VERSION: &str = "phase16-primitives-v1";
 
 pub const KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS: u64 = 16;
+
+// Phase 26.7 advisory chrome/decoration paint envelopes. Each path is
+// O(visible lines) and must remain inside the keypress-to-local-paint
+// budget. Hard CI latency stays advisory until a stable runner exists;
+// the compile-time sum below is the deterministic gate.
+pub const GUTTER_PAINT_P95_BUDGET_MS: u64 = 2;
+pub const ACTIVE_LINE_PAINT_P95_BUDGET_MS: u64 = 1;
+pub const BRACKET_MATCH_PAINT_P95_BUDGET_MS: u64 = 1;
+pub const DECORATION_BACKGROUND_FILL_P95_BUDGET_MS: u64 = 2;
 
 // Phase 24.5 Command Centre budgets. Advisory per the Phase 21 promotion
 // rule (hard CI thresholds only after stable-runner evidence; Plan 084

@@ -44,6 +44,7 @@ Current benchmark targets:
 - `benches/runtime_sdui_baselines.rs`: `runtime_configuration_baselines` and `sdui_application_baselines` groups for deterministic behavior-manifest construction plus native SDUI snapshot/update and SDUI codec paths.
 - `benches/markdown_baselines.rs`: `markdown_activation_baselines`, `markdown_parse_and_decoration_baselines`, and `markdown_decorated_editor_baselines` groups for first-party Markdown package classification/activation, parse-update/decorations validation, and native decorated-editor render-adjacent work.
 - `benches/first_party_language_baselines.rs`: `first_party_open_parse`, `first_party_incremental_edit`, and `first_party_decorated_scroll` groups for the actual Rust, TypeScript, TSX, JavaScript, and Markdown native descriptors, package queries, representative fixtures, incremental tree reuse, and inert decorated-editor scroll work.
+- `benches/window_baselines.rs`: pane paint, tab switch, responsive layout, centered overlay, completion open/filter/layout/selection, Command Centre open, and retained accessibility-tree update groups; all are bounded pure/native projections with local/advisory wall-clock results.
 - `tools/bench/markdown-parser.mjs`: advisory Node.js harness for actual Markdown parser cost. It synthesizes 64 KiB, 256 KiB, 1 MiB, 5 MiB, and 16 MiB corpora by repeating the largest committed repository Markdown files, then times the active `markdown-it` parser, full-document package adapter advisory path, and `windowed-adapter` viewport path without creating dummy source documents. JSON output separates parser, adapter, transport, render-adjacent, status/fallback, and memory categories for Phase 18.5 editor-parity verification. Historical mdast timings remain below only as replacement rationale.
 
 Run all benchmarks locally:
@@ -250,6 +251,10 @@ Treat these as **comparison targets** for local regression triage, not cross-mac
 | Scroll/layout/render-adjacent paths (`editor_scroll_viewport`, `editor_layout_viewport_bounds`) | <= 16 ms (P95, advisory) | `cargo bench --bench editor_baselines editor_scroll_viewport -- --sample-size 10 --warm-up-time 1 --measurement-time 2` |
 | Runtime/configuration evaluation (`runtime_configuration_baselines`) | <= 25 ms (P95, advisory) | `cargo bench --bench runtime_sdui_baselines runtime_configuration_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2` |
 | Large-file memory envelope during 16 MiB fixture workflows | <= 256 MiB (advisory) | local profiler/task manager during `cargo run -- smoke-gui` with generated fixture workflow |
+| Gutter paint (`GUTTER_PAINT_P95_BUDGET_MS`) | <= 2 ms (P95, advisory) | visible-line numbers only; `cargo test --test editor phase26_7_chrome_paint_budgets_fit_inside_keypress_envelope` locks the envelope vs `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` |
+| Active-line highlight (`ACTIVE_LINE_PAINT_P95_BUDGET_MS`) | <= 1 ms (P95, advisory) | one full-line fill; same budget lock |
+| Bracket-match highlight (`BRACKET_MATCH_PAINT_P95_BUDGET_MS`) | <= 1 ms (P95, advisory) | pair scan capped at 64 KiB; same budget lock |
+| Decoration background fills (`DECORATION_BACKGROUND_FILL_P95_BUDGET_MS`) | <= 2 ms (P95, advisory) | Quote/CodeBlock/SearchMatch/Deprecated run fills before glyphs; same budget lock |
 
 ### Local baseline workflow
 
@@ -287,7 +292,7 @@ Phase 18.18 adds deterministic payload/open-order guards and an optimized Criter
 
 Hard guards:
 
-- `first_party_decoration_payloads_stay_within_budget_per_language` runs each compiled grammar/query and serializes its real `DecorationSet` and `IncrementalParseUpdate`. It locks 4096-byte native parse windows for code grammars, Markdown's bounded full-document context ceiling (`MAX_OPENABLE_FILE_BYTES` = 768 KiB), the independent 4096-byte viewport query/output budget, 5000 ms timeout, and 30 MiB syntax-cache ceiling. Same-version Markdown scroll requests reuse the cached full tree, so the larger context ceiling does not mean a full reparse per viewport.
+- `first_party_decoration_payloads_stay_within_budget_per_language` runs each compiled grammar/query and serializes its real `DecorationSet` and `IncrementalParseUpdate`. It locks 4096-byte native parse windows for code grammars, Markdown's bounded full-document context ceiling (`MAX_OPENABLE_FILE_BYTES` = 768 KiB), the independent 4096-byte ordinary parse envelope, and the derived `INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES` envelope when folding is attached (`4096 + 2048 = 6144`), plus the 5000 ms timeout and 30 MiB syntax-cache ceiling. Same-version Markdown scroll requests reuse the cached full tree, so the larger context ceiling does not mean a full reparse per viewport.
 - `first_party_open_parse_does_not_block_initial_render_per_language` installs a deliberately delayed handler for each package, enqueues parse work, and proves the editor snapshot is visible before background parse completion.
 - Existing `editor_performance_invariants` guards keep parser/package JavaScript/IPC/file IO out of paint, input, layout, and scroll paths.
 
@@ -301,7 +306,7 @@ Measured on the local Linux verification host (2026-07-13, optimized Criterion p
 | JavaScript | 1304 / 1584 B | 71.403 µs | 133.52 µs | 1.244 µs |
 | Markdown | 664 / 920 B | 91.540 µs | 209.38 µs | 1.008 µs |
 
-Payload ceilings are 8192 B per decoration set and 4096 B per combined incremental update. All measured scroll work is far below the advisory 16 ms render-adjacent budget; all open/incremental parses are below 0.25 ms median on these small representative fixtures. Direct monitoring of the optimized benchmark process (excluding Cargo/compiler parent RSS) observed 16.9 MiB maximum RSS, below `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB` (256 MiB); retained syntax accounting remains independently capped at `SYNTAX_CACHE_BUDGET_BYTES` (30 MiB).
+Payload ceilings are 8192 B per decoration set, 4096 B for an ordinary incremental update, and 6144 B when the independently capped 2048 B folding set is attached. All measured scroll work is far below the advisory 16 ms render-adjacent budget; all open/incremental parses are below 0.25 ms median on these small representative fixtures. Direct monitoring of the optimized benchmark process (excluding Cargo/compiler parent RSS) observed 16.9 MiB maximum RSS, below `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB` (256 MiB); retained syntax accounting remains independently capped at `SYNTAX_CACHE_BUDGET_BYTES` (30 MiB).
 
 Baseline workflow used:
 
@@ -320,7 +325,7 @@ Phase 18 adds deterministic Markdown performance/regression guards around the fi
 Hard guards and regression tests:
 
 - `markdown_behavior_manifest_fits_budget` encodes the actual Markdown behavior manifest with package commands/keymaps and verifies it stays within `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`.
-- `markdown_parse_and_decoration_payloads_fit_budgets` serializes a representative Markdown `IncrementalParseUpdate` plus `DecorationSet` for headings, strong/emphasis, inline code, fenced code blocks, and list markers; both stay under `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` and `DECORATION_PAYLOAD_BUDGET_BYTES`.
+- `markdown_parse_and_decoration_payloads_fit_budgets` serializes a representative Markdown `IncrementalParseUpdate` plus `DecorationSet` for headings, strong/emphasis, inline code, fenced code blocks, and list markers; ordinary updates stay under `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, folded updates use the derived `INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES`, and decorations stay under `DECORATION_PAYLOAD_BUDGET_BYTES`.
 - `markdown_typing_does_not_wait_for_markdown_it_parse` schedules a slow Markdown parser and proves local editor insertion completes before the server parse result, preserving the no-hot-path JavaScript rule.
 - `markdown_large_file_typing_does_not_wait_for_windowed_parse` schedules a slow bounded-window parser and proves large-file local typing still applies before parser completion.
 - `markdown_reload_reinstalls_manifest_and_decorations`, `markdown_disabled_falls_back_to_plain_text_after_rewrite`, `markdown_invalid_package_reports_sanitized_diagnostics`, and `markdown_fixture_activates_with_markdown_it_adapter` cover reload/restart, disabled fallback, invalid package diagnostics, package activation, and fixture/smoke setup without granting extra package authority.
@@ -649,6 +654,162 @@ warm-up, 2 s measurement) produced these median estimates:
 These wall-clock results remain local/advisory; deterministic row, geometry,
 accessibility-tree, stale-provenance, and no-hot-path checks are the hard gate.
 
+## Plan 089 editor, menu, tab, completion, and accessibility cost guards
+
+Plan 089 extends existing benchmark targets instead of adding a second performance
+framework. The editor baseline already measures the typing/local-paint proxy
+(`editor_render_adjacent`) and the protocol/runtime targets retain queue,
+acknowledgement, configuration, and SDUI costs. `window_baselines` now adds the
+missing bounded surfaces:
+
+- `command_centre_open_baselines`: 16/60/256 inert catalogue projections;
+- `completion_selection_baselines`: selected last-row projection at 1/8/60/256
+  items;
+- `accessibility_tree_update_baselines`: a retained Clay shell updates labels
+  for 2/4/8/16 tabs after initial construction. The same owner/client-derived
+  virtual IDs are reused; the timed closure excludes initial tree setup.
+
+`completion_filter_baselines` measures the shared fuzzy matcher used by both
+completion and Command Centre query updates. No benchmark opens IPC, invokes
+package JavaScript, reads documents/files, or creates a network/process
+authority boundary.
+
+Run the complete fixed-input window set with the same Plan 088 settings:
+
+```text
+cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
+Focused additions:
+
+```text
+cargo bench --bench window_baselines command_centre_open_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+cargo bench --bench window_baselines completion_selection_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+cargo bench --bench window_baselines accessibility_tree_update_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
+The blocking guards are `editor_performance_invariants::accessibility_updates_reuse_stable_virtual_ids_without_allocator_churn` and `retained_accessibility_update_fixture_stays_bounded`, plus the existing no-document-reserialization, no-hot-path-IPC/JS, completion-bound, payload, and responsive-layout tests. Virtual accessibility IDs derive from retained widget ownership and typed slots; they do not call `WidgetId::next()` during tree passes.
+
+### Plan 089 local before/after record (2026-08-16)
+
+The exact Plan 088 window command was run before and after adding these
+measurements on the same Linux host. Medians are shown as low/mid/high inputs;
+Criterion's saved-target comparisons remain advisory and are owned by the next
+Plan 089 triage task.
+
+| Group | Before median range | After median range |
+| --- | ---: | ---: |
+| `pane_paint_baselines` (1/2/4) | 72/373/718 ns | 94/481/1.803 µs |
+| `tab_switch_baselines` (1/2/4) | 87/380/783 ns | 180/864/1.898 µs |
+| `responsive_layout_baselines` | 2.13–2.35 µs | 4.43–5.47 µs |
+| `centered_overlay_baselines` (1/4/16) | 216/240/220 ps | 527/391/360 ps |
+| `completion_open_baselines` (1/8/60/256) | 1.62/8.42/55.83/234.64 µs | 2.82/17.03/110.26/484.64 µs |
+| `completion_filter_baselines` (16/60/256) | 8.04/45.96/255.61 µs | 15.97/100.49/533.28 µs |
+| `completion_layout_baselines` (1/8/256) | 550/545/554 ns | 967/1.084/1.118 µs |
+
+New local estimates (10 samples, 1 s warm-up, 2 s measurement) were
+`command_centre_open_baselines` 22.74/84.33/270.86 µs for 16/60/256,
+`completion_selection_baselines` 2.93/14.80/97.85/448.24 µs for 1/8/60/256,
+and `accessibility_tree_update_baselines` 70.61/121.98/208.08/410.33 µs for
+2/4/8/16 tabs. The broad after-run shifts are not promoted to a regression or
+budget change here; Plan 089's next Criterion-triage task must repeat the fixed
+command and classify host variance, benchmark instability, or implementation
+regression before any policy decision.
+
+Existing editor/protocol/runtime checks remain the hard-path companions:
+`editor_render_adjacent`, `client_edit_queue_pressure`/`server_document_acknowledgements`,
+and `runtime_configuration_baselines`/`sdui_application_baselines`. The same
+local run produced these current medians:
+
+| Group | Current median |
+| --- | ---: |
+| `editor_render_adjacent` (64 KiB / 1 MiB) | 332.21 µs / 5.320 ms |
+| `client_edit_queue_pressure` (1 / 64 / 256) | 292.86 ns / 10.082 / 39.677 µs |
+| `server_document_acknowledgements` (1 / 16 / 128) | 315.62 / 316.37 / 332.74 µs |
+| `runtime_configuration_baselines` | 5.916 µs |
+| `sdui_application_baselines` (apply / codec) | 1.970 / 1.117 µs |
+
+Their wall-clock values remain machine-local; deterministic work, payload,
+allocation, stable-ID, and hot-path guards are blocking.
+
+### Plan 089 Criterion triage (2026-08-16)
+
+The exact fixed-input command was run three times sequentially on the same
+Linux host with no competing Cargo/rustc process. Benchmark inputs,
+`--sample-size 10`, 1 s warm-up, and 2 s measurement stayed unchanged; CPU
+pinning and a cross-machine runner were not claimed. Central medians below use
+low/mid/high input order (or the documented input order for each group):
+
+| Group | Run 1 | Run 2 | Run 3 | Classification |
+| --- | ---: | ---: | ---: | --- |
+| `pane_paint_baselines` (1/2/4) | 0.106/0.587/1.135 µs | 0.098/0.529/0.937 µs | 0.139/0.743/1.655 µs | Machine variance |
+| `tab_switch_baselines` (1/2/4) | 0.139/0.600/1.000 µs | 0.199/0.743/1.282 µs | 0.215/0.823/1.317 µs | Machine variance |
+| `responsive_layout_baselines` (six inputs) | 2.53–2.99 µs | 3.81–5.37 µs | 3.66–8.44 µs | Machine variance |
+| `centered_overlay_baselines` (1/4/16) | 0.261/0.253/0.250 ps | 0.321/0.512/0.539 ps | 0.511/0.504/0.548 ps | Benchmark instability: sub-ns timer scale |
+| `completion_open_baselines` (1/8/60/256) | 1.797/10.935/73.091/291.220 µs | 3.556/63.021/193.320/612.900 µs | 4.053/21.196/137.100/479.530 µs | Machine variance |
+| `completion_filter_baselines` (16/60/256) | 10.535/65.972/354.360 µs | 15.359/96.359/620.860 µs | 15.601/103.240/542.240 µs | Machine variance |
+| `command_centre_open_baselines` (16/60/256) | 13.140/43.678/176.020 µs | 22.035/65.416/253.520 µs | 26.724/51.886/316.750 µs | Machine variance |
+| `completion_selection_baselines` (1/8/60/256) | 1.815/9.977/68.526/281.160 µs | 7.434/31.876/149.440/498.410 µs | 2.370/16.965/76.521/324.000 µs | Machine variance |
+| `accessibility_tree_update_baselines` (2/4/8/16) | 54.735/91.487/169.910/326.870 µs | 77.336/118.840/222.620/521.290 µs | 72.042/105.220/186.790/311.040 µs | Machine variance |
+| `completion_layout_baselines` (1/8/256) | 0.780/0.773/0.815 µs | 1.247/1.349/1.462 µs | 0.875/0.853/1.090 µs | Machine variance |
+
+Criterion's saved-target direction confirms the instability rather than a
+source regression: Run 1 reported 34 improvements, 1 regression, and 1
+unchanged group; Run 2 reported 2 improvements, 33 regressions, and 1
+unchanged group; Run 3 reported 14 improvements, 8 regressions, and 14
+unchanged groups. No hot-path or benchmark code changed between these runs.
+The centered-overlay values are below useful wall-clock resolution and are
+classified as measurement instability; all other groups are machine-variance
+warnings. No reproducible implementation regression was found, no budget was
+raised, and no advisory result was promoted to CI policy. Re-run this exact
+command on a stable/cross-machine runner before changing benchmark code or
+policy.
+
+## Plan 088 modernization conformance and responsive layout baselines
+
+Plan 088 keeps modernization checks split into deterministic host-authority
+conformance and local/advisory timing. Screenshot goldens remain deferred;
+structural, typed, accessibility, payload, provenance, and hot-path checks are
+blocking while Criterion timings stay machine-local until the stable-runner
+promotion rule is met.
+
+### Deterministic hard guards
+
+- `bundled_theme_conformance_matrix` validates every bundled theme as inert
+  style data and runs the active SDUI contrast gate.
+- `catalog_is_drift_free_across_doc_enum_and_paint_path`,
+  `style_variable_catalog_matches_components_md`, and
+  `core_token_catalog_matches_tokens_md` keep source/catalog/token tables in
+  sync; `component_catalog_status_partition_is_current` keeps implemented,
+  planned, and reserved states explicit.
+- `shell_chrome_paint_files_source_color_from_primitives_only`,
+  `shell_chrome_paint_files_have_no_hardcoded_chrome_sizes`, and
+  `hot_path_no_theme_resolution_or_package_js` keep modernized chrome
+  token-driven and free of per-frame theme, JavaScript, IPC, filesystem, or
+  shell work.
+- `responsive_layout_work_preserves_sidebar_and_editor_bounds` covers the
+  production SDUI left-slot decision at narrow, normal, wide, and large-UI
+  typography inputs. Existing shell, SDUI, package-overlay, contrast, and
+  AccessKit tests remain the state-level behavioral matrix.
+
+### Advisory responsive layout baseline
+
+`window_baselines` adds `responsive_layout_baselines`, which measures the real
+`SduiNativeState::sidebar_geometry` and
+`editor_region_for_document` decision at 320/900/1200 logical pixels and UI
+sizes 12/24/96. The helper returns only sanitized layout flags; it does not
+emit document text, paths, package code, or screenshots.
+
+Run a short local sample with:
+
+```text
+cargo bench --bench window_baselines responsive_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
+This baseline is diagnostic only. The blocking contract is the typed layout
+matrix and bounded geometry tests; do not promote wall-clock values to CI
+thresholds without repeated stable-runner evidence.
+
 ## Phase 24.5 Command Centre budgets, guards, and browse-grant authority review
 
 Phase 24.5 (plan 085 task 7) budgets the Command Centre in the established
@@ -682,7 +843,7 @@ The built-in browse grant (path-mode traversal outside workspace roots) is
 reachable only from the user-driven built-in path-mode surface:
 
 - The only session-opening helper (`open_command_centre_session`,
-  `src/server/connection.rs`) has exactly two call sites, both fed by
+  `src/server/connection/mod.rs`) has exactly two call sites, both fed by
   user-driven client messages: the `CommandIntent` special case for the two
   builtin ids and menu activation of `controlCenter.openPath`.
 - Package JavaScript runs in the op layer: no op/facade (including
@@ -699,3 +860,38 @@ reachable only from the user-driven built-in path-mode surface:
 - Browsed-path conversions stay on the existing `SingleFile`/`Directory`
   grant paths; a file open converts browse authority into exactly one grant
   through the same selected-file open path as before.
+
+## Phase 28.7 command/intelligence payload pins
+
+Phase 28.7 (plan 094) reuses existing Phase 16/18 budgets. Phase 28.6
+adds only the two bounded recency constants below; no new result allocation
+budget. Link/inlay sets use the decoration cap. Ranking stays inside the completion
+scan. Folding publish (when 28.3 lands) uses the folding-range cap. Hover
+and decoration-intent payloads stay at the language-intelligence hover cap.
+Wall-clock stays advisory (Phase 21). Structural gates are hard in
+`cargo test`.
+
+### Advisory / reused constants (`src/perf/budgets.rs`)
+
+| Constant | Value | What it covers |
+| --- | --- | --- |
+| `FOLDING_RANGE_PAYLOAD_BUDGET_BYTES` | 2048 | one folding-range publish; deny above cap, do not truncate |
+| `DECORATION_PAYLOAD_BUDGET_BYTES` | 8192 | link + inlay decoration sets; same deny path as other kinds |
+| `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES` | 16384 | ranked completion result; no second allocation budget |
+| `COMPLETION_RESULT_MAX_ITEMS` | 256 | ranking scan / result item cap |
+| `COMPLETION_RECENCY_MAX_ITEMS` | 4 | accepted completion strings carried in one request |
+| `COMPLETION_RECENCY_MAX_ITEM_CHARS` | 64 | per-string recency cap; keeps request payload bounded |
+| `LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS` | 4096 | hover markdown; decoration hover/click intent stays at this size class |
+| `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` | 16 | must not regress; ranking / intent / fold-publish stay off this path |
+
+### Deterministic hard guards
+
+| Focus area | Budget | Enforcement |
+| --- | --- | --- |
+| Folding-range payload | <= 2048 bytes | `phase28_budget_constants_match_docs` + `folding_and_inlay_payloads_deny_above_cap` |
+| Link/inlay decoration payload | <= 8192 bytes | same + existing `validate_decoration_publication` deny |
+| Ranked completion result | <= 16384 bytes | `completion_ranking_stays_inside_existing_scan_budget` |
+| Ranked completion items | <= 256 (COMPLETION_RESULT_MAX_ITEMS) | same scan / `check_result_payload_budget` |
+| Completion recency hints | <= 4 × 64 chars | `CompletionRequest::validate`; boxed request field avoids `ClientMessage` size growth |
+| Hover markdown | <= 4096 chars | language-intelligence validation + `folding_and_inlay_payloads_deny_above_cap` |
+| Keypress-to-local-paint | <= 16 ms (P95, advisory) | `completion_ranking_is_not_on_keypress_to_local_paint_path` + `hover_intent_is_not_on_paint_or_layout_path` |

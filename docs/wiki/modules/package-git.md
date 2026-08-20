@@ -11,7 +11,7 @@
 - `src/server/ops/git.rs`
 - `src/server/ops/sdui.rs`
 - `src/server/command_execution.rs`
-- `tests`: `src/server/js_runtime.rs` (`git_package_loads_and_publishes_read_only_status`, `git_package_declares_no_mutation_or_network_authority`)
+- `tests`: `src/server/js_runtime/mod.rs` (`git_package_loads_and_publishes_read_only_status`, `git_package_declares_no_mutation_or_network_authority`)
 - Plan: `plans/041-Phase18.13-Git-Discovery-Service-and-First-Party-Clay-Git-Package.md`
 - Primitive review: `docs/wiki/modules/phase18.13-git-discovery-primitive-review.md`
 

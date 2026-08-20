@@ -4,26 +4,32 @@
 
 - `src/masonry_editor.rs`
 - `src/masonry_pane_document.rs` (Phase 22.2 per-pane view)
-- `src/masonry_shell.rs`
+- `src/masonry_shell/mod.rs`
 - `src/client/mod.rs`
 - `src/client/runtime_state.rs`
 - `src/client/clipboard.rs`
 - `src/editor/composition.rs`
 - `src/editor/history.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/editor/theme.rs`
-- `src/main.rs`
+- `src/launch.rs`
+- `src/app_driver.rs`
 - `runtime/js/editor.js`
 - `runtime/js/theme.js`
 - `docs/reference/clay-js-api/editor/client-copy-selection.md`
 - `docs/reference/clay-js-api/editor/client-cut-selection.md`
 - `docs/reference/clay-js-api/editor/client-paste-clipboard.md`
+- `docs/reference/clay-js-api/editor/toggle-comment.md`
+- `docs/reference/clay-js-api/editor/toggle-list-marker.md`
+- `docs/reference/clay-js-api/editor/rotate-heading.md`
+- `docs/reference/clay-js-api/editor/client-toggle-fold.md`
+- `docs/reference/clay-js-api/editor/toggle-inlay-hints.md`
 
 ## Overview
 
 `EditorWidget` composes the native editor surface, hosted SDUI/panel/overlay child widgets, active editor theme registry, and bottom status chrome. The status chrome reflects connection state, document access, confirmed sync version, and the latest sanitized runtime diagnostic forwarded by `ClientConnectionEvent::RuntimeDiagnostic`.
 
-After Phase 18.2, `EditorWidget` is no longer the top-level application layout. `src/masonry_shell.rs::ClayShellWidget` owns the Masonry root and working-area geometry, registers `EditorWidget` as the shell's editor child, and routes focus/action handling back to that child. `EditorWidget` remains responsible for local text input, caret/selection/viewport state, IME preedit overlay/commit, explicit selection copy/cut/paste clipboard commands, undo/redo inverse edits, edit queue emission, SDUI/panel/overlay event application + sync, status chrome, and accessibility. Plan 070 made `EditorWidget` a **container widget** hosting three children in `children_ids` order `[panel_host, region, overlay_host]` (`PackagePanelHost`/`SduiRegionWidget`/`PackageOverlayHost`); see [SDUI / Package-UI Retained Masonry Reconciliation](masonry-sdui-region.md).
+After Phase 18.2, `EditorWidget` is no longer the top-level application layout. `src/masonry_shell/mod.rs::ClayShellWidget` owns the Masonry root and working-area geometry, registers `EditorWidget` as the shell's editor child, and routes focus/action handling back to that child. `EditorWidget` remains responsible for local text input, caret/selection/viewport state, IME preedit overlay/commit, explicit selection copy/cut/paste clipboard commands, undo/redo inverse edits, edit queue emission, SDUI/panel/overlay event application + sync, status chrome, and accessibility. Plan 070 made `EditorWidget` a **container widget** hosting three children in `children_ids` order `[panel_host, region, overlay_host]` (`PackagePanelHost`/`SduiRegionWidget`/`PackageOverlayHost`); see [SDUI / Package-UI Retained Masonry Reconciliation](masonry-sdui-region.md).
 
 Phase 15 adds `SduiStatusObservation`, a `pub(crate)` headless observability struct for tests and internal agent inspection. It is not a Clay JS API surface; it only exposes strings and version metadata already visible in GUI chrome.
 
@@ -40,6 +46,7 @@ Phase 15 adds `SduiStatusObservation`, a `pub(crate)` headless observability str
 - Provide `EditorWidget::status_observation()` so tests can assert status chrome state without opening a window or painting.
 - Keep diagnostics sanitized by displaying only the `RuntimeDiagnostic` code/message supplied by the server protocol or client clipboard wrapper.
 - Apply `ClientConnectionEvent::DiagnosticSet` through `EditorSurface::apply_diagnostic_set` for paint-only squiggles; do not conflate range diagnostics with status-bar `RuntimeDiagnostic` text.
+- Expose native command-ID helpers through the trusted `clay:editor` facade for manifest-driven comment/list/heading transforms, fold collapse, and inlay visibility; helpers do not execute client JavaScript or mutate state at facade-call time.
 
 ## How It Works
 
@@ -66,6 +73,8 @@ Live runtime reloads use a different path. `ClientConnectionEvent::RuntimeStateS
 
 `EditorWidget::status_text()` reads from the same observation path, and `accessibility_label()` is composed by `src/editor/accessibility.rs` helpers so status, theme, composing, dirty, and recovery markers stay consistent for assistive tools and structural tests.
 
+Phase 28 command helpers follow the existing command-ID facade pattern. `runtime/js/editor.js` returns a literal stable ID; `runtime/js/editor.d.ts` types that literal; `bindKey` validates the ID through `op_clay_keybindings_bind_key`; and the installed behavior manifest routes the command to `EditorClientCommand::from_command_id`. `toggleComment`, `toggleListMarker`, and `rotateHeading` use manifest text-transform data on the client-first predictable lane. `clientToggleFold` and `toggleInlayHints` use client UI routing and keep fold/inlay state in `EditorSurface`. No new op or JS callback crosses into the client.
+
 Clipboard copy/cut/paste are intentionally client-only and user-mediated. `EditorSurface::selected_text()` normalizes the current anchor/focus byte range and extracts only that UTF-8 rope slice through `EditorBuffer::text_range`. `EditorWidget::copy_selection_to_system_clipboard()` writes the returned text through `SystemClipboard` (`ClipboardSink` / text-only `arboard` in `src/client/clipboard.rs`). `SystemClipboard` keeps one backend in GUI-thread-local storage: X11 selection ownership otherwise disappeared when the temporary provider was dropped on hosts without a clipboard manager. Thread-local drop still runs arboard's shutdown/handoff when the UI thread exits. Cut reuses that write then deletes the selection through the ordinary local edit path. Paste reads with `ClipboardSink::get_text`, normalizes line endings, and inserts/replaces through `EditorSurface::paste_text_with_event`. Collapsed cut/copy are no-ops; empty paste text is a no-op. Clipboard failures become sanitized `client.clipboard.write_failed` / `client.clipboard.read_failed` diagnostics that never include full clipboard contents. OS clipboard work happens only on explicit cut/copy/paste commands, never during paint/layout/scroll or ordinary key insertion.
 
 `arboard` remains direct by evidence rather than dependency inertia. Masonry 0.4 owns a private `copypasta::ClipboardContext`: `EventCtx::set_clipboard` can emit writes and masonry_winit intercepts native paste, but `DriverCtx` exposes no read fallback for bindable `clientPasteClipboard`. On Linux, copypasta 0.10's public `ClipboardContext` aliases X11 even when its Wayland module is built; native Wayland construction requires Masonry's raw display pointer, which Clay does not own. Replacing `arboard` would therefore lose the explicit command fallback or add unsafe/event-loop coupling. Clay disables arboard's unused image feature, removing its image codec dependency subtree while retaining text parity. The ignored live clipboard test runs only on an active desktop and restores prior text when available.
@@ -91,6 +100,57 @@ assert_eq!(observation.connection_label, "Connected");
 assert_eq!(observation.access_label, "Editable");
 assert_eq!(observation.sync_version, Some(5));
 ```
+
+## Editable-text accessibility (Phase 28.7 P1)
+
+`EditorWidget` (pane 1) and direct `PaneDocumentView` hosts share
+`populate_accessibility_text`. The root remains a Clay-owned
+`Role::MultilineTextInput`; it carries the sanitized editor label, a bounded
+visible text-window `value`, and one owner-derived `Role::TextRun` child. The
+text run uses `virtual_a11y_slots::TEXT_RUN`, UTF-8 character lengths, and
+stable IDs, so AT-SPI text/caret queries do not allocate a new node identity on
+redraw. Selection metadata is emitted only for contiguous, non-folded windows;
+folded windows omit it rather than guessing byte offsets.
+
+`PaneDocumentView::handle_access_event` handles AccessKit
+`SetTextSelection`, `ReplaceSelectedText`, and `SetValue`. Text replacement
+reuses the existing local paste/edit-history/edit-queue path, including
+newline normalization, editable-lease checks, optimistic acknowledgements,
+undo, and accessibility invalidation. Read-only documents retain read/text
+semantics but set `readOnly` and omit mutation actions. `EditorWidget` delegates
+accessibility events to its pane view; direct split-pane views use the same
+handler.
+
+The pinned `accesskit_atspi_common`/`accesskit_unix` sources under `vendor/`
+add the missing standard `org.a11y.atspi.EditableText` interface for writable
+text-input roles and map `SetTextContents`, `InsertText`, and `DeleteText` to
+AccessKit actions. Clipboard-specific EditableText methods remain unsupported;
+Clay's explicit client keyboard clipboard commands remain the authority. This
+is a generic adapter patch, not a package-facing component or JS API, and can
+be removed when the pinned upstream adapter ships equivalent support.
+
+Structural coverage lives in
+`masonry_editor::tests::editor_accessibility_exposes_editable_text_value_selection_and_stable_run`.
+The ignored Linux smoke checks the real `EditableText` D-Bus interface;
+`code-reviews/screenshots/2026-08-20-phase28.7-followups/editor-editable-text/`
+retains the current live Entry/interface evidence. Keyboard mutation remains
+explicitly unresolved on hosts without a development keyboard backend.
+
+## Phase 28.7 P2 visual review status (2026-08-21)
+
+Fresh static review fixtures (`default`, `loading`, `error`, `recovery`, and
+`large-typography`) pass with named shell controls, bounded status/diagnostic
+text, and recovery-menu semantics. Dynamic completion, Command Centre, fold,
+link, inlay, keyboard-transform, and resize states remain recorded as
+`UNRESOLVED` when the host cannot deliver input or analyzer data; structural
+and security tests remain the source of deterministic coverage. The review
+artifacts and exact host blocker are under
+`code-reviews/screenshots/2026-08-21-phase28.7-p2-recapture/`.
+
+The custom editor's inline Link decorations still use the existing inert
+`DecorationTarget`/caret-command route and do not expose separate AT-SPI Link
+nodes. This is a known discoverability ceiling, not a claimed accessibility
+pass; a future fix belongs in the generic Clay-owned AccessKit host layer.
 
 ## Invariants and Constraints
 
@@ -119,20 +179,23 @@ assert_eq!(observation.sync_version, Some(5));
 - `src/masonry_editor.rs`: `document_saved_clears_dirty_and_keeps_status_chrome_clean`, `stale_save_conflict_keeps_dirty_and_opens_recovery_menu`, `dirty_reload_conflict_offers_save_first_and_keeps_local_text`, `document_reloaded_replaces_text_and_clears_dirty`, and `save_and_reload_command_intents_enqueue_protocol_file_messages` cover save/conflict chrome and protocol enqueue.
 - `src/editor/accessibility.rs`: sanitize/compose helper unit tests plus deterministic virtual-node slot derivation used by editor, pane, shell, and menu status nodes.
 - `src/masonry_sdui.rs`: active transient menus expose `Role::Menu` / `Role::MenuItem` accessibility entries.
-- `src/editor/surface.rs`: `selected_text_returns_forward_backward_unicode_ranges` and `selected_text_returns_none_for_collapsed_selection` validate UTF-8 selection extraction.
+- `src/editor/surface/mod.rs`: `selected_text_returns_forward_backward_unicode_ranges` and `selected_text_returns_none_for_collapsed_selection` validate UTF-8 selection extraction.
 - `src/masonry_editor.rs`: copy/cut/paste unit tests validate write/read/no-op/failure behavior with a fake sink, including cut-then-delete and paste insert/replace.
 - `src/client/clipboard.rs`: fake/memory sink tests cover `set_text` / `get_text` without requiring a desktop clipboard.
-- `src/editor/composition.rs` / `src/editor/surface.rs`: preedit does not change canonical text; empty preedit clears; load/undo cancel unfinished composition.
+- `src/editor/composition.rs` / `src/editor/surface/mod.rs`: preedit does not change canonical text; empty preedit clears; load/undo cancel unfinished composition.
 - `src/masonry_editor.rs`: accessibility composing flag omits raw preedit; commit-after-preedit inserts once; undo cancels composition.
-- `src/masonry_sdui.rs`: `workspace_browser_reserves_left_slot_after_document_id_changes` validates the editor region still excludes the left slot after the active document ID changes; `ui_size_change_scales_row_hit_and_accessibility_bounds_together` locks shared UI geometry.
+- `src/masonry_sdui.rs`: `workspace_browser_reserves_left_slot_after_document_id_changes` validates the editor region still excludes the left slot after the active document ID changes; `ui_size_change_scales_row_hit_and_accessibility_bounds_together` locks shared UI geometry; `narrow_workspace_browser_yields_its_slot_without_overlapping_editor` and `large_ui_typography_yields_sidebar_before_main_region_is_unusable` cover pane-width and large-font fallbacks.
 - `src/masonry_editor.rs`: `live_typography_update_requests_layout_render_and_accessibility` proves an UI-profile live update reaches SDUI and requests one native layout/accessibility refresh; Plan 086 consumer tests verify the editor status node remains attached and stable across redraws.
+- `src/masonry_shell/mod.rs`: `tab_bar_height_tracks_user_ui_typography`, `live_typography_update_reflows_tab_bar_without_duplicate_churn`, and `high_dpi_layout_uses_logical_window_bounds` cover typography-driven shell geometry, duplicate-update suppression, and 2x logical bounds.
 - `src/masonry_editor.rs`: `editor_pointer_hit_testing_uses_non_overlapping_editor_region_after_open` validates that clicks in the left file browser do not place a caret after a document opens.
-- `src/editor/surface.rs`: `editor_surface_paint_has_no_decorative_accent_circle` and `editor_surface_uses_full_rect_background_without_visible_card_inset` source-guard the removed decorative chrome.
-- `src/editor/surface.rs`: `scroll_after_caret_move_clears_caret_pin`, `scroll_vertical_pixels_advances_viewport_after_visual_budget`, `custom_typography_keeps_scrollbar_and_viewport_geometry_bounded`, and `empty_document_caret_uses_default_document_profile` validate bounded scroll, profile-driven geometry, reset, and placeholder-caret behavior.
+- `src/editor/surface/mod.rs`: `editor_surface_paint_has_no_decorative_accent_circle` and `editor_surface_uses_full_rect_background_without_visible_card_inset` source-guard the removed decorative chrome.
+- `src/editor/surface/mod.rs`: `scroll_after_caret_move_clears_caret_pin`, `scroll_vertical_pixels_advances_viewport_after_visual_budget`, `custom_typography_keeps_scrollbar_and_viewport_geometry_bounded`, and `empty_document_caret_uses_default_document_profile` validate bounded scroll, profile-driven geometry, reset, and placeholder-caret behavior.
 - `src/editor/theme.rs`: theme registry unit tests validate Clay defaults, token/kind dispatch, modifier attributes, hex parsing, override merge, and theme text-attribute defaults.
-- `src/editor/surface.rs`: `syntax_decoration_colors_are_distinct_by_token_family` locks the default per-token-family syntax color mapping through the registry; `src/editor/layout.rs::decoration_range_uses_a_non_default_text_brush` proves a syntax range receives a non-default Parley foreground brush.
-- `src/editor/surface.rs`: `visible_caret_offset_returns_none_when_caret_above_viewport` locks the overflow guard when the caret is above the visible snapshot after scrolling.
+- `src/editor/surface/mod.rs`: `syntax_decoration_colors_are_distinct_by_token_family` locks the default per-token-family syntax color mapping through the registry; `src/editor/layout.rs::decoration_range_uses_a_non_default_text_brush` proves a syntax range receives a non-default Parley foreground brush.
+- `src/editor/surface/mod.rs`: `visible_caret_offset_returns_none_when_caret_above_viewport` locks the overflow guard when the caret is above the visible snapshot after scrolling.
 - `src/masonry_editor.rs`: `client_installs_behavior_theme_typography_ui_and_render_generation_atomically`, `invalid_snapshot_installs_nothing_and_disconnects_without_ack`, `runtime_install_preserves_caret_selection_viewport_and_focus_status`, and `runtime_install_invalidates_layout_once` validate atomic runtime-generation install.
+- `tests/clay_js_facade_layout.rs::clay_js_facade_modules_exist_with_expected_exports`: keeps the five Phase 28 editor command helpers present in both JavaScript and TypeScript facades.
+- `tests/clay_js_doc_registry.rs::phase28_editor_command_apis_are_documented_and_facaded`: verifies stable IDs, docs/index links, generated metadata, key-binding defaults, and denied-authority notes.
 - Command: `cargo test -p clay --lib masonry_editor`
 
 ## Multi-document sessions (Phase 20)
@@ -224,9 +287,15 @@ sessions still use their separate window-layer host.
 - [Editor Theme Registry](editor-theme-registry.md)
 - [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md)
 - [Range Diagnostics](range-diagnostics.md)
+- [Folding Ranges](folding-ranges.md)
 - [Client Copy Selection Clay JS API](../../reference/clay-js-api/editor/client-copy-selection.md)
 - [Client Cut Selection Clay JS API](../../reference/clay-js-api/editor/client-cut-selection.md)
 - [Client Paste Clipboard Clay JS API](../../reference/clay-js-api/editor/client-paste-clipboard.md)
+- [Toggle Comment Clay JS API](../../reference/clay-js-api/editor/toggle-comment.md)
+- [Toggle List Marker Clay JS API](../../reference/clay-js-api/editor/toggle-list-marker.md)
+- [Rotate Heading Clay JS API](../../reference/clay-js-api/editor/rotate-heading.md)
+- [Toggle Fold Clay JS API](../../reference/clay-js-api/editor/client-toggle-fold.md)
+- [Toggle Inlay Hints Clay JS API](../../reference/clay-js-api/editor/toggle-inlay-hints.md)
 - [`theme.setTheme`](../../reference/clay-js-api/theme/set-theme.md)
 - [Package Authoring Guide](../../reference/packages/creating-packages.md) — Phase 20 package non-goals for multi-document / recovery chrome
 - [File Open, Save, and Reload Workflow](../../development/file-open-save-reload-workflow.md)

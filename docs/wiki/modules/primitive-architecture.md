@@ -31,7 +31,7 @@
 - `docs/wiki/modules/slot-aware-package-ui.md`
 - `docs/wiki/modules/masonry-shell.md`
 - `src/shell/layout.rs`
-- `src/masonry_shell.rs`
+- `src/masonry_shell/mod.rs`
 - `docs/reference/clay-js-api/api-inventory.toml`
 - `src/perf/budgets.rs`
 - `tests/primitives_docs.rs`
@@ -56,7 +56,7 @@ The authoritative public architecture lives in `docs/reference/primitives/`. Thi
 3. Category names such as `DocumentClassification`, `MajorModeActivation`, `TextTransform`, `IncrementalParseUpdate`, `DecorationRange`, `CommandDeclaration`, `SduiPanelStatusContribution`, `PackageOwnedConfiguration`, and `PackagePermissionDeclaration` become trace anchors for later plans.
 4. The Phase 18.1 [Shell/Layout Primitive Review](phase18.1-shell-layout-primitive-review.md) extends that primitive-first flow to the Clay shell/working-area architecture gate. It records that existing SDUI/action/configuration/package primitives are useful building blocks but do not yet implement reusable shell/layout primitives.
 5. The Phase 18.2 [Shell Runtime Primitive Review](phase18.2-shell-runtime-primitive-review.md) narrows that architecture gate into an implementation-time map: reuse the existing editor, SDUI, behavior-manifest, command/action, configuration, package-loading, parse/decorations, and Masonry surfaces where they fit; add only generic `WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout`, and internal shell observability before package UI work.
-6. The Phase 18.2 [Masonry Shell Runtime](masonry-shell.md) implementation now backs the internal shell primitives in Rust: `src/masonry_shell.rs` owns the Clay root widget above `EditorWidget`, while `src/shell/layout.rs` owns `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` state, split validation, active pane metadata, fixed-slot size/visibility/collapse state, and deterministic split/slot geometry. Public/package-facing `clay:ui` APIs remain planned until later tasks promote them with docs and tests.
+6. The Phase 18.2 [Masonry Shell Runtime](masonry-shell.md) implementation now backs the internal shell primitives in Rust: `src/masonry_shell/mod.rs` owns the Clay root widget above `EditorWidget`, while `src/shell/layout.rs` owns `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` state, split validation, active pane metadata, fixed-slot size/visibility/collapse state, and deterministic split/slot geometry. Public/package-facing `clay:ui` APIs remain planned until later tasks promote them with docs and tests.
 7. The Phase 18.3 [Slot-Aware Package UI Primitive Review](phase18.3-slot-ui-primitive-review.md) maps existing SDUI helpers, shell slot state, command/action validation, package manifest/provenance validation, package loading descriptors, documentation registry machinery, and structural observability to the generic slot UI gaps that should be implemented next: `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, and `PackageThemeTokenDeclaration`. It also records that `PackageUiStateScope` and `PackageLayoutOverride` stay Phase 18.4 work unless deliberately promoted with full Clay JS facade/op/reference-doc/registry/test coverage.
 8. The Phase 18.3 [Slot-Aware Package UI](slot-aware-package-ui.md) implementation now backs those four contribution primitives with public `clay:ui` facade exports, op wrappers, server-side package UI validators, typed component/style/theme-token modules, crate-internal runtime state, generated API registry coverage, and native fixed-panel/overlay composition. The public APIs are documented under `docs/reference/clay-js-api/ui/`; Rust layout/config/state override primitives remain internal or planned.
 9. The Phase 18.4 [Input, State, and Configuration Primitive Review](phase18.4-input-state-config-primitive-review.md) maps existing behavior manifests, keybindings, command/action registry, SDUI/component catalog, shell `PaneSlotLayout`, package UI registry/runtime state, package metadata validation, configuration runtime, docs registry, and observability to the generic Phase 18.4 gaps: `PackageInputContribution`, component-scoped action/focus metadata, `PackageUiStateScope`, `PackageLayoutOverride`, `PackageOwnedConfiguration`, package option schemas, and typed theme-token remaps. The Phase 18.4 [Package Input, State, and Configuration Integration](package-input-state-configuration.md) wiki records the final implementation status: runtime-backed `ui.serverRegisterInputContribution`, `ui.serverRegisterUiStateScope`, `ui.serverSetLayoutOverride`, and `configuration.setPackageOption` facade/op/validator/docs/registry paths; inert `PackageInputRouting` runtime state; package option/layout override records; and deferred durable state values, pane selectors, multi-panel ordering, overlay z-order, cross-window layout, and package enable/disable authority. It keeps key/text behavior on behavior manifests, side effects on command intents, package options on documented `~/.config/clay/init.js` Clay JS APIs, and rejects Markdown-specific Rust branches, hidden config keys, raw Masonry access, raw CSS, raw ops, and client-side JavaScript.
@@ -99,13 +99,15 @@ Phase 16 adds advisory primitive budget names in `src/perf/budgets.rs` so docs a
 ```rust
 pub const DECORATION_PAYLOAD_BUDGET_BYTES: usize = 8192;
 pub const INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES: usize = 4096;
+pub const INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES: usize =
+    INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES + FOLDING_RANGE_PAYLOAD_BUDGET_BYTES;
 pub const MODE_ACTIVATION_P95_BUDGET_MS: u64 = 100;
 pub const COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES: usize = 4096;
 pub const FOLDING_RANGE_PAYLOAD_BUDGET_BYTES: usize = 2048;
 pub const PRIMITIVES_REGISTRY_VERSION: &str = "phase16-primitives-v1";
 ```
 
-These are advisory in Phase 16. Later phases should promote them to hard checks only after concrete protocol messages and representative fixtures exist.
+These are advisory in Phase 16. Later phases should promote them to hard checks only after concrete protocol messages and representative fixtures exist. The ordinary parse envelope remains 4096 bytes; the derived folding envelope is used only when the independently capped 2048-byte folding set is attached.
 
 ## Package Security Model
 

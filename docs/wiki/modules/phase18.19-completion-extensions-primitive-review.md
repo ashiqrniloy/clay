@@ -10,9 +10,9 @@
 - `src/server/completion.rs` (`CompletionProviderMeta`, `CompletionCoordinator`, `BufferWordCompletionProvider`, `list_ordered`, `providers_for_trigger_character`, `schedule_completion`, `cancel_package`, `cancel_generation`, `bump_generation`, `remove_older_generations`).
 - `src/server/ops/mod.rs` (`ClayOpState.completion_providers`, `completion_providers_for_trigger`, `register_completion_provider_metadata`).
 - `src/server/ops/completion.rs` (`op_clay_completion_register_completion_provider`, `op_clay_completion_providers_for_trigger`, `completion_provider_metas`).
-- `src/packages/record.rs` (completion provider contribution descriptor).
+- `src/packages/record/mod.rs` (completion provider contribution descriptor).
 - `src/shell/transient_menu.rs` (`CompletionMenuAcceptAction`, `TransientMenuAction`, `TransientMenuSession`).
-- `src/editor/surface.rs` (`accept_completion_with_event`, `finish_edit_with_operation`, `EditOperation::Replace`).
+- `src/editor/surface/mod.rs` (`accept_completion_with_event`, `finish_edit_with_operation`, `EditOperation::Replace`).
 - `runtime/js/completion.js` (`serverRegisterCompletionProvider`, `serverListCompletionProvidersForTrigger`, `completionTriggerCharactersFromEditorRules`, prohibited authority fields).
 - `packages/{rust,typescript,javascript,markdown}/package.json` (`clay.contributions.completionProviders`).
 - `tests/completion_provider.rs`, `tests/primitives_docs.rs`, `tests/editor_performance_invariants.rs`, `tests/performance_protocol.rs`.
@@ -45,13 +45,13 @@ This review records the primitive inventory available after Phase 18.18 landed a
 
 ### Accept path and transient menu
 
-`src/shell/transient_menu.rs::CompletionMenuAcceptAction` carries `request_id`, `document_id`, `document_version`, `behavior_version`, `replacement_range`, `insert_text`, `text_format`, and `commit_characters` as inert data; `completion_item_to_menu_item` copies the format from the validated `CompletionItem`. `src/editor/surface.rs::accept_completion_with_event` preserves the exact plain-text path. For `Snippet`, it calls bounded `parse_snippet`, converts relative placeholder byte ranges to document offsets, appends any inert commit character after expansion, and applies the expanded text through the same `EditOperation::Replace`/`finish_edit_with_operation` optimistic-edit path. No provider code, direct IPC/op, JavaScript, filesystem, or network work runs on accept.
+`src/shell/transient_menu.rs::CompletionMenuAcceptAction` carries `request_id`, `document_id`, `document_version`, `behavior_version`, `replacement_range`, `insert_text`, `text_format`, and `commit_characters` as inert data; `completion_item_to_menu_item` copies the format from the validated `CompletionItem`. `src/editor/surface/mod.rs::accept_completion_with_event` preserves the exact plain-text path. For `Snippet`, it calls bounded `parse_snippet`, converts relative placeholder byte ranges to document offsets, appends any inert commit character after expansion, and applies the expanded text through the same `EditOperation::Replace`/`finish_edit_with_operation` optimistic-edit path. No provider code, direct IPC/op, JavaScript, filesystem, or network work runs on accept.
 
 `EditorSurface` owns one client-local `SnippetSession { placeholders, active_index }`. Acceptance sorts tabstops numerically with `$0` last and selects the first non-final placeholder through existing `CursorState`/`SelectionState`; no widget or decoration layer was added. Tab and Shift-Tab navigate the bounded list, reaching `$0` (or advancing past the last placeholder when `$0` is absent) ends the session, and Escape exits without a document edit. Edits inside the active placeholder shift its end and later absolute ranges; edits outside it and explicit caret/selection movement cancel the session rather than retaining stale offsets. `load_snapshot` also clears transient session state.
 
 ### Package completionProviders descriptor
 
-`src/packages/record.rs::CompletionItemContributionDescriptor` normalizes each package `completionProviders[].items` entry from either a backward-compatible non-empty string or `{ label, insertText, detail?, textFormat?: "plainText"|"snippet" }`. It enforces label/insert/detail character caps, unique labels, exact object fields, and one text format per provider; plain and snippet items must use separate providers. `src/server/ops/completion.rs::completion_provider_metas` maps this data generically to `CompletionItem`, preserving `detail`, `insert_text`, `text_format`, and provenance. The provider descriptor also carries `id`, `priority`, `exclusive`, trigger/boundary metadata, timeout, and item caps. No language ID enters parser or mapping code.
+`src/packages/record/mod.rs::CompletionItemContributionDescriptor` normalizes each package `completionProviders[].items` entry from either a backward-compatible non-empty string or `{ label, insertText, detail?, textFormat?: "plainText"|"snippet" }`. It enforces label/insert/detail character caps, unique labels, exact object fields, and one text format per provider; plain and snippet items must use separate providers. `src/server/ops/completion.rs::completion_provider_metas` maps this data generically to `CompletionItem`, preserving `detail`, `insert_text`, `text_format`, and provenance. The provider descriptor also carries `id`, `priority`, `exclusive`, trigger/boundary metadata, timeout, and item caps. No language ID enters parser or mapping code.
 
 ### Clay JS facade and permissions
 
@@ -165,17 +165,17 @@ No new `PackagePermission` and no new decision log are required for this phase (
 
 - `src/protocol/completion.rs` unit tests: plain-text and snippet `CompletionItem` rkyv round trips; `PlainText` default; snippet validation; oversized snippet `insert_text` rejection.
 - `src/editor/snippet.rs` unit tests: verbatim text, bare-dollar literals, tabstops, placeholders, first-choice expansion, empty/braced tabstops, malformed/unterminated syntax, deferred variable rejection, 32-tabstop cap, and expanded-text cap.
-- `src/editor/surface.rs` unit tests: plain-text compatibility; snippet expansion and first-placeholder selection; Tab/Shift-Tab/final-tabstop lifecycle; Escape without edit; active-placeholder edit range shifting.
+- `src/editor/surface/mod.rs` unit tests: plain-text compatibility; snippet expansion and first-placeholder selection; Tab/Shift-Tab/final-tabstop lifecycle; Escape without edit; active-placeholder edit range shifting.
 - `src/shell/transient_menu.rs` unit test: completion item `text_format` survives projection into `CompletionMenuAcceptAction`.
 - `tests/editor_performance_invariants.rs::snippet_accept_is_bounded_client_local_text_work`: locks `parse_snippet` + existing `finish_edit_with_operation` reuse and rejects direct op/enqueue, JavaScript, filesystem, shell, or network work in accept/parser bodies.
 - `src/server/completion.rs` unit tests: non-exclusive priority merge, highest-tier exclusive suppression with equal-priority retention, and lower-priority exclusive non-claim.
 - `src/server/ops/completion.rs` unit tests: package descriptor boolean validation/default, descriptor-to-meta propagation, and coordinator/`ClayOpState` selection parity.
-- `src/server/js_runtime.rs` completion facade tests: registration/listing preserve `exclusive: true`; disable returns its idempotence/generation result, filters trigger/runtime snapshots, and rejects empty, ambiguous, or authority-bearing input.
+- `src/server/js_runtime/mod.rs` completion facade tests: registration/listing preserve `exclusive: true`; disable returns its idempotence/generation result, filters trigger/runtime snapshots, and rejects empty, ambiguous, or authority-bearing input.
 - `src/server/ops/completion.rs` unit tests: exact native-provider disable bumps generation and retains a stamped peer; package-name disable removes every provider from runtime/trigger snapshots.
 - `tests/completion_provider.rs::disabling_provider_invalidates_in_flight_generation_and_blocks_reschedule`: coordinator disable aborts old-generation work, publishes no stale result, and refuses rescheduling the disabled provider.
 - `tests/completion_provider.rs::first_party_rust_and_typescript_packages_ship_dedicated_snippet_providers`: locks exact provider IDs/labels, snippet format, details, final tabstops, priorities, and item budgets from real package manifests.
-- `src/server/connection.rs::static_package_completion_merges_equal_priority_plain_and_snippet_providers`: locks live static-provider merge and final result validation.
-- `src/server/js_runtime.rs::language_package_completion_trigger_metadata_is_queryable`: loads packages through `loadPackage`, observes both snippet providers and structured `textFormat: "snippet"` items through the public listing facade.
+- `src/server/connection/mod.rs::static_package_completion_merges_equal_priority_plain_and_snippet_providers`: locks live static-provider merge and final result validation.
+- `src/server/js_runtime/mod.rs::language_package_completion_trigger_metadata_is_queryable`: loads packages through `loadPackage`, observes both snippet providers and structured `textFormat: "snippet"` items through the public listing facade.
 - `tests/package_primitive_gate.rs`: locks string compatibility plus structured-item validation, mixed-format rejection, and insert-text budget enforcement.
 - Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - Implementation coverage (later tasks): `tests/clay_js_api_inventory.rs`/`tests/clay_js_doc_registry.rs` (authoritative descriptor and `serverDisableCompletion` docs/registry coverage).

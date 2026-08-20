@@ -10,10 +10,10 @@
 - Patterns: `.agents/skills/project-patterns/references/mode-primitive-first.md`, `language-capability-sequencing.md`, `protocol-and-performance.md`, `extensions-and-ai.md`, and `authority-boundaries.md`.
 - Primitive references: `docs/reference/primitives/language-intelligence.md`, `diagnostics.md`, `parse-update-strategy.md`, `package-security.md`, `registry.md`, and `backlog.md`.
 - Process/session: `src/server/language_server.rs`, `src/server/ops/language_server.rs`, and `runtime/js/language-server.js`.
-- Runtime/module boundary: `src/server/js_runtime.rs`, `src/server/ops/mod.rs`, and `src/server/ops/packages.rs`.
+- Runtime/module boundary: `src/server/js_runtime/mod.rs`, `src/server/ops/mod.rs`, and `src/server/ops/packages.rs`.
 - Analysis/provider paths: `src/server/parse_coordinator.rs`, `language_intelligence.rs`, `completion.rs`, `decorations.rs`, and `diagnostics.rs`.
 - Protocol shapes: `src/protocol/parse.rs`, `language_intelligence.rs`, `completion.rs`, `decorations.rs`, and `diagnostics.rs`.
-- Document/workspace/command flow: `src/server/connection.rs`, `document.rs`, `workspace.rs`, and `command_execution.rs`.
+- Document/workspace/command flow: `src/server/connection/mod.rs`, `document.rs`, `workspace.rs`, and `command_execution.rs`.
 - JavaScript facades: `runtime/js/{language,completion,parse,decorations,diagnostics,language-server}.js` with adjacent `.d.ts` declarations.
 - Base packages: `packages/{rust,typescript,javascript,markdown}/{package.json,dist/load.js}`.
 - Tests: `tests/language_server_authority.rs`, `language_intelligence.rs`, `completion_provider.rs`, `parse_coordinator.rs`, `decoration_transport.rs`, `range_diagnostics.rs`, `editor_performance_invariants.rs`, and `primitives_docs.rs`.
@@ -67,7 +67,7 @@ Parse windows remain correct for syntax work and bounded intelligence context. T
 
 ### Document open/edit/reload flow
 
-`DocumentState` owns the canonical rope, version checks, lease checks, and accepted edit ordering. `src/server/connection.rs` handles open paths through `WorkspaceState`, sends `DocumentOpened`, classifies/activates the mode, and schedules background syntax. Edits call `DocumentState::apply_edit` before `EditAck`; client local paint remains optimistic and does not wait for package JavaScript or a child process. Reload returns a new canonical snapshot and reruns generic open follow-up activation.
+`DocumentState` owns the canonical rope, version checks, lease checks, and accepted edit ordering. `src/server/connection/mod.rs` handles open paths through `WorkspaceState`, sends `DocumentOpened`, classifies/activates the mode, and schedules background syntax. Edits call `DocumentState::apply_edit` before `EditAck`; client local paint remains optimistic and does not wait for package JavaScript or a child process. Reload returns a new canonical snapshot and reruns generic open follow-up activation.
 
 Future bridge events must attach only after these authoritative transitions: initial snapshot after successful open/activation; delta after canonical acceptance/version increment; close/reload/root removal through explicit lifecycle events. They must never consume unvalidated client intent or run before local paint.
 
@@ -91,7 +91,7 @@ Current runtime publication is likewise not a notification stream. `published_di
 
 `src/protocol/completion.rs`, `CompletionProviderRegistry`, and `CompletionCoordinator` already support bounded versioned requests/results, provider priority, optional exclusive claim, disabled-provider filtering, cancellation, timeout, generations, stale rejection, inert snippets, and `TransientMenuSession` presentation. The generic Rust registry already accepts executable `CompletionProvider` implementations.
 
-The package-facing path is still static-only. `serverRegisterCompletionProvider` rejects `module`, `handler`, and callback fields; `completion_provider_metas` stores manifest-declared `items`; `static_package_completion_result` prefix-filters those items directly in `connection.rs`. `JsCompletionProviderRegistration` exists only as an unused shape. LSP completion therefore needs one narrow resolver-validated module/export token adapter into the existing coordinator, not another coordinator, result type, menu, snippet parser, or per-language provider path.
+The package-facing path is still static-only. `serverRegisterCompletionProvider` rejects `module`, `handler`, and callback fields; `completion_provider_metas` stores manifest-declared `items`; `static_package_completion_result` prefix-filters those items directly in `connection/mod.rs`. `JsCompletionProviderRegistration` exists only as an unused shape. LSP completion therefore needs one narrow resolver-validated module/export token adapter into the existing coordinator, not another coordinator, result type, menu, snippet parser, or per-language provider path.
 
 ### Language-intelligence providers
 
@@ -163,7 +163,7 @@ This is new full-document/package-worker authority and cannot be inferred from `
 
 Complete the unused generic bridge from a resolver-validated package module/export token to the existing `CompletionProviderRegistry`/`CompletionCoordinator`. Preserve current request/result types, priority/exclusive/disable semantics, cancellation, timeout, item/payload limits, server-stamped provenance, and client-local snippet expansion. Do not add a parallel LSP completion coordinator or static polling workaround.
 
-**Implementation**: `register_completion_provider` op accepts `runtimeBridge: true` with `exportName` (default `"provideCompletion"`); creates `JsCompletionProviderRegistration` stored in `ClayOpState`; JS handlers stored in `globalThis.__clayCompletionHandlers` keyed by token. `CompletionRequest` in `connection.rs` attempts dynamic provider resolution first (package prefix + trigger characters), spawns async with timeout, falls back to `static_package_completion_result`. `document_changed` called on every `EditAck` to abort stale work. LSP bridges register at priority 100 non-exclusive with halving-retry truncation for oversize results.
+**Implementation**: `register_completion_provider` op accepts `runtimeBridge: true` with `exportName` (default `"provideCompletion"`); creates `JsCompletionProviderRegistration` stored in `ClayOpState`; JS handlers stored in `globalThis.__clayCompletionHandlers` keyed by token. `CompletionRequest` in `connection/mod.rs` attempts dynamic provider resolution first (package prefix + trigger characters), spawns async with timeout, falls back to `static_package_completion_result`. `document_changed` called on every `EditAck` to abort stale work. LSP bridges register at priority 100 non-exclusive with halving-retry truncation for oversize results.
 
 ### 4. Long-lived validated worker outputs — Resolved (Task 5)
 

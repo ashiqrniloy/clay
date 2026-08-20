@@ -115,6 +115,12 @@ impl ClientBehaviorState {
 
     /// Dispatch a matched keymap rule to its routed behavior.
     fn dispatch_rule(&self, rule: &KeyBindingRule) -> RoutedBehavior {
+        if crate::masonry_editor::EditorClientCommand::from_command_id(&rule.command_id).is_some() {
+            return RoutedBehavior::ClientUiCommand(ClientUiCommandRoute {
+                command_id: rule.command_id.clone(),
+                routing_policy: rule.routing_policy.clone(),
+            });
+        }
         match &rule.routing_policy {
             RoutingPolicy::ClientFirstPredictable | RoutingPolicy::ClientFirstRequiresAck => {
                 match rule.command_id.as_str() {

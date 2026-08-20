@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSelectNextMatch
 js_facade: runtime/js/editor.js::clientSelectNextMatch
-backing_rust: src/editor/surface.rs::EditorSurface::select_next_match
+backing_rust: src/editor/surface/mod.rs::EditorSurface::select_next_match
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientSelectNextMatch
@@ -90,7 +90,7 @@ Use `editor.clientSelectNextMatch` when the user asks for Select Next Match thro
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientSelectNextMatch`
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::select_next_match`
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::select_next_match`
 - Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
 
 ## Lookup metadata

@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientRemoveSelection
 js_facade: runtime/js/editor.js::clientRemoveSelection
-backing_rust: src/editor/surface.rs::EditorSurface::remove_selection
+backing_rust: src/editor/surface/mod.rs::EditorSurface::remove_selection
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientRemoveSelection
@@ -90,7 +90,7 @@ Use `editor.clientRemoveSelection` when the user asks for Remove Selection throu
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientRemoveSelection`
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::remove_selection`
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::remove_selection`
 - Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
 
 ## Lookup metadata

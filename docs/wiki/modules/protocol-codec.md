@@ -6,11 +6,14 @@
 - `src/protocol/codec.rs`
 - `src/protocol/decorations.rs`
 - `src/protocol/parse.rs`
+- `src/protocol/folding.rs`
+- `src/protocol/language_intelligence.rs`
+- `tests/editor_intelligence_protocol.rs`
 - `tests/typography_protocol.rs`
 
 ## Overview
 
-The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 introduced `DecorationViewportRequest`; version 3 accompanies grouped native decoration chunks and analyzer-only diagnostic semantics; version 4 introduces the Phase 19 complete `RuntimeStateSnapshot` / `RuntimeGenerationInstalled` reload contract; version 5 (Plan 059) adds `ServerMessage::DecorationBatch` for single-frame multi-chunk parse updates and pairs with the `ReadPumpGuard` cancellation-safe framing pattern; protocol v15 moves `InitialDocument` and initial workspace SDUI after tab binding. Older servers are rejected before incompatible message discriminants or parse-result semantics are used.
+The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 introduced `DecorationViewportRequest`; version 3 accompanies grouped native decoration chunks and analyzer-only diagnostic semantics; version 4 introduces the Phase 19 complete `RuntimeStateSnapshot` / `RuntimeGenerationInstalled` reload contract; version 5 (Plan 059) adds `ServerMessage::DecorationBatch` for single-frame multi-chunk parse updates and pairs with the `ReadPumpGuard` cancellation-safe framing pattern; protocol v15 moves `InitialDocument` and initial workspace SDUI after tab binding. Phase 28 adds protocol versions 20–23 for `FoldingRangeSet`, Link targets, InlayHint payloads, and completion recency metadata; the current wire pin is 23. Older servers are rejected before incompatible message discriminants or parse-result semantics are used.
 
 ## Responsibilities
 
@@ -47,7 +50,7 @@ Phase 17 adds `ServerMessage::DecorationSet` for validated inline editor decorat
 
 `BehaviorManifest::minimal_text_editing` now builds the default declarative text behavior manifest with an ID, behavior version, scope, document font role, key bindings, command declarations, routing policies, and editor rules; it is data, not script code. `core.text` defaults proportional and `core.code` defaults monospace.
 
-Phase 18.16.5 adds a separate `ServerMessage::ActiveTypography(ActiveTypography)` wire shape. Each snapshot has a revision and the user-owned `monospace`, `proportional`, and `ui` `FontProfile`s. A profile accepts at most eight non-control family names of at most 128 bytes, requires a final generic fallback, and accepts finite 6–96 logical-pixel sizes. `src/server/connection.rs` sends the current snapshot as the final pre-bind handshake lane, after `ActiveTheme`, and broadcasts later revisions. `src/client/mod.rs` revalidates bootstrap/live snapshots before `TypographyRegistry` installation, keeping geometry-affecting updates separate from theme colors.
+Phase 18.16.5 adds a separate `ServerMessage::ActiveTypography(ActiveTypography)` wire shape. Each snapshot has a revision and the user-owned `monospace`, `proportional`, and `ui` `FontProfile`s. A profile accepts at most eight non-control family names of at most 128 bytes, requires a final generic fallback, and accepts finite 6–96 logical-pixel sizes. `src/server/connection/mod.rs` sends the current snapshot as the final pre-bind handshake lane, after `ActiveTheme`, and broadcasts later revisions. `src/client/mod.rs` revalidates bootstrap/live snapshots before `TypographyRegistry` installation, keeping geometry-affecting updates separate from theme colors.
 
 Phase 19 adds `src/protocol/runtime.rs` with `RuntimeGenerationId`, `RuntimeStateSnapshot`, `DocumentRuntimeRenderState`, and `PackageUiSnapshot`. `ServerMessage::RuntimeStateSnapshot` carries one complete connection-scoped generation (behavior, active theme, typography, SDUI, versioned package UI, per-document decoration/diagnostic resets, and runtime diagnostics) under the existing 1 MiB frame ceiling. Clients acknowledge only with `ClientMessage::RuntimeGenerationInstalled { client_id, runtime_generation_id }` after validation. Snapshots never carry document source text, absolute paths, tokens, grants, or executable callbacks. Package UI contribution payloads remain empty until package UI publication crosses IPC; the version still advances with the runtime generation so clients clear previous package UI under the same install boundary.
 
@@ -56,6 +59,14 @@ Phase 19 adds `src/protocol/runtime.rs` with `RuntimeGenerationId`, `RuntimeStat
 ### Plan 086 archive hardening
 
 Clay pins `rkyv = 0.8.17`. The decode boundary retains generic `CheckBytes<HighValidator>` and `Deserialize` bounds, rejects oversized declarations before payload copy, and has no unchecked fallback. `src/protocol/codec.rs` adds deterministic truncation, mutation, misaligned-length, and read-side oversized-declaration corpus tests. These assert rejection-or-validated-decode without panics or out-of-bounds access rather than requiring every corrupted byte sequence to fail: rkyv can validate a mutated archive whose fields still describe a different valid message. The fixed rkyv 0.8.16 advisories are never placed in `.cargo/audit.toml`; `docs/development/security.md` records the upgrade and evidence.
+
+Plan 089 adds `compact_generated_frame_mutations_fail_closed_without_panicking`,
+a bounded 64-seed × client/server corpus. Each case applies one deterministic
+truncation, length-prefix mismatch, payload bit mutation, or oversized
+prefix. Framing errors are rejected before archive access, truncated archives
+must fail bytecheck, and every mutated decode is wrapped in `catch_unwind` so
+malformed local-IPC bytes cannot panic the test boundary. This complements,
+without replacing, the larger Plan 086 truncation/mutation sweeps.
 
 ## Code Examples
 
@@ -82,7 +93,7 @@ stream ──tokio::io::split──▶ reader ──[read-pump task]──▶ mp
 ```
 
 - **Client** (`src/client/mod.rs::run_connection`): already split via `tokio::io::split`; read-pump task spawned with `EDIT_QUEUE_CAPACITY` (256) channel.
-- **Server** (`src/server/connection.rs::handle_connection_with_analysis`): adds `tokio::io::split` after the sequential handshake; write half keeps the name `stream` so all 49 existing write sites need zero changes. Channel capacity 64 (single-client backpressure).
+- **Server** (`src/server/connection/mod.rs::handle_connection_with_analysis`): adds `tokio::io::split` after the sequential handshake; write half keeps the name `stream` so all 49 existing write sites need zero changes. Channel capacity 64 (single-client backpressure).
 
 `ReadPumpGuard` is `pub(crate)` in `src/protocol/codec.rs` (derives `Debug`, not `Clone`/`Copy`) and is shared between client and server since `codec.rs` is the framed-transport boundary both sides share. `Codec` is `Copy` so pump task and main loop each get their own cheap copy.
 
@@ -113,11 +124,12 @@ stream ──tokio::io::split──▶ reader ──[read-pump task]──▶ mp
   `CloseDocument`, decoration viewport requests, workspace result messages,
   typed file-operation failures, SDUI snapshot/update/action messages, and
   runtime diagnostic messages.
-- `src/server/connection.rs`: table-driven forged-ID coverage for every post-Hello message family plus close/access/subscription cleanup tests.
+- `src/server/connection/mod.rs`: table-driven forged-ID coverage for every post-Hello message family plus close/access/subscription cleanup tests.
 - `tests/decoration_transport.rs::decoration_transport_round_trips_through_protocol_codec`: verifies `ServerMessage::DecorationSet` uses the shared codec boundary.
 - `tests/typography_protocol.rs`: codec round trip for all profiles/revision plus invalid profile and role-layer rejection coverage.
-- `src/client/mod.rs` and `src/server/connection.rs`: bootstrap ordering and live-delivery tests consume the fifth `ActiveTypography` frame before post-bootstrap SDUI/capability traffic.
-- `src/protocol/codec.rs`: rejection tests for oversized Phase 5 frames, oversized manifest messages, invalid client archived bytes, invalid server/manifest archived bytes, truncation sweeps, deterministic byte mutations, misaligned declared lengths, and read-side oversized declarations.
+- `src/client/mod.rs` and `src/server/connection/mod.rs`: bootstrap ordering and live-delivery tests consume the fifth `ActiveTypography` frame before post-bootstrap SDUI/capability traffic.
+- `src/protocol/codec.rs`: rejection tests for oversized Phase 5 frames, oversized manifest messages, invalid client archived bytes, invalid server/manifest archived bytes, compact generated framing/archive mutations, truncation sweeps, deterministic byte mutations, misaligned declared lengths, and read-side oversized declarations.
+- `tests/editor_intelligence_protocol.rs`: Phase 28 codec compatibility for protocol version 23, folding, Link/InlayHint `DecorationSet`/`DecorationBatch`, inert `DecorationTarget` click/hover data, completion recency, hover request/results, and bounded malformed-frame rejection.
 - Relevant command: `cargo test protocol`.
 
 ## Related

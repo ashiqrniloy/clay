@@ -3,14 +3,14 @@
 ## Source
 
 - `src/packages/permissions.rs`
-- `src/packages/record.rs`
+- `src/packages/record/mod.rs`
 - `src/packages/authorization.rs`
 - `src/packages/service.rs`
 - `src/server/language_server.rs`
 - `src/server/ops/language_server.rs`
 - `src/server/ops/mod.rs`
 - `runtime/js/language-server.js`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `src/perf/budgets.rs`
 - `tests/language_server_authority.rs`
 - `tests/package_loading.rs`
@@ -53,6 +53,8 @@ await loadPackage("@clay/lsp-rust");
 ```
 
 Grant creation resolves and canonicalizes the executable, validates directory workspace roots, and binds package name/version/source/API prefix, contribution ID/fingerprint, canonical executable, fixed argv/environment declaration, workspace-root IDs, and approver. The authorization gate is open only while evaluating the configuration root. `loadPackage` seals it before package enable/import, so loaded package code cannot self-authorize.
+
+`startLanguageServerSession` accepts only `{ contribution, workspaceRootId }`. The host stamps the package identity from the executing package context and resolves the current workspace root from the analyzer's connection-owned workspace; a bridge cannot smuggle another package name or use the persistent runtime's empty default workspace.
 
 Bundled `NativeTrust` explicitly filters out `language-server`. Enablement re-resolves the executable and verifies the exact current grant; package/source/version/contribution/executable/root drift fails closed.
 
@@ -130,7 +132,7 @@ Bridge release notes must repeat trusted-subprocess containment language and mus
 - `tests/language_server_authority.rs`: shell/external executable rejection, pre-spawn byte budget, bad cwd spawn error, timeout with stoppable session, sanitized child exit, duplicate contribution/root rejection, session cap, package-withdrawal reaping, lossless split-UTF-8 round-trip, fragmented LSP frame reassembly, oversize byte write/read rejection, cross-session head-of-line isolation, and bounded actor-ingress rejection. 16 tests total.
 - `src/server/language_server.rs`: `capped_stderr_retains_prefix_and_drains_remainder_to_eof` uses a small duplex pipe and an over-cap payload to prove retained bytes/truncation stay bounded while the writer still reaches normal EOF.
 - `tests/package_loading.rs`: descriptor validation, no bundled auto-grant, exact grant enablement, and revocation failure.
-- `src/server/js_runtime.rs`: grant-before-load, unknown-root rejection, and loaded-package self-grant denial.
+- `src/server/js_runtime/mod.rs`: grant-before-load, unknown-root rejection, and loaded-package self-grant denial.
 - `tests/editor_performance_invariants.rs`: process service and `tokio::process::Command` absent from editor/client hot paths.
 - `tests/package_loading_docs.rs`, `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`: configuration/API/security documentation and registry freshness.
 

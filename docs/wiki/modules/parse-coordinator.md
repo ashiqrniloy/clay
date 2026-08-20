@@ -7,7 +7,8 @@
 - `src/server/ops/parse.rs`
 - `runtime/js/parse.js`
 - `src/server/syntax.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
+- `src/server/folding.rs`
 - `src/server/mod.rs`
 - `tests/parse_coordinator.rs`
 - `docs/reference/primitives/parse-update-strategy.md`
@@ -27,7 +28,7 @@ The coordinator never sends parser code to the Rust client and never waits for p
 - Coalesce duplicate work for one document/package/mode/stable-window/version and abort older versions in that stream without affecting other documents or grammars.
 - Replace parse handlers by runtime generation during hot reload and cancel old-generation parse tasks before they can publish.
 - Sort invalidated ranges so viewport-intersecting work is handled first, using only generic byte-range metadata that token-stream adapters for Markdown, Python, or other modes can consume.
-- Validate parse-window document/version/provenance metadata, byte lengths, per-window limits, `SYNTAX_CACHE_BUDGET_BYTES`, stale versions, ranges, every parse-produced decoration chunk and optional range-diagnostic metadata, their viewport/provenance identity, component payload budgets, and per-member `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` before publishing updates to downstream consumers.
+- Validate parse-window document/version/provenance metadata, byte lengths, per-window limits, `SYNTAX_CACHE_BUDGET_BYTES`, stale versions, ranges, every parse-produced decoration chunk, optional folding set, and optional range-diagnostic metadata, their viewport/provenance identity, component payload budgets, and the ordinary or folding-aware incremental-update envelope before publishing updates to downstream consumers.
 - Instrument scheduled, cancelled, published, stale, and failed parse tasks through `ParseCoordinatorStats`.
 - Dual-publish updates/diagnostics to bounded internal test/tooling receivers and bounded access-scoped connection subscriptions; production connections never compete to drain a global receiver.
 - Answer advisory Plan 071 selection queries (text objects / smart select): `handler_for(package_prefix, mode_id)` exposes the registered handler to the connection loop, and the `ParseHandler::selection_query_ranges` default method returns `None` so JS handlers never participate — only `TreeSitterSyntaxHandler` implements it, in pure Rust over inert ranges. See [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md).
@@ -40,7 +41,7 @@ The live JS bridge is deliberately split across the facade and the op. Package l
 
 `ParseCoordinator::schedule_parse` takes a `ParseScheduleRequest` containing document/version metadata, behavior version, package prefix, mode ID, viewport byte range, and invalidated ranges. Scheduling is intentionally cheap: it validates range shape, snapshots the registered handler generation and stable parse-window identity into the task key, records the latest document version, and returns immediately. Duplicate requests for the same stable window/version coalesce. A newer version aborts older work for the same document/package/mode even when window identity changed, while other documents and grammars remain independent. A start gate ensures task execution cannot finish before its active-task record is installed, and completion verifies the active version before removing or publishing work.
 
-Native connection scheduling submits one full bounded window instead of one task per decoration destination. Open, edit, and viewport requests therefore enter the parser once per missing document/version/window. The handler returns one `IncrementalParseUpdate` containing visible/changed-first `decoration_updates`; the coordinator validates every member before publishing the batch, and the connection drains members as ordinary `DecorationSet` messages.
+Native connection scheduling submits one full bounded window instead of one task per decoration destination. Open, edit, and viewport requests therefore enter the parser once per missing document/version/window. The handler returns one `IncrementalParseUpdate` containing visible/changed-first `decoration_updates` plus optional folding data; the coordinator validates every member and optional fold set before publishing the update. Ordinary updates use `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`; an attached folding set uses the derived `INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES` envelope while retaining its independent folding cap. The connection drains them as ordinary `DecorationSet`, `DiagnosticSet`, and `FoldingRangeSet` messages.
 
 `ParseCoordinator::schedule_parse_with_windows` is the Phase 18.5 large-file path. The caller prepares bounded server-canonical snapshots from already-open document text, then the coordinator validates each snapshot before any package handler can observe it: document ID and version must match the request, package prefix and mode ID must match handler provenance, `byte_end - byte_start` must equal the UTF-8 byte length of `text`, every window must fit `ParsePolicy::max_window_bytes`, and total retained window text must fit `ParsePolicy::memory_budget_bytes` and `SYNTAX_CACHE_BUDGET_BYTES` (30 MiB). Valid windows are delivered in `ParseEditNotification::parse_windows` with `SyntaxMemoryBudget` metadata.
 
@@ -80,9 +81,9 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 - The client receives only later validated inert render/folding/diagnostic data; it does not receive parser functions or package JavaScript.
 - Stale results are discarded before publication, including old-runtime-generation task results after hot reload.
 - Live parse output is document/access scoped. Per-client lanes and legacy test lanes are bounded and use non-blocking publication; final close/disconnect removes routes and document task/version state.
-- Incremental parse updates are bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`; over-budget updates increment failed-task stats, emit sanitized diagnostics, and are not published.
+- Incremental parse updates are bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, or by the derived `INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES` only when a validated folding set is attached; over-budget updates increment failed-task stats, emit sanitized diagnostics, and are not published.
 - Windowed parser input is bounded by `ParsePolicy::max_window_bytes` per snapshot and `SYNTAX_CACHE_BUDGET_BYTES`/`SyntaxMemoryBudget` across retained syntax windows.
-- Parse-produced decoration batches and diagnostics are validated atomically. Every decoration member must match the enclosing update's document/version/package and stay inside its viewport; each member independently satisfies decoration and incremental-update payload ceilings. Diagnostics match the enclosing viewport exactly and additionally use centralized field/count/range/payload sanitization.
+- Parse-produced decoration batches and diagnostics are validated atomically. Every decoration member must match the enclosing update's document/version/package and stay inside its viewport; each member independently satisfies decoration and the applicable ordinary/folding-aware incremental-update payload ceiling. Diagnostics match the enclosing viewport exactly and additionally use centralized field/count/range/payload sanitization.
 - The Markdown parser adapter and the Tree-sitter syntax handler publish decoration updates as generic `DecorationSet` values; the coordinator validates them without knowing markdown-it tokens, Markdown syntax, Rust syntax, TypeScript syntax, or JavaScript syntax.
 - Token-stream adapters receive package-neutral parse metadata (`document_id`, versions, package prefix, mode ID, viewport, invalidated byte ranges, and optional bounded parse windows). If a future adapter needs line-start tables beyond `base_line`, those must be added as generic parse-input primitives, not mode-specific Rust parser branches.
 
@@ -111,17 +112,17 @@ These types are `rkyv`-serializable for future protocol/cache use, but the curre
 - `tests/parse_coordinator.rs::handler_failures_are_instrumented_after_generation_replacement`
 - `tests/parse_coordinator.rs::handler_failures_are_instrumented_and_not_published`
 - `tests/parse_coordinator.rs::parsing_does_not_block_edit_acknowledgement`
-- `src/server/js_runtime.rs::phase18_parse_and_decoration_facades_are_runtime_backed`
-- `src/server/js_runtime.rs::js_parse_handler_bridge_runs_registered_markdown_handler`
-- `src/server/js_runtime.rs::parse_registration_rejects_executable_callbacks_and_missing_permissions`
-- `src/server/js_runtime.rs::js_parse_handler_timeout_uses_registered_budget`
-- `src/server/js_runtime.rs::runtime_boundary_does_not_expose_platform_authorities`
-- `src/server/connection.rs::open_document_renders_before_background_parse_completes`
-- `src/server/connection.rs::native_windows_schedule_once_for_each_first_party_language`
+- `src/server/js_runtime/mod.rs::phase18_parse_and_decoration_facades_are_runtime_backed`
+- `src/server/js_runtime/mod.rs::js_parse_handler_bridge_runs_registered_markdown_handler`
+- `src/server/js_runtime/mod.rs::parse_registration_rejects_executable_callbacks_and_missing_permissions`
+- `src/server/js_runtime/mod.rs::js_parse_handler_timeout_uses_registered_budget`
+- `src/server/js_runtime/mod.rs::runtime_boundary_does_not_expose_platform_authorities`
+- `src/server/connection/mod.rs::open_document_renders_before_background_parse_completes`
+- `src/server/connection/mod.rs::native_windows_schedule_once_for_each_first_party_language`
 - `tests/parse_coordinator.rs::same_native_window_and_version_is_scheduled_once_across_viewports`
 - `tests/parse_coordinator.rs::rapid_native_versions_cancel_superseded_work_and_publish_latest`
 - `tests/parse_coordinator.rs::native_work_for_two_documents_runs_independently`
-- `src/server/connection.rs::selected_markdown_file_publishes_manifest_and_decorations`
+- `src/server/connection/mod.rs::selected_markdown_file_publishes_manifest_and_decorations`
 - `tests/syntax_grammar.rs::manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow`
 - `tests/syntax_grammar.rs::tree_sitter_handler_publishes_through_parse_coordinator_and_rejects_stale_results`
 
@@ -138,6 +139,7 @@ cargo test js_parse_handler_bridge_runs_registered_markdown_handler --lib
 - [Parse Task Lifecycle](parse-task-lifecycle.md)
 - [Decoration Transport](decoration-transport.md)
 - [Range Diagnostics](range-diagnostics.md)
+- [Folding Ranges](folding-ranges.md)
 - [Protocol Codec](protocol-codec.md)
 - `docs/reference/primitives/parse-update-strategy.md`
 - `plans/019-Phase17-Package-System-and-Mode-Loading-Foundation.md`

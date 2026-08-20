@@ -243,6 +243,600 @@ Expected outcome:
   is performance-bounded and documented, and the new authority surface is
   review-clean.
 
+## Phase 25: ACP Coding Agent Adoption (Prism Agent, Clay Client)
+
+Give Clay a coding agent through the Agent Client Protocol (ACP v1): Clay is
+the ACP **client** (editor), a Node daemon embedding `@arnilo/prism` 0.2.6+
+first-party packages is the ACP **agent**, and the two speak stdio JSON-RPC.
+Confirmed decisions: Prism runs in a spawned child process (never inside
+`deno_core` — real Node >= 20 is a runtime requirement and the process boundary
+is the right trust boundary); the Rust side uses the official
+`agent-client-protocol` crate (not a hand-rolled JSON-RPC client); Clay owns
+credentials and feeds them through Prism credential resolvers (Prism never
+reads `process.env` itself); all `@arnilo/prism-*` packages are pinned to one
+exact lockstep version and upgraded only as reviewed events. Upstream Prism
+defects and gaps that Clay depends on are tracked in
+`docs/development/prism-adoption-issues.md` (B1–B5 bugs, F1–F10 feature
+requests); B1–B4 and F1–F3 should land before Phase 25.3 editor integration.
+
+### Phase 25.1: `clay-agent` Daemon (Prism ACP Agent Process)
+
+Focus areas:
+
+- New first-party TypeScript package `clay-agent` embedding `@arnilo/prism`,
+  `@arnilo/prism-coding-agent`, `@arnilo/prism-coding-security`,
+  `@arnilo/prism-ag-ui/acp`, `@arnilo/prism-mcp`, one provider package per
+  roadmap provider (Alibaba, Ollama Cloud, OpenCode-go, Kimi, OpenAI OAuth,
+  Anthropic), and `@arnilo/prism-session-store-sqlite`.
+- Wire `createPrismAcpAgent` seams: local single-ownership `authorize`
+  (everything keyed to a local user identity for future remote clients),
+  `sessionFactory` over `createAgentSession` with the coding tool registry,
+  execution policy, and the native Linux sandbox adapter from
+  `@arnilo/prism-coding-security`.
+- Durable run lifecycle: `AgentRunLifecycle`, `AcpSessionStore`, and the 0.2.6
+  `recovery` seam over a SQLite store under Clay's per-user data directory, so
+  agent sessions, pending approvals, and in-flight runs survive daemon
+  restarts.
+- Host policy seams: `sessions` (list/load/delete/resume), `modes` matching the
+  roadmap agent loop (plan/execute/review), `configOptions`, `mcp.select`
+  allow-list, `coding.lifecycle` emitter.
+- Stdio transport from `@agentclientprotocol/sdk`'s node adapter; graceful
+  shutdown; structured logs; documented seam configuration.
+
+Expected outcome:
+
+- `clay-agent` is spawnable standalone, advertises its real capabilities
+  through `initialize`, and an external ACP client (e.g. the SDK example
+  client) can run a full prompt/tool/approval round trip against it.
+
+### Phase 25.2: Clay Server ACP Client and Agent Process Manager
+
+Focus areas:
+
+- Rust ACP client in the Clay server over the official `agent-client-protocol`
+  and `agent-client-protocol-tokio` crates: typed methods, capability
+  negotiation, session updates, permission and elicitation requests.
+- Agent process manager next to the existing server connection machinery:
+  spawn/restart/health-check/log-capture for the `clay-agent` child, Node >= 20
+  detection with clear failure UX, per-session agent lifecycles.
+- Clay IPC/protocol extensions in `src/protocol` and server ops: agent
+  session ops (`new`/`list`/`load`/`resume`/`prompt`/`cancel`/`set_mode`/
+  `set_config_option`), agent process lifecycle ops, and forwarding of ACP
+  `session/update` notifications to the client over Clay IPC.
+- Request/response correlation over the GUI IPC for permission prompts and
+  elicitation forms, modeled on the existing transient menu/confirmation
+  session pattern; bounded payloads and the same protocol compatibility tests
+  as existing ops.
+
+Expected outcome:
+
+- A GUI agent pane can create a session, stream an assistant reply with tool
+  calls and usage, answer a permission prompt, and cancel a run, all through
+  typed protocol messages with CI-guarded compatibility tests.
+
+### Phase 25.3: Editor Filesystem Client Capability and AI-Safe Mutation
+
+Focus areas:
+
+- Implement the ACP client `fs/read_text_file` capability: map agent reads to
+  Clay server document snapshots including dirty (unsaved) buffers, with disk
+  fallback for unopened files.
+- Implement `fs/write_text_file` routed through the Clay document write path,
+  gated by the Phase "AI-Safe Mutation and Region Locks" contract: explicit
+  document versions, region locks, permission scopes, preview/apply/reject
+  flows, and conflict explanations — agent edits never bypass the same
+  authority model as package edits.
+- Render ACP `diff` tool-call content and `locations` in the UI: a diff review
+  surface (accept/reject per change), jump-to-line navigation, and
+  agent-activity markers in open documents.
+- Terminal client capability explicitly deferred until the terminal emulator
+  package exists; do not advertise `terminal` capabilities until then.
+
+Expected outcome:
+
+- The agent sees unsaved editor state, proposes edits through ACP diffs, and
+  applies them only through the reviewed, versioned, permission-scoped write
+  path with visible conflict boundaries between user edits and agent edits.
+
+### Phase 25.4: Agent UX Surfaces (Chat, Approvals, Modes, Sessions)
+
+Focus areas:
+
+- Agent chat pane and tool-call tree as SDUI surfaces reusing the Masonry pane
+  and package-UI patterns; streaming deltas, thinking/reasoning display once
+  Prism F1 lands, usage/context-window display once Prism B1 lands.
+- Permission approval and elicitation UI with the four ACP outcomes
+  (allow-once / allow-for-run / reject-once / reject-for-run) and sticky
+  decision visibility, wired to the existing approvals/permissions package
+  surfaces.
+- Mode selector (plan/execute/review) and boolean config options advertised
+  through `session.configOptions.boolean`; plan updates once Prism F5 lands
+  behind the client `plan` capability.
+- Session picker over `session/list` with resume/delete, restore-after-restart
+  via the durable recovery seam, and session titles once Prism F6 lands.
+- MCP server configuration UI feeding the agent-side `mcp.select` allow-list;
+  slash-command affordances once Prism F9 lands.
+
+Expected outcome:
+
+- A user can run the full roadmap agent loop (plan, execute, review, test,
+  document, user to-do) in the GUI with visible approvals, diffs, modes, and
+  recoverable sessions, without leaving Clay's existing permission model.
+
+### Phase 25.5: Hardening, Budgets, and Documentation
+
+Focus areas:
+
+- Performance budgets for agent round trips (prompt first update, permission
+  round trip, diff apply) CI-guarded like existing budgets; bounded event and
+  payload sizes end to end (ACP caps, Clay IPC caps, SDUI payloads).
+- Security review of the trust boundary: agent child process privileges,
+  sandbox capability honesty on Linux (and deny-by-default `shell` on Windows
+  until a sandbox backend exists, matching Prism F10), credential flow,
+  ownership-scoped session persistence.
+- Protocol compatibility tests for every new Clay IPC message; generated
+  registry entries and Clay JS API docs for any new public surface; manual
+  test plan update per the documentation contract.
+- Dependency policy: exact Prism version pinning, upgrade checklist, and a
+  tracked re-evaluation of ACP v2/UNSTABLE exposure when Prism publishes it.
+
+Expected outcome:
+
+- The agent integration is performance-bounded, review-clean, documented in
+  the registries and manual test plan, and safe to upgrade Prism deliberately.
+  
+
+
+## Phase 26: Editor Rendering Quality Foundation
+
+Fix the defects and missing paint primitives found in the 2026-08-18 editor
+implementation review so rendered text looks right in every mode before new
+formats are added. Confirmed decisions: decorations gain a theme-owned
+background color axis and foreground colors become opaque
+(`decision-logs/2026-08-18-1758-decoration-background-axis.md`), and document
+typography gains a bounded theme-owned per-token size ladder
+(`decision-logs/2026-08-18-1758-document-typography-size-ladder.md`). The
+two-axis vocabulary (TokenType + Modifiers), theme single-source-of-color,
+and optimistic decoration interpolation are confirmed correct and must not be
+regressed.
+
+### Phase 26.1: Default Theme Opacity and StyleSpec Contract Repair
+
+Focus areas:
+
+- Replace every `0x55`/`0x2f`-alpha entry in `StyleRegistry::clay_default()`
+  (`src/editor/theme.rs`) with opaque foreground text colors; same fix for
+  the semantic fallback tint. Verified visually in light and dark contexts.
+- Rewrite the `StyleSpec` doc comment ("background tint") to the actual
+  contract: opaque foreground color plus optional background axis.
+- Theme token coverage: give `theme-modus-operandi`, gruvbox, and the default
+  distinct colors for currently-dormant vocabulary entries (`Macro`,
+  `Property`, `Method`, `Parameter`, `EnumMember`, `Operator`, …) so richer
+  queries (26.2) light up immediately.
+
+Expected outcome:
+
+- Default-theme code renders at full opacity with a legible, distinct token
+  palette; no theme maps two token types to visually identical output.
+
+### Phase 26.2: Capture-Rich Highlight Queries and Style Maps
+
+Focus areas:
+
+- Rewrite `packages/{rust,typescript,javascript}/queries/highlights.scm` from
+  the current ~9-capture POC set to nvim-treesitter-class capture sets:
+  boolean/null literals, macro invocations (`println!`), operators, fields,
+  constants, lifetimes, attributes (`#[derive]`), method calls, parameters,
+  type parameters, punctuation tiers for Rust; analogues for TS/JS
+  (properties, optional chains, regex, JSX tags) and Markdown (emphasis
+  levels, link text vs URL, fence info strings).
+- Extend the compiled-in `DEFAULT_NATIVE_STYLE_MAP`/
+  `MARKDOWN_NATIVE_STYLE_MAP` (`src/server/syntax.rs`) so every new capture
+  maps onto the closed `TokenType`+`Modifiers` vocabulary — data changes
+  only, no engine changes.
+- Add query-contract tests: every capture name in each `.scm` resolves to a
+  vocabulary entry or is explicitly inert.
+
+Expected outcome:
+
+- A Rust/TS/JS/Markdown file renders with full token differentiation under
+  any theme, using the dormant half of the existing vocabulary.
+
+### Phase 26.3: Decoration Background Axis and Layered Fills
+
+Focus areas:
+
+- Add the optional background axis to `StyleSpec` through decoration
+  chunking (`src/protocol/decorations.rs`), budget accounting, rkyv
+  serialization, and `VisibleTextStyleRun` normalization; paint fills run
+  backgrounds before text in the parley/vello path.
+- Implement client-side `DecorationKind::SearchMatch` painting on the new
+  axis (layer-rank plumbing already exists).
+- Markdown mode paints fenced code blocks and block quotes as background
+  panels (tinted blocks) driven by existing `CodeBlock`/`Quote` tokens —
+  package data only, no Rust markdown branches.
+- LSP bridges map "unused symbol" fades/dead-code dims to background-axis
+  decorations where the server reports them.
+
+Expected outcome:
+
+- Backgrounds, search highlights, code-fence panels, and quote tints render
+  through one axis owned by the theme; no new `DecorationKind`s for what is
+  a paint property.
+
+### Phase 26.4: Document Typography Size Ladder
+
+Focus areas:
+
+- `StyleRegistry` gains a bounded per-`TokenType` scale ladder (heading
+  1.0/0.87/0.75…, small/code 0.9) mirroring `UiTypographyHierarchy`
+  (`src/editor/typography.rs`); applied per-run in `rebuild()`
+  (`src/editor/layout.rs`) next to the font-role override; themes override
+  the ladder like any style.
+- Reconcile line metrics: the single `document_line_height =
+  max(mono, prop) × 1.4` approximation breaks with mixed-size lines; adopt
+  per-line metrics (or a recalibrated uniform height with a documented
+  ceiling) and keep logical viewport/scroll math consistent with painted
+  lines.
+- Prose rendering validation: heading hierarchy, mixed mono/prose lines, and
+  wrapped headings checked in manual test plan screenshots.
+
+Expected outcome:
+
+- Markdown headings render as a real typographic hierarchy in every theme;
+  scroll/viewport math stays correct on mixed-size documents.
+
+### Phase 26.5: Editor Chrome — Gutter, Active Line, Bracket Match, Indent Guides
+
+Focus areas:
+
+- Line-number gutter as a generic client chrome surface: token-styled
+  (theme-owned colors), configurable width/visibility, correct alignment
+  under mixed line heights, never on the hot layout path.
+- Active-line highlight and indent guides as theme-token-driven chrome with
+  per-mode configuration defaults (on for code modes, off for prose unless
+  configured).
+- Bracket-match highlight: reuse the existing matching-pair scan in
+  `src/editor/buffer.rs` (currently only used for electric indent) to paint
+  matched-pair ranges when the caret is adjacent to a bracket declared in
+  the active behavior manifest.
+
+Expected outcome:
+
+- Code modes get the affordances of a real editor; all chrome is generic,
+  token-driven, and available to every mode with zero package code.
+
+### Phase 26.6: Layout Geometry — Insets, Wrap Policy, Prose Column
+
+Focus areas:
+
+- Replace the uniform 48px `TEXT_INSET` with asymmetric, token-driven insets;
+  define a prose column cap (bounded max line width) for proportional modes
+  while code modes keep full-width behavior.
+- Introduce a `WrapPolicy` primitive (`none | viewport | column`): `none`
+  enables horizontal scrolling (scroll plumbing + caret visibility beyond
+  width), `viewport` is today's soft wrap, `column` caps wrap width; declared
+  per mode in behavior manifests with user override via `init.js`.
+- Address the viewport simplification noted in the review: the visible
+  snapshot uses a logical-line window (`viewport.visible_range`) that breaks
+  with wrapped lines and proportional fonts; derive the visible range from
+  painted visual lines.
+
+Expected outcome:
+
+- Long-line code files scroll horizontally instead of wrapping; prose reads
+  at a sane column; insets and wrap behavior are mode- and user-configurable.
+
+### Phase 26.7: Rendering Hardening, Accessibility, and Documentation
+
+Focus areas:
+
+- Fix the client panic in `accesskit_consumer` ("Focused ID #4 is not in the
+  node list") when closing a dirty pane via Ctrl+Alt+W — accessibility tree
+  must drop focus references before the pane widget is removed.
+- Performance budgets for gutter/active-line/bracket-match paint and
+  background-fill paths, CI-guarded like existing Phase 14/16 budgets;
+  keypress-to-local-paint budget must not regress.
+- Theme catalog documentation for the two new axes (background, size ladder);
+  generated registry entries, primitive reference updates, manual test plan
+  screenshots (light+dark, code+prose), and wiki updates.
+
+Expected outcome:
+
+- Rendering foundation is production-safe, budgeted, documented, and ready
+  for new formats to adopt visually with data-only contributions.
+
+## Phase 27: Package Data Flow Consolidation
+
+Remove the duplication identified in the 2026-08-18 review so a new file
+format is one package, not four copies of the same declarations. Confirmed
+decisions: manifest contributions are the sole package data path
+(`decision-logs/2026-08-18-1758-single-manifest-package-loading.md`) and
+manifests gain capability presets
+(`decision-logs/2026-08-18-1758-package-capability-presets.md`).
+
+### Phase 27.1: Single-Manifest Loading and Load-Entry Cleanup
+
+Focus areas:
+
+- Delete the `*PackageManifest()` literal duplicates (`@clay/markdown`,
+  `@clay/typescript` `dist/index.js`/`load.js`); `package.json`
+  `clay.contributions` is the only manifest source.
+- Remove imperative registration calls from first-party load entries
+  (`serverRegisterSyntaxGrammar({})`, `serverRegisterCompletionProvider({})`,
+  explicit mode-pattern/command/component re-registrations); load entries
+  keep only executing code (parse module imports, bridge factories).
+- Remove stale ceremony: `@clay/markdown` load-time `serverActivateMajorMode`
+  with hardcoded `documentId: 1`/`sample.md`, and similar legacy triggers.
+- Keep the imperative APIs public for `init.js` and runtime contributions;
+  document the execute-only load-entry contract in package authoring docs.
+
+Expected outcome:
+
+- Every first-party package declares data exactly once; load entries contain
+  only executable wiring; ~80–120 lines deleted per package.
+
+### Phase 27.2: Native Grammar Ownership Cleanup
+
+Focus areas:
+
+- Drop the inert `syntaxGrammars` blocks (including dead `styleMap` and
+  `queries` paths) from first-party `package.json` files whose grammars are
+  owned by `FIRST_PARTY_NATIVE_GRAMMARS`; the Rust descriptor is the Tier 1
+  source of truth (decision: no drift between two copies).
+- Simplify `op_clay_syntax_register_syntax_grammar` to a diagnostic or no-op
+  for shadowed native grammars instead of silently skipping package
+  contributions; surface "owned by native descriptor" in package inspection.
+- Decide and document the long-term inversion (Rust statics carry only
+  grammar/query functions; style maps read from trusted package records) as
+  a future decision to take when third-party grammars arrive.
+
+Expected outcome:
+
+- One owner per grammar's style map; editing a first-party package.json can
+  no longer silently do nothing for syntax.
+
+### Phase 27.3: Capability Presets
+
+Focus areas:
+
+- Manifest `preset` field (`code-mode`, `prose-mode`, `lsp-bridge`) expanded
+  at validation (`src/packages/manifest.rs`) into the standard permission,
+  `apiDependencies`, extension-point, and contribution-family sets; explicit
+  deviating declarations win; expanded set is what is validated, budgeted,
+  and shown in package inspection UI.
+- Migrate `@clay/rust`, `@clay/typescript`, `@clay/javascript`,
+  `@clay/markdown`, and `@clay/lsp-*` manifests to presets with only
+  deviating declarations; version the manifest schema change.
+- Package authoring docs: preset tables, override rules, and migration notes;
+  generated registry and API inventory updated.
+
+Expected outcome:
+
+- A new code-language package is a preset line plus its deviations; the
+  copy-paste boilerplate class of divergence bugs is gone.
+
+### Phase 27.4: Package-to-Package Dependency Resolution
+
+Focus areas:
+
+- Extend the bundled inventory (`src/packages/bundled.rs`) with an exports
+  map so workspace-local specifiers (e.g. `lsp-shared/client.js`) resolve in
+  the package module loader — first-party packages only, fingerprinted and
+  trust-boundary-preserving (no third-party imports, no path escapes).
+- Delete the four vendored `dist/shared/` copies of `lsp-shared` and
+  `scripts/update-first-party-lsp-shared.mjs` once packages import the
+  shared source.
+- Guard test: first-party packages contain no vendored duplicate of another
+  first-party package's modules.
+
+Expected outcome:
+
+- Shared first-party code lives once; new `lsp-*` packages import shared
+  bridge utilities instead of copying them.
+
+### Phase 27.5: LSP Bridge Factory Consolidation
+
+Focus areas:
+
+- One `createLspBridge({ server, languageId, diagnostics: "push"|"pull",
+  features })` factory in `lsp-shared` absorbing the ~85% shared body of
+  `@clay/lsp-rust` and `@clay/lsp-markdown` inline bridges (capabilities
+  objects, `TOKEN_TYPES`/`TOKEN_MODIFIERS` tables, document tracking,
+  refresh/completion/intelligence plumbing).
+- `@clay/lsp-rust` and `@clay/lsp-markdown` become config + manifest
+  packages like the existing `lsp-typescript`/`lsp-javascript` shells.
+- New-language-server adoption becomes: one manifest `languageServers`
+  contribution + one factory config object; documented in package authoring
+  docs.
+
+Expected outcome:
+
+- Four LSP bridge packages share one implementation; adding a language
+  server is data plus configuration.
+
+### Phase 27.6: One Syntax Vocabulary — Tier 3 Migration and Compat Demotion
+
+Focus areas:
+
+- Migrate `@clay/markdown/dist/parser.js` from legacy free-form `markup.*`
+  style tokens to the closed `TokenType`+`Modifiers` vocabulary (heading
+  levels, emphasis, link parts, fences are all already modeled).
+- Demote the `style_token`/`from_style_token`/`classify_style_token` compat
+  path and the `scope` escape hatch to explicitly deprecated; keep them
+  rendering old packages but documented as frozen.
+- Vocabulary guard test: no first-party producer emits free-form style
+  tokens.
+
+Expected outcome:
+
+- One syntax vocabulary end to end; themes key one table; compat path is
+  frozen rather than first-class.
+
+### Phase 27.7: Bundled Inventory Generation
+
+Focus areas:
+
+- Generate the `BUNDLED_PACKAGES` FNV fingerprint inventory in
+  `src/packages/bundled.rs` at build time (`build.rs`) from a checked-in
+  package list, so adding/editing a first-party package stops requiring an
+  11-struct Rust edit with hand-computed hashes; test-enforced inventory
+  stays the trust boundary.
+
+Expected outcome:
+
+- First-party package adoption touches the package tree and a list entry,
+  not hand-maintained hash literals.
+
+### Phase 27.8: Consolidation Hardening and Documentation
+
+Focus areas:
+
+- Behavior parity tests: activation, keymaps, commands, completion, and
+  syntax identical before/after the manifest and preset migration for all
+  first-party packages.
+- Load-order and hot-reload regression tests for the execute-only load-entry
+  contract; package inspection UI shows preset-expanded permissions.
+- Docs: package authoring guide rewrite (single-manifest, presets, shared
+  imports, LSP factory), generated registry freshness, wiki updates.
+
+Expected outcome:
+
+- Package consolidation is behavior-preserving, review-clean, and
+  documented; new-format packages are materially smaller to write.
+
+## Phase 28: Editor Command and Intelligence Primitives
+
+Complete the generic command/edit/intelligence primitives whose data already
+exists, and fix the defects found in the 2026-08-18 review in the command and
+provider layers. No language-specific Rust logic: everything is driven by
+behavior-manifest data and the closed decoration/completion vocabularies.
+
+### Phase 28.1: Package Keymap Parsing Fix
+
+Focus areas:
+
+- `parse_keymap` (`src/server/ops/modes.rs`) currently stuffs the whole chord
+  string ("Ctrl+Shift+M") into `KeyCode::Character` with no modifiers, so
+  every package-declared keymap is dead; reuse
+  `src/server/ops/keybindings.rs::parse_key_sequence` instead and delete the
+  local divergent copy; same treatment for the duplicated routing-policy
+  string parser.
+- Regression tests: package keymaps (`Ctrl+Shift+M`-style chords and
+  sequences) parse to real `KeyStroke`s with modifiers and match key events;
+  markdown's default keymaps (`togglePreview`, `insertHeading`,
+  `toggleList`) become functional.
+
+Expected outcome:
+
+- Package-declared keymaps work; one chord parser in the codebase.
+
+### Phase 28.2: Generic Comment Toggle and Prose Line Transforms
+
+Focus areas:
+
+- Client `editor.toggleComment` primitive driven by the active behavior
+  manifest's `comments` rule: per-line prefix toggle with indent awareness,
+  multi-caret, selection-line handling — one implementation serving every
+  code mode.
+- Declarative line-transform primitives for prose: toggle list marker,
+  insert/rotate heading level — same shape as
+  `EnterRule::ContinueLineMarkers`, declared as manifest data.
+- Wire the currently-inert registered commands (`rust.toggleLineComment`,
+  `markdown.toggleComment`/`toggleList`/`insertHeading`) to these
+  primitives; policy: packages may not register commands they cannot back.
+
+Expected outcome:
+
+- Comment toggle works in every code mode; markdown list/heading commands
+  execute for real; no metadata-only commands in the palette.
+
+### Phase 28.3: Folding Ranges
+
+Focus areas:
+
+- Implement the stubbed `folding.serverPublishFoldingRanges` API surface
+  (currently documented as planned/unavailable in
+  `docs/reference/clay-js-api/api-inventory.toml`): protocol messages,
+  budget-validated range sets, provenance.
+- Server-side fold computation from tree-sitter indents/multi-line nodes
+  (nearly free on the existing parsed trees); client gutter fold UI composes
+  with Phase 26.5 chrome.
+
+Expected outcome:
+
+- Code modes get working folding with provider provenance; the API stub
+  becomes real.
+
+### Phase 28.4: Link Decorations and Hover Intent
+
+Focus areas:
+
+- Add `DecorationKind::Link` carrying target provenance; paint styling
+  (underline/color) from theme tokens.
+- Hover/click intent protocol for decorated ranges: markdown links and
+  footnotes open targets; groundwork for LSP go-to-definition affordances
+  using the same generic intent (no language branches in core).
+
+Expected outcome:
+
+- Links in prose are visually distinct and activatable; one generic hover
+  intent primitive serves markdown and future LSP features.
+
+### Phase 28.5: Inlay Hints
+
+Focus areas:
+
+- New decoration kind for inlay hints (type annotations, parameter names)
+  with the existing vocabulary-alignment to LSP; bounded payloads, gutter-
+  adjacent paint, toggle command and per-mode default.
+- LSP bridge mapping (`lsp-rust` first) through the factory from Phase 27.5.
+
+Expected outcome:
+
+- rust-analyzer inlay hints render as decorations through the same pipeline
+  as syntax/diagnostics.
+
+### Phase 28.6: Completion Ranking and Provider Polish
+
+Focus areas:
+
+- Replace the alphabetical-prefix-only buffer-word ranking with a scoring
+  function (exact-prefix, case-match, length, recency-of-use) inside the
+  existing budgeted candidate scan; shared by all providers for tie-breaks.
+- Ranking tests over representative candidate sets; no ranking work on the
+  keypress-to-local-paint path.
+
+Expected outcome:
+
+- Buffer-word completions rank sensibly; the scoring function is the single
+  shared tie-breaker as more providers land.
+
+### Phase 28.7: Hardening and Documentation
+
+Focus areas:
+
+- Behavior parity and protocol compatibility tests for every new command,
+  intent, and decoration kind; budgets CI-guarded; authority review for the
+  new intents (link activation, hover) under existing package permissions.
+- `src/server/js_runtime/mod.rs` test mass (~9.7k inline test lines) moves to
+  a sibling integration module to keep the runtime file reviewable — move
+  only, no behavior change.
+- Generated registry entries, API inventory, primitive reference docs, and
+  wiki updates for all new primitives; manual test plan coverage.
+
+Expected outcome:
+
+- The command/intelligence primitive set is complete, budgeted, and
+documented; new formats consume it declaratively.
+
+Sequencing note: Phase 26 (rendering) first — new formats cannot be judged
+visually until paint is fixed; then 27 (data flow) before any new package is
+authored; 28 can proceed in parallel with 27. Tier 2 WASM execution stays
+scheduled with Phase 23 ecosystem work as planned; the adoption target once
+built is server-side capture→vocabulary mapping so third-party grammars are
+data-only packages.
+
 ## ACP/AG-UI
 
 ## Coding agent
@@ -269,17 +863,7 @@ General details:
 - Ponytail
 - Providers: Alibaba cloud, Ollama-cloud, Opencode-go, Kimi, OpenAI Oauth, Cursor SDK, Gemini SDK
 
-## User Package and Config segregation with defined ~/.config/clay structure
 
-## Command Centre
-
-## File browser with dynamic root selection
-
-## Coding agent
-
-
-
-### Evaluation of Prism capability against requirements
 
 #### Requirements list
 
@@ -302,7 +886,6 @@ Expected outcome:
 - AI agents can propose or apply changes safely.
 - User edits and agent edits have explicit conflict boundaries.
 - AI-visible tools and mutation capabilities are documented and inspectable.
-
 
 ## Markdown mode preview implementation with capabilities required for personal and work agent
 

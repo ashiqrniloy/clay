@@ -4,18 +4,11 @@
 use std::collections::BTreeSet;
 use std::fs;
 
+mod common;
+use common::{assert_each_contains, non_test, read_src};
+
 fn repository_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
-fn non_test_body(src: &str) -> &str {
-    if let Some(index) = src.find("\nmod tests") {
-        return &src[..index];
-    }
-    if let Some(index) = src.find("\n#[cfg(test)]") {
-        return &src[..index];
-    }
-    src
 }
 
 /// Parse public third-party facade rows from the single runtime facade table.
@@ -70,7 +63,7 @@ fn parse_plan_public_third_party_facades() -> BTreeSet<String> {
 fn third_party_facade_allowlist_exactly_matches_plan_public_inventory() {
     let code = parse_third_party_facades();
     let plan = parse_plan_public_third_party_facades();
-    assert_eq!(code.len(), 13, "third-party facade count must be 13");
+    assert_eq!(code.len(), 14, "third-party facade count must be 14");
     assert_eq!(
         code, plan,
         "THIRD_PARTY_FACADES must exactly match the plan's Public-third-party classification"
@@ -106,11 +99,11 @@ fn internal_runtime_mechanics_are_not_public() {
         ),
         ("src/server/workspace.rs", "pub struct CloseDocumentOutcome"),
         (
-            "src/server/connection.rs",
+            "src/server/connection/mod.rs",
             "pub struct RuntimeDiagnosticStore",
         ),
         (
-            "src/server/connection.rs",
+            "src/server/connection/mod.rs",
             "pub struct ConnectionOutputSubscriptions",
         ),
         (
@@ -123,8 +116,7 @@ fn internal_runtime_mechanics_are_not_public() {
         ),
     ];
     for (path, declaration) in declarations {
-        let source =
-            fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let source = read_src(path);
         assert!(
             !source.contains(declaration),
             "{declaration} in {path} must be pub(crate) or private"
@@ -154,8 +146,7 @@ fn internal_runtime_mechanics_are_not_public() {
         ("src/server/parse_coordinator.rs", "pub fn remove_document"),
     ];
     for (path, declaration) in internal_functions {
-        let source =
-            fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let source = read_src(path);
         assert!(
             !source.contains(declaration),
             "{declaration} in {path} must be pub(crate) or private"
@@ -315,7 +306,7 @@ fn phase20_4_introduces_no_unexposed_public_rust_function() {
             &["theme_style"],
         ),
         (
-            "src/editor/surface.rs",
+            "src/editor/surface/mod.rs",
             &[
                 "ui_theme",
                 "set_pointer_pos",
@@ -417,11 +408,14 @@ fn phase24_5_command_centre_sessions_are_not_a_package_programmatic_surface() {
     // claim either id (tests/command_execution.rs
     // control_center_command_ids_are_not_registerable_by_packages).
     let root = repository_root();
-    let connection =
-        fs::read_to_string(root.join("src/server/connection.rs")).expect("connection readable");
+    let menus = fs::read_to_string(root.join("src/server/connection/menus.rs"))
+        .expect("read connection/menus.rs");
+    let runtime = fs::read_to_string(root.join("src/server/connection/runtime.rs"))
+        .expect("read connection/runtime.rs");
+    let session_call_sites = menus.matches("open_command_centre_session(").count()
+        + runtime.matches("open_command_centre_session(").count();
     assert_eq!(
-        connection.matches("open_command_centre_session(").count(),
-        3,
+        session_call_sites, 3,
         "definition + exactly two call sites (CommandIntent, menu activation)"
     );
 
@@ -435,7 +429,7 @@ fn phase24_5_command_centre_sessions_are_not_a_package_programmatic_surface() {
     ] {
         let src = fs::read_to_string(root.join(file))
             .unwrap_or_else(|error| panic!("read {file}: {error}"));
-        let body = non_test_body(&src);
+        let body = non_test(&src);
         for forbidden in [
             "open_command_centre_session",
             "PathBrowserSession",
@@ -453,7 +447,7 @@ fn phase24_5_command_centre_sessions_are_not_a_package_programmatic_surface() {
     let sessions =
         fs::read_to_string(root.join("src/server/menu_sessions.rs")).expect("sessions readable");
     assert!(
-        !non_test_body(&sessions).contains("open_command_centre_session"),
+        !non_test(&sessions).contains("open_command_centre_session"),
         "menu_sessions.rs must not open command centre/browse sessions"
     );
 }
@@ -471,21 +465,24 @@ fn phase24_4_centered_surface_is_not_a_public_programmatic_surface() {
         editor.contains("#[doc(hidden)]\n    pub fn reconcile_centered_overlay_layer"),
         "masonry_editor.rs must keep the doc(hidden) reconcile bridge"
     );
-    let mut doc_hidden_pub_fns: Vec<String> = std::fs::read_dir(root.join("src"))
-        .expect("read src")
-        .filter_map(|entry| entry.ok())
+    let mut doc_hidden_pub_fns: Vec<String> = ["src", "src/masonry_shell"]
+        .iter()
+        .flat_map(|dir| {
+            std::fs::read_dir(root.join(dir))
+                .expect("read dir")
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().extension().and_then(|v| v.to_str()) == Some("rs"))
+                .collect::<Vec<_>>()
+        })
         .flat_map(|entry| {
             let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("rs") {
-                return Vec::new();
-            }
             fs::read_to_string(&path)
                 .expect("read source file")
                 .split("#[doc(hidden)]")
                 .skip(1)
                 .filter(|tail| tail.trim_start().starts_with("pub fn"))
                 .map(|_| format!("{}::pub fn", path.display()))
-                .collect()
+                .collect::<Vec<_>>()
         })
         .collect();
     doc_hidden_pub_fns.sort();
@@ -493,8 +490,18 @@ fn phase24_4_centered_surface_is_not_a_public_programmatic_surface() {
         doc_hidden_pub_fns,
         vec![
             format!("{}::pub fn", root.join("src/masonry_editor.rs").display()),
-            format!("{}::pub fn", root.join("src/masonry_shell.rs").display()),
-            format!("{}::pub fn", root.join("src/masonry_shell.rs").display()),
+            format!(
+                "{}::pub fn",
+                root.join("src/masonry_shell/mod.rs").display()
+            ),
+            format!(
+                "{}::pub fn",
+                root.join("src/masonry_shell/window_tabs.rs").display()
+            ),
+            format!(
+                "{}::pub fn",
+                root.join("src/masonry_shell/window_tabs.rs").display()
+            ),
         ],
         "doc(hidden) pub fn allowlist: reconcile bridge + shell widget methods only"
     );
@@ -562,14 +569,20 @@ fn phase22_6_window_model_a11y_additions_are_not_public_programmatic_surfaces() 
     let root = repository_root();
 
     // Internal helpers must be pub(crate) or private, never bare `pub`.
-    let internal_items: &[(&str, &str)] = &[
-        ("src/masonry_shell.rs", "pub(crate) enum AnnouncementKind"),
+    assert_each_contains(&[
         (
-            "src/masonry_shell.rs",
+            "src/masonry_shell/accessibility.rs",
+            "pub(crate) enum AnnouncementKind",
+        ),
+        (
+            "src/masonry_shell/accessibility.rs",
             "pub(crate) const ANNOUNCEMENT_MAX_CHARS",
         ),
-        ("src/masonry_shell.rs", "pub(crate) fn compose_announcement"),
-        ("src/masonry_shell.rs", "    fn announce_pane_change"),
+        (
+            "src/masonry_shell/accessibility.rs",
+            "pub(crate) fn compose_announcement",
+        ),
+        ("src/masonry_shell/mod.rs", "    fn announce_pane_change"),
         ("src/masonry_pane_host.rs", "pub(crate) fn with_pane_count"),
         ("src/masonry_pane_host.rs", "pub(crate) fn set_pane_count"),
         (
@@ -584,15 +597,7 @@ fn phase22_6_window_model_a11y_additions_are_not_public_programmatic_surfaces() 
             "src/perf/baselines.rs",
             "pub(crate) fn working_area_layout_with",
         ),
-    ];
-    for (path, declaration) in internal_items {
-        let source =
-            fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("read {path}: {e}"));
-        assert!(
-            source.contains(declaration),
-            "{declaration} in {path} must be pub(crate) or private"
-        );
-    }
+    ]);
 
     // None of the Phase 22.6 additions may be wrapped by a deno_core op.
     let ops_names = [
@@ -689,22 +694,25 @@ fn phase22_8_per_tab_state_has_no_new_public_programmatic_surface() {
         );
     }
 
-    let connection = fs::read_to_string(root.join("src/server/connection.rs"))
-        .expect("read server/connection.rs");
-    for function in [
-        "route_connection_tab_state",
-        "message_requires_tab_state",
-        "document_for_message",
-        "workspace_command_result_message",
+    let connection_mod = fs::read_to_string(root.join("src/server/connection/mod.rs"))
+        .expect("read connection/mod.rs");
+    let documents = fs::read_to_string(root.join("src/server/connection/documents.rs"))
+        .expect("read connection/documents.rs");
+    let workspace = fs::read_to_string(root.join("src/server/connection/workspace.rs"))
+        .expect("read connection/workspace.rs");
+    for (file, function) in [
+        (&connection_mod, "route_connection_tab_state"),
+        (&connection_mod, "message_requires_tab_state"),
+        (&documents, "document_for_message"),
+        (&workspace, "workspace_command_result_message"),
     ] {
+        let private = file.contains(&format!("async fn {function}"))
+            || file.contains(&format!("fn {function}"))
+            || file.contains(&format!("pub(super) async fn {function}"));
+        assert!(private, "connection::{function} must remain crate-private");
         assert!(
-            connection.contains(&format!("async fn {function}"))
-                || connection.contains(&format!("fn {function}")),
-            "connection::{function} must remain private"
-        );
-        assert!(
-            !connection.contains(&format!("pub async fn {function}"))
-                && !connection.contains(&format!("pub fn {function}")),
+            !file.contains(&format!("pub async fn {function}"))
+                && !file.contains(&format!("pub fn {function}")),
             "connection::{function} must not become a public API"
         );
     }
@@ -799,7 +807,7 @@ fn phase24_5_keybinding_internals_stay_crate_private() {
             "ChordRouteOutcome must stay pub(crate)",
         ),
         (
-            "src/editor/surface.rs",
+            "src/editor/surface/command.rs",
             "pub(crate) struct PendingChord {",
             "PendingChord must stay pub(crate): it is internal input-routing state",
         ),
@@ -822,7 +830,7 @@ fn phase24_5_keybinding_internals_stay_crate_private() {
     for (file, needle, message) in cases {
         let src = fs::read_to_string(root.join(file)).expect("read {file}");
         assert!(
-            non_test_body(&src).contains(needle),
+            non_test(&src).contains(needle),
             "{message} (missing `{needle}` in {file})"
         );
     }
@@ -1021,8 +1029,7 @@ fn plan087_welcome_and_completion_internals_are_not_public_programmatic_surfaces
         ),
     ];
     for (path, declaration) in internal_declarations {
-        let source =
-            fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let source = read_src(path);
         assert!(
             source.contains(declaration),
             "{declaration} in {path} must be pub(crate) or private"

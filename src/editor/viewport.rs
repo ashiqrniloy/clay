@@ -63,6 +63,15 @@ impl Viewport {
         start..end
     }
 
+    pub fn set_overscan_lines(&mut self, overscan_lines: usize) -> bool {
+        if self.overscan_lines == overscan_lines {
+            return false;
+        }
+        self.overscan_lines = overscan_lines;
+        self.bump_revision();
+        true
+    }
+
     pub fn set_visible_line_count(
         &mut self,
         visible_line_count: usize,

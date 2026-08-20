@@ -83,7 +83,7 @@ The API is runtime-backed by a `deno_core` op wrapper, but callers never touch r
 
 ## When to use
 
-Use this API from a first-party grammar package load entry when the package declares `clay.contributions.syntaxGrammars` metadata and wants that metadata available for syntax provider selection. End-user configuration should use one-line package loading instead:
+Use this API from a package load entry when the package declares `clay.contributions.syntaxGrammars` and is **not** already owned by `FIRST_PARTY_NATIVE_GRAMMARS`. Native-owned prefixes (`rust`, `typescript`, `javascript`, `markdown`) return `syntax.owned_by_native_descriptor`; the live grammar stays the compiled descriptor. End-user configuration should use one-line package loading instead:
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -205,5 +205,5 @@ Prefer one-line `loadPackage("@clay/<language>")` for user setup. Package author
 - Runtime facade: `src/server/facades.rs`
 - Op wrapper: `src/server/ops/syntax.rs::op_clay_syntax_register_syntax_grammar`
 - Registry: `src/server/syntax.rs::SyntaxGrammarRegistry::register_package`
-- Package validation: `src/packages/record.rs::assemble_package_record`
-- Tests: `src/server/js_runtime.rs::syntax_facade_registers_grammar_metadata_without_raw_ops`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_api_inventory.rs`, `tests/syntax_grammar.rs`
+- Package validation: `src/packages/record/mod.rs::assemble_package_record`
+- Tests: `src/server/js_runtime/mod.rs::syntax_facade_registers_grammar_metadata_without_raw_ops`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_api_inventory.rs`, `tests/syntax_grammar.rs`

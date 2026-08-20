@@ -9,7 +9,7 @@
 - `src/editor/theme.rs`
 - `src/editor/typography.rs`
 - `src/protocol/mod.rs`
-- `src/packages/record.rs`
+- `src/packages/record/mod.rs`
 - `src/server/ui.rs`
 - `src/masonry_sdui.rs`
 - `docs/reference/primitives/typography.md`
@@ -42,7 +42,7 @@ package semantic token -> same-typed core fallback -> resolved component style
 | `TypographyRegistry` | `src/editor/typography.rs`; validates/resolves three profiles once, appends generic fallbacks, installs only newer revisions, and serves cached Parley stacks/sizes and shared geometry. | Keep as sole client typography resolver and cache. Variant hierarchy becomes installed state, not theme color state. |
 | `ActiveTypography` | `src/protocol/mod.rs`; atomic revisioned `monospace`, `proportional`, and `ui` profiles with bounded family stacks and logical-pixel sizes. | Extend atomically with user-owned `UiTypographyHierarchy`; preserve one snapshot and one invalidation path. |
 | `UiTextVariant` | `src/editor/typography.rs`; `Body`, `Status`, `Title`, and `Detail` resolve from a selected semantic `FontRole`. | Add `Display`, `Section`, and `Caption`; preserve existing default scales and role ownership. |
-| Component style validation | `src/shell/components.rs`, `src/server/ui.rs`, and `src/packages/record.rs`; 11 implemented kinds, four reserved kinds, token-typed style variables, closed enum variants, semantic `fontRole`, and raw-style rejection. | Reuse unchanged component kinds and style-variable names. New token domains become available to generic validators/accessors only where a documented variable consumes them. |
+| Component style validation | `src/shell/components.rs`, `src/server/ui.rs`, and `src/packages/record/mod.rs`; 11 implemented kinds, four reserved kinds, token-typed style variables, closed enum variants, semantic `fontRole`, and raw-style rejection. | Reuse unchanged component kinds and style-variable names. New token domains become available to generic validators/accessors only where a documented variable consumes them. |
 | Package theme-token declarations | `clay.contributions.themeTokens` and `ui.serverRegisterThemeToken`; package-prefixed semantic aliases with a description and same-typed core fallback, no raw value. | Preserve this alias contract. Theme package `designTokens` are a separate static value-overlay contract and must not let ordinary packages set concrete global values. |
 | Panel/slot geometry | `PaneSlotLayout` and `FixedSlotState` in `src/shell/layout.rs`; mandatory `main`, optional fixed sides, finite ordered bounds, clamping, visibility/collapse, and deterministic geometry. | Keep geometry and validation. Replace only independent default sources in `src/shell/package_ui.rs` and `src/masonry_sdui.rs` with one token-resolved layout-default view. |
 | Structural observations | `WorkingAreaLayoutObservation`, package panel/overlay observations, `SduiObservableSnapshot`, and `SduiStatusObservation`. | Reuse for geometry, accessibility, compatibility, and update-count assertions; do not expose raw theme maps or native handles. |

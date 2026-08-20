@@ -365,6 +365,82 @@ pub(super) fn op_clay_editor_set_cursor_style(
     Ok(descriptor)
 }
 
+/// Wrap-policy string table for `setEditorLayout` (deny-by-default).
+const WRAP_POLICIES: &[&str] = &["none", "viewport", "column"];
+
+/// Validate `clientSetEditorLayout` options and resolve them to a
+/// `WrapPolicy`. `wrapPolicy` is required; `columnCap` is honored only for
+/// `"column"` (clamped to `WrapPolicy::MIN_COLUMN..=MAX_COLUMN`). An absent
+/// or `null` `wrapPolicy` is rejected so the override is always explicit.
+fn validate_set_editor_layout_value(
+    value: &Value,
+) -> Result<crate::protocol::WrapPolicy, JsErrorBox> {
+    const ERROR: &str = "editor.invalid_set_editor_layout";
+    let policy = value
+        .get("wrapPolicy")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            JsErrorBox::generic(format!(
+                "{ERROR}: missing required string `wrapPolicy` (one of {})",
+                WRAP_POLICIES.join(", ")
+            ))
+        })?;
+    let wrap = match policy {
+        "none" => crate::protocol::WrapPolicy::None,
+        "viewport" => crate::protocol::WrapPolicy::Viewport,
+        "column" => {
+            let cap = value
+                .get("columnCap")
+                .and_then(Value::as_u64)
+                .and_then(|n| u16::try_from(n).ok())
+                .unwrap_or(crate::protocol::WrapPolicy::DEFAULT_COLUMN);
+            crate::protocol::WrapPolicy::Column(crate::protocol::WrapPolicy::clamp_column(cap))
+        }
+        other => {
+            return Err(JsErrorBox::generic(format!(
+                "{ERROR}: unknown `wrapPolicy` value `{other}` (expected one of {})",
+                WRAP_POLICIES.join(", ")
+            )));
+        }
+    };
+    Ok(wrap)
+}
+
+/// Phase 26: user-owned editor wrap-policy override from `setEditorLayout`.
+/// Registered in the trusted extension only, so packages cannot forge it; the
+/// `editor-control` trust gate additionally allows trusted-domain user
+/// configuration (init.js) outside any package activation.
+#[op2]
+#[string]
+pub(super) fn op_clay_editor_set_editor_layout(
+    state: &mut OpState,
+    #[string] options_json: String,
+) -> Result<String, JsErrorBox> {
+    require_editor_control(state)?;
+    let value = parse_options(&options_json, "editor.invalid_set_editor_layout")?;
+    let wrap = validate_set_editor_layout_value(&value)?;
+    state
+        .borrow::<Arc<crate::server::ops::ClayOpState>>()
+        .publish_editor_layout_override(Some(wrap));
+    serde_json::to_string(&json!({
+        "commandId": "editor.clientSetEditorLayout",
+        "wrapPolicy": match wrap {
+            crate::protocol::WrapPolicy::None => "none",
+            crate::protocol::WrapPolicy::Viewport => "viewport",
+            crate::protocol::WrapPolicy::Column(_) => "column",
+        },
+        "columnCap": match wrap {
+            crate::protocol::WrapPolicy::Column(cap) => Some(cap),
+            _ => None,
+        },
+    }))
+    .map_err(|error| {
+        JsErrorBox::generic(format!(
+            "editor.invalid_set_editor_layout: failed to serialize result ({error})"
+        ))
+    })
+}
+
 /// Validate `clientAddCursor` options (deny-by-default enum). Returns the
 /// direction-specific command ID descriptor (Plan 071 task 9).
 pub(super) fn validate_add_cursor(options_json: &str) -> Result<String, JsErrorBox> {

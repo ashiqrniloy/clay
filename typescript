@@ -1,0 +1,5 @@
+Script started on 2026-08-17 02:06:49+06:00 [COMMAND="cd /home/arn/Projects/clay && scripts/capture-ui-review.sh --fixture ui-review-command-centre --output '/home/arn/Projects/clay/code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/command-centre-f12' --timeout 45" <not executed on terminal>]
+Review fixture ui-review-command-centre is live. Follow /home/arn/Projects/clay/code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/command-centre-f12/instructions.md, then press Enter here: 
+UI review unresolved: Command Centre menu/dialog did not appear
+
+Script done on 2026-08-17 02:07:48+06:00 [COMMAND_EXIT_CODE="2"]

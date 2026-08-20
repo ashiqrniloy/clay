@@ -220,6 +220,28 @@ roots containing distinct filenames/content.
 | T69 | Open a selected-file capability in tab A, then attempt to reuse that path/token from tab B | The request is denied or the token is replenished without opening the file in tab B; no foreign document/lease appears in tab B |
 | T70 | Repeat T63–T69 while watching tab creation, split, restore, and reconnect latency | No perceptible stall is introduced on typing or pane paint; restore/reconnect work is bounded and asynchronous after the normal startup/connection sequence |
 
+## Plan 088 shell/tab modernization steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| T71 | Apply the large UI typography fixture with two or more tabs | Tab bar/card/close/+ geometry follows active UI typography and remains clamped inside logical window bounds; active/inactive/dirty states remain distinguishable without color alone |
+| T72 | Open six or more tabs at the supported window width and scroll the tab bar | Cards stop at the documented minimum, the + affordance stays pinned, wheel offset clamps, and clipped cards do not paint or enter the accessibility tree outside the strip |
+| T73 | Use workspace roots with long/control-character/path-like names | Visible and accessible tab labels use a bounded sanitized basename/fallback; no absolute filesystem layout leaks |
+| T74 | Compare dark/light theme tab chrome with the same tab order | Active, inactive, hover/focus, close, dirty, and new-tab affordances remain legible and token-driven in both themes |
+| T75 | Switch among tabs with multiple panes and status diagnostics | Active tab/pane/status ownership is clear; inactive panes are absent from accessibility traversal; recovery/dirty/connection state is textual and synchronized |
+| T76 | Run the representative high-DPI logical-window layout check with multiple tabs | Tab bar, cards, pane hosts, and + affordance remain inside logical bounds; no physical-pixel overflow or duplicate scale compensation |
+
+## Plan 088 task 12 Linux execution record (2026-08-15)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| T71 | PASS strongest available evidence | `code-reviews/screenshots/2026-08-14-plan088-modernization/large-typography/` shows no welcome accessibility regression; shell geometry tests cover dynamic Status metrics, but live multi-tab large-type capture is blocked |
+| T72 | PASS structural / NOT RUN visually | `tab_bar_cards_never_below_min_width`, wheel-clamp, hit-test, and offscreen-activation tests pass; compositor resize/focus targeting is unavailable |
+| T73 | PASS structural / partial live | `tab_card_display_name_never_falls_back_to_an_absolute_path` passes; current welcome artifact exposes only `Workspace: clay`; multi-tab label inspection was not safely targetable |
+| T74 | PASS structural / NOT RUN tab-bar visually | Dark/light Task 8 welcome artifacts and bundled contrast tests pass; no raw colors were introduced, but multi-tab theme chrome was not safely targetable |
+| T75 | PASS structural / UNRESOLVED live | Tab/pane roles, announcements, recovery/dirty state tests pass; current recovery capture records the known stale WelcomeWidget Connected status (P1), so state synchronization is not called green |
+| T76 | PASS structural / NOT RUN visually | `high_dpi_layout_uses_logical_window_bounds` passes; live DPI/window resize is unavailable on this host |
+
 ## Linux execution record (2026-08-10)
 
 | Checks | Result | Evidence |
@@ -304,10 +326,11 @@ roots containing distinct filenames/content.
   pinned and cards clip at its left boundary (no overflow `»` menu).
 - **No drag-to-reorder**: card order changes only via the 22.4 move chords;
   drag reordering is not implemented.
-- **No tab persistence to disk**: tab structure and per-tab split trees live
-  in the in-memory server registry only — a full server restart (not just
-  the client) resets them to the single initial workspace. Disk persistence
-  for the registry and split trees arrives with Phase 22.5.
+- **Persistence is split by owner**: the server registry is in-memory and
+  does not survive a full server restart, while the client-owned `layout.json`
+  v2 persists tab order, active tab, workspace roots, split trees, and open
+  per-pane documents across a full client/server relaunch (T41/T66). Unsaved
+  edits, caret/viewport positions, and some runtime-only policy state do not.
 - **Restart drops unsaved state (22.5)**: the persisted window state is tab
   order, active tab, per-tab workspace + split tree, and per-pane open
   documents only — unsaved edits, caret/viewport/scroll positions, and
@@ -336,3 +359,14 @@ roots containing distinct filenames/content.
   repeated twice in a row) — documented, not a bug.
 - **Per-tab pane cap still 4**: each tab's split tree caps at
   `MAX_PANES_PER_TAB = 4` (module 13, S4) — the cap is per tab.
+
+## Plan 089 task 9 Linux execution record (2026-08-17)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| T71 | PASS live | `code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/large-typography/` shows the large UI fixture in bounds; shell geometry tests cover dynamic Status metrics |
+| T72 | PASS structural | Tab bar card minimum, wheel-clamp, hit-test, and offscreen-activation tests pass |
+| T73 | PASS structural + partial live | `tab_card_display_name_never_falls_back_to_an_absolute_path` passes; welcome artifact exposes only `Workspace: clay` |
+| T74 | PASS structural | Dark/light captures and bundled contrast tests pass; no raw colors were introduced |
+| T75 | PASS live | `code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/recovery/` shows `Connection lost` / `Connection: Disconnected` consistently in the welcome panel, status chrome, and AT-SPI tree after the `request_welcome_render` fix; the Plan 088 P1 stale WelcomeWidget Connected status is resolved |
+| T76 | PASS structural | `high_dpi_layout_uses_logical_bounds_from_physical_size` passes; live DPI/window resize is covered by the multi-window smoke test (module 01 L20) |

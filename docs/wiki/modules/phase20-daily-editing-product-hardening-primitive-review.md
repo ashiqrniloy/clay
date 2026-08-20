@@ -7,7 +7,7 @@
 - `plans/055-Phase20-Daily-Editing-Product-Hardening.md`
 - `plans/046-Phase-18.15-Text-Vocabulary-Two-Axis-Decorations-and-Theme-Registry.md`
 - `src/client/{clipboard,file_dialog,mod,runtime_state}.rs`
-- `src/masonry_editor.rs`, `src/masonry_sdui.rs`, `src/editor/surface.rs`
+- `src/masonry_editor.rs`, `src/masonry_sdui.rs`, `src/editor/surface/mod.rs`
 - `src/server/{workspace,document,connection}.rs`
 - `src/shell/transient_menu.rs`
 - `docs/wiki/modules/{masonry-editor,client-file-dialog,server-file-workspace,server-document-state,client-snapshot-bootstrap,editor-theme-registry,transient-menu-session,workspace-file-browser,persistent-runtime-hot-reload}.md`

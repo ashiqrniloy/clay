@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientMoveCursor
 js_facade: runtime/js/editor.js::clientMoveCursor
-backing_rust: src/editor/surface.rs::EditorSurface::move_word_start
+backing_rust: src/editor/surface/mod.rs::EditorSurface::move_word_start
 deno_op: op_clay_editor_move_cursor
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_move_cursor
 name: clientMoveCursor
@@ -122,7 +122,7 @@ Use `editor.clientMoveCursor` when the user asks to move cursor through the Clay
 
 - JS facade: `runtime/js/editor.js::clientMoveCursor`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_move_cursor` (`op_clay_editor_move_cursor`)
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::move_word_start` (and `move_paragraph`, `move_first_non_blank`, `move_last_non_blank`, `move_matching_pair`)
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::move_word_start` (and `move_paragraph`, `move_first_non_blank`, `move_last_non_blank`, `move_matching_pair`)
 - Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
 
 ## Lookup metadata

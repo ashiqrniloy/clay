@@ -23,12 +23,13 @@ use crate::masonry_sdui::{
     SduiNativeState, editor_region_for_document, editor_region_without_workspace_sidebar,
 };
 use crate::masonry_sdui_region::SduiRegionWidget;
+use crate::masonry_welcome::accessibility_status_node;
 // Re-exported so the native app driver (`main.rs`) can downcast the reconciled
 // SDUI button's action without exposing the whole `pub(crate)` region module.
 pub use crate::masonry_sdui_region::{SduiButtonPress, SduiListRowPress};
 // Same for the reconciled package fixed-panel button/list-row actions (13b).
 pub use crate::masonry_package_region::{
-    PackageButtonPress, PackageDropdownSelect, PackageListRowPress,
+    PackageButtonPress, PackageDropdownSelect, PackageListRowPress, PackageModalDismiss,
 };
 use crate::protocol::{
     ClientId, DocumentAccess, DocumentId, DocumentVersion, FontRole, RuntimeDiagnostic,
@@ -202,6 +203,11 @@ pub enum EditorClientCommand {
     KeepSelection,
     RemoveSelection,
     UndoCursorMove,
+    ToggleComment,
+    ToggleListMarker,
+    RotateHeading,
+    ToggleFold,
+    ToggleInlayHints,
 }
 
 impl EditorClientCommand {
@@ -229,6 +235,15 @@ impl EditorClientCommand {
             "editor.clientKeepSelection" => Some(Self::KeepSelection),
             "editor.clientRemoveSelection" => Some(Self::RemoveSelection),
             "editor.clientUndoCursorMove" => Some(Self::UndoCursorMove),
+            "editor.toggleComment"
+            | "rust.toggleLineComment"
+            | "typescript.toggleLineComment"
+            | "javascript.toggleLineComment"
+            | "markdown.toggleComment" => Some(Self::ToggleComment),
+            "editor.toggleListMarker" | "markdown.toggleList" => Some(Self::ToggleListMarker),
+            "editor.rotateHeading" | "markdown.insertHeading" => Some(Self::RotateHeading),
+            "editor.clientToggleFold" => Some(Self::ToggleFold),
+            "editor.toggleInlayHints" => Some(Self::ToggleInlayHints),
             _ => None,
         }
     }
@@ -559,6 +574,11 @@ impl EditorWidget {
         self.view.ui_theme()
     }
 
+    /// Cached user-owned typography for shell chrome initialization.
+    pub(crate) fn typography(&self) -> &crate::editor::typography::TypographyRegistry {
+        self.view.typography()
+    }
+
     /// Create the inert region child pod (reconciled later by `sync_region`).
     fn new_region_pod() -> WidgetPod<dyn Widget> {
         NewWidget::new(SduiRegionWidget::new()).erased().to_pod()
@@ -691,25 +711,30 @@ impl EditorWidget {
     /// Reconcile the persistent `SduiRegionWidget` child in place from the
     /// current SDUI state when it changed (plan 070 step 11c).
     pub fn sync_region(&mut self, ctx: &mut MutateCtx<'_>) {
+        self.view.request_welcome_render(ctx);
         if !self.sdui.take_region_dirty() {
             return;
         }
         let input = self.sdui.region_render_input();
-        let mut region_widget = ctx.get_mut(&mut self.region);
-        let mut region = region_widget
-            .try_downcast::<SduiRegionWidget>()
-            .expect("region child is an SduiRegionWidget");
-        match input {
-            Some(input) => {
-                region
-                    .widget
-                    .set_render_context(input.typography, input.ui_theme);
-                region
-                    .widget
-                    .reconcile_snapshot_live(&mut region.ctx, input.tree);
+        {
+            let mut region_widget = ctx.get_mut(&mut self.region);
+            let mut region = region_widget
+                .try_downcast::<SduiRegionWidget>()
+                .expect("region child is an SduiRegionWidget");
+            match input {
+                Some(input) => {
+                    region
+                        .widget
+                        .set_render_context(input.typography, input.ui_theme);
+                    region
+                        .widget
+                        .reconcile_snapshot_live(&mut region.ctx, input.tree);
+                    region.ctx.request_accessibility_update();
+                }
+                None => region.widget.clear_live(&mut region.ctx),
             }
-            None => region.widget.clear_live(&mut region.ctx),
         }
+        ctx.request_accessibility_update();
     }
 
     pub fn with_status(mut self, status: EditorStatus) -> Self {
@@ -1166,10 +1191,11 @@ impl Widget for EditorWidget {
 
     fn on_access_event(
         &mut self,
-        _ctx: &mut EventCtx<'_>,
+        ctx: &mut EventCtx<'_>,
         _props: &mut PropertiesMut<'_>,
-        _event: &AccessEvent,
+        event: &AccessEvent,
     ) {
+        self.view.handle_access_event(ctx, event);
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, props: &mut PropertiesMut<'_>, event: &Update) {
@@ -1289,6 +1315,9 @@ impl Widget for EditorWidget {
         node: &mut Node,
     ) {
         node.set_label(self.accessibility_label());
+        let text_run_id = self
+            .view
+            .populate_accessibility_text(ctx, node, ctx.widget_id());
         // The reconciled SDUI tree's accessibility flows through the region
         // child's scroll-viewport subtree. The region is ALWAYS listed, even
         // when no sidebar tree is present: Masonry's accessibility walk emits
@@ -1297,7 +1326,17 @@ impl Widget for EditorWidget {
         // task 2), and empty group children are the same convention the
         // panel/overlay hosts already follow.
         let mut children = Vec::new();
+        if let Some(text_run_id) = text_run_id {
+            children.push(text_run_id);
+        }
         if self.view.welcome_visible() {
+            let (welcome_status_id, welcome_status) = accessibility_status_node(
+                self.view.welcome_widget_id(),
+                self.view.accessibility_label(),
+            );
+            ctx.tree_update()
+                .nodes
+                .push((welcome_status_id, welcome_status));
             children.push(self.view.welcome_widget_id().into());
         }
         children.push(self.region.id().into());
@@ -1360,9 +1399,9 @@ mod tests {
     use crate::editor::EditorCommand;
     use crate::masonry_package_region::PackageOverlayHost;
     use crate::protocol::{
-        BehaviorManifest, ClientMessage, DocumentAccess, DocumentMetadata, FontRole,
-        SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
-        SduiTreeOperation, SduiTreeUpdate,
+        BehaviorManifest, ClientMessage, CommentContinuationRule, DocumentAccess, DocumentMetadata,
+        EnterRule, FontRole, SduiEditorBinding, SduiFlexDirection, SduiNode, SduiNodeId,
+        SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
     };
     use crate::shell::{
         FixedPackagePanel, FixedSlotId, FixedSlotState, PackagePanelVisibility,
@@ -1705,6 +1744,297 @@ mod tests {
     }
 
     #[test]
+    fn editor_accessibility_exposes_editable_text_value_selection_and_stable_run() {
+        use masonry::accesskit::{Action, ActionData, ActionRequest, TextPosition, TextSelection};
+
+        let root_widget = NewWidget::new(EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::Editable { lease_id: 99 },
+            1,
+        )));
+        let editor_id = root_widget.id();
+        let mut rr = RenderRoot::new(root_widget, |_| {}, render_root_options());
+        rr.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+
+        let (_, update) = rr.redraw();
+        let update = update.expect("editor access tree");
+        let editor = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == masonry::accesskit::Role::MultilineTextInput)
+            .map(|(_, node)| node)
+            .expect("editor text node");
+        assert_eq!(editor.value(), Some("server text"));
+        assert!(editor.supports_action(Action::SetTextSelection));
+        assert!(editor.supports_action(Action::ReplaceSelectedText));
+        assert!(editor.supports_action(Action::SetValue));
+        let text_run = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == masonry::accesskit::Role::TextRun)
+            .map(|(id, node)| (*id, node))
+            .expect("bounded editor text run");
+        assert_eq!(text_run.1.value(), Some("server text"));
+        assert_eq!(text_run.1.character_lengths(), &[1; 11]);
+        assert!(editor.children().contains(&text_run.0));
+        let selection = editor.text_selection().expect("editor caret selection");
+        assert_eq!(selection.anchor.node, text_run.0);
+        assert_eq!(selection.anchor.character_index, 0);
+        assert_eq!(selection.focus.character_index, 0);
+        let text_run_id = text_run.0;
+
+        rr.handle_access_event(ActionRequest {
+            action: Action::SetTextSelection,
+            target: editor_id.into(),
+            data: Some(ActionData::SetTextSelection(TextSelection {
+                anchor: TextPosition {
+                    node: text_run_id,
+                    character_index: 0,
+                },
+                focus: TextPosition {
+                    node: text_run_id,
+                    character_index: 6,
+                },
+            })),
+        });
+        let (_, update) = rr.redraw();
+        let update = update.expect("selection accessibility update");
+        let selected_editor = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == masonry::accesskit::Role::MultilineTextInput)
+            .map(|(_, node)| node)
+            .expect("selected editor text node");
+        let selection = selected_editor
+            .text_selection()
+            .expect("selected editor exposes selection");
+        assert_eq!(selection.anchor.character_index, 0);
+        assert_eq!(selection.focus.character_index, 6);
+
+        rr.handle_access_event(ActionRequest {
+            action: Action::ReplaceSelectedText,
+            target: editor_id.into(),
+            data: Some(ActionData::Value("client".to_string().into_boxed_str())),
+        });
+        let text = rr.edit_widget(editor_id, |mut widget| {
+            widget
+                .try_downcast::<EditorWidget>()
+                .expect("editor widget")
+                .widget
+                .visible_text_for_test()
+        });
+        assert_eq!(text, "client text");
+
+        rr.edit_widget(editor_id, |mut widget| {
+            let mut editor = widget
+                .try_downcast::<EditorWidget>()
+                .expect("editor widget");
+            assert!(editor.widget.view_mut().undo());
+            editor.ctx.request_render();
+            editor.ctx.request_accessibility_update();
+        });
+        let text = rr.edit_widget(editor_id, |mut widget| {
+            widget
+                .try_downcast::<EditorWidget>()
+                .expect("editor widget")
+                .widget
+                .visible_text_for_test()
+        });
+        assert_eq!(text, "server text");
+
+        let (_, update) = rr.redraw();
+        let update = update.expect("editor accessibility update");
+        let updated_run = update
+            .nodes
+            .iter()
+            .find(|(id, node)| {
+                *id == text_run_id && node.role() == masonry::accesskit::Role::TextRun
+            })
+            .expect("stable text-run node id");
+        assert_eq!(updated_run.1.value(), Some("server text"));
+    }
+
+    #[test]
+    fn read_only_editor_accessibility_omits_mutation_actions() {
+        let root_widget = NewWidget::new(EditorWidget::with_initial_state(initial_state(
+            DocumentAccess::ReadOnly,
+            1,
+        )));
+        let mut rr = RenderRoot::new(root_widget, |_| {}, render_root_options());
+        rr.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+        let (_, update) = rr.redraw();
+        let update = update.expect("read-only editor access tree");
+        let editor = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == masonry::accesskit::Role::MultilineTextInput)
+            .map(|(_, node)| node)
+            .expect("read-only editor node");
+        assert!(editor.is_read_only());
+        assert!(editor.supports_action(masonry::accesskit::Action::SetTextSelection));
+        assert!(!editor.supports_action(masonry::accesskit::Action::ReplaceSelectedText));
+        assert!(!editor.supports_action(masonry::accesskit::Action::SetValue));
+    }
+
+    #[test]
+    fn runtime_loading_tree_reaches_accessibility_after_document_open() {
+        let root_widget = NewWidget::new(EditorWidget::with_initial_state(welcome_initial_state()));
+        let chrome_id = root_widget.id();
+        let mut rr = RenderRoot::new(root_widget, |_| {}, render_root_options());
+        rr.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+        let _ = rr.redraw();
+
+        let loading_tree = SduiTree {
+            ui_version: 1,
+            root_id: SduiNodeId(1),
+            nodes: vec![
+                SduiNode::new(
+                    SduiNodeId(1),
+                    SduiNodeKind::Flex {
+                        direction: SduiFlexDirection::Column,
+                        children: vec![SduiNodeId(2), SduiNodeId(5)],
+                    },
+                ),
+                SduiNode::new(
+                    SduiNodeId(2),
+                    SduiNodeKind::Panel {
+                        title: "Loading review".to_string(),
+                        children: vec![SduiNodeId(3)],
+                    },
+                ),
+                SduiNode::new(
+                    SduiNodeId(3),
+                    SduiNodeKind::Label {
+                        text: "Loading workspace…".to_string(),
+                    },
+                ),
+                SduiNode::new(
+                    SduiNodeId(5),
+                    SduiNodeKind::EditorView {
+                        binding: SduiEditorBinding {
+                            document_id: 42,
+                            expected_version: Some(1),
+                        },
+                    },
+                ),
+            ],
+        };
+        rr.edit_widget(chrome_id, |mut widget| {
+            let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            assert!(
+                editor
+                    .widget
+                    .apply_connection_event(ClientConnectionEvent::SduiSnapshot {
+                        client_id: 11,
+                        tree: SduiTree {
+                            ui_version: 1,
+                            root_id: SduiNodeId(1),
+                            nodes: vec![
+                                SduiNode::new(
+                                    SduiNodeId(1),
+                                    SduiNodeKind::Flex {
+                                        direction: SduiFlexDirection::Row,
+                                        children: vec![SduiNodeId(2)],
+                                    },
+                                ),
+                                SduiNode::new(
+                                    SduiNodeId(2),
+                                    SduiNodeKind::EditorView {
+                                        binding: SduiEditorBinding {
+                                            document_id: 1,
+                                            expected_version: Some(1),
+                                        },
+                                    },
+                                ),
+                            ],
+                        },
+                    })
+            );
+            editor.widget.sync_region(&mut editor.ctx);
+        });
+        let _ = rr.redraw();
+
+        rr.edit_widget(chrome_id, |mut widget| {
+            let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            assert!(
+                editor
+                    .widget
+                    .apply_connection_event(ClientConnectionEvent::DocumentOpened {
+                        metadata: DocumentMetadata {
+                            document_id: 42,
+                            version: 1,
+                            access: DocumentAccess::Editable { lease_id: 42 },
+                            lease_id: Some(42),
+                            dirty: false,
+                            workspace_root_id: 77,
+                            path: "loading.txt".to_string(),
+                        },
+                        text: "Loading workspace…\\n".to_string(),
+                    })
+            );
+            let mut snapshot = runtime_snapshot(2, 11, 42);
+            snapshot.sdui_tree = loading_tree;
+            assert!(editor.widget.apply_connection_event(
+                ClientConnectionEvent::RuntimeStateSnapshot(Box::new(snapshot))
+            ));
+            editor.widget.sync_region(&mut editor.ctx);
+            editor.ctx.request_render();
+            editor.ctx.request_accessibility_update();
+        });
+
+        let (_, update) = rr.redraw();
+        let update = update.expect("loading access tree");
+        assert!(
+            update
+                .nodes
+                .iter()
+                .any(|(_, node)| { node.label() == Some("Loading review") })
+        );
+    }
+
+    #[test]
+    fn disconnected_welcome_accessibility_tracks_status_update() {
+        let root_widget = NewWidget::new(EditorWidget::with_initial_state(welcome_initial_state()));
+        let chrome_id = root_widget.id();
+        let mut rr = RenderRoot::new(root_widget, |_| {}, render_root_options());
+        rr.handle_window_event(masonry::core::WindowEvent::EnableAccessTree);
+        let (_, initial_update) = rr.redraw();
+        let _consumer = accesskit_consumer::Tree::new(
+            initial_update.expect("initial welcome access tree"),
+            false,
+        );
+
+        rr.edit_widget(chrome_id, |mut widget| {
+            let mut editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            assert!(
+                editor
+                    .widget
+                    .apply_connection_event(ClientConnectionEvent::Disconnected)
+            );
+            editor.widget.sync_region(&mut editor.ctx);
+            editor.ctx.request_render();
+            editor.ctx.request_accessibility_update();
+        });
+        let (_, update) = rr.redraw();
+        let update = update.expect("disconnected welcome access tree");
+        let welcome_status = update
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == masonry::accesskit::Role::Status
+                    && node
+                        .label()
+                        .is_some_and(|label| label.contains("Connection lost"))
+            })
+            .expect("welcome status follows disconnected connection");
+        assert!(
+            welcome_status
+                .1
+                .label()
+                .is_some_and(|label| label.contains("Connection: Disconnected"))
+        );
+    }
+
+    #[test]
     fn centered_layer_repeated_open_close_cycles_leave_no_orphan_layers() {
         let root_widget = NewWidget::new(EditorWidget::default());
         let chrome_id = root_widget.id();
@@ -1890,6 +2220,38 @@ mod tests {
             EditorClientCommand::from_command_id("editor.clientUndoCursorMove"),
             Some(EditorClientCommand::UndoCursorMove)
         );
+    }
+
+    #[test]
+    fn package_alias_ids_map_to_editor_client_commands() {
+        assert_eq!(
+            EditorClientCommand::from_command_id("editor.toggleComment"),
+            Some(EditorClientCommand::ToggleComment)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("rust.toggleLineComment"),
+            Some(EditorClientCommand::ToggleComment)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("typescript.toggleLineComment"),
+            Some(EditorClientCommand::ToggleComment)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("javascript.toggleLineComment"),
+            Some(EditorClientCommand::ToggleComment)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("markdown.toggleComment"),
+            Some(EditorClientCommand::ToggleComment)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("markdown.toggleList"),
+            Some(EditorClientCommand::ToggleListMarker)
+        );
+        assert_eq!(
+            EditorClientCommand::from_command_id("markdown.insertHeading"),
+            Some(EditorClientCommand::RotateHeading)
+        );
 
         // Dispatch moves the caret/selection on the underlying pane-1 view.
         // Text: "server text" ("server" 0..6, space 6, "text" 7..11).
@@ -1911,6 +2273,71 @@ mod tests {
         assert_eq!(
             widget.view_mut().editor_mut().selection_for_test(),
             Some((0, 11))
+        );
+    }
+
+    #[test]
+    fn package_edit_commands_use_active_manifest_transforms() {
+        fn widget_with_manifest(text: &str, manifest: BehaviorManifest) -> EditorWidget {
+            let mut widget = EditorWidget::with_initial_state(initial_state(
+                DocumentAccess::Editable { lease_id: 1 },
+                1,
+            ));
+            widget.view_mut().editor_mut().load_snapshot(
+                7,
+                1,
+                text.to_string(),
+                DocumentAccess::Editable { lease_id: 1 },
+            );
+            widget
+                .view_mut()
+                .editor_mut()
+                .install_behavior_manifest(manifest);
+            widget
+        }
+
+        for (command_id, prefix, expected) in [
+            ("rust.toggleLineComment", "//", "    //code"),
+            ("typescript.toggleLineComment", "//", "    //code"),
+            ("javascript.toggleLineComment", "//", "    //code"),
+            ("markdown.toggleComment", "<!-- ", "    <!-- code"),
+        ] {
+            let mut manifest = BehaviorManifest::core_code_editing(1);
+            manifest.editor_rules.comments = vec![CommentContinuationRule {
+                line_prefix: prefix.to_string(),
+                continue_prefix: prefix.to_string(),
+            }];
+            let mut widget = widget_with_manifest("    code", manifest);
+            let command = EditorClientCommand::from_command_id(command_id)
+                .unwrap_or_else(|| panic!("missing editor engine for {command_id}"));
+            assert!(
+                widget.apply_editor_client_command(command),
+                "{command_id} must mutate the document"
+            );
+            assert_eq!(widget.view_mut().editor_mut().visible_text(), expected);
+        }
+
+        let mut list_manifest = BehaviorManifest::minimal_text_editing(1);
+        list_manifest.editor_rules.enter = EnterRule::ContinueLineMarkers {
+            markers: vec!["-".to_string(), "ordered-dot".to_string()],
+            exit_on_empty_item: true,
+        };
+        let mut list_widget = widget_with_manifest("item", list_manifest);
+        let list_command = EditorClientCommand::from_command_id("markdown.toggleList")
+            .expect("Markdown list command must have an editor engine");
+        assert!(list_widget.apply_editor_client_command(list_command));
+        assert_eq!(list_widget.view_mut().editor_mut().visible_text(), "- item");
+
+        let mut heading_manifest = BehaviorManifest::minimal_text_editing(1);
+        heading_manifest.editor_rules.heading_prefixes =
+            vec!["# ".to_string(), "## ".to_string(), "### ".to_string()];
+        let mut heading_widget = widget_with_manifest("title", heading_manifest);
+        let heading_command = EditorClientCommand::from_command_id("markdown.insertHeading")
+            .expect("Markdown heading command must have an editor engine");
+        assert!(heading_widget.apply_editor_client_command(heading_command));
+        assert_eq!(
+            heading_widget.view_mut().editor_mut().visible_text(),
+            "# title"
         );
     }
 

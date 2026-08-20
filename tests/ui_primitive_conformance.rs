@@ -10,7 +10,7 @@ use std::fs;
 /// Strip the `mod tests` section (or, if absent, the first `#[cfg(test)]`
 /// block) from source. Preferring the `mod tests` boundary avoids truncating
 /// the scan at early `#[cfg(test)]` test-only imports/consts that live in the
-/// non-test region (e.g. `src/masonry_sdui.rs`, `src/masonry_shell.rs`).
+/// non-test region (e.g. `src/masonry_sdui.rs`, `src/masonry_shell/mod.rs`).
 fn non_test_body(src: &str) -> &str {
     if let Some(i) = src.find("\nmod tests") {
         return &src[..i];
@@ -33,12 +33,15 @@ fn shell_chrome_paint_files_source_color_from_primitives_only() {
         "src/shell/transient_menu.rs",
         "src/shell/file_browser.rs",
         "src/masonry_sdui.rs",
-        "src/masonry_shell.rs",
+        "src/masonry_shell/mod.rs",
+        // Plan 088 Task 7: retained package chrome remains on the primitive
+        // path as its containment/layout work evolves.
+        "src/masonry_package_region.rs",
         // Plan 065 task 5: editor chrome paint must source color from the
         // StyleRegistry / shell primitives, not inline literals. Size constants
         // (SCROLLBAR_*, TEXT_INSET) are pre-existing editor chrome and stay out
         // of the size guard below.
-        "src/editor/surface.rs",
+        "src/editor/surface/mod.rs",
         // Plan 065 task 6: status bar paint must source color from the
         // StyleRegistry / shell primitives, not inline literals.
         "src/masonry_editor.rs",
@@ -91,7 +94,10 @@ fn shell_chrome_paint_files_have_no_hardcoded_chrome_sizes() {
         "src/shell/transient_menu.rs",
         "src/shell/file_browser.rs",
         "src/masonry_sdui.rs",
-        "src/masonry_shell.rs",
+        "src/masonry_shell/mod.rs",
+        // Plan 088 Task 7: retained package chrome must not grow named
+        // hardcoded size constants outside the token/primitive owners.
+        "src/masonry_package_region.rs",
         // Plan 065 task 6: status bar paint lives here; guard it against
         // reintroducing hardcoded chrome-size constants.
         "src/masonry_editor.rs",
@@ -146,15 +152,15 @@ fn package_component_paint_routes_chrome_through_primitives() {
 #[test]
 fn editor_scrollbar_routes_through_primitives() {
     // Plan 063 task 5: editor scrollbar chrome routes through primitives.
-    let surface_src = fs::read_to_string("src/editor/surface.rs")
-        .expect("src/editor/surface.rs should be readable");
+    let surface_src = fs::read_to_string("src/editor/surface/mod.rs")
+        .expect("src/editor/surface/mod.rs should be readable");
     let surface_body = non_test_body(&surface_src);
 
     // Assert that editor scrollbar routes through primitives.
     assert!(
         surface_body.contains("shell::primitives::paint_scroll_chrome")
             || surface_body.contains("crate::shell::primitives::paint_scroll_chrome"),
-        "src/editor/surface.rs must route scrollbar chrome through shell::primitives::paint_scroll_chrome"
+        "src/editor/surface/mod.rs must route scrollbar chrome through shell::primitives::paint_scroll_chrome"
     );
 }
 

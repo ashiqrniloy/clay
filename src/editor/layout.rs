@@ -12,7 +12,6 @@ use crate::perf::metrics::global_recorder;
 
 use crate::protocol::FontRole;
 
-use super::surface::TEXT_INSET;
 use super::theme::TextAttributes;
 use super::typography::{DOCUMENT_LINE_HEIGHT_MULTIPLIER, TypographyRegistry};
 
@@ -22,17 +21,24 @@ pub(super) struct VisibleTextStyleRun {
     pub font_role: FontRole,
     pub attributes: TextAttributes,
     pub color: Option<Color>,
+    pub background: Option<Color>,
+    pub scale: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VisualLayoutMetrics {
     pub visual_line_count: usize,
     pub height: f32,
+    pub width: f32,
 }
 
 impl VisualLayoutMetrics {
     pub fn max_scroll_y(self, available_height: f64) -> f64 {
         (self.height as f64 - available_height.max(0.0)).max(0.0)
+    }
+
+    pub fn max_scroll_x(self, available_width: f64) -> f64 {
+        (self.width as f64 - available_width.max(0.0)).max(0.0)
     }
 }
 
@@ -53,6 +59,25 @@ pub struct CaretCell {
 }
 
 const CARET_WIDTH: f32 = 1.5;
+const INDENT_GUIDE_WIDTH: f64 = 1.0;
+
+/// Pane geometry for one paint pass.
+pub(super) struct TextFrame {
+    pub inset_x: f64,
+    pub inset_y: f64,
+    pub scroll_x: f64,
+    pub clip_width: f64,
+}
+
+/// Optional editor-chrome underlays painted before glyphs.
+pub(super) struct TextChromeLayers<'a> {
+    pub active_line_offsets: &'a [usize],
+    pub active_line_color: Color,
+    pub bracket_ranges: &'a [Range<usize>],
+    pub bracket_color: Color,
+    pub indent_tab: Option<u8>,
+    pub indent_color: Color,
+}
 
 // Clay-owned squiggle geometry — themes supply color only.
 const SQUIGGLE_AMPLITUDE: f64 = 1.5;
@@ -74,6 +99,7 @@ pub struct LayoutCacheKey {
     /// explicit so the cache invariant is self-documenting and a future per-mode
     /// override would not need to re-architect the key.
     ligature_hash: u64,
+    fold_revision: u64,
 }
 
 impl LayoutCacheKey {
@@ -86,7 +112,13 @@ impl LayoutCacheKey {
             layout_style_revision: 0,
             document_font_role: FontRole::Proportional,
             ligature_hash: 0,
+            fold_revision: 0,
         }
+    }
+
+    pub fn with_fold_revision(mut self, fold_revision: u64) -> Self {
+        self.fold_revision = fold_revision;
+        self
     }
 
     pub fn with_presentation(
@@ -159,6 +191,8 @@ impl LayoutState {
         pin_caret_visible: bool,
         typography: &TypographyRegistry,
         document_font_role: FontRole,
+        frame: TextFrame,
+        chrome: TextChromeLayers<'_>,
         normalize_style_runs: F,
     ) -> VisualLayoutMetrics
     where
@@ -203,21 +237,76 @@ impl LayoutState {
         }
 
         let clip = Rect::new(
-            origin.0 + TEXT_INSET,
-            origin.1 + TEXT_INSET,
-            origin.0 + TEXT_INSET + max_width as f64,
-            origin.1 + TEXT_INSET + available_height,
+            origin.0 + frame.inset_x,
+            origin.1 + frame.inset_y,
+            origin.0 + frame.inset_x + frame.clip_width,
+            origin.1 + frame.inset_y + available_height,
         );
         scene.push_clip_layer(Affine::IDENTITY, &clip);
+        for &offset in chrome.active_line_offsets {
+            if let Some(cell) =
+                Self::caret_geometry_in_layout(&cached.layout, cached.text_len, offset)
+            {
+                let rect = Rect::new(
+                    clip.x0,
+                    origin.1 + cell.rect.y0 + frame.inset_y - *scroll_y,
+                    clip.x1,
+                    origin.1 + cell.rect.y1 + frame.inset_y - *scroll_y,
+                );
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    chrome.active_line_color,
+                    None,
+                    &rect,
+                );
+            }
+        }
+        if let Some(tab) = chrome.indent_tab {
+            for (x, y0, y1) in indent_guide_segments(display_text, tab, &cached.layout) {
+                let rect = Rect::new(
+                    origin.0 + x + frame.inset_x - frame.scroll_x,
+                    origin.1 + y0 + frame.inset_y - *scroll_y,
+                    origin.0 + x + frame.inset_x - frame.scroll_x + INDENT_GUIDE_WIDTH,
+                    origin.1 + y1 + frame.inset_y - *scroll_y,
+                );
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    chrome.indent_color,
+                    None,
+                    &rect,
+                );
+            }
+        }
+        for range in chrome.bracket_ranges {
+            for rect in
+                Self::selection_rects_in_layout(&cached.layout, cached.text_len, range.clone())
+            {
+                let rect = Rect::new(
+                    origin.0 + rect.x0 + frame.inset_x - frame.scroll_x,
+                    origin.1 + rect.y0 + frame.inset_y - *scroll_y,
+                    origin.0 + rect.x1 + frame.inset_x - frame.scroll_x,
+                    origin.1 + rect.y1 + frame.inset_y - *scroll_y,
+                );
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    chrome.bracket_color,
+                    None,
+                    &rect,
+                );
+            }
+        }
         for range in selection_visible_byte_ranges {
             for rect in
                 Self::selection_rects_in_layout(&cached.layout, cached.text_len, range.clone())
             {
                 let rect = Rect::new(
-                    origin.0 + rect.x0 + TEXT_INSET,
-                    origin.1 + rect.y0 + TEXT_INSET - *scroll_y,
-                    origin.0 + rect.x1 + TEXT_INSET,
-                    origin.1 + rect.y1 + TEXT_INSET - *scroll_y,
+                    origin.0 + rect.x0 + frame.inset_x - frame.scroll_x,
+                    origin.1 + rect.y0 + frame.inset_y - *scroll_y,
+                    origin.0 + rect.x1 + frame.inset_x - frame.scroll_x,
+                    origin.1 + rect.y1 + frame.inset_y - *scroll_y,
                 );
                 scene.fill(
                     Fill::NonZero,
@@ -228,9 +317,28 @@ impl LayoutState {
                 );
             }
         }
+        for run in &cached.style_runs {
+            let Some(background) = run.background else {
+                continue;
+            };
+            for rect in
+                Self::selection_rects_in_layout(&cached.layout, cached.text_len, run.range.clone())
+            {
+                let rect = Rect::new(
+                    origin.0 + rect.x0 + frame.inset_x - frame.scroll_x,
+                    origin.1 + rect.y0 + frame.inset_y - *scroll_y,
+                    origin.0 + rect.x1 + frame.inset_x - frame.scroll_x,
+                    origin.1 + rect.y1 + frame.inset_y - *scroll_y,
+                );
+                scene.fill(Fill::NonZero, Affine::IDENTITY, background, None, &rect);
+            }
+        }
         render_text(
             scene,
-            Affine::translate((origin.0 + TEXT_INSET, origin.1 + TEXT_INSET - *scroll_y)),
+            Affine::translate((
+                origin.0 + frame.inset_x - frame.scroll_x,
+                origin.1 + frame.inset_y - *scroll_y,
+            )),
             &cached.layout,
             &cached.brushes,
             true,
@@ -242,10 +350,10 @@ impl LayoutState {
                 range.clone(),
             ) {
                 let rect = Rect::new(
-                    origin.0 + rect.x0 + TEXT_INSET,
-                    origin.1 + rect.y0 + TEXT_INSET - *scroll_y,
-                    origin.0 + rect.x1 + TEXT_INSET,
-                    origin.1 + rect.y1 + TEXT_INSET - *scroll_y,
+                    origin.0 + rect.x0 + frame.inset_x - frame.scroll_x,
+                    origin.1 + rect.y0 + frame.inset_y - *scroll_y,
+                    origin.0 + rect.x1 + frame.inset_x - frame.scroll_x,
+                    origin.1 + rect.y1 + frame.inset_y - *scroll_y,
                 );
                 Self::paint_squiggle(scene, rect, *diagnostic_color);
             }
@@ -353,6 +461,12 @@ impl LayoutState {
             .unwrap_or_default()
     }
 
+    pub fn line_vertical_span(&self, byte_offset: usize) -> Option<(f64, f64)> {
+        let cached = self.cached.as_ref()?;
+        Self::caret_geometry_in_layout(&cached.layout, cached.text_len, byte_offset)
+            .map(|caret| (caret.rect.y0, caret.rect.y1))
+    }
+
     fn paint_squiggle(scene: &mut masonry::vello::Scene, rect: Rect, color: Color) {
         if rect.width() <= 0.0 || rect.height() <= 0.0 {
             return;
@@ -418,6 +532,7 @@ impl LayoutState {
         VisualLayoutMetrics {
             visual_line_count: layout.len(),
             height: layout.height(),
+            width: layout.full_width(),
         }
     }
 
@@ -453,7 +568,10 @@ impl LayoutState {
                 StyleProperty::FontStack(profile.font_stack()),
                 run.range.clone(),
             );
-            builder.push(StyleProperty::FontSize(profile.size()), run.range.clone());
+            builder.push(
+                StyleProperty::FontSize(profile.size() * run.scale),
+                run.range.clone(),
+            );
             builder.push(
                 StyleProperty::FontFeatures(profile.font_features()),
                 run.range.clone(),
@@ -492,12 +610,9 @@ impl LayoutState {
         }
 
         let mut layout = builder.build(display_text);
-        layout.break_all_lines(Some(max_width));
-        layout.align(
-            Some(max_width),
-            TextAlign::Start,
-            TextAlignOptions::default(),
-        );
+        let wrap_width = wrap_width_for_layout(max_width);
+        layout.break_all_lines(wrap_width);
+        layout.align(wrap_width, TextAlign::Start, TextAlignOptions::default());
 
         self.cached = Some(CachedLayout {
             key,
@@ -544,7 +659,10 @@ impl LayoutState {
                 StyleProperty::FontStack(profile.font_stack()),
                 run.range.clone(),
             );
-            builder.push(StyleProperty::FontSize(profile.size()), run.range.clone());
+            builder.push(
+                StyleProperty::FontSize(profile.size() * run.scale),
+                run.range.clone(),
+            );
             builder.push(
                 StyleProperty::FontFeatures(profile.font_features()),
                 run.range.clone(),
@@ -558,12 +676,9 @@ impl LayoutState {
         }
 
         let mut layout = builder.build(display_text);
-        layout.break_all_lines(Some(max_width));
-        layout.align(
-            Some(max_width),
-            TextAlign::Start,
-            TextAlignOptions::default(),
-        );
+        let wrap_width = wrap_width_for_layout(max_width);
+        layout.break_all_lines(wrap_width);
+        layout.align(wrap_width, TextAlign::Start, TextAlignOptions::default());
         layout
     }
 
@@ -611,6 +726,53 @@ impl LayoutState {
             brushes: Vec::new(),
         });
     }
+}
+
+fn wrap_width_for_layout(max_width: f32) -> Option<f32> {
+    (max_width.is_finite() && max_width < 1.0e6).then_some(max_width)
+}
+
+fn indent_columns(line: &str, tab: usize) -> usize {
+    let mut cols = 0;
+    for character in line.chars() {
+        match character {
+            ' ' => cols += 1,
+            '\t' => cols += tab - (cols % tab),
+            _ => break,
+        }
+    }
+    cols
+}
+
+fn column_to_byte(line: &str, column: usize, tab: usize) -> usize {
+    let mut cols = 0;
+    for (index, character) in line.char_indices() {
+        if cols >= column {
+            return index;
+        }
+        match character {
+            '\t' => cols += tab - (cols % tab),
+            _ => cols += 1,
+        }
+    }
+    line.len()
+}
+
+fn indent_guide_segments(text: &str, tab: u8, layout: &Layout<BrushIndex>) -> Vec<(f64, f64, f64)> {
+    let tab = usize::from(tab.max(1));
+    let mut byte = 0;
+    let mut out = Vec::new();
+    for line in text.split('\n') {
+        let cols = indent_columns(line, tab);
+        for column in (tab..=cols).step_by(tab) {
+            let offset = (byte + column_to_byte(line, column, tab)).min(text.len());
+            let cursor = Cursor::from_byte_index(layout, offset, Affinity::Downstream);
+            let geometry = cursor.geometry(layout, CARET_WIDTH);
+            out.push((geometry.x0, geometry.y0, geometry.y1));
+        }
+        byte = byte.saturating_add(line.len()).saturating_add(1);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -741,12 +903,44 @@ mod tests {
                 font_role: FontRole::Monospace,
                 attributes: TextAttributes::default(),
                 color: None,
+                background: None,
+                scale: 1.0,
             }],
         );
 
         assert!(
             layout.get(0).unwrap().metrics().line_height
                 >= typography.document_line_height() as f32
+        );
+    }
+
+    #[test]
+    fn heading_scale_increases_parley_line_height() {
+        let typography = TypographyRegistry::default();
+        let body = LayoutState::build_layout_with_typography_for_test(
+            "# Title",
+            300.0,
+            &typography,
+            FontRole::Proportional,
+            &[],
+        );
+        let heading = LayoutState::build_layout_with_typography_for_test(
+            "# Title",
+            300.0,
+            &typography,
+            FontRole::Proportional,
+            &[VisibleTextStyleRun {
+                range: 0..7,
+                font_role: FontRole::Proportional,
+                attributes: TextAttributes::default(),
+                color: None,
+                background: None,
+                scale: 1.5,
+            }],
+        );
+        assert!(
+            heading.get(0).unwrap().metrics().line_height
+                > body.get(0).unwrap().metrics().line_height + 1.0
         );
     }
 
@@ -763,6 +957,8 @@ mod tests {
                 font_role: FontRole::Monospace,
                 attributes: TextAttributes::default(),
                 color: Some(masonry::peniko::color::palette::css::RED),
+                background: None,
+                scale: 1.0,
             }],
         );
 
@@ -800,10 +996,13 @@ mod tests {
         let metrics = VisualLayoutMetrics {
             visual_line_count: 3,
             height: 84.0,
+            width: 200.0,
         };
 
         assert_eq!(metrics.max_scroll_y(56.0), 28.0);
         assert_eq!(metrics.max_scroll_y(100.0), 0.0);
+        assert_eq!(metrics.max_scroll_x(120.0), 80.0);
+        assert_eq!(metrics.max_scroll_x(400.0), 0.0);
     }
 
     #[test]
@@ -888,5 +1087,32 @@ mod tests {
         let zero = LayoutState::diagnostic_mark_rects_in_layout(&layout, text.len(), 10..10);
         assert_eq!(zero.len(), 1);
         assert!(zero[0].width() >= super::SQUIGGLE_PERIOD);
+    }
+
+    #[test]
+    fn style_run_backgrounds_paint_before_glyphs() {
+        let body = include_str!("layout.rs");
+        let background = body
+            .find("for run in &cached.style_runs")
+            .expect("background fill loop");
+        let glyphs = background
+            + body[background..]
+                .find("render_text(")
+                .expect("glyph paint after fills");
+        assert!(
+            background < glyphs,
+            "run backgrounds must fill before render_text"
+        );
+    }
+
+    #[test]
+    fn chrome_underlays_paint_before_glyphs() {
+        let source = include_str!("layout.rs");
+        let body = source.split("fn paint_text").nth(1).expect("paint_text");
+        let active = body.find("active_line_offsets").expect("active line");
+        let indent = body.find("indent_tab").expect("indent guides");
+        let brackets = body.find("bracket_ranges").expect("bracket match");
+        let glyphs = body.find("render_text(").expect("glyphs");
+        assert!(active < glyphs && indent < glyphs && brackets < glyphs);
     }
 }

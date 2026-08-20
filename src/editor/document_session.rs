@@ -94,6 +94,19 @@ impl DocumentSessionStore {
         self.evict_if_needed()
     }
 
+    pub(crate) fn document_id_for_path(
+        &self,
+        workspace_root_id: WorkspaceRootId,
+        path: &str,
+    ) -> Option<DocumentId> {
+        let normalized = path.replace('\\', "/");
+        self.sessions.iter().find_map(|(&document_id, session)| {
+            (session.workspace_root_id == workspace_root_id
+                && session.path.replace('\\', "/") == normalized)
+                .then_some(document_id)
+        })
+    }
+
     /// Phase 22.3: the open identities of every retained session, for a
     /// reconnecting tab to re-open (root id + relative path).
     pub(crate) fn reopen_documents(&self) -> Vec<(WorkspaceRootId, String)> {

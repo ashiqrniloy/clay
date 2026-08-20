@@ -8,14 +8,6 @@ use clay::packages::{
 };
 use clay::protocol::language_intelligence::LanguageIntelligenceFeature;
 
-const SHARED_FILES: &[&str] = &[
-    "utf8.js",
-    "framing.js",
-    "positions.js",
-    "mapping.js",
-    "client.js",
-    "typescript-language-server.js",
-];
 const BRIDGE_PACKAGES: &[&str] = &[
     "lsp-rust",
     "lsp-typescript",
@@ -25,6 +17,8 @@ const BRIDGE_PACKAGES: &[&str] = &[
 
 fn run_node(arguments: &[&str]) {
     let output = Command::new("node")
+        .arg("--import")
+        .arg("./tests/fixtures/lsp/register-lsp-shared.mjs")
         .args(arguments)
         .output()
         .expect("Node.js is required for package adapter tests");
@@ -223,13 +217,11 @@ fn typescript_javascript_bridge_manifests_are_fixed_opt_in_mode_separated_and_lo
         let load = fs::read_to_string(format!("packages/{package}/dist/load.js")).unwrap();
         assert!(load.contains("serverRegisterDocumentAnalyzer"));
         assert!(!load.contains("authorizeLanguageServer"));
-        let shared_policy = fs::read_to_string(format!(
-            "packages/{package}/dist/shared/typescript-language-server.js"
-        ))
-        .unwrap();
-        let canonical =
-            fs::read_to_string("packages/lsp-shared/typescript-language-server.js").unwrap();
-        assert_eq!(shared_policy, canonical);
+        let server = fs::read_to_string(format!("packages/{package}/dist/server.js")).unwrap();
+        assert!(
+            server.contains("from \"lsp-shared/typescript-language-server.js\""),
+            "{package} must import the inventory helper, not a vendored copy"
+        );
         for file in fixture_files {
             assert!(
                 Path::new(fixture_root).join(file).is_file(),
@@ -290,25 +282,16 @@ fn rust_bridge_manifest_is_fixed_opt_in_and_load_tolerates_missing_grant() {
 }
 
 #[test]
-fn first_party_shared_adapter_copies_are_fresh() {
+fn first_party_packages_do_not_vendor_helper_modules() {
     for package in BRIDGE_PACKAGES {
-        for file in SHARED_FILES {
-            let canonical = fs::read(Path::new("packages/lsp-shared").join(file))
-                .unwrap_or_else(|error| panic!("failed to read canonical {file}: {error}"));
-            let target = Path::new("packages")
-                .join(package)
-                .join("dist/shared")
-                .join(file);
-            assert_eq!(
-                fs::read(&target)
-                    .unwrap_or_else(|error| panic!("failed to read {}: {error}", target.display())),
-                canonical,
-                "{} is stale; run node scripts/update-first-party-lsp-shared.mjs",
-                target.display(),
-            );
-        }
+        let shared = Path::new("packages").join(package).join("dist/shared");
+        assert!(
+            !shared.exists(),
+            "{} must not vendor lsp-shared; import inventory specifiers instead",
+            shared.display()
+        );
     }
-    run_node(&["scripts/update-first-party-lsp-shared.mjs", "--check"]);
+    assert!(!Path::new("scripts/update-first-party-lsp-shared.mjs").exists());
 }
 
 #[test]
@@ -324,7 +307,12 @@ fn rust_core_remains_lsp_wire_neutral() {
     ];
     for path in [
         "src/server/document_analysis.rs",
-        "src/server/connection.rs",
+        "src/server/connection/mod.rs",
+        "src/server/connection/documents.rs",
+        "src/server/connection/runtime.rs",
+        "src/server/connection/workspace.rs",
+        "src/server/connection/tabs.rs",
+        "src/server/connection/menus.rs",
         "src/server/language_server.rs",
         "src/server/language_intelligence.rs",
         "src/server/completion.rs",

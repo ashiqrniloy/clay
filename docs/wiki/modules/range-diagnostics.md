@@ -9,11 +9,12 @@
 - `src/server/ops/diagnostics.rs` — `op_clay_diagnostics_publish_diagnostics`.
 - `src/server/parse_coordinator.rs` — side-channel validation and `next_update` / `next_diagnostic` delivery.
 - `src/server/syntax.rs` — native highlighting deliberately leaves `diagnostic_update` empty.
-- `src/server/connection.rs` — connection `select!` drains parse decorations + diagnostic sets.
+- `src/server/connection/mod.rs` — connection `select!` drains parse decorations + diagnostic sets.
 - `src/server/ops/mod.rs` — `ClayOpState::published_diagnostic_set` / `publish_diagnostic_set`.
 - `src/client/mod.rs` — `ClientConnectionEvent::DiagnosticSet`.
 - `src/masonry_editor.rs` — `apply_diagnostic_set` vs status-level `RuntimeDiagnostic`.
-- `src/editor/surface.rs` — `EditorDiagnosticState`, `apply_diagnostic_set`, `visible_diagnostic_ranges`.
+- `src/editor/surface/diagnostic.rs` — `EditorDiagnosticState`.
+- `src/editor/surface/mod.rs` — `apply_diagnostic_set`, `visible_diagnostic_ranges`.
 - `src/editor/layout.rs` — `paint_squiggle`, `diagnostic_mark_rects_in_layout`.
 - `src/editor/theme.rs` — `StyleRegistry::diagnostic_style`, severity colors.
 - `src/perf/budgets.rs` — `DIAGNOSTIC_*` budgets.

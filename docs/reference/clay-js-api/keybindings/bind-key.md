@@ -203,6 +203,21 @@ Phase 19 runtime reload note: `runtime.reloadConfiguration` is a fixed built-in 
 
 Shifted character matching note: character-key chords match case-insensitively at route time. The chord parser stores the manifest character as lowercase (for example `Ctrl+Shift+O` stores `"o"`), and the client compares modifier sets exactly but character keys case-insensitively, so a Linux/GNOME key event reporting uppercase `"O"` (because Shift is held) still routes to the bound command. Unbound shifted printable input (for example `Shift+1`) still inserts its shifted text (`!`) into the editor. Modifier sets (`Ctrl`, `Alt`, `Shift`, `Super`) must match exactly.
 
+## Phase 28 editor commands
+
+These built-in editor command IDs are valid `bindKey` targets:
+
+- `editor.toggleComment` — default `Ctrl+/`; uses the active mode's comment rule.
+- `editor.toggleListMarker` and `editor.rotateHeading` — no core default chord; use manifest-declared prose prefixes.
+- `editor.clientToggleFold` — no core default chord; toggles the caret's validated fold locally.
+- `editor.toggleInlayHints` — no core default chord; toggles the client-local inlay visibility override.
+
+Use the corresponding `clay:editor` command-ID helper when possible. These
+routes do not add package options, execute JavaScript on keypress, or grant
+filesystem, network, shell, package enable/disable, or rendering authority.
+Wrapping remains `editor.clientSetEditorLayout`; chrome and inlay defaults
+remain behavior-manifest data.
+
 ## Options
 
 - `key` (`string`): Key chord or space-separated multi-stroke sequence, for example `"Ctrl+I"` or `"Ctrl+X Ctrl+P"`.

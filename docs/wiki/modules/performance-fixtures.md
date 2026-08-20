@@ -2,13 +2,13 @@
 
 ## Scope
 
-Covers `src/perf/mod.rs`, `src/perf/fixtures.rs`, `src/perf/baselines.rs`, `src/perf/metrics.rs`, the `clay perf-fixture` and `--profile-perf` CLI paths in `src/main.rs`, profiling hooks in editor/layout/SDUI/client/server/protocol/runtime modules, `benches/editor_baselines.rs`, `benches/protocol_server_baselines.rs`, `benches/runtime_sdui_baselines.rs`, `benches/markdown_baselines.rs`, `tests/perf_fixtures.rs`, and the developer guide at `docs/development/performance.md`.
+Covers `src/perf/mod.rs`, `src/perf/fixtures.rs`, `src/perf/baselines.rs`, `src/perf/metrics.rs`, the `clay perf-fixture` and `--profile-perf` CLI paths in `src/cli.rs`, profiling hooks in editor/layout/SDUI/client/server/protocol/runtime modules, `benches/editor_baselines.rs`, `benches/protocol_server_baselines.rs`, `benches/runtime_sdui_baselines.rs`, `benches/markdown_baselines.rs`, `benches/first_party_language_baselines.rs`, `benches/window_baselines.rs`, the conformance/performance suites under `tests/`, and the developer guide at `docs/development/performance.md`.
 
 ## Responsibilities
 
 The performance fixture module generates deterministic large UTF-8 plain-text files for Phase 14 benchmarks, targeted tests, and manual smoke preparation. It provides reusable Rust helpers plus a developer-only CLI command so large files can be reproduced locally instead of committed to the repository.
 
-The baseline module exposes internal, non-user-facing helpers for Criterion targets. These helpers assemble deterministic editor surfaces, protocol messages, server documents, behavior manifests, and SDUI trees so benchmark files measure production paths without duplicating fixture or protocol construction logic.
+The baseline module exposes internal, non-user-facing helpers for Criterion targets. These helpers assemble deterministic editor surfaces, protocol messages, server documents, behavior manifests, and SDUI trees so benchmark files measure production paths without duplicating fixture or protocol construction logic. Plan 088 adds `responsive_layout_work`, which drives the production SDUI sidebar/editor slot decision across pane widths and UI typography without exposing document text or user paths.
 
 The metrics module provides Clay-owned, low-overhead profiling primitives for Phase 14. `PerfConfig` centralizes activation from `CLAY_PERF_PROFILE=1`, the developer-only `--profile-perf` flag, or test helpers. `PerfRecorder` is no-op by default, and enabled recorders collect typed `MetricSnapshot` values for durations, counters, gauges, and byte counts.
 
@@ -38,7 +38,7 @@ Current hooks cover:
 - Client edit queue enqueue duration, pending depth, enqueue failures, and acknowledgement application metadata in `src/client/mod.rs`.
 - Protocol encode/decode duration, payload byte counts, and oversized-frame counters in `src/protocol/codec.rs`.
 - Server document edit acknowledgement duration/counters in `src/server/document.rs`.
-- Server-side JavaScript runtime/configuration evaluation duration in `src/server/js_runtime.rs`.
+- Server-side JavaScript runtime/configuration evaluation duration in `src/server/js_runtime/mod.rs`.
 
 Metric metadata is numeric and sanitized: document/client/version/transaction IDs are allowed, while document text, file contents, JavaScript source bodies, secrets, and absolute user paths are not recorded. Path metadata uses `sanitize_path`, which redacts parent directories and keeps only a basename marker for diagnostics.
 
@@ -48,6 +48,7 @@ Metric metadata is numeric and sanitized: document/client/version/transaction ID
 
 - `editor_visible_extraction`, `editor_editing`, and `editor_scroll_viewport` use `EditorSurface` and generated fixtures for buffer, visible extraction, edit, and scroll-adjacent measurements.
 - `editor_typography_viewport_bounds` runs the same small/large fixtures with 10 px and 40 px document profiles, preserving a local regression check that configured typography changes only the bounded viewport window rather than triggering full-document work. Deterministic verification also exercises 500 mixed-role visible spans/1,000 normalized boundaries and statically excludes JavaScript, IPC, filesystem, network, shell, and font-discovery work from editor/SDUI hot paths.
+- `responsive_layout_baselines` measures the production SDUI sidebar/editor slot decision at narrow, normal, wide, and large-UI-typography inputs. Its returned flags are sanitized layout facts; timings remain local/advisory while the typed bounds matrix is blocking.
 - `protocol_codec_payloads` and `server_document_acknowledgements` use the production `Codec` and in-process `DocumentState` acknowledgement logic for deterministic IPC/server baselines.
 - `runtime_configuration_baselines` and `sdui_application_baselines` cover deterministic behavior-manifest creation plus native SDUI snapshot/update and codec paths.
 - `markdown_activation_baselines`, `markdown_parse_and_decoration_baselines`, and `markdown_decorated_editor_baselines` cover first-party Markdown package activation, representative parse/decorations validation, and native decorated-editor render-adjacent work.
@@ -69,6 +70,39 @@ node --expose-gc tools/bench/markdown-parser.mjs --sizes 64KiB,256KiB,1MiB,5MiB,
 ```
 
 Local results showed `windowed-adapter` parsing exactly a 64 KiB window for medium/large corpora and keeping `markdown_overhead` under budget: 3.64 MiB at 5 MiB and 3.64 MiB at 16 MiB. The same run marked full-document `markdown-it` and `adapter` rows as `hotPathAllowed=false` for 5 MiB and 16 MiB; the 16 MiB full adapter advisory row reported 2356.308 ms and 750.48 MiB Markdown overhead, while the status/fallback check took 0.260 ms, confirming that full-document adapter work must not return to ordinary open/edit/scroll paths.
+
+## Plan 088 window and responsive baselines
+
+`benches/window_baselines.rs` keeps ten fixed-input Criterion groups advisory: pane paint, tab switch, responsive layout, centered overlay, completion open/filter/layout/selection, Command Centre open, and retained accessibility-tree update. The pure helpers in `src/perf/baselines.rs` measure bounded geometry/projection work rather than launching UI, serializing documents, or invoking package code. `responsive_layout_work(width, ui_size)` is the blocking layout fact: it records whether the sidebar, editor, and usable-main-width constraints hold at representative 320/900/1200 logical widths and 12/24/96 UI sizes. `AccessibilityTreeBench` constructs the retained shell once, then times label updates that reuse owner/client-derived virtual IDs.
+
+The promotion boundary is deliberate. `tests/editor_performance_invariants.rs::responsive_layout_work_preserves_sidebar_and_editor_bounds`, `accessibility_updates_reuse_stable_virtual_ids_without_allocator_churn`, and `retained_accessibility_update_fixture_stays_bounded` plus the source hot-path guards are blocking; Criterion medians and regression comparisons are machine-local advisory evidence. A benchmark comparison warning does not turn into a CI failure or justify weakening a layout invariant. All benchmark helpers remain `doc(hidden)`/internal and are not Clay JS APIs.
+
+### Plan 089 cost guards
+
+The existing `editor_baselines` `editor_render_adjacent` group remains the
+local typing/paint proxy; `protocol_server_baselines` retains edit queue and
+acknowledgement groups, and `runtime_sdui_baselines` retains configuration and
+SDUI groups. The new `window_baselines` groups are:
+
+- `command_centre_open_baselines`: bounded 16/60/256 catalogue projection;
+- `completion_selection_baselines`: selected-row projection at 1/8/60/256
+  items;
+- `accessibility_tree_update_baselines`: retained shell label updates at
+  2/4/8/16 tabs after initial tree construction.
+
+`completion_filter_baselines` is the shared fuzzy-filter measurement for both
+completion and Command Centre queries. Run the fixed-input set with:
+
+```text
+cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
+`AccessibilityTreeBench::update` mutates labels while preserving virtual IDs
+based on retained owner/client slots. The deterministic editor invariants
+reject `WidgetId::next()` in virtual-ID construction and cap the retained
+update fixture; existing `accesskit_consumer` shell tests validate reachable
+incremental trees. Criterion timing remains advisory; no budget is raised from
+the broad local after-run shifts recorded in `docs/development/performance.md`.
 
 ## Security and Authority Boundaries
 
@@ -112,10 +146,12 @@ Security guardrails: profiling/benchmark workflows must not expose document cont
 
 ## Tests
 
-- `cargo test --test protocol performance_budgets::`: verifies benchmark command discoverability, budget constant/doc alignment, constant values (compile-time guard), developer-only profiling policy, active Markdown benchmark documentation, Phase 18 markdown-it rewrite decision/performance evidence in the plan/docs, and structural UI observability documentation.
+- `cargo test --test protocol performance_budgets::`: verifies benchmark command discoverability, budget constant/doc alignment, constant values (compile-time guard), developer-only profiling policy, active Markdown benchmark documentation, Phase 18 markdown-it rewrite decision/performance evidence in the plan/docs, structural UI observability documentation, and Plan 088 responsive layout coverage.
 - `cargo test --test protocol performance_protocol::`: deterministic payload-size budgets, client-first typing invariants, queue depth/responsiveness, and oversized-frame rejection.
-- `cargo test --test editor editor_performance_invariants::`: viewport-bounded extraction, scroll layout stability, layout cache invalidation, and Unicode safety.
-- `cargo bench --no-run`: compiles all Criterion targets, including `markdown_baselines`, without machine-variant timing.
+- `cargo test --test editor editor_performance_invariants::`: viewport-bounded extraction, scroll layout stability, responsive sidebar/editor bounds, layout cache invalidation, hot-path boundaries, and Unicode safety.
+- `cargo test --test editor package_ui_conformance::` and `cargo test --test editor ui_primitive_conformance::`: blocking theme, catalog/token drift, state, primitive, and package-chrome conformance checks.
+- `cargo bench --bench window_baselines responsive_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2`: local responsive layout timing signal.
+- `cargo bench --no-run`: compiles all Criterion targets, including `window_baselines`, without machine-variant timing.
 
 ## Related
 

@@ -182,6 +182,7 @@ fn markdown_parse_update(document_version: u64) -> IncrementalParseUpdate {
         syntax_tree_delta: Some("decorations:viewport-spans=5".to_string()),
         decoration_updates: vec![markdown_decoration_set(document_version, 160)],
         diagnostic_update: None,
+        folding_update: None,
     }
 }
 

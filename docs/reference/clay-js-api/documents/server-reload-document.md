@@ -99,7 +99,7 @@ Use `documents.serverReloadDocument` only through the documented Clay JS facade.
 - JS facade: `runtime/js/documents.js::serverReloadDocument`
 - Deno op: `src/server/ops/documents.rs::op_clay_documents_reload_document` (`op_clay_documents_reload_document`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::reload_document`
-- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
+- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection/mod.rs`, and `src/server/workspace.rs`
 
 ## Lookup metadata
 

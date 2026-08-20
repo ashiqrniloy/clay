@@ -1,3 +1,5 @@
+#[path = "../decoration_intent_authority.rs"]
+mod decoration_intent_authority;
 #[path = "../language_server_authority.rs"]
 mod language_server_authority;
 #[path = "../live_atspi_smoke.rs"]

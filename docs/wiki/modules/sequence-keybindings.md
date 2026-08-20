@@ -16,7 +16,7 @@ Rust capability was added (pinned by
   serialization)
 - `src/client/behavior.rs` — `ClientBehaviorState::route_key_sequence` (pure
   matcher), `ChordRouteOutcome`, `route_key` (single-stroke wrapper)
-- `src/editor/surface.rs` — `PendingChord` (mutable pending-chord state),
+- `src/editor/surface/command.rs` — `PendingChord` (mutable pending-chord state),
   the state machine inside `route_key_with_event`, `EditorKeyOutcome::consumed`
 - `src/masonry_pane_document.rs` — `local_key`: consumed-key handling and
   modal-menu containment order
@@ -78,12 +78,12 @@ green.
 ## Pending-chord state machine
 
 `PendingChord { strokes: Vec<KeyStroke>, started_at: std::time::Instant }`
-(`src/editor/surface.rs:219`) lives in `EditorSurface` because it is
+(`src/editor/surface/mod.rs:219`) lives in `EditorSurface` because it is
 mutable routing state that must survive across keystrokes, while
 `ClientBehaviorState::new` is reconstructed per keystroke from the manifest.
 It holds only already-validated strokes from the incoming event stream.
 
-Inside `route_key_with_event` (`src/editor/surface.rs`), after the Tab /
+Inside `route_key_with_event` (`src/editor/surface/mod.rs`), after the Tab /
 Escape special cases:
 
 - **Stale check:** if the pending chord's `started_at` is older than
@@ -101,7 +101,10 @@ The buffer grows one stroke per Pending outcome and is bounded by the
 longest bound sequence (`pending_chord_buffer_grows_one_stroke_per_pending_outcome`
 in `tests/editor_performance_invariants.rs`,
 `editor_pending_chord_buffer_never_exceeds_longest_bound_sequence` in
-`src/editor/surface.rs`).
+`src/editor/surface/mod.rs`). Plan 089 adds a compact deterministic state-machine
+sweep: 128 fixed cases cover complete two-/three-stroke sequences, mismatch
+re-evaluation, and stale-timeout re-evaluation, asserting that every case
+clears pending state and never swallows more than its intended fallback text.
 
 **Why the consumed flag:** `finish_local_outcome` marks a key handled only
 when the outcome `changed`, so an unhandled pending stroke would bubble to
@@ -157,7 +160,7 @@ single-stroke default uses, and diverge at the second stroke
 The built-in browse grant (path-mode traversal outside workspace roots,
 `controlCenter.openPath`) remains reachable only from the user-driven
 built-in path-mode surface: `open_command_centre_session` has exactly two
-call sites, both in `src/server/connection.rs` (command-intent dispatch and
+call sites, both in `src/server/connection/mod.rs` (command-intent dispatch and
 server-menu activation — user-driven client messages). Package code cannot
 reach it: `validate_package_command` rejects reserved/`clay.`-prefixed IDs
 (`is_package_owned_id`), `CommandRegistry::register_command` rejects
@@ -189,14 +192,15 @@ and authority record: `docs/development/performance.md` (Phase 24.5).
 - `src/client/behavior.rs`: `route_key_sequence_*` — single-stroke
   regression, two-stroke tracking, mismatch clearing, context precedence for
   exact matches and prefixes.
-- `src/editor/surface.rs`: `editor_pending_chord_consumes_strokes_and_dispatches_on_completion`,
+- `src/editor/surface/mod.rs`: `editor_pending_chord_consumes_strokes_and_dispatches_on_completion`,
   `editor_abandoned_chord_does_not_eat_the_next_key`,
   `editor_stale_pending_chord_cancels_on_the_next_key`,
+  `editor_generated_chord_sequences_preserve_prefix_mismatch_and_timeout_transitions`,
   `editor_pending_chord_buffer_never_exceeds_longest_bound_sequence`.
 - `src/behavior/manifest.rs`: `manifest_rejects_prefix_collisions_within_a_context`,
   `manifest_accepts_divergent_rules_sharing_a_common_prefix`,
   `manifest_accepts_prefix_collisions_across_contexts`.
-- `src/server/js_runtime.rs` (configuration): `configuration_bind_key_sequence_publishes_multi_stroke_rule`,
+- `src/server/js_runtime/mod.rs` (configuration): `configuration_bind_key_sequence_publishes_multi_stroke_rule`,
   `configuration_unbind_key_sequence_removes_only_the_matching_rule`,
   `configuration_bind_key_prefix_collision_is_rejected`.
 - `src/protocol/mod.rs`: `default_keymaps_are_prefix_collision_free`;

@@ -82,7 +82,7 @@
         },
         {
           "token": "Operator",
-          "color": "#4c7a4d"
+          "color": "#4d7a4d"
         },
         {
           "token": "Comment",
@@ -99,7 +99,7 @@
         },
         {
           "token": "Regexp",
-          "color": "#4c7a4d"
+          "color": "#4c7b4d"
         },
         {
           "token": "Function",
@@ -108,11 +108,11 @@
         },
         {
           "token": "Method",
-          "color": "#b47109"
+          "color": "#b57109"
         },
         {
           "token": "Macro",
-          "color": "#945e80"
+          "color": "#955e80"
         },
         {
           "token": "Namespace",
@@ -140,11 +140,11 @@
         },
         {
           "token": "TypeParameter",
-          "color": "#c35e0a"
+          "color": "#c45e0a"
         },
         {
           "token": "Parameter",
-          "color": "#3c3836"
+          "color": "#3c3936"
         },
         {
           "token": "Variable",
@@ -152,11 +152,11 @@
         },
         {
           "token": "Property",
-          "color": "#3c3836"
+          "color": "#3d3836"
         },
         {
           "token": "EnumMember",
-          "color": "#6c782e"
+          "color": "#6d782e"
         },
         {
           "token": "Event",
@@ -164,34 +164,40 @@
         },
         {
           "token": "Decorator",
-          "color": "#945e80"
+          "color": "#945f80"
         },
         {
           "token": "Heading1",
           "color": "#c14a4a",
-          "bold": true
+          "bold": true,
+          "scale": 1.5
         },
         {
           "token": "Heading2",
           "color": "#c35e0a",
-          "bold": true
+          "bold": true,
+          "scale": 1.33
         },
         {
           "token": "Heading3",
           "color": "#b47109",
-          "bold": true
+          "bold": true,
+          "scale": 1.17
         },
         {
           "token": "Heading4",
-          "color": "#6c782e"
+          "color": "#6c782e",
+          "scale": 1.08
         },
         {
           "token": "Heading5",
-          "color": "#4c7a4d"
+          "color": "#4c7a4d",
+          "scale": 1.0
         },
         {
           "token": "Heading6",
-          "color": "#45707a"
+          "color": "#45707a",
+          "scale": 0.92
         },
         {
           "token": "ListItem",
@@ -200,15 +206,18 @@
         {
           "token": "Quote",
           "color": "#a89984",
-          "italic": true
+          "italic": true,
+          "background": "#a8998428"
         },
         {
           "token": "CodeBlock",
-          "color": "#504940"
+          "color": "#504940",
+          "background": "#f2e5bc66"
         },
         {
           "token": "CodeSpan",
-          "color": "#c35e0a"
+          "color": "#c35e0a",
+          "scale": 0.9
         },
         {
           "token": "Link",
@@ -218,6 +227,10 @@
         {
           "token": "Paragraph",
           "color": "#504940"
+        },
+        {
+          "token": "searchMatch",
+          "color": "#b5761455"
         }
       ]
     },

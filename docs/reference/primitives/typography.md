@@ -99,6 +99,23 @@ The seven semantic variants (`display`, `title`, `section`, `body`, `status`, `d
 
 Packages and components select a semantic variant name only; they cannot supply concrete scale ratios. A `clay.contributions.designTokens` entry targeting any `typography.*` token is rejected as a typography (variant) override, not a scale value. A changed hierarchy increments the typography revision and invalidates editor/UI layout once; an unchanged hierarchy does not churn layout.
 
+## Document size ladder (Phase 26.4)
+
+Document text uses the resolved profile size multiplied by a per-`TokenType` scale from `StyleRegistry`. This is not a new font role and not a package pixel: packages keep declaring `defaultFontRole` / `fontRole` only.
+
+| TokenType | Default scale |
+| --- | --- |
+| Heading1 | 1.50 |
+| Heading2 | 1.33 |
+| Heading3 | 1.17 |
+| Heading4 | 1.08 |
+| Heading5 | 1.00 |
+| Heading6 | 0.92 |
+| CodeSpan | 0.90 |
+| all other token types | 1.00 |
+
+Theme `textStyles[].scale` overrides clamp to the UI hierarchy range `(0, 4]`. Diagnostic and SearchMatch layers stay at 1.0 so they do not split runs. Line/scroll geometry still uses the body `document_line_height()`; per-line mixed-heading scroll is deferred.
+
 ## Fallback and Invalidation
 
 Each user profile is an ordered family stack ending in a generic fallback. Named families resolve on the client; Clay retains the role-appropriate generic fallback when names are unavailable. Packages cannot inspect installed fonts or react to resolution results.
@@ -123,9 +140,9 @@ Semantic role declaration grants no filesystem, network, shell, package-manager,
 
 Primary source paths:
 
-- Protocol and validation: `src/protocol/mod.rs`, `src/protocol/decorations.rs`, `src/packages/record.rs`, `src/server/ui.rs`
+- Protocol and validation: `src/protocol/mod.rs`, `src/protocol/decorations.rs`, `src/packages/record/mod.rs`, `src/server/ui.rs`
 - Mode/range parsing: `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/ops/decorations.rs`, `src/server/syntax.rs`
-- Client resolution/layout: `src/editor/typography.rs`, `src/editor/layout.rs`, `src/editor/surface.rs`
+- Client resolution/layout: `src/editor/typography.rs`, `src/editor/layout.rs`, `src/editor/surface/mod.rs`
 - Native UI/components: `src/masonry_editor.rs`, `src/masonry_sdui.rs`, `src/shell/package_ui.rs`, `src/shell/theme.rs`
 
 Deterministic coverage lives in `tests/typography_protocol.rs`, `tests/markdown_mode.rs`, `tests/decoration_transport.rs`, `tests/editor_performance_invariants.rs`, `tests/package_loading.rs`, `tests/package_primitive_gate.rs`, and module tests beside the source paths above. Manual coverage is the Phase 18.16.5 matrix in `docs/development/launch-and-gui-smoke.md`.

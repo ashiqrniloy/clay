@@ -8,14 +8,18 @@
 - `src/editor/buffer.rs` (word/paragraph/pair boundary classifiers)
 - `src/editor/cursor.rs` (`CursorState`)
 - `src/editor/selection.rs` (`Selection`, `SelectionState`)
-- `src/editor/surface.rs` (`EditorSurface`: movement dispatch, caret resolution, `CaretBlink`, multi-caret edit, cursor undo)
+- `src/editor/surface/mod.rs` (`EditorSurface`: movement dispatch, caret resolution, multi-caret edit, cursor undo)
+- `src/editor/surface/caret.rs` (`CaretBlink` phase state machine)
+- `src/editor/surface/command.rs` (`EditorCommand`, `EditorKeyOutcome`, `EditorCommandOutcome`, `PendingChord`, request events)
+- `src/editor/surface/decoration.rs` (`EditorDecorationState` + decoration helpers)
+- `src/editor/surface/diagnostic.rs` (`EditorDiagnosticState`)
 - `src/editor/layout.rs` (`CaretCell` measurement, font-feature push into Parley)
 - `src/editor/typography.rs` (`ResolvedFontProfile::font_features`, `resolve_font_features`)
 - `src/masonry_editor.rs` (`EditorClientCommand`, default key bindings, selection-query enqueue/apply, anim-frame blink loop)
 - `src/server/ops/editor.rs` (trusted editor validation ops)
 - `src/server/ops/modes.rs` (`parse_movement_rules`, `parse_caret_style`)
 - `src/server/syntax.rs` (`TreeSitterSyntaxHandler::selection_query_ranges`, textobject/smart-select query runners)
-- `src/server/connection.rs` (`SelectionQueryRequest` dispatch)
+- `src/server/connection/mod.rs` (`SelectionQueryRequest` dispatch)
 - `packages/{rust,typescript,javascript}/queries/textobjects.scm`
 - `runtime/js/editor.js`, `runtime/js/behavior.js`
 
@@ -37,7 +41,7 @@ New `EditorCommand` variants: `MoveWordStart`/`MoveWordEnd`/`MoveParagraph` (eac
 
 Rendering: `CaretCell` (`src/editor/layout.rs`) measures the character advance at the caret via Parley `Cursor::next_visual` to derive Block width / Underline height (falls back to `line_height * 0.6` at end of line/text); `paint_caret` builds shape-specific geometry from it. The IME preedit caret (`paint_preedit_overlay`) shares the shape logic so preedit never regresses to a hardcoded bar.
 
-Blinking: `CaretBlink` (surface.rs) is a `Wait → On → Off` phase state machine advanced by Masonry `on_anim_frame` — Clay's first animation-frame usage. The widget calls `ctx.request_anim_frame()` while a blinkable caret exists; `Solid` always shows; user input resets the timer when `stop_blink_on_typing`. `Phase`/`Smooth` currently use discrete timing (alpha ramp deferred).
+Blinking: `CaretBlink` (surface/caret.rs) is a `Wait → On → Off` phase state machine advanced by Masonry `on_anim_frame` — Clay's first animation-frame usage. The widget calls `ctx.request_anim_frame()` while a blinkable caret exists; `Solid` always shows; user input resets the timer when `stop_blink_on_typing`. `Phase`/`Smooth` currently use discrete timing (alpha ramp deferred).
 
 ## Font ligatures (task 7)
 
@@ -63,11 +67,11 @@ Two coordinated surfaces:
 
 Wire: `ClientMessage::SelectionQueryRequest` (request id, document id/version, behavior version, `SelectionQuery`, up to `MAX_SELECTION_QUERY_CURSORS` = 256 cursors) → `ServerMessage::SelectionQueryResult` (one `Option<Range>` per cursor). `PROTOCOL_VERSION` is 7 for these variants.
 
-Server: `connection.rs` validates, resolves document metadata/text, re-resolves the native handler from `runtime_generation.current()` per request (no stale state), and calls `ParseHandler::selection_query_ranges`. `TreeSitterSyntaxHandler` implements it using `packages/*/queries/textobjects.scm` (capture schema `@textobject.<kind>.<scope>`; kinds function/class/argument/comment/loop/conditional/call/statement; `inner` falls back to `around`): Current = smallest containing node, Next = earliest start strictly after focus, Previous = latest end at/before focus. Smart select needs no query file: Expand walks the parent chain to the first strictly larger ancestor; Shrink DFS-finds the largest descendant strictly inside the selection. Cached trees are reused only when document version and full-document coverage match; otherwise a bounded fresh parse runs. **Every miss degrades to empty ranges — advisory queries never block editing.**
+Server: `connection/mod.rs` validates, resolves document metadata/text, re-resolves the native handler from `runtime_generation.current()` per request (no stale state), and calls `ParseHandler::selection_query_ranges`. `TreeSitterSyntaxHandler` implements it using `packages/*/queries/textobjects.scm` (capture schema `@textobject.<kind>.<scope>`; kinds function/class/argument/comment/loop/conditional/call/statement; `inner` falls back to `around`): Current = smallest containing node, Next = earliest start strictly after focus, Previous = latest end at/before focus. Smart select needs no query file: Expand walks the parent chain to the first strictly larger ancestor; Shrink DFS-finds the largest descendant strictly inside the selection. Cached trees are reused only when document version and full-document coverage match; otherwise a bounded fresh parse runs. **Every miss degrades to empty ranges — advisory queries never block editing.**
 
 Client: `EditorWidget` keeps `pending_selection_query` (request id + cursor snapshot); results apply only on matching request/document/version, preserving backward selections and leaving `None` carets untouched. Cursor-undo snapshots the pre-query set.
 
-Authority boundaries (task 15 + follow-up round): text-object queries are pure Rust over inert ranges (no V8 involvement — JS parse handlers inherit the `None` default); package grammar `queries` metadata rejects any key outside {highlights, locals, injections} deny-by-default (`src/packages/record.rs`), and grammar contributions stay first-party-only.
+Authority boundaries (task 15 + follow-up round): text-object queries are pure Rust over inert ranges (no V8 involvement — JS parse handlers inherit the `None` default); package grammar `queries` metadata rejects any key outside {highlights, locals, injections} deny-by-default (`src/packages/record/mod.rs`), and grammar contributions stay first-party-only.
 
 ## `editor-control` trust boundary (follow-up round, approved 2026-08-03)
 
@@ -93,12 +97,12 @@ First- and third-party packages may access the editor ops and trigger execution 
 
 ## Tests
 
-- `src/editor/surface.rs`: movement classifier/motion tests, `effective_caret_style_resolves_override_manifest_theme`, multi-cursor edit/undo (`add_cursor_refuses_to_stack_on_same_line_or_past_edges`, `cursor_undo_restores_previous_selection_set`), selection-query request/apply round-trip.
+- `src/editor/surface/mod.rs`: movement classifier/motion tests, `effective_caret_style_resolves_override_manifest_theme`, multi-cursor edit/undo (`add_cursor_refuses_to_stack_on_same_line_or_past_edges`, `cursor_undo_restores_previous_selection_set`), selection-query request/apply round-trip.
 - `src/masonry_editor.rs`: `editor_client_command_maps_ids_and_moves_caret`, `editor_client_command_dispatches_multi_cursor_commands`, `selection_query_result_applies_ranges_keeps_unmatched_and_drops_stale`.
 - `src/server/syntax.rs`: textobject query compile + function/comment direction tests, smart-select expand/shrink monotonicity, markdown degrade-to-none.
 - `src/server/ops/editor.rs`: deny-by-default validation tests for every editor op.
 - `src/protocol/textobjects.rs`: command-ID round trips, unknown-ID rejection, cursor-bound validation.
-- `src/server/js_runtime.rs`: `third_party_runtime_cannot_see_trusted_ops_or_admin_modules` (editor ops visible but gated third-party), `editor_control_gate_enforces_permission_and_declared_mode`, `third_party_editor_control_gate_requires_declared_mode`, `editor_control_execute_publishes_gated_known_commands_only`.
+- `src/server/js_runtime/mod.rs`: `third_party_runtime_cannot_see_trusted_ops_or_admin_modules` (editor ops visible but gated third-party), `editor_control_gate_enforces_permission_and_declared_mode`, `third_party_editor_control_gate_requires_declared_mode`, `editor_control_execute_publishes_gated_known_commands_only`.
 - `tests/syntax_grammar.rs`: `syntax_grammar_rejects_unknown_query_kind_deny_by_default`.
 - Commands: `cargo test --lib`, `cargo test --test editor`, `cargo test --test protocol`, `cargo test --test runtime`.
 

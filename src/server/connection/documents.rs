@@ -1,0 +1,1185 @@
+//! Document family: edit/resync/decorations/open/save/reload/close/status/list,
+//! selection queries, parse-window scheduling. Plan 090 task 2 extraction.
+
+use std::sync::Arc;
+
+use tokio::{io::AsyncWrite, sync::Mutex};
+
+use crate::{
+    perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+    protocol::{
+        ClientId, DocumentId, DocumentMetadata, DocumentVersion, ParseByteRange, ParseInputEdit,
+        ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic,
+        SelectionQueryRange, SelectionQueryResult, ServerMessage, WorkspaceRootId,
+        codec::{Codec, CodecError},
+    },
+};
+
+use crate::server::connection::{file_operation_failed, teardown_closed_document};
+use crate::server::{
+    RuntimeGenerationStore,
+    behavior::{ActiveBehaviorManifest, BehaviorVersionDecision},
+    document::DocumentState,
+    document_analysis::DocumentAnalysisCoordinator,
+    js_runtime::ClayJsRuntimeService,
+    language_intelligence::LanguageIntelligenceCoordinator,
+    parse_coordinator::{ParseCoordinator, ParseCoordinatorError, ParseScheduleRequest},
+    sdui::StaticSduiState,
+    workspace::{
+        WorkspaceError, WorkspaceState, open_existing_file_unlocked, reload_document_unlocked,
+        save_document_unlocked,
+    },
+};
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "open-document follow-up carries every server-owned state handle explicitly"
+)]
+pub(super) async fn write_document_open_response<S>(
+    codec: &Codec,
+    stream: &mut S,
+    response: ServerMessage,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: &RuntimeGenerationStore,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    parse_coordinator: &ParseCoordinator,
+    document_analysis: &crate::server::document_analysis::DocumentAnalysisCoordinator,
+    client_id: ClientId,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    codec.write_server_message(stream, &response).await?;
+    let ServerMessage::DocumentOpened { metadata, text } = &response else {
+        return Ok(());
+    };
+    parse_coordinator.subscribe_document(metadata.document_id, client_id);
+    document_analysis.subscribe_document(metadata.document_id, client_id);
+    let runtime = runtime_generation.current().await;
+    for message in open_document_followup_messages(
+        metadata,
+        text,
+        behavior,
+        sdui,
+        runtime.id,
+        &runtime.service,
+        parse_coordinator,
+    )
+    .await
+    {
+        codec.write_server_message(stream, &message).await?;
+    }
+    for message in start_document_analysis(
+        document_analysis,
+        workspace,
+        behavior,
+        runtime.id,
+        metadata,
+        text,
+    )
+    .await
+    {
+        codec.write_server_message(stream, &message).await?;
+    }
+    Ok(())
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "shared edit/intent dispatch keeps server-owned state explicit instead of hiding authority in a context bag"
+)]
+pub(super) async fn dispatch_edit_operation<S>(
+    codec: Codec,
+    stream: &mut S,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: &RuntimeGenerationStore,
+    document: &Arc<Mutex<DocumentState>>,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    completion: &crate::server::completion::CompletionCoordinator,
+    language_intelligence: &LanguageIntelligenceCoordinator,
+    document_analysis: &crate::server::document_analysis::DocumentAnalysisCoordinator,
+    parse_coordinator: &ParseCoordinator,
+    client_id: ClientId,
+    document_id: DocumentId,
+    lease_id: Option<crate::protocol::LeaseId>,
+    base_version: crate::protocol::DocumentVersion,
+    behavior_version: crate::protocol::BehaviorVersion,
+    transaction_id: crate::protocol::TransactionId,
+    operation: crate::protocol::EditOperation,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let Some(target_document) =
+        document_for_message(document_id, client_id, document, workspace).await
+    else {
+        codec
+            .write_server_message(
+                stream,
+                &ServerMessage::EditRejected {
+                    document_id,
+                    transaction_id,
+                    reason: crate::protocol::EditRejection::InvalidDocument { document_id },
+                },
+            )
+            .await?;
+        return Ok(());
+    };
+
+    let behavior_decision = match validate_edit_behavior_version(
+        behavior,
+        runtime_generation,
+        client_id,
+        document_id,
+        transaction_id,
+        behavior_version,
+    )
+    .await
+    {
+        Ok(decision) => decision,
+        Err(response) => {
+            reject_invalid_behavior_version(
+                &codec,
+                stream,
+                runtime_generation,
+                client_id,
+                response,
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let analysis_delta = document_analysis_delta(&operation);
+    let (response, parse_input) = {
+        let mut document = target_document.lock().await;
+        document.apply_edit_with_parse_input(
+            document_id,
+            client_id,
+            lease_id,
+            base_version,
+            transaction_id,
+            operation,
+        )
+    };
+    codec.write_server_message(stream, &response).await?;
+    if let (
+        ServerMessage::EditAck {
+            confirmed_version, ..
+        },
+        Some(parse_input),
+    ) = (response, parse_input)
+    {
+        if matches!(
+            behavior_decision,
+            BehaviorVersionDecision::PreviousWithinGrace
+        ) {
+            let _ = runtime_generation
+                .behavior_grace()
+                .record_previous_accepted(std::time::Instant::now())
+                .await;
+        }
+        completion.document_changed(document_id, confirmed_version);
+        language_intelligence.document_changed(document_id, confirmed_version);
+        let (byte_start, byte_end, inserted_text) = analysis_delta;
+        if document_analysis.change_document(
+            document_id,
+            base_version,
+            confirmed_version,
+            byte_start,
+            byte_end,
+            inserted_text,
+        ) {
+            let text = target_document.lock().await.text();
+            document_analysis.reset_document(document_id, confirmed_version, text);
+        }
+        if let Err(diagnostic) = refresh_native_syntax_after_edit(
+            workspace,
+            behavior,
+            runtime_generation,
+            parse_coordinator,
+            client_id,
+            document_id,
+            parse_input,
+        )
+        .await
+        {
+            codec
+                .write_server_message(stream, &ServerMessage::RuntimeDiagnostic(diagnostic))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Shared open path for the two built-in Command Centre sessions. Both the
+/// command-intent lane (`CommandIntent` from a keybinding or the JS op) and
+/// Control Center activation (selecting "Browse Filesystem" from the
+/// catalogue) land here, so the one-active-session invariant has a single
+/// enforcement point: the helper replaces any active server session and
+/// returns its id for the caller to report as `TransientMenuClosed` before
+/// pushing the snapshot.
+///
+/// Runs one bounded user-browse relist for Path Browser navigation (plan 083
+/// task 8) and installs the result back into the session, returning the
+/// re-projected snapshot. The listing runs on the blocking pool with no
+/// workspace/tab/menu lock held; a failed listing keeps the session open in
+/// its sticky error state (recoverable input) rather than failing the
+/// intent. Returns `None` only when the session vanished while listing.
+pub(super) async fn validate_edit_behavior_version(
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: &RuntimeGenerationStore,
+    client_id: ClientId,
+    document_id: DocumentId,
+    transaction_id: crate::protocol::TransactionId,
+    behavior_version: crate::protocol::BehaviorVersion,
+) -> Result<BehaviorVersionDecision, ServerMessage> {
+    let current = behavior.lock().await.clone();
+    let current_runtime_generation = runtime_generation.generation_id().await;
+    let acknowledged_generation = runtime_generation
+        .acknowledged_runtime_generation(client_id)
+        .await;
+    runtime_generation
+        .behavior_grace()
+        .validate_edit_version(
+            &current,
+            client_id,
+            document_id,
+            transaction_id,
+            behavior_version,
+            current_runtime_generation,
+            acknowledged_generation,
+            std::time::Instant::now(),
+        )
+        .await
+}
+
+pub(super) async fn reject_invalid_behavior_version<S>(
+    codec: &Codec,
+    stream: &mut S,
+    runtime_generation: &RuntimeGenerationStore,
+    client_id: ClientId,
+    rejection: ServerMessage,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    codec.write_server_message(stream, &rejection).await?;
+    if let Some(snapshot) = runtime_generation
+        .latest_runtime_snapshot_for(client_id)
+        .await
+    {
+        codec
+            .write_server_message(
+                stream,
+                &ServerMessage::RuntimeStateSnapshot(Box::new(snapshot)),
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+// Resolve only an explicitly authorized document. Unknown IDs must not fall
+// through to welcome text: globally unique IDs make that fallback an
+// information leak for completion, language, and edit requests.
+pub(super) async fn document_for_message(
+    document_id: DocumentId,
+    client_id: ClientId,
+    default_document: &Arc<Mutex<DocumentState>>,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+) -> Option<Arc<Mutex<DocumentState>>> {
+    let is_authorized_default = {
+        let default_document = default_document.lock().await;
+        default_document.document_id() == document_id && default_document.has_access(client_id)
+    };
+    if is_authorized_default {
+        return Some(Arc::clone(default_document));
+    }
+
+    let document = workspace.lock().await.document_handle(document_id)?;
+    let authorized = document.lock().await.has_access(client_id);
+    authorized.then_some(document)
+}
+
+pub(super) fn document_analysis_delta(
+    operation: &crate::protocol::EditOperation,
+) -> (u64, u64, String) {
+    match operation {
+        crate::protocol::EditOperation::Insert { byte_offset, text } => {
+            (*byte_offset, *byte_offset, text.clone())
+        }
+        crate::protocol::EditOperation::Delete { start, end } => (*start, *end, String::new()),
+        crate::protocol::EditOperation::Replace { start, end, text } => {
+            (*start, *end, text.clone())
+        }
+    }
+}
+
+pub(super) async fn start_document_analysis(
+    coordinator: &crate::server::document_analysis::DocumentAnalysisCoordinator,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    generation: u64,
+    metadata: &DocumentMetadata,
+    text: &str,
+) -> Vec<ServerMessage> {
+    let canonical_root = workspace
+        .lock()
+        .await
+        .directory_roots()
+        .into_iter()
+        .find(|root| root.workspace_root_id == metadata.workspace_root_id)
+        .map(|root| root.canonical_path);
+    let Some(canonical_root) = canonical_root else {
+        return Vec::new();
+    };
+    let manifest_id = behavior
+        .lock()
+        .await
+        .manifest_for(metadata.document_id)
+        .manifest_id
+        .clone();
+    let active_mode = manifest_id.rsplit('.').next().unwrap_or(&manifest_id);
+    coordinator
+        .open_document(
+            Arc::clone(workspace),
+            generation,
+            metadata,
+            active_mode,
+            canonical_root,
+            text.to_string(),
+        )
+        .into_iter()
+        .map(ServerMessage::RuntimeDiagnostic)
+        .collect()
+}
+
+/// Release every access grant the connection holds (disconnect) and tear down
+/// document-scoped coordinator state for documents whose final holder left
+/// (Plan 060 T6, P1-4). Documents still held by other connections keep their
+/// analysis routes, versions, and provider state.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "disconnect teardown needs every document-scoped coordinator explicitly"
+)]
+pub(super) async fn open_document_response(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    workspace_root_id: WorkspaceRootId,
+    path: String,
+    client_id: ClientId,
+) -> ServerMessage {
+    let opened =
+        match open_existing_file_unlocked(workspace, workspace_root_id, &path, client_id).await {
+            Ok(opened) => opened,
+            Err(error) => return file_operation_failed(error, Some(workspace_root_id), None),
+        };
+
+    let document = opened.document.lock().await;
+    let metadata = DocumentMetadata {
+        document_id: opened.document_id,
+        version: document.version(),
+        lease_id: opened.access.lease_id(),
+        access: opened.access,
+        dirty: document.is_dirty(),
+        workspace_root_id,
+        path: opened.file_state.display_path(),
+    };
+    ServerMessage::DocumentOpened {
+        metadata,
+        text: document.text(),
+    }
+}
+
+/// Shared bound-tab workspace open (plan 083 task 10): validates and
+/// adds/gets the canonical directory root in the tab's workspace, rebinds
+/// the tab through `TabRegistry::open_workspace` (bound-client-only),
+/// broadcasts the reconciled snapshot, and returns the file-browser refresh
+/// message (or the bounded failure) the caller must write. Used by the
+/// `TabCommand::OpenWorkspace` branch and path-mode secondary activation —
+/// path mode has no client-supplied tab id, so the bound tab is the only
+/// target and a missing binding is an authorization failure. The caller
+/// already validated any client-supplied tab id against the bound id.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn save_document_response(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    document_id: DocumentId,
+    client_id: ClientId,
+    known_version: crate::protocol::DocumentVersion,
+) -> ServerMessage {
+    match save_document_unlocked(workspace, document_id, client_id, known_version).await {
+        Ok(outcome) => ServerMessage::DocumentSaved {
+            document_id: outcome.document_id,
+            version: outcome.version,
+            dirty: outcome.dirty,
+        },
+        Err(error) => file_operation_failed(error, None, Some(document_id)),
+    }
+}
+
+pub(super) async fn reload_document_response(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    document_id: DocumentId,
+    client_id: ClientId,
+    force: bool,
+) -> ServerMessage {
+    let outcome = match reload_document_unlocked(workspace, document_id, client_id, force).await {
+        Ok(outcome) => outcome,
+        Err(error) => return file_operation_failed(error, None, Some(document_id)),
+    };
+    match workspace
+        .lock()
+        .await
+        .document_metadata(document_id, client_id)
+        .await
+    {
+        Ok(metadata) => ServerMessage::DocumentReloaded {
+            metadata,
+            text: outcome.text,
+        },
+        Err(error) => file_operation_failed(error, None, Some(document_id)),
+    }
+}
+
+pub(super) async fn document_status_response(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    document_id: DocumentId,
+    client_id: ClientId,
+) -> ServerMessage {
+    match workspace
+        .lock()
+        .await
+        .document_metadata(document_id, client_id)
+        .await
+    {
+        Ok(metadata) => ServerMessage::DocumentStatus { metadata },
+        Err(error) => file_operation_failed(error, None, Some(document_id)),
+    }
+}
+
+pub(super) async fn document_list_response(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    client_id: ClientId,
+) -> ServerMessage {
+    match workspace.lock().await.list_documents(client_id).await {
+        Ok(documents) => ServerMessage::DocumentList { documents },
+        Err(error) => file_operation_failed(error, None, None),
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "shared open-document/reload follow-up primitive keeps server-owned state explicit"
+)]
+pub(crate) async fn open_document_followup_messages(
+    metadata: &DocumentMetadata,
+    text: &str,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    generation_id: u64,
+    js_runtime: &ClayJsRuntimeService,
+    parse_coordinator: &ParseCoordinator,
+) -> Vec<ServerMessage> {
+    let Some(activation) = classify_open_document(
+        generation_id,
+        js_runtime,
+        parse_coordinator,
+        metadata,
+        text,
+        behavior,
+        sdui,
+    )
+    .await
+    else {
+        return vec![behavior.lock().await.manifest_message()];
+    };
+
+    let behavior_guard = behavior.lock().await;
+    // Phase 22.2: the just-classified document's own mode layer (when the
+    // open published one) precedes the connection-wide manifest. Other
+    // documents' layers were already delivered when they opened; re-sending
+    // them here is redundant chatter.
+    let mut messages = Vec::new();
+    if let Some(layer) = behavior_guard.document_layer(metadata.document_id).cloned() {
+        messages.push(ServerMessage::BehaviorManifest(Box::new(layer)));
+    }
+    messages.push(behavior_guard.manifest_message());
+    drop(behavior_guard);
+    match schedule_open_parse(parse_coordinator, metadata, text, behavior, &activation).await {
+        Ok(Some(set)) => messages.push(ServerMessage::DecorationSet(set)),
+        Ok(None) => {}
+        Err(diagnostic) => messages.push(ServerMessage::RuntimeDiagnostic(diagnostic)),
+    }
+
+    messages
+}
+
+#[derive(Debug)]
+pub(super) struct OpenModeActivation {
+    package_prefix: String,
+    mode_id: String,
+    parse_handler_mode_id: String,
+    native_parse_policy: Option<ParsePolicy>,
+}
+
+pub(super) async fn classify_open_document(
+    generation_id: u64,
+    js_runtime: &ClayJsRuntimeService,
+    parse_coordinator: &ParseCoordinator,
+    metadata: &DocumentMetadata,
+    text: &str,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    _sdui: &Arc<Mutex<StaticSduiState>>,
+) -> Option<OpenModeActivation> {
+    // Supply the open path's bounded leading-content slice and shebang line so
+    // server-owned classification probes can route scripts (shebang) and
+    // magic-prefixed files (content probes). The slice is bounded to
+    // MAX_LEADING_CONTENT_BYTES; `ModeRegistry::classify` rejects anything
+    // larger, so probes never read unbounded content and no new filesystem
+    // authority is introduced beyond the already-open document text.
+    let shebang = text
+        .lines()
+        .next()
+        .filter(|line| line.starts_with("#!"))
+        .map(str::to_string);
+    let leading_content =
+        bounded_utf8_prefix(text, crate::packages::modes::MAX_LEADING_CONTENT_BYTES)
+            .0
+            .to_string();
+    let shebang_json = serde_json::to_string(&shebang).unwrap_or_else(|_| "null".to_string());
+    let leading_json =
+        serde_json::to_string(&leading_content).unwrap_or_else(|_| "null".to_string());
+    let source = format!(
+        r#"
+import {{ serverActivateClassifiedMode, serverClassifyDocument }} from "clay:modes";
+import {{ loadPackage, serverListFirstPartyPackageSpecifiers }} from "clay:packages";
+const input = {{ documentId: {}, path: {}, shebang: {}, leadingContent: {} }};
+let classification = null;
+try {{ classification = serverClassifyDocument(input); }} catch {{}}
+// Built-in fallback modes (apiPrefix "core", e.g. core.text/core.code) are a
+// last resort. Discard a built-in-only match so first-party packages still
+// load and win precedence over the fallback, then only activate a real
+// (non-built-in) classification below.
+if (classification && classification.apiPrefix === "core") {{
+  classification = null;
+}}
+if (!classification) {{
+  for (const specifier of serverListFirstPartyPackageSpecifiers()) {{
+    try {{
+      await loadPackage(specifier);
+      classification = serverClassifyDocument(input);
+      if (classification && classification.apiPrefix !== "core") break;
+    }} catch {{}}
+  }}
+}}
+if (classification && classification.apiPrefix === "core") {{
+  classification = null;
+}}
+if (classification) {{
+  serverActivateClassifiedMode(classification, input);
+}}
+Deno.core.ops.op_clay_runtime_record(JSON.stringify(classification));
+"#,
+        metadata.document_id,
+        serde_json::to_string(&metadata.path).ok()?,
+        shebang_json,
+        leading_json,
+    );
+    let evaluation = js_runtime
+        .evaluate_controlled_module_for_document(source, metadata.document_id)
+        .await
+        .ok()?;
+    crate::server::apply_runtime_outputs_without_sdui(&evaluation, behavior).await;
+    let record = evaluation.op_records.last()?;
+    let value: serde_json::Value = serde_json::from_str(record).ok()?;
+    let mut activation = OpenModeActivation {
+        package_prefix: value.get("apiPrefix")?.as_str()?.to_string(),
+        mode_id: value.get("modeId")?.as_str()?.to_string(),
+        parse_handler_mode_id: value.get("modeId")?.as_str()?.to_string(),
+        native_parse_policy: None,
+    };
+    if let Some((meta, policy)) = js_runtime
+        .register_native_syntax_handler(
+            parse_coordinator,
+            generation_id,
+            &evaluation,
+            &metadata.path,
+            &activation.package_prefix,
+            &activation.mode_id,
+        )
+        .ok()
+        .flatten()
+    {
+        activation.parse_handler_mode_id = meta.mode_id;
+        activation.native_parse_policy = Some(policy);
+    }
+    // Tier 1 registers first. A same-generation JS handler remains available
+    // only when no selected native handler owns this package/mode key.
+    let _ = js_runtime.register_parse_handlers(parse_coordinator, generation_id, &evaluation);
+    Some(activation)
+}
+
+pub(super) async fn refresh_native_syntax_after_edit(
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: &RuntimeGenerationStore,
+    parse_coordinator: &ParseCoordinator,
+    client_id: ClientId,
+    document_id: DocumentId,
+    accepted_edit: ParseInputEdit,
+) -> Result<(), RuntimeDiagnostic> {
+    let (metadata, document) = {
+        let workspace = workspace.lock().await;
+        let Ok(metadata) = workspace.document_metadata(document_id, client_id).await else {
+            return Ok(());
+        };
+        let Some(document) = workspace.document_handle(document_id) else {
+            return Ok(());
+        };
+        (metadata, document)
+    };
+    let runtime = runtime_generation.current().await;
+    let Some((meta, policy)) = runtime
+        .service
+        .registered_native_syntax_handler(runtime.id, &metadata.path)
+    else {
+        return Ok(());
+    };
+    let window = document
+        .lock()
+        .await
+        .parse_window_after_edit(&meta.package_prefix, &meta.mode_id, policy, accepted_edit)
+        .map_err(|message| {
+            RuntimeDiagnostic::error(
+                "parse.window_failed",
+                format!("Parse window failed: {message}"),
+            )
+        })?;
+    let Some(window) = window else {
+        return Ok(());
+    };
+    parse_coordinator.record_native_edit_accepted(metadata.document_id, metadata.version);
+    let viewport = window.byte_range();
+    schedule_parse_snapshot(
+        parse_coordinator,
+        &metadata,
+        behavior.lock().await.version(),
+        policy,
+        window,
+        viewport,
+        Some(accepted_edit),
+    )?;
+    Ok(())
+}
+
+pub(super) async fn schedule_open_parse(
+    parse_coordinator: &ParseCoordinator,
+    metadata: &DocumentMetadata,
+    text: &str,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    activation: &OpenModeActivation,
+) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
+    let policy = activation.native_parse_policy.unwrap_or(ParsePolicy::new(
+        64 * 1024,
+        4 * 1024,
+        30 * 1024 * 1024,
+        5_000,
+    ));
+    schedule_parse_window(
+        parse_coordinator,
+        metadata,
+        text,
+        behavior.lock().await.version(),
+        &activation.package_prefix,
+        &activation.parse_handler_mode_id,
+        policy,
+        ParseByteRange::new(0, text.len() as u64),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn schedule_parse_window(
+    parse_coordinator: &ParseCoordinator,
+    metadata: &DocumentMetadata,
+    text: &str,
+    behavior_version: u64,
+    package_prefix: &str,
+    mode_id: &str,
+    policy: ParsePolicy,
+    requested: ParseByteRange,
+) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
+    let text_len = text.len();
+    let viewport_start = floor_char_boundary(text, requested.start.min(text_len as u64) as usize);
+    let output_budget = policy
+        .max_window_bytes
+        .min(INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES as u64);
+    let viewport_end = floor_char_boundary(
+        text,
+        requested
+            .end
+            .max(viewport_start as u64)
+            .min(text_len as u64)
+            .min((viewport_start as u64).saturating_add(output_budget)) as usize,
+    );
+    if viewport_start >= viewport_end {
+        return Ok(None);
+    }
+    let viewport = ParseByteRange::new(viewport_start as u64, viewport_end as u64);
+
+    let (window_start, window_end) = if text_len as u64 <= policy.max_window_bytes {
+        (0, text_len)
+    } else {
+        let guard_budget = policy.max_window_bytes.saturating_sub(viewport.len());
+        let before = policy.guard_bytes.min(guard_budget / 2);
+        let after = policy.guard_bytes.min(guard_budget.saturating_sub(before));
+        let start = floor_char_boundary(text, viewport_start.saturating_sub(before as usize));
+        let mut end = ceil_char_boundary(
+            text,
+            viewport_end.saturating_add(after as usize).min(text_len),
+        );
+        if end.saturating_sub(start) > policy.max_window_bytes as usize {
+            end = floor_char_boundary(text, start.saturating_add(policy.max_window_bytes as usize));
+        }
+        (start, end)
+    };
+
+    let prefix = &text[..window_start];
+    let base_line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u64;
+    let base_column = prefix
+        .rsplit_once('\n')
+        .map_or(prefix.len(), |(_, trailing)| trailing.len()) as u64;
+    let window = ParseWindowSnapshot {
+        document_id: metadata.document_id,
+        document_version: metadata.version,
+        package_prefix: package_prefix.to_string(),
+        mode_id: mode_id.to_string(),
+        window_id: window_start as u64,
+        byte_start: window_start as u64,
+        byte_end: window_end as u64,
+        base_line,
+        base_column,
+        incremental_edit: false,
+        text: text[window_start..window_end].to_string(),
+    };
+
+    schedule_parse_snapshot(
+        parse_coordinator,
+        metadata,
+        behavior_version,
+        policy,
+        window,
+        viewport,
+        None,
+    )
+}
+
+pub(super) fn schedule_parse_snapshot(
+    parse_coordinator: &ParseCoordinator,
+    metadata: &DocumentMetadata,
+    behavior_version: u64,
+    policy: ParsePolicy,
+    window: ParseWindowSnapshot,
+    viewport: ParseByteRange,
+    accepted_edit: Option<ParseInputEdit>,
+) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
+    let invalidated_ranges =
+        accepted_edit.map_or_else(|| vec![viewport], |edit| vec![edited_range(edit, viewport)]);
+    let request = ParseScheduleRequest {
+        document_id: metadata.document_id,
+        document_version: metadata.version,
+        behavior_version,
+        package_prefix: window.package_prefix.clone(),
+        mode_id: window.mode_id.clone(),
+        viewport,
+        invalidated_ranges,
+        accepted_edit,
+    };
+    match parse_coordinator.schedule_parse_with_windows(request, vec![window], Some(policy)) {
+        Ok(_) | Err(ParseCoordinatorError::HandlerNotRegistered { .. }) => Ok(None),
+        Err(error) => Err(RuntimeDiagnostic::error(
+            "parse.viewport_activation_failed",
+            format!("Viewport parse scheduling failed: {error:?}"),
+        )),
+    }
+}
+
+pub(super) fn floor_char_boundary(text: &str, mut offset: usize) -> usize {
+    while !text.is_char_boundary(offset) {
+        offset = offset.saturating_sub(1);
+    }
+    offset
+}
+
+pub(super) fn ceil_char_boundary(text: &str, mut offset: usize) -> usize {
+    while offset < text.len() && !text.is_char_boundary(offset) {
+        offset += 1;
+    }
+    offset
+}
+
+pub(super) fn edited_range(edit: ParseInputEdit, window: ParseByteRange) -> ParseByteRange {
+    let start = edit.start_byte.clamp(window.start, window.end);
+    let mut end = edit.new_end_byte.clamp(start, window.end);
+    if start == end {
+        if end < window.end {
+            end += 1;
+        } else if start > window.start {
+            return ParseByteRange::new(start - 1, start);
+        }
+    }
+    ParseByteRange::new(start, end)
+}
+
+pub(super) fn bounded_utf8_prefix(text: &str, max_bytes: usize) -> (&str, u64) {
+    if text.len() <= max_bytes {
+        return (text, text.len() as u64);
+    }
+    let mut end = max_bytes;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&text[..end], end as u64)
+}
+
+// ---------- coordinator loop handlers (Plan 090 task 2 extraction) ----------
+
+#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+pub(super) async fn handle_request_resync<S>(
+    codec: Codec,
+    stream: &mut S,
+    document: &Arc<Mutex<DocumentState>>,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    client_id: ClientId,
+    document_id: DocumentId,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let Some(target_document) =
+        document_for_message(document_id, client_id, document, workspace).await
+    else {
+        let response = file_operation_failed(
+            WorkspaceError::UnknownDocument { document_id },
+            None,
+            Some(document_id),
+        );
+        codec.write_server_message(stream, &response).await?;
+        return Ok(());
+    };
+    let response = {
+        let document = target_document.lock().await;
+        document.resync_snapshot_message_for_client(document_id, client_id)
+    };
+    codec.write_server_message(stream, &response).await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+pub(super) async fn handle_decoration_viewport_request<S>(
+    codec: Codec,
+    stream: &mut S,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: &RuntimeGenerationStore,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    parse_coordinator: &ParseCoordinator,
+    client_id: ClientId,
+    document_id: DocumentId,
+    document_version: DocumentVersion,
+    byte_start: u64,
+    byte_end: u64,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    if byte_start > byte_end {
+        return Ok(());
+    }
+    let (metadata, target_document) = {
+        let workspace = workspace.lock().await;
+        let Ok(metadata) = workspace.document_metadata(document_id, client_id).await else {
+            return Ok(());
+        };
+        let Some(target_document) = workspace.document_handle(document_id) else {
+            return Ok(());
+        };
+        (metadata, target_document)
+    };
+    if metadata.version != document_version {
+        return Ok(());
+    }
+    let text = target_document.lock().await.text();
+    let runtime = runtime_generation.current().await;
+    let Some((meta, policy)) = runtime
+        .service
+        .registered_native_syntax_handler(runtime.id, &metadata.path)
+    else {
+        return Ok(());
+    };
+    if let Err(diagnostic) = schedule_parse_window(
+        parse_coordinator,
+        &metadata,
+        &text,
+        behavior.lock().await.version(),
+        &meta.package_prefix,
+        &meta.mode_id,
+        policy,
+        ParseByteRange::new(byte_start, byte_end),
+    ) {
+        codec
+            .write_server_message(stream, &ServerMessage::RuntimeDiagnostic(diagnostic))
+            .await?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+pub(super) async fn handle_open_document<S>(
+    codec: Codec,
+    stream: &mut S,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: &RuntimeGenerationStore,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    sdui: &Arc<Mutex<StaticSduiState>>,
+    parse_coordinator: &ParseCoordinator,
+    document_analysis: &DocumentAnalysisCoordinator,
+    client_id: ClientId,
+    workspace_root_id: WorkspaceRootId,
+    path: String,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let response = open_document_response(workspace, workspace_root_id, path, client_id).await;
+    write_document_open_response(
+        &codec,
+        stream,
+        response,
+        behavior,
+        runtime_generation,
+        workspace,
+        sdui,
+        parse_coordinator,
+        document_analysis,
+        client_id,
+    )
+    .await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+pub(super) async fn handle_save_document<S>(
+    codec: Codec,
+    stream: &mut S,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    client_id: ClientId,
+    document_id: DocumentId,
+    known_version: DocumentVersion,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let response = save_document_response(workspace, document_id, client_id, known_version).await;
+    codec.write_server_message(stream, &response).await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+pub(super) async fn handle_reload_document<S>(
+    codec: Codec,
+    stream: &mut S,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    completion: &crate::server::completion::CompletionCoordinator,
+    language_intelligence: &LanguageIntelligenceCoordinator,
+    document_analysis: &DocumentAnalysisCoordinator,
+    client_id: ClientId,
+    document_id: DocumentId,
+    _known_version: DocumentVersion,
+    force: bool,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let response = reload_document_response(workspace, document_id, client_id, force).await;
+    codec.write_server_message(stream, &response).await?;
+    if let ServerMessage::DocumentReloaded { metadata, text } = response {
+        completion.document_changed(document_id, metadata.version);
+        language_intelligence.document_changed(document_id, metadata.version);
+        document_analysis.reset_document(document_id, metadata.version, text);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+pub(super) async fn handle_close_document<S>(
+    codec: Codec,
+    stream: &mut S,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    parse_coordinator: &ParseCoordinator,
+    completion: &crate::server::completion::CompletionCoordinator,
+    language_intelligence: &LanguageIntelligenceCoordinator,
+    document_analysis: &DocumentAnalysisCoordinator,
+    client_id: ClientId,
+    document_id: DocumentId,
+    force: bool,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let outcome = {
+        let mut workspace = workspace.lock().await;
+        workspace
+            .close_document(document_id, client_id, force)
+            .await
+    };
+    match outcome {
+        Ok(outcome) => {
+            // This connection's subscriptions end immediately; the document
+            // may stay alive for other connections.
+            parse_coordinator.unsubscribe_document(document_id, client_id);
+            document_analysis.unsubscribe_document(document_id, client_id);
+            if outcome.closed {
+                teardown_closed_document(
+                    document_id,
+                    outcome.version,
+                    parse_coordinator,
+                    completion,
+                    language_intelligence,
+                    document_analysis,
+                );
+            }
+            codec
+                .write_server_message(
+                    stream,
+                    &ServerMessage::DocumentClosed {
+                        document_id,
+                        closed: outcome.closed,
+                    },
+                )
+                .await?;
+        }
+        Err(error) => {
+            let response = file_operation_failed(error, None, Some(document_id));
+            codec.write_server_message(stream, &response).await?;
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+pub(super) async fn handle_get_document_status<S>(
+    codec: Codec,
+    stream: &mut S,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    client_id: ClientId,
+    document_id: DocumentId,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let response = document_status_response(workspace, document_id, client_id).await;
+    codec.write_server_message(stream, &response).await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+pub(super) async fn handle_list_documents<S>(
+    codec: Codec,
+    stream: &mut S,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    client_id: ClientId,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let response = document_list_response(workspace, client_id).await;
+    codec.write_server_message(stream, &response).await?;
+    Ok(())
+}
+
+/// Plan 071 task 10: read-only tree-sitter text-object/smart-select ranges.
+/// Every miss (validation, no grammar, no parse handler, timed-out parse)
+/// degrades to empty ranges so an advisory selection query can never block
+/// editing.
+#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+pub(super) async fn handle_selection_query_request<S>(
+    codec: Codec,
+    stream: &mut S,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    document: &Arc<Mutex<DocumentState>>,
+    parse_coordinator: &ParseCoordinator,
+    runtime_generation: &RuntimeGenerationStore,
+    client_id: ClientId,
+    request: &crate::protocol::SelectionQueryRequest,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    if let Err(rejection) = request.validate() {
+        codec
+            .write_server_message(
+                stream,
+                &ServerMessage::Error {
+                    code: ProtocolErrorCode::InvalidMessage,
+                    message: format!("selection query request rejected: {rejection:?}"),
+                },
+            )
+            .await?;
+        return Ok(());
+    }
+    let metadata = workspace
+        .lock()
+        .await
+        .document_metadata(request.document_id, client_id)
+        .await
+        .ok();
+    let mut ranges: Vec<Option<SelectionQueryRange>> = vec![None; request.selections.len()];
+    if let Some(metadata) = metadata {
+        let Some(target_document) =
+            document_for_message(request.document_id, client_id, document, workspace).await
+        else {
+            codec
+                .write_server_message(
+                    stream,
+                    &ServerMessage::Error {
+                        code: ProtocolErrorCode::InvalidMessage,
+                        message: "selection-query document is not authorized for this connection"
+                            .to_string(),
+                    },
+                )
+                .await?;
+            return Ok(());
+        };
+        let document_text = target_document.lock().await.text();
+        let runtime = runtime_generation.current().await;
+        if let Some((meta, _policy)) = runtime
+            .service
+            .registered_native_syntax_handler(runtime.id, &metadata.path)
+            && let Some(handler) =
+                parse_coordinator.handler_for(&meta.package_prefix, &meta.mode_id)
+            && let Some(query_ranges) = handler.selection_query_ranges(
+                request.document_id,
+                request.document_version,
+                &document_text,
+                request.query,
+                &request.selections,
+            )
+        {
+            ranges = query_ranges;
+        }
+    }
+    codec
+        .write_server_message(
+            stream,
+            &ServerMessage::SelectionQueryResult {
+                result: SelectionQueryResult {
+                    request_id: request.request_id,
+                    client_id,
+                    document_id: request.document_id,
+                    document_version: request.document_version,
+                    behavior_version: request.behavior_version,
+                    ranges,
+                },
+            },
+        )
+        .await?;
+    Ok(())
+}

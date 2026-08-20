@@ -8,7 +8,7 @@ Decision source: `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-synt
 
 Clay decorations use a two-axis vocabulary so parsers, LSP bridges, themes, and the native renderer agree on stable text categories without per-language renderer branches.
 
-A decoration says **what text is** (`TokenType`) separately from **which attributes apply** (`Modifiers`). A theme then resolves that inert metadata through `StyleRegistry` into a `StyleSpec` (`color`, `bold`, `italic`, `underline`, `strike`).
+A decoration says **what text is** (`TokenType`) separately from **which attributes apply** (`Modifiers`). A theme then resolves that inert metadata through `StyleRegistry` into a `StyleSpec` (`color`, optional `background`, `scale`, `bold`, `italic`, `underline`, `strike`).
 
 ```rust
 DecorationSpan {
@@ -89,11 +89,11 @@ Reserved contract:
 - A future third-party scope resolver may apply TextMate-style **longest-prefix fallback** (`meta.function-call.arguments` → `meta.function-call` → `meta`), then fall back to `token_type`.
 - First-party themes authored in Phase 18.15 target closed `TokenType` names and base UI keys, not open scope patterns.
 
-## Compatibility mapping
+## Compatibility mapping (frozen / deprecated)
 
-Existing `styleToken` producers keep working through `TokenType::classify_style_token` and `DecorationSpan::from_style_token`.
+Old packages may still emit free-form `styleToken` strings. Host maps them through `TokenType::classify_style_token` and `DecorationSpan::from_style_token` (original string kept in `scope`). This path is frozen: first-party producers (`@clay/markdown` Tier 3 included) emit closed `tokenType` + `modifiers` only. Do not add new first-party `markup.*` families.
 
-The exact baseline colors are locked by `free_form_style_token_decoration_colors_baseline_locked` in `src/editor/surface.rs`.
+The exact baseline colors are locked by `free_form_style_token_decoration_colors_baseline_locked` in `src/editor/surface/mod.rs`.
 
 | styleToken input | TokenType | Modifiers |
 | --- | --- | --- |
@@ -135,16 +135,25 @@ See [Creating Clay Packages: complete first-party language packages](../packages
 
 Theme packages declare inert `clay.contributions.textStyles` entries. Each entry targets either:
 
-- a base UI key: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`; or
+- a base UI key: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`, `searchMatch`, `unused`, `gutterFg`, `gutterFgActive`, `lineHighlight`, `indentGuide`, `bracketMatch`; or
 - a `TokenType` variant name such as `Keyword`, `String`, `Function`, `Heading1`, or `Paragraph`.
 
 Each entry may set any subset of:
 
 ```json
-{ "token": "Keyword", "color": "#d3869b", "bold": true }
+{ "token": "Heading1", "color": "#d3869b", "background": "#9aa0a628", "scale": 1.5, "bold": true }
 ```
 
-`color` accepts `#rgb`, `#rrggbb`, or `#rrggbbaa`. Boolean fields are `bold`, `italic`, `underline`, and `strike`.
+`color` / `background` accept `#rgb`, `#rrggbb`, or `#rrggbbaa`. Boolean fields are `bold`, `italic`, `underline`, and `strike`. `scale` is a finite multiplier in `(0, 4]` (milli-units on the wire). Background is theme-resolved only — `DecorationSpan` has no background field.
+
+### Phase 26 theme axes
+
+| Axis | Default | Theme override |
+| --- | --- | --- |
+| Foreground `color` | Opaque per-`TokenType` palette | `textStyles[].color` |
+| Background fill | Quote / CodeBlock / SearchMatch / Deprecated only | `textStyles[].background` or base key `searchMatch` |
+| Size `scale` | H1 1.50 … H6 0.92, CodeSpan 0.90, else 1.0 | `textStyles[].scale` |
+| Chrome | `gutterFg`, `gutterFgActive`, `lineHighlight`, `indentGuide`, `bracketMatch` | matching base UI keys |
 
 Theme resolution happens at configuration/package-load time. `setTheme("@clay/theme-gruvbox-material-dark")` selects one active first-party theme, the server sends an inert `ActiveTheme` snapshot, and the client builds `StyleRegistry` before first paint. Paint reads the resolved registry only.
 
@@ -160,6 +169,6 @@ Theme resolution happens at configuration/package-load time. `setTheme("@clay/th
 
 - `src/protocol/decorations.rs` — `TokenType`, `Modifiers`, `DecorationSpan`, compatibility mapping.
 - `src/editor/theme.rs` — `StyleSpec`, `StyleRegistry`, theme override resolution.
-- `src/packages/record.rs` — `TextStyleOverrideDescriptor` validation for `clay.contributions.textStyles`.
+- `src/packages/record/mod.rs` — `TextStyleOverrideDescriptor` validation for `clay.contributions.textStyles`.
 - `runtime/js/theme.js` and `docs/reference/clay-js-api/theme/set-theme.md` — `setTheme()`.
 - `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md`.

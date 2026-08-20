@@ -16,18 +16,19 @@ The package is explicit opt-in and is not auto-loaded. Without this line, `.rs` 
 
 Optional customization is exposed through documented Clay/package JS APIs. For example, after `loadPackage("@clay/rust")` a user can bind `rust.toggleLineComment` to a key or toggle a package option; the default load line itself never needs to inline the package manifest.
 
-Phase 19 hot reload reruns the same one-line `await loadPackage("@clay/rust")` setup in a fresh runtime generation with an empty `globalThis.__clayLoadedPackages` cache. Rust mode metadata, syntax grammar, commands, completion providers, and UI contributions rebuild from `loadEntry`; failed reloads keep the prior Rust generation active. No Rust-specific reload callback or copied manifest is required.
+Phase 19 hot reload reruns the same one-line `await loadPackage("@clay/rust")` setup in a fresh runtime generation with an empty `globalThis.__clayLoadedPackages` cache. Rust mode metadata, syntax grammar, commands, completion providers, and UI contributions rebuild from `package.json` via host apply-record; `loadEntry` stays execute-only. Failed reloads keep the prior Rust generation active. No Rust-specific reload callback or copied manifest is required.
 
 ## Contract
 
 - `package.json` name: `@clay/rust`
 - Clay API prefix: `rust`
+- Preset: `code-mode` (permissions / `apiDependencies` / extension points expand at validate time)
 - Language ID: `rust`
 - Mode ID: `rust`
 - File patterns: `.rs`, `Cargo.toml`
 - Docs path: `./docs/index.md`
 - Entries: `./dist/index.js`, `./dist/load.js`
-- Grammar contribution: `native`, source `tree-sitter-rust` (no package `.wasm` asset)
+- Grammar contribution: owned by native descriptor (`FIRST_PARTY_NATIVE_GRAMMARS`); package.json omits `syntaxGrammars`
 - Highlight query: `./queries/highlights.scm`
 - Vocabulary styleMap: code captures map directly to closed `TokenType` + `Modifiers`, including `Function + Declaration`
 - Budgets: `timeoutMs = 5000`, `maxWindowBytes = 4096`; published decorations remain bounded by `DECORATION_PAYLOAD_BUDGET_BYTES` and cached syntax chunks by `SYNTAX_CACHE_BUDGET_BYTES`

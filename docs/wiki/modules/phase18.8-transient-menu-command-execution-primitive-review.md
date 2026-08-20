@@ -20,7 +20,7 @@
 - `src/masonry_sdui.rs`
 - `src/shell/package_ui.rs`
 - `src/server/ui.rs`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `tests/primitives_docs.rs`
 
 ## Overview
@@ -36,7 +36,7 @@ This review completes the primitive-first gate before implementation. It invento
 - `src/packages/commands.rs::CommandRegistry` is the current source of truth for package-owned command metadata. It validates package provenance, `command-registration`, package-prefixed command IDs, display names, routing policies, key bindings, custom properties, duplicate IDs, undeclared permissions, and executable text-transform fields.
 - `runtime/js/commands.js` exposes `serverRegisterCommand` and `serverListCommands` through the controlled server runtime. These facades serialize package manifests and declarations to Clay-owned ops; raw `Deno.core.ops` names are not public API.
 - `docs/reference/clay-js-api/commands/server-register-command.md` and `server-list-commands.md` document registration/listing as runtime-backed metadata APIs. Registration does not grant execution authority.
-- `src/protocol/mod.rs`, `src/behavior/manifest.rs`, `src/client/behavior.rs`, and `src/editor/surface.rs` define behavior-manifest command declarations and routing policies. `ClientFirstPredictable` and `ClientFirstRequiresAck` remain Rust-known client edit authorities; package commands must route through server-first/UI/background policies.
+- `src/protocol/mod.rs`, `src/behavior/manifest.rs`, `src/client/behavior.rs`, and `src/editor/surface/mod.rs` define behavior-manifest command declarations and routing policies. `ClientFirstPredictable` and `ClientFirstRequiresAck` remain Rust-known client edit authorities; package commands must route through server-first/UI/background policies.
 
 ### SDUI/action primitives
 
@@ -48,7 +48,7 @@ This review completes the primitive-first gate before implementation. It invento
 ### Shell, slot, and transient overlay primitives
 
 - `src/shell/layout.rs` implements internal `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` state. The `bottom` slot already exists as a Clay-owned attachment point.
-- `src/masonry_shell.rs` owns the native shell root and places the editor child from installed layout state. Masonry layout reads validated state only; it must not parse packages, run JavaScript, wait on IPC, or mutate package UI state during layout.
+- `src/masonry_shell/mod.rs` owns the native shell root and places the editor child from installed layout state. Masonry layout reads validated state only; it must not parse packages, run JavaScript, wait on IPC, or mutate package UI state during layout.
 - `src/shell/package_ui.rs::PackageUiRuntimeState` stores fixed panels and transient overlays. Accepted overlays render separately from fixed slots and do not consume `PaneSlotLayout` geometry.
 - `src/masonry_sdui.rs::SduiNativeState` paints package fixed panels and transient overlays from inert runtime state and can structurally observe panels/overlays without document text, widget handles, raw action authority, raw CSS, or executable code.
 - Existing `TransientOverlayContribution` can describe dismissible/focus-scoped overlay intent, but it does not model query text, selected index, filtered item lists, session IDs, activation lifecycle, or typed menu result semantics.
@@ -62,7 +62,7 @@ This review completes the primitive-first gate before implementation. It invento
 
 ### Persistent server runtime primitives
 
-- `src/server/js_runtime.rs::ClayJsRuntimeService` owns the persistent server-side `deno_core` runtime worker for curated `clay:*` facades.
+- `src/server/js_runtime/mod.rs::ClayJsRuntimeService` owns the persistent server-side `deno_core` runtime worker for curated `clay:*` facades.
 - Runtime evaluation is startup, configuration, package-load, open-time, parse, or explicit command/UI work. It is not called from Masonry paint/layout, pointer, scroll, keypress, text-event, or ordinary local edit application.
 - The module loader is deny-by-default and raw platform authorities remain unavailable unless a documented Clay facade grants a constrained subset.
 - Phase 18.8 command execution may call server runtime/package handlers only from the server-first execution path, never from client hot paths.
@@ -179,7 +179,7 @@ Allowed authority remains narrow:
 - `src/server/control_center.rs` unit tests cover opening from the registry snapshot, built-in command inclusion, query filtering by label/id/detail/provenance, selected command execution through `CommandExecutor`, empty-filter rejection, and exclusion of client-first/native-client-UI commands.
 - `tests/command_execution.rs` integration/security tests cover unknown command rejection, client-first/client-ui routing rejection, provenance mismatch, undeclared permission, malformed/oversize arguments, invalid document target, workspace-mutation target requirement, and duplicate command ID rejection.
 - `tests/package_primitive_gate.rs` covers client-first and client-ui command routing rejection at registration time, alongside existing duplicate/ambiguous/executable-transform validation.
-- `src/editor/surface.rs` unit tests verify that ordinary typing updates local text synchronously while server-first keybindings produce only an intent, preserving the no-block-during-typing invariant.
+- `src/editor/surface/mod.rs` unit tests verify that ordinary typing updates local text synchronously while server-first keybindings produce only an intent, preserving the no-block-during-typing invariant.
 - Future tests should cover session-to-overlay projection and end-to-end SDUI/package/keybinding/menu sources sharing one command execution path.
 - Run focused documentation coverage with:
 

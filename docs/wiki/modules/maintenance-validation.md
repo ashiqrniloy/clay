@@ -54,6 +54,48 @@ The 2026-07-19 P0–P3 review is closed through executable evidence recorded in 
 
 Routine dev/test profiles use line-table debug information, with full DWARF under `--profile debugging`. Consolidating 33 integration source modules into four suite roots reduced the clean all-target artifact snapshot from roughly 22 GiB/43 expected harness executables/89 s to 6.1 GiB/14 Cargo harnesses/68 s on the same Linux host; times are advisory, while suite inventory and artifact topology are deterministic. Runtime/resource ceilings remain compiled host policy rather than configuration. `cargo audit` currently passes with the documented unmaintained warnings and expiring quick-xml exceptions enforced by `audit_exceptions_are_documented_and_unexpired`.
 
+## Plan 088 code-wiki maintenance
+
+`tests/primitives_docs.rs::plan088_code_wiki_documents_modernization_contract` keeps the master wiki index and the implementation pages for theme, shell, retained UI, workspace labels, performance baselines, and review evidence aligned with the Plan 088 architecture. It is a deterministic content gate only; it never mutates the wiki. `wiki_index_links_every_wiki_page` remains the broader navigation guard.
+
+Run `cargo test --test protocol primitives_docs` after wiki changes. The final Plan 088 wiki update documents cached theme/typography resolution, Clay-owned shell/package boundaries, clipping/accessibility semantics, responsive constraints, security/path sanitization, advisory-vs-blocking performance, and explicit visual-review blockers.
+
+## Plan 089 validation and performance gates
+
+Plan 089 adds three validation layers on top of the existing Linux blocking gate:
+
+**`scripts/check.sh` wrapper.** The serial gate is now `scripts/check.sh full` (acquires `target/.clay-full-check.lock`, runs `cargo audit`, `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets`, `cargo bench --no-run` in order, reports the failed stage on exit). `scripts/check.sh quick` runs `cargo fmt --check` then `cargo test --lib` (non-release fast path). `scripts/check.sh report` prints advisory `target/` size breakdowns without deleting or masking failures. CI invokes `scripts/check.sh full` as a single gate step. The lock prevents concurrent full runs from corrupting the shared `target/` tree.
+
+**Bounded async-test helpers.** `src/server/mod.rs::runtime_generation_tests::wait_until` polls every 10 ms with a 5 s deadline, panicking with scenario name, generation id, and runtime diagnostics codes on timeout. The four `configuration_watcher_*` poll loops were converted to `wait_until` to fix a production watcher race (the post-reload baseline scan adopted a change landing during the reload, absorbing the recovery write). The helper is test-only; production timeout sites (`connection/mod.rs` provider fallback, `js_runtime/mod.rs` reply waits) remain direct patterns.
+
+**Build artifact reporting.** `scripts/check.sh report` prints `target/` total size, `debug/deps`, `debug/incremental`, and executable count. Advisory only; no cleanup or masking. The 50 GiB / 20 GiB cleanup thresholds and `cargo clean --profile dev --package clay` workflow are documented in `docs/development/build-and-test.md`.
+
+**Criterion triage.** Plan 089 ran three fixed-input `window_baselines` passes (sample-size 10, warm-up 1 s, measurement 2 s) on an idle host and classified every group as machine variance except `centered_overlay` as benchmark instability (~0.25–0.55 ps below useful timer resolution). No reproducible implementation regression was found; no budget was raised; nothing was promoted to CI policy. The broad after-run shifts recorded in `docs/development/performance.md` are advisory evidence, not failures.
+
+**Generated state-machine coverage.** Plan 089 added deterministic stdlib-generated tests (no property-test dependency) for protocol frame mutations (`compact_generated_frame_mutations_fail_closed_without_panicking`), chord state-machine transitions (`editor_generated_chord_sequences_preserve_prefix_mismatch_and_timeout_transitions`), and menu intent ordering (`generated_menu_intent_ordering_preserves_lifecycle_and_authority`). Each test uses a local `Lcg` split-mix generator seeded deterministically; every case asserts fail-closed behavior (rejection or safe validation, never panic). The strategy is compact deterministic coverage for bounded state spaces; a dedicated fuzzer is deferred until it finds value unavailable from these cases.
+
+**Live platform validation.** `CLAY_LIVE_WINDOW_SMOKE=1 cargo test --test security live_atspi_smoke::live_multi_window_scale_smoke -- --ignored --exact --test-threads=1` launches two real Clay client processes on a Wayland host with AT-SPI prereqs, verifies both frames have positive physical bounds with scale factors between 0.5 and 4.0 via PID-separated AT-SPI identity, and confirms both status bars contain `Clay —`. The headless `rescale_event_recomputes_logical_bounds_from_physical_size` test sends `WindowEvent::Rescale(2.0)` plus `Resize(1800x1200 physical)` and asserts logical size remains 900×600. Safe window targeting requires the GNOME Shell extension (`can_query_windows=true`, `can_focus_windows=true`); blind portal input is never used.
+
+Run `scripts/check.sh full` for the serial gate. Run `cargo test --test protocol primitives_docs` after wiki changes. Run `cargo test --test security rust_visibility_api_mapping` to verify the `#[doc(hidden)]` pub allowlist (exactly 4: reconcile bridge + shell widget methods) and benchmark-helper `pub(crate)` pins.
+
+## Phase 28 manual test-plan execution
+
+The Phase 28 manual plan is maintained in `test-plan/index.md` and modules
+04, 08, 09, 10, and 11. The 2026-08-21 Linux rerun used
+`cargo build --bin clay`, the isolated `scripts/capture-ui-review.sh` fixtures,
+AT-SPI dumps, and xdg-desktop-portal screenshots. Fresh default, runtime-error,
+recovery, and large-typography states passed their static shell/accessibility
+checks under `code-reviews/screenshots/2026-08-21-phase28-manual/`.
+
+Interactive rows remain explicitly unresolved where host tooling cannot prove
+them: the completion/Command Centre harness requires a TTY for keyboard
+capture; the editor editable-text interface, compositor targeting, link
+pointer activation, and GUI `lsp-shared` worker remain known ceilings. The
+plan does not promote structural tests to live passes. Focused transform,
+keymap, completion-ranking, folding/inlay-budget, completion-payload, and
+package-conformance tests plus `cargo test --all-targets --no-fail-fast` remain
+the automated companion gate.
+
 ## Invariants
 
 - Do not silence warnings at crate level.

@@ -25,17 +25,17 @@ in [Multi-Document Sessions](multi-document-sessions.md).
   section below).
 - `src/server/mod.rs` — `IpcServer` owns the registry, broadcast sender,
   bootstrap `TabServerState`, and `TabServerState` map keyed by `TabId`.
-- `src/server/connection.rs` — handshake replay, `TabCommand` dispatch,
+- `src/server/connection/mod.rs` — handshake replay, `TabCommand` dispatch,
   close-terminates-connection, reconciliation snapshots.
 - `src/driver/mod.rs`, `src/driver/reconcile.rs`,
   `src/driver/restore.rs` — `Driver`/`TabState`, lifecycle, registry
   reconciliation, restore/reconnect state machine, per-tab event bridges,
   typed widget access helpers, and `NewTab`/close flows.
-- `src/main.rs` — event-loop integration and action dispatch into the driver.
+- `src/app_driver.rs` — event-loop integration and action dispatch into the driver.
 - `src/client/mod.rs` — handshake binding helpers,
   `ClientEditQueue::enqueue_tab_command` for post-bind lifecycle commands,
   and `ClientConnectionEvent::TabRegistry`.
-- `src/masonry_shell.rs` — per-tab chrome (`TabChrome`) and tab bar (see
+- `src/masonry_shell/window_tabs.rs` — per-tab chrome (`TabChrome`) and tab bar (see
   masonry-shell page).
 - `src/masonry_pane_document.rs`, `src/editor/document_session.rs` —
   reconnect: per-session `workspace_root_id`/`path` retention,
@@ -398,10 +398,18 @@ tests: `pane_commands_only_mutate_the_active_tab`,
 `divider_drag_credits_only_the_active_tab`,
 `per_tab_routing_targets_are_isolated`,
 `tab_switch_round_trip_preserves_split_trees_and_active_panes` in
-`src/masonry_shell.rs`;
-`per_tab_edit_queues_are_isolated` in `src/main.rs`;
+`src/masonry_shell/mod.rs`;
+`per_tab_edit_queues_are_isolated` in `src/driver/mod.rs`;
 `move_ops_change_order_only_and_preserve_entry_contents` in
 `src/server/tab_registry.rs`).
+
+## Plan 088 tab-chrome verification
+
+Plan 088 leaves the server-authoritative tab model unchanged and modernizes only Clay-owned presentation. `ClayShellWidget` installs each tab's cached `ActiveTypography`; the active tab mirrors its UI metrics to the window-level bar, whose cards, close affordances, pinned `+`, hit rectangles, and labels stay inside logical bounds. Overflow stops shrinking below the documented minimum and uses the existing clamped wheel strip; no package owns this row.
+
+`tab_card_display_name` is the shell boundary for workspace roots: it keeps only a bounded sanitized final segment and falls back to `Workspace`, so tab/accessibility labels never expose an absolute host path. Active/inactive/hover/disabled/focus card states use typed state tokens and visible focus/selection semantics; dirty/recovery/connection state remains textual in pane/status chrome and the dirty-close menu rather than being color-only. Inactive tab hosts remain retained for reconnect continuity but are stashed from paint, hit-testing, and accessibility traversal.
+
+Verification lives in `src/masonry_shell/mod.rs` tab-bar/typography/accessibility tests, `src/driver/reconcile.rs::tab_card_display_name_never_falls_back_to_an_absolute_path`, `tests/editor_performance_invariants.rs::tab_switch_path_performs_no_document_reserialization` and `high_dpi_layout_uses_logical_window_bounds`. Live multi-tab/narrow-wide captures remain unresolved on hosts without safe window targeting; retained pre-task screenshots are comparison evidence only.
 
 ## Invariants and Constraints
 
@@ -443,7 +451,7 @@ tests: `pane_commands_only_mutate_the_active_tab`,
 
 - `src/server/tab_registry.rs`: registry unit tests (incl. 22.4 reorder:
   valid moves, boundary no-ops, bound-client validation, position bounds).
-- `src/server/mod.rs` + `src/server/connection.rs`: handshake replay order,
+- `src/server/mod.rs` + `src/server/connection/mod.rs`: handshake replay order,
   `TabCommand` dispatch (incl. move variants: reorder broadcast + rejection
   snapshots), rejected-command reconciliation snapshots,
   close-terminates-connection.
@@ -471,14 +479,14 @@ tests: `pane_commands_only_mutate_the_active_tab`,
   bounds, legacy v1 detection, panic-free hostile input),
   `layout_from_persisted_tab_builds_validated_layout`. Command:
   `cargo test --lib layout_persist --quiet`.
-- `src/main.rs` (bin, 22.5): restore state machine — gate waits for
+- `src/driver/restore.rs` (bin, 22.5): restore state machine — gate waits for
   server-assigned `tab_id` before the next mount, missing-root tabs are
   skipped in order with diagnostics, deadline cancel drops the remaining
   queue, `reopen_restored_documents` attributes panes by `PaneId` and skips
   missing files, `tab_order_is_registry_order_with_entry_less_mounted_appended`.
   Command: `cargo test --bin clay --quiet`. (The machine itself moved to
   `src/driver/restore.rs` in 22.7; tests live in `driver::restore::tests`.)
-- `src/masonry_shell.rs` (22.5): `layout_mutation_signals_persistence_with_multiple_tabs`,
+- `src/masonry_shell/mod.rs` (22.5): `layout_mutation_signals_persistence_with_multiple_tabs`,
   `keyboard_resize_signals_persistence`, `tab_layout_data_returns_every_mounted_tab_layout`,
   `restored_single_editor_mounts_persisted_split_tree`,
   `install_restored_tab_mounts_persisted_tree_without_switching`.
@@ -492,7 +500,7 @@ tests: `pane_commands_only_mutate_the_active_tab`,
   `real_server_restart_rebuilds_reconnect_from_persisted_workspace_root`
   proves a reset registry rebuilds from the persisted root. Command:
   `cargo test --lib real_server_restore --quiet`.
-- `src/masonry_shell.rs`: install/switch/retention/rekey/zero-size-layout
+- `src/masonry_shell/mod.rs`: install/switch/retention/rekey/zero-size-layout
   tests (see masonry-shell page). Command:
   `cargo test --lib masonry_shell --quiet`.
 
@@ -546,7 +554,7 @@ changed in tasks 6–7 — guards only.
     only_and_grants_nothing` (TabEntry literal compile-pin),
     `reclaim_rebinds_only_the_reclaiming_connection` (old client ops fail
     after reclaim; the reclaiming client cannot operate other tabs).
-  - `src/server/connection.rs`: `reconnected_tab_regains_only_its_own_
+  - `src/server/connection/mod.rs`: `reconnected_tab_regains_only_its_own_
     reopened_grants` (A opens 2 docs → disconnect releases both → fresh
     connection inherits nothing → reopens one, the other stays
     `UnknownDocument`).
@@ -622,6 +630,6 @@ rejected-close fix:
   `sweep_skips_tabs_of_live_connected_clients` (end-to-end real-server
   liveness wiring, `src/server/mod.rs`);
   `rejected_close_keeps_connection_serving` /
-  `accepted_close_still_ends_connection` (`src/server/connection.rs`);
+  `accepted_close_still_ends_connection` (`src/server/connection/mod.rs`);
   alias allowlist + `validate_command_id` gate coverage
   (`src/server/ops/keybindings.rs`).

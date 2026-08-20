@@ -7,7 +7,7 @@
 - `docs/reference/primitives/package-security.md`
 - `src/masonry_editor.rs`
 - `src/masonry_sdui.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/protocol/sdui.rs`
 - `src/perf/budgets.rs`
 - `tests/primitives_docs.rs`
@@ -68,7 +68,7 @@ Important fields:
 The implemented render hook preserves these boundaries:
 
 - `src/masonry_editor.rs::EditorWidget::apply_connection_event` receives `ClientConnectionEvent::DecorationSet` and stores validated updates before paint.
-- `src/editor/surface.rs::EditorSurface` holds current document/version-matched decoration state near visible snapshot/layout-cache computation.
+- `src/editor/surface/mod.rs::EditorSurface` holds current document/version-matched decoration state near visible snapshot/layout-cache computation.
 - `src/editor/layout.rs::LayoutState::paint_text` renders syntax/semantic ranges with cached Parley foreground brushes; selection fills and diagnostic squiggles remain separate Vello layers.
 - `src/masonry_editor.rs::EditorWidget::paint` does not run package JavaScript, validate large payloads, or parse package declarations. It only renders already-applied state.
 - `src/masonry_sdui.rs::SduiNativeState::apply_snapshot` and `apply_update` remain the SDUI panel/status application path; the validated native UI tree is rendered by a retained reconciled Masonry subtree (`SduiRegionWidget`, `src/masonry_sdui_region.rs`) hosted as a child of `EditorWidget` (see [SDUI / Package-UI Retained Masonry Reconciliation](masonry-sdui-region.md)).

@@ -21,11 +21,12 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use masonry::accesskit::{Node, Role};
+use masonry::accesskit::{ActionData, Node, NodeId, Role};
 use masonry::core::{
-    AccessCtx, AccessEvent, BoxConstraints, BrushIndex, ChildrenIds, EventCtx, LayoutCtx, PaintCtx,
-    PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef, RegisterCtx, ScrollDelta,
-    TextEvent, Update, UpdateCtx, Widget, WidgetPod, render_text,
+    AccessCtx, AccessEvent, BoxConstraints, BrushIndex, ChildrenIds, EventCtx, LayoutCtx,
+    MutateCtx, PaintCtx, PointerEvent, PointerScrollEvent, PropertiesMut, PropertiesRef,
+    RegisterCtx, ScrollDelta, TextEvent, Update, UpdateCtx, Widget, WidgetId, WidgetPod,
+    render_text,
 };
 use masonry::kurbo::{Affine, Point, Rect, Size};
 use masonry::parley::style::{LineHeight, StyleProperty};
@@ -45,13 +46,16 @@ use crate::masonry_editor::{
     ClipboardCommandOutcome, EditorAction, EditorClientCommand, EditorConnectionStatus,
     EditorStatus, SduiStatusObservation,
 };
-use crate::masonry_welcome::{WelcomeRenderContext, WelcomeState, WelcomeWidget};
+use crate::masonry_welcome::{
+    WelcomeRenderContext, WelcomeState, WelcomeWidget, accessibility_status_node,
+};
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
     ActiveTheme, ActiveTypography, BehaviorManifest, CompletionRequestId, CompletionResultSet,
-    DocumentId, DocumentVersion, EditRejection, EditorCommandRequest, FileErrorCode, FontRole,
-    KeyCode, KeyModifiers, KeyStroke, LanguageIntelligenceRequestId, LanguageIntelligenceResult,
-    ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent, WorkspaceRootId,
+    DecorationActivatePlan, DecorationIntent, DecorationTarget, DocumentId, DocumentVersion,
+    EditRejection, EditorCommandRequest, FileErrorCode, FontRole, KeyCode, KeyModifiers, KeyStroke,
+    LanguageIntelligenceRequestId, LanguageIntelligenceResult, ProtocolErrorCode,
+    RuntimeDiagnostic, SduiActionIntent, WorkspaceRootId, plan_decoration_activate,
 };
 use crate::shell::transient_menu::TransientMenuFocusPolicy;
 use crate::shell::{
@@ -268,6 +272,7 @@ pub struct PaneDocumentView {
     /// `(0,0,size)` for standalone panes). Set during layout.
     editor_rect: Rect,
     pending_definition_navigation: Option<PendingDefinitionNavigation>,
+    link_hover_text: Option<String>,
     last_decoration_viewport: Option<(DocumentId, DocumentVersion, u64, u64)>,
     /// Phase 22.7 (C4): request-id allocators and in-flight request
     /// bookkeeping (grouped; see [`PaneRequestBookkeeping`]).
@@ -325,6 +330,7 @@ impl Default for PaneDocumentView {
             edit_queue: None,
             editor_rect: Rect::ZERO,
             pending_definition_navigation: None,
+            link_hover_text: None,
             last_decoration_viewport: None,
             requests: PaneRequestBookkeeping::default(),
             status,
@@ -790,6 +796,7 @@ impl PaneDocumentView {
                 changed
             }
             ClientConnectionEvent::DiagnosticSet(set) => self.editor.apply_diagnostic_set(set),
+            ClientConnectionEvent::FoldingRangeSet(set) => self.editor.apply_folding_set(set),
             ClientConnectionEvent::CompletionResult(result) => self.apply_completion_result(result),
             ClientConnectionEvent::LanguageIntelligenceResult(result) => {
                 self.apply_language_intelligence_result(result)
@@ -813,6 +820,9 @@ impl PaneDocumentView {
             }
             ClientConnectionEvent::CaretStyleOverride(style) => {
                 self.editor.set_caret_style_override(style)
+            }
+            ClientConnectionEvent::EditorLayoutOverride(wrap) => {
+                self.editor.set_editor_layout(wrap)
             }
             ClientConnectionEvent::CompletionRejected { request_id, .. } => {
                 if self.requests.take_completion_if_current(request_id) {
@@ -1025,6 +1035,7 @@ impl PaneDocumentView {
         }
         self.has_opened_document = true;
         self.welcome_visible = false;
+        self.layout_invalidated = true;
         self.active_document_path = Some((metadata.workspace_root_id, metadata.path.clone()));
         self.pending_reconnect_resync = false;
 
@@ -2003,6 +2014,11 @@ impl PaneDocumentView {
             EditorClientCommand::KeepSelection => EditorCommand::KeepSelection,
             EditorClientCommand::RemoveSelection => EditorCommand::RemoveSelection,
             EditorClientCommand::UndoCursorMove => EditorCommand::UndoCursorMove,
+            EditorClientCommand::ToggleComment => EditorCommand::ToggleComment,
+            EditorClientCommand::ToggleListMarker => EditorCommand::ToggleListMarker,
+            EditorClientCommand::RotateHeading => EditorCommand::RotateHeading,
+            EditorClientCommand::ToggleFold => EditorCommand::ToggleFold,
+            EditorClientCommand::ToggleInlayHints => EditorCommand::ToggleInlayHints,
         };
         self.editor.command(editor_command)
     }
@@ -2074,6 +2090,14 @@ impl PaneDocumentView {
         ctx.register_child(&mut self.welcome);
     }
 
+    pub(crate) fn request_welcome_render(&mut self, ctx: &mut MutateCtx<'_>) {
+        // WelcomeState is shared, but Masonry caches each child scene; mark
+        // this child when status changes so its visible copy is repainted.
+        if self.welcome_visible {
+            ctx.get_mut(&mut self.welcome).ctx.request_render();
+        }
+    }
+
     fn apply_completion_result(&mut self, result: CompletionResultSet) -> bool {
         if !self.requests.take_completion_if_current(result.request_id) {
             return false;
@@ -2143,6 +2167,78 @@ impl PaneDocumentView {
         }
         self.push_menu(Some(language_intelligence_result_to_menu_session(&result)));
         true
+    }
+
+    fn apply_decoration_intent(&mut self, intent: DecorationIntent, offset: usize) -> bool {
+        let Some(target) = self.editor.decoration_target_at(offset).cloned() else {
+            return false;
+        };
+        match intent {
+            DecorationIntent::Hover => {
+                let text = target.hover_text();
+                let next = (!text.is_empty()).then(|| text.to_string());
+                if self.link_hover_text == next {
+                    return false;
+                }
+                self.link_hover_text = next;
+                true
+            }
+            DecorationIntent::Activate => {
+                let _ = self.activate_decoration_target(&target);
+                true
+            }
+        }
+    }
+
+    fn activate_decoration_target(&mut self, target: &DecorationTarget) -> DecorationActivatePlan {
+        let document = self.editor.document_state();
+        let (root_id, path) = self
+            .active_document_path
+            .clone()
+            .unwrap_or((0, String::new()));
+        let resolved = match target {
+            DecorationTarget::WorkspacePath { relative_path, .. } => {
+                crate::protocol::resolve_workspace_href(&path, relative_path)
+            }
+            _ => None,
+        };
+        let retained = resolved
+            .as_ref()
+            .and_then(|relative| self.sessions.document_id_for_path(root_id, relative));
+        let plan = plan_decoration_activate(target, document.document_id, root_id, &path, retained);
+        match &plan {
+            DecorationActivatePlan::Jump { byte_start } => {
+                let _ = self.editor.navigate_to_byte_offset(*byte_start);
+            }
+            DecorationActivatePlan::Focus {
+                document_id,
+                byte_start,
+            } => {
+                if *document_id != document.document_id {
+                    let _ = self.activate_document(*document_id);
+                }
+                if let Some(byte_start) = byte_start {
+                    let _ = self.editor.navigate_to_byte_offset(*byte_start);
+                }
+            }
+            DecorationActivatePlan::Open {
+                workspace_root_id,
+                relative_path,
+                byte_start,
+            } => {
+                if let Some(byte_start) = byte_start {
+                    self.pending_definition_navigation = Some(PendingDefinitionNavigation {
+                        relative_path: relative_path.clone(),
+                        byte_start: *byte_start,
+                    });
+                }
+                if let Some(queue) = &self.edit_queue {
+                    let _ = queue.enqueue_open_document(*workspace_root_id, relative_path.clone());
+                }
+            }
+            DecorationActivatePlan::Denied => {}
+        }
+        plan
     }
 
     fn take_pending_definition_navigation_for_path(
@@ -2217,7 +2313,20 @@ impl PaneDocumentView {
                     &intent.command_id,
                 )
             {
-                if let Some(event) = self
+                let intent_kind = match feature {
+                    crate::protocol::LanguageIntelligenceFeature::Hover => {
+                        Some(DecorationIntent::Hover)
+                    }
+                    crate::protocol::LanguageIntelligenceFeature::GoToDefinition => {
+                        Some(DecorationIntent::Activate)
+                    }
+                    _ => None,
+                };
+                if let Some(intent_kind) = intent_kind
+                    && self.apply_decoration_intent(intent_kind, self.editor.caret())
+                {
+                    ctx.request_render();
+                } else if let Some(event) = self
                     .editor
                     .language_intelligence_request_for_feature(feature)
                 {
@@ -2413,6 +2522,11 @@ impl PaneDocumentView {
             let outcome = self
                 .editor
                 .accept_completion_with_event(&completion, commit_character);
+            if outcome.changed
+                && let Some(edit_queue) = self.edit_queue.as_ref()
+            {
+                edit_queue.record_completion_accept(&completion.insert_text);
+            }
             self.finish_local_outcome(ctx, outcome);
             self.requests.active_completion_request_id = None;
         } else if let Some(local_action) = self.menu_selected_action() {
@@ -2833,6 +2947,12 @@ impl PaneDocumentView {
             PointerEvent::Move(pointer_update) => {
                 let point = ctx.local_position(pointer_update.current.position);
                 self.editor.set_pointer_pos(Some(point));
+                if !ctx.is_active()
+                    && let Some(local_point) = self.editor_local_point(point)
+                    && let Some(offset) = self.editor.hit_test_document_offset(local_point)
+                {
+                    let _ = self.apply_decoration_intent(DecorationIntent::Hover, offset);
+                }
                 ctx.request_render();
                 if ctx.is_active() {
                     if let Some(local_point) = self.editor_local_point(point) {
@@ -2864,6 +2984,7 @@ impl PaneDocumentView {
             }
             PointerEvent::Leave(_) => {
                 self.editor.clear_pointer_chrome_state();
+                self.link_hover_text = None;
                 ctx.request_render();
                 (false, false)
             }
@@ -3345,6 +3466,133 @@ impl PaneDocumentView {
         let recorder = global_recorder();
         let _scope = recorder.scope("masonry.render_prepare.post_paint");
         self.paint_status_line(ctx, scene);
+        self.paint_link_hover(ctx, scene);
+    }
+
+    fn paint_link_hover(&self, ctx: &mut PaintCtx<'_>, scene: &mut Scene) {
+        let Some(text) = self.link_hover_text.as_deref() else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        let ui_theme = self.editor.ui_theme();
+        let inset = ui_theme.scalar_f64("spacing.sm").unwrap_or(8.0);
+        let width = (text.chars().count() as f64 * 8.0 + inset * 2.0).clamp(48.0, 360.0);
+        let height = 28.0;
+        let rect = self.editor_rect;
+        let tooltip = Rect::new(
+            rect.x0 + inset,
+            (rect.y1 - height - inset - 24.0).max(rect.y0 + inset),
+            rect.x0 + inset + width,
+            (rect.y1 - inset - 24.0).max(rect.y0 + inset + height),
+        );
+        crate::shell::primitives::paint_tooltip_shell(scene, tooltip, ui_theme);
+        let color = ui_theme
+            .color("text.tooltip")
+            .unwrap_or(self.editor.theme().base.status_text);
+        let (font_context, layout_context) = ctx.text_contexts();
+        let mut builder = layout_context.ranged_builder(font_context, text, 1.0, true);
+        builder.push_default(StyleProperty::FontSize(12.0));
+        builder.push_default(StyleProperty::Brush(BrushIndex(0)));
+        let mut layout = builder.build(text);
+        layout.break_all_lines(Some((width - inset).max(8.0) as f32));
+        render_text(
+            scene,
+            Affine::translate((tooltip.x0 + inset, tooltip.y0 + 6.0)),
+            &layout,
+            &[color.into()],
+            true,
+        );
+    }
+
+    pub(crate) fn accessibility_text_run_id(owner: WidgetId) -> NodeId {
+        crate::editor::accessibility::virtual_a11y_node_id(
+            owner,
+            crate::editor::accessibility::virtual_a11y_slots::TEXT_RUN,
+        )
+    }
+
+    pub(crate) fn populate_accessibility_text(
+        &self,
+        ctx: &mut AccessCtx<'_>,
+        node: &mut Node,
+        owner: WidgetId,
+    ) -> Option<NodeId> {
+        if self.welcome_visible {
+            return None;
+        }
+
+        let text = self.editor.accessibility_text();
+        let character_lengths: Vec<u8> = text
+            .chars()
+            .map(|character| character.len_utf8() as u8)
+            .collect();
+        let text_run_id = Self::accessibility_text_run_id(owner);
+        node.set_value(text.clone());
+        node.clear_text_selection();
+        node.add_action(masonry::accesskit::Action::SetTextSelection);
+        if self.editor.document_state().access == crate::protocol::DocumentAccess::ReadOnly {
+            node.set_read_only();
+        } else {
+            node.add_action(masonry::accesskit::Action::ReplaceSelectedText);
+            node.add_action(masonry::accesskit::Action::SetValue);
+        }
+        if let Some(selection) = self.editor.accessibility_selection(text_run_id) {
+            node.set_text_selection(selection);
+        }
+
+        let mut text_run = Node::new(Role::TextRun);
+        text_run.set_value(text);
+        text_run.set_bounds(masonry::accesskit::Rect {
+            x0: self.editor_rect.x0,
+            y0: self.editor_rect.y0,
+            x1: self.editor_rect.x1.max(self.editor_rect.x0),
+            y1: self.editor_rect.y1.max(self.editor_rect.y0),
+        });
+        text_run.set_character_lengths(character_lengths);
+        ctx.tree_update().nodes.push((text_run_id, text_run));
+        Some(text_run_id)
+    }
+
+    pub(crate) fn handle_access_event(&mut self, ctx: &mut EventCtx<'_>, event: &AccessEvent) {
+        if self.welcome_visible {
+            return;
+        }
+        match event.action {
+            masonry::accesskit::Action::SetTextSelection => {
+                let Some(ActionData::SetTextSelection(selection)) = &event.data else {
+                    return;
+                };
+                let changed = self.editor.set_accessibility_selection(
+                    Self::accessibility_text_run_id(ctx.widget_id()),
+                    selection,
+                );
+                if changed {
+                    ctx.request_render();
+                    ctx.request_accessibility_update();
+                }
+                ctx.set_handled();
+            }
+            masonry::accesskit::Action::ReplaceSelectedText
+            | masonry::accesskit::Action::SetValue => {
+                if self.editor.document_state().access == crate::protocol::DocumentAccess::ReadOnly
+                {
+                    return;
+                }
+                let Some(ActionData::Value(value)) = &event.data else {
+                    return;
+                };
+                let outcome = if event.action == masonry::accesskit::Action::SetValue {
+                    self.editor.replace_accessibility_value(value.as_ref())
+                } else {
+                    self.editor.replace_accessibility_text(value.as_ref())
+                };
+                self.finish_local_outcome(ctx, outcome);
+                ctx.set_handled();
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn accessibility_label(&self) -> String {
@@ -3416,6 +3664,7 @@ impl PaneDocumentView {
         builder.push_default(StyleProperty::Brush(BrushIndex(0)));
         let mut layout = builder.build(&status);
         layout.break_all_lines(Some(max_width));
+        scene.push_clip_layer(Affine::IDENTITY, &status_rect);
         render_text(
             scene,
             Affine::translate((
@@ -3426,6 +3675,7 @@ impl PaneDocumentView {
             &[status_text_color.into()],
             true,
         );
+        scene.pop_layer();
     }
 }
 
@@ -3452,10 +3702,11 @@ impl Widget for PaneDocumentView {
 
     fn on_access_event(
         &mut self,
-        _ctx: &mut EventCtx<'_>,
+        ctx: &mut EventCtx<'_>,
         _props: &mut PropertiesMut<'_>,
-        _event: &AccessEvent,
+        event: &AccessEvent,
     ) {
+        self.handle_access_event(ctx, event);
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx<'_>, props: &mut PropertiesMut<'_>, event: &Update) {
@@ -3517,6 +3768,7 @@ impl Widget for PaneDocumentView {
         node: &mut Node,
     ) {
         node.set_label(self.accessibility_label());
+        let text_run_id = self.populate_accessibility_text(ctx, node, ctx.widget_id());
         let metrics = self
             .editor
             .typography()
@@ -3541,8 +3793,19 @@ impl Widget for PaneDocumentView {
             y1: rect.y1.max(rect.y0),
         });
         ctx.tree_update().nodes.push((status_id, status));
-        let mut children = vec![status_id];
+        let mut children = Vec::new();
+        if let Some(text_run_id) = text_run_id {
+            children.push(text_run_id);
+        }
+        children.push(status_id);
         if self.welcome_visible {
+            let (welcome_status_id, welcome_status) = accessibility_status_node(
+                self.welcome.id(),
+                self.welcome_state.borrow().accessibility_label(),
+            );
+            ctx.tree_update()
+                .nodes
+                .push((welcome_status_id, welcome_status));
             children.push(self.welcome.id().into());
         }
         node.set_children(children);
@@ -4167,6 +4430,8 @@ mod tests {
                     package_version: "1.0.0".to_string(),
                     package_prefix: "test".to_string(),
                 },
+                target: None,
+                inlay: None,
             }],
         };
         assert!(!view.apply_connection_event(ClientConnectionEvent::DecorationSet(foreign)));
@@ -5042,6 +5307,87 @@ mod tests {
         );
         assert!(view.menu_sync.menu.is_none(), "matching close clears");
         assert!(!view.menu_sync.server_owned);
+    }
+
+    #[test]
+    fn decoration_hover_is_local_and_activation_queues_only_safe_open() {
+        let (queue, mut receiver) = ClientEditQueue::bounded(8);
+        let mut view = view_with_queue(queue);
+        open(&mut view, 7, "alpha");
+        while receiver.try_recv().is_ok() {}
+
+        let provenance = crate::protocol::DecorationProvenance {
+            package_name: "@clay/markdown".to_string(),
+            package_version: "0.1.0".to_string(),
+            package_prefix: "markdown".to_string(),
+        };
+        let mut span = crate::protocol::DecorationSpan::from_vocabulary(
+            0,
+            5,
+            crate::protocol::DecorationKind::Link,
+            crate::protocol::TokenType::Link,
+            crate::protocol::Modifiers::NONE,
+            80,
+            provenance.clone(),
+        );
+        span.target = Some(crate::protocol::DecorationTarget::DisplayOnly {
+            text: "https://example.com".to_string(),
+        });
+        let set = crate::protocol::DecorationSet {
+            document_id: 7,
+            document_version: 1,
+            package_prefix: "markdown".to_string(),
+            kind: crate::protocol::DecorationKind::Link,
+            viewport_byte_start: 0,
+            viewport_byte_end: 5,
+            spans: vec![span],
+        };
+        assert!(view.editor_mut().apply_decoration_set(set));
+
+        assert!(view.apply_decoration_intent(DecorationIntent::Hover, 2));
+        assert_eq!(view.link_hover_text.as_deref(), Some("https://example.com"));
+        assert!(receiver.try_recv().is_err(), "hover must not enqueue work");
+
+        assert!(view.apply_decoration_intent(DecorationIntent::Activate, 2));
+        assert!(
+            receiver.try_recv().is_err(),
+            "display-only activation is inert"
+        );
+
+        let mut safe_span = crate::protocol::DecorationSpan::from_vocabulary(
+            0,
+            5,
+            crate::protocol::DecorationKind::Link,
+            crate::protocol::TokenType::Link,
+            crate::protocol::Modifiers::NONE,
+            80,
+            provenance,
+        );
+        safe_span.target = Some(crate::protocol::DecorationTarget::WorkspacePath {
+            relative_path: "notes.md".to_string(),
+            range: None,
+        });
+        assert!(
+            view.editor_mut()
+                .apply_decoration_set(crate::protocol::DecorationSet {
+                    document_id: 7,
+                    document_version: 1,
+                    package_prefix: "markdown".to_string(),
+                    kind: crate::protocol::DecorationKind::Link,
+                    viewport_byte_start: 0,
+                    viewport_byte_end: 5,
+                    spans: vec![safe_span],
+                })
+        );
+        assert!(view.apply_decoration_intent(DecorationIntent::Activate, 2));
+        assert!(matches!(
+            receiver.try_recv().expect("safe activation queues open"),
+            ClientMessage::OpenDocument {
+                workspace_root_id: 77,
+                path,
+                ..
+            } if path == "notes.md"
+        ));
     }
 
     #[test]

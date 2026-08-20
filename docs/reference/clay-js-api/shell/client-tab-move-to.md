@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientTabMoveTo
 js_facade: runtime/js/shell.js::clientTabMoveTo
-backing_rust: src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)
+backing_rust: src/driver/restore.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell/window_tabs.rs::ShellClientCommand (command mapping)
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientTabMoveTo
@@ -108,7 +108,7 @@ Use `shell.clientTabMoveTo` only as a documented command ID for `bindKey` to rem
 
 - JS facade: `runtime/js/shell.js::clientTabMoveTo`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/main.rs::Driver::apply_tab_command` (tab-order policy resolvers + execution); `src/masonry_shell.rs::ShellClientCommand` (command mapping)
+- Backing Rust/current owner: `src/driver/restore.rs::Driver::apply_tab_command` (tab-order policy resolvers + execution); `src/masonry_shell/window_tabs.rs::ShellClientCommand` (command mapping)
 
 ## Lookup metadata
 

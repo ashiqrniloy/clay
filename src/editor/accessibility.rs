@@ -43,8 +43,9 @@ pub(crate) mod virtual_a11y_slots {
     pub(crate) const SHELL_TAB_LIST: u16 = 1;
     pub(crate) const SHELL_ANNOUNCEMENT: u16 = 2;
     pub(crate) const SHELL_TAB_BASE: u16 = 3;
-    // Editor / pane-document: status line = 1.
+    // Editor / pane-document: status line = 1, bounded text window = 2.
     pub(crate) const STATUS: u16 = 1;
+    pub(crate) const TEXT_RUN: u16 = 2;
     // Package region: status = 1, Item(i) = 2 + i (legacy numbering).
     pub(crate) const REGION_MENU_STATUS: u16 = 1;
     pub(crate) const REGION_MENU_ITEM_BASE: u16 = 2;

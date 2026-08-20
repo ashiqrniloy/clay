@@ -69,6 +69,8 @@ What it verifies against the real desktop accessibility stack:
 - The AT-SPI tree exposes the shell, the `Workspace tabs` TabList with both
   restored cards (one selected), the active pane, the connected status
   line, and the attached server-driven region.
+- The active editor Entry advertises the real `EditableText` interface in
+  addition to `Text`; this is checked separately from its editable state flag.
 - Node identities stay stable across a second query (no per-pass virtual
   node churn).
 - Every run uses a mode-700 temporary IPC/config home — never the ambient
@@ -79,6 +81,47 @@ The deterministic `accesskit_consumer` unit tests (plan 086 task 3)
 remain the blocking coverage for input-driven tab/menu/status updates;
 this check (implemented in `tests/live_atspi_smoke.rs`) proves the real
 desktop adapter path stays alive.
+
+## Plan 089 Linux multi-window, DPI, font-scale, and Wayland smoke
+
+Run the environment-gated platform check on a real Wayland desktop:
+
+```bash
+CLAY_LIVE_WINDOW_SMOKE=1 cargo test --test security \
+  live_atspi_smoke::live_multi_window_scale_smoke \
+  -- --ignored --exact --test-threads=1
+```
+
+The check starts one isolated server and two real Clay clients, applies a
+complete user-owned `theme.setTypography` profile (`ui: 24`, document roles
+20/21), and verifies through AT-SPI that both windows expose distinct frames,
+positive physical bounds within a bounded envelope derived from Clay's
+900×600 logical window, and large bounded status bars. A compositor may
+resize a mapped window's axes independently; exact logical-size conversion is
+covered by the headless
+`masonry_shell::tests::rescale_event_recomputes_logical_bounds_from_physical_size`
+check sends Masonry `Rescale(2.0)` plus a physical 1800×1200 resize and asserts
+that layout remains 900×600 logical; together these checks cover scale change,
+logical/physical conversion, typography-driven geometry, multi-window startup,
+and Wayland delivery without blind input.
+
+Prerequisites: Linux, `WAYLAND_DISPLAY`, a reachable `org.a11y.Bus`, Python
+GI AT-SPI (`python3-gi` and `gir1.2-atspi-2.0`), and built Clay binaries.
+Missing prerequisites return a skip reason; they never count as a pass. The
+smoke uses mode-700 HOME/XDG/socket/workspace roots and synthetic documents
+only.
+
+Interactive Plan 088 completion, Command Centre, settings, file-browser,
+multi-tab/multi-pane, narrow/wide, DPI, and native-dialog states additionally
+require safe window targeting. Run `computer-use-linux doctor`; when
+`can_query_windows` or `can_focus_windows` is false, run
+`computer-use-linux setup-window-targeting` and log out/in if GNOME requests a
+shell reload, then verify both readiness flags before targeted input. The
+current host's unavailable-backend report is
+`org.freedesktop.DBus.Error.ServiceUnknown` for the GNOME Shell window-control
+API, so portal coordinates and unscoped chords must not be used as a
+substitute; retain those states as `UNRESOLVED` until targeting or a semantic
+no-focus harness action is available.
 
 ## Repeatable UI review harness (Plan 087 task 2)
 
@@ -94,8 +137,9 @@ scripts/capture-ui-review.sh --fixture ui-review-completion \
 ```
 
 `--fixture` accepts `ui-review-default`, `ui-review-loading`,
-`ui-review-error`, `ui-review-recovery`, `ui-review-completion`, and
-`ui-review-command-centre`. The fixtures live under
+`ui-review-error`, `ui-review-recovery`, `ui-review-large-typography`,
+`ui-review-completion`, `ui-review-command-centre`, and `ui-review-rust`. The
+fixtures live under
 `tests/fixtures/configuration/ui-review-*/`:
 
 | Fixture | State and capture step |
@@ -104,8 +148,10 @@ scripts/capture-ui-review.sh --fixture ui-review-completion \
 | `ui-review-loading` | Runtime SDUI loading-state fixture with label `Loading workspace…`; no timer or production-only hook is added. |
 | `ui-review-error` | Invalid theme specifier; Clay stays alive and exposes a sanitized `Runtime packages.not_installed` diagnostic. |
 | `ui-review-recovery` | Connects normally, stops only its private server, then captures `Disconnected`/recovery status. |
+| `ui-review-large-typography` | Applies `theme.setTypography` with UI 24/document 20–21 before the client handshake; captures the bounded large-type shell. |
 | `ui-review-completion` | Loads `@clay/rust` and binds `Ctrl+Space`; focus editor, trigger completion, then press Enter in the terminal to capture. |
 | `ui-review-command-centre` | Binds global `Ctrl+Alt+P`; open the centered Command Centre, then press Enter in the terminal to capture. |
+| `ui-review-rust` | Authorizes `@clay/lsp-rust`; make a no-op edit, capture visible inlays, toggle them off, and capture again. |
 
 Each run copies its named `init.js` into a mode-700 temporary
 `HOME/.config/clay`, uses a mode-700 temporary XDG config/data/socket root,
@@ -385,7 +431,7 @@ Manual matrix:
 
 Fixtures contain only short synthetic source text—no secrets, real paths, or executable authority.
 
-Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_18_manual_smoke_documents_first_party_language_matrix` and `first_party_syntax_fixtures_exist_per_language` lock this matrix and fixture set. `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions`, `first_party_language_packages_are_not_silent_defaults`, `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, and `language_package_classification_is_deterministic_across_load_orders` cover registration, package classification, and fallback deterministically. `tests/syntax_grammar.rs`, `tests/range_diagnostics.rs`, and `tests/editor_performance_invariants.rs` cover full-window vocabulary decoration chunks, analyzer-only range diagnostics, and no-hot-path behavior.
+Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_18_manual_smoke_documents_first_party_language_matrix` and `first_party_syntax_fixtures_exist_per_language` lock this matrix and fixture set. `src/server/js_runtime/mod.rs::language_packages_config_fixture_loads_and_registers_all_contributions`, `first_party_language_packages_are_not_silent_defaults`, `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, and `language_package_classification_is_deterministic_across_load_orders` cover registration, package classification, and fallback deterministically. `tests/syntax_grammar.rs`, `tests/range_diagnostics.rs`, and `tests/editor_performance_invariants.rs` cover full-window vocabulary decoration chunks, analyzer-only range diagnostics, and no-hot-path behavior.
 
 ### Plan 056 low-latency syntax Linux smoke (2026-07-19)
 
@@ -528,7 +574,7 @@ Manual Linux verification:
 
 Security and authority contract: folder selection grants only the selected directory after server validation; file opens remain root-relative or selected-file validated; packages cannot scan arbitrary paths, add root markers, override ignore/listing budgets, call raw `Deno.core.ops`, run shell commands, fetch network/package-manager resources, access AI/WASM/native widgets, execute client-side JavaScript, or invent package clipboard-contents APIs. Copy selection is write-only and limited to the current native editor selection; cut/paste are separate Clay-owned user-mediated client commands.
 
-Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` verifies this docs/fixture contract; `src/server/js_runtime.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings` loads the fixture and confirms package contributions plus folder/copy/cut/paste/file-browser/open-documents bindings; `src/server/connection.rs::connection_add_selected_workspace_root_sends_file_browser_snapshot`, `connection_add_selected_workspace_root_rejects_stale_capability`, `workspace_directory_action_sends_refreshed_file_browser_snapshot`, and `file_browser_open_uses_generic_open_document_followups` cover selected-folder grants, directory navigation, SDUI refresh, and generic language activation; `copy_selection_writes_selected_text_without_edit_event`, `copy_selection_is_noop_when_selection_is_collapsed`, `copy_selection_failure_reports_runtime_diagnostic`, plus cut/paste unit tests cover clipboard behavior.
+Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` verifies this docs/fixture contract; `src/server/js_runtime/mod.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings` loads the fixture and confirms package contributions plus folder/copy/cut/paste/file-browser/open-documents bindings; `src/server/connection/mod.rs::connection_add_selected_workspace_root_sends_file_browser_snapshot`, `connection_add_selected_workspace_root_rejects_stale_capability`, `workspace_directory_action_sends_refreshed_file_browser_snapshot`, and `file_browser_open_uses_generic_open_document_followups` cover selected-folder grants, directory navigation, SDUI refresh, and generic language activation; `copy_selection_writes_selected_text_without_edit_event`, `copy_selection_is_noop_when_selection_is_collapsed`, `copy_selection_failure_reports_runtime_diagnostic`, plus cut/paste unit tests cover clipboard behavior.
 
 ### Phase 20 daily-editing platform matrix and Linux verification
 

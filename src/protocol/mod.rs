@@ -3,6 +3,7 @@ pub mod completion;
 pub mod decorations;
 pub mod diagnostics;
 pub mod editor_control;
+pub mod folding;
 pub mod language_intelligence;
 pub mod menu;
 pub mod parse;
@@ -14,6 +15,7 @@ pub use completion::*;
 pub use decorations::*;
 pub use diagnostics::*;
 pub use editor_control::*;
+pub use folding::*;
 pub use language_intelligence::*;
 pub use menu::*;
 pub use parse::*;
@@ -49,8 +51,21 @@ pub use textobjects::*;
 /// Version 17 (Phase 24.4) adds `TransientMenuOriginData::Centered` so
 /// command/path mode snapshots can select the window-centered Command Centre
 /// surface (client-side layout/presentation only).
+/// Version 18 (Phase 26) adds `EditorLayoutOverride` so the user-owned
+/// `setEditorLayout` wrap-policy override (init.js / configuration reload)
+/// reaches every client editor surface, beating the per-mode manifest.
+/// Version 19 (Phase 28.2) adds `EditorBehaviorRules.heading_prefixes` so
+/// heading rotate is package data (no ATX literals in Rust).
+/// Version 20 (Phase 28.3) adds `FoldingRangeSet` so validated folds reach
+/// the client; collapse state stays client-local.
+/// Version 21 (Phase 28.4) adds `DecorationKind::Link` plus optional
+/// `DecorationTarget` on `DecorationSpan`.
+/// Version 22 (Phase 28.5) adds `DecorationKind::InlayHint`, inlay payload,
+/// and `EditorChrome.inlay_hints`.
+/// Version 23 (Phase 28.6) adds bounded completion recency hints to
+/// `CompletionRequest`; the ring is process-local and never persisted.
 /// Older server processes must not retain the previous wire semantics.
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 23;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;
@@ -230,6 +245,12 @@ fn default_keymaps() -> Vec<KeyBindingRule> {
     let mut rules = vec![
         KeyBindingRule::single("text.insert_newline", KeyCode::Enter),
         KeyBindingRule::single("text.insert_tab", KeyCode::Tab),
+        KeyBindingRule {
+            command_id: "editor.toggleComment".to_string(),
+            sequence: vec![ctrl_key(KeyCode::Character("/".to_string()))],
+            context: KeyBindingContext::EditorTextFocus,
+            routing_policy: RoutingPolicy::ClientFirstPredictable,
+        },
         KeyBindingRule::default_reload_configuration(),
         // Phase 24.5: the Command Centre opens on the Emacs-like `Ctrl+X
         // Ctrl+P` chord (P = palette), routed through the same server-intent
@@ -403,6 +424,11 @@ fn default_commands() -> Vec<CommandDeclaration> {
         CommandDeclaration::client_edit("text.replace", "Replace Text"),
         CommandDeclaration::client_edit("text.insert_newline", "Insert Newline"),
         CommandDeclaration::client_edit("text.insert_tab", "Insert Tab"),
+        CommandDeclaration::client_edit("editor.toggleComment", "Toggle Comment"),
+        CommandDeclaration::client_edit("editor.toggleListMarker", "Toggle List Marker"),
+        CommandDeclaration::client_edit("editor.rotateHeading", "Rotate Heading"),
+        CommandDeclaration::client_ui("editor.clientToggleFold", "Toggle Fold"),
+        CommandDeclaration::client_ui("editor.toggleInlayHints", "Toggle Inlay Hints"),
         CommandDeclaration {
             command_id: "runtime.reloadConfiguration".to_string(),
             display_name: "Reload Configuration and Packages".to_string(),
@@ -664,6 +690,26 @@ pub enum RoutingPolicy {
     ClientUiCommand,
     UiReactivePriority,
     Background,
+}
+
+impl RoutingPolicy {
+    /// Parse a package/JSON routing-policy string. Accepts kebab-case and
+    /// PascalCase aliases. `ServerFirstWithLock` and `ClientUiCommand` are
+    /// host-constructed only (need a lock scope / are not package-declarable).
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "client-first-predictable" | "ClientFirstPredictable" => {
+                Ok(Self::ClientFirstPredictable)
+            }
+            "client-first-requires-ack" | "ClientFirstRequiresAck" => {
+                Ok(Self::ClientFirstRequiresAck)
+            }
+            "server-first" | "ServerFirst" => Ok(Self::ServerFirst),
+            "ui-reactive-priority" | "UiReactivePriority" => Ok(Self::UiReactivePriority),
+            "background" | "Background" => Ok(Self::Background),
+            other => Err(format!("unsupported routingPolicy '{other}'")),
+        }
+    }
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -932,6 +978,10 @@ pub struct EditorBehaviorRules {
     pub tab: TabRule,
     pub pairs: Vec<PairRule>,
     pub comments: Vec<CommentContinuationRule>,
+    /// ATX/setext-style heading prefixes rotated by `editor.rotateHeading`.
+    /// Package data only (e.g. `"# "`…`"###### "`); empty means the command
+    /// no-ops. No heading literals live in the transform engine.
+    pub heading_prefixes: Vec<String>,
     /// Generic electric-character rules. Each rule reflows the current line
     /// locally when its trigger character is typed, e.g. outdenting a line so a
     /// closing `}` aligns with its opener. Any future language package can
@@ -946,6 +996,86 @@ pub struct EditorBehaviorRules {
     /// Per-mode caret appearance/blink override. `None` defers to the editor
     /// `StyleRegistry` default; `clientSetCursorStyle` overrides both at runtime.
     pub caret_style: Option<CaretStyle>,
+    /// Per-mode editor chrome. `None` derives from `document_font_role`
+    /// (monospace → on, proportional → off).
+    pub chrome: Option<EditorChrome>,
+    /// Per-mode wrap/column policy. `None` derives from `document_font_role`
+    /// (monospace → no wrap, proportional → 72-column measure).
+    pub layout: Option<EditorLayoutRules>,
+}
+
+/// Wrap + measure. Packages declare this; users can override it client-side.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorLayoutRules {
+    pub wrap: WrapPolicy,
+}
+
+/// How document text wraps inside the pane.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WrapPolicy {
+    /// No wrap; horizontal scroll. Code default.
+    None,
+    /// Wrap to the pane content width. Historical default.
+    Viewport,
+    /// Wrap to `min(pane, column * average-advance)`.
+    Column(u16),
+}
+
+impl WrapPolicy {
+    pub const DEFAULT_COLUMN: u16 = 72;
+    pub const MIN_COLUMN: u16 = 16;
+    pub const MAX_COLUMN: u16 = 240;
+
+    pub const fn from_font_role(role: DocumentFontRole) -> Self {
+        match role {
+            DocumentFontRole::Monospace => Self::None,
+            DocumentFontRole::Proportional => Self::Column(Self::DEFAULT_COLUMN),
+            DocumentFontRole::Inherit => Self::Viewport,
+        }
+    }
+
+    pub fn clamp_column(cols: u16) -> u16 {
+        cols.clamp(Self::MIN_COLUMN, Self::MAX_COLUMN)
+    }
+}
+
+/// Generic editor chrome toggles. Any mode can declare them; paint is client-side.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorChrome {
+    pub gutter: bool,
+    pub active_line: bool,
+    pub indent_guides: bool,
+    pub bracket_match: bool,
+    pub inlay_hints: bool,
+}
+
+impl EditorChrome {
+    pub const fn prose() -> Self {
+        Self {
+            gutter: false,
+            active_line: false,
+            indent_guides: false,
+            bracket_match: false,
+            inlay_hints: false,
+        }
+    }
+
+    pub const fn code() -> Self {
+        Self {
+            gutter: true,
+            active_line: true,
+            indent_guides: true,
+            bracket_match: true,
+            inlay_hints: true,
+        }
+    }
+
+    pub const fn from_font_role(role: DocumentFontRole) -> Self {
+        match role {
+            DocumentFontRole::Monospace => Self::code(),
+            DocumentFontRole::Proportional | DocumentFontRole::Inherit => Self::prose(),
+        }
+    }
 }
 
 impl EditorBehaviorRules {
@@ -975,6 +1105,7 @@ impl EditorBehaviorRules {
                 line_prefix: "//".to_string(),
                 continue_prefix: "// ".to_string(),
             }],
+            heading_prefixes: Vec::new(),
             electric_characters: Vec::new(),
             autocomplete_triggers: vec![AutocompleteTrigger {
                 trigger: ".".to_string(),
@@ -982,6 +1113,8 @@ impl EditorBehaviorRules {
             }],
             movement: MovementRules::default_text(),
             caret_style: None,
+            chrome: None,
+            layout: None,
         }
     }
 
@@ -1253,9 +1386,9 @@ pub enum ClientMessage {
     /// Phase 18.11 completion request. Enqueued after a local-first edit that
     /// hit a behavior-manifest autocomplete trigger, or after a manual
     /// `completion.trigger` command. Carries typed request metadata only (no
-    /// document text); the server-side provider lane stale-drops older
-    /// requests against `document_version`/`behavior_version`/
-    /// `provider_generation`.
+    /// document text); bounded accepted-completion recency hints are inert
+    /// ranking data. The server-side provider lane stale-drops older requests
+    /// against `document_version`/`behavior_version`/`provider_generation`.
     CompletionRequest {
         request: CompletionRequest,
     },
@@ -1391,10 +1524,15 @@ pub struct TextThemeOverride {
     pub token: String,
     /// RGBA override, present only when the entry declares a color.
     pub color: Option<[u8; 4]>,
+    /// Optional fill override (`#rrggbbaa`). Theme-resolved only; never a
+    /// decoration-span wire field.
+    pub background: Option<[u8; 4]>,
     pub bold: Option<bool>,
     pub italic: Option<bool>,
     pub underline: Option<bool>,
     pub strike: Option<bool>,
+    /// Size-ladder thousandths (`1500` = 1.5). Theme-owned; never a span field.
+    pub scale: Option<u16>,
     /// Owning theme package api prefix (provenance).
     pub provenance: String,
 }
@@ -1897,6 +2035,10 @@ pub enum ServerMessage {
         update: SduiTreeUpdate,
     },
     DecorationSet(DecorationSet),
+    /// Validated folding ranges for one document version. Collapse state is
+    /// client-local and is not part of this message. Payload-capped by
+    /// `FOLDING_RANGE_PAYLOAD_BUDGET_BYTES`.
+    FoldingRangeSet(FoldingRangeSet),
     /// All authority chunks produced by one parse update, in viewport-key
     /// order. Clients apply chunks in order; the batch shares the single-set
     /// validation and staleness semantics per chunk.
@@ -1996,6 +2138,11 @@ pub enum ServerMessage {
     /// (editor-control gated). `None` clears the override so the effective
     /// style falls back to the per-mode manifest then the theme default.
     CaretStyleOverride(Option<CaretStyle>),
+    /// Phase 26 user-owned editor wrap-policy override from `setEditorLayout`
+    /// (trusted-domain configuration only; packages cannot forge it). `None`
+    /// clears the override so the effective wrap falls back to the per-mode
+    /// manifest `editorRules.layout.wrap` then `WrapPolicy::from_font_role`.
+    EditorLayoutOverride(Option<WrapPolicy>),
     /// Phase 22.1 shell-level user preferences from `setPaneFocusPolicy`
     /// (configuration-time). Sent on initial connect and whenever the
     /// preference changes during `init.js` evaluation/reload.
@@ -2063,6 +2210,69 @@ pub enum ProtocolErrorCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_keymaps_contain_editor_comment_toggle_binding() {
+        let rule = default_keymaps()
+            .into_iter()
+            .find(|rule| rule.command_id == "editor.toggleComment")
+            .expect("default keymap missing editor comment toggle");
+
+        assert_eq!(
+            rule.sequence,
+            vec![KeyStroke {
+                key: KeyCode::Character("/".to_string()),
+                modifiers: KeyModifiers {
+                    control: true,
+                    ..KeyModifiers::NONE
+                },
+            }]
+        );
+        assert_eq!(rule.context, KeyBindingContext::EditorTextFocus);
+        assert_eq!(rule.routing_policy, RoutingPolicy::ClientFirstPredictable);
+    }
+
+    #[test]
+    fn default_commands_declare_phase28_editor_configuration_commands() {
+        let commands = default_commands();
+        for (id, authority, routing_policy) in [
+            (
+                "editor.toggleComment",
+                CommandAuthority::BuiltInClientEdit,
+                RoutingPolicy::ClientFirstPredictable,
+            ),
+            (
+                "editor.toggleListMarker",
+                CommandAuthority::BuiltInClientEdit,
+                RoutingPolicy::ClientFirstPredictable,
+            ),
+            (
+                "editor.rotateHeading",
+                CommandAuthority::BuiltInClientEdit,
+                RoutingPolicy::ClientFirstPredictable,
+            ),
+            (
+                "editor.clientToggleFold",
+                CommandAuthority::ClientUi,
+                RoutingPolicy::ClientUiCommand,
+            ),
+            (
+                "editor.toggleInlayHints",
+                CommandAuthority::ClientUi,
+                RoutingPolicy::ClientUiCommand,
+            ),
+        ] {
+            let command = commands
+                .iter()
+                .find(|command| command.command_id == id)
+                .unwrap_or_else(|| panic!("default commands missing {id}"));
+            assert_eq!(command.authority, authority, "{id} authority drifted");
+            assert_eq!(
+                command.routing_policy, routing_policy,
+                "{id} routing policy drifted"
+            );
+        }
+    }
 
     #[test]
     fn default_keymaps_contain_configuration_reload_binding() {
@@ -2349,5 +2559,39 @@ mod tests {
                 "{id} should be ClientUi"
             );
         }
+    }
+
+    #[test]
+    fn routing_policy_parse_accepts_kebab_and_pascal() {
+        for (input, expected) in [
+            (
+                "client-first-predictable",
+                RoutingPolicy::ClientFirstPredictable,
+            ),
+            (
+                "ClientFirstPredictable",
+                RoutingPolicy::ClientFirstPredictable,
+            ),
+            (
+                "client-first-requires-ack",
+                RoutingPolicy::ClientFirstRequiresAck,
+            ),
+            (
+                "ClientFirstRequiresAck",
+                RoutingPolicy::ClientFirstRequiresAck,
+            ),
+            ("server-first", RoutingPolicy::ServerFirst),
+            ("ServerFirst", RoutingPolicy::ServerFirst),
+            ("ui-reactive-priority", RoutingPolicy::UiReactivePriority),
+            ("UiReactivePriority", RoutingPolicy::UiReactivePriority),
+            ("background", RoutingPolicy::Background),
+            ("Background", RoutingPolicy::Background),
+        ] {
+            assert_eq!(RoutingPolicy::parse(input).unwrap(), expected, "{input}");
+        }
+        assert!(RoutingPolicy::parse("").is_err());
+        assert!(RoutingPolicy::parse("server-first-with-lock").is_err());
+        assert!(RoutingPolicy::parse("ClientUiCommand").is_err());
+        assert!(RoutingPolicy::parse("not-a-policy").is_err());
     }
 }

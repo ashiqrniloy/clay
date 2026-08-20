@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientUndo
 js_facade: runtime/js/editor.js::clientUndo
-backing_rust: src/masonry_editor.rs::EditorWidget::undo; src/editor/surface.rs::EditorSurface::undo_with_event; src/editor/history.rs::EditHistory
+backing_rust: src/masonry_editor.rs::EditorWidget::undo; src/editor/surface/mod.rs::EditorSurface::undo_with_event; src/editor/history.rs::EditHistory
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientUndo
@@ -104,7 +104,7 @@ Use `editor.clientUndo` only as a documented command ID for `bindKey`. Avoid raw
 
 - JS facade: `runtime/js/editor.js::clientUndo`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/masonry_editor.rs::EditorWidget::undo`; `src/editor/surface.rs::EditorSurface::undo_with_event`; `src/editor/history.rs::EditHistory`
+- Backing Rust/current owner: `src/masonry_editor.rs::EditorWidget::undo`; `src/editor/surface/mod.rs::EditorSurface::undo_with_event`; `src/editor/history.rs::EditHistory`
 
 ## Lookup metadata
 

@@ -76,15 +76,33 @@ The reconcile entry points are `reconcile_snapshot_live`/`apply_update_live`/`re
 | `PackageCollapse` | `collapse` | clip-based content show/hide (layout `set_clip_path`); widget-local `expanded`; Enter/Space toggles |
 | `PackageDropdown` | `dropdown` | single-widget (painted trigger + open list); widget-local `selected_index`/`open`; ArrowUp/Down cycles, Enter/Space confirms; emits `PackageDropdownSelect` |
 | `PackageTextInput` | `textInput` | wraps Masonry `TextArea<true>` (editable substrate); Clay-owned chrome paint (bg, validation border, placeholder, focus ring); optimistic local edit + server-authority adopt via `reset_text` when unfocused; commit via `TextAction::Entered` routed through `text_input_intents` map |
-| `PackageModal` | `modal` | `Role::Dialog`; Tab/Shift+Tab focus trap cycles widget-local focusable descendants via `ctx.set_focus`; `set_handled` prevents global Tab traversal; Escape emits `PackageModalDismiss` |
-| `PackagePanelHost` | (host) | hosts `PackageRegionWidget` per visible fixed panel; reconciles by `FixedSlotId`; paints panel chrome |
-| `PackageOverlayHost` | (host) | hosts `PackageRegionWidget` per transient overlay + active menu; reconciles by overlay id; sorts by z-order; `accepts_pointer_interaction()=false` (pointer-transparent); paints `paint_tooltip_shell` chrome behind children |
+| `PackageModal` | `modal` | `Role::Dialog`; Tab/Shift+Tab focus trap cycles widget-local focusable descendants via `ctx.set_focus`; `set_handled` prevents global Tab traversal; Escape emits `PackageModalDismiss` with the declared inert dismiss intent |
+| `PackagePanelHost` | (host) | hosts `PackageRegionWidget` per visible fixed panel; reconciles by `FixedSlotId`; paints panel chrome and exposes clipped panel children |
+| `PackageOverlayHost` | (host) | hosts `PackageRegionWidget` per transient overlay + active menu; reconciles by overlay id; sorts by z-order; `accepts_pointer_interaction()=false` (pointer-transparent); exposes clipped overlay children and paints `paint_tooltip_shell` chrome behind them |
 
 ## Action Routing
 
-Custom Masonry action types carry `SduiActionIntent` payloads; `main.rs` downcasts via `ErasedAction::downcast` in order: `SduiButtonPress` → `SduiListRowPress` → `PackageButtonPress` → `PackageListRowPress` → `PackageDropdownSelect` → `TextAction` → `EditorAction`, then routes to `enqueue_sdui_intent`. Stock Masonry `ButtonPress` carries only `PointerButton` (no payload), so the custom-action-type pattern is necessary for all SDUI/package interactive kinds.
+Custom Masonry action types carry `SduiActionIntent` payloads; `main.rs` downcasts via `ErasedAction::downcast` in order: `SduiButtonPress` → `SduiListRowPress` → `PackageButtonPress` → `PackageListRowPress` → `PackageDropdownSelect` → `PackageModalDismiss` → `TextAction` → `EditorAction`, then routes to `enqueue_sdui_intent`. Modal Escape carries its component action as the same inert button-source intent and is ignored when no action was declared. Stock Masonry `ButtonPress` carries only `PointerButton` (no payload), so the custom-action-type pattern is necessary for all SDUI/package interactive kinds.
 
 `PackageTextInput` commit is special: `TextArea<true>` submits `TextAction::Entered(value)` directly to the global action handler with the TextArea's `WidgetId` (it does not bubble through parent `on_text_event`). `PackageRegionWidget` stores `text_input_intents: HashMap<WidgetId, SduiActionIntent>` mapping the TextArea widget id to the component's base commit intent; `main.rs` navigates `EditorWidget` → `PackagePanelHost` → `PackageRegionWidget` → map lookup to recover component context and append the value argument.
+
+## Plan 088: Overlay, panel, and input containment
+
+Task 5 keeps package UI on the existing retained primitive path. `PackageRegionWidget` clips each reconciled subtree to its fixed panel/overlay frame; `PackagePanelHost`, `PackageOverlayHost`, `PackageModal`, and the SDUI region expose `set_clips_children()` so renderer and accessibility consumers cannot observe rows beyond the owning surface. `scroll` children receive a flex factor when nested in panel/flex/stack/collapse/modal containers, allowing long catalog content such as `@clay/settings` to consume the bounded panel height and scroll internally.
+
+Package leaves with `statusItem` use `Role::Status` and primary status text. Disabled package controls expose AccessKit disabled state. `PackageTextInput` reads spacing/border geometry from cached tokens and paints the shared focus ring. Modal Tab trapping remains widget-local; Escape emits `PackageModalDismiss`, and `main.rs` routes its optional declared command intent through the existing server-first SDUI path.
+
+The `@clay/settings` panel composes `panel` + `scroll` + existing `collapse`/`dropdown`/`textInput`/`button` kinds; no component kind, style variable, token, package permission, or JS authority was added.
+
+### Plan 088 Task 6 responsive layout
+
+The SDUI sidebar and editor main-region helpers use cached UI typography metrics plus actual pane bounds. A bounded body-font em threshold suppresses the left slot when a narrow pane or large user UI profile would leave no usable editor width; it is shared by the document-region and sidebar viewport decisions. Long labels are clipped to their typography-derived row clip, while the accessibility label remains complete. These decisions stay in native layout/paint state; no package-authored breakpoint or layout option is exposed.
+
+### Plan 089 runtime loading replacement
+
+A watcher-driven `RuntimeStateSnapshot` can replace the bootstrap SDUI tree after a document restore. `SduiRegionWidget` now compares `PodRecord` kind discriminants for nested keyed children as well as the root; an unchanged `SduiNodeId` whose kind changes is removed and rebuilt instead of being downcast as its old widget. The sidebar Flex tree uses fill alignment and the scroll viewport supplies its bounded width, preventing labels/panels from collapsing to zero width. `EditorWidget::sync_region` requests an accessibility update after live reconciliation.
+
+The deterministic regression `masonry_editor::tests::runtime_loading_tree_reaches_accessibility_after_document_open` covers the initial editor-only tree → `DocumentOpened` → published loading panel sequence. `SduiScrollViewport` remains a native bounded/clipped surface; fixture code does not receive renderer or filesystem authority.
 
 ## Active Menu (Completion / Command Palette / Context Menu)
 
@@ -135,7 +153,7 @@ The legacy `collect_active_menu_accessibility_entries` (Menu > MenuItem with cus
 - `src/masonry_package_region.rs`: `overlay_host_reconcile_updates_menu_selection`, `hosted_menu_overlay_exposes_menu_role_and_item_accessibility_labels`, `package_menu_accessibility_labels_are_sanitized_bounded_and_consumer_valid`, package widget interaction + collapse/dropdown/textInput/modal tests, panel-host/overlay-host reconcile tests.
 - `src/editor/accessibility.rs`: `menu_item_accessibility_labels_are_safe_and_bounded`.
 - `src/masonry_sdui.rs`: SDUI snapshot/update application + observability tests (`sdui_snapshot_replaces_native_tree_state`, `slot_ui_observation_omits_document_text_native_handles_and_raw_authority`, layout regression tests).
-- `src/masonry_editor.rs`: `sync_region`/`sync_panels`/`sync_overlays` wiring tests, `MenuStateChanged` re-sync, completion-overlay z-order.
+- `src/masonry_editor.rs`: `sync_region`/`sync_panels`/`sync_overlays` wiring tests, `MenuStateChanged` re-sync, completion-overlay z-order, and `runtime_loading_tree_reaches_accessibility_after_document_open`.
 - Conformance: `tests/ui_primitive_conformance.rs`, `tests/package_ui_conformance.rs` (run via `cargo test --test editor`).
 - Commands: `cargo test --lib`, `cargo test --test editor`, `cargo test --test runtime`, `cargo test --test protocol` (doc/catalog drift gates).
 

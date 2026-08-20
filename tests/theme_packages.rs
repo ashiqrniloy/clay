@@ -27,6 +27,7 @@ const EXPECTED_BASE_UI_KEYS: &[&str] = &[
     "diagnosticError",
     "diagnosticWarning",
     "diagnosticInfo",
+    "searchMatch",
 ];
 
 const EXPECTED_TOKEN_TYPE_NAMES: &[&str] = &[
@@ -96,7 +97,7 @@ fn assert_full_theme_mapping(specifier: &str, dir: &str, keyword_bold: bool) {
     );
 
     let overrides = &record.contributions.text_styles;
-    // Full mapping: 13 base UI keys + 35 TokenType variants = 48 entries.
+    // Full mapping: 14 base UI keys + 35 TokenType variants = 49 entries.
     assert_eq!(
         overrides.len(),
         EXPECTED_BASE_UI_KEYS.len() + EXPECTED_TOKEN_TYPE_NAMES.len(),
@@ -153,10 +154,14 @@ fn assert_full_theme_mapping(specifier: &str, dir: &str, keyword_bold: bool) {
             color: o
                 .color
                 .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
+            background: o
+                .background
+                .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
             bold: o.bold,
             italic: o.italic,
             underline: o.underline,
             strike: o.strike,
+            scale: o.scale.map(|milli| f32::from(milli) / 1000.0),
             provenance: o.provenance.clone(),
         })
         .collect();
@@ -207,6 +212,43 @@ fn assert_full_theme_mapping(specifier: &str, dir: &str, keyword_bold: bool) {
             .color,
         "{specifier} must preserve per-TokenType color overrides instead of collapsing prose tokens"
     );
+    assert!(
+        registry
+            .style_for(
+                clay::protocol::DecorationKind::Syntax,
+                TokenType::Quote,
+                clay::protocol::Modifiers::NONE,
+            )
+            .background
+            .is_some(),
+        "{specifier} Quote must resolve a background fill"
+    );
+    assert!(
+        registry
+            .style_for(
+                clay::protocol::DecorationKind::Syntax,
+                TokenType::CodeBlock,
+                clay::protocol::Modifiers::NONE,
+            )
+            .background
+            .is_some(),
+        "{specifier} CodeBlock must resolve a background fill"
+    );
+    assert!(
+        registry
+            .style_for(
+                clay::protocol::DecorationKind::SearchMatch,
+                TokenType::Variable,
+                clay::protocol::Modifiers::NONE,
+            )
+            .background
+            .is_some(),
+        "{specifier} searchMatch must resolve a background fill"
+    );
+    assert!(
+        registry.size_scale(TokenType::Heading1) > registry.size_scale(TokenType::Paragraph),
+        "{specifier} Heading1 must resolve larger than body"
+    );
     assert_ne!(
         registry
             .diagnostic_style(clay::protocol::DiagnosticSeverity::Error)
@@ -225,6 +267,51 @@ fn assert_full_theme_mapping(specifier: &str, dir: &str, keyword_bold: bool) {
             .color,
         "{specifier} must provide distinct diagnosticWarning/diagnosticInfo colors"
     );
+
+    // Phase 26.1: dormant syntax vocabulary entries (the ones first-party
+    // queries will start emitting in task 26.2) must not collapse to the same
+    // resolved StyleSpec as any other syntax token in the same theme.
+    let dormant = [
+        clay::protocol::TokenType::Macro,
+        clay::protocol::TokenType::Property,
+        clay::protocol::TokenType::Method,
+        clay::protocol::TokenType::Parameter,
+        clay::protocol::TokenType::EnumMember,
+        clay::protocol::TokenType::Operator,
+        clay::protocol::TokenType::TypeParameter,
+        clay::protocol::TokenType::Regexp,
+        clay::protocol::TokenType::Decorator,
+    ];
+    let syntax_spec = |tt: clay::protocol::TokenType| {
+        registry.style_for(
+            clay::protocol::DecorationKind::Syntax,
+            tt,
+            clay::protocol::Modifiers::NONE,
+        )
+    };
+    for (i, tt) in dormant.iter().enumerate() {
+        let spec = syntax_spec(*tt);
+        for other in EXPECTED_TOKEN_TYPE_NAMES {
+            let other_tt = clay::protocol::TokenType::from_name(other).unwrap();
+            if *tt == other_tt {
+                continue;
+            }
+            assert_ne!(
+                spec,
+                syntax_spec(other_tt),
+                "{specifier} dormant token {tt:?} must not share a StyleSpec with {other}"
+            );
+        }
+        // Also distinct from the other dormant tokens (redundant with the loop
+        // above, but makes the intent explicit).
+        for other in dormant.iter().skip(i + 1) {
+            assert_ne!(
+                syntax_spec(*tt),
+                syntax_spec(*other),
+                "{specifier} dormant tokens must be distinct: {tt:?} vs {other:?}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -328,10 +415,14 @@ fn gruvbox_themes_status_chrome_meets_aa_contrast() {
                 color: o
                     .color
                     .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
+                background: o
+                    .background
+                    .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
                 bold: o.bold,
                 italic: o.italic,
                 underline: o.underline,
                 strike: o.strike,
+                scale: o.scale.map(|milli| f32::from(milli) / 1000.0),
                 provenance: o.provenance.clone(),
             })
             .collect();
@@ -372,10 +463,12 @@ fn bundled_themes_sdui_pairs_meet_aa_contrast() {
             .map(|entry| TextThemeOverride {
                 token: entry.token.clone(),
                 color: entry.color,
+                background: entry.background,
                 bold: entry.bold,
                 italic: entry.italic,
                 underline: entry.underline,
                 strike: entry.strike,
+                scale: entry.scale,
                 provenance: entry.provenance.clone(),
             })
             .collect();

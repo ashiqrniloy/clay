@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSelectAllMatches
 js_facade: runtime/js/editor.js::clientSelectAllMatches
-backing_rust: src/editor/surface.rs::EditorSurface::select_all_matches
+backing_rust: src/editor/surface/mod.rs::EditorSurface::select_all_matches
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientSelectAllMatches
@@ -90,7 +90,7 @@ Use `editor.clientSelectAllMatches` when the user asks for Select All Matches th
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientSelectAllMatches`
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::select_all_matches`
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::select_all_matches`
 - Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
 
 ## Lookup metadata

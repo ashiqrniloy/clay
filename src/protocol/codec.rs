@@ -708,6 +708,7 @@ mod tests {
             replacement_range: CompletionReplacementRange::new(10, 12),
             trigger: CompletionTrigger::Character(".".to_string()),
             provider_generation: 2,
+            recent_completions: vec!["foo".to_string()].into_boxed_slice(),
         };
         let message = ClientMessage::CompletionRequest { request };
 
@@ -730,6 +731,7 @@ mod tests {
             replacement_range: CompletionReplacementRange::new(10, 12),
             trigger: CompletionTrigger::Manual,
             provider_generation: 2,
+            recent_completions: Vec::<String>::new().into_boxed_slice(),
         };
         let message = ClientMessage::CompletionRequest { request };
 
@@ -1170,6 +1172,89 @@ mod tests {
                 },
             ),
         ]
+    }
+
+    #[test]
+    fn compact_generated_frame_mutations_fail_closed_without_panicking() {
+        let codec = Codec::new(4096);
+        let mut rng = Lcg::new(0x0890_c0de_2026_0816);
+
+        for case in 0..64_u64 {
+            let frames = [
+                (
+                    false,
+                    codec
+                        .encode_client_message(&ClientMessage::MenuQueryUpdate {
+                            client_id: 7,
+                            session_id: (1 << 63) | (case + 1),
+                            query: format!("query-{case}"),
+                        })
+                        .unwrap(),
+                ),
+                (
+                    true,
+                    codec
+                        .encode_server_message(&ServerMessage::TransientMenuClosed {
+                            session_id: (1 << 63) | (case + 1),
+                        })
+                        .unwrap(),
+                ),
+            ];
+
+            for (server, original) in frames {
+                let payload_len = original.len() - LENGTH_PREFIX_BYTES;
+                assert!(payload_len > 1, "mutation fixture must have a payload");
+                let mutation = (case as usize + if server { 1 } else { 0 }) % 5;
+                let mut mutated = original;
+                match mutation {
+                    // Truncate the archive and make the prefix agree with the
+                    // shorter buffer: bytecheck must reject the archive.
+                    0 => {
+                        let declared = rng.below(payload_len);
+                        mutated.truncate(LENGTH_PREFIX_BYTES + declared);
+                        mutated[..LENGTH_PREFIX_BYTES]
+                            .copy_from_slice(&(declared as u32).to_be_bytes());
+                    }
+                    // Prefixes that disagree with the actual payload stop at
+                    // the framing boundary, before archive access.
+                    1 => mutated[..LENGTH_PREFIX_BYTES]
+                        .copy_from_slice(&((payload_len - 1) as u32).to_be_bytes()),
+                    2 => mutated[..LENGTH_PREFIX_BYTES]
+                        .copy_from_slice(&((payload_len + 1) as u32).to_be_bytes()),
+                    // A byte mutation may still be a valid archive with a
+                    // changed value; either validated decode or rejection is
+                    // safe, but a panic is never acceptable.
+                    3 => {
+                        let offset = LENGTH_PREFIX_BYTES + rng.below(payload_len);
+                        mutated[offset] ^= (rng.next() as u8).max(1);
+                    }
+                    // Oversized declarations are rejected before allocation or
+                    // archive validation.
+                    4 => mutated[..LENGTH_PREFIX_BYTES]
+                        .copy_from_slice(&((codec.max_frame_size() + 1) as u32).to_be_bytes()),
+                    _ => unreachable!(),
+                }
+
+                let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if server {
+                        codec.decode_server_message(&mutated).map(|_| ())
+                    } else {
+                        codec.decode_client_message(&mutated).map(|_| ())
+                    }
+                }))
+                .unwrap_or_else(|_| panic!("generated codec mutation panicked: case={case}"));
+
+                match mutation {
+                    0 => assert!(decoded.is_err(), "truncated archive was accepted"),
+                    1 | 2 => assert!(matches!(decoded, Err(CodecError::LengthMismatch { .. }))),
+                    3 => match decoded {
+                        Ok(()) | Err(_) => {}
+                    },
+                    4 => assert!(matches!(decoded, Err(CodecError::FrameTooLarge { .. }))),
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 
     #[test]

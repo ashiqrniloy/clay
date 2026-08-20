@@ -1,1 +1,198 @@
-{"name":"@clay/typescript","version":"0.1.0","type":"module","exports":{".":"./dist/index.js","./load":"./dist/load.js"},"clay":{"apiPrefix":"typescript","entry":"./dist/index.js","loadEntry":"./dist/load.js","permissions":["mode-registration","mode-activation","command-registration","completion-provider","parse-document","render-decorations"],"modes":["typescript"],"docs":"./docs/index.md","apiDependencies":["syntax.serverRegisterSyntaxGrammar","modes.serverRegisterModePattern","behavior.buildCodeEditingManifest","commands.serverRegisterCommand","completion.serverRegisterCompletionProvider","completion.completionTriggerCharactersFromEditorRules","ui.serverRegisterComponentContribution"],"performance":{"estimatedManifestBytes":1900,"hotPathPolicy":"grammar metadata validated at load; no hot-path JS"},"contributions":{"syntaxGrammars":[{"languageId":"typescript","filePatterns":{"extensions":["ts","tsx","mts","cts"]},"grammar":{"kind":"native","source":"tree-sitter-typescript"},"queries":{"highlights":"./queries/highlights.scm"},"styleMap":{"keyword":{"type":"Keyword"},"string":{"type":"String"},"comment":{"type":"Comment"},"punctuation":{"type":"Operator"},"text":{"type":"Paragraph"},"function":{"type":"Function"},"function.declaration":{"type":"Function","modifiers":["Declaration"]},"type":{"type":"Type"},"number":{"type":"Number"}},"budgets":{"timeoutMs":5000,"maxWindowBytes":4096}}],"modePatterns":[{"mode":"typescript","displayName":"TypeScript","extensions":["ts","tsx","mts","cts"],"defaultFontRole":"monospace"}],"commands":[{"id":"typescript.toggleLineComment","displayName":"Toggle TypeScript Line Comment","routingPolicy":"server-first"}],"completionProviders":[{"id":"typescript.keywords","priority":0,"triggerCharacters":["."],"wordBoundaryChars":[".",";",","],"budgets":{"timeoutMs":300,"maxItems":32},"items":["as","async","await","break","case","catch","class","const","continue","default","do","else","enum","export","extends","false","finally","for","from","function","if","implements","import","in","instanceof","interface","let","new","return","true","type","while"]},{"id":"typescript.snippets","priority":0,"triggerCharacters":["."],"wordBoundaryChars":[".",";",","],"budgets":{"timeoutMs":300,"maxItems":32},"items":[{"label":"interface","insertText":"interface ${1:Name} {\n  $0\n}","textFormat":"snippet","detail":"interface snippet"},{"label":"type","insertText":"type ${1:Name} = ${2:Type};$0","textFormat":"snippet","detail":"type alias snippet"}]}],"ui":{"components":[{"kind":"statusItem","id":"typescript.status.mode","style":{"variant":"muted"}}]}},"extensionPoints":[{"id":"typescript.completionProviders","version":1,"operations":["append","replace"],"contributionKinds":["completionProvider"],"scopes":["typescript.keywords","typescript.snippets"],"summary":"Add or replace typescript completion and snippet providers."},{"id":"typescript.languageLayers","version":1,"operations":["append"],"contributionKinds":["analyzer","diagnosticSource","intelligenceProvider","decorationLayer"],"summary":"Append package-owned analyzers, diagnostics, intelligence, and decoration layers for typescript."},{"id":"typescript.commands","version":1,"operations":["append","replace"],"contributionKinds":["command"],"scopes":["typescript.toggleLineComment"],"summary":"Add or replace typescript commands."},{"id":"typescript.ui","version":1,"operations":["append","replace"],"contributionKinds":["componentContribution","statusItem","panelContribution"],"scopes":["typescript.status.mode"],"summary":"Add or replace typescript status and panel contributions."},{"id":"typescript.grammar","version":1,"operations":["replace"],"contributionKinds":["grammar"],"scopes":["typescript.typescript"],"summary":"Replace the typescript grammar, highlights query, and style map."},{"id":"typescript.modePattern","version":1,"operations":["append"],"contributionKinds":["modePattern"],"summary":"Extend typescript file and mode patterns."}]}}
+{
+  "name": "@clay/typescript",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./load": "./dist/load.js"
+  },
+  "clay": {
+    "apiPrefix": "typescript",
+    "preset": "code-mode",
+    "entry": "./dist/index.js",
+    "loadEntry": "./dist/load.js",
+    "modes": [
+      "typescript"
+    ],
+    "docs": "./docs/index.md",
+    "performance": {
+      "estimatedManifestBytes": 1900,
+      "hotPathPolicy": "grammar metadata validated at load; no hot-path JS"
+    },
+    "contributions": {
+      "modePatterns": [
+        {
+          "mode": "typescript",
+          "displayName": "TypeScript",
+          "extensions": [
+            "ts",
+            "tsx",
+            "mts",
+            "cts"
+          ],
+          "defaultFontRole": "monospace",
+          "editorRules": {
+            "enter": {
+              "kind": "preserveLeadingWhitespace"
+            },
+            "pairs": [
+              {
+                "open": "(",
+                "close": ")"
+              },
+              {
+                "open": "[",
+                "close": "]"
+              },
+              {
+                "open": "{",
+                "close": "}"
+              },
+              {
+                "open": "\"",
+                "close": "\""
+              },
+              {
+                "open": "'",
+                "close": "'"
+              },
+              {
+                "open": "`",
+                "close": "`"
+              }
+            ],
+            "comments": [
+              {
+                "linePrefix": "//",
+                "continuePrefix": "// "
+              }
+            ],
+            "tabSpaces": 2,
+            "electricCharacters": [
+              {
+                "trigger": "}",
+                "effect": "outdent-one-level"
+              },
+              {
+                "trigger": ")",
+                "effect": "outdent-one-level"
+              },
+              {
+                "trigger": "]",
+                "effect": "outdent-one-level"
+              }
+            ],
+            "autocompleteTriggers": [
+              {
+                "trigger": "."
+              }
+            ],
+            "movement": {
+              "wordSeparators": "code"
+            }
+          }
+        }
+      ],
+      "commands": [
+        {
+          "id": "typescript.toggleLineComment",
+          "displayName": "Toggle TypeScript Line Comment",
+          "routingPolicy": "server-first"
+        }
+      ],
+      "completionProviders": [
+        {
+          "id": "typescript.keywords",
+          "priority": 0,
+          "triggerCharacters": [
+            "."
+          ],
+          "wordBoundaryChars": [
+            ".",
+            ";",
+            ","
+          ],
+          "budgets": {
+            "timeoutMs": 300,
+            "maxItems": 32
+          },
+          "items": [
+            "as",
+            "async",
+            "await",
+            "break",
+            "case",
+            "catch",
+            "class",
+            "const",
+            "continue",
+            "default",
+            "do",
+            "else",
+            "enum",
+            "export",
+            "extends",
+            "false",
+            "finally",
+            "for",
+            "from",
+            "function",
+            "if",
+            "implements",
+            "import",
+            "in",
+            "instanceof",
+            "interface",
+            "let",
+            "new",
+            "return",
+            "true",
+            "type",
+            "while"
+          ]
+        },
+        {
+          "id": "typescript.snippets",
+          "priority": 0,
+          "triggerCharacters": [
+            "."
+          ],
+          "wordBoundaryChars": [
+            ".",
+            ";",
+            ","
+          ],
+          "budgets": {
+            "timeoutMs": 300,
+            "maxItems": 32
+          },
+          "items": [
+            {
+              "label": "interface",
+              "insertText": "interface ${1:Name} {\n  $0\n}",
+              "textFormat": "snippet",
+              "detail": "interface snippet"
+            },
+            {
+              "label": "type",
+              "insertText": "type ${1:Name} = ${2:Type};$0",
+              "textFormat": "snippet",
+              "detail": "type alias snippet"
+            }
+          ]
+        }
+      ],
+      "ui": {
+        "components": [
+          {
+            "kind": "statusItem",
+            "id": "typescript.status.mode",
+            "style": {
+              "variant": "muted"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -47,6 +47,7 @@ use crate::{
             LanguageIntelligenceProvider, LanguageIntelligenceProviderError,
             LanguageIntelligenceProviderFuture, LanguageIntelligenceProviderMeta,
         },
+        workspace::WorkspaceState,
     },
 };
 
@@ -275,6 +276,7 @@ struct WorkerKey {
     package_name: String,
     contribution: String,
     workspace_root_id: WorkspaceRootId,
+    canonical_root_path: PathBuf,
     generation: u64,
 }
 
@@ -509,6 +511,7 @@ impl DocumentAnalysisCoordinator {
 
     pub(crate) fn open_document(
         &self,
+        workspace: Arc<tokio::sync::Mutex<WorkspaceState>>,
         generation: u64,
         metadata: &DocumentMetadata,
         active_mode: &str,
@@ -559,6 +562,7 @@ impl DocumentAnalysisCoordinator {
                 package_name: registration.package.manifest.name.clone(),
                 contribution: registration.contribution.clone(),
                 workspace_root_id: metadata.workspace_root_id,
+                canonical_root_path: canonical_root_path.clone(),
                 generation,
             };
             if inner
@@ -582,6 +586,7 @@ impl DocumentAnalysisCoordinator {
                 let worker = spawn_worker(
                     runtime.clone(),
                     registration.clone(),
+                    Arc::clone(&workspace),
                     metadata.workspace_root_id,
                     AnalysisOutputSink {
                         global_tx: self.outputs_tx.clone(),
@@ -1100,6 +1105,7 @@ fn acquire_request_slot(pending: &AtomicUsize) -> Result<(), String> {
 fn spawn_worker(
     runtime: ClayJsRuntimeService,
     registration: JsDocumentAnalyzerRegistration,
+    workspace: Arc<tokio::sync::Mutex<WorkspaceState>>,
     workspace_root_id: WorkspaceRootId,
     outputs: AnalysisOutputSink,
 ) -> AnalysisWorker {
@@ -1120,8 +1126,11 @@ fn spawn_worker(
                 active.store(false, Ordering::Release);
                 break;
             }
-            let invocation =
-                runtime.invoke_document_analyzer(registration.clone(), queued.event.clone());
+            let invocation = runtime.invoke_document_analyzer(
+                registration.clone(),
+                queued.event.clone(),
+                Arc::clone(&workspace),
+            );
             let invocation = if shutdown {
                 tokio::time::timeout(
                     std::time::Duration::from_millis(DOCUMENT_ANALYSIS_TOTAL_SHUTDOWN_MS),
@@ -1456,11 +1465,16 @@ mod tests {
     fn analyzer_source(package: &serde_json::Value) -> String {
         format!(
             r#"
+import {{ startLanguageServerSession }} from "clay:language-server";
 import {{ serverPublishDecorations }} from "clay:decorations";
 import {{ serverPublishDiagnostics }} from "clay:diagnostics";
 const manifest = {package};
 const documents = new Map();
 export async function handleDocumentAnalysis(event) {{
+  if (event.kind === "open") {{
+    const session = await startLanguageServerSession({{ contribution: "analysis.server", workspaceRootId: event.workspaceRootId }});
+    await session.stop();
+  }}
   if (event.kind === "open" || event.kind === "reset") {{
     documents.set(event.documentId, {{ text: event.text, version: event.documentVersion }});
   }} else if (event.kind === "change") {{
@@ -1588,6 +1602,12 @@ export async function handleDocumentAnalysis(event) {{
         )
     }
 
+    fn analysis_workspace(root: &std::path::Path) -> Arc<tokio::sync::Mutex<WorkspaceState>> {
+        let mut workspace = WorkspaceState::new();
+        workspace.add_root(root).unwrap();
+        Arc::new(tokio::sync::Mutex::new(workspace))
+    }
+
     fn metadata(version: u64) -> DocumentMetadata {
         DocumentMetadata {
             document_id: 7,
@@ -1614,6 +1634,7 @@ export async function handleDocumentAnalysis(event) {{
             },
             trigger: CompletionTrigger::Manual,
             provider_generation: 1,
+            recent_completions: Vec::<String>::new().into_boxed_slice(),
         }
     }
 
@@ -1675,7 +1696,14 @@ export async function handleDocumentAnalysis(event) {{
             .unwrap();
         assert!(
             coordinator
-                .open_document(1, &metadata(1), "test", root, "fn".to_string())
+                .open_document(
+                    analysis_workspace(&root),
+                    1,
+                    &metadata(1),
+                    "test",
+                    root,
+                    "fn".to_string(),
+                )
                 .is_empty()
         );
         let output = tokio::time::timeout(Duration::from_secs(2), coordinator.next_output())
@@ -1762,7 +1790,14 @@ export async function handleDocumentAnalysis(event) {{
                 &LanguageIntelligenceCoordinator::new(),
             )
             .unwrap();
-        coordinator.open_document(1, &metadata(1), "test", root, "fn".to_string());
+        coordinator.open_document(
+            analysis_workspace(&root),
+            1,
+            &metadata(1),
+            "test",
+            root,
+            "fn".to_string(),
+        );
         let _ = tokio::time::timeout(Duration::from_secs(2), coordinator.next_output())
             .await
             .unwrap();
@@ -1791,7 +1826,14 @@ export async function handleDocumentAnalysis(event) {{
             .unwrap();
         assert!(
             coordinator
-                .open_document(1, &metadata(1), "test", root.clone(), "fn".to_string())
+                .open_document(
+                    analysis_workspace(&root),
+                    1,
+                    &metadata(1),
+                    "test",
+                    root.clone(),
+                    "fn".to_string(),
+                )
                 .is_empty()
         );
         let _ = tokio::time::timeout(Duration::from_secs(2), coordinator.next_output())
@@ -1805,8 +1847,14 @@ export async function handleDocumentAnalysis(event) {{
             .unwrap()
             .revoke_language_server_grants("@vendor/analysis");
         coordinator.cancel_package("@vendor/analysis");
-        let diagnostics =
-            coordinator.open_document(1, &metadata(1), "test", root, "fn".to_string());
+        let diagnostics = coordinator.open_document(
+            analysis_workspace(&root),
+            1,
+            &metadata(1),
+            "test",
+            root,
+            "fn".to_string(),
+        );
 
         assert_eq!(diagnostics[0].code, "analysis.unauthorized");
         assert!(coordinator.active_completion_provider_ids(7).is_empty());
@@ -1832,7 +1880,14 @@ export async function handleDocumentAnalysis(event) {{
                 .unwrap();
             assert!(
                 coordinator
-                    .open_document(1, &metadata(1), "test", root, "fn".to_string())
+                    .open_document(
+                        analysis_workspace(&root),
+                        1,
+                        &metadata(1),
+                        "test",
+                        root,
+                        "fn".to_string(),
+                    )
                     .is_empty()
             );
             let _ = tokio::time::timeout(Duration::from_secs(2), coordinator.next_output())
@@ -1874,6 +1929,7 @@ export async function handleDocumentAnalysis(event) {{
             )
             .unwrap();
         let diagnostics = coordinator.open_document(
+            analysis_workspace(&root),
             1,
             &metadata(1),
             "test",

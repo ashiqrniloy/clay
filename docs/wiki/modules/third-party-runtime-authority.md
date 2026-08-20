@@ -7,13 +7,13 @@
 - `src/packages/extension_points.rs` — `RelationOperation`, `ExtensionContributionKind` (16 variants), validation constants and charset rules.
 - `src/packages/approvals.rs` — `PackageApprovalStore`, `PackageApprovalRecord`, `ApprovedRelation`, `ApprovedReplacement`, `approval_covers`, `AdoptionState`, atomic file persistence.
 - `src/packages/service.rs` — `install_from_value_at_root_with_spec`, `approve_package`, `adoption_state`, `enable` with adoption gating and replacement approval revocation, `rollback_replacement`, `enable_graph` with `verify_relation_authority`, `enable` transactionality (snapshot/restore), `force_enabled_runtime_domain_for_test`.
-- `src/packages/record.rs` — `PackageRecord` with `runtime_domain` field, `PartialEq` excluding `runtime_domain`.
+- `src/packages/record/mod.rs` — `PackageRecord` with `runtime_domain` field, `PartialEq` excluding `runtime_domain`.
 - `src/packages/conflict.rs` — `reconcile_enabled_conflicts` post-enable, `PackageReplaces` conflict resolution.
 - `src/server/cross_domain.rs` — `CrossDomainRequestEnvelope`, cross-domain invocation validation, `dispatch_to_domain` with provider routing.
 - `src/server/ops/packages.rs` — `op_clay_packages_load_package_by_specifier` (sync trusted-only, stamps domain in result), `op_clay_packages_load_in_package_domain` (async, bridge dispatch + absorption).
-- `src/server/js_runtime.rs` — Two-domain runtime topology, `production_reload`, cross-domain bridge wiring, `replay_third_party_domain`, `dispatch_to_domain` with replacement.
+- `src/server/js_runtime/mod.rs` — Two-domain runtime topology, `production_reload`, cross-domain bridge wiring, `replay_third_party_domain`, `dispatch_to_domain` with replacement.
 - `src/server/mod.rs` — `TrustedOpState`, connected-loop references wired to `PackageService` and bridge.
-- `src/main.rs` — CLI `clay package adopt/revoke/rollback/inspect`, `PackageService::open` for durable store.
+- `src/cli.rs` — CLI `clay package adopt/revoke/rollback/inspect`, `PackageService::open` for durable store.
 - `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`
 - `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` (superseded authority model retained for provenance)
 - `plans/061-Two-Package-Runtime-Trust-Domains-and-Extension-Authority.md`

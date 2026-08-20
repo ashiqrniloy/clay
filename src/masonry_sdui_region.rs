@@ -35,7 +35,7 @@ use masonry::core::{
 };
 use masonry::kurbo::{Affine, Point, Rect, Size, Vec2};
 use masonry::peniko::{Color, Fill};
-use masonry::properties::types::{Length, UnitPoint};
+use masonry::properties::types::{CrossAxisAlignment, Length, UnitPoint};
 use masonry::vello::Scene;
 use masonry::widgets::{Flex, ZStack};
 
@@ -297,8 +297,12 @@ impl SduiRegionWidget {
                 children,
             } => {
                 let mut flex = match direction {
-                    SduiFlexDirection::Row => Flex::row(),
-                    SduiFlexDirection::Column => Flex::column(),
+                    SduiFlexDirection::Row => {
+                        Flex::row().cross_axis_alignment(CrossAxisAlignment::Fill)
+                    }
+                    SduiFlexDirection::Column => {
+                        Flex::column().cross_axis_alignment(CrossAxisAlignment::Fill)
+                    }
                 };
                 // Masonry's `Flex` defaults to a 10px gap (`DEFAULT_GAP`); the
                 // legacy renderer stacks children with no inter-child gap, and
@@ -331,7 +335,9 @@ impl SduiRegionWidget {
             SduiNodeKind::Panel { title, children } => {
                 // Panel renders as a column: a title leaf followed by children
                 // indented one level deeper (mirrors legacy immediate-mode renderer).
-                let mut column = Flex::column().with_gap(Length::ZERO);
+                let mut column = Flex::column()
+                    .cross_axis_alignment(CrossAxisAlignment::Fill)
+                    .with_gap(Length::ZERO);
                 column = column.with_child(NewWidget::new(SduiLabel::panel_title(
                     title.clone(),
                     depth,
@@ -362,7 +368,9 @@ impl SduiRegionWidget {
             // List: a column of retained row widgets (plan 070 step 10), keyed
             // by item id so rows keep their identity across in-place reconciles.
             SduiNodeKind::List { items } => {
-                let mut column = Flex::column().with_gap(Length::ZERO);
+                let mut column = Flex::column()
+                    .cross_axis_alignment(CrossAxisAlignment::Fill)
+                    .with_gap(Length::ZERO);
                 let mut keys = Vec::new();
                 for item in items {
                     column = column.with_child(NewWidget::new(SduiListRow::new(
@@ -525,6 +533,7 @@ impl SduiRegionWidget {
                         SduiFlexDirection::Column => Axis::Vertical,
                     };
                     Flex::set_direction(&mut flex, axis);
+                    Flex::set_cross_axis_alignment(&mut flex, CrossAxisAlignment::Fill);
                     let keys = children.iter().map(|c| ChildKey::Node(*c)).collect();
                     self.reconcile_flex_children(&mut flex, node_id, keys, depth, false);
                 }
@@ -596,7 +605,14 @@ impl SduiRegionWidget {
         // Walk the new list: keep in-place survivors, insert/move the rest.
         for (target, key) in new_keys.iter().enumerate() {
             let child_depth = Self::child_depth(key, depth, container_is_panel);
-            if current.get(target) == Some(key) {
+            let kind_changed = match key {
+                ChildKey::Node(node_id) => {
+                    self.pods.get(node_id).map(|record| record.kind)
+                        != self.nodes.get(node_id).map(|node| discriminant(&node.kind))
+                }
+                ChildKey::PanelTitle | ChildKey::ListRow(_) => false,
+            };
+            if current.get(target) == Some(key) && !kind_changed {
                 if let Some(child) = Flex::child_mut(flex, target) {
                     self.reconcile_child_in_place(child, container_id, key, child_depth);
                 }
@@ -832,6 +848,7 @@ impl Widget for SduiRegionWidget {
         let padding = SduiThemeStyle::from_ui_theme(&self.ui_theme).panel_padding;
         let viewport_size = Size::new(size.width, (size.height - padding).max(1.0));
         let _ = ctx.run_layout(pod, &BoxConstraints::new(viewport_size, viewport_size));
+        ctx.set_clip_path(size.to_rect());
         ctx.place_child(pod, Point::new(0.0, padding));
         size
     }
@@ -866,6 +883,7 @@ impl Widget for SduiRegionWidget {
         node: &mut Node,
     ) {
         node.set_label("Server-driven UI region");
+        node.set_clips_children();
         // Children flow from `children_ids` (the scroll-viewport subtree) so the
         // reconciled SDUI tree is reachable in the access tree with
         // Masonry-computed (scroll-aware) bounds.
@@ -1065,7 +1083,7 @@ impl Widget for SduiScrollViewport {
         bc: &BoxConstraints,
     ) -> Size {
         let viewport = bc.max();
-        let child_bc = BoxConstraints::new(Size::ZERO, viewport);
+        let child_bc = BoxConstraints::new(Size::new(viewport.width, 0.0), viewport);
         self.content_size = ctx.run_layout(&mut self.child, &child_bc);
         let max = self.max_scroll(viewport.height);
         if let Some((target_y0, target_y1)) = self

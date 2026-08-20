@@ -10,17 +10,17 @@
 - `src/server/ops/typography.rs` (`apply_typography`)
 - `src/server/ops/mod.rs` (`ClayOpState` appearance/explicit-theme-active fields)
 - `src/server/configuration.rs` (`PersistedPreferences`, `load_preferences`, `persist_preference`, `clear_preferences`)
-- `src/server/js_runtime.rs` (`apply_persisted_preferences`, canonical-default harvest injection)
-- `src/server/connection.rs` (`persist_settings_change`, `PersistOutcome`, settings command dispatch, `sdui_command_request` argument forwarding)
+- `src/server/js_runtime/mod.rs` (`apply_persisted_preferences`, canonical-default harvest injection)
+- `src/server/connection/mod.rs` (`persist_settings_change`, `PersistOutcome`, settings command dispatch, `sdui_command_request` argument forwarding)
 - `src/server/command_execution.rs` (`is_settings_command`, `execute_settings`)
 - `src/packages/bundled.rs` (Modus + `@clay/settings` registration, FNV-1a-64 fingerprints)
-- `runtime/js/theme.js`, `runtime/js/theme.d.ts` (`setAppearance` facade)
+- `runtime/js/theme.js`, `runtime/js/theme.d.ts` (`setTheme`, `setAppearance`, and `setTypography` facades)
 - `docs/reference/clay-js-api/theme/set-appearance.md`
 - `docs/reference/clay-js-api/configuration.md` (Phase 20.6 precedence section)
 - `docs/reference/packages/creating-packages.md` (canonical defaults + override APIs subsections)
 - `docs/reference/clay-js-api/api-inventory.toml` (`theme.setAppearance` entry)
 - `docs/generated/clay-js-api-registry.json`
-- Tests: `tests/theme_packages.rs`, `src/server/js_runtime.rs`, `src/server/ops/theme.rs`, `src/server/configuration.rs`, `src/server/command_execution.rs`, `src/server/connection.rs`, `tests/clay_js_doc_registry.rs`
+- Tests: `tests/theme_packages.rs`, `src/server/js_runtime/mod.rs`, `src/server/ops/theme.rs`, `src/server/configuration.rs`, `src/server/command_execution.rs`, `src/server/connection/mod.rs`, `tests/clay_js_doc_registry.rs`
 
 ## Overview
 
@@ -62,7 +62,7 @@ Packages are registered in `src/packages/bundled.rs` as `BundledPackageEntry` ro
 
 ### 3. Canonical-default harvest injection
 
-`src/server/js_runtime.rs` injects canonical-default resolution into the evaluation harvest: after `init.js` evaluates, if no explicit theme was set, the harvest resolves the canonical default from the current appearance and installs it as the active theme. Then `apply_persisted_preferences` runs immediately after to overlay `ui-session` preferences, so a persisted UI choice always overrides the equivalent `init.js` call and the canonical default. An entirely absent `init.js` does not silently resolve a canonical default — the existing `load_configuration_from_root` error contract is preserved.
+`src/server/js_runtime/mod.rs` injects canonical-default resolution into the evaluation harvest: after `init.js` evaluates, if no explicit theme was set, the harvest resolves the canonical default from the current appearance and installs it as the active theme. Then `apply_persisted_preferences` runs immediately after to overlay `ui-session` preferences, so a persisted UI choice always overrides the equivalent `init.js` call and the canonical default. An entirely absent `init.js` does not silently resolve a canonical default — the existing `load_configuration_from_root` error contract is preserved.
 
 ### 4. `@clay/settings` SDUI panel
 
@@ -70,7 +70,7 @@ Packages are registered in `src/packages/bundled.rs` as `BundledPackageEntry` ro
 
 The surface is a fixed panel rather than a transient `modal` overlay because the component tree (~3.4 KiB) exceeds `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` (1024). No `multi-select` is used — the three font profiles are fixed and edited via `textInput`.
 
-`src/server/connection.rs::sdui_command_request` forwards `SduiActionSource` (`ListItem.item_id` for dropdowns/lists, the node id for buttons) as command arguments, enabling value carriage from SDUI actions to the server handler.
+`src/server/connection/runtime.rs::sdui_command_request` forwards `SduiActionSource` (`ListItem.item_id` for dropdowns/lists, the node id for buttons) as command arguments, enabling value carriage from SDUI actions to the server handler.
 
 ### 5. Settings command validation and persistence
 
@@ -80,7 +80,7 @@ The surface is a fixed panel rather than a transient `modal` overlay because the
 - `settings.setAppearance` — requires `light` | `dark` | `system`.
 - `settings.setTypography` — accepted; bounds are enforced by the `setTypography` op at apply time (free-form `textInput` value carriage is a follow-up protocol task, so `setTypography` does not yet persist).
 
-`src/server/connection.rs::persist_settings_change` (`PersistOutcome`) merges `settings.setTheme` / `settings.setAppearance` / `settings.reset` into `~/.config/clay/preferences.json` (atomic tmp + rename) and triggers `reload_runtime_generation()` so the change applies live through the canonical apply path: persist → reload → `init.js` re-eval + `apply_persisted_preferences` → `RuntimeStateSnapshot` fanout. No restart required. Live theme apply rides the existing `RuntimeStateSnapshot` fanout (which already ships `ActiveTheme`); no separate `ThemeUpdates` broadcast primitive was needed.
+`src/server/connection/runtime.rs::persist_settings_change` (`PersistOutcome`) merges `settings.setTheme` / `settings.setAppearance` / `settings.reset` into `~/.config/clay/preferences.json` (atomic tmp + rename) and triggers `reload_runtime_generation()` so the change applies live through the canonical apply path: persist → reload → `init.js` re-eval + `apply_persisted_preferences` → `RuntimeStateSnapshot` fanout. No restart required. Live theme apply rides the existing `RuntimeStateSnapshot` fanout (which already ships `ActiveTheme`); no separate `ThemeUpdates` broadcast primitive was needed.
 
 ### 6. `preferences.json` and precedence
 
@@ -97,6 +97,22 @@ Precedence (highest wins):
 ### 7. `setAppearance` Clay JS API
 
 `theme.setAppearance` is a registry-public `clay:theme` facade (id `theme.setAppearance`, phase Phase 20.6, owner `server`, `custom_properties: [appearance:enum=required]`). It is NOT a `clay:configuration` API — `clay:configuration` stays closed (`setPackageOption` + `loadConfigurationModule` + `getConfigurationState` only). Docs: `docs/reference/clay-js-api/theme/set-appearance.md`; inventory entry in `docs/reference/clay-js-api/api-inventory.toml`; generated registry in `docs/generated/clay-js-api-registry.json` (regenerated via `cargo run --bin update-doc-registry`).
+
+### 8. Plan 088 Clay JS API verification
+
+Plan 088 adds no new public programmatic surface. The existing theme trio is the complete user-facing API for this modernization:
+
+| Stable ID | Facade export | Deno op | Rust owner | Reference |
+|---|---|---|---|---|
+| `theme.setTheme` | `clay:theme` / `setTheme` | `op_clay_theme_set_theme` | `src/server/ops/theme.rs::apply_theme` | [`set-theme.md`](../../reference/clay-js-api/theme/set-theme.md) |
+| `theme.setAppearance` | `clay:theme` / `setAppearance` | `op_clay_theme_set_appearance` | `src/server/ops/theme.rs::apply_appearance` | [`set-appearance.md`](../../reference/clay-js-api/theme/set-appearance.md) |
+| `theme.setTypography` | `clay:theme` / `setTypography` | `op_clay_theme_set_typography` | `src/server/ops/typography.rs::apply_typography` | [`set-typography.md`](../../reference/clay-js-api/theme/set-typography.md) |
+
+Each row is present in `api-inventory.toml`, `docs/index.md`, and the generated registry, with user-facing name, empty default key bindings, behavior-changing `custom_properties`, security notes, lookup tags, facade path, op path, and backing Rust path. `cargo run --bin update-doc-registry` is the repair command when authoritative Markdown changes; the registry was already current for this verification.
+
+The shared `apply_theme`, `apply_appearance`, and `apply_typography` functions are `pub(crate)` server primitives, not additional JS APIs. Plan 088's client-only `ClayShellWidget::set_active_typography`, `PackageModalDismiss`, and benchmark/layout helpers likewise have no op, facade, inventory entry, or configuration authority. The `settings.*` identifiers belong to the `@clay/settings` package's `apiPrefix`, so they remain inert server-first package command intents rather than reserved core IDs or duplicate Clay JS exports.
+
+Verification is split across `tests/clay_js_api_inventory.rs` (inventory/docs/index/generated-registry/schema and Rust/op/facade paths), `tests/clay_js_doc_registry.rs` (theme metadata, custom properties, lookup, precedence, authority denial), `tests/clay_js_facade_layout.rs` (JS and declaration exports plus facade inclusion), and `tests/rust_visibility_api_mapping.rs` (visual-only Rust visibility/hidden bridge allowlist). The facade test explicitly covers all three theme exports.
 
 ## Code Examples
 
@@ -143,11 +159,11 @@ settings.reset
 ## Tests
 
 - `tests/theme_packages.rs`: Gruvbox + Modus packages validate as inert full 48-entry mappings (`assert_full_theme_mapping` parameterized by `keyword_bold`: Gruvbox true, Modus false), distinct palettes (`assert_distinct_theme_palettes`), and AA-contrast status chrome across all four themes. Command: `cargo test --test editor theme_packages::`.
-- `src/server/js_runtime.rs`: `set_theme_resolves_first_party_gruvbox_theme` (both Gruvbox variants), `canonical_default_is_modus_not_gruvbox`, `explicit_set_theme_wins_over_canonical_default`, `absent_init_js_loads_no_runtime_theme`, `set_appearance_light_resolves_canonical_modus_operandi`, `explicit_set_theme_wins_over_appearance`, `set_appearance_rejects_unknown_value`, and the `preferences_*` precedence matrix (`preferences_override_init_js_theme_on_reload`, `no_preferences_lets_init_js_win`, `preferences_appearance_applies_when_init_js_is_silent`, `preferences_theme_beats_appearance_canonical_default`, `preferences_typography_round_trips_through_reload`). Command: `cargo test --lib js_runtime::`.
+- `src/server/js_runtime/mod.rs`: `set_theme_resolves_first_party_gruvbox_theme` (both Gruvbox variants), `canonical_default_is_modus_not_gruvbox`, `explicit_set_theme_wins_over_canonical_default`, `absent_init_js_loads_no_runtime_theme`, `set_appearance_light_resolves_canonical_modus_operandi`, `explicit_set_theme_wins_over_appearance`, `set_appearance_rejects_unknown_value`, and the `preferences_*` precedence matrix (`preferences_override_init_js_theme_on_reload`, `no_preferences_lets_init_js_win`, `preferences_appearance_applies_when_init_js_is_silent`, `preferences_theme_beats_appearance_canonical_default`, `preferences_typography_round_trips_through_reload`). Command: `cargo test --lib js_runtime::`.
 - `src/server/ops/theme.rs`: `appearance_system_falls_back_to_dark_without_os_signal`, `appearance_parse_rejects_unknown_values`.
 - `src/server/configuration.rs`: `PersistedPreferences` round-trip, first-party theme validation, bounded appearance enum, unknown-key rejection, corrupted JSON, payload budget.
 - `src/server/command_execution.rs`: `is_settings_command` prefix + `settings.setTheme`/`setAppearance` validation (6 tests).
-- `src/server/connection.rs`: `sdui_command_request` `item_id`/`node_id` argument forwarding.
+- `src/server/connection/mod.rs`: `sdui_command_request` `item_id`/`node_id` argument forwarding.
 - `tests/clay_js_doc_registry.rs`: `configuration_api_documents_phase20_6_appearance_and_precedence` (setAppearance registry-public, `appearance` custom_property, authority denial, configuration.md precedence/ui-session/preferences.json docs, closed `clay:configuration`).
 - `src/packages/bundled.rs`: `bundled_extension_points_match_real_contributions`, `inventory_matches_source_tree`, integrity/provenance tests include the Modus + settings entries.
 - Commands: `cargo test --lib packages::bundled`, `cargo test --lib theme`, `cargo test --test editor`, `cargo test --test protocol configuration`.

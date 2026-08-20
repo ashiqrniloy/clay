@@ -172,17 +172,26 @@ impl Driver {
             self.switch_tab(ctx, window_id, new_active);
         } else if active_removed && self.tabs.len() == 1 {
             // The last remaining tab is now active: refresh the mirror.
-            let (client_id, _) = self.tabs.iter().next().expect("one tab remains");
-            self.active_tab = *client_id;
+            let client_id = *self.tabs.iter().next().expect("one tab remains").0;
+            self.active_tab = client_id;
             if let Some(chrome_id) = with_shell(
                 ctx.render_root(window_id),
                 self.shell_widget_id,
-                |shell, _| shell.editor_widget_id_for(*client_id),
+                |shell, _| shell.editor_widget_id_for(client_id),
             )
             .flatten()
             {
                 self.editor_widget_id = chrome_id;
                 self.sync_centered_layer(ctx, window_id, chrome_id);
+                if let Some(target) = with_shell(
+                    ctx.render_root(window_id),
+                    self.shell_widget_id,
+                    |shell, _| shell.active_pane_target_for(client_id),
+                )
+                .flatten()
+                {
+                    let _ = ctx.render_root(window_id).focus_on(Some(target));
+                }
             }
         }
         let cards = reconcile.cards;

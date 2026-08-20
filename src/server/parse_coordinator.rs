@@ -12,7 +12,10 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use crate::{
     packages::{permissions::PackagePermission, record::PackageRecord},
     perf::{
-        budgets::{INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
+        budgets::{
+            INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+            INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES, SYNTAX_CACHE_BUDGET_BYTES,
+        },
         metrics::{
             MetricMetadata, MetricValue, PerfRecorder, SYNTAX_CANCELLED_SUPERSEDED,
             SYNTAX_DECORATION_CHUNKS, SYNTAX_EDIT_TO_PUBLISH, SYNTAX_LOGICAL_WORK_ITEMS,
@@ -899,11 +902,13 @@ fn validate_update_payload(update: &IncrementalParseUpdate) -> Result<(), ParseC
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(update)
         .map_err(|_| ParseCoordinatorError::SerializationFailed)?
         .len();
-    if bytes > INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES {
-        return Err(ParseCoordinatorError::PayloadBudgetExceeded {
-            bytes,
-            budget: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
-        });
+    let budget = if update.folding_update.is_some() {
+        INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES
+    } else {
+        INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES
+    };
+    if bytes > budget {
+        return Err(ParseCoordinatorError::PayloadBudgetExceeded { bytes, budget });
     }
     Ok(())
 }
@@ -1114,7 +1119,7 @@ mod tests {
     use super::*;
     use crate::{
         perf::metrics::PerfRecorder,
-        protocol::{DecorationSet, ParseUnit},
+        protocol::{DecorationSet, FoldingRangeSet, ParseUnit},
     };
 
     #[test]
@@ -1143,6 +1148,7 @@ mod tests {
                 spans: Vec::new(),
             }],
             diagnostic_update: None,
+            folding_update: None,
         };
 
         coordinator.record_native_publication(&update);
@@ -1200,5 +1206,39 @@ mod tests {
         let snapshot = perf.snapshots().pop().expect("cancellation metric");
         assert_eq!(snapshot.name, SYNTAX_CANCELLED_SUPERSEDED);
         assert_eq!(snapshot.metadata, MetricMetadata::document(7, 3));
+    }
+
+    #[test]
+    fn folded_parse_update_uses_additive_budget_without_changing_ordinary_cap() {
+        let ordinary = IncrementalParseUpdate {
+            document_id: 7,
+            document_version: 2,
+            behavior_version: 1,
+            package_prefix: "rust".to_string(),
+            mode_id: "rust.rust".to_string(),
+            parse_unit: ParseUnit::Region,
+            viewport: ParseByteRange::new(0, 1),
+            invalidated_ranges: vec![ParseByteRange::new(0, 1)],
+            syntax_tree_delta: Some("x".repeat(4000)),
+            decoration_updates: Vec::new(),
+            diagnostic_update: None,
+            folding_update: None,
+        };
+        assert!(matches!(
+            validate_update_payload(&ordinary),
+            Err(ParseCoordinatorError::PayloadBudgetExceeded {
+                budget: INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+                ..
+            })
+        ));
+
+        let mut folded = ordinary;
+        folded.folding_update = Some(FoldingRangeSet {
+            document_id: 7,
+            document_version: 2,
+            package_prefix: "core".to_string(),
+            ranges: Vec::new(),
+        });
+        assert!(validate_update_payload(&folded).is_ok());
     }
 }

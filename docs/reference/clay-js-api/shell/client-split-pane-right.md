@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientSplitPaneRight
 js_facade: runtime/js/shell.js::clientSplitPaneRight
-backing_rust: src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree
+backing_rust: src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientSplitPaneRight
@@ -104,7 +104,7 @@ Use `shell.clientSplitPaneRight` only as a documented command ID for `bindKey` t
 
 - JS facade: `runtime/js/shell.js::clientSplitPaneRight`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command` (alias routed in `ShellClientCommand::from_command_id`); `src/shell/layout.rs::PaneSplitTree`
+- Backing Rust/current owner: `src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command` (alias routed in `ShellClientCommand::from_command_id`); `src/shell/layout.rs::PaneSplitTree`
 
 ## Lookup metadata
 

@@ -6,8 +6,8 @@
 - `plans/033-Phase19-Persistent-Runtime-Hot-Reload-Semantics.md`
 - `plans/036-Phase18.8-Bottom-Pane-Transient-Menu-and-Command-Execution-Foundation.md` through `plans/053-Phase18.21-First-Party-LSP-Bridge-Packages.md`
 - `src/server/mod.rs`
-- `src/server/js_runtime.rs`
-- `src/server/connection.rs`
+- `src/server/js_runtime/mod.rs`
+- `src/server/connection/mod.rs`
 - `src/server/behavior.rs`
 - `src/server/{parse_coordinator,completion,language_intelligence,document_analysis,language_server,syntax,ui}.rs`
 - `src/packages/{service,modes,commands}.rs`

@@ -533,6 +533,37 @@ pub fn tab_switch_geometry_work(pane_count: usize) -> usize {
     dividers + slots + focus + editor
 }
 
+/// Measure the production SDUI left-slot decision across pane widths and UI
+/// typography. The returned flags keep Criterion from eliding the real
+/// `sidebar_geometry` and `editor_region_for_document` work: bit 0 means the
+/// sidebar is present, bit 1 means the editor is offset by it, and bit 2 means
+/// the editor has usable width.
+#[doc(hidden)]
+pub fn responsive_layout_work(width: f64, ui_size: f32) -> usize {
+    let mut state = SduiNativeState::empty();
+    state.apply_snapshot(representative_sdui_tree());
+    let default = ActiveTypography::default();
+    let typography = ActiveTypography {
+        revision: 1,
+        ui: crate::protocol::FontProfile {
+            size: ui_size,
+            ..default.ui.clone()
+        },
+        ..default
+    };
+    state.set_typography(
+        crate::editor::typography::TypographyRegistry::from_active_typography(typography)
+            .expect("benchmark typography fixture is valid"),
+    );
+    let size = masonry::kurbo::Size::new(width, 600.0);
+    let sidebar = state.sidebar_geometry(size);
+    let editor = crate::masonry_sdui::editor_region_for_document(size, &state, 7);
+    let flags = usize::from(sidebar.is_some())
+        | (usize::from(editor.x0 > 0.0) << 1)
+        | (usize::from(editor.width() > 0.0) << 2);
+    std::hint::black_box(flags)
+}
+
 /// Geometry work a centered Command Centre open/theme update performs: the
 /// full-window scrim rect plus the centered surface rect and one rect per
 /// hosted overlay. Pure rect math over window bounds — no document text,
@@ -595,6 +626,59 @@ pub fn completion_open_projection_work(item_count: usize) -> usize {
     std::hint::black_box(semantic_items + overlay.component.children.len())
 }
 
+/// Project one selected completion result through the production menu and
+/// accessibility model. Selection changes reuse the bounded rows; no provider,
+/// document, IPC, or package JavaScript work is included.
+#[doc(hidden)]
+pub fn completion_selection_work(item_count: usize, selected_index: usize) -> usize {
+    let session = completion_session_for_benchmark(item_count).with_selected_index(selected_index);
+    let overlay = crate::shell::package_ui::TransientPackageOverlay::from_menu_session(&session);
+    let selected = overlay.menu_a11y.as_ref().map_or(0, |menu| {
+        menu.items.iter().filter(|item| item.selected).count()
+    });
+    std::hint::black_box(selected + overlay.component.children.len())
+}
+
+fn command_centre_session_for_benchmark(item_count: usize) -> crate::shell::TransientMenuSession {
+    use crate::shell::transient_menu::{
+        TransientMenuAction, TransientMenuItem, TransientMenuOrigin, TransientMenuSession,
+        TransientMenuSessionId,
+    };
+
+    let items = (0..item_count.min(crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS))
+        .map(|index| {
+            TransientMenuItem::new(
+                format!("command-{index}"),
+                format!("Command Centre action {index}"),
+                TransientMenuAction::new(format!("shell.command{index}")),
+            )
+        })
+        .collect();
+    TransientMenuSession::new(TransientMenuSessionId(2), "Control Center")
+        .with_origin(TransientMenuOrigin::Centered)
+        .with_items(items)
+}
+
+/// Project one bounded Command Centre catalogue through the production menu
+/// and accessibility model. Filtering uses the same matcher as completion;
+/// this helper measures the open/projection side without server or filesystem
+/// authority.
+#[doc(hidden)]
+pub fn command_centre_open_projection_work(item_count: usize) -> usize {
+    let session = command_centre_session_for_benchmark(item_count);
+    let overlay = crate::shell::package_ui::TransientPackageOverlay::from_menu_session(&session);
+    let semantic_items = overlay
+        .menu_a11y
+        .as_ref()
+        .map_or(0, |menu| menu.items.len());
+    let result_count = overlay
+        .menu_a11y
+        .as_ref()
+        .and_then(|menu| menu.result_count.as_deref())
+        .map_or(0, str::len);
+    std::hint::black_box(semantic_items + result_count + overlay.component.children.len())
+}
+
 /// Score one bounded transient-menu candidate set with the production fuzzy
 /// matcher. Command Centre filtering uses the same matcher and caps.
 #[doc(hidden)]
@@ -626,4 +710,109 @@ pub fn completion_layout_work(item_count: usize, caret_y: f64) -> usize {
         &ui_theme,
     );
     std::hint::black_box(rect.width().to_bits() as usize ^ rect.height().to_bits() as usize)
+}
+
+/// Reusable optimized benchmark fixture for retained accessibility updates.
+/// The initial tree is built outside Criterion's timed closure; `update`
+/// changes labels while preserving the owner/client-derived virtual IDs.
+#[doc(hidden)]
+pub struct AccessibilityTreeBench {
+    root: masonry::app::RenderRoot,
+    shell_id: masonry::core::WidgetId,
+    tab_count: usize,
+    revision: usize,
+}
+
+impl AccessibilityTreeBench {
+    /// Build a bounded shell tree with stable tab accessibility IDs.
+    #[doc(hidden)]
+    pub fn new(tab_count: usize) -> Self {
+        use masonry::app::{RenderRoot, RenderRootOptions, WindowSizePolicy};
+        use masonry::core::{NewWidget, WindowEvent};
+        use masonry::dpi::PhysicalSize;
+
+        let tab_count = tab_count.clamp(2, crate::perf::budgets::MAX_ACTIVE_CONNECTIONS);
+        let root_widget = NewWidget::new(crate::masonry_shell::ClayShellWidget::single_editor(
+            0,
+            crate::masonry_editor::EditorWidget::default(),
+        ));
+        let shell_id = root_widget.id();
+        let mut root = RenderRoot::new(
+            root_widget,
+            |_| {},
+            RenderRootOptions {
+                default_properties: masonry::theme::default_property_set().into(),
+                use_system_fonts: false,
+                size_policy: WindowSizePolicy::User,
+                size: PhysicalSize::new(900, 600),
+                scale_factor: 1.0,
+                test_font: None,
+            },
+        );
+        root.handle_window_event(WindowEvent::EnableAccessTree);
+        let _ = root.redraw();
+        root.edit_widget(shell_id, |mut widget| {
+            let mut shell = widget
+                .try_downcast::<crate::masonry_shell::ClayShellWidget>()
+                .expect("benchmark root is ClayShellWidget");
+            for client_id in 1..tab_count as u64 {
+                shell.widget.install_tab(
+                    &mut shell.ctx,
+                    client_id,
+                    crate::masonry_shell::TabChrome::single_editor(
+                        crate::masonry_editor::EditorWidget::default(),
+                        false,
+                    ),
+                );
+            }
+            shell
+                .widget
+                .set_tab_cards(&mut shell.ctx, benchmark_tab_cards(tab_count, 0));
+        });
+        let _ = root.redraw();
+        Self {
+            root,
+            shell_id,
+            tab_count,
+            revision: 0,
+        }
+    }
+
+    /// Apply one stable-ID label update and return emitted accessibility-node
+    /// count. This is the timed operation; setup and first tree construction
+    /// stay outside the benchmark closure.
+    #[doc(hidden)]
+    pub fn update(&mut self) -> usize {
+        self.revision = self.revision.wrapping_add(1);
+        let revision = self.revision;
+        self.root.edit_widget(self.shell_id, |mut widget| {
+            let mut shell = widget
+                .try_downcast::<crate::masonry_shell::ClayShellWidget>()
+                .expect("benchmark root is ClayShellWidget");
+            shell.widget.set_tab_cards(
+                &mut shell.ctx,
+                benchmark_tab_cards(self.tab_count, revision),
+            );
+        });
+        let (_, update) = self.root.redraw();
+        std::hint::black_box(update.map_or(0, |tree| tree.nodes.len()))
+    }
+}
+
+fn benchmark_tab_cards(tab_count: usize, revision: usize) -> Vec<crate::masonry_shell::TabCard> {
+    (0..tab_count)
+        .map(|client_id| crate::masonry_shell::TabCard {
+            client_id: client_id as u64,
+            name: format!("workspace-{revision}-{client_id}"),
+            closable: true,
+        })
+        .collect()
+}
+
+/// Build and update one retained accessibility tree when a caller needs a
+/// single-shot smoke value rather than a reusable Criterion fixture.
+#[doc(hidden)]
+pub fn accessibility_tree_update_work(tab_count: usize) -> usize {
+    let mut fixture = AccessibilityTreeBench::new(tab_count);
+    fixture.update()
 }

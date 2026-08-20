@@ -3,12 +3,13 @@
 ## Source
 
 - `src/client/mod.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/editor/typography.rs`
 - `src/editor/buffer.rs`
 - `src/masonry_editor.rs`
-- `src/main.rs`
-- `src/server/connection.rs`
+- `src/launch.rs`
+- `src/app_driver.rs`
+- `src/server/connection/mod.rs`
 - `src/ipc.rs`
 
 ## Overview
@@ -23,11 +24,11 @@ The native app starts as a client unit that initializes the Masonry editor from 
 - `EditorSurface::load_snapshot` replaces the local shadow buffer at startup or resync and resets caret, selection, viewport, layout cache, and scroll state.
 - `EditorSurface::install_behavior_manifest` stores the behavior version and manifest data without executing scripts.
 - `EditorWidget::with_initial_state` bridges the bootstrap result into the existing Masonry widget.
-- `src/main.rs` starts or connects to the local server, loads the initial state before launching Masonry, and keeps ongoing IPC on background Tokio tasks.
+- `src/launch.rs` starts or connects to the local server, loads the initial state before launching Masonry, and keeps ongoing IPC on background Tokio tasks.
 
 ## How It Works
 
-`src/main.rs` parses CLI endpoint arguments through `IpcEndpoint`; `client::connect` opens a `tokio::net::UnixStream` on Unix or a Tokio `NamedPipeClient` on Windows and wraps the handshake in a five-second timeout. Windows named-pipe clients use `ClientOptions::open` and retry `ERROR_PIPE_BUSY` briefly so an auto-started or saturated server can rotate a pipe instance. `ClientBootstrapError::kind` categorizes transport, endpoint-validation, protocol, handshake, server rejection, and timeout failures so launch code can print actionable startup diagnostics without string matching on error text. Once a connected stream exists, `connect_with_workspace_root` binds a selected new-tab root, `connect_for_reclaim` binds a persisted `TabId`, and the reconnect-only `connect_for_reclaim_or_new` falls back to that root when an in-memory server registry reset rejects the old ID. `connect_from_stream`/`handshake_initial_state` plus the background `run_connection` loop remain transport-neutral over Tokio async read/write traits and use `tokio::io::split` for independent read/write halves. All wire messages still go through the shared `Codec`, so length-prefix bounds and `rkyv` validation remain centralized. Runtime diagnostics are not part of the blocking bootstrap contract; if the server publishes `ServerMessage::RuntimeDiagnostic` after startup/configuration, `run_connection` forwards it as `ClientConnectionEvent::RuntimeDiagnostic` on the background event queue.
+`src/cli.rs` parses CLI endpoint arguments through `IpcEndpoint`; `client::connect` opens a `tokio::net::UnixStream` on Unix or a Tokio `NamedPipeClient` on Windows and wraps the handshake in a five-second timeout. Windows named-pipe clients use `ClientOptions::open` and retry `ERROR_PIPE_BUSY` briefly so an auto-started or saturated server can rotate a pipe instance. `ClientBootstrapError::kind` categorizes transport, endpoint-validation, protocol, handshake, server rejection, and timeout failures so launch code can print actionable startup diagnostics without string matching on error text. Once a connected stream exists, `connect_with_workspace_root` binds a selected new-tab root, `connect_for_reclaim` binds a persisted `TabId`, and the reconnect-only `connect_for_reclaim_or_new` falls back to that root when an in-memory server registry reset rejects the old ID. `connect_from_stream`/`handshake_initial_state` plus the background `run_connection` loop remain transport-neutral over Tokio async read/write traits and use `tokio::io::split` for independent read/write halves. All wire messages still go through the shared `Codec`, so length-prefix bounds and `rkyv` validation remain centralized. Runtime diagnostics are not part of the blocking bootstrap contract; if the server publishes `ServerMessage::RuntimeDiagnostic` after startup/configuration, `run_connection` forwards it as `ClientConnectionEvent::RuntimeDiagnostic` on the background event queue.
 
 The production bootstrap expects messages and writes in this order:
 
@@ -66,7 +67,7 @@ let widget = clay::masonry_editor::EditorWidget::with_initial_state(state);
 - Client bootstrap connects only to the configured local IPC endpoint: Unix sockets on Unix and local named pipes on Windows. Failed decodes, unexpected messages, server errors, connection failures, endpoint validation errors, and timeouts are returned as categorized `ClientBootstrapError` values instead of panicking.
 - Editable/read-only access from the server is authoritative. Read-only snapshots allow navigation/selection but block local text mutation and edit queue emission.
 - Runtime diagnostics are asynchronous status events. They update UI status text but do not block bootstrap, rendering, typing, edit queueing, or behavior routing.
-- `ActiveTypography` is revalidated both during bootstrap and when received live. Invalid/stale snapshots are ignored without changing cached typography, layout, or scroll state. A newer revision resets stale editor layout/visual-scroll state; `src/main.rs` requests Masonry layout, render, and accessibility updates exactly for that changed event.
+- `ActiveTypography` is revalidated both during bootstrap and when received live. Invalid/stale snapshots are ignored without changing cached typography, layout, or scroll state. A newer revision resets stale editor layout/visual-scroll state; `src/app_driver.rs` requests Masonry layout, render, and accessibility updates exactly for that changed event.
 
 ## Tests
 
@@ -75,8 +76,8 @@ let widget = clay::masonry_editor::EditorWidget::with_initial_state(state);
 - `src/masonry_editor.rs`: `live_typography_update_requests_layout_render_and_accessibility` verifies a newer live snapshot changes the widget once and raises one layout invalidation.
 - `src/main.rs`: `connect_retry_reports_last_error` verifies bounded startup retry returns an actionable readiness error with the last categorized connection failure, and `client_mode_falls_back_with_status_when_server_missing` verifies fallback diagnostics include endpoint and error category.
 - `src/client/mod.rs`: behavior-manifest tests verify manifest version/access data is preserved, and `client_receives_runtime_diagnostic_event` verifies runtime diagnostic protocol events reach the client event queue.
-- `src/editor/surface.rs`: `editor_load_snapshot_replaces_text_and_resets_caret` verifies snapshot text, metadata, caret, selection, and scroll reset.
-- `src/editor/surface.rs`: `editor_installs_minimal_behavior_manifest` verifies behavior manifest storage without execution.
+- `src/editor/surface/mod.rs`: `editor_load_snapshot_replaces_text_and_resets_caret` verifies snapshot text, metadata, caret, selection, and scroll reset.
+- `src/editor/surface/mod.rs`: `editor_installs_minimal_behavior_manifest` verifies behavior manifest storage without execution.
 - `src/masonry_editor.rs`: `resync_event_replaces_editor_snapshot` verifies later resync snapshots use the same safe loading boundary, and `runtime_diagnostic_updates_status_text` verifies runtime diagnostics become visible GUI status text.
 - Windows transport tests in `src/client/mod.rs`: named-pipe deferred hidden/visible initial snapshot, edit acknowledgement, independent per-tab welcome documents, and stale-edit resync recovery.
 - Relevant commands: `cargo test --lib client --quiet`, `cargo test --lib windows_named_pipe --quiet`, `cargo test --lib windows_second_client_gets_independent_welcome_document --quiet`, `cargo test --lib windows_named_pipe_stale_edit_rejected_then_resynced --quiet`, `cargo test editor_load_snapshot_replaces_text_and_resets_caret --quiet`, `cargo test --quiet`.

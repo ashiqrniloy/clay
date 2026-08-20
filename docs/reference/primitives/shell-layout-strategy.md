@@ -132,9 +132,10 @@ blur, filter, or offscreen render target. Completion, context-menu, menu-bar,
 and package overlays preserve existing local anchors. The centered anchor is
 Clay-internal, not a package `OverlayAnchor` value. The centered host reports
 modal Dialog/Menu/MenuItem/Status accessibility and keeps server-owned input
-containment on the originating pane. Plan 087's live review tracks retained
-scroll-child clipping separately as `P1-087-UI-1`; it does not add package
-authority.
+containment on the originating pane. Plan 088 closes the retained
+scroll-child-rendering follow-up `P1-087-UI-1` at the package/SDUI host
+boundary: children are clipped to their owner and clipped-child semantics are
+exposed to accessibility consumers. This changes no package authority.
 
 ### Phase 18.12 Clay-Owned File Browser
 

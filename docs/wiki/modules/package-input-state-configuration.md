@@ -8,11 +8,11 @@
 - `src/server/ops/configuration.rs`
 - `src/server/ui.rs`
 - `src/server/configuration.rs`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `src/shell/package_ui.rs`
 - `src/shell/components.rs`
 - `src/shell/theme.rs`
-- `src/packages/record.rs`
+- `src/packages/record/mod.rs`
 - `src/packages/conflict.rs`
 - `src/masonry_sdui.rs`
 - `docs/reference/clay-js-api/ui/server-register-input-contribution.md`
@@ -61,7 +61,7 @@ These APIs are runtime-backed for declaration/override records. They do **not** 
 2. `src/server/ops/ui.rs` and `src/server/ops/configuration.rs` parse JSON at the server boundary. Raw `op_clay_*` names remain internal implementation details; public authors use the documented facade exports.
 3. `src/server/ui.rs` validates package-owned UI records against the package manifest/provenance, registered component IDs, registered command/action targets, manifest-declared input modes, package-prefixed IDs, allowed scopes/properties, payload budgets, and prohibited authority fields.
 4. `src/server/configuration.rs` records package option values as typed configuration records with explicit source/precedence information. Supported option names include `layout.defaultVisibility`, `layout.defaultSlot`, `layout.splitRatio`, `input.default`, `action.default`, `themeTokenRemap`, and `fallback`.
-5. Package manifests are also validated by `src/packages/record.rs`. Their Phase 18.4 metadata (`input`, `uiStateScopes`, `layoutOverrides`, `packageOptions`, and `themeTokens`) must align with declared API dependencies and permissions before package enable/load can activate the record.
+5. Package manifests are also validated by `src/packages/record/mod.rs`. Their Phase 18.4 metadata (`input`, `uiStateScopes`, `layoutOverrides`, `packageOptions`, and `themeTokens`) must align with declared API dependencies and permissions before package enable/load can activate the record.
 6. Cross-package checks in `src/packages/conflict.rs` reject duplicate input IDs, UI state scope IDs, layout override target/property pairs, package option schemas, theme tokens, fixed-slot claims, and ambiguous action/input conflicts with deterministic provenance diagnostics.
 7. Accepted input declarations become inert `PackageInputRouting` values in `src/shell/package_ui.rs`. `src/masonry_sdui.rs` can read those values while composing native panels/overlays and routing already-validated component actions, but it does not parse manifests, evaluate configuration, execute JavaScript, or mutate the child tree during layout.
 8. Accepted UI state scope declarations remain inert schema/lifecycle metadata. Phase 18.4 does not accept state values, hidden globals, raw JSON blobs, or persisted workspace/document mutation authority.

@@ -106,7 +106,7 @@ Use `documents.serverSaveDocument` only through the documented Clay JS facade. D
 - JS facade: `runtime/js/documents.js::serverSaveDocument`
 - Deno op: `src/server/ops/documents.rs::op_clay_documents_save_document` (`op_clay_documents_save_document`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::save_document`
-- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
+- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection/mod.rs`, and `src/server/workspace.rs`
 
 ## Lookup metadata
 

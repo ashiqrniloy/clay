@@ -16,17 +16,23 @@ impl Driver {
         if let Some((index, tab)) = self.restore_next_mount() {
             self.restore_pending = Some((index, tab));
             self.spawn_restore_connect();
-        } else if self.restore_gate.is_some() && self.restore_queue.is_empty() {
+        } else if self.restore_queue.is_empty() && self.restore_gate_confirmed() {
             // The last mount is confirmed and nothing is left to mount.
             self.finish_restore(ctx, window_id);
         }
     }
 
+    /// True only after current mounted tab has received a server `TabId`.
+    fn restore_gate_confirmed(&self) -> bool {
+        self.restore_gate
+            .and_then(|(client_id, _)| self.tabs.get(&client_id))
+            .is_some_and(|tab| tab.tab_id.is_some())
+    }
+
     /// Phase 22.5: the gate's next mount — `Some((persisted index, tab))`
     /// once the last mounted tab's server `TabId` is confirmed, or `None`
-    /// while the gate waits or the queue is empty (the caller distinguishes:
-    /// a live gate with an empty queue finishes the restore). Tabs whose
-    /// workspace root is gone are skipped here, with a diagnostic.
+    /// while the gate waits or the queue is empty. Tabs whose workspace root
+    /// is gone are skipped here, with a diagnostic.
     pub(crate) fn restore_next_mount(&mut self) -> Option<(usize, PersistedTabState)> {
         loop {
             let (last, _) = self.restore_gate?;
@@ -857,6 +863,17 @@ mod tests {
         assert!(driver.restore_queue.is_empty());
         assert!(driver.restore_gate.is_some());
         assert!(driver.restore_next_mount().is_none());
+    }
+
+    #[test]
+    fn restore_completion_waits_for_registry_tab_id() {
+        let (queue, _receiver) = ClientEditQueue::bounded(4);
+        let mut driver = test_driver_with_tabs(BTreeMap::from([(11, tab_state_with_queue(queue))]));
+        driver.restore_gate = Some((11, Instant::now() + RESTORE_CONFIRM_TIMEOUT));
+
+        assert!(!driver.restore_gate_confirmed());
+        driver.tabs.get_mut(&11).expect("tab").tab_id = Some(101);
+        assert!(driver.restore_gate_confirmed());
     }
 
     #[test]

@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientKeepSelection
 js_facade: runtime/js/editor.js::clientKeepSelection
-backing_rust: src/editor/surface.rs::EditorSurface::keep_selection
+backing_rust: src/editor/surface/mod.rs::EditorSurface::keep_selection
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientKeepSelection
@@ -90,7 +90,7 @@ Use `editor.clientKeepSelection` when the user asks for Keep Selection through t
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientKeepSelection`
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::keep_selection`
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::keep_selection`
 - Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
 
 ## Lookup metadata

@@ -22,18 +22,19 @@ Baseline invariants for the end-user Markdown UX:
 - **Optional preview on demand.** An optional preview/status panel is a `clay:ui` `PanelContribution` targeting a slot such as `right` with `defaultVisibility: "hidden"`, shown only through `setPackageOption`, `serverSetLayoutOverride`, or `markdown.togglePreview`.
 - **Selected-file open supports save/conflict UX.** Opening a file through `Ctrl+O` activates Markdown behavior/decorations through generic `MajorModeActivation` + `DocumentClassification`. Dirty state is visible in Clay-owned status chrome; `bindKey("Ctrl+S", "documents.serverSaveDocument")` saves through server file IO. Stale-metadata and dirty-reload conflicts present an explicit recovery menu rather than silent overwrite.
 
-Loading, contribution validation, selected-file activation, and Phase 19 reload refresh run at configuration/document-open/reload time only; typing, paint, scroll, layout, and text-event paths stay client-local/non-blocking and read only installed inert shell/contribution state. Hot reload reruns the one-line `await loadPackage("@clay/markdown")` setup in a fresh runtime generation with an empty `globalThis.__clayLoadedPackages` cache, replacing Markdown mode metadata and parse handler tokens without adding a Markdown-specific Rust branch. Failed reloads keep the prior Markdown generation active and surface sanitized diagnostics. The one-line loader does not broaden package installation, filesystem (beyond the selected file and config root), workspace expansion, shell, network, AI mutation, WASM, raw-op, native-widget, raw-CSS, renderer-callback, or client-side JavaScript authority beyond what the constrained first-party `@clay/*` resolver already grants.
+Loading, contribution validation, selected-file activation, and Phase 19 reload refresh run at configuration/document-open/reload time only; typing, paint, scroll, layout, and text-event paths stay client-local/non-blocking and read only installed inert shell/contribution state. Hot reload reruns the one-line `await loadPackage("@clay/markdown")` setup in a fresh runtime generation with an empty `globalThis.__clayLoadedPackages` cache, replacing Markdown mode metadata from `package.json` and parse-handler tokens from the execute-only `loadEntry` without adding a Markdown-specific Rust branch. Failed reloads keep the prior Markdown generation active and surface sanitized diagnostics. The one-line loader does not broaden package installation, filesystem (beyond the selected file and config root), workspace expansion, shell, network, AI mutation, WASM, raw-op, native-widget, raw-CSS, renderer-callback, or client-side JavaScript authority beyond what the constrained first-party `@clay/*` resolver already grants.
 
 ## Contract
 
 - `package.json` name: `@clay/markdown`
 - Clay API prefix: `markdown`
+- Preset: `prose-mode` (permissions / `apiDependencies` / extension points expand at validate time)
 - Mode: `markdown`
 - File patterns: `.md`, `.markdown`, `.mdown`
 - MIME type: `text/markdown`
 - Docs path: `./docs/index.md`
 - Entries: `./dist/index.js`, `./dist/load.js`, parser export `./dist/parser.js`, and SDUI export `./dist/sdui.js`
-- Grammar contribution: `native`, source `tree-sitter-md-025` (no package `.wasm` asset)
+- Grammar contribution: owned by native descriptor (`FIRST_PARTY_NATIVE_GRAMMARS`); package.json omits `syntaxGrammars`
 - Highlight query: `./queries/highlights.scm`
 - Vocabulary styleMap: headings/prose/code/list/link/quote captures map directly to closed `TokenType` + `Modifiers`
 - Completion provider `markdown.keywords`: priority-0 metadata-only provider carrying 16 inert Markdown construct text replacements, `#`/`[`/`` ` `` triggers, and 300 ms/32-item budgets; snippet transforms remain deferred to Phase 18.19

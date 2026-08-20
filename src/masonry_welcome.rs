@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use masonry::accesskit::{Action, Live, Node, Role};
+use masonry::accesskit::{Action, Live, Node, NodeId, Role};
 use masonry::core::keyboard::{Key, NamedKey};
 use masonry::core::{
     AccessCtx, AccessEvent, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, PaintCtx,
@@ -252,6 +252,14 @@ impl WelcomeWidget {
         }
     }
 
+    fn shortcut_text(content_width: f64) -> &'static str {
+        if content_width < 480.0 {
+            "Shortcut: Ctrl+T new tab"
+        } else {
+            "Shortcuts: Ctrl+X Ctrl+P Command Centre · Ctrl+\\ split pane · Ctrl+T new tab"
+        }
+    }
+
     fn text_color(theme: &ResolvedUiTheme) -> Color {
         theme.color("text.primary").unwrap_or(Color::BLACK)
     }
@@ -291,6 +299,24 @@ impl WelcomeWidget {
             color,
         );
     }
+}
+
+pub(crate) fn accessibility_status_node_id(owner: masonry::core::WidgetId) -> NodeId {
+    crate::editor::accessibility::virtual_a11y_node_id(
+        owner,
+        crate::editor::accessibility::virtual_a11y_slots::STATUS,
+    )
+}
+
+pub(crate) fn accessibility_status_node(
+    owner: masonry::core::WidgetId,
+    label: String,
+) -> (NodeId, Node) {
+    let status_id = accessibility_status_node_id(owner);
+    let mut status = Node::new(Role::Status);
+    status.set_label(label);
+    status.set_live(Live::Polite);
+    (status_id, status)
 }
 
 impl Widget for WelcomeWidget {
@@ -381,14 +407,15 @@ impl Widget for WelcomeWidget {
             geometry.card.width() - geometry.padding * 2.0,
             muted_color,
         );
+        let content_width = geometry.card.width() - geometry.padding * 2.0;
         self.paint_line(
             ctx,
             scene,
-            "Shortcuts: Ctrl+X Ctrl+P Command Centre · Ctrl+\\ split pane · Ctrl+T new tab",
+            Self::shortcut_text(content_width),
             UiTextVariant::Caption,
             geometry.card.x0 + geometry.padding,
             geometry.shortcut_y,
-            geometry.card.width() - geometry.padding * 2.0,
+            content_width,
             muted_color,
         );
         self.paint_line(
@@ -455,16 +482,8 @@ impl Widget for WelcomeWidget {
         _props: &PropertiesRef<'_>,
         node: &mut Node,
     ) {
-        let state = self.state.borrow();
         node.set_label("Welcome to Clay");
-        let status_id = crate::editor::accessibility::virtual_a11y_node_id(
-            ctx.widget_id(),
-            crate::editor::accessibility::virtual_a11y_slots::STATUS,
-        );
-        let mut status = Node::new(Role::Status);
-        status.set_label(state.accessibility_label());
-        status.set_live(Live::Polite);
-        ctx.tree_update().nodes.push((status_id, status));
+        let status_id = accessibility_status_node_id(ctx.widget_id());
         node.set_children(vec![
             status_id,
             self.open_file.id().into(),
@@ -723,6 +742,15 @@ mod tests {
                 action => panic!("welcome action must stay client-local: {action:?}"),
             }
         }
+    }
+
+    #[test]
+    fn narrow_welcome_uses_one_line_shortcut_copy() {
+        assert_eq!(
+            WelcomeWidget::shortcut_text(388.0),
+            "Shortcut: Ctrl+T new tab"
+        );
+        assert!(WelcomeWidget::shortcut_text(788.0).starts_with("Shortcuts:"));
     }
 
     #[test]

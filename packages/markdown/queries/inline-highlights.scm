@@ -1,8 +1,6 @@
 ; @clay/markdown inline-grammar highlight query (markdown_inline injection
-; layer). Capture names intentionally match the block query's styleMap keys so
-; inline spans flow through the same MARKDOWN_NATIVE_STYLE_MAP vocabulary
-; mapping; node ranges come from the real inline grammar instead of the old
-; whole-`(inline)` regex predicates.
+; layer). Capture names match the block query's styleMap keys so inline spans
+; flow through MARKDOWN_NATIVE_STYLE_MAP.
 (strong_emphasis) @strong
 
 (emphasis) @emphasis
@@ -17,3 +15,6 @@
   (uri_autolink)
   (email_autolink)
 ] @link
+
+(link_text) @link
+(link_destination) @link-url

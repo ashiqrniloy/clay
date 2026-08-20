@@ -1,4 +1,4 @@
-use crate::protocol::{DocumentFontRole, DocumentId, DocumentVersion};
+use crate::protocol::{DocumentFontRole, DocumentId, DocumentVersion, TextByteRange};
 
 /// Package provenance retained on every decoration publication.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -17,6 +17,248 @@ pub enum DecorationKind {
     Semantic,
     Diagnostic,
     SearchMatch,
+    Link,
+    InlayHint,
+}
+
+impl DecorationKind {
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "syntax" | "Syntax" => Self::Syntax,
+            "semantic" | "Semantic" => Self::Semantic,
+            "diagnostic" | "Diagnostic" => Self::Diagnostic,
+            "search-match" | "searchMatch" | "SearchMatch" => Self::SearchMatch,
+            "link" | "Link" => Self::Link,
+            "inlayHint" | "inlay-hint" | "InlayHint" => Self::InlayHint,
+            _ => return None,
+        })
+    }
+
+    pub const fn allows_font_role(self) -> bool {
+        matches!(self, Self::Syntax | Self::Semantic)
+    }
+
+    pub const fn paints_vocabulary_color(self) -> bool {
+        matches!(self, Self::Syntax | Self::Semantic | Self::Link)
+    }
+
+    pub const fn layer_rank(self) -> u8 {
+        match self {
+            Self::SearchMatch => 3,
+            Self::Semantic => 2,
+            Self::Syntax | Self::Link => 1,
+            Self::Diagnostic => 0,
+            Self::InlayHint => 4,
+        }
+    }
+}
+
+/// Hover or activate at a byte offset. Hover is client-local (payload already
+/// on the span). Activate may open an already-granted workspace path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecorationIntent {
+    Hover,
+    Activate,
+}
+
+/// Optional activatable payload on a [`DecorationKind::Link`] span.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum DecorationTarget {
+    WorkspacePath {
+        relative_path: String,
+        range: Option<TextByteRange>,
+    },
+    DocumentRange {
+        range: TextByteRange,
+    },
+    DisplayOnly {
+        text: String,
+    },
+}
+
+/// Denied above the decoration payload budget; individual strings stay short.
+pub const DECORATION_TARGET_MAX_CHARS: usize = 512;
+
+impl DecorationTarget {
+    pub fn hover_text(&self) -> &str {
+        match self {
+            Self::WorkspacePath { relative_path, .. } => relative_path,
+            Self::DocumentRange { .. } => "",
+            Self::DisplayOnly { text } => text,
+        }
+    }
+
+    pub fn sanitized(self) -> Option<Self> {
+        match self {
+            Self::WorkspacePath {
+                relative_path,
+                range,
+            } => {
+                let relative_path = sanitize_target_text(&relative_path)?;
+                Some(Self::WorkspacePath {
+                    relative_path,
+                    range,
+                })
+            }
+            Self::DocumentRange { range } if range.is_ordered() => {
+                Some(Self::DocumentRange { range })
+            }
+            Self::DocumentRange { .. } => None,
+            Self::DisplayOnly { text } => Some(Self::DisplayOnly {
+                text: sanitize_target_text(&text).unwrap_or_default(),
+            }),
+        }
+    }
+}
+
+fn sanitize_target_text(text: &str) -> Option<String> {
+    let cleaned: String = text
+        .chars()
+        .filter(|ch| !ch.is_control() || *ch == '\t')
+        .take(DECORATION_TARGET_MAX_CHARS)
+        .collect();
+    let cleaned = cleaned.trim().to_string();
+    if cleaned.is_empty() || cleaned.chars().count() > DECORATION_TARGET_MAX_CHARS {
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
+/// Resolve a workspace-relative href against the current document path.
+/// Absolute, URL, and escaped (`..`) results are `None`.
+pub fn resolve_workspace_href(current_document_path: &str, href: &str) -> Option<String> {
+    let href = href.trim().replace('\\', "/");
+    if href.is_empty()
+        || looks_like_external_or_absolute(&href)
+        || href.split('/').any(|part| part == "..")
+    {
+        return None;
+    }
+    let joined = if href.starts_with("./") || href.starts_with("../") || href == "." || href == ".."
+    {
+        let mut parts = current_document_dir(current_document_path);
+        for component in href.split('/') {
+            match component {
+                "" | "." => {}
+                ".." => {
+                    parts.pop()?;
+                }
+                other => parts.push(other.to_string()),
+            }
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        parts.join("/")
+    } else {
+        href
+    };
+    is_safe_relative_path(&joined).then_some(joined)
+}
+
+fn is_safe_relative_path(path: &str) -> bool {
+    let normalized: String = path.replace('\\', "/");
+    if normalized.is_empty() || normalized.starts_with('/') {
+        return false;
+    }
+    let bytes = normalized.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return false;
+    }
+    normalized
+        .split('/')
+        .all(|component| !component.is_empty() && component != "." && component != "..")
+}
+
+fn current_document_dir(path: &str) -> Vec<String> {
+    let normalized = path.replace('\\', "/");
+    let mut parts: Vec<String> = normalized
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .map(str::to_string)
+        .collect();
+    parts.pop();
+    parts
+}
+
+fn looks_like_external_or_absolute(href: &str) -> bool {
+    let bytes = href.as_bytes();
+    href.starts_with('/')
+        || href.starts_with('#')
+        || href.contains(':')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+}
+
+/// Plan an Activate for a decoration target. Never mints a browse grant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecorationActivatePlan {
+    Jump {
+        byte_start: u64,
+    },
+    Focus {
+        document_id: DocumentId,
+        byte_start: Option<u64>,
+    },
+    Open {
+        workspace_root_id: crate::protocol::WorkspaceRootId,
+        relative_path: String,
+        byte_start: Option<u64>,
+    },
+    Denied,
+}
+
+pub fn plan_decoration_activate(
+    target: &DecorationTarget,
+    current_document_id: DocumentId,
+    current_workspace_root_id: crate::protocol::WorkspaceRootId,
+    current_path: &str,
+    retained_id_for_path: Option<DocumentId>,
+) -> DecorationActivatePlan {
+    match target {
+        DecorationTarget::DocumentRange { range } => DecorationActivatePlan::Jump {
+            byte_start: range.byte_start,
+        },
+        DecorationTarget::DisplayOnly { .. } => DecorationActivatePlan::Denied,
+        DecorationTarget::WorkspacePath {
+            relative_path,
+            range,
+        } => {
+            // WorkspaceRootId 0 is the client-side "no bound root" sentinel;
+            // fail closed before queueing an OpenDocument intent.
+            if current_workspace_root_id == 0 {
+                return DecorationActivatePlan::Denied;
+            }
+            let Some(resolved) = resolve_workspace_href(current_path, relative_path) else {
+                return DecorationActivatePlan::Denied;
+            };
+            let byte_start = range.map(|range| range.byte_start);
+            if paths_equal(current_path, &resolved) {
+                return match byte_start {
+                    Some(byte_start) => DecorationActivatePlan::Jump { byte_start },
+                    None => DecorationActivatePlan::Focus {
+                        document_id: current_document_id,
+                        byte_start: None,
+                    },
+                };
+            }
+            if let Some(document_id) = retained_id_for_path {
+                return DecorationActivatePlan::Focus {
+                    document_id,
+                    byte_start,
+                };
+            }
+            DecorationActivatePlan::Open {
+                workspace_root_id: current_workspace_root_id,
+                relative_path: resolved,
+                byte_start,
+            }
+        }
+    }
+}
+
+fn paths_equal(left: &str, right: &str) -> bool {
+    left.replace('\\', "/") == right.replace('\\', "/")
 }
 
 /// Closed vocabulary axis 1: the semantic text category of a decoration span.
@@ -167,8 +409,9 @@ impl std::ops::BitOr for Modifiers {
 }
 
 impl TokenType {
-    /// Compat mapper: classify a free-form `style_token` string from the Plan
-    /// 046 baseline families into the two-axis `(token_type, modifiers)` model.
+    /// Frozen compatibility mapper for old packages that still emit free-form
+    /// `style_token` strings. New first-party producers must emit closed
+    /// [`TokenType`] + [`Modifiers`] instead.
     ///
     /// The original string is preserved as [`DecorationSpan::scope`] by the
     /// `from_style_token` constructor so existing packages render unchanged (the
@@ -315,6 +558,53 @@ pub struct DecorationSpan {
     pub font_role: Option<DocumentFontRole>,
     pub priority: u16,
     pub provenance: DecorationProvenance,
+    pub target: Option<DecorationTarget>,
+    pub inlay: Option<InlayHintPayload>,
+}
+
+/// Overlay label. Inert: no command, no URL.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct InlayHintPayload {
+    pub label: String,
+    pub placement: InlayPlacement,
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InlayPlacement {
+    Before,
+    After,
+}
+
+/// Cap on a single inlay label. Set payload still uses DECORATION_PAYLOAD_BUDGET_BYTES.
+pub const INLAY_LABEL_MAX_CHARS: usize = 64;
+
+impl InlayHintPayload {
+    pub fn sanitized(self) -> Option<Self> {
+        let label: String = self
+            .label
+            .chars()
+            .filter(|ch| !ch.is_control())
+            .take(INLAY_LABEL_MAX_CHARS)
+            .collect();
+        let label = label.trim().to_string();
+        if label.is_empty() || label.chars().count() > INLAY_LABEL_MAX_CHARS {
+            None
+        } else {
+            Some(Self {
+                label,
+                placement: self.placement,
+            })
+        }
+    }
+
+    pub fn from_name(placement: &str, label: String) -> Option<Self> {
+        let placement = match placement {
+            "before" | "Before" => InlayPlacement::Before,
+            "after" | "After" => InlayPlacement::After,
+            _ => return None,
+        };
+        Self { label, placement }.sanitized()
+    }
 }
 
 impl DecorationSpan {
@@ -341,13 +631,37 @@ impl DecorationSpan {
             font_role: None,
             priority,
             provenance,
+            target: None,
+            inlay: None,
         }
     }
 
-    /// Compat constructor: classify a free-form `style_token` into the two-axis
-    /// `(token_type, modifiers)` model and preserve the original string as the
-    /// open-escape `scope`. Existing package style_token families render
-    /// unchanged because `decoration_color` keys off `token_type`.
+    pub fn from_inlay(
+        byte_start: u64,
+        byte_end: u64,
+        payload: InlayHintPayload,
+        priority: u16,
+        provenance: DecorationProvenance,
+    ) -> Self {
+        Self {
+            byte_start,
+            byte_end,
+            kind: DecorationKind::InlayHint,
+            token_type: TokenType::Type,
+            modifiers: Modifiers::NONE,
+            scope: None,
+            font_role: None,
+            priority,
+            provenance,
+            target: None,
+            inlay: Some(payload),
+        }
+    }
+
+    /// Frozen compatibility constructor for old packages. Classifies a
+    /// free-form `style_token` into [`TokenType`] + [`Modifiers`] and keeps the
+    /// original string as the open-escape `scope`. New first-party producers
+    /// must use [`DecorationSpan::from_vocabulary`].
     pub fn from_style_token(
         byte_start: u64,
         byte_end: u64,
@@ -367,6 +681,8 @@ impl DecorationSpan {
             font_role: None,
             priority,
             provenance,
+            target: None,
+            inlay: None,
         }
     }
 }
@@ -430,4 +746,181 @@ impl DecorationSet {
 
 fn span_intersects_viewport(span: &DecorationSpan, viewport_start: u64, viewport_end: u64) -> bool {
     span.byte_start < viewport_end && span.byte_end > viewport_start
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decoration_span_wire_shape_has_no_background_field() {
+        let span = DecorationSpan::from_vocabulary(
+            0,
+            4,
+            DecorationKind::Syntax,
+            TokenType::Quote,
+            Modifiers::NONE,
+            10,
+            DecorationProvenance {
+                package_name: "test".into(),
+                package_version: "1.0.0".into(),
+                package_prefix: "test".into(),
+            },
+        );
+        let encoded = format!("{span:?}");
+        assert!(
+            !encoded.contains("background"),
+            "DecorationSpan must stay vocabulary-only: {encoded}"
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&span).expect("span encodes");
+        assert!(
+            bytes.len() <= crate::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES,
+            "single span stays inside the decoration budget"
+        );
+    }
+
+    #[test]
+    fn link_span_round_trip_with_workspace_target() {
+        let span = DecorationSpan {
+            byte_start: 1,
+            byte_end: 8,
+            kind: DecorationKind::Link,
+            token_type: TokenType::Link,
+            modifiers: Modifiers::NONE,
+            scope: None,
+            font_role: None,
+            priority: 80,
+            provenance: DecorationProvenance {
+                package_name: "@clay/markdown".into(),
+                package_version: "0.1.0".into(),
+                package_prefix: "markdown".into(),
+            },
+            target: Some(DecorationTarget::WorkspacePath {
+                relative_path: "docs/note.md".into(),
+                range: None,
+            }),
+            inlay: None,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&span).expect("encodes");
+        let decoded =
+            rkyv::from_bytes::<DecorationSpan, rkyv::rancor::Error>(&bytes).expect("decode");
+        assert_eq!(decoded, span);
+        assert_eq!(
+            plan_decoration_activate(
+                decoded.target.as_ref().expect("target"),
+                1,
+                7,
+                "readme.md",
+                None,
+            ),
+            DecorationActivatePlan::Open {
+                workspace_root_id: 7,
+                relative_path: "docs/note.md".into(),
+                byte_start: None,
+            }
+        );
+    }
+
+    #[test]
+    fn activate_http_or_escape_path_denied_no_grant() {
+        assert_eq!(
+            plan_decoration_activate(
+                &DecorationTarget::DisplayOnly {
+                    text: "https://example.com".into(),
+                },
+                1,
+                7,
+                "readme.md",
+                None,
+            ),
+            DecorationActivatePlan::Denied
+        );
+        assert_eq!(
+            plan_decoration_activate(
+                &DecorationTarget::WorkspacePath {
+                    relative_path: "../secret".into(),
+                    range: None,
+                },
+                1,
+                7,
+                "docs/readme.md",
+                None,
+            ),
+            DecorationActivatePlan::Denied
+        );
+        assert_eq!(
+            plan_decoration_activate(
+                &DecorationTarget::WorkspacePath {
+                    relative_path: "notes.md".into(),
+                    range: None,
+                },
+                1,
+                0,
+                "readme.md",
+                None,
+            ),
+            DecorationActivatePlan::Denied
+        );
+        assert!(resolve_workspace_href("docs/a.md", "https://x").is_none());
+        assert!(resolve_workspace_href("docs/a.md", "/etc/passwd").is_none());
+    }
+
+    #[test]
+    fn activate_workspace_path_opens_or_focuses() {
+        let target = DecorationTarget::WorkspacePath {
+            relative_path: "note.md".into(),
+            range: None,
+        };
+        assert_eq!(
+            plan_decoration_activate(&target, 1, 7, "readme.md", Some(9)),
+            DecorationActivatePlan::Focus {
+                document_id: 9,
+                byte_start: None,
+            }
+        );
+        assert_eq!(
+            plan_decoration_activate(&target, 1, 7, "note.md", None),
+            DecorationActivatePlan::Focus {
+                document_id: 1,
+                byte_start: None,
+            }
+        );
+        assert_eq!(
+            plan_decoration_activate(
+                &DecorationTarget::DocumentRange {
+                    range: TextByteRange::new(4, 8),
+                },
+                1,
+                7,
+                "readme.md",
+                None,
+            ),
+            DecorationActivatePlan::Jump { byte_start: 4 }
+        );
+    }
+
+    #[test]
+    fn inlay_span_round_trip_and_budget() {
+        let span = DecorationSpan::from_inlay(
+            2,
+            3,
+            InlayHintPayload {
+                label: ": i32".into(),
+                placement: InlayPlacement::After,
+            },
+            10,
+            DecorationProvenance {
+                package_name: "@clay/lsp-rust".into(),
+                package_version: "0.1.0".into(),
+                package_prefix: "lsp-rust".into(),
+            },
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&span).expect("encodes");
+        let decoded =
+            rkyv::from_bytes::<DecorationSpan, rkyv::rancor::Error>(&bytes).expect("decode");
+        assert_eq!(decoded, span);
+        assert!(bytes.len() <= crate::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES);
+        assert!(span.inlay.is_some());
+        assert_eq!(span.kind, DecorationKind::InlayHint);
+    }
 }

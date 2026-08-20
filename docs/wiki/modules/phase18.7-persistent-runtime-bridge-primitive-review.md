@@ -20,10 +20,10 @@
 - `.agents/skills/project-patterns/references/authority-boundaries.md`
 - `.agents/skills/project-patterns/references/protocol-and-performance.md`
 - `.agents/skills/project-patterns/references/clay-js-api-boundary.md`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `src/server/parse_coordinator.rs`
 - `src/server/ops/parse.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/server/mod.rs`
 - `src/packages/service.rs`
 - `packages/markdown/dist/load.js`
@@ -141,7 +141,7 @@ Rejected alternatives:
 
 ### Gap 3: Generic open-time activation orchestration
 
-`src/server/connection.rs` currently checks Markdown file extensions and loaded Markdown commands, then evaluates a copied temp Markdown runtime root. No generic open-time path ties classification, mode activation, persistent runtime handlers, bounded parse windows, and output application together.
+`src/server/connection/mod.rs` currently checks Markdown file extensions and loaded Markdown commands, then evaluates a copied temp Markdown runtime root. No generic open-time path ties classification, mode activation, persistent runtime handlers, bounded parse windows, and output application together.
 
 Required generic primitive:
 
@@ -187,7 +187,7 @@ Phase 18.7 must preserve these boundaries:
 3. Add a JS-backed `ParseHandler` adapter that stores server-owned handler tokens tied to package prefix/mode and invokes package JS on the persistent runtime.
 4. Keep public `serverRegisterParseHandler` callback-free for user config; bridge registration only succeeds under validated package load authority.
 5. Add generic open-time activation orchestration and route Markdown through it.
-6. Delete the Markdown-specific branch and helpers from `src/server/connection.rs` once equivalent behavior/decorations are produced.
+6. Delete the Markdown-specific branch and helpers from `src/server/connection/mod.rs` once equivalent behavior/decorations are produced.
 7. Update docs/tests/registry around the changed `clay:parse` contract.
 
 ## Test Implications

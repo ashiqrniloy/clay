@@ -9,7 +9,7 @@ import {
 
 await publishTree(defineFlex({
   id: "review-loading-root",
-  direction: "row",
+  direction: "column",
   children: [
     definePanel({
       id: "review-loading-panel",

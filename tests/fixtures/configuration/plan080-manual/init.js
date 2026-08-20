@@ -51,7 +51,7 @@
 // diagnostics). Paths are relative to the config root (~/.config/clay).
 //
 // This example loads its package configuration from two modules at the end
-// of this file (section 10), both with optional: true so a broken or missing
+// of this file (section 11), both with optional: true so a broken or missing
 // package module records configuration.module_failed and never blocks the
 // base configuration or app launch.
 //
@@ -78,10 +78,12 @@ setTheme("@clay/theme-gruvbox-material-dark");
 // setTheme("@clay/theme-modus-vivendi");
 // setTheme({ specifier: "@clay/theme-modus-vivendi" }); // object form
 
-// setAppearance selects the appearance variant within the active theme.
-// Usually left to the settings panel (it persists the choice and reloads);
-// setting it here applies it at startup.
-// setAppearance("dark");
+// setAppearance selects the canonical appearance variant. To use it here,
+// comment out the explicit setTheme above; an explicit theme always wins.
+// Usually leave this to the settings panel (it persists the choice and reloads).
+// setAppearance("light");  // canonical Modus Operandi
+// setAppearance("dark");   // canonical Modus Vivendi
+// setAppearance("system"); // OS signal, dark fallback
 
 // ----------------------------------------------------------------------------
 // 3. Typography + ligatures — clay:theme setTypography
@@ -117,6 +119,17 @@ setTypography({
   },
   proportional: { families: ["Noto Sans", "sans-serif"], size: 17 },
   ui: { families: ["system-ui"], size: 13 },
+  // Optional UI hierarchy. When present, all seven bounded ratios are required.
+  // Each ratio is finite, > 0, and <= 4; these values preserve Clay defaults.
+  hierarchy: {
+    display: 1.5,
+    title: 14 / 12,
+    section: 13 / 12,
+    body: 1,
+    status: 1,
+    detail: 10 / 12,
+    caption: 0.75,
+  },
 });
 
 // ----------------------------------------------------------------------------
@@ -143,7 +156,33 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 // clientSetCursorStyle({ shape: "bar", blink: "solid", widthPx: 2.5 });
 
 // ----------------------------------------------------------------------------
-// 5. Key bindings — clay:keybindings
+// 5. Editor layout — clay:editor clientSetEditorLayout
+// ----------------------------------------------------------------------------
+// User-owned wrap-policy override. Resolution order:
+// runtime override (this call) > per-mode editorRules.layout.wrap (package
+// manifests) > WrapPolicy::from_font_role default (monospace → none,
+// proportional → column 72).
+//
+// Options:
+//   wrapPolicy  "none" | "viewport" | "column"   (required)
+//     "none"      no wrapping — horizontal scrolling for code
+//     "viewport"  wrap at the pane content width
+//     "column"    wrap at columnCap average character widths (prose)
+//   columnCap   number   column cap for "column" (default 72, clamped to
+//                        16–240; ignored for "none"/"viewport")
+//
+// The override is package-unforgeable: the op lives in the trusted runtime
+// extension only, so third-party package code cannot resolve it. It survives
+// configuration reload. Comment the call out to keep per-mode defaults.
+import { clientSetEditorLayout } from "clay:editor";
+
+clientSetEditorLayout({ wrapPolicy: "column", columnCap: 72 });
+// clientSetEditorLayout({ wrapPolicy: "none" });      // code: horizontal scroll
+// clientSetEditorLayout({ wrapPolicy: "viewport" });  // wrap at pane width
+// clientSetEditorLayout({ wrapPolicy: "column" });   // default 72-column prose
+
+// ----------------------------------------------------------------------------
+// 6. Key bindings — clay:keybindings
 // ----------------------------------------------------------------------------
 // bindKey(key, commandId, options?)              — bind one chord (single form).
 // bindKey({ scope, bindings: { chord: id, ... } }) — bind a whole table in one
@@ -154,12 +193,20 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 // listKeyBindings(scope?)                        — inspect bindings ("all" default).
 //
 // Key format: single stroke "Modifier+Key" (Ctrl/Shift/Alt + a key name,
-// e.g. "Ctrl+O", "Shift+Alt+Down"). Multi-stroke chords ("g g") are NOT
-// Supported yet. Bindings validate deny-by-default; unknown or non-editor
-// command IDs are rejected. Last binding for a chord wins (within a table,
-// duplicate chords collapse to the last value). Table-form calls validate
-// every entry before applying any: one bad entry rejects the whole table
-// and names its 1-based index, so nothing binds halfway.
+// e.g. "Ctrl+O", "Shift+Alt+Down") OR a space-separated multi-stroke chord
+// (e.g. "Ctrl+X Ctrl+P", "g g"). Single-stroke is the fast path; a
+// multi-stroke chord holds a pending chord until the sequence completes,
+// times out, or mismatches — on mismatch the key re-evaluates fresh, so a
+// half-typed chord never eats typing. Example (commented; the shipped
+// defaults are re-declared in the batch tables below):
+//   // bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" });
+// Bindings validate deny-by-default; unknown or non-editor command IDs are
+// rejected, and a chord that is a strict prefix of another binding in the
+// same scope is rejected as ambiguous at bind time. Last binding for a chord
+// wins (within a table, duplicate chords collapse to the last value).
+// Table-form calls validate every entry before applying any: one bad entry
+// rejects the whole table and names its 1-based index, so nothing binds
+// halfway.
 //
 // Bindable editor command IDs (Plan 071 surface):
 //   Movement:      editor.clientMoveCursor.nextWordStart
@@ -250,6 +297,26 @@ clientSetCursorStyle({ shape: "bar", blink: "blink" });
 //   "Ctrl+Alt+Shift+9": "shell.clientTabMoveTo.9",
 // }});
 
+// Control Center (Phase 24.2): built-in server-first command
+// controlCenter.open ships with the default Ctrl+X Ctrl+P chord (Global
+// scope) in the default behavior manifest, re-declared in the batch table
+// below as an idempotent no-op override. The Control Center is a transient
+// menu session: listing grants no authority, and it cannot be styled,
+// positioned, filtered, or dismissed from init.js. Multi-stroke chord
+// sequences are supported (Phase 24.5): space-separated strokes, e.g.
+// "Ctrl+X Ctrl+P", "g g".
+
+// Path Browser (Phase 24.3): built-in server-first command
+// controlCenter.openPath ships with the Phase 24.5 sequence default
+// Ctrl+X Ctrl+F chord (Global scope), re-declared in the batch table below
+// as an idempotent no-op override. It opens a dired-style browse session
+// seeded from the active document's directory; Enter descends/opens,
+// Alt+Enter opens a directory as this tab's workspace, Backspace on an
+// empty filter ascends. Browse navigation alone grants nothing — opening a
+// file or workspace is the explicit grant — and packages get no
+// arbitrary-path access. The command id is stable across the Phase 24.5
+// sequence-default handoff (previously the temporary Ctrl+Alt+P chord).
+
 // Default keybindings — implemented below so this file, taken as-is, installs
 // every shipped default chord (they are already active without init.js;
 // re-declaring them is an idempotent no-op override and doubles as the
@@ -286,6 +353,14 @@ bindKey({
     "Ctrl+Alt+]": "shell.clientMovePaneNext",
     // Built-in server-first reload; this re-declaration is idempotent.
     "Ctrl+Shift+R": "runtime.reloadConfiguration",
+    // Built-in server-first Control Center (Phase 24.2); this re-declaration
+    // is idempotent. Global scope, ServerFirst routing; override/remove via
+    // bindKey/unbindKey (see the commented example below).
+    "Ctrl+X Ctrl+P": "controlCenter.open",
+    // Built-in server-first Path Browser (Phase 24.3); this re-declaration
+    // is idempotent. Phase 24.5 sequence default; override/remove via
+    // bindKey/unbindKey (see the commented example below).
+    "Ctrl+X Ctrl+F": "controlCenter.openPath",
   },
 });
 
@@ -326,7 +401,8 @@ bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 bindKey("Ctrl+B", "workspace.toggleFileBrowser", { scope: "editor" });
 
 // Text objects + smart select ship with NO default bindings by design —
-// bound here as single-form examples (single strokes only):
+// bound here as single-form examples (single strokes and multi-stroke
+// chords both work):
 bindKey("Alt+I", "editor.clientSelectTextobject.function.inner.current", { scope: "editor" });
 bindKey("Alt+O", "editor.clientSelectTextobject.function.around.current", { scope: "editor" });
 bindKey("Alt+A", "editor.clientSelectTextobject.argument.inner.current", { scope: "editor" });
@@ -341,10 +417,23 @@ bindKey("Alt+R", "editor.clientSmartSelect.shrink", { scope: "editor" });
 
 // Rebinding a shipped default (example: "add equal pane" on a different
 // chord; scope "global" matches the shipped default context):
-// bindKey("Ctrl+Shift+P", "shell.clientAddEqualPane", { scope: "global" });
+// bindKey("Ctrl+Shift+=", "shell.clientAddEqualPane", { scope: "global" });
+
+// Rebinding the Control Center default (Phase 24.2): unbind the shipped
+// Ctrl+X Ctrl+P chord, then bind another global chord (single-stroke or
+// multi-stroke). Without the unbind the default remains bound; last binding
+// for a chord wins:
+// unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
+// bindKey("Alt+X", "controlCenter.open", { scope: "global" });
+
+// Rebinding the Path Browser default (Phase 24.3): unbind the shipped
+// Ctrl+X Ctrl+F chord, then bind another global chord (command id stays
+// stable across the Phase 24.5 sequence-default handoff):
+// unbindKey("Ctrl+X Ctrl+F", { scope: "global" });
+// bindKey("Alt+P", "controlCenter.openPath", { scope: "global" });
 
 // ----------------------------------------------------------------------------
-// 6. Window split pane focus — clay:shell
+// 7. Window split pane focus — clay:shell
 // ----------------------------------------------------------------------------
 // Pane focus policy for split panes (Phase 22.1). One option:
 // Since Phase 22.3 the policy applies per active tab (each tab carries its
@@ -363,7 +452,7 @@ import { setPaneFocusPolicy } from "clay:shell";
 // setPaneFocusPolicy({ paneFocusPolicy: "cursor" });
 
 // ----------------------------------------------------------------------------
-// 7. Syntax engine preference — clay:syntax
+// 8. Syntax engine preference — clay:syntax
 // ----------------------------------------------------------------------------
 // Force the parser tier for a language or first-party package.
 //   target: language/package name (e.g. "rust")
@@ -376,7 +465,7 @@ import { setSyntaxEnginePreference } from "clay:syntax";
 // setSyntaxEnginePreference("rust", "wasm");
 
 // ----------------------------------------------------------------------------
-// 8. Programmatic editor control — clay:editor
+// 9. Programmatic editor control — clay:editor
 // ----------------------------------------------------------------------------
 // These run through the `editor-control` trust boundary. init.js is trusted
 // user configuration (no package context), so it passes the gate without a
@@ -385,7 +474,7 @@ import { setSyntaxEnginePreference } from "clay:syntax";
 //
 // clientExecuteEditorCommand({ commandId }) pushes ONE known editor command
 // ID through the gated server→client channel (advisory; dropped silently if
-// unknown or undeliverable). Only the command IDs listed in section 7 are
+// unknown or undeliverable). Only the command IDs listed in section 6 are
 // accepted.
 
 import { clientExecuteEditorCommand } from "clay:editor";
@@ -414,7 +503,7 @@ import { clientExecuteEditorCommand } from "clay:editor";
 //   clientRemoveSelection() clientUndoCursorMove()
 
 // ----------------------------------------------------------------------------
-// 9. Planned — NOT callable yet (documented placeholders)
+// 10. Planned — NOT callable yet (documented placeholders)
 // ----------------------------------------------------------------------------
 // These clay:configuration exports exist as facade stubs and inventory
 // entries but have no server-side validators yet. Calling them throws.
@@ -426,7 +515,7 @@ import { clientExecuteEditorCommand } from "clay:editor";
 // Do not write hidden-key workarounds for them; hidden keys are rejected.
 
 // ----------------------------------------------------------------------------
-// 10. Package configuration modules — fault-isolated optional loads
+// 11. Package configuration modules — fault-isolated optional loads
 // ----------------------------------------------------------------------------
 // Package configuration is segregated from the base config and loaded as
 // optional modules: a broken or missing module records a

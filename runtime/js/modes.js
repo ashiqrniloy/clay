@@ -37,10 +37,10 @@ export function serverActivateMajorMode(input) {
 }
 export function serverActivateClassifiedMode(classification, input = {}) {
     const classified = classification;
-    const activation = activationRegistry[activationKey(String(classified?.apiPrefix), String(classified?.modeId))];
-    if (!activation || classified?.documentId === undefined || !classified?.modeId) {
-        throw new Error("modes.activation_failed: classified mode has no registered activation metadata");
+    if (classified?.documentId === undefined || !classified?.modeId) {
+        throw new Error("modes.activation_failed: classified mode is missing documentId or modeId");
     }
+    const activation = activationRegistry[activationKey(String(classified?.apiPrefix), String(classified?.modeId))] ?? {};
     return serverActivateMajorMode({
         ...input,
         documentId: classified.documentId,

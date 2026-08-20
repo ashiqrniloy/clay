@@ -36,8 +36,59 @@ are cataloged here so package authors do not mistake them for extension points:
   normalized once at the host boundary and remain within the 256-character
   accessibility ceiling.
 
-The Plan 087 visual review also records host-only follow-up `P1-087-UI-1` for
-retained scroll-child clipping; it does not change the package contract.
+The retained package/SDUI hosts now clip scroll-child rendering and expose
+clipped-child semantics to accessibility consumers, closing host-only follow-up
+`P1-087-UI-1` without changing the package contract.
+
+## Plan 088 UI modernization package contract
+
+Plan 088 consumes the existing catalog and adds no package-facing kind, style
+variable, token, overlay anchor, manifest field, permission, or JavaScript API.
+The package guide contains the full authoring contract; this navigation page
+records the boundaries that are easiest to confuse with package extension
+points:
+
+- Clay owns the working area, pane/split tree, fixed slots, tab bar, status
+  chrome, welcome surface, file browser, completion projection, and centered
+  Command Centre. Packages contribute inert component trees, action intents,
+  input/state metadata, and typed semantic tokens only.
+- Retained package/SDUI hosts clip children to their owning bounds and expose
+  clipped-child accessibility semantics. A nested `scroll` component receives
+  bounded flex space inside panels; `modal` Escape routes its declared inert
+  `PackageModalDismiss` intent; `statusItem` and disabled controls expose their
+  AccessKit state.
+- Responsive slot yielding, label clipping, path sanitization, focus
+  containment, and active user typography propagation remain Clay-native
+  layout/render responsibilities. Package overlays remain limited to
+  `working-area`, `active-pane`, `main`, and `pointer`; `completion` and
+  `centered` are internal origins.
+- Existing typed tokens and cached `ResolvedUiTheme`/typography metrics are
+  reused. Packages cannot declare breakpoints, concrete fonts/sizes, raw
+  CSS/colors, native widgets, renderer callbacks, client JavaScript, or direct
+  Masonry mutation. `table` remains reserved.
+
+See [Creating Clay Packages — Plan 088 UI modernization authoring contract](packages/creating-packages.md#plan-088-ui-modernization-authoring-contract)
+and the [token catalog](../../.agents/skills/clay-ui/references/tokens.md#plan-088-token-consumption-no-additions).
+
+## Phase 28 editor-intelligence chrome
+
+Phase 28 keeps editor intelligence outside the package component catalog:
+
+- Packages publish validated folding ranges with `render-folding`; Clay paints
+  gutter chevrons, hides collapsed lines, and owns `editor.clientToggleFold`.
+- Packages publish Link targets and inert InlayHint labels through the existing
+  decoration transport with `render-decorations`; Clay owns decoration
+  hit-testing, `paint_tooltip_shell`, link activation, and the no-reflow inlay
+  overlay.
+- Link activation is a typed decoration intent, not a package callback or a
+  browse/filesystem grant. HTTP/absolute/traversal targets remain display-only
+  or denied. Inlay labels are decorative and `aria-hidden`.
+- No new `ComponentKind`, token, style variable, package overlay anchor, raw
+  renderer, or client-side JavaScript path was added. Paint/layout/pointer
+  paths read cached inert data only.
+
+See [Creating Clay Packages — Phase 28 authoring contract](packages/creating-packages.md#phase-28-authoring-contract-editor-commands-folding-decoration-intent-and-inlay-hints)
+and the [UI Chrome Primitives](primitives/ui-chrome-primitives.md) reference.
 
 ## Reference Documents
 

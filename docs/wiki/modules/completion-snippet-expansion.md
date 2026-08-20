@@ -3,14 +3,18 @@
 ## Source
 
 - `src/editor/snippet.rs` — bounded LSP snippet parser
-- `src/editor/surface.rs` — `EditorSurface` snippet session and accept branching
+- `src/editor/surface/mod.rs` — `EditorSurface` snippet session and accept branching
 - `src/masonry_editor.rs` — snippet-aware keyboard routing
-- `src/protocol/completion.rs` — `CompletionItemTextFormat` and `text_format` field
-- `src/server/completion.rs` — `CompletionProviderMeta::exclusive` and `apply_exclusive_suppression`
+- `src/protocol/completion.rs` / `src/protocol/mod.rs` — `CompletionItemTextFormat`, `text_format`, bounded completion recency hints, and protocol v23
+- `src/server/completion.rs` — ranking scorer, `CompletionProviderMeta::exclusive`, and `apply_exclusive_suppression`
+- `src/server/connection/runtime.rs` — static-provider merge ranking
+- `src/client/mod.rs` — process-local accepted-completion ring
+- `src/masonry_pane_document.rs` — accept-path recency recording
 - `src/server/ops/completion.rs` — `op_clay_completion_disable`
 - `src/server/ops/mod.rs` — `ClayOpState::disabled_completion_providers` and generation counter
 - `runtime/js/completion.js` — `serverDisableCompletion` JS facade
-- `tests/completion_provider.rs` — snippet provider integration tests
+- `tests/completion_provider.rs` — snippet/ranking provider integration tests
+- `tests/performance_protocol.rs` — completion request budget test
 - `tests/primitives_docs.rs` — deterministic primitive docs test
 
 ## Overview
@@ -86,7 +90,7 @@ Session lifetime:
 - A lower-priority exclusive provider cannot claim a request whose top tier is non-exclusive
 - Lists with no exclusive provider pass through unchanged
 
-The helper is wired into all three selection paths: `ClayOpState::completion_providers_for_trigger` (`src/server/ops/mod.rs`), `CompletionProviderRegistry::providers_for_trigger_character`, and the static package completion result merge in `src/server/connection.rs`. No provider execution occurs during exclusive filtering.
+The helper is wired into all three selection paths: `ClayOpState::completion_providers_for_trigger` (`src/server/ops/mod.rs`), `CompletionProviderRegistry::providers_for_trigger_character`, and the static package completion result merge in `src/server/connection/mod.rs`. No provider execution occurs during exclusive filtering.
 
 ### serverDisableCompletion and disabled-provider filtering
 
@@ -101,6 +105,16 @@ The JS facade `serverDisableCompletion` (`runtime/js/completion.js`) validates e
 ### First-party snippet providers
 
 `@clay/rust` ships `rust.snippets` with three `fn`/`match`/`impl` templates at priority 0 alongside `rust.keywords`. `@clay/typescript` ships `typescript.snippets` with `interface`/`type` templates at priority 0. Both use `textFormat: "snippet"` in their structured `CompletionItemContributionDescriptor` items, share existing trigger characters and permission, and load through host-context-stamped `serverRegisterCompletionProvider({})` calls that map each manifest-declared provider by ID; package JavaScript cannot select provenance with a `packageManifest` field.
+
+### Completion ranking and recency (Phase 28.6)
+
+`score_completion_item` in `src/server/completion.rs` is the single candidate scorer. It gives exact case-sensitive prefix matches the highest tier, case-insensitive prefix matches the next tier, then prefers shorter labels and finally a higher recency rank. `completion_prefix_matches` lets the buffer-word provider retain useful case-insensitive candidates instead of filtering them out before scoring.
+
+The buffer-word provider still uses `BTreeSet` for uniqueness, then sorts the bounded candidate vector by the scorer. Static package results first apply trigger/prefix filtering and exclusive suppression, then sort within provider-priority tiers with the same scorer. Dynamic provider results are normalized by `CompletionCoordinator::finish_task` before validation/publication. Provider priority and exclusive suppression are not overridden by item relevance.
+
+Accepted completion insert text is kept in a `ClientEditQueue` `VecDeque`, newest first, with four entries capped at 64 characters. The next `CompletionRequest` carries it in a boxed slice so the larger request payload does not enlarge every `ClientMessage` result error or trigger Clippy's large-error lint. The server uses these inert hints for ranking only; the ring is process-local, bounded, not persisted, and rejected if malformed or oversized.
+
+The four-entry/64-character ceiling is telemetry- and decision-gated. No completion acceptance/usefulness telemetry currently exists, so expansion or hashing is deferred until measured useful-snippet misses justify an approved protocol/retention decision. Disk persistence requires a separate product decision.
 
 ## How It Works
 
@@ -145,11 +159,24 @@ serverDisableCompletion({ provider: "core.bufferWords" })
             → stale-drop published results
 ```
 
+### Ranking flow
+
+```text
+accepted completion
+    → ClientEditQueue records bounded insert_text in newest-first ring
+next CompletionRequest
+    → boxed recent_completions hints
+server provider lane
+    → prefix filter → score exact/case/length/recency
+    → preserve provider priority/exclusive tiers
+    → item/payload caps → publish
+```
+
 ## Phase 18.20/18.21 Handoff (Complete)
 
 Language intelligence does not add a second completion model. LSP bridges map `CompletionItem.insertTextFormat` to existing `PlainText`/`Snippet`, preserve priority and exclusive-claim behavior, and honor `serverDisableCompletion`. The `language-server` permission does not bypass `completion-provider`; snippet expansion remains inert client-local Rust after a validated result reaches the menu.
 
-Phase 18.21 adds a dynamic completion adapter through the document-analysis worker. LSP bridge packages register with `runtimeBridge: true` and `priority: 100`, `exclusive: false`. `CompletionRequest` in `connection.rs` attempts dynamic provider resolution through the `CompletionCoordinator` first (matching package prefix, trigger characters, and analysis provider IDs), then falls back to `static_package_completion_result` on no match or failure. The dynamic adapter uses the bounded worker mailbox for scheduling and a oneshot channel for result delivery with timeout. `EditAck` calls `document_changed` on the coordinator to abort stale in-flight completion work.
+Phase 18.21 adds a dynamic completion adapter through the document-analysis worker. LSP bridge packages register with `runtimeBridge: true` and `priority: 100`, `exclusive: false`. `CompletionRequest` in `connection/mod.rs` attempts dynamic provider resolution through the `CompletionCoordinator` first (matching package prefix, trigger characters, and analysis provider IDs), then falls back to `static_package_completion_result` on no match or failure. The dynamic adapter uses the bounded worker mailbox for scheduling and a oneshot channel for result delivery with timeout. `EditAck` calls `document_changed` on the coordinator to abort stale in-flight completion work.
 
 Completion-enabled behavior manifests now request completion after ordinary identifier characters as well as declared punctuation triggers. Identifier requests use invoked/manual provider semantics, so static and LSP providers may answer while a word is being typed; punctuation retains its declared `Character` trigger. `ClientEditQueue::enqueue_completion_request` stamps the request with the queue's optimistic document version after the preceding local edit. This is required because the server acknowledges the edit before returning completion results; using the surface's previous confirmed version made every typing-triggered result stale at the client. Valid results are projected onto the existing modeless `TransientMenuSession` and painted as the Clay-owned bottom overlay. Arrow keys select, Enter/Tab accepts, and Escape dismisses; no caret-anchored native popup is used.
 
@@ -165,6 +192,10 @@ LSP completion results can exceed `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES` (16 K
 - Disabled state persists across runtime reloads; the reload path stamps fresh metadata with the current generation from the surviving counter.
 - Structured `CompletionItemContributionDescriptor` items are validated at load time: per-field char caps, `textFormat` must be `"plainText"` or `"snippet"`, mixing plain and snippet items in one provider is rejected.
 - No per-language Rust branch exists in completion registration or selection.
+- Recency is advisory ranking metadata only; it does not alter provider priority,
+  exclusive suppression, document authority, or completion acceptance validation.
+- `COMPLETION_RESULT_MAX_ITEMS` and `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES`
+  remain the final result caps; request recency uses the existing request budget.
 
 ## Security and Authority Boundary
 
@@ -177,9 +208,13 @@ LSP completion results can exceed `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES` (16 K
 
 - `src/editor/snippet.rs`: 10 unit tests covering bare tabstops, braced tabstops, placeholders with defaults, choices, final tabstop ordering, unterminated brace error, unsupported variable error, malformed input error, expanded-text-too-long rejection, too-many-tabstops rejection
 - `src/protocol/completion.rs`: `CompletionItemTextFormat` rkyv round-trip, `CompletionItem::new` defaults to `PlainText`
-- `src/editor/surface.rs`: snippet accept selects first placeholder, Tab/Shift-Tab navigation, Escape exits, active-placeholder editing shifts later ranges, manual completion routing, and identifier typing requests
+- `src/editor/surface/mod.rs`: snippet accept selects first placeholder, Tab/Shift-Tab navigation, Escape exits, active-placeholder editing shifts later ranges, manual completion routing, and identifier typing requests
 - `src/client/mod.rs`: completion requests after local edits use the optimistic document version so returned menus survive the preceding `EditAck`.
-- `tests/completion_provider.rs`: first-party snippet providers end-to-end, exclusive claim selection, disable filtering and generation bump, stale-drop on disable, LSP priority 100 non-exclusive merge, `serverDisableCompletion` override, and dynamic provider routing through document-analysis coordinator.
+- `tests/completion_provider.rs`: first-party snippet providers end-to-end, ranked buffer-word ordering, exclusive claim selection, disable filtering and generation bump, stale-drop on disable, LSP priority 100 non-exclusive merge, `serverDisableCompletion` override, and dynamic provider routing through document-analysis coordinator.
+- `src/server/completion.rs` unit tests: scorer prefix/case/length/recency precedence, non-alphabetical buffer ordering, and item/payload caps.
+- `src/server/connection/mod.rs` unit test: equal-priority static providers use the shared score while preserving snippet/plain metadata.
+- `src/protocol/completion.rs`: recency ring count/character-bound validation; `src/protocol/codec.rs`: non-empty recency round trip.
+- `src/client/mod.rs`: accepted completion recency reaches the next non-blocking request.
 - `tests/editor_performance_invariants.rs`: snippet accept hot-path guard (no Deno.core, op_clay_, enqueue_, std::fs, TcpStream, reqwest, ureq)
 - `tests/package_primitive_gate.rs`: structured item validation (valid, mixed-format rejection, invalid textFormat, oversized insertText)
 - `tests/primitives_docs.rs`: Phase 18.19 primitive review linked and complete
@@ -190,6 +225,9 @@ Run with:
 cargo test --lib snippet --quiet
 cargo test --lib surface --quiet
 cargo test --test runtime completion_provider:: --quiet
+cargo test --lib server::completion::tests --quiet
+cargo test --lib protocol::completion::tests --quiet
+cargo test --lib client::tests::completion --quiet
 cargo test --test editor editor_performance_invariants:: --quiet
 cargo test --test protocol primitives_docs::
 ```

@@ -1,19 +1,20 @@
-//! Environment-gated live AT-SPI accessibility smoke (plan 086 task 4).
+//! Environment-gated live AT-SPI accessibility and platform smoke checks.
 //!
-//! Ordinary `cargo test` never runs this test: it is `#[ignore]` AND gated
-//! on `CLAY_LIVE_A11Y_SMOKE=1`. When enabled it must run on a Linux desktop
+//! Ordinary `cargo test` never runs these tests: they are `#[ignore]` and
+//! separately gated by `CLAY_LIVE_A11Y_SMOKE=1` or
+//! `CLAY_LIVE_WINDOW_SMOKE=1`. When enabled they require a Linux desktop
 //! session with a live AT-SPI bus and Python 3 with the AT-SPI GI bindings
 //! (`python3-gi` + `gir1.2-atspi-2.0`). Missing prerequisites print a skip
 //! reason and return — never a false pass.
 //!
-//! The check launches the real `clay server` + `clay client` binaries with
-//! a mode-700 temporary IPC/config home (never the ambient
-//! `~/.config/clay` or default socket), restores a two-tab window (the
-//! live two-tab tree shape that panicked before plan 086 task 3), and
-//! requires the window to survive startup, expose its accessibility tree
-//! over the real AT-SPI bus, keep the same node identities across a second
-//! query, and stay alive until the deadline. Every failure path kills both
-//! children and removes the temporary directory.
+//! The Plan 086 check launches one real server/client pair, restores a
+//! two-tab window, and checks stable accessibility identities. The Plan 089
+//! platform check launches one isolated server and two real client windows,
+//! applies a large user-owned UI typography profile, and verifies two
+//! accessible frames with positive physical bounds within a 900×600-derived
+//! envelope. Exact logical/physical conversion is covered by a headless
+//! rescale test. Every failure path kills spawned children and removes
+//! its temporary directory.
 
 use std::fs;
 use std::os::unix::fs::DirBuilderExt;
@@ -25,9 +26,15 @@ fn live_smoke_enabled() -> bool {
     std::env::var_os("CLAY_LIVE_A11Y_SMOKE").is_some_and(|value| value == "1")
 }
 
+fn live_window_smoke_enabled() -> bool {
+    std::env::var_os("CLAY_LIVE_WINDOW_SMOKE").is_some_and(|value| value == "1")
+}
+
 /// Python probe: `prereq` mode verifies the GI AT-SPI bindings and a
 /// reachable desktop bus; `dump` mode prints every node as
-/// `depth|role|selected|name|object-path|application`.
+/// `depth|role|selected|name|object-path|application|pid`; `bounds` appends
+/// `x|y|width|height` from the AT-SPI screen-coordinate component bounds;
+/// `editable` appends the Entry's real EditableText interface list.
 const PROBE_SCRIPT: &str = r#"
 import sys
 try:
@@ -38,27 +45,55 @@ except Exception as exc:
     print(f'PREREQ_MISSING: {exc}', file=sys.stderr)
     sys.exit(3)
 
-if sys.argv[1] == 'prereq':
+mode = sys.argv[1]
+if mode == 'prereq':
     desktop = Atspi.get_desktop(0)
     print(f'OK apps={desktop.get_child_count()}')
     sys.exit(0)
+if mode not in {'dump', 'bounds', 'editable'}:
+    print(f'unknown probe mode: {mode}', file=sys.stderr)
+    sys.exit(2)
 
 desktop = Atspi.get_desktop(0)
 lines = []
+
+def clean(value):
+    return str(value or '').replace('|', ' ').replace('\n', ' ')
 
 def walk(node, depth):
     if node is None:
         return
     try:
-        role = node.get_role_name()
-        name = node.get_name()
-        path = node.path
+        role = clean(node.get_role_name())
+        name = clean(node.get_name())
+        path = clean(node.path)
         app = node.get_application()
-        app_name = app.get_name() if app is not None else ''
+        app_name = clean(app.get_name() if app is not None else '')
+        app_pid = app.get_process_id() if app is not None else -1
         selected = 'S' if node.get_state_set().contains(Atspi.StateType.SELECTED) else '-'
-        lines.append(f'{depth}|{role}|{selected}|{name}|{path}|{app_name}')
+        fields = [str(depth), role, selected, name, path, app_name, str(app_pid)]
+        if mode == 'editable' and role.lower() == 'entry':
+            # Role/state alone is insufficient: require the real AT-SPI
+            # EditableText interface advertised by the platform adapter.
+            try:
+                fields.extend([
+                    str(bool(node.get_editable_text())).lower(),
+                    ','.join(node.get_interfaces()),
+                ])
+            except Exception:
+                fields.extend(['false', ''])
+        if mode == 'bounds':
+            try:
+                component = node.get_component()
+                extents = component.get_extents(Atspi.CoordType.SCREEN) if component else None
+                if extents is None:
+                    raise RuntimeError('component bounds unavailable')
+                fields.extend([str(extents.x), str(extents.y), str(extents.width), str(extents.height)])
+            except Exception:
+                fields.extend(['-1', '-1', '0', '0'])
+        lines.append('|'.join(fields))
     except Exception as exc:
-        lines.append(f'{depth}|ERROR|{exc}')
+        lines.append(f'0|ERROR|-|{clean(exc)}|||')
         return
     count = node.get_child_count()
     for i in range(count):
@@ -170,13 +205,14 @@ struct ProbeNode {
     name: String,
     path: String,
     app: String,
+    pid: i32,
 }
 
 fn parse_dump(dump: &str) -> Vec<ProbeNode> {
     dump.lines()
         .filter_map(|line| {
-            let fields: Vec<&str> = line.splitn(6, '|').collect();
-            if fields.len() != 6 {
+            let fields: Vec<&str> = line.splitn(7, '|').collect();
+            if fields.len() != 7 {
                 return None;
             }
             Some(ProbeNode {
@@ -186,12 +222,59 @@ fn parse_dump(dump: &str) -> Vec<ProbeNode> {
                 name: fields[3].to_string(),
                 path: fields[4].to_string(),
                 app: fields[5].to_string(),
+                pid: fields[6].parse().unwrap_or(-1),
             })
         })
         .collect()
 }
 
 fn clay_nodes(nodes: &[ProbeNode]) -> Vec<&ProbeNode> {
+    nodes.iter().filter(|node| node.app == "clay").collect()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScreenBounds {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+#[derive(Debug, Clone)]
+struct BoundNode {
+    role: String,
+    name: String,
+    path: String,
+    app: String,
+    pid: i32,
+    bounds: ScreenBounds,
+}
+
+fn parse_bounds_dump(dump: &str) -> Vec<BoundNode> {
+    dump.lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.splitn(11, '|').collect();
+            if fields.len() != 11 {
+                return None;
+            }
+            Some(BoundNode {
+                role: fields[1].to_string(),
+                name: fields[3].to_string(),
+                path: fields[4].to_string(),
+                app: fields[5].to_string(),
+                pid: fields[6].parse().ok()?,
+                bounds: ScreenBounds {
+                    x: fields[7].parse().ok()?,
+                    y: fields[8].parse().ok()?,
+                    width: fields[9].parse().ok()?,
+                    height: fields[10].parse().ok()?,
+                },
+            })
+        })
+        .collect()
+}
+
+fn clay_bound_nodes(nodes: &[BoundNode]) -> Vec<&BoundNode> {
     nodes.iter().filter(|node| node.app == "clay").collect()
 }
 
@@ -402,6 +485,22 @@ fn live_atspi_accessibility_smoke() {
             .ok_or_else(|| format!("no pane label in tree: {clay:#?}"))?;
         let _ = pane;
 
+        let editable = run_probe(&script, "editable")
+            .map_err(|error| format!("editable-text probe failed: {error}"))?;
+        assert!(
+            editable.lines().any(|line| {
+                let fields: Vec<&str> = line.split('|').collect();
+                fields.len() >= 9
+                    && fields[1].eq_ignore_ascii_case("entry")
+                    && fields[5].eq_ignore_ascii_case("clay")
+                    && fields[7] == "true"
+                    && fields[8]
+                        .split(',')
+                        .any(|interface| interface.eq_ignore_ascii_case("editabletext"))
+            }),
+            "Clay editor must expose AT-SPI EditableText, got:\n{editable}"
+        );
+
         // 6. Identity stability: a second query must expose the same object
         //    paths (stable virtual node identities; churn would renumber).
         std::thread::sleep(Duration::from_secs(2));
@@ -429,5 +528,227 @@ fn live_atspi_accessibility_smoke() {
     let _ = fs::remove_dir_all(&script_dir);
     if let Err(error) = result {
         panic!("live AT-SPI smoke failed: {error}");
+    }
+}
+
+#[test]
+#[ignore = "requires a live Wayland desktop with AT-SPI (CLAY_LIVE_WINDOW_SMOKE=1)"]
+fn live_multi_window_scale_smoke() {
+    if !live_window_smoke_enabled() {
+        eprintln!(
+            "skipping live multi-window smoke: set CLAY_LIVE_WINDOW_SMOKE=1 on a Wayland desktop session to run it"
+        );
+        return;
+    }
+    if !std::env::var("WAYLAND_DISPLAY")
+        .map(|value| !value.is_empty())
+        .unwrap_or(false)
+    {
+        eprintln!(
+            "skipping live multi-window smoke: WAYLAND_DISPLAY is unavailable; this check does not claim X11"
+        );
+        return;
+    }
+
+    let script_dir = make_private_temp_dir();
+    let script = script_dir.join("atspi_probe.py");
+    fs::write(&script, PROBE_SCRIPT).expect("write probe script");
+    if let Err(reason) = run_probe(&script, "prereq") {
+        eprintln!(
+            "skipping live multi-window smoke (prerequisite missing, never a false pass): {reason}"
+        );
+        let _ = fs::remove_dir_all(&script_dir);
+        return;
+    }
+
+    let private_dir = |path: &Path| {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(path)
+            .unwrap_or_else(|error| panic!("create {}: {error}", path.display()));
+    };
+    let home = script_dir.join("home");
+    let config_home = script_dir.join("config");
+    let data_home = script_dir.join("data");
+    let workspace = script_dir.join("workspace");
+    private_dir(&home.join(".config").join("clay"));
+    private_dir(&config_home.join("clay"));
+    private_dir(&data_home);
+    private_dir(&workspace);
+    fs::write(
+        workspace.join("window.rs"),
+        "fn window_smoke() { let scale = 2; println!(\"{scale}\"); }\n",
+    )
+    .expect("write synthetic window document");
+    fs::write(
+        home.join(".config/clay/init.js"),
+        r#"import { setTypography } from "clay:theme";
+setTypography({
+  monospace: { families: ["monospace"], size: 20 },
+  proportional: { families: ["sans-serif"], size: 21 },
+  ui: { families: ["system-ui"], size: 24 },
+});
+"#,
+    )
+    .expect("write large-typography configuration");
+
+    let socket = script_dir.join("window-smoke.sock");
+    let binary = env!("CARGO_BIN_EXE_clay");
+    let baseline_paths: std::collections::HashSet<(i32, String)> = run_probe(&script, "dump")
+        .ok()
+        .map(|dump| {
+            clay_nodes(&parse_dump(&dump))
+                .into_iter()
+                .filter(|node| node.role == "frame")
+                .map(|node| (node.pid, node.path.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut guard = KillGuard {
+        children: Vec::new(),
+    };
+    let result = (|| -> Result<(), String> {
+        guard.spawn({
+            let mut command = Command::new(binary);
+            command
+                .arg("server")
+                .arg(&socket)
+                .current_dir(&workspace)
+                .env("HOME", &home)
+                .env("XDG_CONFIG_HOME", &config_home)
+                .env("XDG_DATA_HOME", &data_home)
+                .env("TMPDIR", &script_dir);
+            command
+        });
+        wait_until(
+            || socket_connectable(&socket),
+            Duration::from_secs(20),
+            "multi-window server socket",
+        )?;
+
+        for _ in 0..2 {
+            let mut command = Command::new(binary);
+            command
+                .arg("client")
+                .arg(&socket)
+                .current_dir(&workspace)
+                .env("HOME", &home)
+                .env("XDG_CONFIG_HOME", &config_home)
+                .env("XDG_DATA_HOME", &data_home)
+                .env("TMPDIR", &script_dir);
+            guard.spawn(command);
+        }
+
+        let mut latest_dump = String::new();
+        wait_until(
+            || {
+                if !(guard.alive(0) && guard.alive(1) && guard.alive(2)) {
+                    return true;
+                }
+                match run_probe(&script, "dump") {
+                    Ok(dump) => {
+                        latest_dump = dump.clone();
+                        let frames = clay_nodes(&parse_dump(&dump))
+                            .into_iter()
+                            .filter(|node| {
+                                node.role == "frame"
+                                    && !baseline_paths.contains(&(node.pid, node.path.clone()))
+                            })
+                            .count();
+                        frames >= 2
+                    }
+                    Err(_) => false,
+                }
+            },
+            Duration::from_secs(45),
+            "two Clay windows in the Wayland AT-SPI tree",
+        )
+        .map_err(|error| {
+            format!(
+                "{error}; child statuses: server={:?} client1={:?} client2={:?}; latest tree:\n{latest_dump}",
+                guard.exit_status(0),
+                guard.exit_status(1),
+                guard.exit_status(2),
+            )
+        })?;
+
+        let frames: Vec<ProbeNode> = clay_nodes(&parse_dump(&latest_dump))
+            .into_iter()
+            .filter(|node| {
+                node.role == "frame" && !baseline_paths.contains(&(node.pid, node.path.clone()))
+            })
+            .cloned()
+            .collect();
+        if frames.len() < 2 {
+            return Err(format!("expected two new Clay frames, got {frames:#?}"));
+        }
+        let frame_paths: std::collections::HashSet<(i32, &str)> = frames
+            .iter()
+            .map(|frame| (frame.pid, frame.path.as_str()))
+            .collect();
+        if frame_paths.len() != frames.len() {
+            return Err(format!(
+                "multi-window frame identities are not unique: {frames:#?}"
+            ));
+        }
+
+        let bounds_dump = run_probe(&script, "bounds")?;
+        let parsed_bounds = parse_bounds_dump(&bounds_dump);
+        let bounds = clay_bound_nodes(&parsed_bounds);
+        let frame_bounds: Vec<&BoundNode> = bounds
+            .iter()
+            .copied()
+            .filter(|node| frame_paths.contains(&(node.pid, node.path.as_str())))
+            .collect();
+        if frame_bounds.len() < 2 {
+            return Err(format!(
+                "AT-SPI did not expose physical bounds for both frames: {bounds:#?}"
+            ));
+        }
+        for frame in &frame_bounds {
+            let scale_x = f64::from(frame.bounds.width) / 900.0;
+            let scale_y = f64::from(frame.bounds.height) / 600.0;
+            if frame.bounds.x < -100_000
+                || frame.bounds.y < -100_000
+                || frame.bounds.width <= 0
+                || frame.bounds.height <= 0
+                || !(0.5..=4.0).contains(&scale_x)
+                || !(0.5..=4.0).contains(&scale_y)
+            {
+                return Err(format!(
+                    "invalid physical/logical frame bounds for {}: {:?} (scale {scale_x:.2}x{scale_y:.2})",
+                    frame.path, frame.bounds
+                ));
+            }
+        }
+
+        let large_status_bars: Vec<&BoundNode> = bounds
+            .iter()
+            .copied()
+            .filter(|node| {
+                node.role == "status bar"
+                    && node.name.contains("Clay —")
+                    && frame_paths.iter().any(|(pid, _)| *pid == node.pid)
+                    && node.bounds.height >= 30
+            })
+            .collect();
+        if large_status_bars.len() < 2 {
+            return Err(format!(
+                "large UI typography did not produce two bounded status bars: {large_status_bars:#?}; all bounds: {bounds:#?}"
+            ));
+        }
+
+        eprintln!(
+            "live multi-window smoke: PASS ({} windows, physical/logical bounds, UI typography 24)",
+            frame_bounds.len()
+        );
+        Ok(())
+    })();
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&script_dir);
+    if let Err(error) = result {
+        panic!("live multi-window smoke failed: {error}");
     }
 }

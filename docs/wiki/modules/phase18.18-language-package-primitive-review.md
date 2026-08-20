@@ -8,7 +8,7 @@
 - Patterns: `.agents/skills/project-patterns/references/language-capability-sequencing.md`, `mode-primitive-first.md`, `protocol-and-performance.md`, and `authority-boundaries.md`.
 - Predecessor reviews: `docs/wiki/modules/phase18.14-language-package-expansion-primitive-review.md`, `docs/wiki/modules/phase18.16-tiered-tree-sitter-engine-primitive-review.md`, `docs/wiki/modules/phase18.16.5-typography-primitive-review.md`, `docs/wiki/modules/phase18.17-range-diagnostics-primitive-review.md`.
 - `src/server/syntax.rs` (`FIRST_PARTY_NATIVE_GRAMMARS`, `NativeGrammarDescriptor`, `DEFAULT_NATIVE_STYLE_MAP`, `MARKDOWN_NATIVE_STYLE_MAP`, `SyntaxEngineTier`, `TreeSitterSyntaxHandler`, `SyntaxGrammarRegistry`).
-- `src/packages/record.rs` (`SyntaxStyleMapEntry`, `SyntaxGrammarContributionDescriptor`, `is_known_syntax_style_token`).
+- `src/packages/record/mod.rs` (`SyntaxStyleMapEntry`, `SyntaxGrammarContributionDescriptor`, `is_known_syntax_style_token`).
 - `src/protocol/decorations.rs` (`TokenType`, `Modifiers`, `DecorationSpan`, `classify_style_token`, `from_style_token`).
 - `src/editor/theme.rs` (`StyleRegistry`).
 - `src/protocol/completion.rs` (`CompletionItem`), `src/server/completion.rs`, `runtime/js/completion.js` (`serverRegisterCompletionProvider`).
@@ -34,7 +34,7 @@ This surface is reusable unchanged: Phase 18.18 adds no new native grammar regis
 
 ### Capture-to-vocabulary mapping (current style-token state)
 
-Today the native style maps (`DEFAULT_NATIVE_STYLE_MAP`, `MARKDOWN_NATIVE_STYLE_MAP`) and the package `src/packages/record.rs::SyntaxStyleMapEntry` emit **free-form style-token strings** such as `keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`, `markup.heading.1..6`, `markup.strong`, `markup.emphasis`, `markup.inline-code`, `markup.code-block`, and `markup.list-marker`. `is_known_syntax_style_token` is the closed allowlist.
+Today the native style maps (`DEFAULT_NATIVE_STYLE_MAP`, `MARKDOWN_NATIVE_STYLE_MAP`) and the package `src/packages/record/mod.rs::SyntaxStyleMapEntry` emit **free-form style-token strings** such as `keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`, `markup.heading.1..6`, `markup.strong`, `markup.emphasis`, `markup.inline-code`, `markup.code-block`, and `markup.list-marker`. `is_known_syntax_style_token` is the closed allowlist.
 
 These strings reach the two-axis model only through the Phase 18.15 compatibility mapping: `TokenType::classify_style_token` and `DecorationSpan::from_style_token` convert them into `TokenType` + `Modifiers` (e.g. `markup.strong` → `Paragraph` + `Bold`). The mapping is lossy: it cannot express `Function` + `Declaration`, `Heading1` directly, distinct `Type`/`Interface`/`Struct`, or `Bold|Italic` combinations, because the source vocabulary is the old flat style-token set. First-party grammars therefore render through the compatibility fallback rather than emitting true vocabulary tokens.
 
@@ -82,7 +82,7 @@ Phase 18.18 moves the Markdown decoration styleMap onto the vocabulary contract 
 
 ### Promote first-party grammar styleMaps to vocabulary `TokenType` + `Modifiers`
 
-This is the central generic gap. `SyntaxStyleMapEntry` (`src/packages/record.rs`) and the native `NativeGrammarDescriptor::style_map` (`src/server/syntax.rs`) must gain the ability to express Phase 18.15 `TokenType` + `Modifiers` directly, so first-party grammar captures emit true vocabulary tokens instead of the lossy `style_token` compatibility fallback.
+This is the central generic gap. `SyntaxStyleMapEntry` (`src/packages/record/mod.rs`) and the native `NativeGrammarDescriptor::style_map` (`src/server/syntax.rs`) must gain the ability to express Phase 18.15 `TokenType` + `Modifiers` directly, so first-party grammar captures emit true vocabulary tokens instead of the lossy `style_token` compatibility fallback.
 
 Acceptable implementation: extend the style-map primitive generically — a style-map entry may carry either the legacy `style_token` string (kept for third-party/back-compat) or a `{ tokenType, modifiers }` vocabulary mapping (plus the existing optional `fontRole`). Update `DEFAULT_NATIVE_STYLE_MAP` and `MARKDOWN_NATIVE_STYLE_MAP` (and the four package `styleMap` contributions) to the vocabulary form: `keyword → Keyword`, `string → String`, `comment → Comment`, `function.declaration → Function + Declaration`, `type → Type`/`Interface`/`Struct`, Markdown `**x** → Paragraph + Bold`, `_x_ → Paragraph + Italic`, `# h1 → Heading1`, code spans/blocks → `CodeSpan`/`CodeBlock` (+ `Monospace` font role). The capture name in `queries/highlights.scm` is the join key; the styleMap maps capture → vocabulary, never capture → color. Unmatched captures stay unstyled (no crash, no default color leak).
 

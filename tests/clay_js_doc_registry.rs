@@ -128,6 +128,158 @@ fn generated_registry_contains_all_indexed_public_apis() {
 }
 
 #[test]
+fn phase28_folding_api_uses_reserved_core_domain() {
+    assert!(
+        clay::packages::manifest::RESERVED_CORE_API_DOMAINS.contains(&"folding"),
+        "folding must remain reserved for the core Clay API"
+    );
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    let folding = registry
+        .by_id("folding.serverPublishFoldingRanges")
+        .expect("folding publication API must be discoverable");
+    assert_eq!(folding.js_module, "clay:folding");
+    assert_eq!(folding.js_export, "serverPublishFoldingRanges");
+    assert_eq!(folding.permissions, vec!["render-folding"]);
+}
+
+#[test]
+fn phase28_editor_command_apis_are_documented_and_facaded() {
+    let root = repository_root();
+    let docs_index = std::fs::read_to_string(root.join("docs/index.md")).expect("read docs index");
+    let facade =
+        std::fs::read_to_string(root.join("runtime/js/editor.js")).expect("read editor facade");
+    let declarations = std::fs::read_to_string(root.join("runtime/js/editor.d.ts"))
+        .expect("read editor declarations");
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    let expected = [
+        (
+            "editor.toggleComment",
+            "toggleComment",
+            "docs/reference/clay-js-api/editor/toggle-comment.md",
+            vec!["Ctrl+/".to_string()],
+        ),
+        (
+            "editor.toggleListMarker",
+            "toggleListMarker",
+            "docs/reference/clay-js-api/editor/toggle-list-marker.md",
+            Vec::new(),
+        ),
+        (
+            "editor.rotateHeading",
+            "rotateHeading",
+            "docs/reference/clay-js-api/editor/rotate-heading.md",
+            Vec::new(),
+        ),
+        (
+            "editor.clientToggleFold",
+            "clientToggleFold",
+            "docs/reference/clay-js-api/editor/client-toggle-fold.md",
+            Vec::new(),
+        ),
+        (
+            "editor.toggleInlayHints",
+            "toggleInlayHints",
+            "docs/reference/clay-js-api/editor/toggle-inlay-hints.md",
+            Vec::new(),
+        ),
+    ];
+
+    for (id, export, docs_path, key_bindings) in expected {
+        let entry = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("generated registry is missing Phase 28 API {id}"));
+        assert_eq!(entry.js_module, "clay:editor");
+        assert_eq!(entry.js_export, export);
+        assert_eq!(entry.documentation_path, docs_path);
+        assert_eq!(
+            entry.key_bindings, key_bindings,
+            "{id} key bindings drifted"
+        );
+        assert!(
+            entry.custom_properties.is_empty(),
+            "{id} has hidden options"
+        );
+        assert!(
+            entry.app_visible && entry.help_visible,
+            "{id} must be discoverable"
+        );
+        assert_eq!(entry.stability, "runtime-backed-command");
+        assert!(docs_index.contains(docs_path.trim_start_matches("docs/")));
+        assert!(facade.contains(&format!("export function {export}")));
+        assert!(declarations.contains(&format!("function {export}")));
+        assert_eq!(
+            entry.deno_op, "op_clay_keybindings_bind_key",
+            "{id} must use the binding validation boundary"
+        );
+        for denied in denied_configuration_authorities() {
+            assert!(
+                entry.security.contains(denied),
+                "{id} security metadata must deny {denied} authority"
+            );
+        }
+    }
+
+    assert!(!facade.contains("Deno.core.ops.op_"));
+}
+
+#[test]
+fn phase28_configuration_apis_have_documented_bindings_and_closed_options() {
+    let root = repository_root();
+    let configuration =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration API guide");
+    let bind_key =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey API doc");
+    let declarations = std::fs::read_to_string(root.join("runtime/js/configuration.d.ts"))
+        .expect("read configuration declarations");
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+
+    for marker in [
+        "## Phase 28 editor command configuration review",
+        "default `Ctrl+/`",
+        "editorRules.chrome.inlayHints",
+        "Phase 28 adds no package option",
+        "editor.commentPrefix",
+        "editor.inlayHints.enabled",
+    ] {
+        assert!(
+            configuration.contains(marker),
+            "configuration guide must record Phase 28 marker {marker}"
+        );
+    }
+    for command in [
+        "editor.toggleComment",
+        "editor.toggleListMarker",
+        "editor.rotateHeading",
+        "editor.clientToggleFold",
+        "editor.toggleInlayHints",
+    ] {
+        assert!(
+            bind_key.contains(command),
+            "bindKey docs must list Phase 28 command {command}"
+        );
+    }
+
+    let package_option = registry
+        .by_id("configuration.setPackageOption")
+        .expect("setPackageOption must remain a public configuration API");
+    let source = package_option
+        .custom_properties
+        .iter()
+        .find(|property| property.name == "source")
+        .expect("setPackageOption source must remain a custom property");
+    assert!(
+        source.description.contains("ui-session"),
+        "setPackageOption source metadata must include ui-session"
+    );
+    assert!(
+        declarations.contains("| \"ui-session\""),
+        "configuration.d.ts must expose the persisted ui-session source"
+    );
+}
+
+#[test]
 fn planned_shell_layout_apis_are_not_generated_registry_entries() {
     let root = repository_root();
     let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
@@ -648,7 +800,7 @@ fn generated_registry_preserves_configuration_metadata() {
     );
     assert_eq!(
         cursor_style.backing_rust,
-        "src/editor/surface.rs::EditorSurface::set_caret_style_override"
+        "src/editor/surface/mod.rs::EditorSurface::set_caret_style_override"
     );
     assert_eq!(cursor_style.deno_op, "op_clay_editor_set_cursor_style");
     assert!(cursor_style.permissions.is_empty());
@@ -1924,6 +2076,219 @@ fn configuration_api_documents_phase22_8_workspace_surface_without_new_keys() {
             && std::fs::read_to_string(root.join("docs/index.md"))
                 .expect("read docs index")
                 .contains("reference/clay-js-api/configuration.md")
+    );
+}
+
+#[test]
+fn canonical_example_covers_theme_typography_and_modular_configuration() {
+    let root = repository_root();
+    let example = std::fs::read_to_string(root.join("examples/init.js"))
+        .expect("read canonical init.js example");
+
+    for import in [
+        r#"import { loadConfigurationModule, getConfigurationState } from "clay:configuration";"#,
+        r#"import { setTheme, setTypography, setAppearance } from "clay:theme";"#,
+        r#"import { clientSetCursorStyle } from "clay:editor";"#,
+        r#"import { clientSetEditorLayout } from "clay:editor";"#,
+        r#"import { bindKey, unbindKey } from "clay:keybindings";"#,
+        r#"import { setPaneFocusPolicy } from "clay:shell";"#,
+        r#"import { setSyntaxEnginePreference } from "clay:syntax";"#,
+        r#"import { clientExecuteEditorCommand } from "clay:editor";"#,
+    ] {
+        assert_eq!(
+            example.matches(import).count(),
+            1,
+            "canonical example must import each configuration facade exactly once: {import}"
+        );
+    }
+
+    assert_eq!(
+        example
+            .matches("\nsetTheme(\"@clay/theme-gruvbox-material-dark\");")
+            .count(),
+        1,
+        "canonical example must keep one active explicit theme selection"
+    );
+    assert_eq!(
+        example.matches("\nsetTypography({").count(),
+        1,
+        "canonical example must keep one active atomic typography call"
+    );
+    for theme in [
+        "@clay/theme-gruvbox-material-light",
+        "@clay/theme-modus-operandi",
+        "@clay/theme-modus-vivendi",
+    ] {
+        assert!(
+            example.contains(&format!("// setTheme(\"{theme}\");")),
+            "canonical example must show {theme} as a documented alternative"
+        );
+    }
+    for hierarchy_field in [
+        "    display: 1.5,",
+        "    title: 14 / 12,",
+        "    section: 13 / 12,",
+        "    body: 1,",
+        "    status: 1,",
+        "    detail: 10 / 12,",
+        "    caption: 0.75,",
+    ] {
+        assert_eq!(
+            example.matches(hierarchy_field).count(),
+            1,
+            "canonical example must document hierarchy field exactly once: {hierarchy_field}"
+        );
+    }
+    assert!(
+        example.contains("// setAppearance(\"dark\");"),
+        "canonical example must show appearance as an optional alternative to explicit setTheme"
+    );
+    assert!(
+        example.contains("path: \"./packages/first-party.js\"")
+            && example.contains("path: \"./packages/third-party.js\""),
+        "canonical example must keep package configuration loads modular and optional"
+    );
+
+    let configuration =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration API doc");
+    for marker in [
+        "examples/` tree",
+        "theme.setTheme",
+        "theme.setTypography",
+        "theme.setAppearance",
+        "loadConfigurationModule",
+        "No hidden JSON/TOML",
+    ] {
+        assert!(
+            configuration.contains(marker),
+            "configuration docs must cover canonical example marker {marker}"
+        );
+    }
+}
+
+#[test]
+fn phase28_canonical_example_lists_all_bindable_editor_commands() {
+    let root = repository_root();
+    let example = std::fs::read_to_string(root.join("examples/init.js"))
+        .expect("read canonical init.js example");
+
+    for (command, binding) in [
+        (
+            "editor.toggleComment",
+            "\"Ctrl+/\": \"editor.toggleComment\",",
+        ),
+        (
+            "editor.toggleListMarker",
+            "// bindKey(\"Ctrl+Shift+8\", \"editor.toggleListMarker\", { scope: \"editor\" });",
+        ),
+        (
+            "editor.rotateHeading",
+            "// bindKey(\"Ctrl+Alt+1\", \"editor.rotateHeading\", { scope: \"editor\" });",
+        ),
+        (
+            "editor.clientToggleFold",
+            "// bindKey(\"Ctrl+Shift+F\", \"editor.clientToggleFold\", { scope: \"editor\" });",
+        ),
+        (
+            "editor.toggleInlayHints",
+            "// bindKey(\"Ctrl+Alt+I\", \"editor.toggleInlayHints\", { scope: \"editor\" });",
+        ),
+    ] {
+        assert_eq!(
+            example.matches(command).count(),
+            2,
+            "canonical example must mention {command} once in its Phase 28 description and once in its binding"
+        );
+        assert_eq!(
+            example.matches(binding).count(),
+            1,
+            "canonical example must bind {command} exactly once"
+        );
+    }
+
+    for marker in [
+        "editor.toggleComment    argless client-first edit; default Ctrl+/;",
+        "editor.toggleListMarker argless client-first edit; no core default chord;",
+        "editor.rotateHeading    argless client-first edit; no core default chord;",
+        "editor.clientToggleFold argless client-UI command; no core default chord;",
+        "editor.toggleInlayHints argless client-UI command; no core default chord;",
+    ] {
+        assert!(
+            example.contains(marker),
+            "canonical example must document Phase 28 command metadata: {marker}"
+        );
+    }
+}
+
+#[test]
+fn canonical_example_cross_checks_editor_layout_options_against_inventory() {
+    // Phase 26 configuration task: the canonical example's new editor-layout
+    // option names/enums/defaults must cross-check against the validated
+    // server-side parser surface (api-inventory.toml custom_properties), not
+    // prose. The example documents each option exactly once, the enum values
+    // match the inventory entry, and the configuration guide names the API.
+    let root = repository_root();
+    let example = std::fs::read_to_string(root.join("examples/init.js"))
+        .expect("read canonical init.js example");
+
+    // The example must document the option names and the bounded enum in the
+    // options annotation, and keep exactly one ACTIVE (uncommented) call.
+    assert!(
+        example.contains("wrapPolicy  \"none\" | \"viewport\" | \"column\"   (required)"),
+        "canonical example must annotate the wrapPolicy enum"
+    );
+    assert!(
+        example.contains("columnCap   number   column cap for \"column\" (default 72, clamped to"),
+        "canonical example must annotate columnCap with type/default"
+    );
+    assert_eq!(
+        example
+            .matches("\nclientSetEditorLayout({ wrapPolicy: \"column\", columnCap: 72 });")
+            .count(),
+        1,
+        "canonical example must keep one active editor-layout call"
+    );
+
+    // The inventory entry's custom_properties must name the same options, and
+    // the doc must state the same enum and clamp.
+    let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
+    let layout = registry
+        .by_id("editor.clientSetEditorLayout")
+        .expect("editor.clientSetEditorLayout must be a registered public configuration API");
+    assert_eq!(layout.visibility, "public");
+    assert_eq!(layout.js_module, "clay:editor");
+    let property_names: BTreeSet<_> = layout
+        .custom_properties
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert!(
+        property_names.contains("wrapPolicy") && property_names.contains("columnCap"),
+        "inventory must list wrapPolicy and columnCap in custom_properties, got {property_names:?}"
+    );
+    let doc = std::fs::read_to_string(
+        root.join("docs/reference/clay-js-api/editor/client-set-editor-layout.md"),
+    )
+    .expect("read clientSetEditorLayout API doc");
+    for marker in [
+        "\"none\" | \"viewport\" | \"column\"",
+        "clamped to 16–240",
+        "package-unforgeable",
+    ] {
+        assert!(
+            doc.contains(marker),
+            "clientSetEditorLayout doc must state {marker}"
+        );
+    }
+
+    // The configuration guide must name the new configuration surface.
+    let configuration =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration API doc");
+    assert!(
+        configuration.contains("clientSetEditorLayout"),
+        "configuration.md must cover the editor-layout configuration surface"
     );
 }
 

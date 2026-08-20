@@ -72,6 +72,7 @@ const FACADES: &[Facade] = &[
         "clay:decorations",
         include_str!("../../runtime/js/decorations.js"),
     ),
+    Facade::public("clay:folding", include_str!("../../runtime/js/folding.js")),
     Facade::public(
         "clay:diagnostics",
         include_str!("../../runtime/js/diagnostics.js"),
@@ -118,13 +119,13 @@ mod tests {
     #[test]
     fn facade_inventory_is_unique_and_domain_partitioned() {
         let specifiers: HashSet<_> = FACADES.iter().map(|facade| facade.specifier).collect();
-        assert_eq!(specifiers.len(), 22);
+        assert_eq!(specifiers.len(), 23);
         assert_eq!(
             FACADES
                 .iter()
                 .filter(|facade| facade.access == FacadeAccess::Public)
                 .count(),
-            13
+            14
         );
     }
 }

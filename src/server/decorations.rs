@@ -21,6 +21,12 @@ pub enum DecorationValidationError {
     InvalidSpanRange {
         index: usize,
     },
+    InvalidTarget {
+        index: usize,
+    },
+    InvalidInlay {
+        index: usize,
+    },
     FontRoleOnNonLayoutSpan {
         index: usize,
         kind: DecorationKind,
@@ -103,9 +109,23 @@ pub fn validate_decoration_set(
         if span.byte_start < set.viewport_byte_start || span.byte_end > set.viewport_byte_end {
             return Err(DecorationValidationError::SpanOutsideViewport { index });
         }
-        if span.font_role.is_some()
-            && !matches!(span.kind, DecorationKind::Syntax | DecorationKind::Semantic)
+        if span.target.is_some() && span.kind != DecorationKind::Link {
+            return Err(DecorationValidationError::InvalidTarget { index });
+        }
+        if let Some(target) = &span.target
+            && target.clone().sanitized().as_ref() != Some(target)
         {
+            return Err(DecorationValidationError::InvalidTarget { index });
+        }
+        match (span.kind, span.inlay.as_ref()) {
+            (DecorationKind::InlayHint, Some(inlay))
+                if inlay.clone().sanitized().as_ref() == Some(inlay) => {}
+            (DecorationKind::InlayHint, _) | (_, Some(_)) => {
+                return Err(DecorationValidationError::InvalidInlay { index });
+            }
+            _ => {}
+        }
+        if span.font_role.is_some() && !span.kind.allows_font_role() {
             return Err(DecorationValidationError::FontRoleOnNonLayoutSpan {
                 index,
                 kind: span.kind,
@@ -357,7 +377,10 @@ fn is_known_style_token(style_token: &str) -> bool {
 mod tests {
     use serde_json::json;
 
-    use super::{SyntaxChunkCache, validate_decoration_publication};
+    use super::{
+        DecorationValidationError, SyntaxChunkCache, validate_decoration_publication,
+        validate_decoration_set,
+    };
     use crate::packages::record::assemble_package_record;
     use crate::perf::budgets::SYNTAX_CACHE_BUDGET_BYTES;
     use crate::protocol::{DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan};
@@ -427,5 +450,68 @@ mod tests {
         assert!(cache.retained_bytes() <= cache.budget_bytes());
         assert!(cache.chunk_count() <= 2);
         assert!(cache.evicted_chunks() >= 1);
+    }
+
+    #[test]
+    fn inlay_control_chars_rejected() {
+        let mut set = decoration_set_for_range(3, 0);
+        set.kind = DecorationKind::InlayHint;
+        set.spans = vec![DecorationSpan::from_inlay(
+            0,
+            5,
+            crate::protocol::InlayHintPayload {
+                label: "\u{07}bad".into(),
+                placement: crate::protocol::InlayPlacement::After,
+            },
+            10,
+            DecorationProvenance {
+                package_name: "@clay/markdown".to_string(),
+                package_version: "0.1.0".to_string(),
+                package_prefix: "markdown".to_string(),
+            },
+        )];
+        // Control char is stripped; remaining "bad" is accepted. Reject empty/control-only.
+        set.spans[0].inlay = Some(crate::protocol::InlayHintPayload {
+            label: "\u{07}\n".into(),
+            placement: crate::protocol::InlayPlacement::After,
+        });
+        let err = validate_decoration_set(3, set, None).expect_err("control-only");
+        assert!(matches!(
+            err,
+            DecorationValidationError::InvalidInlay { .. }
+        ));
+    }
+
+    #[test]
+    fn link_payload_over_budget_denied() {
+        let mut set = decoration_set_for_range(3, 0);
+        set.kind = DecorationKind::Link;
+        let huge = "n".repeat(crate::perf::budgets::DECORATION_PAYLOAD_BUDGET_BYTES + 64);
+        set.spans = vec![DecorationSpan {
+            byte_start: 0,
+            byte_end: 5,
+            kind: DecorationKind::Link,
+            token_type: crate::protocol::TokenType::Link,
+            modifiers: crate::protocol::Modifiers::NONE,
+            scope: None,
+            font_role: None,
+            priority: 80,
+            provenance: DecorationProvenance {
+                package_name: "@clay/markdown".to_string(),
+                package_version: "0.1.0".to_string(),
+                package_prefix: "markdown".to_string(),
+            },
+            target: Some(crate::protocol::DecorationTarget::DisplayOnly { text: huge }),
+            inlay: None,
+        }];
+        let err = validate_decoration_set(3, set, None).expect_err("oversize");
+        assert!(
+            matches!(
+                err,
+                DecorationValidationError::PayloadBudgetExceeded { .. }
+                    | DecorationValidationError::InvalidTarget { .. }
+            ),
+            "{err:?}"
+        );
     }
 }

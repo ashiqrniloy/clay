@@ -4,7 +4,7 @@
 
 - `src/masonry_pane_document.rs` — `PaneDocumentView` (per-pane editor view)
 - `src/masonry_editor.rs` — `EditorWidget` (connection chrome, owns pane 1's view)
-- `src/masonry_shell.rs` — `ClayShellWidget` (pane hosts, `pane_targets`, focus actions)
+- `src/masonry_shell/mod.rs` — `ClayShellWidget` (pane hosts, `pane_targets`, focus actions)
 - `src/masonry_pane_host.rs` — `PaneContentHost` / `PaneContent::Document`
 - `src/client/mod.rs` — `ClientSyncState` per-document map, `ClientConnectionEvent::document_id()`
 - `src/driver/mod.rs` — `Driver` event routing, pending-open attribution, close arm
@@ -20,7 +20,13 @@ The architecture keeps ONE `EditorWidget` per connection as **connection chrome*
 
 ## Plan 088 status chrome
 
-`PaneDocumentView::paint_status_line` reads cached `ResolvedUiTheme` tokens (`surface.control`, `text.primary`, spacing, and border) with legacy `StyleRegistry` fallbacks. The status string still carries connection, access, document/version, dirty, diagnostic, pending-edit, and recovery text, so state is never communicated by color alone. Welcome layout bypasses only the Clay-owned workspace-browser slot; package fixed slots remain authoritative.
+`PaneDocumentView::paint_status_line` reads cached `ResolvedUiTheme` tokens (`surface.control`, `text.primary`, spacing, and border) with legacy `StyleRegistry` fallbacks. The status string still carries connection, access, document/version, dirty, diagnostic, pending-edit, and recovery text, so state is never communicated by color alone. Welcome layout bypasses only the Clay-owned workspace-browser slot; package fixed slots remain authoritative. Plan 089 closes the recovery synchronization defect: the parent now publishes the shared welcome virtual `Status` node from current `WelcomeState`, so the WelcomeWidget and pane/status chrome both report `Connection lost` / `Disconnected` after a connection event.
+
+## Plan 089 recovery and loading closure
+
+`set_status` still rebuilds the shared `WelcomeState`, but accessibility ownership is parent-driven: `PaneDocumentView::accessibility` and `EditorWidget::accessibility` push the current welcome `Status` node using the stable virtual status slot, while `WelcomeWidget::accessibility` retains only the child reference. This avoids stale child accessibility caches and keeps the status announcement synchronized without per-frame polling. Because Masonry caches child paint scenes independently, `EditorWidget::sync_region` also marks the visible `WelcomeWidget` child for `request_render()` after event-driven state changes; otherwise the parent status/accessibility tree could update while the painted welcome card stayed stale. The disconnected regression test drives this sync before redraw, and the live recovery capture verifies matching `Connection lost` / `Disconnected` copy.
+
+The loading review path is also restore-aware. The capture harness starts its server in the isolated workspace, waits for the client shell, triggers one watcher reload after handshake, and opens `loading.txt`; the runtime SDUI tree is then reconciled into the retained sidebar. See [Repeatable UI Review Harness](ui-review-harness.md) and [SDUI / Package-UI Retained Masonry Reconciliation](masonry-sdui-region.md).
 
 ## How It Works
 
@@ -71,7 +77,7 @@ Because the server returns the existing lease with full metadata on a duplicate 
 
 `show_open_documents_menu(other_panes: &[CrossPaneDocumentEntry])` lists the focused pane's active + retained sessions plus every other pane's sessions (`pane N: <name>` labels, active/dirty markers). Activating a cross-pane entry emits `EditorAction::ActivateDocumentInPane(pane_id, document_id)`; the driver switches the OWNING pane's document (stashing its prior session) and focuses it — consistent with one-view-per-document.
 
-### Shell integration (`src/masonry_shell.rs`)
+### Shell integration (`src/masonry_shell/mod.rs`)
 
 `PaneContent` gained `Document(PaneDocumentView)`; `set_document_view` / `clear_content` (via `std::mem::replace`) mount/unmount views on hosts. `ClayShellWidget` tracks `pane_targets: BTreeMap<PaneId, WidgetId>` for routing, submits `EditorAction::PaneFocused(pane_id)` on Tab/pointer focus changes, and `focus_fallback_widget_id()` returns the active pane's target. Pane close removes the routing target first, then reconciles hosts.
 
@@ -106,7 +112,7 @@ routes the display name down:
   changing `apply_connection_event`'s signature — was rejected (ripples
   through EditorWidget/view/tests); Masonry `Properties` flow downward,
   so they cannot carry the name up.
-- **Shell boundary** (`src/masonry_shell.rs`): `set_pane_document_name`
+- **Shell boundary** (`src/masonry_shell/mod.rs`): `set_pane_document_name`
   maps `Option<&str>` through `sanitize_document_display_name`
   (pub(crate) in `src/editor/accessibility.rs`, so the bin crate cannot
   call it directly — sanitization happens here) and calls
@@ -170,21 +176,24 @@ carries the `selected` state. The welcome surface (also hosted by this view)
 exposes a `Group` with two `Button` children and a polite `Status` virtual node
 (slot `STATUS`) and refuses text input while visible; its label stays within the
 256-character sanitized ceiling. Both surfaces are fed through
-`accesskit_consumer::Tree` in tests and appear in the live review harness
-captures (`scripts/capture-ui-review.sh`, see
-[Repeatable UI Review Harness](ui-review-harness.md)).
+`accesskit_consumer::Tree` in tests and are represented in the review harness
+artifacts (`scripts/capture-ui-review.sh`, see
+[Repeatable UI Review Harness](ui-review-harness.md)); interactive completion
+recapture remains host-dependent and must not be inferred from structural tests.
 
 ## Known Ceilings
 
 - SDUI sidebars and package panels/overlays are window-scoped chrome (per-client), not per-pane; packages cannot contribute per-pane chrome yet.
 - No per-pane tab strips or document chrome beyond the status line until Phase 22.3.
 - Completion rows are retained widgets rather than virtualized; the shared result cap (256 items) and eight visible-row budget bound work.
-- No topology or per-pane document persistence until Phase 22.5.
+- Topology and active per-pane document identity persist through the
+  client-owned `layout.json` v2 path (Phase 22.5); unsaved edits, caret,
+  viewport, and retained inactive sessions are intentionally not persisted.
 
 ## Tests
 
 - `src/masonry_pane_document.rs`: event isolation, session stash/activate, close-pane release + blank reset, dirty-close gate with conflict menu, per-document edit queueing, duplicate-open no-op, cross-pane menu aggregation + routing, failed-opens leave state unchanged, runtime-snapshot baseline restore, scope-aware manifest install, and completion empty/error/stale dismissal. Command: `cargo test --lib masonry_pane_document --quiet`.
-- `src/masonry_shell.rs`: panes host independent document views with document-scoped routing, typing isolation hot-path guard, routing-target cleanup on pane close, concurrent per-pane major modes isolated across behavior manifests. Command: `cargo test --lib masonry_shell --quiet`.
+- `src/masonry_shell/mod.rs`: panes host independent document views with document-scoped routing, typing isolation hot-path guard, routing-target cleanup on pane close, concurrent per-pane major modes isolated across behavior manifests. Command: `cargo test --lib masonry_shell --quiet`.
 - `src/client/mod.rs`: per-document sync state, stale-ack filtering by document, per-document reload updates. Command: `cargo test --lib client --quiet`.
 - `src/driver/mod.rs`: `decide_open_route` pure-function tests (owner > pending > active, path matching);
   Phase 22.6 label routing (`route_document_event`/`route_document_opened`
@@ -192,7 +201,10 @@ captures (`scripts/capture-ui-review.sh`, see
 - `src/masonry_package_region.rs`: `menu_selection_keeps_selected_row_in_scroll_viewport` and `centered_command_center_scrolls_60_results_without_overflow` verify long-menu selection visibility and centered containment.
 - `src/masonry_sdui.rs`: `completion_menu_observation_uses_caret_bounded_geometry` verifies structural overlay bounds.
 - Guard suites scanning the new module: `tests/editor_performance_invariants.rs`, `tests/ui_primitive_conformance.rs`.
-- Full suite: `cargo test --all-targets` (1916 passing).
+- Full Linux verification: `cargo test --all-targets`; focused Plan 088
+  checks include `cargo test --lib masonry_pane_document`, `cargo test --lib
+  masonry_editor`, `cargo test --test editor editor_performance_invariants`,
+  and `cargo test --test editor ui_primitive_conformance`.
 
 ## Related
 

@@ -97,7 +97,7 @@ Use `documents.serverListDocuments` only through the documented Clay JS facade. 
 - JS facade: `runtime/js/documents.js::serverListDocuments`
 - Deno op: `src/server/ops/documents.rs::op_clay_documents_list_documents` (`op_clay_documents_list_documents`)
 - Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::list_documents`
-- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
+- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection/mod.rs`, and `src/server/workspace.rs`
 
 ## Lookup metadata
 

@@ -334,6 +334,46 @@ fn package_cannot_silently_override_native_tier() {
 
 #[cfg(any(unix, windows))]
 #[test]
+fn registering_shadowed_native_grammar_returns_ownership_diagnostic() {
+    let record = assemble_package_record(&grammar_package("rust", "rust", "rs"))
+        .expect("valid rust grammar package");
+    let mut registry = SyntaxGrammarRegistry::with_first_party_native();
+    assert!(matches!(
+        registry.register_package(&record),
+        Err(SyntaxGrammarRegistryError::OwnedByNativeDescriptor {
+            language_id,
+            package_prefix
+        }) if language_id == "rust" && package_prefix == "rust"
+    ));
+    let grammar = registry
+        .find_for_extension("rs")
+        .expect("native rust stays registered");
+    assert_eq!(grammar.engine_tier, SyntaxEngineTier::Native);
+    assert_eq!(grammar.package_version, "builtin");
+}
+
+#[test]
+fn native_owned_first_party_package_json_omits_syntax_grammars() {
+    for (package_dir, language_id) in [
+        ("rust", "rust"),
+        ("typescript", "typescript"),
+        ("javascript", "javascript"),
+        ("markdown", "markdown"),
+    ] {
+        let (_, record) = first_party_grammar_package_record(package_dir);
+        assert!(
+            record.contributions.syntax_grammars.is_empty(),
+            "{package_dir} package.json must not declare syntaxGrammars"
+        );
+        assert!(
+            !SyntaxGrammarRegistry::native_owned_syntax_languages(language_id).is_empty(),
+            "{package_dir} must remain native-owned"
+        );
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
 fn native_registration_shadows_first_party_wasm_package_metadata() {
     let (_, record) = first_party_grammar_package_record("rust");
     let mut registry = SyntaxGrammarRegistry::with_first_party_native();
@@ -1211,12 +1251,14 @@ fn syntax_grammar_registry_rejects_duplicate_language_or_pattern_deterministical
 #[test]
 fn manual_syntax_smoke_contract_is_covered_by_deterministic_fixture_flow() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let mut registry = SyntaxGrammarRegistry::new();
+    let mut registry = SyntaxGrammarRegistry::with_first_party_native();
     for package_dir in ["rust", "typescript", "javascript"] {
         let (_, record) = first_party_grammar_package_record(package_dir);
-        registry
-            .register_package(&record)
-            .unwrap_or_else(|error| panic!("register {package_dir}: {error:?}"));
+        assert_eq!(
+            registry.clone().register_package(&record),
+            Ok(0),
+            "native-owned {package_dir} package.json must not re-register a grammar"
+        );
     }
 
     for (package_dir, contribution_id, language, fixture_path, document_path) in [
@@ -1323,10 +1365,8 @@ fn first_party_syntax_fixtures_produce_bounded_decoration_sets() {
         ),
     ] {
         let (_, record) = first_party_grammar_package_record(package_dir);
-        let mut registry = SyntaxGrammarRegistry::new();
-        registry
-            .register_package(&record)
-            .expect("first-party grammar registers");
+        assert!(record.contributions.syntax_grammars.is_empty());
+        let registry = SyntaxGrammarRegistry::with_first_party_native();
         let contribution = registry
             .get(contribution_id)
             .unwrap_or_else(|| panic!("registered {contribution_id}"))
@@ -1484,11 +1524,13 @@ fn rust_grammar_emits_vocabulary_tokens_through_stylemap() {
     .expect("read Rust highlights query");
     let handler = TreeSitterSyntaxHandler::new(contribution, rust_language(), &query)
         .expect("Rust query compiles");
+    let source = std::fs::read_to_string(format!(
+        "{}/tests/fixtures/syntax/rust.rs",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("read Rust fixture");
     let set = handler
-        .parse_sync(parse_notification(
-            1,
-            "fn main() { let s = \"x\"; // comment\n}",
-        ))
+        .parse_sync(parse_notification_for("rust", 1, &source))
         .expect("Rust parses")
         .decoration_updates
         .expect("Rust decorations");
@@ -1498,6 +1540,15 @@ fn rust_grammar_emits_vocabulary_tokens_through_stylemap() {
         TokenType::String,
         TokenType::Comment,
         TokenType::Function,
+        TokenType::Type,
+        TokenType::TypeParameter,
+        TokenType::Property,
+        TokenType::Parameter,
+        TokenType::Number,
+        TokenType::Operator,
+        TokenType::Decorator,
+        TokenType::Macro,
+        TokenType::Method,
     ] {
         assert!(
             set.spans.iter().any(|span| span.token_type == token_type),
@@ -1507,6 +1558,11 @@ fn rust_grammar_emits_vocabulary_tokens_through_stylemap() {
     assert!(set.spans.iter().any(|span| {
         span.token_type == TokenType::Function
             && span.modifiers.contains(Modifiers::DECLARATION)
+            && span.scope.is_none()
+    }));
+    assert!(set.spans.iter().any(|span| {
+        span.token_type == TokenType::EnumMember
+            && span.modifiers.contains(Modifiers::NONE)
             && span.scope.is_none()
     }));
 }
@@ -1589,6 +1645,19 @@ fn typescript_grammar_covers_ts_tsx_mts_and_cts_extensions() {
                 .iter()
                 .any(|span| span.token_type == TokenType::Type)
         );
+        if fixture.ends_with("typescript.ts") {
+            for token_type in [
+                TokenType::Property,
+                TokenType::Method,
+                TokenType::Parameter,
+                TokenType::Operator,
+            ] {
+                assert!(
+                    set.spans.iter().any(|span| span.token_type == token_type),
+                    "{path} should emit {token_type:?}"
+                );
+            }
+        }
     }
 }
 
@@ -1644,6 +1713,31 @@ fn javascript_grammar_covers_js_jsx_mjs_cjs_extensions() {
     assert!(set.spans.iter().any(|span| {
         span.token_type == TokenType::Function && span.modifiers.contains(Modifiers::DECLARATION)
     }));
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| { span.token_type == TokenType::Property })
+    );
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| { span.token_type == TokenType::Method })
+    );
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| { span.token_type == TokenType::Parameter })
+    );
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| { span.token_type == TokenType::Operator })
+    );
+    assert!(
+        set.spans
+            .iter()
+            .any(|span| { span.token_type == TokenType::Regexp })
+    );
 }
 
 #[cfg(any(unix, windows))]
@@ -1665,9 +1759,12 @@ fn markdown_grammar_emits_prose_vocabulary_tokens_with_modifiers() {
     handler
         .enable_injections(include_str!("../packages/markdown/queries/injections.scm"))
         .expect("Markdown injections query compiles");
-    let source = "# h1\n## h2\n### h3\n#### h4\n##### h5\n###### h6\n\n**bold**\n\n_emphasis_\n\n`code`\n\n[x](https://example.com)\n\n- item\n\n> quote\n\n```rust\nfn main() {}\n```\n";
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let source =
+        std::fs::read_to_string(format!("{manifest_dir}/tests/fixtures/syntax/markdown.md"))
+            .expect("read Markdown fixture");
     let set = handler
-        .parse_sync(parse_notification_for("markdown", 1, source))
+        .parse_sync(parse_notification_for("markdown", 1, &source))
         .expect("Markdown parses")
         .decoration_updates
         .expect("Markdown decorations");
@@ -2144,6 +2241,11 @@ fn scroll_sized_native_sources_produce_bounded_decorations() {
             .parse_sync(parse_notification_for(prefix, 1, &source))
             .unwrap_or_else(|error| panic!("scroll-sized {label} parses: {error}"));
         assert!(!update.decoration_updates.is_empty(), "{label}");
+        let update_budget = if update.folding_update.is_some() {
+            clay::perf::budgets::INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES
+        } else {
+            clay::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES
+        };
         for set in &update.decoration_updates {
             assert!(
                 rkyv::to_bytes::<rkyv::rancor::Error>(set)
@@ -2158,7 +2260,7 @@ fn scroll_sized_native_sources_produce_bounded_decorations() {
                 rkyv::to_bytes::<rkyv::rancor::Error>(&member)
                     .expect("serialize bounded parse update")
                     .len()
-                    <= clay::perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+                    <= update_budget,
                 "{label}"
             );
         }
@@ -4094,26 +4196,16 @@ fn first_party_language_packages_load_with_required_assets() {
         );
 
         let contributions = &record.contributions;
-        assert_eq!(
-            contributions.syntax_grammars.len(),
-            1,
-            "{expected_name} must declare one syntax grammar"
+        assert!(
+            contributions.syntax_grammars.is_empty(),
+            "{expected_name} must omit syntaxGrammars; grammar is owned by native descriptor"
         );
-        let grammar = &contributions.syntax_grammars[0];
-        assert_eq!(grammar.language_id, language_id);
-        assert!(grammar.extensions.contains(&extension.to_string()));
-        assert_eq!(grammar.grammar_kind, "native");
-        assert!(grammar.style_map.values().all(|entry| matches!(
-            entry.token_type,
-            TokenType::Keyword
-                | TokenType::String
-                | TokenType::Comment
-                | TokenType::Operator
-                | TokenType::Paragraph
-                | TokenType::Function
-                | TokenType::Type
-                | TokenType::Number
-        )));
+        assert!(
+            clay::server::syntax::SyntaxGrammarRegistry::native_owned_syntax_languages(language_id)
+                .contains(&language_id),
+            "{expected_name} must stay in FIRST_PARTY_NATIVE_GRAMMARS"
+        );
+        let _ = extension;
 
         assert_eq!(contributions.commands.len(), 1);
         assert_eq!(contributions.commands[0].id, command_id);
@@ -4187,7 +4279,11 @@ fn first_party_language_packages_load_with_required_assets() {
 #[test]
 fn first_party_grammar_packages_do_not_add_language_specific_rust_branches() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    for relative in ["src/server/syntax.rs", "src/packages/record.rs"] {
+    for relative in [
+        "src/server/syntax.rs",
+        "src/packages/record/mod.rs",
+        "src/packages/record/language.rs",
+    ] {
         let source = std::fs::read_to_string(format!("{manifest_dir}/{relative}"))
             .unwrap_or_else(|error| panic!("read {relative}: {error}"));
         for denied in [

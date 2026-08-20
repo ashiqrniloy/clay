@@ -30,7 +30,7 @@ build on the same transport.
   and `TransientMenuClosed {session_id}`.
 - `src/server/menu_sessions.rs`: `ServerMenuSessions` per-connection store,
   `ServerMenuSession` wrapper, `snapshot_from_session` projection.
-- `src/server/connection.rs`: intent handlers, the `controlCenter.open`
+- `src/server/connection/mod.rs`: intent handlers, the `controlCenter.open`
   special case in the `CommandIntent` arm, tab-switch cancel.
 - `src/server/control_center.rs`: `ControlCenter` with persisted
   `selected_index` and `move_selection(delta)`.
@@ -41,7 +41,7 @@ build on the same transport.
 - `src/masonry_pane_document.rs`: `PaneMenuSync` `server_owned` flag +
   `server_query_buffer`; `route_menu_key` ownership dispatch;
   `dispatch_server_menu_key`; `handle_text_event` Backspace interception.
-- `src/main.rs`: driver routing — snapshots go to chrome + all pane views.
+- `src/app_driver.rs`: driver routing — snapshots go to chrome + all pane views.
 - `src/shell/transient_menu.rs`: `from_snapshot_data` hydration,
   `with_query`, `with_selected_index` builders.
 - `src/perf/baselines.rs`: `encode_decode_max_transient_menu_snapshot`
@@ -248,12 +248,17 @@ server-authoritative behavior.
 ## Tests
 
 - `src/protocol/menu.rs`: 9 codec tests (clamp, round trip, frame size).
-- `src/server/menu_sessions.rs`: 16 store tests (high-bit ids, replace,
+- `src/server/menu_sessions.rs`: store tests (high-bit ids, replace,
   query filter, selection wrap incl. `i64::MAX` modulo, activation through
   `CommandExecutor`, cancel, snapshot projection, `cancel_active`,
   adversarial intent ordering, path-browser navigate/activate/helpers/
-  cancel/frame-ceiling).
-- `src/server/connection.rs`: `menu_intents_for_unknown_sessions_produce_bounded_diagnostics`,
+  cancel/frame-ceiling, and
+  `generated_menu_intent_ordering_preserves_lifecycle_and_authority`). The
+  generated test runs 64 fixed seeds × 18 bounded intents across open/query/
+  select/activate/cancel/reload, checking one-active-session replacement,
+  selection bounds, stale-generation rejection, catalogue/provenance, and
+  cleanup.
+- `src/server/connection/mod.rs`: `menu_intents_for_unknown_sessions_produce_bounded_diagnostics`,
   `control_center_opens_filters_activates_and_cancels`,
   `tab_switch_cancels_the_active_server_menu_session`,
   `menu_backspace_deletes_one_char_and_secondary_activation_matches_primary`,

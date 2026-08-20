@@ -48,10 +48,12 @@ pub(crate) fn build_active_theme_from_record(
         .map(|descriptor| crate::protocol::TextThemeOverride {
             token: descriptor.token.clone(),
             color: descriptor.color,
+            background: descriptor.background,
             bold: descriptor.bold,
             italic: descriptor.italic,
             underline: descriptor.underline,
             strike: descriptor.strike,
+            scale: descriptor.scale,
             provenance: descriptor.provenance.clone(),
         })
         .collect::<Vec<_>>();

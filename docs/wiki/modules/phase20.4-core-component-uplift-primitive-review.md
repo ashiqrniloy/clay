@@ -4,7 +4,7 @@
 
 - `src/masonry_sdui.rs`
 - `src/masonry_editor.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/shell/primitives.rs`
 - `src/shell/theme.rs`
 - `src/shell/components.rs`
@@ -131,7 +131,7 @@ Plan 065 task 7 added a test-local `ComponentStatePalette { fill, border, text }
 
 ## Hot-Path Boundary
 
-Phase 20.4 paint paths read **cached** resolved values only. Forbidden in `masonry_sdui.rs`/`surface.rs`/`masonry_editor.rs`/`primitives.rs` non-test paint code (asserted by `hot_path_no_theme_resolution_or_package_js`):
+Phase 20.4 paint paths read **cached** resolved values only. Forbidden in `masonry_sdui.rs`/`surface/mod.rs`/`masonry_editor.rs`/`primitives.rs` non-test paint code (asserted by `hot_path_no_theme_resolution_or_package_js`):
 
 - `ThemeTokenResolver::new()` / `from_resolver()` / `core_theme_value` (theme re-resolution happens once at install time into `ResolvedUiTheme`).
 - `Deno.core`, `op_clay_theme_set_*`, package JavaScript, IPC waits, `reqwest`/`ureq`/`TcpStream`/`Command::new`/`std::fs::read`.
@@ -153,15 +153,15 @@ Phase 20.4 paint paths read **cached** resolved values only. Forbidden in `mason
 - **Button Focus fill `accent.primary`** is strong; Phase 20.6 can tone it down.
 - **Scrollbar thumb-drag scrolling** deferred: a press inside the thumb sets the Active visual only; the drag math is not implemented (scrolling stays wheel/keyboard).
 - **Rest scrollbar reuses `opacity.disabled`** (no dedicated `opacity.scrollbar.rest` token); the upgrade path is a dedicated token if Rest needs to differ from Disabled.
-- **Editor chrome size constants** (`SCROLLBAR_WIDTH`/`MARGIN`/`MIN_THUMB`, `TEXT_INSET`) are not yet routed through `dimension.*` tokens (a bigger refactor outside Phase 20.4 scope); `surface.rs` is intentionally excluded from the conformance size guard.
+- **Editor chrome size constants** (`SCROLLBAR_WIDTH`/`MARGIN`/`MIN_THUMB`, `TEXT_INSET`) are not yet routed through `dimension.*` tokens (a bigger refactor outside Phase 20.4 scope); `surface/mod.rs` is intentionally excluded from the conformance size guard.
 - **Full manual accessibility audit** deferred to Phase 20.7 (structural role/state checks cover this phase).
 
 ## Tests
 
 - `src/shell/primitives.rs`: `component_state_color_maps_all_five_states_to_tokens`, `list_row_fill_color_honors_selected_and_state` pin exact core token colors per state.
 - `src/masonry_sdui.rs`: `sdui_paint_uses_active_theme_not_core_fallbacks` (design-token overrides reach `theme_style()`), `sdui_spacing_rhythm_scales_with_density` (`panel_padding = spacing.md × spacing_scale()` for compact/default/spacious), `disabled_component_applies_opacity_disabled_and_gates_actions`, `focused_component_tracks_focus_and_derives_interaction_state`, `each_component_kind_renders_all_five_states` (55-cell matrix), `component_state_colors_are_token_derived`.
-- `src/editor/surface.rs`: `editor_scrollbar_reflects_hover_and_active_state`, `editor_caret_selection_diagnostics_use_base_ui_colors`.
-- `tests/ui_primitive_conformance.rs`: `sdui_paint_resolves_from_active_theme_not_core_fallback_resolver`, `sdui_paint_wires_focus_ring_and_state_colors_for_interactive_components` (source guards); `masonry_editor.rs` is in both the color and size conformance file lists; `surface.rs` is in the color list.
+- `src/editor/surface/mod.rs`: `editor_scrollbar_reflects_hover_and_active_state`, `editor_caret_selection_diagnostics_use_base_ui_colors`.
+- `tests/ui_primitive_conformance.rs`: `sdui_paint_resolves_from_active_theme_not_core_fallback_resolver`, `sdui_paint_wires_focus_ring_and_state_colors_for_interactive_components` (source guards); `masonry_editor.rs` is in both the color and size conformance file lists; `surface/mod.rs` is in the color list.
 - `tests/editor_performance_invariants.rs`: `hot_path_no_theme_resolution_or_package_js`; `non_test_body` now scans the full `masonry_sdui.rs`/`masonry_editor.rs` paint bodies.
 - `tests/primitives_docs.rs`: `package_guide_documents_phase20_4_uplift`, `clay_ui_catalog_notes_state_completeness`, `primitives_reference_documents_component_state_color`, `no_component_kind_or_token_renamed`, `existing_packages_render_unchanged`.
 - `tests/rust_visibility_api_mapping.rs`: `phase20_4_introduces_no_unexposed_public_rust_function`.

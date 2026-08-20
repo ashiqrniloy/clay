@@ -21,6 +21,11 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "clientShowOpenDocuments",
             "clientRequestResync",
             "clientDismissRecovery",
+            "toggleComment",
+            "toggleListMarker",
+            "rotateHeading",
+            "clientToggleFold",
+            "toggleInlayHints",
             "clientAddCursor",
             "clientColumnSelect",
             "clientSelectNextMatch",
@@ -142,6 +147,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
         ],
     ),
     ("runtime/js/decorations.js", &["serverPublishDecorations"]),
+    ("runtime/js/folding.js", &["serverPublishFoldingRanges"]),
     ("runtime/js/diagnostics.js", &["serverPublishDiagnostics"]),
     (
         "runtime/js/language-server.js",
@@ -163,7 +169,10 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "serverDisableCompletion",
         ],
     ),
-    ("runtime/js/theme.js", &["setTheme", "setTypography"]),
+    (
+        "runtime/js/theme.js",
+        &["setTheme", "setAppearance", "setTypography"],
+    ),
     (
         "runtime/js/shell.js",
         &[
@@ -255,7 +264,7 @@ fn clay_js_facade_exports_follow_naming_and_boundary_rules() {
 #[test]
 fn runtime_facades_are_included_from_authoritative_js_files() {
     let table = fs::read_to_string("src/server/facades.rs").unwrap();
-    let runtime = fs::read_to_string("src/server/js_runtime.rs").unwrap();
+    let runtime = fs::read_to_string("src/server/js_runtime/mod.rs").unwrap();
     let mut expected: Vec<_> = FACADE_MODULES.iter().map(|(path, _)| *path).collect();
     let mut executable: Vec<_> = fs::read_dir("runtime/js")
         .unwrap()

@@ -54,7 +54,7 @@ command id never changed).
   `install_path_browser` / `set_path_browser_error`, `MenuEdit`,
   `ServerMenuActivateOutcome` (`Navigate` / `OpenFile` / `OpenWorkspace` /
   `Dispatch`), kind-dispatching `set_query`/`backspace`/`activate`.
-- `src/server/connection.rs` — `open_command_centre_session` (shared
+- `src/server/connection/mod.rs` — `open_command_centre_session` (shared
   open helper for `controlCenter.open` and `controlCenter.openPath`),
   `path_browser_relist` (bounded relist on the blocking pool),
   `open_workspace_for_bound_tab` (shared with `TabCommand::OpenWorkspace`),
@@ -271,13 +271,13 @@ reachable only from the built-in session):
 - `src/server/menu_sessions.rs` — 11 tests (navigate relists, activation
   dispatch incl. `OpenFile`/`OpenWorkspace` outcomes, no-op helpers on
   Control Center, cancel clears store + fresh id, frame-ceiling snapshot).
-- `src/server/connection.rs` — 10 e2e tests (open from keybinding +
+- `src/server/connection/mod.rs` — 10 e2e tests (open from keybinding +
   catalogue, sticky-error unlistable seed, descend/ascend/direct jump,
   file open converts browse → `SingleFile` grant, workspace open rebinds
   only the bound tab + vanished-directory denial, navigation-only creates
   no grants, cross-client denial, tab-switch + disconnect survival,
   reload dismissal).
-- `src/server/js_runtime.rs` — default/unbind/rebind of `Ctrl+X Ctrl+F`
+- `src/server/js_runtime/mod.rs` — default/unbind/rebind of `Ctrl+X Ctrl+F`
   through `clay:keybindings`.
 - `src/protocol/mod.rs` — default keymap contains the path-browser binding.
 - Manual plan: `test-plan/03-files-and-workspace.md` F17–F29,

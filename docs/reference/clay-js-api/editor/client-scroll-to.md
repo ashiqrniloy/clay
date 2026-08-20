@@ -115,7 +115,7 @@ Use `editor.clientScrollTo` when the user asks for scroll editor through the Cla
 - JS facade: `runtime/js/editor.js::clientScrollTo`
 - Future Deno op: `src/server/ops/editor.rs::op_clay_editor_scroll_to` (`op_clay_editor_scroll_to`)
 - Backing Rust/current owner: `src/editor/viewport.rs::Viewport::scroll_lines`
-- Current implementation audit path: `src/editor/surface.rs::EditorSurface::scroll_lines; src/editor/surface.rs::EditorSurface::scroll_vertical_pixels`
+- Current implementation audit path: `src/editor/surface/mod.rs::EditorSurface::scroll_lines; src/editor/surface/mod.rs::EditorSurface::scroll_vertical_pixels`
 
 ## Lookup metadata
 

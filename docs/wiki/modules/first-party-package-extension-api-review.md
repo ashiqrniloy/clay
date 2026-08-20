@@ -17,7 +17,7 @@ Locked generic-primitive decisions:
 - `runtime/js/*.ts`
 - `src/packages/{manifest,record,graph,service,conflict}.rs`
 - `src/server/ops/*.rs`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `tests/{package_loading,package_graph,package_conflicts,clay_js_api_inventory,primitives_docs}.rs`
 
 ## Overview
@@ -146,7 +146,7 @@ No runtime callback API is needed.
 
 This directory is a private pure-JavaScript helper, not a PackageService package. It contains framing, UTF-8 position, mapping, client, and TypeScript-language-server adapter utilities.
 
-Decided at Plan 061 task 8: keep it private. Third-party language-server bridges use the public `clay:language-server` session APIs with their own approved fixed contribution and do not import `lsp-shared` or any other package's modules. Do not load this helper in the trusted runtime merely to share JavaScript objects across domains.
+Decided at Plan 061 task 8: keep it private. Third-party language-server bridges use the public `clay:language-server` session APIs with their own approved fixed contribution and do not import `lsp-shared` or any other package's modules. First-party trusted bridges import listed `lsp-shared/*` inventory exports; that does not share V8 objects across runtimes.
 
 ## Full First-Party Replacement
 

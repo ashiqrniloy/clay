@@ -6,7 +6,7 @@
 
 ## Overview
 
-Phase 20.2 introduces a native chrome primitive layer in `src/shell/primitives.rs`. These are `pub(crate)` inert paint helpers that centralize recurring shell/SDUI chrome drawing. They are **not** package-facing `ComponentKind` entries and are **not** exposed to JavaScript.
+Phase 20.2 introduces a native chrome primitive layer in `src/shell/primitives.rs`. These are `pub(crate)` inert paint helpers that centralize recurring shell/SDUI chrome drawing. They are **not** package-facing `ComponentKind` entries and are **not** exposed to JavaScript. Missing reads use the resolved core-token fallback (or a transparent/zero no-op where the primitive is intentionally optional), never a package-supplied raw style.
 
 ## Primitives
 
@@ -20,57 +20,49 @@ Phase 20.2 introduces a native chrome primitive layer in `src/shell/primitives.r
 | Kbd hint | `paint_kbd_hint` | Keyboard shortcut hint |
 | Icon slot | `paint_icon_slot` | Token-sized icon slot (no package image assets) |
 | Tooltip shell | `paint_tooltip_shell` | Tooltip background with border and shadow |
+| Scrim | `paint_scrim` | Single-pass centered Command Centre backdrop |
+| Tab card chrome | `tab_card_chrome` | State-resolved tab fill/text/close/focus-ring projection |
 
 ## Token Mapping
 
-All primitives are token-driven. They read from `ResolvedUiTheme` and fall back to hardcoded values if a token is missing.
+All primitives are token-driven. They read from cached `ResolvedUiTheme` values and use core-token/transparent fallbacks only when a value is absent; package declarations cannot inject raw values.
 
 ### Core Tokens (Phase 20.2)
 
 | Token | Type | Purpose |
 |-------|------|---------|
 | `dimension.scrollbar.width` | dimension | Scrollbar width |
-| `dimension.scrollbar.margin` | dimension | Scrollbar margin |
-| `dimension.scrollbar.min_thumb` | dimension | Minimum scrollbar thumb size |
-| `dimension.icon.size` | dimension | Icon size |
-| `dimension.icon.slot.size` | dimension | Icon slot size |
+| `dimension.icon.size` | dimension | Icon glyph slot size |
 | `dimension.kbd.height` | dimension | Kbd hint height |
-| `dimension.focus.ring.width` | dimension | Focus ring width |
-| `dimension.focus.ring.offset` | dimension | Focus ring offset |
+| `surface.scrollbar` / `surface.scrollbar.track` | color | Scrollbar thumb/track |
 | `surface.badge` | color | Badge background |
 | `surface.kbd` | color | Kbd hint background |
 | `surface.tooltip` | color | Tooltip background |
-| `surface.icon` | color | Icon slot background |
 | `border.focus` | color | Focus ring border |
 | `border.kbd` | color | Kbd hint border |
-| `border.tooltip` | color | Tooltip border |
 | `text.badge` | color | Badge text |
 | `text.kbd` | color | Kbd hint text |
 | `text.tooltip` | color | Tooltip text |
 | `text.icon` | color | Icon glyph |
-| `radius.icon` | dimension | Icon slot corner radius |
-| `spacing.badge.padding.x` | dimension | Badge horizontal padding |
-| `spacing.badge.padding.y` | dimension | Badge vertical padding |
-| `spacing.kbd.padding.x` | dimension | Kbd hint horizontal padding |
-| `spacing.kbd.padding.y` | dimension | Kbd hint vertical padding |
-| `typography.badge` | typography | Badge text style |
-| `typography.kbd` | typography | Kbd hint text style |
-| `typography.tooltip` | typography | Tooltip text style |
+| `spacing.badge` | spacing | Badge padding |
+| `spacing.tooltip` | spacing | Tooltip padding |
+| `typography.detail` / `typography.caption` / `typography.body` | typography | Badge, kbd, and tooltip text roles |
+| `elevation.overlay` | elevation | Tooltip elevation role |
+| `z.tooltip` | z-level | Tooltip stacking role |
+| `surface.scrim` / `opacity.scrim` | color / opacity | Centered Command Centre backdrop |
 
 ### Reused Tokens (Phase 20.1)
 
 | Token | Type | Purpose |
 |-------|------|---------|
-| `border.hairline` | color | Divider color |
-| `dimension.border.hairline` | dimension | Divider width |
-| `dimension.border.thin` | dimension | Focus ring width (fallback) |
-| `radius.xs` | dimension | Corner radius (focus ring, badge, kbd, tooltip) |
+| `border.hairline` | color | Divider/tooltip border |
+| `dimension.border.hairline` | dimension | Divider/panel/tooltip border width |
+| `dimension.border.thin` | dimension | Focus ring width |
+| `radius.xs` | radius | Focus ring, badge, kbd, and scrollbar corners |
+| `radius.sm` | radius | Panel and tooltip corners |
 | `surface.panel` | color | Panel background |
-| `border.panel` | color | Panel border |
-| `surface.overlay` | color | Tooltip background (fallback) |
-| `border.overlay` | color | Tooltip border (fallback) |
-| `elevation.overlay` | elevation | Tooltip shadow |
-| `text.muted` | color | Icon glyph (fallback) |
+| `border.subtle` | color | Panel border |
+| `text.muted` | color | Icon glyph fallback |
 | `opacity.disabled` | opacity | Disabled state |
 
 ## Interaction States
@@ -107,11 +99,15 @@ Phase 20.4 adds three `pub(crate)` helpers (re-exported from `src/shell/mod.rs`)
 
 ### Scroll chrome opacity (Phase 20.4)
 
-`paint_scroll_chrome` maps Rest/Disabled → `opacity.disabled` (dim, near-invisible) and Hover/Active/Focus → `opacity.full`. No dedicated `opacity.scrollbar.rest` token was added — Rest reuses `opacity.disabled`. `paint_vertical_scrollbar` in `src/editor/surface.rs` now threads `EditorSurface::scrollbar_interaction_state` (O(1) pointer hit-test against `scrollbar_thumb_rect`) instead of a hardcoded `InteractionState::Rest`.
+`paint_scroll_chrome` preserves the theme-authored `surface.scrollbar` alpha at Rest/Disabled and lifts it toward opaque on Hover/Active/Focus. No dedicated scrollbar interaction token was added; `paint_vertical_scrollbar` in `src/editor/surface/mod.rs` threads `EditorSurface::scrollbar_interaction_state` (O(1) pointer hit-test against `scrollbar_thumb_rect`).
 
 ## Shell chrome consumers (Plan 088)
 
-Tab cards and the pinned new-tab affordance consume `component_state_color`, `list_row_fill_color`, `tab_card_chrome`, and cached radius/text tokens. Split focus rings are painted after child panes so active focus remains visible. These are still Clay-internal paint paths; no package-facing primitive or JavaScript API was added.
+Tab cards and the pinned new-tab affordance consume `component_state_color`, `list_row_fill_color`, `tab_card_chrome`, and cached radius/text tokens. Split focus rings are painted after child panes so active focus remains visible. The centered Command Centre consumes one `paint_scrim` pass plus `paint_tooltip_shell`; package panel/overlay hosts reuse the panel/tooltip primitives and clip their retained children. These are still Clay-internal paint paths; no package-facing primitive or JavaScript API was added.
+
+### Production status
+
+`paint_divider`, `paint_focus_ring`, `paint_panel_chrome`, `paint_scroll_chrome`, `paint_tooltip_shell`, `paint_scrim`, and `tab_card_chrome` have production consumers. `paint_badge`, `paint_kbd_hint`, and `paint_icon_slot` remain internal chrome skeletons: their token/state contracts are documented and tested, but label/glyph rendering is deferred and no production path promotes them to package-facing kinds. This is why the component catalog keeps Badge/tag, kbd hint, and Icon slot marked planned.
 
 ## Accessibility Roles
 
@@ -127,6 +123,7 @@ Primitives map to accessibility roles:
 | Kbd hint | `label` (implicit via text) |
 | Icon slot | `image` or `presentation` |
 | Tooltip shell | `tooltip` |
+| Scrim | `dialog` backdrop (Clay-internal) |
 
 ## Conformance Contract
 
@@ -146,9 +143,15 @@ The Phase 20.2 conformance contract is enforced by `tests/ui_primitive_conforman
 - **Package fixed panel backgrounds:** `paint_panel_chrome`
 - **Overlay backgrounds:** `paint_tooltip_shell`
 
-### Editor (src/editor/surface.rs)
+### Editor (src/editor/surface/mod.rs)
 
 - **Vertical scrollbar:** `paint_scroll_chrome`
+
+### Shell / centered surface
+
+- **Tab cards and pinned `+`:** `tab_card_chrome` plus cached UI typography metrics
+- **Split-pane focus:** `paint_focus_ring` after pane-host paint
+- **Centered Command Centre:** one `paint_scrim` fill, then `paint_tooltip_shell`
 
 ## Performance
 
@@ -167,9 +170,10 @@ The Phase 20.2 conformance contract is enforced by `tests/ui_primitive_conforman
 
 - **Source:** `src/shell/primitives.rs`
 - **Conformance tests:** `tests/ui_primitive_conformance.rs`
-- **Unit tests:** `src/shell/primitives.rs` (3 tests: panic-free on zero-size rects, all interaction states render, disabled opacity applied; plus `component_state_color_maps_all_five_states_to_tokens` and `list_row_fill_color_honors_selected_and_state` from Phase 20.4)
+- **Unit tests:** `src/shell/primitives.rs` (`primitives_panic_free_on_zero_size_rects`, `primitives_render_all_interaction_states`, `disabled_state_applies_opacity`, state-color/tab-card mappings, scrollbar-alpha regression, and deterministic single-pass scrim tests)
 - **Visibility test:** `tests/rust_visibility_api_mapping.rs` (`phase20_2_primitives_are_not_exposed_to_javascript`, `phase20_4_introduces_no_unexposed_public_rust_function`)
-- **Hot-path guard:** `tests/editor_performance_invariants.rs::hot_path_no_theme_resolution_or_package_js` (Phase 20.4)
+- **Hot-path guards:** `tests/editor_performance_invariants.rs::hot_path_no_theme_resolution_or_package_js` and `centered_overlay_work_is_bounded_and_scrim_is_single_pass`
+- **Commands:** `cargo test --lib shell::primitives --quiet`; `cargo test --test editor ui_primitive_conformance`; `cargo test --test protocol primitives_docs`
 
 ## Related Documentation
 

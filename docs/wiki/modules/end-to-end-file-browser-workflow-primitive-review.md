@@ -12,9 +12,9 @@
 - `src/server/workspace.rs`
 - `src/shell/file_browser.rs`
 - `src/server/command_execution.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/client/file_dialog.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/editor/buffer.rs`
 - `src/masonry_editor.rs`
 - `tests/primitives_docs.rs`

@@ -4,7 +4,7 @@
 
 - `plans/086-Audit-Remediation-P0-Release-Integrity-and-Accessibility.md`
 - `src/editor/accessibility.rs`
-- `src/masonry_shell.rs`
+- `src/masonry_shell/mod.rs`
 - `src/masonry_editor.rs`
 - `src/masonry_pane_document.rs`
 - `src/masonry_package_region.rs`
@@ -58,7 +58,7 @@ Masonry traverses `children_ids()` for layout, paint, update, and accessibility.
 - `PackageRegionWidget` keeps its reconciled root pod attached when a menu is open and adds virtual MenuItem/Status nodes beside it. Menu-open state therefore cannot emit an unattached pod subtree.
 - Pane, editor, shell, and menu status/announcement nodes are attached by their retained owner rather than allocated with `WidgetId::next()` on every accessibility pass.
 
-The consumer regression helpers in `src/masonry_shell.rs` feed real `TreeUpdate` values through `accesskit_consumer::Tree`, checking initial trees, unchanged redraws, tab add/reorder/remove, status updates, menu query/selection/close, inactive-pane reachability, and stale virtual-node removal.
+The consumer regression helpers in `src/masonry_shell/mod.rs` feed real `TreeUpdate` values through `accesskit_consumer::Tree`, checking initial trees, unchanged redraws, tab add/reorder/remove, status updates, menu query/selection/close, inactive-pane reachability, and stale virtual-node removal.
 
 ### Label and announcement safety
 
@@ -94,12 +94,12 @@ The three connection/configuration workflows use unique mode-700 temporary roots
 
 ## Tests and Verification
 
-- `src/masonry_shell.rs`: consumer-accepted initial and incremental accessibility trees, stable virtual IDs, inactive-tab stashing, tab/menu/status reachability, and stale-node removal.
+- `src/masonry_shell/mod.rs`: consumer-accepted initial and incremental accessibility trees, stable virtual IDs, inactive-tab stashing, tab/menu/status reachability, and stale-node removal.
 - `src/masonry_package_region.rs`: menu query/selection/close updates and 256-item sanitized-label projection through `accesskit_consumer::Tree`.
 - `src/editor/accessibility.rs`: shared bounded menu-item label helper and fallback tests.
 - `src/protocol/codec.rs`: malformed/truncated/mutated/misaligned corpus and oversized declaration rejection.
 - `src/server/configuration.rs`: internal accessibility/archive-validation settings fail closed.
-- `tests/live_atspi_smoke.rs`: isolated server/client, live AT-SPI tree query, tab/status/region assertions, stability re-dump, and child liveness.
+- `tests/live_atspi_smoke.rs`: isolated server/client, live AT-SPI tree query, tab/status/region assertions, stability re-dump, and child liveness; synthetic top-level-frame focus ingress is covered deterministically by the shell unit test.
 - `test-plan/01-launch-and-connection.md`, `03-files-and-workspace.md`, `10-keybindings-and-commands.md`, `13-window-splits.md`, `14-tabs.md`: real Linux execution records and blockers.
 - Key commands:
 
@@ -114,11 +114,31 @@ CLAY_LIVE_A11Y_SMOKE=1 cargo test --test security live_atspi_smoke::live_atspi_a
 
 The live test is intentionally ignored unless `CLAY_LIVE_A11Y_SMOKE=1` is set and the host exposes a usable AT-SPI bus.
 
-## Known Follow-ups
+## Plan 089 focus/accessibility closure
 
-- A top-level frame `grab_focus` can still produce a Masonry focus event for a removed/nonexistent widget on the reviewed GNOME host; focusing the editor Entry is safe. Evidence: `code-reviews/screenshots/2026-08-14-plan086-a11y/focus-frame-crash.log`.
-- Dirty active-pane close exposed a separate `accesskit_consumer` panic (`Focused ID #4 is not in the node list`) while the server survived. Evidence: `code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log`.
-- The prior transient-menu item-label ceiling follow-up is resolved by Plan 087 Task 5; dirty-pane-close focus reconciliation and top-level frame focus-event guarding remain deferred to Plan 089.
+The two Plan 086 focus blockers are closed at the shared Masonry seam. The
+local exact-0.4.0 `vendor/masonry_core` patch invalidates focused/next/fallback
+IDs while `MutateCtx::remove_child` detaches a subtree; Masonry's normal
+focus rewrite then rebuilds the path and clears ancestor flags, and
+`RenderRoot::handle_access_event` ignores actions aimed at Masonry's synthetic
+Window node. `ClayShellWidget` transfers focus before same-tab pane removal or
+clears it while a replacement tab is still stashed; registry reconciliation
+focuses the survivor after layout. The editor Entry path remains the valid
+control case.
+
+Regression coverage lives in `src/masonry_shell/mod.rs` and runs the real
+`accesskit_consumer::Tree` through dirty-close rejection/discard, clean focused
+pane removal, active-tab removal, and synthetic frame focus. The
+environment-gated `tests/live_atspi_smoke.rs` remains available for ordinary
+live tree/liveness coverage; blind AT-SPI focus actions are not used on hosts
+where the event bridge can block. Remove the local dependency patch when
+upstream Masonry carries equivalent focus invalidation and event-ingress
+guards.
+
+The prior transient-menu item-label ceiling follow-up remains resolved by Plan
+087 Task 5. Original crash evidence is retained for provenance:
+`code-reviews/screenshots/2026-08-14-plan086-a11y/focus-frame-crash.log` and
+`manual-dirty-pane-close-crash.log`.
 
 ## Related
 

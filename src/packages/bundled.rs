@@ -10,10 +10,9 @@
 //! The fingerprint is FNV-1a-64, not a cryptographic hash: the trust root is
 //! the checked-in source tree itself (an attacker who can write under
 //! `CARGO_MANIFEST_DIR` can replace the whole binary), so the fingerprint's
-//! job is exact binding plus drift detection, enforced by the
-//! inventory-matches-source-tree unit test below. Regenerate entries with the
-//! one-liner in that test's failure message after intentionally editing a
-//! bundled `package.json`.
+//! job is exact binding plus drift detection. `build.rs` generates
+//! [`BUNDLED_PACKAGES`] from `bundled-inventory.toml` plus each listed
+//! `package.json`. Unlisted `packages/*` dirs are never trusted.
 
 use std::path::{Path, PathBuf};
 
@@ -43,95 +42,19 @@ pub(crate) struct BundledPackageEntry {
     pub(crate) manifest_fingerprint: &'static str,
 }
 
-/// Checked-in bundled inventory. `packages/lsp-shared` is intentionally
-/// absent: it is a private build-time helper with no manifest identity and is
-/// never a loadable package.
-pub(crate) const BUNDLED_PACKAGES: &[BundledPackageEntry] = &[
-    BundledPackageEntry {
-        name: "@clay/git",
-        version: "0.1.0",
-        root: "git",
-        manifest_fingerprint: "aa9c4099b1589a0b",
-    },
-    BundledPackageEntry {
-        name: "@clay/javascript",
-        version: "0.1.0",
-        root: "javascript",
-        manifest_fingerprint: "81f0237907ba7a1d",
-    },
-    BundledPackageEntry {
-        name: "@clay/lsp-javascript",
-        version: "0.1.0",
-        root: "lsp-javascript",
-        manifest_fingerprint: "7e193cef1bfa9961",
-    },
-    BundledPackageEntry {
-        name: "@clay/lsp-markdown",
-        version: "0.1.0",
-        root: "lsp-markdown",
-        manifest_fingerprint: "749112e10ff1b41c",
-    },
-    BundledPackageEntry {
-        name: "@clay/lsp-rust",
-        version: "0.1.0",
-        root: "lsp-rust",
-        manifest_fingerprint: "defbcf3965f29015",
-    },
-    BundledPackageEntry {
-        name: "@clay/lsp-typescript",
-        version: "0.1.0",
-        root: "lsp-typescript",
-        manifest_fingerprint: "6b19bf25d6820a21",
-    },
-    BundledPackageEntry {
-        name: "@clay/markdown",
-        version: "0.1.0",
-        root: "markdown",
-        manifest_fingerprint: "341407ba4daea2c5",
-    },
-    BundledPackageEntry {
-        name: "@clay/rust",
-        version: "0.1.0",
-        root: "rust",
-        manifest_fingerprint: "df054a6597821e9d",
-    },
-    BundledPackageEntry {
-        name: "@clay/settings",
-        version: "0.1.0",
-        root: "settings",
-        manifest_fingerprint: "df0c3d93eaf1ec29",
-    },
-    BundledPackageEntry {
-        name: "@clay/theme-gruvbox-material-dark",
-        version: "0.1.0",
-        root: "theme-gruvbox-material-dark",
-        manifest_fingerprint: "b40aa56699639b43",
-    },
-    BundledPackageEntry {
-        name: "@clay/theme-gruvbox-material-light",
-        version: "0.1.0",
-        root: "theme-gruvbox-material-light",
-        manifest_fingerprint: "c65285885db23e1e",
-    },
-    BundledPackageEntry {
-        name: "@clay/theme-modus-operandi",
-        version: "0.1.0",
-        root: "theme-modus-operandi",
-        manifest_fingerprint: "7d079e0b979a7150",
-    },
-    BundledPackageEntry {
-        name: "@clay/theme-modus-vivendi",
-        version: "0.1.0",
-        root: "theme-modus-vivendi",
-        manifest_fingerprint: "b95dc45385d0170c",
-    },
-    BundledPackageEntry {
-        name: "@clay/typescript",
-        version: "0.1.0",
-        root: "typescript",
-        manifest_fingerprint: "ca5826e2a366931d",
-    },
-];
+/// One inventory helper export. Specifier is the exact import allowlist key
+/// (`lsp-shared/client.js`); `file` is relative to the helper root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BundledHelperExport {
+    pub(crate) specifier: &'static str,
+    pub(crate) root: &'static str,
+    pub(crate) file: &'static str,
+}
+
+// Generated bundled inventory. Helpers (`BUNDLED_HELPERS`) are fingerprinted
+// and export-mapped but never loadPackage-able. Edit `bundled-inventory.toml`
+// plus the package tree; fingerprints are computed at build time.
+include!(concat!(env!("OUT_DIR"), "/bundled_packages.rs"));
 
 /// FNV-1a 64-bit fingerprint as lowercase hex.
 pub(crate) fn fnv1a64_hex(bytes: &[u8]) -> String {
@@ -146,6 +69,38 @@ pub(crate) fn fnv1a64_hex(bytes: &[u8]) -> String {
 /// Look up a bundled inventory entry by exact package name.
 pub(crate) fn bundled_entry(name: &str) -> Option<&'static BundledPackageEntry> {
     BUNDLED_PACKAGES.iter().find(|entry| entry.name == name)
+}
+
+/// Look up a helper inventory entry by directory name.
+pub(crate) fn bundled_helper(root: &str) -> Option<&'static BundledPackageEntry> {
+    BUNDLED_HELPERS.iter().find(|entry| entry.root == root)
+}
+
+/// Look up a helper export by exact specifier (`lsp-shared/client.js`).
+pub(crate) fn helper_export(specifier: &str) -> Option<&'static BundledHelperExport> {
+    BUNDLED_HELPER_EXPORTS
+        .iter()
+        .find(|export| export.specifier == specifier)
+}
+
+/// Canonical helper root and export file for an exact inventory specifier.
+/// Fails closed if the file is missing or escapes the helper root.
+pub(crate) fn resolve_helper_export(
+    specifier: &str,
+) -> Option<(&'static BundledHelperExport, PathBuf, PathBuf)> {
+    let export = helper_export(specifier)?;
+    let _helper = bundled_helper(export.root)?;
+    let root = std::fs::canonicalize(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("packages")
+            .join(export.root),
+    )
+    .ok()?;
+    let file = std::fs::canonicalize(root.join(export.file)).ok()?;
+    if !file.starts_with(&root) {
+        return None;
+    }
+    Some((export, file, root))
 }
 
 /// Canonical shipped root for one inventory entry.
@@ -215,49 +170,123 @@ mod tests {
     #[test]
     fn inventory_matches_source_tree() {
         let packages_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages");
-        let mut derived: Vec<(String, String, String, String)> = Vec::new();
+        assert_eq!(
+            BUNDLED_PACKAGES
+                .iter()
+                .map(|entry| entry.root)
+                .collect::<Vec<_>>(),
+            inventory_list_roots(),
+            "BUNDLED_PACKAGES roots drifted from bundled-inventory.toml"
+        );
+        for entry in BUNDLED_PACKAGES {
+            let bytes = std::fs::read(packages_dir.join(entry.root).join("package.json"))
+                .unwrap_or_else(|error| panic!("{} manifest readable: {error}", entry.root));
+            let value: serde_json::Value = serde_json::from_slice(&bytes)
+                .unwrap_or_else(|error| panic!("{} manifest parses: {error}", entry.root));
+            assert_eq!(value.get("name").and_then(|v| v.as_str()), Some(entry.name));
+            assert_eq!(
+                value.get("version").and_then(|v| v.as_str()),
+                Some(entry.version)
+            );
+            assert!(
+                value.get("clay").is_some(),
+                "{} must declare clay metadata",
+                entry.root
+            );
+            assert_eq!(
+                fnv1a64_hex(&bytes),
+                entry.manifest_fingerprint,
+                "{} fingerprint drifted; rebuild after editing the listed package.json",
+                entry.root
+            );
+        }
+        for entry in BUNDLED_HELPERS {
+            let bytes = std::fs::read(packages_dir.join(entry.root).join("package.json"))
+                .unwrap_or_else(|error| panic!("{} helper manifest readable: {error}", entry.root));
+            assert_eq!(
+                fnv1a64_hex(&bytes),
+                entry.manifest_fingerprint,
+                "{} helper fingerprint drifted; rebuild after editing the helper package.json",
+                entry.root
+            );
+            assert!(
+                value_has_export_files(entry.root),
+                "{} helper must keep exported files on disk",
+                entry.root
+            );
+        }
+    }
+
+    fn value_has_export_files(root: &str) -> bool {
+        BUNDLED_HELPER_EXPORTS
+            .iter()
+            .filter(|export| export.root == root)
+            .all(|export| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("packages")
+                    .join(export.root)
+                    .join(export.file)
+                    .is_file()
+            })
+    }
+
+    #[test]
+    fn unlisted_package_dirs_are_not_trusted() {
+        let packages_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages");
+        let listed = inventory_list_roots();
+        assert!(
+            packages_dir.join("lsp-shared/package.json").is_file(),
+            "lsp-shared helper must remain on disk"
+        );
+        assert!(
+            !listed.contains(&"lsp-shared"),
+            "lsp-shared must stay off the loadable root list"
+        );
+        assert!(bundled_entry("@clay/lsp-shared").is_none());
+        assert!(bundled_entry("lsp-shared").is_none());
+        assert!(
+            BUNDLED_HELPERS
+                .iter()
+                .any(|entry| entry.root == "lsp-shared"),
+            "lsp-shared must be a fingerprinted helper"
+        );
         for dir in std::fs::read_dir(&packages_dir).expect("packages dir readable") {
             let dir = dir.expect("package dir entry").path();
-            let manifest_path = dir.join("package.json");
-            let Ok(bytes) = std::fs::read(&manifest_path) else {
+            if !dir.is_dir() {
+                continue;
+            }
+            let root = dir.file_name().expect("dir name").to_string_lossy();
+            if listed.contains(&root.as_ref()) {
+                continue;
+            }
+            assert!(
+                !BUNDLED_PACKAGES.iter().any(|entry| entry.root == root),
+                "unlisted packages/{root} must not be in BUNDLED_PACKAGES"
+            );
+            let Ok(bytes) = std::fs::read(dir.join("package.json")) else {
                 continue;
             };
             let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
                 continue;
             };
-            let (Some(name), Some(version)) = (
-                value.get("name").and_then(|v| v.as_str()),
-                value.get("version").and_then(|v| v.as_str()),
-            ) else {
-                continue; // private helpers such as lsp-shared are not packages
-            };
-            if value.get("clay").is_none() {
-                continue;
+            if let Some(name) = value.get("name").and_then(|v| v.as_str()) {
+                assert!(
+                    bundled_entry(name).is_none(),
+                    "unlisted packages/{root} name `{name}` must not be trusted"
+                );
             }
-            derived.push((
-                name.to_string(),
-                version.to_string(),
-                dir.file_name().unwrap().to_string_lossy().into_owned(),
-                fnv1a64_hex(&bytes),
-            ));
         }
-        derived.sort();
-        let inventory: Vec<(String, String, String, String)> = BUNDLED_PACKAGES
-            .iter()
-            .map(|entry| {
-                (
-                    entry.name.to_string(),
-                    entry.version.to_string(),
-                    entry.root.to_string(),
-                    entry.manifest_fingerprint.to_string(),
-                )
+    }
+
+    fn inventory_list_roots() -> Vec<&'static str> {
+        include_str!("bundled-inventory.toml")
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let value = line.strip_prefix("root")?.trim().strip_prefix('=')?.trim();
+                value.strip_prefix('"')?.strip_suffix('"')
             })
-            .collect();
-        assert_eq!(
-            inventory, derived,
-            "BUNDLED_PACKAGES drifted from packages/*/package.json; regenerate fingerprints \
-             with the fnv1a64-hex of each manifest after an intentional bundled manifest edit"
-        );
+            .collect()
     }
 
     #[test]
@@ -386,6 +415,11 @@ mod tests {
             ids.extend(contributions.ui_components.iter().map(|d| d.id.as_str()));
             ids.extend(contributions.ui_panels.iter().map(|d| d.id.as_str()));
             ids.extend(contributions.syntax_grammars.iter().map(|d| d.id.as_str()));
+            ids.extend(
+                crate::server::syntax::SyntaxGrammarRegistry::native_owned_grammar_ids(
+                    &record.manifest.clay.api_prefix,
+                ),
+            );
             ids.extend(RUNTIME_IDS.iter().copied());
             for point in points {
                 assert!(

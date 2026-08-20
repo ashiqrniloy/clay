@@ -164,6 +164,15 @@ impl CommandExecutor {
             ));
         }
         validate(command, &request)?;
+        if crate::masonry_editor::EditorClientCommand::from_command_id(&command.command_id)
+            .is_some()
+        {
+            return Err(diagnostic(
+                &request.command_id,
+                CommandExecutionRule::UnknownCommand,
+                "command is client-mapped and not server-executed",
+            ));
+        }
 
         Ok(CommandExecutionResult {
             command_id: command.command_id.clone(),
@@ -1013,6 +1022,19 @@ mod tests {
             .execute(&CommandRegistry::new(), request("markdown.missing"))
             .unwrap_err();
 
+        assert_eq!(error.rule, CommandExecutionRule::UnknownCommand);
+    }
+
+    #[test]
+    fn unbacked_package_command_is_not_accepted() {
+        let manifest = package_manifest();
+        let mut registry = CommandRegistry::new();
+        registry
+            .register_command(&manifest, declaration("markdown.toggleComment"))
+            .expect("register command");
+        let error = CommandExecutor::new()
+            .execute(&registry, request("markdown.toggleComment"))
+            .unwrap_err();
         assert_eq!(error.rule, CommandExecutionRule::UnknownCommand);
     }
 

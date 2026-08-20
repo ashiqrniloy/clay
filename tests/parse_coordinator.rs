@@ -91,6 +91,7 @@ fn update(version: u64) -> IncrementalParseUpdate {
         syntax_tree_delta: Some("heading".to_string()),
         decoration_updates: Vec::new(),
         diagnostic_update: None,
+        folding_update: None,
     }
 }
 
@@ -312,6 +313,7 @@ async fn native_work_for_two_documents_runs_independently() {
                     syntax_tree_delta: None,
                     decoration_updates: Vec::new(),
                     diagnostic_update: None,
+                    folding_update: None,
                 })
             },
         )
@@ -374,6 +376,7 @@ async fn generic_parse_request_metadata_supports_token_stream_adapters() {
                         syntax_tree_delta: Some("token-stream:visible-ranges-first".to_string()),
                         decoration_updates: Vec::new(),
                         diagnostic_update: None,
+                        folding_update: None,
                     })
                 }
             },
@@ -560,7 +563,11 @@ fn rust_code_has_no_markdown_specific_parser_branch() {
         "src/protocol/decorations.rs",
         "src/server/decorations.rs",
         "src/server/ops/decorations.rs",
-        "src/editor/surface.rs",
+        "src/editor/surface/mod.rs",
+        "src/editor/surface/caret.rs",
+        "src/editor/surface/command.rs",
+        "src/editor/surface/decoration.rs",
+        "src/editor/surface/diagnostic.rs",
         "src/editor/layout.rs",
         "src/masonry_editor.rs",
         "src/client/mod.rs",
@@ -597,6 +604,7 @@ fn markdown_parse_update_accepts_valid_decoration_payload() {
     let parsed = IncrementalParseUpdate {
         decoration_updates: vec![markdown_decoration_update(4)],
         diagnostic_update: None,
+        folding_update: None,
         ..update(4)
     };
 
@@ -651,6 +659,7 @@ async fn invalid_diagnostic_rejects_parse_update_without_partial_publication() {
                         notification.document_version,
                     )],
                     diagnostic_update: Some(diagnostics),
+                    folding_update: None,
                     ..update(notification.document_version)
                 })
             },
@@ -752,6 +761,7 @@ fn markdown_parse_update_rejects_decoration_version_mismatch() {
     let parsed = IncrementalParseUpdate {
         decoration_updates: vec![markdown_decoration_update(99)],
         diagnostic_update: None,
+        folding_update: None,
         ..update(4)
     };
 

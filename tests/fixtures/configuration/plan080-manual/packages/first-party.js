@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // First-party package configuration: language-server grants + explicit
-// @clay/* package loads. Loaded from examples/init.js (section 10) via:
+// @clay/* package loads. Loaded from examples/init.js (section 11) via:
 //
 //   await loadConfigurationModule({ path: "./packages/first-party.js", optional: true });
 //

@@ -10,7 +10,7 @@
 - `src/protocol/mod.rs`, `src/protocol/decorations.rs`, `src/protocol/parse.rs`.
 - `src/server/decorations.rs`, `src/server/parse_coordinator.rs`, `src/server/syntax.rs`, `src/server/ops/decorations.rs`.
 - `runtime/js/decorations.js`, `src/client/mod.rs`, `src/masonry_editor.rs`.
-- `src/editor/theme.rs`, `src/editor/surface.rs`, `src/editor/layout.rs`.
+- `src/editor/theme.rs`, `src/editor/surface/mod.rs`, `src/editor/layout.rs`.
 - `tests/primitives_docs.rs`, `tests/parse_coordinator.rs`, `tests/decoration_transport.rs`, `tests/syntax_grammar.rs`, `tests/editor_performance_invariants.rs`.
 
 ## Overview
@@ -31,7 +31,7 @@ Phase 18.17 needs source-associated byte-range diagnostics that can be produced 
 
 `src/protocol/decorations.rs::DecorationSpan` already supplies a validated non-empty byte range, `DecorationKind`, `TokenType` + `Modifiers`, priority, optional syntax/semantic font role, and `DecorationProvenance`. `DecorationSet` supplies document/version and viewport bounds. `src/server/decorations.rs::validate_decoration_set` rejects stale versions, empty/reversed/off-viewport ranges, invalid style scopes, unauthorized font roles, provenance mismatch, and payload overflow.
 
-`src/client/mod.rs`, `src/masonry_editor.rs`, and `src/editor/surface.rs::EditorDecorationState` already route, apply, version-clear, near-viewport-prune, and paint bounded inert chunks outside package code. This lifecycle is reusable as a pattern. `DecorationSpan` itself is not the diagnostic metadata primitive: `DecorationKind::Diagnostic` has only visual token/layer data and cannot carry diagnostic code, message, source, or independent source-chunk replacement semantics.
+`src/client/mod.rs`, `src/masonry_editor.rs`, and `src/editor/surface/decoration.rs::EditorDecorationState` already route, apply, version-clear, near-viewport-prune, and paint bounded inert chunks outside package code. This lifecycle is reusable as a pattern. `DecorationSpan` itself is not the diagnostic metadata primitive: `DecorationKind::Diagnostic` has only visual token/layer data and cannot carry diagnostic code, message, source, or independent source-chunk replacement semantics.
 
 Diagnostics must remain additive with existing Syntax, Semantic, and Search layers. A diagnostic set must not replace syntax/semantic decoration state, choose a font role, or alter shaping merely because it shares byte geometry.
 

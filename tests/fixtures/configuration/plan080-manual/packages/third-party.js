@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // Template for third-party package configuration. Loaded from
-// examples/init.js (section 10) via:
+// examples/init.js (section 11) via:
 //
 //   await loadConfigurationModule({ path: "./packages/third-party.js", optional: true });
 //

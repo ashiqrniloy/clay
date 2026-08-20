@@ -64,7 +64,11 @@ Core tokens live in `core_theme_value` (`src/shell/theme.rs`) and are the only s
 | `diagnostic.info` | Info (Phase 20.1) |
 | `diagnostic.success` | Success (Phase 20.1) |
 
-Editor base UI color keys (`src/editor/theme.rs` `BaseUiColors`, theme-package contributed): `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`, plus syntax tokens. The editor `StyleRegistry` is the single source of color for editor paint paths and is separate from SDUI typed tokens.
+Editor base UI color keys (`src/editor/theme.rs` `BaseUiColors` / `StyleRegistry`, theme-package contributed): `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`, `searchMatch`, `unused`, `gutterFg`, `gutterFgActive`, `lineHighlight`, `indentGuide`, `bracketMatch`, plus syntax tokens. The editor `StyleRegistry` is the single source of color for editor paint paths and is separate from SDUI typed tokens. Chrome keys (`gutterFg*`, `lineHighlight`, `indentGuide`, `bracketMatch`) style the Phase 26.5 gutter / active-line / indent-guide / bracket-match surfaces.
+
+Editor layout insets (Phase 26.6) are Clay-owned constants aligned to the spacing scale, not new SDUI tokens: horizontal `spacing.xl` (32) without a gutter, `spacing.xxl` (48) when the gutter is on, vertical 20. Wrap policy is `editorRules.layout`, not a theme token.
+
+Theme `textStyles` extra axes (Phase 26.3/26.4): `background` (`#rgb`/`#rrggbb`/`#rrggbbaa`) and `scale` (finite `(0, 4]`). Defaults: Quote/CodeBlock/SearchMatch/Deprecated fills; heading ladder H1 1.50 … H6 0.92, CodeSpan 0.90. Not SDUI tokens.
 
 Legacy `textStyles` themes are projected into modern UI roles by `ResolvedUiTheme::with_base_ui` (`src/shell/theme.rs`) when no typed `designTokens` override wins: panel/list/overlay surfaces use `panelBg`, controls/badges/kbd use `statusBg`, selection/state surfaces use `selection`, focus/accent uses `caret`, feedback uses the diagnostic colors, and text roles use `text`/`placeholder`/`statusText`. UI `text.muted` promotes a low-contrast legacy placeholder to `text` so the same WCAG AA gate applies to light and dark themes. This compatibility projection changes no package-facing token names and keeps theme overrides cached before paint/layout.
 
@@ -209,6 +213,16 @@ Packages and components select a semantic variant name only; they cannot supply 
 Packages declare semantic tokens through `clay.ui.serverRegisterThemeToken` (`runtime/js/ui.js`) or the `clay.contributions.themeTokens`/`clay.contributions.designTokens` manifest descriptors. A package token declaration carries `token` (package-prefixed name), `type` (one of the ten types above), `fallback` (a same-typed Clay core token), and `description`.
 
 Theme packages may also ship typed UI design-token overrides via `clay.contributions.designTokens` (`UiDesignTokenOverride`), validated into `ActiveTheme.design_tokens` and resolved client-side into `ResolvedUiTheme`. Each override's value variant must match the core token's type and pass domain bounds (dimension ordering, opacity `[0,1]`, `motion-duration` `[0,1000]`, valid level names). Raw CSS, raw colors, style strings, renderer callbacks, native handles, and raw ops are rejected at load time.
+
+## Plan 088 token consumption (no additions)
+
+Plan 088 Tasks 3–7 use the existing typed token catalog; no core token or package token domain was added. The modernization contract is consumption-only:
+
+- Shell, pane, panel, overlay, tab, status, and package chrome use the cached `ResolvedUiTheme` surface/text/border, spacing, radius, opacity, density, z-level, elevation, dimension, and semantic typography tokens already listed above.
+- Responsive decisions use token-backed panel/sidebar defaults plus user UI typography metrics and Masonry constraints. They may yield a fixed slot or clip bounded content, but packages cannot declare breakpoints, concrete pixel sizes, font families, or raw CSS.
+- `typography.*` remains a variant selector over user-owned `UiTypographyHierarchy`; `theme.setTypography` owns concrete sizes/families. `designTokens` cannot supply hierarchy scales or typography-token overrides.
+- Token resolution happens once at theme/configuration install or reload. Paint, layout, pointer, scroll, keypress, and text-event paths read cached values only; no package JavaScript, raw IPC, parsing, or re-resolution runs in those hot paths.
+- Contrast, same-typed fallbacks, bounds, state completeness, and code-vs-catalog parity remain host validation rules. `tokens.md` must stay synchronized with `core_theme_value`; no visual alias is added without a concrete generic consumer.
 
 ## Rules
 

@@ -251,6 +251,10 @@ pub struct IncrementalParseUpdate {
     pub decoration_updates: Vec<DecorationSet>,
     /// Optional source-associated diagnostics validated atomically with this update.
     pub diagnostic_update: Option<DiagnosticSet>,
+    /// Optional folding ranges produced with this accepted syntax tree or
+    /// package publish harvested during the same parse invocation.
+    /// Payload-capped by `FOLDING_RANGE_PAYLOAD_BUDGET_BYTES` before publish.
+    pub folding_update: Option<crate::protocol::FoldingRangeSet>,
 }
 
 #[cfg(test)]

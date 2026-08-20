@@ -12,7 +12,7 @@ in `package.json` and registered by `dist/load.js` via
 
 | Control | Catalog kind |
 |---------|-------------|
-| Container | `panel` (fixed right slot, `defaultVisibility: hidden`) |
+| Container | `panel` (fixed right slot, `defaultVisibility: hidden`) + `scroll` (bounded settings content) |
 | Sections | `collapse` |
 | Theme picker | `dropdown` (items carry `settings.setTheme`) |
 | Appearance picker | `dropdown` (light / dark / system) |

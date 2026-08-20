@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientClosePane
 js_facade: runtime/js/shell.js::clientClosePane
-backing_rust: src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree; src/main.rs::Driver (dirty guard, document release, conflict-menu sync); src/masonry_pane_document.rs::PaneDocumentView::guard_pane_close / close_pane
+backing_rust: src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree; src/app_driver.rs::Driver (dirty guard, document release, conflict-menu sync); src/masonry_pane_document.rs::PaneDocumentView::guard_pane_close / close_pane
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientClosePane
@@ -109,7 +109,7 @@ Use `shell.clientClosePane` only as a documented command ID for `bindKey` to rem
 
 - JS facade: `runtime/js/shell.js::clientClosePane`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/main.rs::Driver` close arm (dirty guard, document release, conflict-menu sync); `src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command`; `src/shell/layout.rs::PaneSplitTree`; `src/masonry_pane_document.rs::PaneDocumentView::guard_pane_close` / `close_pane`
+- Backing Rust/current owner: `src/app_driver.rs::Driver::apply_shell_client_command` (dirty guard, document release, conflict-menu sync); `src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command`; `src/shell/layout.rs::PaneSplitTree`; `src/masonry_pane_document.rs::PaneDocumentView::guard_pane_close` / `close_pane`
 
 ## Lookup metadata
 

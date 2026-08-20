@@ -54,6 +54,15 @@ pub(super) fn op_clay_syntax_register_syntax_grammar(
         .require_current_package_capability(
             crate::packages::permissions::PackagePermission::ParseDocument,
         )?;
+    let native_owned = crate::server::syntax::SyntaxGrammarRegistry::native_owned_syntax_languages(
+        &package.manifest.clay.api_prefix,
+    );
+    if !native_owned.is_empty() {
+        return Err(clay_error(format!(
+            "syntax.owned_by_native_descriptor: {} owned by native descriptor (FIRST_PARTY_NATIVE_GRAMMARS)",
+            native_owned.join(", ")
+        )));
+    }
     if package.contributions.syntax_grammars.is_empty() {
         return Err(clay_error(
             "syntax.invalid_grammar: package must declare a syntaxGrammars contribution",

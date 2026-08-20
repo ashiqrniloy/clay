@@ -38,7 +38,7 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 
 - Primitive: `ClientUiCommandRoute` plus documented Clay JS API command IDs.
 - Owner: client app driver invokes native UI only after explicit user command; server validates selected paths afterward.
-- Code: `src/main.rs::handle_client_ui_command`, `src/client/file_dialog.rs`, `src/client/mod.rs`, `runtime/js/workspace.js`, `docs/reference/clay-js-api/workspace/client-open-folder-dialog.md`.
+- Code: `src/app_driver.rs::handle_client_ui_command`, `src/client/file_dialog.rs`, `src/client/mod.rs`, `runtime/js/workspace.js`, `docs/reference/clay-js-api/workspace/client-open-folder-dialog.md`.
 - Bug boundary: `clientOpenFolderDialog()` remains a bindable client UI command. The fix must not add hidden config keys or grant folder authority before `AddSelectedWorkspaceRoot` reaches server validation.
 
 ### FileBrowserState and bounded workspace APIs
@@ -53,7 +53,7 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 
 - Primitive: server-owned SDUI action validation.
 - Owner: `StaticSduiState` stores the currently valid Clay-owned workspace browser/action tree; runtime/package trees are separately validated before publication.
-- Code: `src/server/sdui.rs`, `src/server/connection.rs`, `src/server/mod.rs::apply_runtime_outputs`.
+- Code: `src/server/sdui.rs`, `src/server/connection/mod.rs`, `src/server/mod.rs::apply_runtime_outputs`.
 - Bug boundary: open-time package/classification output must not erase Clay-owned workspace browser validation state. `UnknownActionCommand("workspace.openFile")` after Markdown activation is a validation-state ownership bug, not a Markdown-specific bug.
 - Security: keeping strict validation is required; do not make action validation accept undeclared or mismatched commands to mask stale state.
 
@@ -68,21 +68,21 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 
 - Primitive: `PaneSlotLayout` / fixed left-slot geometry.
 - Owner: Clay shell/client layout owns main-region geometry; packages cannot mutate Masonry widgets or native layout directly.
-- Code: `src/shell/layout.rs`, `src/masonry_shell.rs`, `src/masonry_sdui.rs::editor_region_for_document`, `src/masonry_editor.rs::editor_main_rect`.
+- Code: `src/shell/layout.rs`, `src/masonry_shell/mod.rs`, `src/masonry_sdui.rs::editor_region_for_document`, `src/masonry_editor.rs::editor_main_rect`.
 - Bug boundary: the editor must reserve the Clay-owned left file-browser pane even after the active document ID changes. Rebinding the server file-browser tree for every document open is not required for the generic fix.
 
 ### EditorSurface visual scroll and paint chrome
 
 - Primitive: client-owned editor viewport/visual scroll and native paint chrome.
 - Owner: `EditorSurface` owns text viewport, caret, selection, visual scroll state, and editor paint inside the shell-provided main rect.
-- Code: `src/editor/surface.rs`, `src/editor/viewport.rs`, `src/masonry_editor.rs`.
+- Code: `src/editor/surface/mod.rs`, `src/editor/viewport.rs`, `src/masonry_editor.rs`.
 - Bug boundary: remove the permanent purple decorative circle and visible inset editor card/padding as paint-chrome changes. Add main text-area scrollbar using existing `visual_scroll_y` / `last_visual_max_scroll_y` rather than a second scroll model. The sub-line caret-keep-visible helper must be gated by a one-shot caret-pin flag so explicit scrolling can move the view away from the caret instead of snapping back on every paint.
 
 ### Open-document follow-ups
 
 - Primitive: `DocumentClassification`, `MajorModeActivation`, `IncrementalParseUpdate`, and `DecorationRange` on explicit open/reload.
 - Owner: server/runtime classifies and parses open documents asynchronously; client receives inert behavior/decorations/diagnostics.
-- Code: `src/server/connection.rs::open_document_followup_messages`, `src/server/mod.rs::apply_runtime_outputs`, `src/server/parse_coordinator.rs`.
+- Code: `src/server/connection/documents.rs::open_document_followup_messages`, `src/server/mod.rs::apply_runtime_outputs`, `src/server/parse_coordinator.rs`.
 - Bug boundary: `parse.open_activation_timeout` should be a status/diagnostic result only. It must not poison file-browser navigation or action validation.
 
 ## Generic Fix Map

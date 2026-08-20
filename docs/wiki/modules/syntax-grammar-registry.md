@@ -2,7 +2,7 @@
 
 ## Source
 
-- `src/packages/record.rs`
+- `src/packages/record/mod.rs`
 - `src/server/syntax.rs`
 - `runtime/js/syntax.js`
 - `runtime/js/web-tree-sitter-host.ts`
@@ -48,7 +48,7 @@ The validator rejects non-`@clay/*` syntax grammar packages in Phase 18.10, exte
 
 ## Registry State
 
-`SyntaxGrammarRegistry` in `src/server/syntax.rs` is server-owned registry state for already validated descriptors. Phase 18.16 adds Tier 1 native first-party registration: `SyntaxGrammarRegistry::with_first_party_native()` seeds compiled-in descriptors at server runtime startup for Rust, TypeScript, TSX, JavaScript/JSX/MJS/CJS, and Markdown before package load entries run. `register_package` still stages package grammar contributions from a `PackageRecord`, checks deterministic conflicts, and commits only after the whole package contribution set is valid; if a first-party WASM grammar contribution is fully shadowed by the matching native Tier 1 descriptor, it is skipped instead of conflicting so the rest of the language package can load. Explicit Tier 2 selection uses `register_package_with_explicit_tier2_override`, which removes only the matching first-party native descriptor before inserting the WASM contribution.
+`SyntaxGrammarRegistry` in `src/server/syntax.rs` is server-owned registry state for already validated descriptors. Phase 18.16 adds Tier 1 native first-party registration: `SyntaxGrammarRegistry::with_first_party_native()` seeds compiled-in descriptors at server runtime startup for Rust, TypeScript, TSX, JavaScript/JSX/MJS/CJS, and Markdown before package load entries run. First-party `@clay/{rust,typescript,javascript,markdown}` packages omit `syntaxGrammars`; query files stay `include_str!`-sourced from the package tree. `register_package` stages package grammar contributions from a `PackageRecord` and fails with `OwnedByNativeDescriptor` when a contribution is fully shadowed by the matching native descriptor — not a silent skip. `serverRegisterSyntaxGrammar` on a native-owned package prefix returns `syntax.owned_by_native_descriptor`. `clay package inspect` / `PackageInspection.native_syntax_languages` surfaces that ownership. Inverting style maps from trusted package records is a future decision. Explicit Tier 2 selection uses `register_package_with_explicit_tier2_override`, which removes only the matching first-party native descriptor before inserting the WASM contribution.
 
 The registry indexes by:
 
@@ -133,7 +133,7 @@ Phase 18.18 expands first-party highlight queries under `packages/*/queries/high
 
 Tier 2 WASM binaries are not committed yet; each `packages/*/grammars/PROVENANCE.md` records the exact upstream crate/release used by Tier 1, a reproducible `tree-sitter build --wasm` command, and the required SHA-256 recording step for the eventual `*.wasm` file. `first_party_artifact_provenance_is_recorded` keeps that contract from regressing. Clay runtime still performs no network fetch, package-manager install, shell build, or native-library load for grammar artifacts.
 
-Plan 071 (task 10) adds first-party **text-object queries** alongside highlights: `packages/{rust,typescript,javascript}/queries/textobjects.scm` (TypeScript/TSX share one file) ship capture schemas `@textobject.<kind>.<scope>` for eight kinds (function/class/argument/comment/loop/conditional/call/statement, `inner` falling back to `around`). Like highlights, they are compiled-in `NativeGrammarDescriptor` fields (`textobjects_query_path`/`textobjects_query`) — package grammar metadata cannot declare them: `src/packages/record.rs` rejects any `queries` key outside {highlights, locals, injections} deny-by-default, and grammar contributions remain first-party-only. The queries feed the advisory `clientSelectTextobject`/`clientSmartSelect` wire path; smart select itself needs no query file. See [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md).
+Plan 071 (task 10) adds first-party **text-object queries** alongside highlights: `packages/{rust,typescript,javascript}/queries/textobjects.scm` (TypeScript/TSX share one file) ship capture schemas `@textobject.<kind>.<scope>` for eight kinds (function/class/argument/comment/loop/conditional/call/statement, `inner` falling back to `around`). Like highlights, they are compiled-in `NativeGrammarDescriptor` fields (`textobjects_query_path`/`textobjects_query`) — package grammar metadata cannot declare them: `src/packages/record/mod.rs` rejects any `queries` key outside {highlights, locals, injections} deny-by-default, and grammar contributions remain first-party-only. The queries feed the advisory `clientSelectTextobject`/`clientSmartSelect` wire path; smart select itself needs no query file. See [Editor Movement, Selection, Caret, Ligatures, and Text Objects](editor-movement-selection-caret.md).
 
 ## Tree-sitter Parse/Highlight Handler
 

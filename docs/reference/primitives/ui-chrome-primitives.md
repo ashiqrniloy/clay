@@ -46,20 +46,39 @@ Announcements for tab/split changes come from the shell's persistent
 `Status` live-region node (`Live::Polite`), one per user action. See
 [Accessibility (Phase 22.6)](../development/accessibility.md).
 
+### Editor-intelligence chrome (Phase 28)
+
+Phase 28 extends editor data without adding package-facing chrome primitives:
+
+- `FoldingRange` data is validated and delivered in the background. The editor
+  surface owns fold chevrons in `paint_gutter`, collapsed-line hiding, and the
+  client-local toggle command. Fold ranges are not package widgets or tab stops.
+- `DecorationKind::Link` uses the existing `TokenType::Link` underline. Clay
+  hit-tests visible spans, paints hover through `paint_tooltip_shell`, and
+  handles typed hover/activate intent; packages publish targets, not callbacks.
+- Inlay hints are `DecorationKind::InlayHint` spans with bounded inert labels.
+  Clay paints them as muted overlay text after the main token layout with no
+  Parley reflow. They are decorative/`aria-hidden`; the visibility toggle is a
+  Clay command, not a package component.
+- No package JavaScript runs in paint, layout, pointer, scroll, keypress, or
+  text-event handlers. `render-folding` and `render-decorations` publish data
+  only; link activation never mints a browse/filesystem grant and external
+  HTTP targets are display-only.
+
 ## Primitive inventory
 
 | Primitive | Purpose | Token mapping | Accessibility role |
 |-----------|---------|---------------|-------------------|
-| `paint_divider` | Horizontal/vertical separator | `color.border`, `dimension.border.width` | `separator` |
-| `paint_focus_ring` | Focus indicator ring | `color.focus.ring`, `dimension.focus.ring.width`, `dimension.focus.ring.offset` | Applied to focused element |
-| `paint_panel_chrome` | Panel background/border with optional title/collapse/resize | `color.surface.panel`, `color.border`, `dimension.border.width`, `dimension.radius.panel`, `spacing.panel.padding` | `region` or `complementary` |
-| `paint_scroll_chrome` | Scrollbar track/thumb with interaction states | `color.scrollbar.track`, `color.scrollbar.thumb`, `dimension.scrollbar.width`, `dimension.scrollbar.margin`, `dimension.scrollbar.min.thumb`, `dimension.radius.scrollbar` | `scrollbar` |
-| `paint_badge` | Badge/tag with label and interaction states | `color.surface.badge`, `color.text.badge`, `dimension.radius.badge`, `spacing.badge.padding.x`, `spacing.badge.padding.y`, `typography.badge` | `status` or `note` |
-| `paint_kbd_hint` | Keyboard shortcut hint | `color.surface.kbd`, `color.text.kbd`, `dimension.radius.kbd`, `spacing.kbd.padding.x`, `spacing.kbd.padding.y`, `typography.kbd` | `kbd` (via label) |
-| `paint_icon_slot` | Standardized icon placeholder | `dimension.icon.size`, `dimension.icon.slot.size`, `color.text.muted`, `dimension.radius.icon` | `img` or `presentation` |
-| `paint_tooltip_shell` | Tooltip background/border | `color.surface.overlay`, `color.border`, `dimension.border.width`, `dimension.radius.tooltip`, `spacing.tooltip.padding` | `tooltip` |
-| `paint_scrim` (Phase 24.4) | Full-window dim behind centered Command Centre | `color.surface.scrim`, `opacity.scrim` | modal `Dialog` backdrop |
-| `tab_card_chrome` (Phase 22.3) | Tab card background/text with interaction states and selection | `list_row_fill_color`/`disabled_text_color` state mapping, `color.surface.list`, `color.surface.selected`, `color.surface.hover`, `color.surface.active`, `color.text.disabled`, `opacity.disabled` | informational `Tab` under the shell `TabList` (virtual node, not a widget) |
+| `paint_divider` | Horizontal/vertical separator | `border.hairline`, `dimension.border.hairline` | `separator` |
+| `paint_focus_ring` | Focus indicator ring | `border.focus`, `dimension.border.thin`, `radius.xs` | Applied to focused element |
+| `paint_panel_chrome` | Panel background/border with optional title/collapse/resize | `surface.panel`, `border.subtle`, `dimension.border.hairline`, `radius.sm`, `spacing.panel` | `region` or `complementary` |
+| `paint_scroll_chrome` | Scrollbar track/thumb with interaction states | `surface.scrollbar.track`, `surface.scrollbar`, `dimension.scrollbar.width`, `radius.xs` | `scrollbar` |
+| `paint_badge` | Badge/tag with label and interaction states | `surface.badge`, `text.badge`, `radius.xs`, `spacing.badge`, `typography.detail`/`caption` | `status` or `note` |
+| `paint_kbd_hint` | Keyboard shortcut hint | `surface.kbd`, `text.kbd`, `border.kbd`, `radius.xs`, `dimension.kbd.height`, `typography.caption` | `kbd` (via label) |
+| `paint_icon_slot` | Standardized icon placeholder | `dimension.icon.size`, `text.icon`, `opacity.disabled` | `img` or `presentation` |
+| `paint_tooltip_shell` | Tooltip background/border | `surface.tooltip`, `text.tooltip`, `border.hairline`, `dimension.border.hairline`, `radius.sm`, `elevation.overlay`, `z.tooltip`, `spacing.tooltip`, `typography.body` | `tooltip` |
+| `paint_scrim` (Phase 24.4) | Full-window dim behind centered Command Centre | `surface.scrim`, `opacity.scrim` | modal `Dialog` backdrop |
+| `tab_card_chrome` (Phase 22.3) | Tab card background/text with interaction states and selection | `list_row_fill_color`/`disabled_text_color` state mapping, `surface.list`, `surface.selected`, `surface.hover`, `surface.active`, `text.disabled`, `opacity.disabled` | informational `Tab` under the shell `TabList` (virtual node, not a widget) |
 
 ## State-color helpers (Phase 20.4)
 
@@ -82,7 +101,7 @@ All three are token-driven (read `ResolvedUiTheme::color` / `opacity`) and apply
 - **Package overlay chrome**: `paint_package_overlays()` → `paint_tooltip_shell()`
 - **Centered Command Centre backdrop**: root-layer `PackageOverlayHost::paint()` → `paint_scrim()` once over cached window bounds, then existing tooltip-shell chrome. This is a translucent scrim only; no blur, filter, or offscreen pass.
 
-### Editor chrome routing (src/editor/surface.rs)
+### Editor chrome routing (src/editor/surface/mod.rs)
 
 - **Scrollbar chrome**: `paint_vertical_scrollbar()` → `paint_scroll_chrome()`
 - Editor text/caret/selection/diagnostics remain on `StyleRegistry` (editor-owned color authority)
@@ -96,7 +115,7 @@ All three are token-driven (read `ResolvedUiTheme::color` / `opacity`) and apply
 
 Enforced by `tests/ui_primitive_conformance.rs`:
 
-1. **No color literals**: Shell/SDUI chrome paint files contain no `Color::from_rgb8`/`Color::from_rgba8` literals outside `primitives.rs` and `theme.rs`. Phase 20.4 added `src/editor/surface.rs` (editor chrome) to the color-guard set.
+1. **No color literals**: Shell/SDUI chrome paint files contain no `Color::from_rgb8`/`Color::from_rgba8` literals outside `primitives.rs` and `theme.rs`. Phase 20.4 added `src/editor/surface/mod.rs` (editor chrome) to the color-guard set.
 2. **No hardcoded sizes**: Shell/SDUI chrome paint files contain no hardcoded chrome-size constants (`SCROLLBAR_WIDTH`, `BORDER_WIDTH`, etc.) outside `primitives.rs` and `theme.rs`. Phase 20.4 added `src/masonry_editor.rs` (status bar) to the size-guard set.
 3. **Primitive routing**: Package components map onto primitives by construction (SDUI paint routes chrome through primitive helpers).
 4. **Token-driven**: Each primitive reads from `ResolvedUiTheme` (`theme.color()`, `theme.scalar_f64()` for spacing/radius, `theme.dimension()` for logical dimensions, and `theme.opacity()`).
@@ -116,7 +135,7 @@ Editor chrome is **not** SDUI chrome (Plan 071 task 12): caret shape/blink and t
 - **Caret color**: stays theme-owned — the `caret` theme token, overridable through theme-token contributions like any other color. Shape/blink and color are deliberately separate authorities.
 - **Ligatures**: follow the mode's font role. Each `FontProfile` (monospace/proportional/ui) carries a user-owned `LigaturePolicy`; a mode's `defaultFontRole` selects which profile applies to its document text. No package capability grants ligature overrides. See [Semantic Typography Roles](typography.md#ligature-policy).
 
-Rendering of both surfaces stays in native code (`paint_caret` in `src/editor/surface.rs`; parley `StyleProperty::FontFeatures` in the layout path); no package JavaScript runs in caret paint or text shaping.
+Rendering of both surfaces stays in native code (`paint_caret` in `src/editor/surface/mod.rs`; parley `StyleProperty::FontFeatures` in the layout path); no package JavaScript runs in caret paint or text shaping.
 
 See [Creating Clay Packages](../packages/creating-packages.md#ui-chrome-conformance-phase-202) for the full package authoring contract.
 

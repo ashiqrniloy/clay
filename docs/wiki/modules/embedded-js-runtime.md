@@ -2,7 +2,8 @@
 
 ## Source
 
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
+- `src/server/js_runtime/tests.rs`
 - `src/server/facades.rs`
 - `runtime/js/*.js` and `runtime/js/*.d.ts`
 - `src/server/ops/mod.rs`
@@ -16,7 +17,22 @@
 - `src/server/syntax.rs`
 - `src/server/completion.rs`
 - `src/server/mod.rs`
-- `src/server/js_runtime.rs` tests
+
+## Module layout (Plan 090)
+
+`src/server/js_runtime.rs` was split into a directory module in Plan 090 (task 3). The facade and its adapters stay in `mod.rs`; the extracted responsibilities each own one private submodule:
+
+| File | Contents |
+|------|----------|
+| `src/server/js_runtime/mod.rs` | `DomainRuntime`, `ClayJsRuntimeService` facade (service + channel + two-domain state ownership), and the `JsParseHandler`/`JsCompletionProvider`/`JsLanguageIntelligenceProvider` adapters; test-only service helpers remain `#[cfg(test)]` here |
+| `src/server/js_runtime/error.rs` | `ClayRuntimeError`, `ClayRuntimeEvaluation`, `DocumentAnalysisInvocation` + diagnostic helpers |
+| `src/server/js_runtime/worker.rs` | `RuntimeWorker`, `RuntimeEntry`, `RuntimeCommand`, `start_runtime_worker`/`run`/`create`/`prepare`, `harvest_op_state_evaluation`, `LoadedRuntimeEntry` |
+| `src/server/js_runtime/source.rs` | `ClayModuleLoader` + `ModuleLoader` impl, `markdown_it_module_source`, `CONTROLLED_MAIN_SPECIFIER` |
+| `src/server/js_runtime/evaluation.rs` | `evaluate_loaded_module`, `apply_persisted_preferences`, the `evaluate_js_*` bridges, `TerminationTimer` |
+| `src/server/js_runtime/validation.rs` | parse/completion/language-intelligence/document-analysis JSON marshal/unmarshal + result validation |
+| `src/server/js_runtime/tests.rs` | One sibling unit-test module retaining parent-private access; runtime, facade, package-load, trust-domain, loader, and configuration regressions |
+
+External callers still reach the previously-`pub(crate)` types (`ClayRuntimeError`, `ClayRuntimeEvaluation`, `RuntimeEntry`, `RuntimeCommand`, `ClayJsRuntimeService`) at `crate::server::js_runtime::*` via `pub(crate)` re-exports in `mod.rs`.
 
 ## Overview
 
@@ -38,9 +54,10 @@ Clay runs exactly two persistent `JsRuntime` per `ClayJsRuntimeService`: one **T
 ### Source
 
 - `src/packages/bundled.rs` — `BUNDLED_PACKAGES` inventory, `verify_bundled_trust`, `bundle_extension_points_match_real_contributions` test.
-- `src/server/js_runtime.rs` — `DomainRuntime`, `start_runtime_worker`, `dispatch_to_domain`, `replay_third_party_domain`, `production_reload`, `absorb_cross_domain_evaluation`, `harvest_op_state_evaluation`, `third_party_registrations_snapshot`.
+- `src/server/js_runtime/mod.rs` — `DomainRuntime`, `dispatch_to_domain`, `replay_third_party_domain`, `production_reload`, `third_party_registrations_snapshot`.
+- `src/server/js_runtime/worker.rs` — `start_runtime_worker`, `harvest_op_state_evaluation`.
 - `src/server/ops/mod.rs` — `init_trusted_extension` (67 ops) vs `init_package_extension` (35 ops).
-- `src/server/facades.rs` — one compile-time table includes all 21 executable facade files and marks the 13 public-third-party rows.
+- `src/server/facades.rs` — one compile-time table includes all 23 executable facade files and marks the 14 public-third-party rows.
 - `src/server/cross_domain.rs` — cross-domain typed invocation, envelope validation, requester/target approval checks.
 - `plans/061-Two-Package-Runtime-Trust-Domains-and-Extension-Authority.md`
 
@@ -52,7 +69,7 @@ Each domain has its own `DomainRuntime` struct holding a worker thread, an mpsc 
 
 - **Trusted extension** (67 ops): all Clay ops including admin/config-only (configuration evaluation, package loading, theme management, language-server grant, bridge dispatch).
 - **Package extension** (35 ops): public third-party ops only — mode registration/activation, command/key/palette registration, parse/completion/language-intelligence provider registration, SDUI/decoration/diagnostic publication, theme application, typography setting, status-item registration, bindKey/unbindKey, and 4 cross-domain bridge result ops.
-- **Facade allowlists**: trusted worker can import all 21 `clay:*` facades; third-party worker can import only 13 rows marked public in `src/server/facades.rs`. The same row supplies the `include_str!` executable source, so specifier, source ownership, and domain classification cannot drift across separate Rust lists. Independent Plan 061 inventory tests still verify the 13 security classifications. Missing facades fail at module-load time with `'not allowed in the server runtime boundary'` (fail-closed by import denial).
+- **Facade allowlists**: trusted worker can import all 23 `clay:*` facades; third-party worker can import only 14 rows marked public in `src/server/facades.rs`. The same row supplies the `include_str!` executable source, so specifier, source ownership, and domain classification cannot drift across separate Rust lists. Independent Plan 061 inventory tests still verify the 14 security classifications. Missing facades fail at module-load time with `'not allowed in the server runtime boundary'` (fail-closed by import denial).
 - **Op absence enforcement**: calling a trusted-only op in the third-party runtime produces `TypeError: undefined is not a function` — fail-closed by type absence rather than runtime gating at op entry.
 
 ### Cross-Domain Bridge
@@ -85,7 +102,7 @@ Document-analysis workers are dynamically forked from the owning domain worker's
 
 `RuntimeGenerationStore` owns the active `{ id, ClayJsRuntimeService, diagnostics }` generation for the server. `IpcServer::trigger_developer_hot_reload` is the deterministic non-GUI reload trigger for tests and developer workflow; it is a thin wrapper around `IpcServer::reload_runtime_generation` and adds no package-manager, filesystem, network, shell, or third-party package authority. `IpcServer::reload_runtime_generation` builds the next `ClayJsRuntimeService` off to the side, evaluates configured `init.js`/default package loads on that fresh runtime, and swaps the store only after configuration evaluation succeeds. After a successful swap, `refresh_open_documents_after_reload` enumerates already-open server-owned documents, reruns the same generic selected-file classification/activation path for each document, and returns only follow-up `BehaviorManifest`, `DecorationSet`, or diagnostic messages; it does not send `DocumentOpened`/`DocumentReloaded` full-text snapshots. Failure records a sanitized runtime diagnostic and keeps the previous generation ID/service active. Existing connection tasks ask the store for `current()` before selected-file activation, so later opens use the newest successful generation without respawning IPC connections.
 
-`ClayJsRuntimeService` starts TWO dedicated worker threads when constructed: one trusted and one third-party. Facade source is compiled into the binary from `runtime/js/*.js` by `src/server/facades.rs`; loading performs only a static 21-row lookup and never reads or transpiles facade files at runtime. Adjacent `*.d.ts` files are declarations only. Each worker owns one `deno_core::JsRuntime`, one single-thread Tokio runtime for driving `run_event_loop`, one mutable `ClayModuleLoader`, and one shared `ClayOpState`. Public async methods (`evaluate_controlled_module`, `load_configuration_from_root*`, and default configuration loading) send `RuntimeCommand::Evaluate` requests over a channel and await a oneshot response; the caller never holds or shares the V8 runtime.
+`ClayJsRuntimeService` starts TWO dedicated worker threads when constructed: one trusted and one third-party. Facade source is compiled into the binary from `runtime/js/*.js` by `src/server/facades.rs`; loading performs only a static 23-row lookup and never reads or transpiles facade files at runtime. Adjacent `*.d.ts` files are declarations only. Each worker owns one `deno_core::JsRuntime`, one single-thread Tokio runtime for driving `run_event_loop`, one mutable `ClayModuleLoader`, and one shared `ClayOpState`. Public async methods (`evaluate_controlled_module`, `load_configuration_from_root*`, and default configuration loading) send `RuntimeCommand::Evaluate` requests over a channel and await a oneshot response; the caller never holds or shares the V8 runtime.
 
 The first evaluation is loaded as the runtime's main ES module. Later evaluations use Deno side modules with unique `clay://runtime/main-N.js` specifiers, so global JS state, imported package modules, the first-party `loadEntry` allowlist, and registered package metadata survive across evaluations. `ClayOpState::begin_evaluation` clears per-evaluation records/SDUI/decorations before each command while preserving long-lived package/mode/handler registries needed by Phase 18.7. `ClayOpState::set_runtime_context` updates the current workspace and document id for the command without rebuilding the runtime.
 
@@ -168,10 +185,11 @@ assert_eq!(error.diagnostic().code, "runtime.timeout");
 
 - `src/server/mod.rs`: `reload_runtime_generation_swaps_only_after_successful_configuration_load`, `successful_reload_refreshes_open_documents_without_full_snapshots`, and `failed_reload_keeps_previous_runtime_generation_active` verify generation ID changes, fresh service state after success, open-document refresh through generic mode activation, no full-text snapshot refresh frames, stale service retention after failure, and sanitized diagnostics.
 - `tests/persistent_runtime_hot_reload.rs`: `developer_hot_reload_trigger_reports_success_and_sanitized_failure` verifies the non-GUI developer trigger reports success, returns sanitized failure diagnostics, and keeps the previous generation active after failure.
-- `src/server/js_runtime.rs`: evaluates controlled modules on a persistent worker-owned runtime, verifies global JS state survives between evaluations, imports `clay:*` facades, rejects unsafe/unknown imports and platform authorities, converts JavaScript/op failures into typed errors and sanitized diagnostics, publishes runtime-generated SDUI, validates the runtime SDUI smoke fixture, runtime-backs the configuration-needed document/workspace facade subset, rejects executable parse callbacks/missing parse permission, bridges JS parse handlers into `ParseCoordinator`, registers first-party syntax grammar metadata through `clay:syntax`, registers completion provider metadata through `clay:completion`, enforces registered parse-handler `timeoutMs`, supports generic open-time path classification, compiles key binding registrations into behavior manifests, rejects unauthorized workspace paths/unknown commands, asserts ordinary typing does not enter the runtime, terminates runaway modules with the configured timeout, terminates heap growth with `runtime.heap_limit`, restarts on the next controlled evaluation after timeout/heap worker poisoning, and verifies short timeouts do not break fast evaluations.
+- `src/server/js_runtime/tests.rs`: 198 passing unit tests plus one ignored manual resource probe cover persistent evaluation, trust-domain separation/replay, exact helper-export loading, package load/activation, manifest/keybinding APIs, parse/completion/language-intelligence bridges, editor-layout configuration, syntax ownership, timeout/heap recovery, and sanitized failures. `cargo test --lib server::js_runtime::tests -- --test-threads=1` is the focused move/regression command.
+- `src/server/js_runtime/mod.rs`: owns only runtime implementation and `#[cfg(test)]` service inspection helpers; it includes the sibling module with `#[cfg(test)] mod tests;` and does not contain the test mass.
 - `src/client/mod.rs::tests::selected_file_edit_then_save_persists_and_reports_clean` starts a real Unix IPC server with a `Ctrl+S` configuration overlay, opens and activates a selected Rust file, verifies mode activation preserved the save binding, queues edit then save, and checks both clean `DocumentSaved` metadata and persisted bytes.
-- `src/server/connection.rs`: `client_receives_js_generated_sdui_snapshot` verifies a runtime-generated tree stored in server SDUI state is emitted as the bootstrap `SduiSnapshot`; `server_sends_runtime_diagnostics_after_bootstrap` verifies stored diagnostics are published after bootstrap.
-- `src/server/js_runtime.rs`: typography transaction/rejection tests verify complete replacement and no raw authority fields; `src/server/mod.rs::typography_update_reaches_connected_clients_once` verifies a changed configuration emits one bounded live server update.
+- `src/server/connection/mod.rs`: `client_receives_js_generated_sdui_snapshot` verifies a runtime-generated tree stored in server SDUI state is emitted as the bootstrap `SduiSnapshot`; `server_sends_runtime_diagnostics_after_bootstrap` verifies stored diagnostics are published after bootstrap.
+- `src/server/js_runtime/tests.rs`: typography transaction/rejection tests verify complete replacement and no raw authority fields; `src/server/mod.rs::typography_update_reaches_connected_clients_once` verifies a changed configuration emits one bounded live server update.
 - `src/server/document_analysis.rs`: 6 unit tests covering worker lifecycle, open/change/close/reset/completion/intelligence/shutdown flows, stale output rejection, grant revocation, oversize document rejection, mailbox coalescing, and root/generation cancellation.
 - Command: `cargo test js_runtime --quiet`
 - Command: `cargo test persistent_js_runtime_retains_global_state_between_evaluations --lib`

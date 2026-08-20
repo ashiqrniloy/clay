@@ -55,6 +55,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverRegisterCommand](reference/clay-js-api/commands/server-register-command.md) — `commands.serverRegisterCommand`
 - [serverRevealInTree](reference/clay-js-api/commands/server-reveal-in-tree.md) — `commands.serverRevealInTree`
 - [serverPublishDecorations](reference/clay-js-api/decorations/server-publish-decorations.md) — `decorations.serverPublishDecorations`
+- [serverPublishFoldingRanges](reference/clay-js-api/folding/server-publish-folding-ranges.md) — `folding.serverPublishFoldingRanges`
 - [serverPublishDiagnostics](reference/clay-js-api/diagnostics/server-publish-diagnostics.md) — `diagnostics.serverPublishDiagnostics`
 - [getConfigurationState](reference/clay-js-api/configuration/get-configuration-state.md) — `configuration.getConfigurationState`
 - [loadConfigurationModule](reference/clay-js-api/configuration/load-configuration-module.md) — `configuration.loadConfigurationModule`
@@ -74,9 +75,15 @@ The generated documentation registry must read this section as the explicit incl
 - [clientShowOpenDocuments](reference/clay-js-api/editor/client-show-open-documents.md) — `editor.clientShowOpenDocuments`
 - [clientRequestResync](reference/clay-js-api/editor/client-request-resync.md) — `editor.clientRequestResync`
 - [clientDismissRecovery](reference/clay-js-api/editor/client-dismiss-recovery.md) — `editor.clientDismissRecovery`
+- [toggleComment](reference/clay-js-api/editor/toggle-comment.md) — `editor.toggleComment`
+- [toggleListMarker](reference/clay-js-api/editor/toggle-list-marker.md) — `editor.toggleListMarker`
+- [rotateHeading](reference/clay-js-api/editor/rotate-heading.md) — `editor.rotateHeading`
+- [clientToggleFold](reference/clay-js-api/editor/client-toggle-fold.md) — `editor.clientToggleFold`
+- [toggleInlayHints](reference/clay-js-api/editor/toggle-inlay-hints.md) — `editor.toggleInlayHints`
 - [clientMoveCursor](reference/clay-js-api/editor/client-move-cursor.md) — `editor.clientMoveCursor`
 - [clientScrollTo](reference/clay-js-api/editor/client-scroll-to.md) — `editor.clientScrollTo`
 - [clientSetCursorStyle](reference/clay-js-api/editor/client-set-cursor-style.md) — `editor.clientSetCursorStyle`
+- [clientSetEditorLayout](reference/clay-js-api/editor/client-set-editor-layout.md) — `editor.clientSetEditorLayout`
 - [clientSetSelection](reference/clay-js-api/editor/client-set-selection.md) — `editor.clientSetSelection`
 - [clientSetViewport](reference/clay-js-api/editor/client-set-viewport.md) — `editor.clientSetViewport`
 - [clientAddCursor](reference/clay-js-api/editor/client-add-cursor.md) — `editor.clientAddCursor`

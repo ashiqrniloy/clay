@@ -41,3 +41,48 @@ Two UI-baseline attempts hit same GNOME window-targeting failure: `list_windows`
 ## 26-08-15 04:44 — ui-review-harness-repo-resolution
 
 Temporary UI capture scripts copied to /tmp fail because capture-ui-review.sh derives repo from its own location, yielding `/` and `cargo build` cannot find Cargo.toml. Repeated workaround hardcodes `/home/arn/Projects/clay`; prevent by adding a `--repo`/environment override or resolving Git root before relocating the harness.
+## 26-08-15 06:00 — computer-use-window-targeting
+
+Task 5 interactive overlay capture hit same GNOME Wayland limitation: targeted window focus fails because GNOME Shell Introspect/window-targeting extension is unavailable, and an unscoped portal Ctrl+Alt+P could not be verified to open Clay's Command Centre. Workaround was a live TTY harness plus global input attempt; capture stayed UNRESOLVED, so no interactive visual pass was claimed. Prevent recurrence by enabling the GNOME window-targeting backend or adding a harness command/action path that opens review surfaces without compositor focus.
+## 26-08-15 16:56 — computer-use-window-targeting
+
+Plan 088 Task 8 interactive visual/a11y review repeated the GNOME Wayland window-targeting failure: can_query_windows=false/can_focus_windows=false, coordinate clicks were refused as unsafe, targeted app_id input failed, and global portal chords landed in the focused Firefox instead of Clay. Workaround was isolated TTY captures plus semantic AT-SPI inspection and retained pre-task screenshots; completion/Command Centre/file-browser/settings/narrow-wide remained explicitly unresolved rather than false passes. Prevention: enable GNOME window-targeting/Introspect backend or add a harness action that opens review states without compositor focus.
+## 26-08-15 18:28 — manual-test-plan-window-targeting
+
+Plan 088 Task 12 hit same GNOME Wayland window-targeting blocker again: AT-SPI and portal screenshots work, but can_query_windows/can_focus_windows remain false, coordinate clicks are refused, and global chords land in the focused app. Repeated workaround: isolated capture harness plus AT-SPI/structural tests and explicit BLOCKED/UNRESOLVED records. Prevention: enable GNOME window-targeting/Introspect and log out/in, or add a Clay harness path that opens representative states without compositor focus.
+## 26-08-16 02:09 — ui-review-harness-loading-readiness
+
+Plan 089 loading review needed repeated manual debugging because capture harness's `Loading workspace` readiness marker can be supplied by the opened fixture document, while AT-SPI dynamic SDUI child names were intermittently blank; runtime/client logs plus a Clay-window crop were required to distinguish true SDUI rendering. The supplied crop_clay_review.py also failed on current gold-border rows (top threshold missed), requiring fixed-offset pure-Python cropping. Prevent recurrence by making fixture/document markers distinct or exposing a structural runtime-tree probe, and make crop detection tolerate 1px border variance.
+## 26-08-17 02:40 — visual-review-harness
+
+Plan 089 visual review hit two repeatable harness gaps: scripts/capture-ui-review.sh only builds target/debug/clay when binary is missing, so source edits can be visually re-tested against a stale binary; make capture runs rebuild or accept an explicit build fingerprint. Native Open File semantic action opened an ambient Pick Files chooser outside the private fixture root, exposing real user locations and blocking safe selection; add a no-focus fixture action or an isolated dialog path before retrying file-browser/settings review.
+## 26-08-17 18:54 — UI screenshot capture off-screen
+
+Visual review harness repeatedly captured unrelated primary-monitor content because Clay launches at stale/off-screen compositor bounds (~x=1845 on a 1920px capture). Repeated workaround: activate Clay, move/resize via GNOME backend, targeted portal screenshot, GNOME ScreenshotWindow, interactive portal, X11/ximagesrc; move left bounds unchanged, target returned only 75px, ScreenshotWindow denied, interactive returned code 2, ximagesrc black. Prevent next retry by making capture harness resolve the actual monitor/window surface or resetting compositor window placement before launch; invalid screenshots had to be deleted because they contained unrelated user desktop data.
+## 26-08-17 20:07 — live-atspi-probe
+
+Manual live AT-SPI smoke rerun failed twice because the desktop-wide probe could not discover Clay, even though the isolated capture-ui-review harness found Clay and produced valid Clay-only trees. Repeated workaround was to use the harness and retain prior Plan 089 live evidence. Prevent this by making live probes target the spawned Clay PID/application directly or isolating AT-SPI desktop state before polling.
+## 26-08-20 13:47 — lsp-shared test module resolution
+
+Direct `node --test packages/lsp-rust/rust-package.test.mjs` and the full protocol matrix fail before tests because `dist/server.js` imports `lsp-shared` through the Rust harness-only register hook. Repeated workaround: run via `cargo test --test runtime lsp_bridge::...`, which injects `tests/fixtures/lsp/register-lsp-shared.mjs`. Prevent with a package-local Node test command or stable workspace resolver so direct and CI invocations share module resolution.
+## 26-08-20 14:23 — Wayland live-review window targeting
+
+Live visual review repeatedly lost Clay's compositor target: GNOME window bounds alternated between visible and off-screen, window IDs changed after each AT-SPI refresh, and move/resize calls reported success without stable geometry. Workaround was repeated list_windows/activate_window/screenshot cycles plus the TTY capture harness; keyboard eventually worked only when the harness kept a FIFO-backed TTY. Prevent with a stable window handle/targeted screenshot API that does not remap Wayland foreign-toplevel IDs between queries.
+## 26-08-20 15:09 — stale Phase 28 test baselines
+
+Full `cargo test --all-targets` exposed repeated stale Phase 28 baseline assumptions: hardcoded facade/op counts, behavior-version/command-count assertions, FoldingRangeSet message ordering, package payload estimates, and fixture exports. Workaround was rebaseline Plan 061 + extension counts and rely on focused API/doc/security gates; remaining runtime fixture failures still need their own phase-specific rebaseline. Prevent with generated command/message/package fixture expectations or one Phase 28 post-implementation baseline task instead of scattered literals.
+## 26-08-20 16:08 — full-suite baseline drift
+
+After rebaselining three configuration-manifest assertions for the Phase 28 `Ctrl+/` default, full Linux `cargo test --all-targets` improved to 1636 passed/11 failed. Remaining failures are the same older Phase 28/runtime fixtures (folding message/payload baselines, package exports/duplicate commands, native syntax ownership, menu activation); focused configuration/API gates are green. Generated phase baselines would avoid repeatedly triaging these unrelated failures during later tasks.
+## 26-08-21 00:19 — manual-gui-tty-blocker
+
+Manual GUI harness still blocks interactive Phase 28 capture because scripts/capture-ui-review.sh requires a TTY before keyboard input; both completion and Command Centre attempts hit the same blocker. Repeated workaround: retain partial AT-SPI dumps, rely on focused structural tests, and mark live rows UNRESOLVED. Prevent next time by adding a supported non-TTY input bridge or a computer-use-driven harness mode that accepts injected key events and records the same evidence.
+## 26-08-21 01:28 — wayland-keyboard-backend
+
+P1 GUI recapture hit broader Wayland input friction after the TTY workaround: computer-use reports no keyboard-capable backend (`/dev/uinput` denied, no xdotool/ydotool, RemoteDesktop AvailableDeviceTypes=0), so no-op edit and `Ctrl+Alt+I` cannot be delivered. Workaround was to preserve paired UNRESOLVED artifacts with AT-SPI/client/server logs and prove worker resolution structurally. Prevent next time by enabling a keyboard-capable RemoteDesktop portal or a supported ydotool/uinput backend in the review host.
+## 26-08-21 03:29 — live-atspi-desktop-scan
+
+Live AT-SPI aggregate smoke repeatedly scans the entire desktop tree and timed out despite the targeted Clay fixture working (`supports_editable_text=true`). Workaround: use GNOME window/PID-targeted AT-SPI inspection and retain explicit host-blocked status. Prevent next retry by making live smoke locate the Clay application/window by PID or bounded app-name polling before traversing unrelated Firefox/GNOME trees.
+## 26-08-21 04:30 — p2-visual-recapture-input
+
+P2 recapture repeated the same Wayland limitation: static fixtures pass, but completion/Command Centre/fold/link/transform/inlay-toggle/resize states cannot be driven because doctor reports no keyboard backend (`/dev/uinput` denied, no xdotool/ydotool, RemoteDesktop AvailableDeviceTypes=0). Workaround was static capture plus explicit UNRESOLVED artifacts and structural/security tests. Prevent recurrence with a deterministic no-input fixture action path or keyboard-capable review host.

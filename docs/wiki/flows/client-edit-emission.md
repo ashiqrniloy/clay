@@ -2,7 +2,7 @@
 
 ## Source
 
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/client/mod.rs`
 - `src/masonry_editor.rs`
 - `src/protocol/mod.rs`
@@ -56,13 +56,13 @@ if let Some(event) = outcome.edit_event {
 
 ## Tests
 
-- `src/editor/surface.rs`: `insert_command_emits_insert_operation` validates caret insertion metadata.
-- `src/editor/surface.rs`: `edit_event_carries_behavior_version` validates installed manifest version metadata.
-- `src/editor/surface.rs`: `selection_replacement_emits_replace_operation` validates selected-range replacement metadata.
-- `src/editor/surface.rs`: `backspace_emits_delete_operation_at_unicode_boundary` validates Unicode scalar boundary deletion ranges.
-- `src/editor/surface.rs`: `delete_forward_selected_range_emits_delete_operation` validates normalized selected deletion ranges.
-- `src/editor/surface.rs`: `read_only_editor_allows_navigation_but_not_mutation` validates observer UI behavior.
-- `src/editor/surface.rs`: `editor_events_do_not_block_without_ipc_consumer` validates local edits without a sender/manifest.
+- `src/editor/surface/mod.rs`: `insert_command_emits_insert_operation` validates caret insertion metadata.
+- `src/editor/surface/mod.rs`: `edit_event_carries_behavior_version` validates installed manifest version metadata.
+- `src/editor/surface/mod.rs`: `selection_replacement_emits_replace_operation` validates selected-range replacement metadata.
+- `src/editor/surface/mod.rs`: `backspace_emits_delete_operation_at_unicode_boundary` validates Unicode scalar boundary deletion ranges.
+- `src/editor/surface/mod.rs`: `delete_forward_selected_range_emits_delete_operation` validates normalized selected deletion ranges.
+- `src/editor/surface/mod.rs`: `read_only_editor_allows_navigation_but_not_mutation` validates observer UI behavior.
+- `src/editor/surface/mod.rs`: `editor_events_do_not_block_without_ipc_consumer` validates local edits without a sender/manifest.
 - `src/client/mod.rs`: `edit_event_is_enqueued_as_client_edit_message` validates event-to-protocol conversion.
 - `src/client/mod.rs`: `read_only_client_queue_does_not_emit_edit_message` validates queue-side read-only enforcement.
 - `src/client/mod.rs`: `bounded_edit_queue_applies_backpressure` validates bounded queue behavior and pending rollback.

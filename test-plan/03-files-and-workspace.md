@@ -70,7 +70,7 @@ binding from Setup.
 | # | Action | Expected |
 |---|--------|----------|
 | F13 | Fresh launch with a workspace root and no prior toggle | Workspace pane starts hidden; the editor occupies the left slot; no file-browser `Panel`/`List` is visible |
-| F14 | Press `Ctrl+B` | Workspace pane appears for the active tab; header contains `Workspace`, the folder name, and the full workspace location |
+| F14 | Press `Ctrl+B` | Workspace pane appears for the active tab; header contains `Workspace` and a sanitized workspace name (plus only workspace-relative location when shown); the full authorized absolute path is excluded |
 | F15 | Press `Ctrl+B` again | Pane disappears; the editor reclaims the left slot; no other tab or document state changes |
 | F16 | While pane is hidden, press `Ctrl+O` and select `b.md` | Native file dialog opens normally; selected document opens in the active pane despite hidden workspace chrome; cancellation remains a no-op |
 
@@ -130,6 +130,24 @@ ln -s /tmp/clay-manual/a.txt /tmp/clay-manual/link.txt
 
 - **PASS — F32/F33/F34/F37:** from the welcome state, AT-SPI `click` on the `Open File` button opened the native Nautilus Open File dialog (no implicit authority — a real user dialog was required); typing the workspace path into the dialog's location box and accepting opened `review.md` as `doc 3` (`DocumentOpened` in the client log, entry `Clay — Connected — Editable — review.md — doc 3 — v1`, welcome hidden). AT-SPI names showed only basenames — no `/tmp/…` or `/home/…` segments.
 - **Coverage note:** F35 (Open Folder) and F36 (close-last-pane returns to welcome) were not re-run this session; F36's welcome-return is covered by unit tests (`close_pane` resets to welcome) and S35 below.
+
+## Plan 088 workspace-surface steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| F38 | Toggle the workspace browser on a real workspace and inspect its header/rows | Header uses `Workspace · <sanitized name>`; visible directory labels are bounded and sanitized; no full `/home/...` or `/tmp/...` authorization path leaks |
+| F39 | Return to an empty tab/welcome state after closing its document | Welcome uses the sanitized workspace basename and keeps Open File/Open Folder accessible; it does not reserve an unnecessary left browser slot |
+| F40 | Use long/control-character/path-separator file and workspace names where the host permits | Labels truncate/fallback safely, never expose host path layout, and accessibility names stay bounded |
+| F41 | Inspect browser and welcome trees while a file is selected | Browser/welcome labels and status diagnostics remain non-color-only and contain no document secrets or absolute paths |
+
+## Plan 088 task 12 Linux execution record (2026-08-15)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| F14/F38/F40 | BLOCKED — host window targeting/native dialog limitation | Existing structural sanitization test and Task 4 implementation evidence pass; this host cannot focus Clay or drive the browser/native chooser safely, so no browser visual pass is claimed |
+| F39 | PASS | Current Clay-only default artifact `code-reviews/screenshots/2026-08-15-plan088-task12-manual/default/` exposes sanitized `Workspace: clay`, bounded welcome actions/status, and no absolute path in screenshot/tree |
+| F41 | PASS welcome / BLOCKED browser | Current tree proves non-color-only welcome/status names and no path leak; browser tree could not be targeted safely on this host |
+| F35/F36 | NOT RUN manually | Welcome-return structural coverage passes (`new welcome_entry_reclaims_workspace_sidebar_space`, `S35`); direct Open Folder/last-document interaction remains blocked by targeted input |
 
 ## Negative checks
 

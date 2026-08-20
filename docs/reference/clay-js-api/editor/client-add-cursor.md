@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientAddCursor
 js_facade: runtime/js/editor.js::clientAddCursor
-backing_rust: src/editor/surface.rs::EditorSurface::add_cursor_line
+backing_rust: src/editor/surface/mod.rs::EditorSurface::add_cursor_line
 deno_op: op_clay_editor_add_cursor
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_add_cursor
 name: clientAddCursor
@@ -99,7 +99,7 @@ Use `editor.clientAddCursor` when the user asks for add-cursor multi-editing thr
 
 - JS facade: `runtime/js/editor.js::clientAddCursor`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_add_cursor`
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::add_cursor_line`
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::add_cursor_line`
 - Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
 
 ## Lookup metadata

@@ -9,23 +9,16 @@
   },
   "clay": {
     "apiPrefix": "lsp-markdown",
+    "preset": "lsp-bridge",
     "entry": "./dist/index.js",
     "loadEntry": "./dist/load.js",
-    "permissions": [
-      "parse-document",
-      "completion-provider",
-      "render-decorations"
-    ],
     "capabilities": [
       "language-server"
     ],
     "modes": [],
     "docs": "./docs/index.md",
     "apiDependencies": [
-      "language.serverRegisterDocumentAnalyzer",
-      "language-server.startLanguageServerSession",
-      "decorations.serverPublishDecorations",
-      "diagnostics.serverPublishDiagnostics"
+      "language-server.startLanguageServerSession"
     ],
     "performance": {
       "estimatedManifestBytes": 1500,
@@ -81,26 +74,6 @@
           "timeoutMs": 5000
         }
       ]
-    },
-    "extensionPoints": [
-      {
-        "id": "lsp-markdown.providers",
-        "version": 1,
-        "operations": [
-          "append",
-          "replace"
-        ],
-        "contributionKinds": [
-          "completionProvider",
-          "intelligenceProvider",
-          "analyzer"
-        ],
-        "scopes": [
-          "lsp-markdown.completion",
-          "lsp-markdown.intelligence"
-        ],
-        "summary": "Add or replace language-server completion, intelligence, and analyzer providers. The language-server descriptor and grant are not mutable."
-      }
-    ]
+    }
   }
 }

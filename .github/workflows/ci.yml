@@ -19,14 +19,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
-      - run: cargo audit
-      - run: cargo fmt --check
-      - run: cargo check --all-targets
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test --all-targets
+      - run: scripts/check.sh full
       - name: Report build storage
         if: always()
-        run: |
-          du -sh target/debug/deps target/debug/incremental target
-          printf 'Executable files in target/debug/deps: '
-          find target/debug/deps -maxdepth 1 -type f -executable | wc -l
+        run: scripts/check.sh report

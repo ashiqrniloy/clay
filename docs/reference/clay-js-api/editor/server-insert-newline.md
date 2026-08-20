@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: serverInsertNewline
 js_facade: runtime/js/editor.js::serverInsertNewline
-backing_rust: src/editor/surface.rs::EditorSurface::insert_newline_with_event; src/server/document.rs::DocumentState::apply_edit
+backing_rust: src/editor/surface/mod.rs::EditorSurface::insert_newline_with_event; src/server/document.rs::DocumentState::apply_edit
 deno_op: op_clay_editor_insert_newline
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_insert_newline
 name: serverInsertNewline
@@ -108,8 +108,8 @@ Use `editor.serverInsertNewline` when the user asks for insert newline through t
 
 - JS facade: `runtime/js/editor.js::serverInsertNewline`
 - Future Deno op: `src/server/ops/editor.rs::op_clay_editor_insert_newline` (`op_clay_editor_insert_newline`)
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::insert_newline_with_event; src/server/document.rs::DocumentState::apply_edit`
-- Current implementation audit path: `src/editor/surface.rs::newline_text_at; src/client/behavior.rs::ClientBehaviorState::route_key`
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::insert_newline_with_event; src/server/document.rs::DocumentState::apply_edit`
+- Current implementation audit path: `src/editor/surface/mod.rs::newline_text_at; src/client/behavior.rs::ClientBehaviorState::route_key`
 
 ## Lookup metadata
 

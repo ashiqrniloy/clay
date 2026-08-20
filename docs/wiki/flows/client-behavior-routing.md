@@ -4,7 +4,7 @@
 
 - `src/client/behavior.rs`
 - `src/client/mod.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/masonry_editor.rs`
 - `src/protocol/mod.rs`
 
@@ -61,7 +61,7 @@ Configuration keybindings validate against a closed runtime-bindable command set
 - `src/client/mod.rs`
   - `client_installs_behavior_manifest_replacement_event`
   - `client_rejects_invalid_behavior_manifest_replacement_event`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
   - `editor_routes_client_first_key_through_manifest`
   - `editor_routes_autocomplete_trigger_after_local_edit`
   - `editor_routes_manual_completion_without_text_mutation`

@@ -1,7 +1,18 @@
 export type DecorationSpanInput = {
     byteStart: number;
     byteEnd: number;
-    kind: "syntax" | "semantic" | "diagnostic" | "search-match";
+    kind: "syntax" | "semantic" | "diagnostic" | "search-match" | "link" | "inlayHint";
+    inlay?: {
+        label: string;
+        placement: "before" | "after";
+    };
+    target?: {
+        kind: "workspacePath" | "documentRange" | "displayOnly";
+        relativePath?: string;
+        text?: string;
+        byteStart?: number;
+        byteEnd?: number;
+    };
     /**
      * Closed TokenType variant name (e.g. "Function", "Variable", "Keyword").
      * Preferred for semantic/LSP and first-party two-axis publishers.

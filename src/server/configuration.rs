@@ -906,6 +906,35 @@ mod tests {
     }
 
     #[test]
+    fn phase28_editor_defaults_are_not_configuration_keys() {
+        let runtime = runtime();
+        for option in [
+            "editor.fold.enabled",
+            "editor.inlayHints.enabled",
+            "editor.headingPrefixes",
+            "editor.commentPrefix",
+            "editor.chrome",
+            "editor.wrapPolicy",
+        ] {
+            let error = runtime
+                .set_package_option(&json!({
+                    "packagePrefix": "editor",
+                    "option": option,
+                    "value": true
+                }))
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("unsupported package option"),
+                "Phase 28 hidden editor key {option} must fail closed: {error}"
+            );
+        }
+        assert_eq!(
+            runtime.state_json(),
+            r#"{"entryPoint":"./init.js","loadedModules":[],"packageOptions":[]}"#
+        );
+    }
+
+    #[test]
     fn package_option_configuration_rejects_hidden_ad_hoc_and_raw_authority_keys() {
         let runtime = runtime();
         let hidden = runtime

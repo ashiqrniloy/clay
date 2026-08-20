@@ -2,12 +2,23 @@
 
 ## Source
 
-- `src/masonry_shell.rs`
+- `src/masonry_shell/mod.rs`
 - `src/shell/mod.rs`
 - `src/shell/layout.rs`
 - `src/lib.rs`
-- `src/main.rs`
+- `src/launch.rs`
+- `src/app_driver.rs`
 - `src/masonry_editor.rs`
+
+## Module layout (Plan 090)
+
+`src/masonry_shell.rs` was split into a directory module in Plan 090 (task 6). `ClayShellWidget` (state owner + paint/layout hot paths) stays in `mod.rs`; the tab/window data vocabulary and the accessibility virtual-node builder each own one private submodule:
+
+| File | Contents |
+|------|----------|
+| `src/masonry_shell/mod.rs` | `ClayShellWidget` + `impl ClayShellWidget` + `impl Widget`, `ShellObservableSnapshot`, paint helpers, and the collocated test module |
+| `src/masonry_shell/window_tabs.rs` | `PaneFocusPolicy`, `ShellClientCommand` + catalogue + `TAB_BAR_*` consts, `TabCard`, `TabBarGeometry`/`TabCardGeometry`, `TabChrome` + impl |
+| `src/masonry_shell/accessibility.rs` | `node_window_size`, `accesskit_rect`, `AnnouncementKind`, `ANNOUNCEMENT_MAX_CHARS`, `compose_announcement` |
 
 ## Overview
 
@@ -17,7 +28,9 @@ Phase 18.2 implements the `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLay
 
 ## Plan 088 shell chrome modernization
 
-The welcome entry state now uses the full pane width and suppresses the empty workspace-browser slot until a real document is mounted; package-owned fixed panels still retain their slots. Split-pane focus rings paint in `post_paint`, after pane hosts, so the active pane remains visibly distinct without relying on fill color. The pinned `+` tab action uses the shared state palette on hover, while tab labels remain workspace basenames and tab overflow keeps its existing bounded strip geometry.
+The welcome entry state now uses the full pane width and suppresses the empty workspace-browser slot until a real document is mounted; package-owned fixed panels still retain their slots. Split-pane focus rings paint in `post_paint`, after pane hosts, so the active pane remains visibly distinct without relying on fill color. The pinned `+` tab action uses the shared state palette on hover, while tab labels use the driver-sanitized final workspace segment (or `Workspace` fallback) and tab overflow keeps its existing bounded strip geometry; absolute host paths never enter tab chrome.
+
+Plan 088 Task 6 also installs each tab's `ActiveTypography` into shell chrome. The active tab drives the window-level tab bar registry; status metrics size the bar, cards, close affordances, and `+` slot, all clamped to logical window bounds. The SDUI left-slot decision uses a bounded UI-body em heuristic with the actual pane width, so large user typography yields the sidebar before the editor becomes unusable. Bottom transient overlays clamp to short main regions, and long SDUI labels paint inside typography-derived row clips while retaining their full accessible value.
 
 ## Responsibilities
 
@@ -31,7 +44,7 @@ The welcome entry state now uses the full pane width and suppresses the empty wo
 
 ## How It Works
 
-`src/main.rs::run_editor` constructs an `EditorWidget`, wraps it in `ClayShellWidget::single_editor(...)`, records the child editor `WidgetId`, and starts the Masonry window with the shell as the root widget. The driver sets Masonry focus fallback to the editor child and routes existing `EditorAction` handling back to that child ID, so connection events, file-open UI command results, SDUI snapshots, edit acknowledgements, and resync snapshots continue to mutate `EditorWidget` rather than the shell container.
+`src/launch.rs::run_editor` constructs an `EditorWidget`, wraps it in `ClayShellWidget::single_editor(...)`, records the child editor `WidgetId`, and starts the Masonry window with the shell as the root widget. The driver sets Masonry focus fallback to the editor child and routes existing `EditorAction` handling back to that child ID, so connection events, file-open UI command results, SDUI snapshots, edit acknowledgements, and resync snapshots continue to mutate `EditorWidget` rather than the shell container.
 
 `src/shell/layout.rs` owns the reusable shell state:
 
@@ -42,7 +55,7 @@ The welcome entry state now uses the full pane width and suppresses the empty wo
 5. Validation rejects zero pane IDs, duplicate pane IDs, active panes that are not leaves in the tree, invalid/non-finite split ratios, invalid fixed-slot sizes/bounds, and trees over the internal node limit.
 6. Geometry helpers traverse the installed tree to return deterministic `PaneGeometry` values, then subtract visible fixed slots from a leaf pane to produce the editor component's `main` rectangle.
 
-`src/masonry_shell.rs` owns the Masonry container behavior. `register_children` registers the already-created editor child. During layout, the shell computes its working-area size, asks `WorkingAreaLayout` for the editor component rectangle, runs the child layout with tight constraints for that rectangle, and places the child at the computed origin. The shell's `children_ids` remains the already-registered editor child list; split geometry does not mutate the Masonry child tree.
+`src/masonry_shell/mod.rs` owns the Masonry container behavior. `register_children` registers the already-created editor child. During layout, the shell computes its working-area size, asks `WorkingAreaLayout` for the editor component rectangle, runs the child layout with tight constraints for that rectangle, and places the child at the computed origin. The shell's `children_ids` remains the already-registered editor child list; split geometry does not mutate the Masonry child tree.
 
 Inside the editor child, `src/masonry_editor.rs` reuses the same SDUI/package `PaneSlotLayout` main-region calculation for paint and pointer hit-testing. `EditorWidget::editor_main_rect` asks `editor_region_for_document` for the current `main` rect, paints `EditorSurface::paint_in_rect` clipped to that rect, and translates pointer positions into editor-local coordinates before caret placement or selection extension. `editor_region_for_document` reserves the Clay-owned left file-browser slot when the installed SDUI tree contains a sidebar panel, not merely because an editor binding/root exists. This keeps the main region away from a visible browser after opening a workspace file under a new document ID, while an editor-only hidden snapshot reclaims the full width. Accepted visible fixed panels therefore consume `left`/`right`/`top`/`bottom` geometry instead of covering text, while transient overlays still paint after fixed panels and may cover content by design.
 
@@ -122,20 +135,20 @@ Phase 18.2 is an internal runtime foundation, not a public package UI API releas
 - `src/shell/layout.rs::tests::working_area_layout_applies_inert_validated_update`: validates successful bounded shell state updates increment the local layout version and preserve split/slot observations.
 - `src/shell/layout.rs::tests::shell_layout_update_rejects_stale_or_oversize_payload`: validates stale base versions and oversize slot-layout payloads are rejected.
 - `src/shell/layout.rs::tests::shell_layout_update_rejects_malformed_slot_and_editor_targets`: validates missing editor panes and duplicate slot assignments are rejected.
-- `src/masonry_shell.rs::tests::shell_observable_snapshot_captures_default_working_area`: validates the default structural shell observation without exposing widget handles.
-- `src/masonry_shell.rs::tests::shell_observable_snapshot_captures_split_and_slots`: validates split/slot structural observation after an inert update.
-- `src/masonry_shell.rs::tests::shell_observation_does_not_expose_document_text_or_native_handles`: validates the snapshot debug surface omits document/native/raw authority markers.
-- `src/masonry_shell.rs::tests::shell_layout_update_rejects_stale_or_oversize_payload`: validates the shell widget update wrapper preserves layout validation.
-- `src/masonry_shell.rs::tests::shell_places_editor_child_in_main_slot_rect`: validates the shell places the editor child in the slot-computed main rectangle without changing child identity.
-- `src/masonry_shell.rs::tests::pane_split_tree_layout_does_not_mutate_children`: validates split geometry reads preserve registered editor child IDs.
-- `src/masonry_shell.rs::tests::shell_editor_text_input_remains_client_first`: validates IME text input reaches the editor child through a `RenderRoot` with the shell as root, updates local text immediately, and enqueues a delta edit.
-- `src/masonry_shell.rs::tests::shell_editor_keyboard_routing_uses_installed_behavior_manifest`: validates keyboard behavior-manifest routing, using Enter/newline, still reaches the editor child under the shell.
-- `src/masonry_shell.rs::tests::shell_editor_read_only_observer_blocks_local_edit_queue`: validates read-only observer state blocks local mutation and edit queue emission through the shell root.
+- `src/masonry_shell/mod.rs::tests::shell_observable_snapshot_captures_default_working_area`: validates the default structural shell observation without exposing widget handles.
+- `src/masonry_shell/mod.rs::tests::shell_observable_snapshot_captures_split_and_slots`: validates split/slot structural observation after an inert update.
+- `src/masonry_shell/mod.rs::tests::shell_observation_does_not_expose_document_text_or_native_handles`: validates the snapshot debug surface omits document/native/raw authority markers.
+- `src/masonry_shell/mod.rs::tests::shell_layout_update_rejects_stale_or_oversize_payload`: validates the shell widget update wrapper preserves layout validation.
+- `src/masonry_shell/mod.rs::tests::shell_places_editor_child_in_main_slot_rect`: validates the shell places the editor child in the slot-computed main rectangle without changing child identity.
+- `src/masonry_shell/mod.rs::tests::pane_split_tree_layout_does_not_mutate_children`: validates split geometry reads preserve registered editor child IDs.
+- `src/masonry_shell/mod.rs::tests::shell_editor_text_input_remains_client_first`: validates IME text input reaches the editor child through a `RenderRoot` with the shell as root, updates local text immediately, and enqueues a delta edit.
+- `src/masonry_shell/mod.rs::tests::shell_editor_keyboard_routing_uses_installed_behavior_manifest`: validates keyboard behavior-manifest routing, using Enter/newline, still reaches the editor child under the shell.
+- `src/masonry_shell/mod.rs::tests::shell_editor_read_only_observer_blocks_local_edit_queue`: validates read-only observer state blocks local mutation and edit queue emission through the shell root.
 - `src/shell/package_ui.rs::tests::slot_panel_contribution_places_panel_in_requested_slot_and_preserves_main_editor`: validates package fixed panel slot composition through `PaneSlotLayout`.
 - `src/shell/package_ui.rs::tests::slot_panel_contribution_rejects_duplicate_exclusive_slot_claims`: validates duplicate exclusive fixed-slot claims fail deterministically.
 - `src/shell/package_ui.rs::tests::transient_overlay_renders_without_consuming_fixed_slot_geometry`: validates transient overlay geometry stays separate from fixed slot geometry.
-- `src/masonry_shell.rs::tests::shell_routes_edit_ack_and_resync_to_editor`: validates edit acknowledgements and resync snapshots still update editor text/status state through the shell child route.
-- `src/masonry_shell.rs::tests::shell_routes_sdui_snapshots_to_editor_component`: validates SDUI connection events still land in the editor component under the shell.
+- `src/masonry_shell/mod.rs::tests::shell_routes_edit_ack_and_resync_to_editor`: validates edit acknowledgements and resync snapshots still update editor text/status state through the shell child route.
+- `src/masonry_shell/mod.rs::tests::shell_routes_sdui_snapshots_to_editor_component`: validates SDUI connection events still land in the editor component under the shell.
 - `src/masonry_editor.rs::tests::fixed_package_panel_shrinks_editor_hit_region`: validates visible package fixed panels offset the editor hit region instead of letting panel coordinates place the caret under the panel.
 - `src/driver/mod.rs::tests::connection_event_action_is_dispatched_to_shell_editor_child`: validates GUI connection-event user events target the shell-owned editor child.
 - `src/driver/mod.rs::tests::driver_routes_editor_actions_to_shell_editor_child`: validates `AppDriver` editor action routing uses the shell editor child ID even if a shell/root source is reported.
@@ -173,6 +186,21 @@ defaults.
 
 `PaneSplitTree::next_pane()`/`prev_pane()` traverse panes in reading order (in-order, wrapping). Tab/Shift+Tab in `on_text_event` moves focus; `set_focus_pane()` validates membership. A focus ring paints on the active pane when multiple panes exist (`paint_focus_ring`). `focused_pane_rect()` provides the transient surface anchor for overlays/menus.
 
+### Focus removal and AT-SPI ingress (Plan 089)
+
+Pane/tab removal uses the shared Masonry focus seam rather than a frame-by-frame
+scan. `ClayShellWidget` transfers focus to a surviving same-tab target before
+`reconcile_pane_hosts` detaches the old host; active-tab removal clears focus
+while the replacement remains stashed, and `driver/reconcile.rs` focuses that
+replacement after layout. The exact pinned Masonry 0.4.0 source under
+`vendor/masonry_core/` invalidates focused/next/fallback IDs in
+`MutateCtx::remove_child`; Masonry's normal focus rewrite rebuilds the path
+and clears ancestor flags, preventing stale `accesskit_consumer` focused IDs.
+Its `RenderRoot::handle_access_event` ignores actions addressed to the
+synthetic top-level Window node, which is exposed by AT-SPI but has no Masonry
+widget. Valid editor Entry focus remains unchanged. Tests:
+`cargo test --lib masonry_shell -- --test-threads=1`.
+
 ### Layout Intent API
 
 `serverRequestLayoutIntent` (`clay:ui` facade → `op_clay_ui_request_layout_intent` → `PackageUiRegistry::request_layout_intent`) accepts inert versioned layout intents from packages. Validation: package-prefixed ID, orientation (horizontal/vertical), ratio (0.05–0.95), position (first/second), payload size. Intents are composed into `WorkingAreaLayoutUpdate` via `PaneSplitTree::split_pane()` at Clay's discretion. Packages cannot mutate native layout directly.
@@ -188,7 +216,7 @@ defaults.
 
 - `src/shell/layout.rs`: Split divider hit-test, drag ratio, slot resize/collapse, focus traversal, `split_pane` composition.
 - `src/shell/layout_persist.rs`: Serialization, I/O, apply/restore.
-- `src/masonry_shell.rs`: Pointer/keyboard event handlers, paint, persistence debounce.
+- `src/masonry_shell/mod.rs`: Pointer/keyboard event handlers, paint, persistence debounce.
 - `src/server/ui.rs`: `RegisteredLayoutIntent`, `request_layout_intent` validation.
 - `src/server/ops/ui.rs`: `op_clay_ui_request_layout_intent`.
 - `runtime/js/ui.js`: `serverRequestLayoutIntent` facade.
@@ -232,7 +260,7 @@ Tab/Shift+Tab pane cycling (Phase 20.3) remains: with more than one pane, `Tab` 
 
 ### Shell Commands and Key Routing
 
-`ShellClientCommand` (20 variants, `src/masonry_shell.rs`) parses the `shell.client*` command IDs: the 12 pane commands (`clientSplitPaneVertical/Horizontal`, `clientAddEqualPane`, `clientClosePane`, `clientFocusPaneNext/Prev`, `clientResizePaneLeft/Right/Up/Down`, `clientMovePaneNext/Prev`) plus the 8 Phase 22.4 tab commands (`clientTabNext/Prev/New/Close/MoveLeft/MoveRight`, `clientTabActivate(u32)`, `clientTabMoveTo(u32)` — 1-based card positions). Command names follow the vim convention: a "vertical" split places panes side by side (`SplitOrientation::Horizontal`), a "horizontal" split stacks them.
+`ShellClientCommand` (20 variants, `src/masonry_shell/window_tabs.rs`) parses the `shell.client*` command IDs: the 12 pane commands (`clientSplitPaneVertical/Horizontal`, `clientAddEqualPane`, `clientClosePane`, `clientFocusPaneNext/Prev`, `clientResizePaneLeft/Right/Up/Down`, `clientMovePaneNext/Prev`) plus the 8 Phase 22.4 tab commands (`clientTabNext/Prev/New/Close/MoveLeft/MoveRight`, `clientTabActivate(u32)`, `clientTabMoveTo(u32)` — 1-based card positions). Command names follow the vim convention: a "vertical" split places panes side by side (`SplitOrientation::Horizontal`), a "horizontal" split stacks them.
 
 Dispatch path: `main.rs` resolves `ClientUiCommandResult::ShellCommand`; tab commands are intercepted by the driver's `apply_tab_command` **before** the widget (the widget's tab arms stay inert) — the driver resolves card positions from its `tab_order` policy and routes through the shared execution paths the tab bar also uses (activate/close/new/move), so chords and clicks share one code path. Pane commands reach `render_root.edit_widget(shell_widget_id).apply_shell_client_command(...)` — tree ops go through `WorkingAreaLayout::replace_pane_tree` (new in 22.1; bumps the layout version) + `reconcile_pane_hosts`; resize goes through `keyboard_resize` + `commit_split_drag`. No server round-trip, no JS runtime, no IPC in the dispatch path (guarded by `shell_command_dispatch_requires_no_server_or_js_runtime`).
 
@@ -269,8 +297,8 @@ Phase 22.2 (2026-08-05) wires document views into the pane hosts and makes the s
 
 - `src/shell/layout.rs`: lifecycle ops, `MAX_PANES_PER_TAB`, `PaneResizeDirection`, `replace_pane_tree`.
 - `src/masonry_pane_host.rs`: `PaneContentHost` widget (placeholder/document content, `set_document_view`/`clear_content`).
-- `src/masonry_shell.rs`: `pane_hosts` map, `pane_targets` routing map, reconcile, focus policy, `PaneFocused` actions, `ShellClientCommand` dispatch.
-- `src/main.rs`: shell action target + `ShellCommand`/`ShellPreferences` dispatch.
+- `src/masonry_shell/mod.rs`: `pane_hosts` map, `pane_targets` routing map, reconcile, focus policy, `PaneFocused` actions, `ShellClientCommand` dispatch.
+- `src/app_driver.rs`: shell action target + `ShellCommand`/`ShellPreferences` dispatch.
 - `src/server/ops/shell.rs`: `op_clay_shell_set_pane_focus_policy`.
 - `src/client/behavior.rs`: two-pass `EditorTextFocus`-before-`Global` route_key matching.
 - `src/protocol/mod.rs`: `ShellPreferences`, shell default keymaps/commands, protocol v10.
@@ -280,8 +308,8 @@ Phase 22.2 (2026-08-05) wires document views into the pane hosts and makes the s
 ### Tests
 
 - `src/shell/layout.rs`: cap rejection, equal-area redivision (2/3/4 panes, area equality), close/merge/focus-handoff, move swaps + end no-ops + ratio preservation, keyboard resize bordering/deepest/clamp/no-divider. Command: `cargo test --lib shell::layout --quiet`.
-- `src/masonry_shell.rs`: host identity stability across tree mutations, orphan detachment, placeholder hosting, per-pane placement, click-to-focus on placeholders, focus-policy behavior (default, follows-cursor, drag-skip), all 12 command dispatches, 4-pane cap enforcement, the no-server/no-JS hot-path guard, and (22.2) independent per-pane document views with document-scoped routing, typing-isolation hot-path guard, routing-target cleanup on pane close, and concurrent per-pane major modes isolated across behavior manifests. Phase 22.8 verification re-runs this matrix with per-tab server roots/document sets, per-document lease/version reservations, retained-session switching, duplicate-open ownership, and the four-pane cap; no split or hot-path implementation changes were needed. Command: `cargo test --lib masonry_shell --quiet`.
-- `src/server/js_runtime.rs`: policy publish/reject/default-unset through real init.js evaluation.
+- `src/masonry_shell/mod.rs`: host identity stability across tree mutations, orphan detachment, placeholder hosting, per-pane placement, click-to-focus on placeholders, focus-policy behavior (default, follows-cursor, drag-skip), all 12 command dispatches, 4-pane cap enforcement, the no-server/no-JS hot-path guard, and (22.2) independent per-pane document views with document-scoped routing, typing-isolation hot-path guard, routing-target cleanup on pane close, and concurrent per-pane major modes isolated across behavior manifests. Phase 22.8 verification re-runs this matrix with per-tab server roots/document sets, per-document lease/version reservations, retained-session switching, duplicate-open ownership, and the four-pane cap; no split or hot-path implementation changes were needed. Command: `cargo test --lib masonry_shell --quiet`.
+- `src/server/js_runtime/mod.rs`: policy publish/reject/default-unset through real init.js evaluation.
 - `src/server/ops/keybindings.rs`: all 12 shell IDs bindable + `ClientUiCommand`-routed; unknown `shell.*` rejected.
 - `src/protocol/mod.rs`: defaults present with `Global` context and `ClientUi` authority.
 
@@ -289,7 +317,7 @@ Phase 22.2 (2026-08-05) wires document views into the pane hosts and makes the s
 
 Phase 22.3 (2026-08-06) makes each tab an independent client view with its own server connection. The server side (protocol v11, `src/server/tab_registry.rs`) is covered in the tab-registry task; this section covers the client-side multi-connection model:
 
-- `ClayShellWidget` now owns `tabs: BTreeMap<ClientId, TabChrome>` + `active_tab: ClientId`. `TabChrome` (new, `src/masonry_shell.rs`) bundles one tab's `WorkingAreaLayout`, `pane_hosts`, `pane_targets`, `pane_focus_policy`, and `pending_orphans` — everything that was previously shell-level single-tab state. The shell hosts **every** tab's hosts as registered children; only the active tab's hosts are laid out at their pane rects, inactive tabs' hosts remain registered but are stashed during layout, so they keep connection/reconnect continuity without painting, hit-testing, or accessibility emission.
+- `ClayShellWidget` now owns `tabs: BTreeMap<ClientId, TabChrome>` + `active_tab: ClientId`. `TabChrome` (new, `src/masonry_shell/window_tabs.rs`) bundles one tab's `WorkingAreaLayout`, `pane_hosts`, `pane_targets`, `pane_focus_policy`, and `pending_orphans` — everything that was previously shell-level single-tab state. The shell hosts **every** tab's hosts as registered children; only the active tab's hosts are laid out at their pane rects, inactive tabs' hosts remain registered but are stashed during layout, so they keep connection/reconnect continuity without painting, hit-testing, or accessibility emission.
 - Tabs are keyed by the connection's `ClientId` (the client-known identity at mount time; the server-assigned `TabId` arrives asynchronously via the registry snapshot and is tracked by the app driver). `install_tab` mounts a tab's chrome (first tab becomes active; later tabs are retained until `set_active_tab`), `set_active_tab` switches with one layout pass and resets in-flight drag sessions, `tab_for_chrome` resolves an event's tab from its chrome id, and per-tab queries (`pane_targets_for`, `pane_host_id_for`, `editor_widget_id_for`, `set_pane_focus_policy_for`, …) scope routing to one tab. The no-arg routing methods delegate to the active tab, so single-tab behavior is the pre-22.3 experience.
 - `src/driver/mod.rs` `Driver` owns `tabs: BTreeMap<ClientId, TabState>`
   (`TabState` = the connection's `ClientEditQueue` clone, per-tab
@@ -305,7 +333,7 @@ Phase 22.3 (2026-08-06) makes each tab an independent client view with its own s
 - Event routing: each tab's bridge tags its events with that tab's chrome `WidgetId`; the driver resolves the tab via `tab_for_chrome` and routes document-scoped events, fan-outs, runtime snapshots, and editor commands to **that tab's** targets only. `ShellPreferences` applies to the sending tab's focus policy; `TabRegistry` snapshots are driver-level state. Menus display in the tab's own chrome overlay. Focus follows only for the active tab (an inactive tab's open never steals focus).
 - `ClientEditQueue::enqueue_tab_command` sends `ClientMessage::TabCommand` on a connection.
 
-- The tab bar (Phase 22.3): a shell-owned window-level row painted only when more than one card is present. It is carved in `ClayShellWidget::layout()` (the plan's "equivalent shell-level row" option — `PaneSlotLayout::compute_geometry` is per-pane, so a window-level row cannot live there without changing package slot semantics). The bar is token-driven end to end: `tab_card_chrome` (src/shell/primitives.rs) resolves `surface.list`/`surface.selected` rests, `surface.hover`, `surface.active`, `text.primary`/`text.muted`/`text.disabled`, the `accent.primary` focus ring (painted for the `Focus` state; keyboard focus traversal between cards is a 22.6 ceiling — the 22.4 chords activate/close/move tabs without moving card focus), and the dimmed disabled close. The label uses the UI `Status` typography variant (`UiTextVariant::Status` via the shell's default `TypographyRegistry`; active-typography sync is not wired in 22.3) painted through the shared `paint_sdui_text` with a clip layer. The close glyph is two inline strokes. Cards are registry-driven: the driver pushes `TabCard`s from the server snapshot (order + names = root display path's final segment); mounted tabs awaiting their registry entry are appended with close disabled. Card order is the numbering authority for the 22.4 numbered commands — `clientTabActivate.<N>`/`clientTabMoveTo.<N>` resolve 1-based against this exact card list (registry order, entry-less mounted tabs appended; beyond-count = silent no-op). Clicking a card submits `EditorAction::TabBar(Activate)`; the driver switches optimistically and the server registry reconciles — the server now pushes a `TabRegistry` snapshot even for rejected `Activate`/`Close`/`OpenWorkspace`/move commands, so a rejected optimistic switch reverts. Clicking the close glyph submits `Close`; the driver refuses closing the last mounted tab; a dirty tab gets the 22.4 driver-owned tab-confirm menu (`tab_close_confirm_session`) instead of closing; a clean (or confirmed) close sends `TabCommand::Close` on that tab's own connection, and the server's pushed snapshot (entry removed) drives removal (`apply_registry_reconcile` uninstalls the chrome, switches + focuses the remaining tab, refreshes cards). Removals are skipped against an empty registry (server restart; the lifecycle task re-registers via `Reclaim`/`New`).
+- The tab bar (Phase 22.3): a shell-owned window-level row painted only when more than one card is present. It is carved in `ClayShellWidget::layout()` (the plan's "equivalent shell-level row" option — `PaneSlotLayout::compute_geometry` is per-pane, so a window-level row cannot live there without changing package slot semantics). The bar is token-driven end to end: `tab_card_chrome` (src/shell/primitives.rs) resolves `surface.list`/`surface.selected` rests, `surface.hover`, `surface.active`, `text.primary`/`text.muted`/`text.disabled`, the `accent.primary` focus ring (painted for the `Focus` state; keyboard focus traversal between cards is a 22.6 ceiling — the 22.4 chords activate/close/move tabs without moving card focus), and the dimmed disabled close. The label uses the UI `Status` typography variant (`UiTextVariant::Status` via the active tab's cached `TypographyRegistry`) painted through the shared `paint_sdui_text` with a clip layer. `ActiveTypography` events update the matching tab and request layout/render/accessibility only when the revision changes; the active tab mirrors that registry to the window-level bar. Bar/card affordance geometry follows the resulting status metrics and is clamped to the logical window. The close glyph is two inline strokes. Cards are registry-driven: the driver pushes `TabCard`s from the server snapshot (order + names = root display path's final segment); mounted tabs awaiting their registry entry are appended with close disabled. Card order is the numbering authority for the 22.4 numbered commands — `clientTabActivate.<N>`/`clientTabMoveTo.<N>` resolve 1-based against this exact card list (registry order, entry-less mounted tabs appended; beyond-count = silent no-op). Clicking a card submits `EditorAction::TabBar(Activate)`; the driver switches optimistically and the server registry reconciles — the server now pushes a `TabRegistry` snapshot even for rejected `Activate`/`Close`/`OpenWorkspace`/move commands, so a rejected optimistic switch reverts. Clicking the close glyph submits `Close`; the driver refuses closing the last mounted tab; a dirty tab gets the 22.4 driver-owned tab-confirm menu (`tab_close_confirm_session`) instead of closing; a clean (or confirmed) close sends `TabCommand::Close` on that tab's own connection, and the server's pushed snapshot (entry removed) drives removal (`apply_registry_reconcile` uninstalls the chrome, switches + focuses the remaining tab, refreshes cards). Removals are skipped against an empty registry (server restart; the lifecycle task re-registers via `Reclaim`/`New`).
 
 ### Lifecycle (22.3 task 7: open / close / switch / reconnect)
 
@@ -337,7 +365,8 @@ single keyboard route and close restores the original focus target.
 
 ### Source Paths
 
-- `src/masonry_shell.rs`: `TabChrome`, `tabs`/`active_tab`, `install_tab`/`set_active_tab`/`tab_for_chrome`, per-tab routing queries, inactive-host stashing; tab bar: `TabCard`, `set_tab_cards`, `remove_tab`, `tab_bar_geometry`/`tab_bar_hit_test`, bar paint + pointer handling, `TAB_BAR_*` constants.
+- `src/masonry_shell/mod.rs`: `tabs`/`active_tab`, `install_tab`/`set_active_tab`/`tab_for_chrome`, per-tab routing queries, inactive-host stashing; tab bar paint + pointer handling.
+- `src/masonry_shell/window_tabs.rs`: `TabChrome`, `TabCard`, `set_tab_cards`, `remove_tab`, `tab_bar_geometry`/`tab_bar_hit_test`, `TAB_BAR_*` constants.
 - `src/shell/primitives.rs`: `tab_card_chrome` state resolver (`TabCardChrome`).
 - `src/masonry_pane_document.rs`: `reconnect` (queue swap + reinstall re-arm + menu clear), `documents_for_reopen`, per-session `workspace_root_id`/`path` retention.
 - `src/editor/document_session.rs`: `RetainedDocumentSession` open identity; `reopen_documents`.
@@ -350,7 +379,7 @@ single keyboard route and close restores the original focus target.
 
 ### Tests
 
-- `src/masonry_shell.rs`: install-then-activate, stable chrome/host ids across switches, inactive hosts stashed and hidden from accessibility, single-tab shape unchanged, per-tab routing-target and focus-policy isolation; tab bar: hidden below two cards (single-tab geometry unchanged), geometry/carve with two cards, activate/close/no-op click actions, hover tracking, remove-tab uninstall + active fallback. Command: `cargo test --lib masonry_shell --quiet`.
+- `src/masonry_shell/mod.rs`: install-then-activate, stable chrome/host ids across switches, inactive hosts stashed and hidden from accessibility, single-tab shape unchanged, per-tab routing-target and focus-policy isolation; tab bar: hidden below two cards (single-tab geometry unchanged), geometry/carve with two cards, activate/close/no-op click actions, hover tracking, remove-tab uninstall + active fallback. Command: `cargo test --lib masonry_shell --quiet`.
 - `src/shell/primitives.rs`: `tab_card_chrome` resolves every state (Rest/Hover/Active/Focus/Disabled × selected). Command: `cargo test --lib shell::primitives --quiet`.
 - `src/client/mod.rs`: real-server tab command end-to-end — handshake-bound `New` registers the selected root, a rejected `Activate` pushes a reconciling snapshot, `Close` ends the connection + removes the registry entry (observed on an unbound fresh replay), a dropped connection is reclaimed by `connect_for_reclaim` (`Reclaim` keeps `TabId`, rebinds `ClientId`), server restart falls back to root-scoped `New`, and the connection cap refuses excess connections. Command: `cargo test --lib client::tests::real_server_tab --quiet`, `cargo test --lib real_server_ --quiet`.
 - `src/driver/reconcile.rs`: registry reconciliation — fills tab ids +
@@ -411,7 +440,7 @@ tree, and per-pane open documents. The shell side of the design:
   `PersistedTabState`/`PersistedTabLayout`), `serialize_window_state`/
   `parse_window_state`/`layout_from_persisted_tab`, `save_window_state`/
   `load_window_state`.
-- `src/masonry_shell.rs`: `persist_debounced`/`mark_persistence_due`,
+- `src/masonry_shell/mod.rs`: `persist_debounced`/`mark_persistence_due`,
   `tab_layout_data`, `restored_single_editor`, `install_restored_tab`,
   `TabChrome::with_layout`.
 - `src/driver/restore.rs`: restore state machine (`advance_restore`,
@@ -425,7 +454,7 @@ tree, and per-pane open documents. The shell side of the design:
 - `src/shell/layout_persist.rs`: v2 round-trip, bounds, corrupt/legacy
   fallback, panic-free hostile input. Command: `cargo test --lib
   layout_persist --quiet`.
-- `src/masonry_shell.rs`: persistence-signal emission (pointer mutation +
+- `src/masonry_shell/mod.rs`: persistence-signal emission (pointer mutation +
   keyboard resize, multi-tab), `tab_layout_data_returns_every_mounted_tab_layout`,
   `restored_single_editor_mounts_persisted_split_tree`,
   `install_restored_tab_mounts_persisted_tree_without_switching`. Command:
@@ -555,7 +584,7 @@ this section documents the implementation.
 
 ### Source Paths
 
-- `src/masonry_shell.rs`: `accessibility` (tree chain), `announce`,
+- `src/masonry_shell/mod.rs`: `accessibility` (tree chain), `announce`,
   `announce_tab_activated`/`announce_tab_created` (pub — bin crate),
   `announce_pane_change` (private), `compose_announcement`/`AnnouncementKind`
   (pub(crate)), `set_pane_document_name`, `reconcile_pane_hosts` +
@@ -565,7 +594,7 @@ this section documents the implementation.
   label formats in `accessibility`.
 - `src/driver/mod.rs`: `switch_tab -> bool`, `mount_tab` announcement call
   site; `src/driver/restore.rs`: `activate_tab` announcement call site;
-  `src/masonry_shell.rs`: `apply_tree_change -> bool`, `remove_tab`
+  `src/masonry_shell/mod.rs`: `apply_tree_change -> bool`, `remove_tab`
   announcement call site, `route_document_opened`/`route_document_event`
   label routing;
   `src/client/mod.rs`: `ClientConnectionEvent::metadata_path`.
@@ -575,7 +604,7 @@ this section documents the implementation.
 
 ### Tests
 
-- `src/masonry_shell.rs` (`cargo test --lib masonry_shell --quiet`): a11y
+- `src/masonry_shell/mod.rs` (`cargo test --lib masonry_shell --quiet`): a11y
   tests via the `access_tree` helper (`EnableAccessTree` event then
   `redraw()` → `TreeUpdate`) cover single-tab/no-TabList, selected TabList,
   inactive-tab stashing/hiding, pane `N of M` labels, exact bounded
@@ -672,7 +701,7 @@ Tests: `tab_bar_cards_never_below_min_width`, `tab_bar_wheel_scroll_clamps`,
 
 `shell.clientSplitPaneRight` → `SplitPaneVertical` (side-by-side) and
 `shell.clientSplitPaneDown` → `SplitPaneHorizontal` (stacked) map in
-`ShellClientCommand::from_command_id` (src/masonry_shell.rs), were added to
+`ShellClientCommand::from_command_id` (src/masonry_shell/window_tabs.rs), were added to
 both keybinding allowlists (`is_runtime_bindable_command` and the
 `ClientUiCommand` routing branch, `src/server/ops/keybindings.rs`), and are
 exported by `runtime/js/shell.js` (+ `.d.ts`). No default chords; canonical
@@ -758,3 +787,13 @@ test-plan modules 01 (L12–L14), 03 (F32–F37), 04 (E16–E21), 10 (K69–K72)
 Known visual follow-up (not fixed by this plan): `P1-087-UI-1` — live
 completion and 60+ Command Centre rows paint below their popup shells;
 tracked in the plan's Further Actions.
+
+## Plan 088 shell verification and boundaries
+
+Task 4 is paint/layout-only over the retained shell state. `sync_shell_ui_theme` installs the active `ResolvedUiTheme`; `sync_shell_ui_typography` installs each connection's `ActiveTypography` into its `TabChrome`, mirrors only the active tab to the window-level bar, and suppresses duplicate revisions. `tab_card_display_name` filters controls and separators, bounds the display name, and falls back to `Workspace`; the tab bar's `TabList`/`Tab` labels and painted cards therefore share bounded non-path display data.
+
+The shell owns the window-level tab row, pane focus ring, pane host placement, workspace-browser slot decision, and logical-window clipping. Packages cannot own tabs/panes or request the internal completion/centered anchors. The workspace browser is a Clay-owned SDUI surface; hidden/welcome trees reclaim its left slot, while visible package fixed panels still use `PaneSlotLayout` and never cover the editor. Status text, dirty/recovery/connection state, and focus are carried by the pane/editor surfaces rather than color alone.
+
+Task 8 review evidence is screenshot/AT-SPI evidence, not a pixel golden. Default/light/error/large-typography welcome states passed; completion/Command Centre/multi-tab/multi-pane/narrow-wide live states remain unresolved where the host cannot safely target or resize the Clay window. The recovery capture exposed a stale WelcomeWidget connection label; keep that as a product follow-up rather than treating shell geometry tests as a visual pass.
+
+Relevant checks: `cargo test --lib masonry_shell`; `cargo test --bin clay`; `cargo test --test editor editor_performance_invariants`; `cargo test --test editor ui_primitive_conformance`; `src/driver/reconcile.rs::tab_card_display_name_never_falls_back_to_an_absolute_path`; and the shell accessibility tests covering stashed inactive panes, selected tabs, pane labels, and polite announcements.

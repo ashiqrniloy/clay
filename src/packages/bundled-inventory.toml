@@ -1,0 +1,26 @@
+# Loadable first-party package roots under packages/.
+# Unlisted directories (stray extras) are never trusted.
+root = "git"
+root = "javascript"
+root = "lsp-javascript"
+root = "lsp-markdown"
+root = "lsp-rust"
+root = "lsp-typescript"
+root = "markdown"
+root = "rust"
+root = "settings"
+root = "theme-gruvbox-material-dark"
+root = "theme-gruvbox-material-light"
+root = "theme-modus-operandi"
+root = "theme-modus-vivendi"
+root = "typescript"
+
+# Helpers are fingerprinted and export-mapped, never loadPackage-able.
+helper = "lsp-shared"
+export = "bridge.js"
+export = "client.js"
+export = "framing.js"
+export = "mapping.js"
+export = "positions.js"
+export = "typescript-language-server.js"
+export = "utf8.js"

@@ -5,10 +5,10 @@
 - `src/protocol/mod.rs`
 - `src/behavior/manifest.rs`
 - `src/server/behavior.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/client/behavior.rs`
 - `src/client/mod.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/masonry_editor.rs`
 - `src/masonry_pane_document.rs`
 - `src/server/ops/mod.rs`
@@ -24,11 +24,11 @@ Behavior manifests are server-owned, server-issued, inert declarations that let 
 - `src/protocol/mod.rs` defines the serializable wire/data model.
 - `src/behavior/manifest.rs` validates manifest invariants before a manifest is trusted or installed.
 - `src/server/behavior.rs` owns the active server manifest, publishes validated replacements with deterministic version increments, and performs constant-time behavior-version checks.
-- `src/server/connection.rs` sends the active manifest during handshake and rejects edit/intent messages whose behavior version does not match the active server version before canonical document mutation.
+- `src/server/connection/mod.rs` sends the active manifest during handshake and rejects edit/intent messages whose behavior version does not match the active server version before canonical document mutation.
 - `src/server/ops/keybindings.rs` and `src/server/ops/behavior.rs` let server-side configuration JavaScript update/query manifests through validated Clay facades without adding JavaScript to the client hot path.
 - `src/client/behavior.rs` validates initial/replacement manifests, atomically swaps active client behavior, and routes key strokes to local built-in edits or server-intent declarations.
 - `src/client/mod.rs` validates handshake manifests and processes replacement manifest messages from the server connection loop.
-- `src/editor/surface.rs` consults the installed manifest to decide whether ordinary edits can emit client-first edit events and uses the client router for key-level behavior.
+- `src/editor/surface/mod.rs` consults the installed manifest to decide whether ordinary edits can emit client-first edit events and uses the client router for key-level behavior.
 - `src/masonry_editor.rs` forwards character, Enter, and Tab text events through manifest routing without awaiting IPC.
 - `src/protocol/codec.rs` serializes manifests through the same length-prefixed `rkyv` IPC boundary as other protocol messages.
 
@@ -49,7 +49,7 @@ On the server, `ActiveBehaviorManifest` wraps the current manifest. `Default` cr
 
 During embedded-runtime configuration evaluation, `bindKey` and `unbindKey` operate on a runtime-local `ActiveBehaviorManifest` in `ClayOpState`. They parse a chord — since Phase 24.5 a space-separated multi-stroke sequence such as `Ctrl+X Ctrl+P` (`parse_key_sequence`) — validate `editor`/`global` scope, reject unsupported `when` expressions and unregistered commands, and compile the result into the same `KeyBindingRule`/`CommandDeclaration` structures used by static manifests. Every bind publishes through `validate_manifest`, so the prefix-collision check covers runtime `bindKey` automatically. If configuration changed behavior state, `ClayRuntimeEvaluation` returns the updated manifest so server startup can install it through normal manifest validation/versioning.
 
-Every incoming `ClientMessage::Edit`, `ClientMessage::EditorIntent`, and server-first `ClientMessage::CommandIntent` carries a `behavior_version`. `src/server/connection.rs` checks edit/editor-intent versions against `ActiveBehaviorManifest::version()` before taking the document mutex and before calling `DocumentState::apply_edit`; command intents are rejected before command execution when the behavior version is stale. Edit mismatches return `ServerMessage::EditRejected { reason: EditRejection::InvalidBehaviorVersion { behavior_version, server_behavior_version } }`, preserving the canonical rope and document version.
+Every incoming `ClientMessage::Edit`, `ClientMessage::EditorIntent`, and server-first `ClientMessage::CommandIntent` carries a `behavior_version`. `src/server/connection/mod.rs` checks edit/editor-intent versions against `ActiveBehaviorManifest::version()` before taking the document mutex and before calling `DocumentState::apply_edit`; command intents are rejected before command execution when the behavior version is stale. Edit mismatches return `ServerMessage::EditRejected { reason: EditRejection::InvalidBehaviorVersion { behavior_version, server_behavior_version } }`, preserving the canonical rope and document version.
 
 On the client, `ClientBehaviorState::new` validates the initial manifest before a connected session is returned. Later `ServerMessage::BehaviorManifest` values are replacement candidates. The connection task validates the candidate, swaps it into active state only on success, and emits either `BehaviorManifestInstalled` with the installed manifest or `BehaviorManifestRejected` with the rejected version. Invalid replacements do not leave partial state.
 
@@ -92,24 +92,30 @@ validate_manifest(&manifest).unwrap();
 
 Before 22.2, one `ActiveBehaviorManifest` slot per connection meant the most recently activated major mode's manifest overrode every other pane's — keymaps, autocomplete triggers, and editor rules bled across panes. 22.2 makes manifest scope real:
 
-- **Server** (`src/server/behavior.rs`): `ActiveBehaviorManifest` holds a global manifest plus `HashMap<DocumentId, BehaviorManifest>` document layers. `install_staged` routes `BehaviorScope::Document { document_id }` manifests into the layer map; a dedicated version counter advances on EVERY publish (global or layer) so the connection-wide `behavior_version` stays monotonic and runtime-snapshot recovery never restores a stale version. `manifest_for(document_id)` resolves the document's layer with global fallback — used by completion-provider targeting and language-intelligence window construction in `src/server/connection.rs` (per-request `document_id`), by `build_runtime_state_snapshot` (`src/server/mod.rs`), and by the op-state harvest path.
+- **Server** (`src/server/behavior.rs`): `ActiveBehaviorManifest` holds a global manifest plus `HashMap<DocumentId, BehaviorManifest>` document layers. `install_staged` routes `BehaviorScope::Document { document_id }` manifests into the layer map; a dedicated version counter advances on EVERY publish (global or layer) so the connection-wide `behavior_version` stays monotonic and runtime-snapshot recovery never restores a stale version. `manifest_for(document_id)` resolves the document's layer with global fallback — used by completion-provider targeting and language-intelligence window construction in `src/server/connection/mod.rs` (per-request `document_id`), by `build_runtime_state_snapshot` (`src/server/mod.rs`), and by the op-state harvest path.
 - **Op-state resolution** (`src/server/ops/mod.rs`): `ClayOpState::behavior_manifest()` previously read only the global slot. It now prioritizes `last_published_behavior` (the manifest published during the CURRENT evaluation, reset by `begin_evaluation`) and falls back to `manifest_for(runtime_document_id)`, so package evaluations that activate a mode for a different document (e.g. package-internal evals) still pass the editor-control gate and harvest correctly. `active_major_mode_id()` follows the same resolution.
-- **Handshake/follow-up messages** (`src/server/connection.rs`): startup sends the just-classified document's layer plus the global manifest (`document_manifest_messages`); `open_document_followup_messages` sends only the opened document's layer (if any) + global, keeping message order testable. `classify_open_document` evaluates the controlled module with the OPENED document's ID (`evaluate_controlled_module_for_document` in `src/server/js_runtime.rs`) instead of a hard-coded document 1.
+- **Handshake/follow-up messages** (`src/server/connection/mod.rs`): startup sends the just-classified document's layer plus the global manifest (`document_manifest_messages`); `open_document_followup_messages` sends only the opened document's layer (if any) + global, keeping message order testable. `classify_open_document` evaluates the controlled module with the OPENED document's ID (`evaluate_controlled_module_for_document` in `src/server/js_runtime/mod.rs`) instead of a hard-coded document 1.
 - **Runtime snapshot** (`src/protocol/runtime.rs`): `DocumentRuntimeRenderState` gained `behavior_manifest: Option<BehaviorManifest>` (validated to match its document — `BehaviorManifestDocumentMismatch`), so per-pane mode layers survive `RuntimeStateSnapshot` recovery. `DocumentRuntimeRenderState` is deliberately not `Eq` (manifest payloads carry no `Eq`).
-- **Client** (`src/masonry_pane_document.rs`, `src/editor/surface.rs`): `PaneDocumentView::apply_behavior_manifest` installs content + version when the manifest's scope is global or matches the view's document; for OTHER documents' layers it applies only `EditorSurface::update_behavior_version` (version bump, no content change), so outbound stamps stay current while keymaps/autocomplete never bleed. Snapshot restoration bypasses the monotonic version gate and restores the connection-wide version.
+- **Client** (`src/masonry_pane_document.rs`, `src/editor/surface/mod.rs`): `PaneDocumentView::apply_behavior_manifest` installs content + version when the manifest's scope is global or matches the view's document; for OTHER documents' layers it applies only `EditorSurface::update_behavior_version` (version bump, no content change), so outbound stamps stay current while keymaps/autocomplete never bleed. Snapshot restoration bypasses the monotonic version gate and restores the connection-wide version.
 
 ## Tests
 
 - `src/protocol/codec.rs`: round-trips `ServerMessage::BehaviorManifest` updates and `InvalidBehaviorVersion` rejections through the IPC codec, and rejects invalid or oversized manifest frames.
 - `src/behavior/manifest.rs`: validates executable/side-effect authority rejection, duplicate command/key binding rejection, and all routing policy variants.
 - `src/server/behavior.rs`: validates replacement publishing increments behavior versions, rejects invalid replacements without advancing state, reports version mismatch metadata, and (22.2) verifies per-document layer resolution, `document_manifest_messages` ordering/content, and global-content independence from layer publishes.
-- `src/server/js_runtime.rs`: validates runtime `bindKey`/`unbindKey`, behavior query facades, unknown command rejection, manifest-based client key routing, each first-party package's activated indent/Enter/pair/comment/electric/completion rules and payload budget, package-prefixed server-first comment commands, status-item provenance, and absence of per-language Rust registration branches.
-- `src/server/connection.rs`: validates handshake manifest publication, stale behavior-version edit rejection without canonical mutation, and (22.2) that the language-intelligence window builder resolves the per-document mode layer from the request's `document_id`.
+- `src/server/js_runtime/mod.rs`: validates runtime `bindKey`/`unbindKey`, behavior query facades, unknown command rejection, manifest-based client key routing, each first-party package's activated indent/Enter/pair/comment/electric/completion rules and payload budget, package-prefixed server-first comment commands, status-item provenance, and absence of per-language Rust registration branches.
+- `src/server/ops/modes.rs`: parses real first-party `keyRouting` records through the shared key-sequence parser and checks their `KeyStroke` sequences against uppercase shifted key events.
+- `src/masonry_editor.rs`: maps Rust/JavaScript/TypeScript/Markdown editing command aliases to the generic comment/list/heading engines and verifies active-manifest rule parameters mutate text.
+- `tests/command_execution.rs`: rejects editor-backed package IDs from the metadata-only server/palette `Accepted` path; `markdown.togglePreview` remains an explicit SDUI/server exception.
+- `src/server/connection/mod.rs`: validates handshake manifest publication, stale behavior-version edit rejection without canonical mutation, and (22.2) that the language-intelligence window builder resolves the per-document mode layer from the request's `document_id`.
 - `src/client/behavior.rs`: validates atomic client replacement, previous-manifest retention on invalid replacement, client-first key routing, shifted character binding normalization, shifted printable fallback insertion, the configuration contract that a `Ctrl+Shift+O` folder binding routes on a Linux uppercase-`O` key event, Tab routing, autocomplete trigger classification, manual `completion.trigger` routing, and server-first intent routing.
 - `src/client/mod.rs`: validates full outbound edit queues fail immediately via `try_send` without awaiting IPC capacity and that completion request events enqueue typed `ClientMessage::CompletionRequest` values without an edit mutation.
 - `src/client/mod.rs`: validates runtime manifest replacement and rejection events from the connection loop.
-- `src/editor/surface.rs`: validates client-first key routing mutates locally, autocomplete trigger requests are built after local insertion, manual completion requests do not mutate text, ordinary typing completes locally without a server/JavaScript wait, server-first key routing does not mutate local text, Enter indentation, configured Tab insertion, pair insertion/wrapping, and comment continuation.
-- Command: `cargo test --quiet`.
+- `src/editor/surface/mod.rs`: validates client-first key routing mutates locally, autocomplete trigger requests are built after local insertion, manual completion requests do not mutate text, ordinary typing completes locally without a server/JavaScript wait, server-first key routing does not mutate local text, Enter indentation, configured Tab insertion, pair insertion/wrapping, and comment continuation.
+- Commands: `cargo test --quiet`; focused parity uses
+  `cargo test --lib server::ops::modes::tests::first_party_package_keymaps_match_parsed_sequences_and_key_events`,
+  `cargo test --lib masonry_editor::tests::package_edit_commands_use_active_manifest_transforms`,
+  and `cargo test --test runtime command_execution::package_edit_commands_are_not_accepted_as_palette_only_server_commands`.
 
 ## Related
 

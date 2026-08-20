@@ -71,7 +71,7 @@ text objects (inner/around word/paragraph/function/class/argument/comment/test
 
 ### 2.2 What exists today
 
-- **`EditorCommand`** enum (`src/editor/surface.rs:53`): `Insert`, `Newline`,
+- **`EditorCommand`** enum (`src/editor/surface/mod.rs:53`): `Insert`, `Newline`,
   `Backspace`, `DeleteForward`, `MoveLeft`, `MoveRight`, `SelectLeft`, `SelectRight`,
   `MoveUp`, `MoveDown`, `LineStart`, `LineEnd`, `DocumentStart`, `DocumentEnd`.
   **No word movement, no paragraph movement, no select-word/line/paragraph,
@@ -318,7 +318,7 @@ Add to `CursorState` (`src/editor/cursor.rs`) and `EditorBuffer` (`src/editor/bu
   — reuse existing `PairRule`/bracket data.
 - Already present: scalar, line start/end, doc start/end, prev/next line, sticky column.
 
-Add to `EditorSurface` (`src/editor/surface.rs`) and `EditorCommand`:
+Add to `EditorSurface` (`src/editor/surface/mod.rs`) and `EditorCommand`:
 
 ```
 EditorCommand::MoveWordStart{ forward: bool, long: bool, extend: bool }
@@ -483,7 +483,7 @@ CaretStyle {
 
 - `src/editor/theme.rs`: add `caret_style: CaretStyle` to the base style
   registry (next to `base.caret` color), with theme-key `caretStyle`.
-- `src/editor/surface.rs::paint_caret`: replace the fixed `CARET_WIDTH` bar
+- `src/editor/surface/mod.rs::paint_caret`: replace the fixed `CARET_WIDTH` bar
   with shape-aware geometry: `Bar`/`Line` → vertical rect of `width_px`;
   `Block` → glyph cell rect (optionally `hollow` = stroke only, draw the
   underlying glyph in the inverse/background color); `Underline` → bottom rect
@@ -791,7 +791,7 @@ Each phase is independently shippable and follows Clay's Linux-blocking gates
 
 Codebase (read directly):
 - `src/editor/cursor.rs`, `src/editor/selection.rs`, `src/editor/buffer.rs`,
-  `src/editor/viewport.rs`, `src/editor/surface.rs` (`EditorCommand`,
+  `src/editor/viewport.rs`, `src/editor/surface/mod.rs` (`EditorCommand`,
   `move_cursor`, `extend_selection`, `paint_caret`, `word_prefix_start`,
   `CARET_WIDTH`), `src/editor/layout.rs`, `src/editor/typography.rs`,
   `src/editor/theme.rs`.

@@ -25,13 +25,13 @@
 - `src/server/ops/ui.rs`
 - `src/server/ops/behavior.rs`
 - `src/server/ops/packages.rs`
-- `src/packages/record.rs`
+- `src/packages/record/mod.rs`
 - `src/packages/permissions.rs`
 - `src/packages/modes.rs`
 - `src/server/completion.rs`
 - `src/server/parse_coordinator.rs`
 - `src/server/syntax.rs`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `docs/reference/packages/rust.md`
 - `docs/reference/packages/typescript.md`
 - `docs/reference/packages/javascript.md`
@@ -58,7 +58,7 @@
 - `tests/package_loading_docs.rs`
 - `tests/manual_smoke_docs.rs`
 - `tests/primitives_docs.rs`
-- `src/server/js_runtime.rs` (integration tests)
+- `src/server/js_runtime/mod.rs` (integration tests)
 
 ## Overview
 
@@ -204,7 +204,7 @@ export default async function loadRustPackage() {
 | `CompletionTriggerAndResult` / `serverRegisterCompletionProvider` | Priority-0 static keyword/Markdown-construct providers | `src/server/completion.rs`, `src/server/ops/completion.rs`, `runtime/js/completion.js` |
 | `serverListCompletionProvidersForTrigger` | Query providers by trigger character | `src/server/ops/completion.rs`, `runtime/js/completion.js` |
 | `ComponentContribution` / `statusItem` | Mode status item in editor chrome | `src/server/ops/ui.rs`, `runtime/js/ui.js`, `src/shell/components.rs` |
-| `loadPackage` / first-party package authority | One-line opt-in loading | `src/server/ops/packages.rs`, `src/packages/record.rs` |
+| `loadPackage` / first-party package authority | One-line opt-in loading | `src/server/ops/packages.rs`, `src/packages/record/mod.rs` |
 
 Permissions required: `mode-registration`, `mode-activation`, `command-registration`, `completion-provider`, `parse-document`, `render-decorations`. Not requested: filesystem, network, shell, AI, WASM authority, raw ops, native UI, client runtime, package control, workspace mutation.
 
@@ -212,7 +212,7 @@ Hot-path policy: parse/highlight work and completion resolution run as backgroun
 
 ### Performance verification
 
-`tests/performance_protocol.rs` executes each compiled native descriptor/query against the representative Rust, TypeScript, TSX, JavaScript, and Markdown fixture. It serializes the real decoration and combined update payloads against `DECORATION_PAYLOAD_BUDGET_BYTES`/`INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, verifies each native contribution's parse-window/timeout limits, and proves delayed open parse does not delay initial editor text. `benches/first_party_language_baselines.rs` measures optimized open parse, alternating one-character incremental edits with cached-tree reuse, and decorated scroll work for the same five cases. `docs/development/performance.md` is the measured-results record and explains the local Criterion baseline/RSS method; machine timings remain advisory while payload/enqueue/cache/no-hot-path guards remain deterministic.
+`tests/performance_protocol.rs` executes each compiled native descriptor/query against the representative Rust, TypeScript, TSX, JavaScript, and Markdown fixture. It serializes the real decoration and update payloads against `DECORATION_PAYLOAD_BUDGET_BYTES` and the ordinary `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`; updates carrying the independently capped folding set use the derived `INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES` envelope. It verifies each native contribution's parse-window/timeout limits and proves delayed open parse does not delay initial editor text. `benches/first_party_language_baselines.rs` measures optimized open parse, alternating one-character incremental edits with cached-tree reuse, and decorated scroll work for the same five cases. `docs/development/performance.md` is the measured-results record and explains the local Criterion baseline/RSS method; machine timings remain advisory while payload/enqueue/cache/no-hot-path guards remain deterministic.
 
 ## Invariants and Constraints
 
@@ -232,24 +232,24 @@ Hot-path policy: parse/highlight work and completion resolution run as backgroun
 - `tests/syntax_grammar.rs::markdown_decoration_renders_through_tier1_native_engine`
 - `tests/markdown_mode.rs::markdown_preview_sdui_panel_remains_package_js_and_unchanged`
 - `tests/markdown_mode.rs::markdown_decoration_and_preview_are_independently_activatable`
-- `src/server/connection.rs::tests::default_init_js_load_package_powers_selected_markdown_open`
-- `src/server/js_runtime.rs::rust_package_expansion_registers_mode_command_completion_and_status`
-- `src/server/js_runtime.rs::typescript_package_expansion_registers_mode_command_completion_and_status`
-- `src/server/js_runtime.rs::javascript_package_expansion_registers_mode_command_completion_and_status`
-- `src/server/js_runtime.rs::language_packages_classify_with_core_fallbacks_and_no_conflicts`
-- `src/server/js_runtime.rs::language_package_classification_is_deterministic_across_load_orders`
-- `src/server/js_runtime.rs::language_package_rejects_unauthorized_completion_provider`
-- `src/server/js_runtime.rs::language_package_completion_trigger_metadata_is_queryable`
+- `src/server/connection/mod.rs::tests::default_init_js_load_package_powers_selected_markdown_open`
+- `src/server/js_runtime/mod.rs::rust_package_expansion_registers_mode_command_completion_and_status`
+- `src/server/js_runtime/mod.rs::typescript_package_expansion_registers_mode_command_completion_and_status`
+- `src/server/js_runtime/mod.rs::javascript_package_expansion_registers_mode_command_completion_and_status`
+- `src/server/js_runtime/mod.rs::language_packages_classify_with_core_fallbacks_and_no_conflicts`
+- `src/server/js_runtime/mod.rs::language_package_classification_is_deterministic_across_load_orders`
+- `src/server/js_runtime/mod.rs::language_package_rejects_unauthorized_completion_provider`
+- `src/server/js_runtime/mod.rs::language_package_completion_trigger_metadata_is_queryable`
 - `tests/completion_provider.rs::each_language_registers_a_base_keyword_completion_provider`
 - `tests/completion_provider.rs::base_keyword_provider_merges_with_future_providers_at_documented_priority`
 - `tests/completion_provider.rs::completion_registration_has_no_per_language_rust_branch`
-- `src/server/js_runtime.rs::build_code_editing_manifest_produces_valid_editor_rules`
-- `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions`
+- `src/server/js_runtime/mod.rs::build_code_editing_manifest_produces_valid_editor_rules`
+- `src/server/js_runtime/mod.rs::language_packages_config_fixture_loads_and_registers_all_contributions`
 - Package reference documentation uses generic manifest/API/security validators in `tests/package_loading_docs.rs`; executable package/runtime tests remain authoritative for behavior.
 - `tests/manual_smoke_docs.rs::phase18_18_manual_smoke_documents_first_party_language_matrix`
 - `tests/manual_smoke_docs.rs::first_party_syntax_fixtures_exist_per_language`
 - `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract`
-- `src/server/js_runtime.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings`
+- `src/server/js_runtime/mod.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings`
 - Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 
 Run the relevant suites:

@@ -1,6 +1,16 @@
 # Post-Stability Xilem Compatibility Spike
 
-Prerequisites: Plans 086–090 complete, full Linux gate green, modernized Masonry baseline measured, and no unresolved P0/P1 visual/accessibility defect.
+## Status: Deferred (2026-08-17)
+
+**Decision:** Deferred in full by user approval on 2026-08-17. No spike code will be written under this plan. Production `Cargo.toml`, `Cargo.lock`, and source remain free of Xilem.
+
+**Reason:** Task 1 (the only executed task) resolved the dependency/API matrix and found the graph compatible — one Masonry/winit line, exact versions, no production upgrade, Apache-2.0, audit-clean shared graph (matrix recorded below). However, Task 1 also found a hard released-0.4 embedding constraint that materially weakens the spike's bounded premise: there is no released API to host a Xilem view tree as a child inside Clay's existing Masonry `RenderRoot` (`ViewCtx::new`/`set_state_changed`/`get_id_path` are `pub(crate)`; `examples/external_event_loop.rs` states "more custom embeddings … needs more design work"). The only released-API path that keeps the editor and shell in one window/event loop requires Xilem to own the loop and host the editor as an opaque Masonry child — an architectural inversion that pulls the editor canvas and shell/tab infrastructure into scope, which this plan explicitly keeps out of scope. The separate-window mode is already rejected in this plan's Options Considered. Therefore the spike as designed cannot cleanly answer its target question on Xilem 0.4.
+
+**Recommendation carried forward:** Defer until either (a) Xilem ships a released custom-embedding API, or (b) a separate full-ownership-migration plan with its own decision log is explicitly approved. The current recommendation remains **do not adopt Xilem in production now**.
+
+**Executed task:** Task 1 only (matrix pinned below). All remaining tasks (2–11) are deferred without execution.
+
+Prerequisites: Plans 086–090 complete, including closure of Plan 089's Plan 088 follow-up tasks, full Linux gate green, modernized Masonry baseline measured, and no unresolved P0/P1 visual/accessibility defect. Plan 088's recovery/loading mismatch, host-targeted visual matrix, or renderer-containment review cannot remain open when this spike begins.
 
 This is an experiment, not an adoption plan. Current recommendation remains **do not adopt Xilem in production now**. Production adoption requires a separate evidence-backed decision log and explicit user approval after this spike.
 
@@ -22,7 +32,7 @@ Source review: Xilem evaluation in `code-reviews/2026-08-14-comprehensive-implem
 
 ## Tasks
 
-- [ ] Re-resolve exact Xilem/Masonry documentation and pin the spike matrix
+- [x] Re-resolve exact Xilem/Masonry documentation and pin the spike matrix
   - Acceptance Criteria:
     - Functional: Confirm current crates and exact dependency compatibility at execution time; record Clay's locked Masonry/winit/Rust versions and Xilem's matching requirements/APIs.
     - Performance: Documentation/version inspection adds no production dependency/build.
@@ -55,6 +65,63 @@ Source review: Xilem evaluation in `code-reviews/2026-08-14-comprehensive-implem
       - `https://docs.rs/xilem/0.4.0`, exact downloaded registry source.
   - Test Cases to Write:
     - Dependency matrix resolves one Masonry/winit line; report fails gate on duplicate major/minor UI stack or required production upgrade.
+
+### Task 1 Execution-Time Matrix (resolved 2026-08-17)
+
+Resolving commands run at execution time: `cargo info xilem`, `cargo tree -i masonry_core`, `cargo tree -p xilem` (fails — not in workspace), `cargo audit`, `npx ctx7@latest library Xilem`, `npx ctx7@latest docs /linebender/xilem`, and version-exact registry source under `~/.cargo/registry/src/index.crates.io-*/{xilem-0.4.0,xilem_core-0.4.0,masonry-0.4.0,masonry_core-0.4.0}`. No production build or dependency was added: `cargo tree -p xilem` returns "package ID specification `xilem` did not match any packages", confirming the production workspace and `Cargo.lock` are unchanged by this task.
+
+#### Toolchain
+
+| Item | Clay locked | Xilem 0.4.0 requires | Compatible |
+|------|-------------|----------------------|------------|
+| Rust | 1.96.1 (31fca3adb 2026-06-26) | rust-version = 1.88, edition 2024 | Yes (1.96.1 >= 1.88, edition 2024 shared) |
+
+#### Shared UI stack (one Masonry/winit line)
+
+| Crate | Clay locked (`Cargo.lock`) | Xilem 0.4.0 requires (`Cargo.toml`) | Compatible |
+|-------|----------------------------|--------------------------------------|------------|
+| masonry | 0.4.0 | 0.4.0 | Exact |
+| masonry_winit | 0.4.0 | 0.4.0 | Exact |
+| masonry_core | 0.4.0 (vendored via `[patch.crates-io]`) | 0.4.0 (transitive of masonry) | Exact; patch is workspace-global so a spike in this workspace inherits the same vendored masonry_core |
+| winit | 0.30.13 | 0.30.12 (`^0.30.12`) | Yes (0.30.13 satisfies `^0.30.12`) |
+| vello | 0.6.0 | 0.6.0 | Exact |
+| accesskit | 0.21.1 | transitive via masonry 0.4 | Exact (same line Clay already locks) |
+| peniko | 0.5.0 | transitive via masonry 0.4 | Exact |
+| kurbo | 0.12.0 | transitive via masonry 0.4 | Exact |
+| parley | 0.6.0 | transitive via masonry 0.4 | Exact |
+
+Gate result: one Masonry/winit line resolves with no production upgrade. No duplicate major/minor UI stack. The only crates Xilem introduces beyond Clay's existing graph are `xilem` 0.4.0 and `xilem_core` 0.4.0; Clay already locks `tokio` and `tracing`, so Xilem's `tokio = 1.48.0` (rt, rt-multi-thread, time, sync) and `tracing = 0.1.41` add no new transitive crates of consequence. License: Xilem 0.4.0 and xilem_core 0.4.0 are Apache-2.0 (compatible with Clay's policy).
+
+#### Vendored masonry_core patch scope (AT-SPI WidgetId ingress fix)
+
+Clay's `[patch.crates-io] masonry_core = { path = "vendor/masonry_core" }` overrides registry masonry_core 0.4.0. The vendored source differs from registry 0.4.0 in exactly: `src/app/layer_stack.rs`, `src/app/render_root.rs`, `src/core/contexts.rs`, `src/passes/event.rs`, `src/passes/layout.rs`. Metadata (name/version/edition/rust-version) is identical to registry 0.4.0. Because `[patch.crates-io]` is workspace-global, any spike crate placed in this workspace would automatically use the patched masonry_core — keeping AT-SPI WidgetId handling consistent with production. Constraint for Task 2: a spike in this workspace shares the fix but adds `xilem`/`xilem_core` to the production `Cargo.lock`; a spike in a separate worktree keeps the production lockfile clean but must re-declare the same `[patch.crates-io]` to inherit the fix.
+
+#### Security: `cargo audit` on shared graph
+
+`cargo audit` against the current production `Cargo.lock` (571 crate dependencies): 0 vulnerabilities, 3 unmaintained warnings — `bincode 1.3.3` (RUSTSEC-2025-0141), `paste 1.0.15` (RUSTSEC-2024-0436), `ttf-parser 0.25.1` (RUSTSEC-2026-0192). None are Xilem-introduced; `ttf-parser` is a parley/vello transitive already in production. The Xilem-only addition (`xilem`, `xilem_core`) cannot be audited until it resolves in an isolated spike graph; that audit is a Task 2 entry gate before executing spike code. No dependency enters the production lockfile by this task.
+
+#### Released 0.4 embedding constraints (recorded explicitly)
+
+- `examples/external_event_loop.rs` header comment: released 0.4 "supports running as its own window alongside an existing application, or accessing raw events from winit. Support for more custom embeddings would be welcome, but needs more design work." There is no released API for embedding a Xilem view tree as a child inside a non-Xilem-owned Masonry `RenderRoot`.
+- `ViewCtx::new`, `ViewCtx::set_state_changed`, and `ViewCtx::get_id_path` are `pub(crate)` in `xilem-0.4.0/src/view_ctx.rs`. A spike cannot construct `ViewCtx` directly; it must go through `Xilem::new_simple` / `Xilem::into_driver_and_windows` (as `external_event_loop.rs` does). Consequence: in the viable spike direction Xilem owns the window/event loop and the existing Clay editor must be hosted as an opaque Masonry `Widget` child inside the Xilem view tree — not the reverse. This flips shell/event-loop ownership relative to Clay's current bespoke Masonry app and is a Task 2/4 stop-criterion watch item (duplicate ownership / second event loop -> reject).
+- The separate-window mode in `external_event_loop.rs` is insufficient for the target question ("same window/event loop") and is rejected as compatibility proof, matching the plan's existing Options Considered.
+
+#### Minimum custom adapter API surface (Xilem 0.4.0 registry source)
+
+From `xilem-0.4.0/src/widget_view.rs`, `src/view_ctx.rs`, `src/pod.rs`:
+
+- `trait WidgetView<State, Action = ()>: View<State, Action, ViewCtx, Element = Pod<Self::Widget>> + Send + Sync`, auto-impl for any `V: View<..., ViewCtx, Element = Pod<W>>` where `W: Widget + FromDynWidget + ?Sized`. A custom editor adapter implements `View<State, Action, ViewCtx, Element = Pod<EditorWrapper>>` with `EditorWrapper: Widget + FromDynWidget`.
+- `Pod<W>` (`src/pod.rs`): wraps `NewWidget<W>`; `Pod::new(widget: W) -> Pod<W>`; `.erased() -> Pod<dyn Widget>`; implements `ViewElement` with `Mut<'a> = WidgetMut<'a, W>`.
+- `ViewCtx::create_pod<W: Widget + FromDynWidget>(&mut self, widget: W) -> Pod<W>` — public; used in `View::build`.
+- `ViewCtx::with_action_widget(f) -> Pod<W>` / `ViewCtx::record_action(id: WidgetId)` — public; routes a widget's actions back to the current View path. Required if editor-emitted Masonry actions must reach the Xilem action dispatcher.
+- `ViewCtx::teardown_leaf<W>(widget: WidgetMut<'_, W>)` — public; used in `View::teardown`.
+- `ViewCtx` exposes `runtime() -> &tokio::runtime::Runtime`, `proxy() -> Arc<dyn RawProxy>`, `state_changed() -> bool`, and `environment() -> &mut Environment` (via `ViewPathTracker`).
+
+Masonry side (from ctx7 `/linebender/xilem` docs, sourced from `masonry/src/doc/`): container/leaf widgets implement `Widget` with `measure`/`layout`/`compose`/`register_children`/`children_ids`, mutation via `WidgetMut<'_, Self>` and `NewWidget<dyn Widget>` children (`add_child` pushes `child.to_pod()` and calls `this.ctx.children_changed()`). These match Clay's existing vendored masonry_core 0.4 API, so the editor wrapper can reuse Clay's current Masonry widget patterns.
+
+#### Task 1 gate decision
+
+Dependency matrix resolves one Masonry/winit line with no production upgrade required; Xilem 0.4.0 is Apache-2.0; shared graph is audit-clean. Released 0.4 has a hard embedding constraint (no Xilem-as-child-in-foreign-RenderRoot; `ViewCtx` not constructible externally), so the spike must use the Xilem-owns-loop + opaque-editor-child direction, with the separate-worktree `[patch.crates-io]` re-declaration noted above. Proceed to Task 2. No production files modified.
 
 - [ ] Define time box, isolated worktree/crate, and hard stop criteria
   - Acceptance Criteria:
@@ -354,7 +421,10 @@ Source review: Xilem evaluation in `code-reviews/2026-08-14-comprehensive-implem
 ## Compromises Made
 
 - Spike is limited to one low-frequency surface and one opaque editor adapter. It cannot prove whole-app migration economics, only whether coexistence is technically and operationally credible.
+- Plan deferred in full on 2026-08-17 after Task 1: the released-0.4 embedding constraint means the bounded "one low-frequency surface in the same window" premise is not cleanly testable without either expanding scope to a near-full-ownership migration or using the already-rejected separate-window mode. No engineering time spent on Tasks 2–11.
 
 ## Further Actions
 
-- Production adoption, if recommended, requires explicit user approval, a decision log, a new numbered plan, and a rollback-compatible narrow scope. Otherwise close Xilem evaluation as rejected/deferred with no production dependency.
+- Plan 091 is deferred in full as of 2026-08-17 by user approval. No spike source, production dependency, or further task execution under this plan.
+- Reopen path: create a new numbered plan (and decision log) only after Xilem ships a released custom-embedding API, or if the user explicitly approves broadening scope to a full-ownership Xilem migration with a rollback-compatible narrow scope. Either path requires explicit user approval and a decision log before any production adoption.
+- Task 1's version/API matrix and embedding-constraint finding remain recorded below as evidence for any future reopening.

@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // First-party package configuration: language-server grants + explicit
-// @clay/* package loads. Loaded from examples/init.js (section 10) via:
+// @clay/* package loads. Loaded from examples/init.js (section 11) via:
 //
 //   await loadConfigurationModule({ path: "./packages/first-party.js", optional: true });
 //
@@ -68,8 +68,8 @@ await grantLanguageServer({
 // First-party packages — clay:packages
 // ----------------------------------------------------------------------------
 // Explicit opt-in loading of bundled @clay/* packages. One line per package.
-// loadPackage imports the package's load entry and runs it with host-stamped
-// provenance. There is NO auto-loading: what you don't load here is inactive.
+// loadPackage applies package.json contributions, then runs the execute-only
+// load entry (parse handlers / analyzers). There is NO auto-loading.
 //
 // Available first-party specifiers:
 //   Grammar/mode packages:  @clay/markdown  @clay/rust  @clay/typescript

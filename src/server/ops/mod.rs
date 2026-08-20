@@ -7,6 +7,7 @@ mod diagnostics;
 mod document_analysis;
 mod documents;
 mod editor;
+mod folding;
 mod git;
 mod keybindings;
 mod language_intelligence;
@@ -36,7 +37,7 @@ use deno_error::JsErrorBox;
 use crate::{
     protocol::{
         BehaviorManifest, BehaviorScope, CommandDeclaration, DecorationSet, DiagnosticSet,
-        EditorBehaviorRules, KeyBindingContext, KeyBindingRule, KeyStroke,
+        EditorBehaviorRules, FoldingRangeSet, KeyBindingContext, KeyBindingRule, KeyStroke,
     },
     server::{
         behavior::ActiveBehaviorManifest, decorations::SyntaxChunkCache,
@@ -69,8 +70,10 @@ use self::{
     editor::{
         op_clay_editor_add_cursor, op_clay_editor_column_select, op_clay_editor_execute_command,
         op_clay_editor_move_cursor, op_clay_editor_select_textobject,
-        op_clay_editor_set_cursor_style, op_clay_editor_set_selection, op_clay_editor_smart_select,
+        op_clay_editor_set_cursor_style, op_clay_editor_set_editor_layout,
+        op_clay_editor_set_selection, op_clay_editor_smart_select,
     },
+    folding::op_clay_folding_publish_ranges,
     git::{op_clay_git_list_statuses, op_clay_git_refresh_status},
     keybindings::{
         op_clay_keybindings_bind_key, op_clay_keybindings_bind_keys,
@@ -188,6 +191,17 @@ pub(crate) struct ClayOpState {
     /// current value.
     caret_style_store:
         Mutex<Option<std::sync::Arc<std::sync::Mutex<Option<crate::protocol::CaretStyle>>>>>,
+    /// Phase 26: bounded publisher for the user-owned editor wrap-policy
+    /// override set by `setEditorLayout`. Wired by the JS runtime service for
+    /// the trusted domain only; `None` in unit-test states. Packages cannot
+    /// forge this override (the op is registered in the trusted extension
+    /// only, so third-party workers cannot resolve it).
+    editor_layout_publisher:
+        Mutex<Option<tokio::sync::broadcast::Sender<Option<crate::protocol::WrapPolicy>>>>,
+    /// Shared last-known editor wrap override (service-owned) so connection
+    /// initial sync and lag replay can resend the current value.
+    editor_layout_store:
+        Mutex<Option<std::sync::Arc<std::sync::Mutex<Option<crate::protocol::WrapPolicy>>>>>,
     /// Phase 22.1: bounded publisher for shell-level user preferences set by
     /// `setPaneFocusPolicy`. Wired by the JS runtime service for both domains;
     /// `None` in unit-test states.
@@ -202,6 +216,8 @@ pub(crate) struct ClayOpState {
     published_sdui_tree: Mutex<Option<crate::protocol::SduiTree>>,
     published_decoration_set: Mutex<Option<DecorationSet>>,
     published_diagnostic_set: Mutex<Option<DiagnosticSet>>,
+    /// Last validated folding publication (`FOLDING_RANGE_PAYLOAD_BUDGET_BYTES`).
+    published_folding_set: Mutex<Option<FoldingRangeSet>>,
     decoration_cache: Mutex<SyntaxChunkCache>,
     diagnostic_cache: Mutex<DiagnosticChunkCache>,
     parse_handlers: Mutex<Vec<crate::server::parse_coordinator::ParseHandlerMeta>>,
@@ -312,6 +328,7 @@ impl ClayOpState {
             published_sdui_tree: Mutex::new(None),
             published_decoration_set: Mutex::new(None),
             published_diagnostic_set: Mutex::new(None),
+            published_folding_set: Mutex::new(None),
             decoration_cache: Mutex::new(SyntaxChunkCache::default()),
             diagnostic_cache: Mutex::new(DiagnosticChunkCache::default()),
             parse_handlers: Mutex::new(Vec::new()),
@@ -352,6 +369,8 @@ impl ClayOpState {
             editor_command_publisher: Mutex::new(None),
             caret_style_publisher: Mutex::new(None),
             caret_style_store: Mutex::new(None),
+            editor_layout_publisher: Mutex::new(None),
+            editor_layout_store: Mutex::new(None),
             shell_preferences_publisher: Mutex::new(None),
             shell_preferences_store: Mutex::new(None),
             third_party_commands: Mutex::new(None),
@@ -473,6 +492,12 @@ impl ClayOpState {
                 .published_diagnostic_set
                 .lock()
                 .expect("diagnostic set mutex poisoned") = Some(set.clone());
+        }
+        if let Some(set) = &evaluation.published_folding_set {
+            *self
+                .published_folding_set
+                .lock()
+                .expect("folding set mutex poisoned") = Some(set.clone());
         }
     }
 
@@ -654,6 +679,50 @@ impl ClayOpState {
             return false;
         };
         let _ = sender.send(style);
+        true
+    }
+
+    /// Phase 26: wire the editor wrap-policy override broadcast channel and
+    /// shared store. Called by the JS runtime service for the trusted domain.
+    pub(crate) fn set_editor_layout_publisher(
+        &self,
+        sender: tokio::sync::broadcast::Sender<Option<crate::protocol::WrapPolicy>>,
+        store: std::sync::Arc<std::sync::Mutex<Option<crate::protocol::WrapPolicy>>>,
+    ) {
+        *self
+            .editor_layout_publisher
+            .lock()
+            .expect("editor layout publisher mutex poisoned") = Some(sender);
+        *self
+            .editor_layout_store
+            .lock()
+            .expect("editor layout store mutex poisoned") = Some(store);
+    }
+
+    /// Publish the runtime editor wrap-policy override (`None` clears it) to
+    /// connected clients and record it as the current value. Returns `true`
+    /// when a publisher is wired.
+    pub(crate) fn publish_editor_layout_override(
+        &self,
+        wrap: Option<crate::protocol::WrapPolicy>,
+    ) -> bool {
+        if let Some(store) = self
+            .editor_layout_store
+            .lock()
+            .expect("editor layout store mutex poisoned")
+            .clone()
+        {
+            *store.lock().expect("editor layout state mutex poisoned") = wrap;
+        }
+        let Some(sender) = self
+            .editor_layout_publisher
+            .lock()
+            .expect("editor layout publisher mutex poisoned")
+            .clone()
+        else {
+            return false;
+        };
+        let _ = sender.send(wrap);
         true
     }
 
@@ -847,6 +916,10 @@ impl ClayOpState {
             .published_diagnostic_set
             .lock()
             .expect("Clay runtime op state mutex poisoned") = None;
+        *self
+            .published_folding_set
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = None;
     }
 
     /// Handle to the shared `PackageService` used by the resolver op for
@@ -892,6 +965,13 @@ impl ClayOpState {
 
     pub(crate) fn published_diagnostic_set(&self) -> Option<DiagnosticSet> {
         self.published_diagnostic_set
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
+    pub(crate) fn published_folding_set(&self) -> Option<FoldingRangeSet> {
+        self.published_folding_set
             .lock()
             .expect("Clay runtime op state mutex poisoned")
             .clone()
@@ -1074,6 +1154,13 @@ impl ClayOpState {
             .expect("Clay runtime op state mutex poisoned") = Some(set);
     }
 
+    pub(super) fn publish_folding_set(&self, set: FoldingRangeSet) {
+        *self
+            .published_folding_set
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = Some(set);
+    }
+
     pub(super) fn register_parse_handler_meta(
         &self,
         meta: crate::server::parse_coordinator::ParseHandlerMeta,
@@ -1183,6 +1270,61 @@ impl ClayOpState {
                 )
         })?;
         modes.activate_major_mode(&owner.manifest, classification)
+    }
+
+    pub(super) fn record_behavior_for_activation(
+        &self,
+        activation: &crate::packages::modes::MajorModeActivation,
+    ) -> Option<(
+        EditorBehaviorRules,
+        Vec<CommandDeclaration>,
+        Vec<KeyBindingRule>,
+    )> {
+        let record = {
+            let service = self.package_service();
+            let service = service.lock().expect("package service mutex poisoned");
+            service
+                .enabled_record(&activation.package_name, &activation.package_version)
+                .cloned()
+        }?;
+        let pattern = record
+            .contributions
+            .mode_patterns
+            .iter()
+            .find(|pattern| pattern.mode_id == activation.mode_id)?;
+        let rules = pattern
+            .editor_rules_json
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+            .and_then(|value| modes::parse_editor_rules(&value).ok())?;
+        let commands = record
+            .contributions
+            .commands
+            .iter()
+            .filter_map(|command| {
+                Some(CommandDeclaration {
+                    command_id: command.id.clone(),
+                    display_name: command.display_name.clone(),
+                    routing_policy: packages::routing_policy_from_str(&command.routing_policy)?,
+                    authority: crate::protocol::CommandAuthority::ServerIntent,
+                })
+            })
+            .collect();
+        let keymaps = record
+            .contributions
+            .key_routing
+            .iter()
+            .filter_map(|route| {
+                let key = route.key_binding.as_deref()?;
+                modes::parse_keymap(&serde_json::json!({
+                    "commandId": route.command_id,
+                    "key": key,
+                    "routingPolicy": route.routing_policy.as_deref().unwrap_or("server-first"),
+                }))
+                .ok()
+            })
+            .collect();
+        Some((rules, commands, keymaps))
     }
 
     /// Publish a new behavior manifest shaped by package-supplied editor rules.
@@ -1884,11 +2026,13 @@ extension!(
         op_clay_editor_move_cursor,
         op_clay_editor_set_selection,
         op_clay_editor_set_cursor_style,
+        op_clay_editor_set_editor_layout,
         op_clay_editor_add_cursor,
         op_clay_editor_column_select,
         op_clay_editor_select_textobject,
         op_clay_editor_smart_select,
         op_clay_editor_execute_command,
+        op_clay_folding_publish_ranges,
         op_clay_runtime_unavailable,
     ],
 );
@@ -1946,6 +2090,7 @@ extension!(
         op_clay_language_register_document_analyzer,
         op_clay_language_store_intelligence_result,
         op_clay_editor_execute_command,
+        op_clay_folding_publish_ranges,
     ],
 );
 
@@ -2007,12 +2152,12 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 82);
-        // 44 = 36 public contribution ops + the seven shared `editor-control`
-        // gated editor ops + the gated programmatic execution op (follow-up
-        // round); visibility grants nothing without approved permission +
-        // declared active mode.
-        assert_eq!(package.len(), 44);
+        assert_eq!(trusted.len(), 84);
+        // 45 = 37 public contribution ops (including folding publication) +
+        // the seven shared `editor-control` gated editor ops + the gated
+        // programmatic execution op (follow-up round); visibility grants
+        // nothing without approved permission + declared active mode.
+        assert_eq!(package.len(), 45);
         assert!(
             package.is_subset(&trusted),
             "every third-party op must also exist in the trusted extension"
@@ -2053,6 +2198,7 @@ mod domain_extension_tests {
             "op_clay_modes_classify_document",
             "op_clay_modes_activate_major_mode",
             "op_clay_completion_providers_for_trigger",
+            "op_clay_editor_set_editor_layout",
             "op_clay_runtime_unavailable",
         ] {
             assert!(

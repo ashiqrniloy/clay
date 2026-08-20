@@ -699,6 +699,19 @@ impl EditorBuffer {
     /// `ponytail:` single-char distinct open/close pairs only; same-char and
     /// multi-char pairs are not supported for motion.
     pub fn matching_pair_byte(&self, caret: usize, open: char, close: char) -> Option<usize> {
+        self.matching_pair_byte_within(caret, open, close, usize::MAX)
+    }
+
+    /// Like [`Self::matching_pair_byte`], but stop after `max_bytes` from the
+    /// detected bracket. Chrome paint uses a 64 KiB ceiling so a missing closer
+    /// cannot walk the whole document on every frame.
+    pub fn matching_pair_byte_within(
+        &self,
+        caret: usize,
+        open: char,
+        close: char,
+        max_bytes: usize,
+    ) -> Option<usize> {
         let caret = self.clamp_byte_offset(caret);
         let end = self.rope.byte_len();
         let current = self.char_at(caret);
@@ -724,6 +737,9 @@ impl EditorBuffer {
                 .byte_slice((anchor + open.len_utf8())..end)
                 .chars()
             {
+                if offset.saturating_sub(anchor) > max_bytes {
+                    return None;
+                }
                 if character == close {
                     depth -= 1;
                     if depth == 0 {
@@ -740,6 +756,9 @@ impl EditorBuffer {
             let mut offset = anchor;
             for character in self.rope.byte_slice(..anchor).chars().rev() {
                 offset -= character.len_utf8();
+                if anchor.saturating_sub(offset) > max_bytes {
+                    return None;
+                }
                 if character == open {
                     depth -= 1;
                     if depth == 0 {
@@ -1134,6 +1153,13 @@ mod movement_tests {
         assert_eq!(buffer.matching_pair_byte(0, '(', ')'), Some(4));
         // Inner `(` at 1 matches the first `)` at 3.
         assert_eq!(buffer.matching_pair_byte(1, '(', ')'), Some(3));
+    }
+
+    #[test]
+    fn matching_pair_within_stops_at_byte_ceiling() {
+        let buffer = EditorBuffer::from_text(&format!("({} )", "x".repeat(16)));
+        assert_eq!(buffer.matching_pair_byte_within(0, '(', ')', 4), None);
+        assert_eq!(buffer.matching_pair_byte_within(0, '(', ')', 64), Some(18));
     }
 
     #[test]

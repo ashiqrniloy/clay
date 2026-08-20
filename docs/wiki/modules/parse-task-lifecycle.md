@@ -8,7 +8,7 @@
 - `docs/reference/primitives/package-security.md`
 - `docs/reference/primitives/markdown-mode-requirements.md`
 - `src/server/document.rs`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `src/server/parse_coordinator.rs`
 - `src/protocol/parse.rs`
 - `src/perf/budgets.rs`
@@ -126,9 +126,9 @@ When package parsing lags:
 
 - Documentation structure and discoverability use generic `tests/primitives_docs.rs` inventory/wiki validators; executable tests remain authoritative for behavior instead of phase-specific prose needles.
 - `tests/parse_coordinator.rs`: covers permission-gated registration, superseded task cancellation, runtime-generation handler replacement/cancellation, package-scoped cancellation with handler withdrawal, stale-result discard, payload bounds, failed-task instrumentation, and proof that parse delays do not block edit acknowledgement.
-- `src/server/js_runtime.rs::js_parse_handler_bridge_runs_registered_markdown_handler`: verifies `loadPackage("@clay/markdown")` registers a live JS parse handler, `ParseCoordinator::schedule_parse_with_windows` invokes it, and `next_update` receives validated decoration output.
-- `src/server/js_runtime.rs::parse_registration_rejects_executable_callbacks_and_missing_permissions`: verifies executable callback fields and missing `parse-document` permissions are rejected.
-- `src/server/js_runtime.rs::js_parse_handler_timeout_uses_registered_budget`: verifies a looping JS handler is bounded by registered `timeoutMs` instead of the larger service timeout.
+- `src/server/js_runtime/mod.rs::js_parse_handler_bridge_runs_registered_markdown_handler`: verifies `loadPackage("@clay/markdown")` registers a live JS parse handler, `ParseCoordinator::schedule_parse_with_windows` invokes it, and `next_update` receives validated decoration output.
+- `src/server/js_runtime/mod.rs::parse_registration_rejects_executable_callbacks_and_missing_permissions`: verifies executable callback fields and missing `parse-document` permissions are rejected.
+- `src/server/js_runtime/mod.rs::js_parse_handler_timeout_uses_registered_budget`: verifies a looping JS handler is bounded by registered `timeoutMs` instead of the larger service timeout.
 - `cargo test --test protocol primitives_docs::`: runs the Phase 16 primitive documentation coverage suite.
 - `cargo test --test runtime parse_coordinator::`: runs the implemented coordinator coverage.
 

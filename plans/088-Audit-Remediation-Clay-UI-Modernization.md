@@ -239,7 +239,7 @@ Before reviewing existing UI, planning, designing, or changing any UI-related ta
 - Fresh representative captures are retained under `code-reviews/screenshots/2026-08-15-plan088-task4-welcome/` and `code-reviews/screenshots/2026-08-15-plan088-task4-light/`. Both report `PASS`, contain Clay-window-only 913×1151 PNGs for dark/light welcome states, and expose named `Open File`/`Open Folder` controls plus status/pane semantics. No host path or secret appears in retained text evidence. Full opened-editor, browser-list, multi-tab/pane, narrow/wide, and interactive focus-state visual acceptance remains for the dedicated later review task; this is not a full-plan visual pass. The host still lacks safe window-targeting/portal keyboard control for those interactions.
 - Verification passed: `cargo fmt --all -- --check`; `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo test --all-targets --quiet`; focused shell/editor/SDUI/file-browser/pane tests; and the tab-label sanitization regression. No new component kind, style variable, token, package authority, JS API, filesystem operation, IPC, document serialization, or paint/layout hot-path work was introduced.
 
-- [ ] Modernize overlays, dialogs, settings, diagnostics, and package panels
+- [x] Modernize overlays, dialogs, settings, diagnostics, and package panels
   - Acceptance Criteria:
     - Functional: Menus/completion/Command Centre/dialogs/settings/diagnostics/package panels share spacing, hierarchy, focus, selected/disabled/error states, and clear recovery actions; modality and focus restoration remain correct.
     - Performance: Visible rows are bounded/scrollable; no blur/offscreen filter or per-frame theme resolution; package JS remains absent from input/paint/layout.
@@ -268,7 +268,17 @@ Before reviewing existing UI, planning, designing, or changing any UI-related ta
   - Test Cases to Write:
     - Rest/hover/active/focus/disabled, empty/loading/error/recovery, long content, modal tab loop/Escape/focus restore, package action provenance, narrow pane/window.
 
-- [ ] Make modernized layouts responsive to pane size, DPI, and user typography
+### Task 5 Evidence (2026-08-15)
+
+- Re-ran mandatory UI preflight before review: `npx ui-skills start`; inspected `systems` and `accessibility`; loaded `ibelick/baseline-ui` and `ibelick/fixing-accessibility` (2 skills, within the routing limit), then translated their focus, disabled-state, long-content, containment, and minimal-change guidance to Clay's retained Masonry/token path.
+- Fixed shared host behavior instead of adding surface-specific UI: `PackageRegionWidget` clips each retained package subtree to its owning panel/overlay bounds; `SduiRegionWidget` applies the same boundary; package panel/overlay/modal/region accessibility nodes expose clipped-child semantics. Nested `scroll` children receive flex sizing during build and live reconcile, so bounded fixed panels can scroll long content instead of painting rows below their shell (closing P1-087-UI-1).
+- Completed generic state/accessibility plumbing: `statusItem` maps to `Role::Status` and primary status text; disabled package controls expose AccessKit disabled state; package text-input padding and border width read cached tokens and focused fields use `paint_focus_ring`; modal Escape carries its optional declared inert command intent through `PackageModalDismiss` and `main.rs` routes it through the existing server-first path.
+- Updated `@clay/settings` to compose `panel` + `scroll` without changing the package schema, permissions, or public API. Manifest dependency now names `ui.serverRegisterPanelContribution`; bundled trust fingerprint was regenerated after the manifest edit. Catalog/reference/wiki docs now describe the real token names, scroll composition, containment, status semantics, and modal routing.
+- Evidence: isolated dark welcome capture is retained at `code-reviews/screenshots/2026-08-15-plan088-task5-dark-default/` with `review.status=PASS`, a Clay-window-only 913×1151 PNG, and named welcome/status AT-SPI nodes. A live TTY Command Centre attempt was recorded as `UNRESOLVED` because this GNOME session's portal input did not produce the menu; no interactive visual pass is claimed. Changed overlay/settings states remain part of the dedicated visual/accessibility review task.
+- Added/updated focused checks: package-region containment and modal-intent tests, settings scroll-kind assertion, and package inventory fingerprint validation.
+- Verification passed: `cargo fmt --all -- --check`; `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo test --lib --quiet` (1549 passed, 2 ignored); `cargo test --test editor --quiet` (163); `cargo test --test protocol --quiet` (156); `cargo test --all-targets --quiet`; focused package/UI primitive/docs tests.
+
+- [x] Make modernized layouts responsive to pane size, DPI, and user typography
   - Acceptance Criteria:
     - Functional: Core states remain legible/operable at narrow/wide windows, 1x/2x representative scale, and min/max supported UI typography; long localized/user text truncates/wraps intentionally.
     - Performance: Layout uses Masonry constraints/token metrics, not repeated global measurement or full-tree invalidation.
@@ -288,15 +298,25 @@ Before reviewing existing UI, planning, designing, or changing any UI-related ta
       let width = preferred.min(constraints.max().width).max(minimum);
       ```
     - Files to Create/Edit:
-      - Changed surface/layout modules from prior tasks.
-      - `tests/editor_performance_invariants.rs` only for unique layout/hot-path contracts.
-      - Plan 087 UI review fixtures for scale/size states.
+      - `src/masonry_shell.rs`, `src/main.rs`, `src/masonry_editor.rs`, `src/masonry_sdui.rs`, `src/shell/package_ui.rs` for cached typography propagation and constraint-driven shell/sidebar/overlay geometry.
+      - `tests/rust_visibility_api_mapping.rs` for the internal `#[doc(hidden)]` binary bridge allowlist; adjacent module tests cover unique layout/hot-path contracts.
+      - `.agents/skills/clay-ui/references/components.md`, `docs/reference/packages/creating-packages.md`, and `docs/wiki/modules/{masonry-shell,masonry-sdui-region,masonry-editor,typography-registry-and-font-roles}.md` for the responsive shell/layout contract.
+      - Plan 087 UI review harness output under `code-reviews/screenshots/` for default and large-typography states.
     - References:
       - `docs/development/accessibility.md`, `docs/development/ui-observability.md`.
   - Test Cases to Write:
     - Narrow/wide, 1x/2x, UI size 6/12/24/96 where supported, long names/details/errors, multi-pane, scroll reachability, accessibility bounds match visual bounds.
 
-- [ ] Add automated conformance and performance checks for modernization
+### Task 6 Evidence (2026-08-15)
+
+- Re-ran the mandatory UI preflight before Task 6 review/implementation: `npx ui-skills start`; inspected systems/typography/accessibility guidance and loaded `pbakaus/layout` plus `jakubkrehel/better-typography` (2 skills, within the prefer-1/max-3 rule). Applied the guidance to native Masonry constraints and Clay semantic typography rather than introducing web/CSS breakpoints. Re-read the Clay UI component/token catalog; no new component kind, style variable, token, primitive, package permission, or JS API was needed.
+- Installed `ActiveTypography` into each `TabChrome` and synchronized the active tab's cached registry to the window-level shell. Tab-bar height, card padding, close affordances, `+` geometry, hit-testing, and pane placement now follow `UiTextVariant::Status` metrics and remain clamped to logical window bounds; duplicate/stale revisions do not request reflow. Added the 2x logical-size layout assertion.
+- Replaced the fixed sidebar usability guard with a bounded UI-body em heuristic shared by the editor-region and SDUI left-slot decisions. Narrow panes and large UI text yield the sidebar before the editor becomes unusable. Long SDUI labels clip to typography-derived row bounds while retaining full accessibility text. Bottom transient overlays remain inside short main regions.
+- Updated the internal hidden Rust bridge allowlist for shell typography synchronization; this remains binary plumbing only and is not a Clay JS/public programmatic API. Updated catalog, package authoring, and implementation wiki coverage for the responsive layout contract.
+- Visual/accessibility evidence: `code-reviews/2026-08-15-plan088-task6-default/` and `code-reviews/2026-08-15-plan088-task6-large-typography/` each contain `review.status=PASS`, a cropped Clay-window-only 913×1151 PNG, metadata, and AT-SPI evidence. Default and UI-size-24 captures showed readable welcome/status text, bounded controls, and named `Open File`/`Open Folder` buttons; accessibility dumps retained `Role::Status`/button names and no clipped-path disclosure. Safe compositor window resize/focus remains unavailable on this GNOME Wayland host (`can_query_windows=false`, `can_focus_windows=false`), so narrow/wide interactive screenshot acceptance remains explicitly unresolved for Task 8; structural narrow/large-font/2x checks are the strongest available evidence.
+- Verification passed: `cargo fmt --all -- --check`; `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo test --all-targets --quiet` (1556 passed, 2 ignored in lib; all bins/tests/benches green); focused `masonry_shell` (85), `masonry_sdui` (55), `shell::package_ui` (12), `editor_performance_invariants` (32), `typography_protocol` (11), package conformance (10), primitive conformance (12), docs (25), security visibility (12), and package-doc (5) tests; `git diff --check` clean.
+
+- [x] Add automated conformance and performance checks for modernization
   - Acceptance Criteria:
     - Functional: Structural/state tests cover every changed component/surface and theme; package docs/catalog drift remains blocking.
     - Performance: Existing typing/tab/menu/pane budgets do not regress; benchmark additions measure only missing representative paths and remain advisory until promotion policy is met.
@@ -312,20 +332,30 @@ Before reviewing existing UI, planning, designing, or changing any UI-related ta
       - Extend existing tests/benchmarks surgically and record before/after evidence.
     - API Notes and Examples:
       ```bash
-      cargo test --test protocol package_ui_conformance::
-      cargo test --test protocol ui_primitive_conformance::
+      cargo test --test editor package_ui_conformance::
+      cargo test --test editor ui_primitive_conformance::
       cargo test --test editor editor_performance_invariants::
-      cargo bench --bench window_baselines --no-run
+      cargo bench --bench window_baselines responsive_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
       ```
     - Files to Create/Edit:
       - `tests/package_ui_conformance.rs`, `tests/ui_primitive_conformance.rs`, changed module tests.
-      - `tests/editor_performance_invariants.rs`, `benches/window_baselines.rs`, `docs/development/performance.md` only as required.
+      - `tests/editor_performance_invariants.rs`, `tests/performance_budgets.rs` for typed responsive bounds, hot-path, chrome, and benchmark-documentation gates.
+      - `src/perf/baselines.rs`, `benches/window_baselines.rs` for the advisory responsive-layout benchmark group.
+      - `docs/development/performance.md`, `docs/wiki/modules/performance-fixtures.md` for the blocking/advisory split and runnable commands.
     - References:
       - `.agents/skills/project-patterns/references/maintenance-validation.md`.
   - Test Cases to Write:
     - Theme/state/layout matrix, no raw values, all states complete, contrast valid, no extra hot-path work.
 
-- [ ] Perform visual screenshot and accessibility review of changed UI
+### Task 7 Evidence (2026-08-15)
+
+- Re-ran the mandatory UI preflight before Task 7 review/implementation: `npx ui-skills start`; inspected `testing` and `performance`, selected `pbakaus/audit` from the testing category (1 skill, within the prefer-1/max-3 rule), and translated its measurable-audit guidance to native Masonry, typed tokens, AccessKit, and host-authority tests. Re-read the Clay component/token catalog and relevant performance/observability patterns; no new package-facing component, token, API, permission, or screenshot-golden policy was introduced.
+- Added `responsive_layout_work` in `src/perf/baselines.rs` and the `responsive_layout_baselines` Criterion group in `benches/window_baselines.rs`. It exercises production SDUI sidebar/editor slot geometry at 320/900/1200 logical pixels and UI sizes 12/24/96; timing remains advisory while typed bounds stay blocking.
+- Added the blocking typed matrix `responsive_layout_work_preserves_sidebar_and_editor_bounds`, extended hot-path checks across modernized shell/package/SDUI files, and extended primitive conformance to retained package chrome. Existing theme, state-completeness, catalog/token drift, contrast, payload, provenance, and accessibility tests remain in the blocking suite.
+- Updated `docs/development/performance.md` and `docs/wiki/modules/performance-fixtures.md` with the deterministic/advisory split, benchmark command, sanitized layout-helper contract, and no-screenshot-golden policy. No new Clay JS or configuration surface was required.
+- Verification passed: `cargo fmt --all -- --check`; `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo test --all-targets --quiet` (lib 1556 passed/2 ignored; bin 63; editor 164; protocol 157; remaining suites and all benches green); focused editor performance (33), package conformance (10), primitive conformance (12), and performance-doc (20) tests; `cargo bench --bench window_baselines --no-run`; responsive benchmark run with 10 samples/1 s warm-up/2 s measurement; `git diff --check` clean.
+
+- [x] Perform visual screenshot and accessibility review of changed UI
   - Acceptance Criteria:
     - Functional: Review light/dark and representative override themes across empty/busy/error/recovery, editor, file browser, tabs/panes/status, menus/completion/Command Centre, dialogs/settings/diagnostics/package panels, multi-tab/pane, narrow/wide, and typography extremes.
     - Performance: Interactions remain responsive with no flashing, clipping, duplicate overlays, focus loss, or visible layout churn.
@@ -345,14 +375,24 @@ Before reviewing existing UI, planning, designing, or changing any UI-related ta
       get_app_state before and after each interaction
       ```
     - Files to Create/Edit:
-      - `code-reviews/screenshots/2026-08-14-plan088-modernization/*.png`.
-      - This plan: findings/comparison.
+      - `code-reviews/screenshots/2026-08-14-plan088-modernization/{default,light-default,large-typography,error,recovery}/` Clay-window-only PNG/AT-SPI artifacts.
+      - `code-reviews/screenshots/2026-08-14-plan088-modernization/review-log.md` and `retained-plan087/` comparison evidence.
+      - This plan: findings, screenshot matrix, blockers, and prioritized follow-ups.
     - References:
       - `decision-logs/2026-08-14-0200-mandatory-ui-visual-and-accessibility-review.md`.
   - Test Cases to Write:
     - Keyboard focus/order, visible focus, semantics, contrast, modality, announcements, long content, all matrix states.
 
-- [ ] Update the UI catalog and package authoring contract
+### Task 8 Evidence (2026-08-15)
+
+- Re-ran the mandatory UI preflight for this independent review: `npx ui-skills start`; inspected `visual` and `accessibility`; loaded `vercel-labs/web-design-guidelines` and `ibelick/fixing-accessibility` (2 skills, within the prefer-1/max-3 rule). Fetched the current Web Interface Guidelines source and applied both selected skills to native Masonry/AccessKit semantics and Clay token-driven chrome.
+- Called `computer_2d_use_2d_linux_get_app_state` before desktop interaction, then `computer_2d_use_2d_linux_doctor`. AT-SPI and portal capture are available, but GNOME Wayland window introspection remains unavailable (`can_query_windows=false`, `can_focus_windows=false`). Targeted focus/click failed with the exact compositor backend blocker; global `Ctrl+Space` and `Ctrl+Alt+P` attempts did not reach Clay. No interactive screenshot was claimed as PASS.
+- Captured and inspected current Clay-window-only screenshots/AT-SPI dumps under `code-reviews/screenshots/2026-08-14-plan088-modernization/`: dark default, light Gruvbox override, UI-size-24 typography, runtime error, disconnect/recovery, and loading fixture. Default/light/large passed visual bounds, named controls, status/panel semantics, and path-leak inspection. Recovery exposed a named selected `Dismiss` action but revealed a P1 stale welcome connection state; loading reached the shell but did not expose its intended loading SDUI state.
+- Inspected retained opened-document, completion, Command Centre, multi-tab, and multi-pane evidence copied under `retained-plan087/`. Completion/Command Centre references expose menu/dialog/list/selected/provenance semantics but predate Task 5 containment; current post-containment visual confirmation remains unresolved. Narrow/wide, file-browser, settings/package-panel, and interactive focus states remain unresolved for the host/harness reasons recorded in `review-log.md`.
+- Security review found no absolute workspace path in current Clay labels or cropped current screenshots. Accessibility review found named welcome actions, status/panel landmarks, error/recovery announcements, selected recovery dismissal, and retained menu/dialog semantics. The review log records P1 recovery-state consistency and fresh post-containment interactive recapture, plus P2 fixture/harness observability follow-ups; structural tests are not substituted for those live passes.
+- Verification corroboration remains green from Task 7: `cargo test --all-targets --quiet`, `cargo clippy --all-targets -- -D warnings`, formatting, conformance, containment, contrast, payload, provenance, and responsive-layout checks. Task 8 is complete as an evidence-producing review with explicit unresolved priorities; next task is catalog/authoring-contract maintenance.
+
+- [x] Update the UI catalog and package authoring contract
   - Acceptance Criteria:
     - Functional: Catalogs, token tables, package guide, UI navigation, and tests describe every changed/additive primitive/token/layout rule and current package limits.
     - Performance: Document cached token resolution and paint/layout ceilings.
@@ -372,14 +412,27 @@ Before reviewing existing UI, planning, designing, or changing any UI-related ta
       ```
     - Files to Create/Edit:
       - `.agents/skills/clay-ui/references/components.md`, `references/tokens.md`.
-      - `docs/reference/ui-components.md`, `docs/reference/packages/creating-packages.md`, `docs/index.md` if links change.
-      - `tests/package_ui_conformance.rs`, `tests/primitives_docs.rs`.
+      - `docs/reference/ui-components.md`, `docs/reference/packages/creating-packages.md`, and `docs/reference/primitives/shell-layout-strategy.md`.
+      - `docs/wiki/modules/slot-aware-package-ui.md`: internal package-runtime explanation and test path.
+      - `docs/index.md` verified as the master link for the UI navigation and package guide.
+      - `tests/primitives_docs.rs`: new catalog/package-guide parity gate.
+      - `tests/package_ui_conformance.rs`, `tests/rust_visibility_api_mapping.rs`: existing package-boundary gates verified unchanged.
     - References:
       - `.agents/skills/create-plan/references/clay.md` package UI/layout task.
+      - `.agents/skills/project-patterns/references/package-ui-layout.md`, `package-runtime-trust-domains.md`, and `maintenance-validation.md`.
   - Test Cases to Write:
-    - Source/catalog/package-guide parity and package rejection for internal-only surfaces.
+    - `primitives_docs::plan088_ui_catalog_and_package_authoring_contract_are_consistent`: source/catalog/package-guide/navigation parity, token no-addition note, and exact package anchor/internal-surface limits.
+    - Existing `src/shell/package_ui.rs` centered-origin/internal-anchor test, `src/server/ui.rs` four-anchor validator, reserved-kind/raw-style trust-boundary tests, and `tests/rust_visibility_api_mapping.rs` anchor allowlist remain green.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+### Task 9 Evidence (2026-08-15)
+
+- Re-ran the mandatory UI preflight before reviewing/editing the catalog and package contract: `npx ui-skills start`; inspected `systems` (the CLI has no `components` category), selected `ibelick/baseline-ui` (1 skill, within the prefer-1/max-3 rule), and translated its existing-primitives/accessibility/minimal-change guidance to Clay's native Masonry and typed-token model. Loaded `.agents/skills/clay-ui/` plus `components.md` and `tokens.md` before edits.
+- Updated the authoritative component catalog with the Plan 088 no-additions contract: retained host clipping and clipped-child accessibility semantics, nested `scroll` flex sizing, modal Escape `PackageModalDismiss`, `statusItem`/disabled semantics, responsive shell ownership, sanitized labels, and the package-facing anchor/kind limits. Updated the token catalog with an explicit Plan 088 consumption-only note: existing cached surface/state/spacing/dimension/typography tokens are reused; no core or package token domain was added and no package breakpoint/concrete font/size contract exists.
+- Updated `docs/reference/ui-components.md`, `docs/reference/packages/creating-packages.md`, and `docs/reference/primitives/shell-layout-strategy.md` so navigation and authoring guidance agree on Clay-owned shell/layout, `panel` + `scroll` composition, fixed/transient slots, internal completion/centered origins, status/disabled/accessibility semantics, cached token hot paths, path sanitization, and raw-style/client-JS/native-widget denial. Updated the internal `slot-aware-package-ui` wiki page; `docs/index.md` links were verified unchanged.
+- Added `tests/primitives_docs.rs::plan088_ui_catalog_and_package_authoring_contract_are_consistent` as an actionable documentation parity gate. Existing component/token drift, raw-style/oversize trust-boundary, reserved `table`, exact four package overlay anchors, and centered internal-origin tests remain the enforcement layer; no conformance API or package authority was added.
+- Verification passed: `cargo fmt --all -- --check`; `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo test --all-targets --quiet`; focused `cargo test --test protocol primitives_docs` (26), `cargo test --test editor package_ui_conformance` (10), `cargo test --test editor ui_primitive_conformance` (12), `cargo test --lib shell::package_ui` (12); and `git diff --check`. Next task is Clay JS API verification.
+
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: Inventory changed server-side public functions and commands; visual-only internals remain private; existing `theme.setTheme`/`theme.setTypography` remain documented and discoverable.
     - Performance: JS APIs affect cached install/reload state only, never paint/input/layout.
@@ -399,13 +452,28 @@ Before reviewing existing UI, planning, designing, or changing any UI-related ta
       setTypography({ monospace, proportional, ui, hierarchy });
       ```
     - Files to Create/Edit:
-      - Existing theme API docs/registry only if contract changes; new docs only for proven new public behavior.
+      - `tests/clay_js_facade_layout.rs`: keep the facade export matrix aligned with `runtime/js/theme.js` and `theme.d.ts` (including `setAppearance`).
+      - `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, `tests/rust_visibility_api_mapping.rs`: existing inventory, registry, metadata, lookup, and internal-visibility gates verified unchanged.
+      - `docs/wiki/modules/phase20.6-theme-segregation-settings-ui.md`: API-to-op/facade/Rust ownership inventory and Plan 088 no-new-API result.
+      - `docs/wiki/modules/embedded-js-runtime.md`: current 22-facade compiled inventory count.
+      - `docs/reference/clay-js-api/**`, `docs/index.md`, `docs/generated/clay-js-api-registry.json`: verify authoritative API docs, index, and generated registry; edit/regenerate only if drift is found.
     - References:
       - `.agents/skills/create-plan/references/clay.md` Clay JS API Task.
+      - `.agents/skills/project-patterns/references/clay-js-api-boundary.md`, `clay-js-api-naming.md`, `clay-js-api-schema.md`, `documentation-as-code.md`, and `doc-registry-tests.md`.
   - Test Cases to Write:
-    - Existing theme/typography API docs, index, registry, lookup, facade, and custom properties remain complete.
+    - Theme trio (`theme.setTheme`, `theme.setAppearance`, `theme.setTypography`) has complete op/facade/declaration/docs/index/registry/lookup/custom-property metadata.
+    - `settings.*` remains package-owned and `pub(crate)` `apply_*` helpers plus client-only visual bridges do not become Clay JS APIs.
 
-- [ ] Create or verify Clay configuration APIs and canonical example
+### Task 10 Evidence (2026-08-15)
+
+- Re-ran the mandatory Plan 088 UI preflight before reviewing theme/typography API consumers: `npx ui-skills start`; inspected the `architecture` category and loaded `mattpocock/engineering` (1 skill, within the prefer-1/max-3 rule). Loaded `.agents/skills/clay-ui/SKILL.md` plus `references/components.md` and `references/tokens.md`; translated the selected web/UI engineering context to Clay's native token/cache and server-facade boundaries.
+- Inventory found no new public programmatic capability in Plan 088. The complete public theme surface is the existing trio: `theme.setTheme` → `src/server/ops/theme.rs::op_clay_theme_set_theme` / `apply_theme`; `theme.setAppearance` → `op_clay_theme_set_appearance` / `apply_appearance`; and `theme.setTypography` → `src/server/ops/typography.rs::op_clay_theme_set_typography` / `apply_typography`. All use `clay:theme` flat exports, bare stable IDs, explicit `deno_core` wrappers, cached install/reload state, and authoritative Markdown/inventory/index/generated-registry entries with complete custom properties, empty default key bindings, lookup tags, and authority metadata.
+- The shared `apply_theme`, `apply_appearance`, and `apply_typography` functions remain `pub(crate)` server primitives. `settings.*` commands remain owned by `@clay/settings` (`apiPrefix: settings`) and are inert server-first intents, not duplicate core Clay APIs. Plan 088 client-only `ClayShellWidget::set_active_typography`, `PackageModalDismiss`, and benchmark/layout helpers remain outside server ops, JS facades, API inventory, and configuration authority; the existing hidden Rust bridge allowlist covers the visual shell method.
+- Found and fixed one verification gap: `tests/clay_js_facade_layout.rs` listed only `setTheme` and `setTypography`, so it did not assert the already-implemented `setAppearance` export. The expected facade matrix now covers all three JavaScript and declaration exports; no runtime/API behavior changed.
+- Updated the implementation wiki with the API ownership matrix and no-new-API boundary, and corrected the embedded-runtime facade count from 21 to the current 22 compiled facade files. Existing `docs/wiki/index.md` links both updated pages. `docs/reference/clay-js-api/**`, `docs/index.md`, `api-inventory.toml`, and `docs/generated/clay-js-api-registry.json` were checked and already current; no registry regeneration was needed. The generated-registry repair command remains `cargo run --bin update-doc-registry`.
+- Verification passed: `cargo fmt --all -- --check`; `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; focused `cargo test --test protocol clay_js_facade_layout` (5), `clay_js_api_inventory` (11), and `clay_js_doc_registry` (40); `cargo test --all-targets --quiet` (1556 lib, 63 bin, 164 editor, 158 protocol, 198 runtime, 130 security passed with 2 lib/1 security ignored). The first all-targets run hit a transient security fixture `Text file busy (os error 26)`; the targeted test and full security/runtime reruns passed. `git diff --check` is clean. Next task is configuration API/canonical-example verification.
+
+- [x] Create or verify Clay configuration APIs and canonical example
   - Acceptance Criteria:
     - Functional: `~/.config/clay/init.js` theme/typography configuration continues to work unchanged; no hidden redesign settings; if additive typed options are introduced, docs and `examples/init.js` cover each exactly once.
     - Performance: Configuration reload resolves atomically and does not cause redundant layout/paint churn.
@@ -413,25 +481,41 @@ Before reviewing existing UI, planning, designing, or changing any UI-related ta
     - Security: Configuration retains first-party theme allowlist, typed bounds/contrast, and no filesystem/network/shell/native UI authority.
   - Approach:
     - Documentation Reviewed:
-      - `configuration-system.md`, `examples/init.js`, current theme API docs.
+      - `configuration-system.md`, `examples/init.js`, current theme API docs, and `docs/wiki/modules/configuration-runtime.md`.
     - Options Considered:
-      - New parallel appearance config: rejected.
+      - New parallel appearance config: rejected; appearance already belongs to `clay:theme` and is persisted through the existing settings path.
       - Preserve current APIs and update only if additive semantics require it: chosen.
     - Chosen Approach:
-      - Treat current theme configurability as a blocking compatibility test, not optional documentation.
+      - Treat current theme/typography configurability as a blocking compatibility test, keep `clay:configuration` closed to its documented surface, and make the canonical example executable with optional alternatives only in comments.
     - API Notes and Examples:
-      ```bash
-      node --check examples/init.js
-      cargo run --bin update-doc-registry
+      ```js
+      // Comment out explicit setTheme when using appearance-driven defaults.
+      setAppearance("system");
+      setTypography({ monospace, proportional, ui, hierarchy });
       ```
     - Files to Create/Edit:
-      - `examples/init.js`, `docs/reference/clay-js-api/theme/**`, `docs/index.md`, generated registry only for actual API/schema changes.
+      - `examples/init.js`: document appearance alternatives and the complete optional seven-field typography hierarchy while preserving safe active defaults.
+      - `src/server/mod.rs`: assert the real canonical tree installs the explicit theme, all profiles, and hierarchy.
+      - `tests/clay_js_doc_registry.rs`: add canonical-example/docs parity coverage.
+      - `docs/wiki/modules/configuration-runtime.md`: synchronize runtime flow, validation, canonical-example, and test documentation.
+      - `docs/reference/clay-js-api/theme/**`, `docs/reference/clay-js-api/configuration.md`, `docs/index.md`, `docs/generated/clay-js-api-registry.json`: verify current API docs/index/registry; edit or regenerate only if schema drift is found.
     - References:
       - `decision-logs/2026-08-14-0331-ui-modernization-preserves-theme-configuration.md`.
+      - `.agents/skills/project-patterns/references/configuration-system.md`, `documentation-as-code.md`, `doc-registry-tests.md`, and `typography-role-ownership.md`.
   - Test Cases to Write:
-    - Canonical example loads dark/light theme and user typography; reload is atomic; invalid override preserves prior valid generation.
+    - Canonical example loads the explicit dark theme and all three typography profiles with default hierarchy; documented light/dark/system alternatives remain available.
+    - Reload remains atomic; invalid typography/preferences preserve prior valid state and hidden authority/configuration keys remain rejected.
 
-- [ ] Execute and update the manual test plan (test-plan/)
+### Task 11 Evidence (2026-08-15)
+
+- Ran the mandatory UI preflight for this theme/typography configuration task: `npx ui-skills start`; inspected `typography`; loaded `jakubkrehel/better-typography` (1 skill, within the prefer-1/max-3 rule). Re-read `.agents/skills/clay-ui/` and its component/token references, translating the web typography guidance to Clay's cached `TypographyRegistry`, logical-pixel metrics, and server-side configuration path.
+- Verified the existing configuration API boundary: `clay:configuration` retains its exact six inventory rows (three runtime-backed and three planned/unavailable), while theme/appearance/typography remain the existing `clay:theme` trio. No new hidden config key, public API, permission, renderer hook, or layout API was added.
+- Updated `examples/init.js` to cover the additive `setTypography` hierarchy option exactly once with all seven bounded default ratios, and to show all `setAppearance` enum alternatives with the explicit-theme precedence caveat. Active configuration remains safe to copy: explicit dark Gruvbox theme, complete three-profile typography, caret styling, bindings, and optional fault-isolated package modules. `authorizeLanguageServer` ordering and third-party template remain unchanged.
+- Strengthened the real canonical-tree runtime test in `src/server/mod.rs` to assert explicit dark theme installation, all three profile sizes/fallback families, and the documented default hierarchy. Added `tests/clay_js_doc_registry.rs::canonical_example_covers_theme_typography_and_modular_configuration` to keep facade imports, active calls, alternatives, hierarchy fields, module paths, and configuration documentation markers synchronized.
+- Updated `docs/wiki/modules/configuration-runtime.md`; its master-index link already exists. Authoritative theme/configuration Markdown, `docs/index.md`, `api-inventory.toml`, and `docs/generated/clay-js-api-registry.json` were checked and current, so `cargo run --bin update-doc-registry` was not needed. Configuration remains atomic/cached and grants no filesystem, network, shell, package-install, workspace, raw-op, native-widget, or client-JavaScript authority.
+- Verification passed: `node --check` for `examples/init.js`, `examples/packages/first-party.js`, and `examples/packages/third-party.js`; `cargo fmt --all -- --check`; focused `cargo test --test protocol clay_js_doc_registry` (41), `cargo test --lib example_configuration_loads_cleanly_and_applies_effects -- --test-threads=1` (1), `cargo test --lib js_runtime:: -- --test-threads=1` (186 passed/1 ignored), and `cargo test --lib configuration:: -- --test-threads=1` (17); `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo test --all-targets --quiet` (lib 1556 passed/2 ignored, bin 63, editor 164, protocol 159, runtime 198, security 130 passed/1 ignored, all bench suites green); and `git diff --check`. Next task is the manual test plan.
+
+- [x] Execute and update the manual test plan (test-plan/)
   - Acceptance Criteria:
     - Functional: Execute/update modules 01, 02, 03, 04, 07, 09, 10, 11, 13, and 14 for the full modernized state/theme/layout matrix.
     - Performance: Record perceived typing, switching, filtering, scrolling, resize, and theme reload behavior.
@@ -439,25 +523,44 @@ Before reviewing existing UI, planning, designing, or changing any UI-related ta
     - Security: Include theme validation, sanitized labels, package UI confinement, and modal focus checks.
   - Approach:
     - Documentation Reviewed:
-      - `test-plan/index.md` module map/coverage matrix.
+      - `test-plan/index.md` module map/coverage matrix and modules `01`, `02`, `03`, `04`, `07`, `09`, `10`, `11`, `13`, `14`.
+      - `docs/development/launch-and-gui-smoke.md`, `file-open-save-reload-workflow.md`, `accessibility.md`, `performance.md`, and the referenced theme/package/shell docs.
+      - `.agents/skills/project-patterns/references/ui-visual-review.md`, `ui-modernization.md`, `package-ui-layout.md`, `typography-role-ownership.md`, `maintenance-validation.md`, and `documentation-as-code.md`.
     - Options Considered:
-      - New standalone visual test document: rejected; use indexed modules.
-      - Update affected modules: chosen.
+      - New standalone visual test document: rejected; use indexed modules and module-local step IDs.
+      - Claim structural tests as visual passes when window targeting is unavailable: rejected; record `BLOCKED`/`UNRESOLVED` with exact evidence and retain automated coverage.
+      - Update affected modules and index: chosen.
     - Chosen Approach:
-      - Keep reusable manual verification close to owning behavior.
+      - Add Plan 088 step ranges, expected results, negative checks, known ceilings, and Linux execution records to the existing modules without deleting or weakening prior coverage. Use current-build Clay-window-only capture plus retained same-build comparison artifacts; treat host limitations and product findings explicitly.
     - API Notes and Examples:
       ```bash
       cargo build
-      scripts/capture-ui-review.sh --fixture <state> --output <artifact-dir>
+      scripts/capture-ui-review.sh --fixture ui-review-default --output <artifact-dir>
+      cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
       ```
     - Files to Create/Edit:
-      - Relevant module files listed above and `test-plan/index.md`.
+      - `test-plan/index.md`: add Plan 088 coverage row and Task 12 execution summary.
+      - `test-plan/01-launch-and-connection.md`, `02-configuration-init-js.md`, `03-files-and-workspace.md`, `04-core-editing.md`, `07-caret-and-typography.md`, `09-packages-and-modes.md`, `10-keybindings-and-commands.md`, `11-performance.md`, `13-window-splits.md`, `14-tabs.md`: add numbered Plan 088 steps and execution records; correct stale path/persistence expectations.
+      - `code-reviews/screenshots/2026-08-15-plan088-task12-manual/`: retain current Clay-window-only review evidence (ignored artifact directory).
     - References:
       - `.agents/skills/create-plan/references/clay.md` Manual Test Plan Task.
+      - `decision-logs/2026-08-14-0200-mandatory-ui-visual-and-accessibility-review.md`.
+      - `decision-logs/2026-08-14-0331-ui-modernization-preserves-theme-configuration.md`.
   - Test Cases to Write:
-    - Full visual/accessibility/theme matrix and negative checks from prior tasks.
+    - Step ranges `L15–L19`, `C20–C24`, `F38–F41`, `E22–E24`, `T14–T17`, `P16–P21`, `K73–K77`, `Q15–Q19`, `S36–S40`, and `T71–T76`: expected visual/accessibility behavior plus negative checks.
+    - Verify every unresolved state records a reason and artifact, never a false pass; verify no prior manual step is removed or weakened.
 
-- [ ] Update or verify the code wiki after implementation
+### Task 12 Evidence (2026-08-15)
+
+- Ran the mandatory per-task UI preflight: `npx ui-skills start`; inspected `accessibility` and `testing`; loaded `wshobson/wcag-audit-patterns` and `vercel-labs/web-design-guidelines` (2 skills, within prefer-1/max-3). Re-read `.agents/skills/clay-ui/SKILL.md`, `references/components.md`, and `references/tokens.md`; translated the web guidance to Clay's native Masonry, typed-token, logical-window, and AT-SPI workflow.
+- Called `computer_2d_use_2d_linux_get_app_state` before desktop work, then `computer_2d_use_2d_linux_doctor`. AT-SPI tree/screenshot and portal capture are available, but GNOME Wayland has `can_query_windows=false`/`can_focus_windows=false`; targeted key delivery, resize, and native-dialog selection are therefore recorded as blocked, not passed.
+- Built the current Linux binary and ran `scripts/capture-ui-review.sh --fixture ui-review-default`. `review.status` is `PASS`; `metadata.txt` records a 900×600 logical window, private mode-700 roots, portal PNG, and GI/AT-SPI dump. The screenshot was gold-border-cropped to a Clay-only 913×1152 PNG at `code-reviews/screenshots/2026-08-15-plan088-task12-manual/default/screenshot.png`; the tree exposes Welcome to Clay, named Open File/Open Folder buttons, Connected/Editable status, and no absolute path.
+- Updated the ten affected modules and `test-plan/index.md` with stable Plan 088 step IDs, expected results, security/negative checks, known ceilings, and pass/fail/blocked records. Corrected the file-browser expectation to exclude full authorized paths and corrected the stale tab-persistence ceiling to distinguish in-memory server registry from client-owned `layout.json` v2.
+- Recorded retained dark/light/error/recovery/large-typography evidence from the same current implementation under `code-reviews/screenshots/2026-08-14-plan088-modernization/`. Results: dark/default, light, large typography, and runtime error are PASS; recovery has a P1 stale WelcomeWidget `Connected` status mismatch; loading is UNRESOLVED because its fixture exposed welcome instead of the intended loading tree; interactive completion, Command Centre, settings, file-browser, multi-tab, narrow/wide, and live DPI states remain explicitly blocked/unresolved by host targeting rather than misreported.
+- Headless/structural verification passed: canonical example runtime test, `clay_js_doc_registry` (41), package UI conformance (10), UI primitive conformance (12), editor performance invariants (33), and Rust visibility mapping (12). `cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2` completed all groups; advisory Criterion comparisons reported some local-baseline regressions but remained below blocking budgets and are not CI pass/fail thresholds.
+- No existing test-plan steps were removed or weakened. The final code-wiki task records the unresolved UI findings as explicit follow-ups; no unchecked Plan 088 task remains.
+
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: Wiki teaches modern visual architecture, token/theme flow, component/chrome ownership, responsive behavior, accessibility, extension rules, and tests; index links pages.
     - Performance: Document cached resolution and hot-path invariants.
@@ -465,29 +568,51 @@ Before reviewing existing UI, planning, designing, or changing any UI-related ta
     - Security: Document validation/authority boundaries and theme/package restrictions.
   - Approach:
     - Documentation Reviewed:
-      - `.agents/skills/project-wiki/SKILL.md`.
+      - `.agents/skills/project-wiki/SKILL.md` and `references/page-template.md`.
+      - Existing wiki pages for theme/typography, shell/tabs/panes, retained SDUI/package UI, overlays, workspace/file browser, performance, configuration, and the review harness.
+      - `.agents/skills/project-patterns/references/ui-modernization.md`, `ui-visual-review.md`, `maintenance-validation.md`, `documentation-as-code.md`, plus current implementation/source and authoritative UI/package references.
     - Options Considered:
-      - Update after each surface: rejected as churn.
-      - One final synchronized update: chosen.
+      - New standalone Plan 088 wiki page: rejected; existing module ownership pages are already indexed and avoid duplicating implementation explanations.
+      - Duplicate public JS/package API reference prose: rejected; link `docs/reference/` and keep `docs/wiki/` implementation-focused.
+      - One final synchronized update with a master-index map and deterministic content guard: chosen.
     - Chosen Approach:
-      - Update existing UI/theme/shell pages and master index after gates/review pass.
+      - Update the existing owner pages and `docs/wiki/index.md` after implementation/verification, record retained visual-review findings and host limitations, and add one non-mutating `primitives_docs` guard for the cross-page contract.
     - API Notes and Examples:
-      ```text
-      docs/wiki/modules/shell-primitives.md
-      docs/wiki/modules/editor-theme-registry.md
-      docs/wiki/modules/masonry-shell.md
+      ```bash
+      cargo test --test protocol primitives_docs -- --test-threads=1
+      cargo test --all-targets --quiet
       ```
     - Files to Create/Edit:
-      - `docs/wiki/index.md` and relevant modules above plus package UI/conformance pages.
+      - `docs/wiki/index.md`: Plan 088 implementation map and corrected module navigation.
+      - `docs/wiki/modules/{shell-primitives,editor-theme-registry,masonry-shell,pane-document-views,tabs-and-clients,masonry-sdui-region,server-driven-ui,phase20.5-overlay-menu-input-components,slot-aware-package-ui,workspace-file-browser,performance-fixtures,ui-review-harness,maintenance-validation,typography-registry-and-font-roles,phase20.6-theme-segregation-settings-ui,configuration-runtime}.md`: synchronized implementation, ownership, accessibility, performance, security, and review notes.
+      - `tests/primitives_docs.rs`: deterministic Plan 088 wiki-index/content guard.
     - References:
       - `.agents/skills/create-plan/references/wiki-task.md`.
+      - `docs/reference/ui-components.md`, `docs/reference/packages/creating-packages.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`.
   - Test Cases to Write:
-    - Manual wiki link/content review and deterministic documentation checks.
+    - `wiki_index_links_every_wiki_page` and `plan088_code_wiki_documents_modernization_contract`: master-index navigation and required implementation markers.
+    - `cargo test --test protocol primitives_docs`, `cargo test --test editor package_ui_conformance`, `cargo test --test editor ui_primitive_conformance`, and `cargo test --test editor editor_performance_invariants`: deterministic docs/catalog/conformance/hot-path coverage.
+    - `cargo fmt --all -- --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --all-targets --quiet`: Linux blocking verification.
+
+### Task 13 Evidence (2026-08-15)
+
+- Ran the per-task UI preflight before reviewing UI implementation for documentation: `npx ui-skills start`; inspected `accessibility`; loaded `ibelick/fixing-accessibility` (1 skill, within prefer-1/max-3). Re-read `.agents/skills/clay-ui/SKILL.md`, `references/components.md`, and `references/tokens.md`; translated accessible-name, keyboard/focus, modal, state, contrast, and tool-boundary guidance to native Masonry/AccessKit rather than web ARIA.
+- Read the project-wiki workflow/template, current owner pages, Plan 088 implementation paths, package/catalog/reference contracts, and project patterns. Updated the master wiki map and synchronized shell primitives, theme/typography, shell/tabs/panes, retained SDUI/package UI, overlay, file-browser, performance, maintenance, and visual-review documentation. Existing authoritative JS/package docs remain linked rather than duplicated.
+- Added `tests/primitives_docs.rs::plan088_code_wiki_documents_modernization_contract`, which checks the Plan 088 index map and required markers across implementation pages without mutating files. The broader `wiki_index_links_every_wiki_page` guard remains green.
+- Verification passed: `cargo fmt --all -- --check`; `cargo test --test protocol primitives_docs -- --test-threads=1` (27 passed); package UI conformance (10), UI primitive conformance (12), editor performance invariants (33); `cargo check --all-targets`; `cargo clippy --all-targets -- -D warnings`; and `cargo test --all-targets --quiet` (1556 library, 63 binary, 164 editor, 160 protocol, 198 runtime, 130 security; 2 library/1 security ignored). All window benchmark harnesses completed during the all-target run.
+- No JS API, package permission, component kind, token, style variable, generated registry entry, or runtime behavior changed in this task, so `cargo run --bin update-doc-registry` was not needed. The wiki records the existing public API/reference boundary, cached theme/typography hot-path policy, package trust/conformance rules, path sanitization, responsive constraints, and visual-review blockers.
+- Plan 088 is complete. Remaining follow-ups are intentionally explicit: stale WelcomeWidget recovery status, loading-fixture observability, live completion/Command Centre/other window-targeted captures, and renderer-level containment recapture.
 
 ## Compromises Made
 
 - No UI-library migration, renderer rewrite, blur/filter pipeline, or speculative component suite. Existing Masonry/token system is sufficient unless task 2 proves a specific reusable gap.
+- Kept one cross-cutting Plan 088 map in `docs/wiki/index.md` and extended existing owner pages instead of adding a duplicate phase page.
+- Live GUI coverage remains evidence-producing rather than fully interactive on this host; no screenshot/AT-SPI blocker was converted into a false pass.
+- Criterion window baselines remain advisory; only deterministic responsive/hot-path bounds are blocking.
 
 ## Further Actions
 
+- **P1 — Plan 089 task `Close Plan 088 welcome recovery/status and loading-fixture follow-ups`:** Fix WelcomeWidget connection/status propagation and publish a loading fixture that actually exposes its intended SDUI state; recapture recovery/loading.
+- **P1 — Plan 089 tasks `Add real Linux multi-window, DPI, font-scale, and Wayland validation` and `Perform visual screenshot and accessibility review of validation fixtures`:** Enable safe GNOME window targeting or add a no-focus harness action path, then recapture completion, Command Centre, settings, file browser, multi-tab/multi-pane, narrow/wide, and DPI states; verify retained clipping/containment visually.
+- **P2 — Plan 089 task `Triage Plan 088 advisory Criterion regressions before policy promotion`:** Investigate local Criterion regressions before promoting advisory window numbers to any cross-machine policy.
 - Xilem remains a separate post-stability experiment in Plan 091; this plan does not depend on it.

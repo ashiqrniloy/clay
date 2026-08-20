@@ -7,13 +7,13 @@
 - `src/protocol/decorations.rs` — `DecorationSpan.font_role`, `SyntaxStyleMapEntry`.
 - `src/server/ops/typography.rs` — `op_clay_theme_set_typography`.
 - `src/server/mod.rs` — `ActiveTypographyState`, `RuntimeGenerationStore`, `install_active_typography`.
-- `src/server/connection.rs` — bootstrap fifth message and live broadcast loop.
+- `src/server/connection/mod.rs` — bootstrap fifth message and live broadcast loop.
 - `src/client/mod.rs` — `ClientInitialState.active_typography`, `ClientConnectionEvent::ActiveTypography`, handshake reader.
 - `src/masonry_editor.rs` — `apply_connection_event` typography branch, layout-invalidation flag, SDUI propagation.
 - `src/editor/layout.rs` — `VisibleTextStyleRun`, `LayoutCacheKey::with_presentation`, role-aware `rebuild`.
-- `src/editor/surface.rs` — `normalize_visible_text_style_runs`, `set_typography`, `document_font_role`, `layout_style_revision`.
+- `src/editor/surface/mod.rs` — `normalize_visible_text_style_runs`, `set_typography`, `document_font_role`, `layout_style_revision`.
 - `src/masonry_sdui.rs` — `SduiNativeState.typography`, `text_metrics`/`component_metrics`, accessibility bounds.
-- `src/shell/package_ui.rs`, `src/server/ui.rs`, `src/packages/record.rs` — component `style.fontRole` validation.
+- `src/shell/package_ui.rs`, `src/server/ui.rs`, `src/packages/record/mod.rs` — component `style.fontRole` validation.
 - `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/syntax.rs` — mode `defaultFontRole` and style-map roles.
 - Tests: `tests/typography_protocol.rs`, `tests/editor_performance_invariants.rs`, `tests/decoration_transport.rs`, `tests/markdown_mode.rs`, `tests/primitives_docs.rs`, `tests/package_loading_docs.rs`, `tests/manual_smoke_docs.rs`.
 - Authoritative public API: [`theme.setTypography`](../../reference/clay-js-api/theme/set-typography.md).
@@ -47,7 +47,7 @@ Server state lives in `ActiveTypographyState` (`src/server/mod.rs`): an `Arc<Mut
 
 ### Protocol and delivery
 
-`ServerMessage::ActiveTypography(ActiveTypography)` is the final pre-bind handshake message, sent after `ActiveTheme` in `send_welcome_snapshot_and_manifest` (`src/server/connection.rs`). The tab binding and per-tab `InitialDocument` follow it. Variant ordering in `ServerMessage` is fixed for rkyv wire stability.
+`ServerMessage::ActiveTypography(ActiveTypography)` is the final pre-bind handshake message, sent after `ActiveTheme` in `send_welcome_snapshot_and_manifest` (`src/server/connection/mod.rs`). The tab binding and per-tab `InitialDocument` follow it. Variant ordering in `ServerMessage` is fixed for rkyv wire stability.
 
 Live updates are multiplexed in the per-connection event loop via `tokio::select!` over `subscribe_typography()`. A successful `replace` emits exactly one `ServerMessage::ActiveTypography` to each connected client; a broadcast lag (closed/lagged receiver) re-sends the current snapshot so a client never misses the authoritative state. `live_typography_update_reaches_connection_once` locks the one-update-per-replacement invariant.
 
@@ -69,7 +69,7 @@ Plan 071 (task 7) adds per-role ligature control without a new delivery path: `F
 
 ### Editor layout and role normalization
 
-`EditorSurface` (`src/editor/surface.rs`) owns the `TypographyRegistry` and a `layout_style_revision: u64`. `set_typography(active)` calls `typography.install()` and, on change, resets `LayoutState` to default, zeroes `visual_scroll_y`/`last_visual_max_scroll_y`, clears `pin_caret_visible`, and bumps `layout_style_revision`. `bump_layout_style_revision()` is also called on decoration application, `StyleRegistry` (theme) change, `BehaviorManifest` document-font-role change, and `load_snapshot` (document reload). Any future event that affects layout-visible presentation must bump this revision.
+`EditorSurface` (`src/editor/surface/mod.rs`) owns the `TypographyRegistry` and a `layout_style_revision: u64`. `set_typography(active)` calls `typography.install()` and, on change, resets `LayoutState` to default, zeroes `visual_scroll_y`/`last_visual_max_scroll_y`, clears `pin_caret_visible`, and bumps `layout_style_revision`. `bump_layout_style_revision()` is also called on decoration application, `StyleRegistry` (theme) change, `BehaviorManifest` document-font-role change, and `load_snapshot` (document reload). Any future event that affects layout-visible presentation must bump this revision.
 
 `document_font_role()` reads `BehaviorManifest.document_font_role` (defaulting to `FontRole::Proportional` when absent). Mode `defaultFontRole` propagates `ModeDeclaration` → `MajorModeActivation` → `BehaviorManifest.document_font_role` at activation time (`src/packages/modes.rs`, `src/server/ops/modes.rs`); `core.code` defaults to `Monospace`, `core.text` and Markdown to `Proportional`.
 
@@ -80,6 +80,10 @@ Plan 071 (task 7) adds per-role ligature control without a new delivery path: `F
 `LayoutState::rebuild()` (`src/editor/layout.rs`) takes `&TypographyRegistry`, `document_font_role`, and the owned `Vec<VisibleTextStyleRun>`. It pushes the default profile's `FontStack` and `FontSize` (and `LineHeight::FontSizeRelative(DOCUMENT_LINE_HEIGHT_MULTIPLIER)`) via `RangedBuilder::push_default`, then for each run pushes ranged `FontStack`, `FontSize`, `FontWeight::BOLD`/`FontStyle::Italic`/`Underline`/`Strikethrough` overrides over the run's byte range. Placeholder text follows the document default role.
 
 `LayoutCacheKey` carries `text_revision`, `viewport_revision`, `max_width`, plus `typography_revision`, `layout_style_revision`, and `document_font_role` set via `with_presentation`. `should_rebuild()` checks key equality and `ctx.fonts_changed()` separately; a typography revision bump, style-revision bump, or document-role change invalidates the cache and triggers a rebuild. `mixed_role_normalization_stays_bounded_by_visible_span_boundaries` locks that normalization never escapes the visible viewport.
+
+### Phase 26 per-token size ladder
+
+Phase 26.4 adds a theme-owned size multiplier on top of the role resolution: `StyleRegistry::size_scale(token_type)` returns a per-`TokenType` ladder (Heading1 1.50, Heading2 1.33, Heading3 1.17, Heading4 1.08, Heading5 1.00, Heading6 0.92, CodeSpan 0.90, all others 1.00) clamped to the UI hierarchy range `(0, 4.0]`. `LayoutState::rebuild` pushes `FontSize(profile.size() * run.scale)` per `VisibleTextStyleRun` instead of the plain profile size, so headings render larger inside the same document profile. Scale applies only to `Syntax`/`Semantic` runs (`style_for` returns 1.0 for `Diagnostic`/`SearchMatch`), so non-syntax decorations never split style runs. `document_line_height()` deliberately stays unscaled — the conservative baseline for viewport extraction, pixel-scroll progression, and scrollbar progress is unchanged, and Parley supplies the exact rendered line heights (`heading_scale_increases_parley_line_height` locks this). Wire representation is `u16` milli-units in `TextThemeOverride.scale`/`TextStyleOverrideDescriptor.scale`; theme parser validation requires finite values in `(0, 4.0]`. See [Editor Theme Registry](editor-theme-registry.md).
 
 ### Geometry
 
@@ -95,9 +99,15 @@ All hardcoded font-size constants were removed. `scroll_vertical_pixels`, `updat
 
 Accessibility geometry uses `SduiAccessibilityEntry { role, label, bounds: Rect }`. `append_accessibility_children()` builds AccessKit nodes with `Node::set_bounds()` from computed cursor_y/depth geometry; `collect_accessibility_entries()`/`collect_package_accessibility_entries()` walk the SDUI and `PackageUiComponentTree` trees computing bounds. `EditorWidget::accessibility()` composes the SDUI subtree plus a bounded Status node. Since SDUI paint nodes are not laid-out widgets, bounds are computed from paint geometry rather than `LayoutCtx::size()`. `ui_size_change_scales_row_hit_and_accessibility_bounds_together` locks that paint rect, hit-test rect, and accessibility bounds scale identically with UI size.
 
+#### Plan 088 Task 6 shell/layout consumers
+
+Shell chrome now installs the same cached `ActiveTypography` snapshot into each `TabChrome`; only the active tab mirrors its registry to the window-level tab bar. `ClayShellWidget::tab_bar_height` derives the minimum row from `UiTextVariant::Status`, and card padding, close size, `+` affordance, and hit geometry clamp against that logical bar height. A duplicate or stale revision returns without reflow; a real active-tab update requests layout/render/accessibility once.
+
+The SDUI left-slot guard measures the configured UI body font and uses a bounded em threshold instead of a fixed `+100px` usability test. Narrow panes and large UI typography therefore give the editor the full width before reserving a sidebar that cannot leave a usable main region. Long SDUI text is clipped to its typography-derived row while accessibility keeps the full label. Bottom transient menu geometry similarly clamps to short main regions. These are layout constraints, not package-facing breakpoints or new tokens.
+
 ### Package component roles
 
-`PackageUiComponentTree` (`src/shell/package_ui.rs`) carries `font_role: FontRole` (default `Ui`) and `text_variant: Option<UiTextVariant>`. Only `panel`, `label`, `button`, `list`, and `statusItem` may declare `style.fontRole`; `editorView` and structural components cannot. The two-gate validation: `ComponentKind::supports_text_font_role()` in `src/server/ui.rs` and `src/packages/record.rs`, plus deny-by-default field-name rejection (`fontFamily`/`fontFamilies`/`fontSize`/`fontStack`) in `reject_syntax_grammar_prohibited_authority`. `package_component_font_role_is_semantic_and_text_only` rejects unknown roles, concrete fields, and roles on non-text kinds. `package_component_font_role_uses_selected_profile_without_concrete_sizes` locks that a monospace-fontRole component resolves to the monospace profile, not the UI profile.
+`PackageUiComponentTree` (`src/shell/package_ui.rs`) carries `font_role: FontRole` (default `Ui`) and `text_variant: Option<UiTextVariant>`. Only `panel`, `label`, `button`, `list`, and `statusItem` may declare `style.fontRole`; `editorView` and structural components cannot. The two-gate validation: `ComponentKind::supports_text_font_role()` in `src/server/ui.rs` and `src/packages/record/mod.rs`, plus deny-by-default field-name rejection (`fontFamily`/`fontFamilies`/`fontSize`/`fontStack`) in `reject_syntax_grammar_prohibited_authority`. `package_component_font_role_is_semantic_and_text_only` rejects unknown roles, concrete fields, and roles on non-text kinds. `package_component_font_role_uses_selected_profile_without_concrete_sizes` locks that a monospace-fontRole component resolves to the monospace profile, not the UI profile.
 
 ## Code Examples
 
@@ -145,7 +155,7 @@ for run in style_runs {
 
 ## Primitive Coverage
 
-- `SemanticTypographyRole` — field-level extension of existing mode/decoration/syntax/UI primitives, not a new package setter or permission. Owning modules: `src/protocol/mod.rs`, `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/ops/decorations.rs`, `src/server/syntax.rs`, `src/server/ui.rs`, `src/packages/record.rs`.
+- `SemanticTypographyRole` — field-level extension of existing mode/decoration/syntax/UI primitives, not a new package setter or permission. Owning modules: `src/protocol/mod.rs`, `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/ops/decorations.rs`, `src/server/syntax.rs`, `src/server/ui.rs`, `src/packages/record/mod.rs`.
 - JS facade/op: `theme.setTypography` (`runtime/js/theme.js`) → `op_clay_theme_set_typography` (`src/server/ops/typography.rs`). No separate package typography op exists; the only public surface is the user-facing setter documented in [`set-typography.md`](../../reference/clay-js-api/theme/set-typography.md).
 - Validation/budgets: `MAX_FONT_FAMILIES_PER_PROFILE=8`, `MAX_FONT_FAMILY_BYTES=128`, `MIN_FONT_SIZE=6.0`, `MAX_FONT_SIZE=96.0`, `HIERARCHY_SCALE_MAX=4.0`, `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES=1024`; `FontProfile::validate()` requires a non-empty stack, a trailing generic fallback, finite bounded size, and no control characters; `ActiveTypography::validate()` validates all three profiles and the complete hierarchy atomically.
 - Hot-path policy: configuration/protocol/normalization run outside paint/input/layout; native hot paths read cached `TypographyRegistry`/profile/style/layout state only — no package JavaScript, IPC, filesystem/network access, font download, or server-side installed-font discovery. `typography_updates_do_not_enter_editor_hot_paths` guards this.
@@ -168,13 +178,13 @@ for run in style_runs {
 
 - `src/editor/typography.rs`: `typography_registry_resolves_each_role_and_revision`, `missing_named_family_retains_generic_fallback`, `unchanged_typography_revision_does_not_invalidate_layout`, `document_line_height_uses_largest_document_profile_not_ui`, `ui_variants_scale_from_configured_role_size`, `ui_typography_hierarchy_defaults_preserve_existing_variant_metrics`, `display_section_and_caption_scale_from_selected_font_role`, `custom_hierarchy_updates_layout_hit_and_accessibility_geometry_together`, `unchanged_hierarchy_does_not_invalidate_layout`, `invalid_partial_or_extreme_hierarchy_is_rejected_atomically`.
 - `src/editor/layout.rs`: `mixed_role_line_height_keeps_largest_inline_profile_in_bounds`, `unicode_and_emoji_shape_with_unavailable_named_font_fallback`, `layout_cache_invalidates_on_typography_style_or_document_role_change`.
-- `src/editor/surface.rs`: `markdown_code_range_uses_monospace_inside_proportional_layout`, `overlapping_style_runs_resolve_deterministically_and_merge_adjacent_runs`, `diagnostic_and_invalid_utf8_spans_cannot_change_font_role`, `mixed_role_normalization_stays_bounded_by_visible_span_boundaries`, `empty_document_caret_uses_default_document_profile`, `custom_typography_keeps_scrollbar_and_viewport_geometry_bounded`.
+- `src/editor/surface/mod.rs`: `markdown_code_range_uses_monospace_inside_proportional_layout`, `overlapping_style_runs_resolve_deterministically_and_merge_adjacent_runs`, `diagnostic_and_invalid_utf8_spans_cannot_change_font_role`, `mixed_role_normalization_stays_bounded_by_visible_span_boundaries`, `empty_document_caret_uses_default_document_profile`, `custom_typography_keeps_scrollbar_and_viewport_geometry_bounded`.
 - `src/masonry_editor.rs`: `live_typography_update_requests_layout_render_and_accessibility`.
 - `src/masonry_sdui.rs`: `ui_size_change_scales_row_hit_and_accessibility_bounds_together`, `package_component_font_role_uses_selected_profile_without_concrete_sizes`.
 - `src/server/ui.rs`: `package_component_font_role_is_semantic_and_text_only`.
-- `src/server/connection.rs`: `live_typography_update_reaches_connection_once` plus bootstrap fifth-message consumption across all connection tests.
+- `src/server/connection/mod.rs`: `live_typography_update_reaches_connection_once` plus bootstrap fifth-message consumption across all connection tests.
 - `src/server/mod.rs`: `typography_defaults_exist_without_init_configuration` (with failed-reload path).
-- `src/server/js_runtime.rs`: `set_typography_replaces_all_profiles_atomically`, `set_typography_failure_preserves_previous_revision`, `typography_configuration_grants_no_additional_authority`, `typography_configuration_rejects_oversized_snapshot`, `invalid_mode_font_role_fails_before_registration_and_keeps_core_fallback`, markdown/parser adapter fontRole assertions.
+- `src/server/js_runtime/mod.rs`: `set_typography_replaces_all_profiles_atomically`, `set_typography_failure_preserves_previous_revision`, `typography_configuration_grants_no_additional_authority`, `typography_configuration_rejects_oversized_snapshot`, `invalid_mode_font_role_fails_before_registration_and_keeps_core_fallback`, markdown/parser adapter fontRole assertions.
 - `tests/typography_protocol.rs`: wire/validation, first-party `defaultFontRole` declarations, no language-name rendering branches.
 - `tests/editor_performance_invariants.rs`: `typography_geometry_uses_shared_profile_baseline_not_fixed_font_size`, `typography_updates_do_not_enter_editor_hot_paths`.
 - `tests/markdown_mode.rs`: `core_and_markdown_modes_publish_semantic_document_font_defaults`.

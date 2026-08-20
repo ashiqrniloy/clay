@@ -16,18 +16,19 @@ The package is explicit opt-in and is not auto-loaded. Without this line, `.js`/
 
 Optional customization is exposed through documented Clay/package JS APIs. For example, after `loadPackage("@clay/javascript")` a user can bind `javascript.toggleLineComment` to a key or toggle a package option; the default load line itself never needs to inline the package manifest.
 
-Phase 19 hot reload reruns the same one-line `await loadPackage("@clay/javascript")` setup in a fresh runtime generation with an empty `globalThis.__clayLoadedPackages` cache. JavaScript mode metadata, syntax grammar, commands, completion providers, and UI contributions rebuild from `loadEntry`; failed reloads keep the prior JavaScript generation active. No JavaScript-specific reload callback or copied manifest is required.
+Phase 19 hot reload reruns the same one-line `await loadPackage("@clay/javascript")` setup in a fresh runtime generation with an empty `globalThis.__clayLoadedPackages` cache. JavaScript mode metadata, syntax grammar, commands, completion providers, and UI contributions rebuild from `package.json` via host apply-record; `loadEntry` stays execute-only. Failed reloads keep the prior JavaScript generation active. No JavaScript-specific reload callback or copied manifest is required.
 
 ## Contract
 
 - `package.json` name: `@clay/javascript`
 - Clay API prefix: `javascript`
+- Preset: `code-mode` (permissions / `apiDependencies` / extension points expand at validate time)
 - Language ID: `javascript`
 - Mode ID: `javascript`
 - File patterns: `.js`, `.jsx`, `.mjs`, `.cjs`
 - Docs path: `./docs/index.md`
 - Entries: `./dist/index.js`, `./dist/load.js`
-- Grammar contribution: `native`, source `tree-sitter-javascript` (no package `.wasm` asset)
+- Grammar contribution: owned by native descriptor (`FIRST_PARTY_NATIVE_GRAMMARS`); package.json omits `syntaxGrammars`
 - Highlight query: `./queries/highlights.scm`
 - Vocabulary styleMap: JS/JSX/MJS/CJS captures map directly to closed `TokenType` + `Modifiers`, including `Function + Declaration`
 - Budgets: `timeoutMs = 5000`, `maxWindowBytes = 4096`; published decorations remain bounded by `DECORATION_PAYLOAD_BUDGET_BYTES` and cached syntax chunks by `SYNTAX_CACHE_BUDGET_BYTES`

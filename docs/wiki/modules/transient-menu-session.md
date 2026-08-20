@@ -181,10 +181,10 @@ focus-restoration behavior.
 - `src/masonry_package_region.rs`: `menu_selection_keeps_selected_row_in_scroll_viewport`, `centered_command_center_scrolls_60_results_without_overflow`, `package_menu_accessibility_labels_are_sanitized_bounded_and_consumer_valid`
 - `src/masonry_pane_document.rs`: `local_menu_open_cancels_the_active_server_session`
 - `src/masonry_pane_document.rs`: `menu_sync_pending_semantics` (2-arg `push` + `push_server`)
-- `src/editor/surface.rs`: `editor_accepts_completion_as_local_replacement`
-- `src/editor/surface.rs`: `editor_accepts_snippet_as_local_expansion_and_selects_first_placeholder` (Phase 18.19)
-- `src/editor/surface.rs`: `snippet_tab_navigation_moves_forward_backward_and_ends_at_final_tabstop` (Phase 18.19)
-- `src/editor/surface.rs`: `editing_active_placeholder_shifts_later_snippet_ranges` (Phase 18.19)
+- `src/editor/surface/mod.rs`: `editor_accepts_completion_as_local_replacement`
+- `src/editor/surface/mod.rs`: `editor_accepts_snippet_as_local_expansion_and_selects_first_placeholder` (Phase 18.19)
+- `src/editor/surface/mod.rs`: `snippet_tab_navigation_moves_forward_backward_and_ends_at_final_tabstop` (Phase 18.19)
+- `src/editor/surface/mod.rs`: `editing_active_placeholder_shifts_later_snippet_ranges` (Phase 18.19)
 - `src/shell/transient_menu.rs`: `completion_result_projects_snippet_text_format_to_menu_accept_action` (Phase 18.19)
 - `src/shell/transient_menu.rs`: `cancelled_session_rejects_activation`
 - `src/editor/accessibility.rs`: `menu_item_accessibility_labels_are_safe_and_bounded`

@@ -3,7 +3,7 @@
 ## Source
 
 - `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `src/server/runtime_sandbox.rs`
 - `src/bin/clay-runtime-sandbox.rs`
 - `src/server/ops/packages.rs`
@@ -82,9 +82,9 @@ Plan 034 hardening is verified by focused security tests plus repository-wide ga
 ## Tests
 
 - Package reference documentation uses generic manifest/API/security validators in `tests/package_loading_docs.rs`; executable package/runtime tests remain authoritative for behavior.
-- `src/server/js_runtime.rs::tests::js_runtime_heap_growth_is_terminated_with_heap_limit_diagnostic`: verifies heap growth terminates with `runtime.heap_limit`.
-- `src/server/js_runtime.rs::tests::js_runtime_timeout_recovery_uses_fresh_worker`: verifies a timeout-poisoned worker is replaced.
-- `src/server/js_runtime.rs::tests::js_runtime_heap_limit_recovery_uses_fresh_worker`: verifies a heap-poisoned worker is replaced.
+- `src/server/js_runtime/mod.rs::tests::js_runtime_heap_growth_is_terminated_with_heap_limit_diagnostic`: verifies heap growth terminates with `runtime.heap_limit`.
+- `src/server/js_runtime/mod.rs::tests::js_runtime_timeout_recovery_uses_fresh_worker`: verifies a timeout-poisoned worker is replaced.
+- `src/server/js_runtime/mod.rs::tests::js_runtime_heap_limit_recovery_uses_fresh_worker`: verifies a heap-poisoned worker is replaced.
 - `tests/runtime_sandbox_harness.rs`: verifies child start/evaluate, timeout kill and fresh restart, valid oversized JSON rejection, absence of filesystem/network/shell globals, and hostile newline-terminated/unterminated streams. Linux fixture scripts emit exactly `max + 1` bytes (one then sleeps without a delimiter); both fail immediately at the bound and `/proc/<pid>` confirms the supervisor reaped each child.
 
 ## Related

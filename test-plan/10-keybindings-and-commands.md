@@ -159,6 +159,16 @@ Tab command policy table (module 14 steps in parentheses):
 - Textobject/smart-select IDs ship with NO defaults; binding is the package
   or user's job.
 
+## Plan 089 task 9 Linux execution record (2026-08-17)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| K73 | PASS | Welcome state captures expose named Open File/Open Folder buttons, polite status, and Connected/Editable status |
+| K74 | PASS live | `code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/completion/` shows the bounded completion popup with 44 children, `as` selected, no rows exceeding the visible surface; P1-087-UI-1 containment is visually verified |
+| K75 | UNRESOLVED live / PASS structural | Command Centre remains UNRESOLVED because `Ctrl+Alt+P` is consumed by GNOME before reaching Clay; structural clipping/single-scrim/modal-role tests pass |
+| K76 | PASS automated | `PackageModalDismiss` routing and Escape intent tests pass; native/package modal keyboard action could not be focused on this host |
+| K77 | PASS automated | Shell allowlist, stale-session, package-authority, and key-routing tests pass; Plan 089 added `compact_generated_frame_mutations_fail_closed_without_panicking`, `editor_generated_chord_sequences_preserve_prefix_mismatch_and_timeout_transitions`, and `generated_menu_intent_ordering_preserves_lifecycle_and_authority` |
+
 ## Control Center menu round trip (Phase 24.1)
 
 Server-owned interactive menu session (query/selection/activate/cancel
@@ -255,3 +265,61 @@ Deep references: `docs/development/accessibility.md`,
 | K57 | Press Tab/Shift+Tab, arbitrary function/modifier key, paste, or IME input while centered menu is open | Input remains contained: supported menu intent keys work; unsupported keys/paste/IME are consumed and do not alter editor text, caret, or keybinding state. |
 | K58 | Click scrim outside panel, then close with Escape | Scrim click changes no document/caret/selection and does not move focus into overlay; Escape closes through server cancel and focus remains on originating pane. |
 | K59 | Performance (qualitative, real Linux build): open, type a filter, descend, ascend, jump, cancel | Responsiveness feels immediate; one bounded depth-1 scan per directory change, zero filesystem work per filter keystroke, one snapshot per accepted transition, snapshot under the 1 MiB frame ceiling (automated: `path_browser_navigation_only_creates_no_grants`, `path_browser_snapshot_stays_under_frame_ceiling`; module 03 known ceilings) |
+
+## Plan 088 interaction and accessibility steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| K73 | Inspect the welcome shell's Open File/Open Folder actions and status tree | Buttons expose names/actions; the welcome is a Group/panel with a polite Status; connection/access/error state is textual and not color-only |
+| K74 | Open completion from the editor, then type, select, dismiss, and attempt a stale accept | Modeless completion keeps editor focus, traps no modal input, consumes only its supported keys, and stale results cannot mutate the document |
+| K75 | Open Command Centre/Path Browser and inspect the centered surface | Exactly one token-driven scrim and one named Dialog/Menu/Status tree exist; rows are clipped to the centered host and focus returns to the originating pane on Escape |
+| K76 | Trigger `PackageModalDismiss` with Escape on a package modal that declares an intent | Escape closes the modal and routes only the declared inert intent; no package JavaScript or native-widget authority runs in the key path |
+| K77 | Send unknown/forged shell or package command ids and attempt input while a menu is active | Deny-by-default diagnostics/no-op; no editor text/caret mutation, stale session activation, path leak, or disconnect |
+
+## Plan 088 task 12 Linux execution record (2026-08-15)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| K73 | PASS | Current AT-SPI dump in `code-reviews/screenshots/2026-08-15-plan088-task12-manual/default/accessibility.txt` exposes named Open File/Open Folder buttons, Welcome to Clay, polite status, and Connected/Editable status |
+| K74 | UNRESOLVED live / PASS structural | Retained Plan 087 completion artifacts and completion unit tests cover modeless selection/dismissal; current Task 8 interactive fixture could not receive targeted keys on this host, so no current live pass is claimed |
+| K75 | UNRESOLVED live / PASS structural | Retained Plan 087 Command Centre/Path Browser comparison trees plus clipping, single-scrim, modal-role, and focus-routing tests; current centered interaction was not safely targetable |
+| K76 | PASS automated / NOT RUN manually | `PackageModalDismiss` routing and Escape intent tests pass; native/package modal keyboard action could not be focused on this host |
+| K77 | PASS automated / NOT RUN manually | Shell allowlist, stale-session, package-authority, and key-routing tests pass; targeted input is blocked by `can_query_windows=false`/`can_focus_windows=false` |
+
+## Phase 28 editor-command aliases and package keymaps
+
+Deep references: `docs/reference/packages/creating-packages.md`,
+`docs/reference/clay-js-api/keybindings/bind-key.md`, and the command docs
+under `docs/reference/clay-js-api/editor/`.
+
+| # | Action | Expected |
+|---|---|---|
+| K78 | Fresh code profile: press `Ctrl+/`; then repeat in Rust, TypeScript, and JavaScript package modes | The built-in/alias command toggles line comments locally; the package aliases resolve to the same core transform, not a server Accepted no-op |
+| K79 | Load `@clay/markdown`; on a plain line press its declared `Ctrl+Shift+8` list chord, then `Ctrl+Alt+1` heading chord | Package `keyRouting` modifier parsing dispatches `markdown.toggleList` and `markdown.insertHeading`; list/ATX transforms are visible and no whole chord is treated as literal character text |
+| K80 | Bind `editor.clientToggleFold` and `editor.toggleInlayHints` to editor chords, invoke each, then repeat with a malformed/unknown command such as `markdown.notImplemented` | Known client commands execute through their closed alias/command table; malformed or unbacked IDs fail registration with a diagnostic and never become Accepted no-ops |
+| K81 | Bind a two-stroke package-facing transform (`Ctrl+Q Ctrl+W` → `editor.toggleComment`), complete it, mismatch it with printable text, and let it time out | Completion dispatches once; mismatch re-routes the fresh key to the editor; timeout cancels without mutation; package/user chords share the parser and deny-by-default command validation |
+| K82 | With a completion, link hover, or command menu active, press editor transform/fold/inlay chords | The active transient/menu route owns its supported keys; no hidden editor mutation or stale command dispatch occurs, and Escape restores pane focus |
+| K83 | Load `@clay/markdown`, open a Markdown document, press its declared `Ctrl+Shift+M` preview chord, then press `Ctrl+/` on a commentable line | `Ctrl+Shift+M` routes to `markdown.togglePreview` without inserting text or stealing the editor comment path; `Ctrl+/` still toggles the active Markdown comment prefix. Preview/diagnostic state stays bounded and the client remains connected |
+
+## Phase 28 Linux execution record (2026-08-20)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| K78, K80–K83 | UNRESOLVED live; PASS structural | The live Entry did not expose editable-text support, so keyboard mutation and preview/comment round trips were not claimed. Closed alias, client-routing, preview registration, malformed-sequence, and menu-consumption tests pass. |
+| K79 | PASS automated / NOT RUN live | `parse_keymap_ctrl_shift_m_has_modifiers`, `parse_keymap_multi_stroke_sequence`, and Markdown activation/keymap tests pass; package keymap interaction was not falsely claimed without reliable editor focus. |
+| K81 | PASS automated / NOT RUN live | Existing sequence-chord tests cover completion, mismatch, timeout, and no-eaten-typing; the current host could not deliver a reliable two-stroke editor chord. |
+| K83 | PASS automated / NOT RUN live | Markdown package tests pin `markdown.togglePreview` on `Ctrl+Shift+M`, while the live preview/comment round trip remains blocked by the same editable-text/input ceiling. |
+
+## Phase 28.7 P2 visual and interaction recapture (2026-08-21)
+
+UI preflight used `npx ui-skills start`, category `accessibility`, selected
+`rams/rams`, and `computer-use-linux_get_app_state` before review. Evidence is
+under `code-reviews/screenshots/2026-08-21-phase28.7-p2-recapture/`.
+
+| Checks | Result | Evidence |
+|---|---|---|
+| K78–K83 | UNRESOLVED live; PASS structural/automated | The host has no development keyboard backend, so package transform, fold/inlay, preview, menu-consumption, and two-stroke live actions were not claimed. Closed alias, keymap, deny-by-default, stale-session, and menu-routing tests pass. |
+| Completion / Command Centre trigger | UNRESOLVED live | `completion/review.status` and `command-centre/review.status` record that neither interactive trigger reached Clay; no visual pass was inferred from rest state. |
+| Accessibility/focus containment | PASS static/structural; UNRESOLVED interactive | Static shell/recovery trees expose named controls/status/menu roles; keyboard focus return and transient-menu interaction require a keyboard-capable host. |
+
+No existing step was deleted or weakened.

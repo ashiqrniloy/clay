@@ -7,8 +7,9 @@ use serde_json::{Map, Value, json};
 use crate::{
     packages::record::PackageRecord,
     protocol::{
-        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DocumentFontRole,
-        DocumentId, DocumentVersion, Modifiers, TokenType,
+        DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DecorationTarget,
+        DocumentFontRole, DocumentId, DocumentVersion, InlayHintPayload, Modifiers, TextByteRange,
+        TokenType,
     },
     server::decorations::{DecorationValidationError, validate_decoration_publication},
 };
@@ -58,9 +59,12 @@ pub(super) fn op_clay_decorations_publish_decorations(
         document_id: document_id as DocumentId,
         document_version: document_version as DocumentVersion,
         package_prefix: package.manifest.clay.api_prefix.clone(),
-        kind: spans
-            .first()
-            .map_or(crate::protocol::DecorationKind::Syntax, |span| span.kind),
+        kind: options
+            .get("kind")
+            .and_then(Value::as_str)
+            .and_then(DecorationKind::from_name)
+            .or_else(|| spans.first().map(|span| span.kind))
+            .unwrap_or(DecorationKind::Syntax),
         viewport_byte_start,
         viewport_byte_end,
         spans,
@@ -95,17 +99,12 @@ fn span_from_value(
             "decorations.invalid_span: span {index} must be an object"
         ))
     })?;
-    let kind = match required_str(object, "kind", "decorations.invalid_span")? {
-        "syntax" | "Syntax" => DecorationKind::Syntax,
-        "semantic" | "Semantic" => DecorationKind::Semantic,
-        "diagnostic" | "Diagnostic" => DecorationKind::Diagnostic,
-        "search-match" | "searchMatch" | "SearchMatch" => DecorationKind::SearchMatch,
-        other => {
-            return Err(clay_error(format!(
-                "decorations.invalid_span: unsupported decoration kind `{other}`"
-            )));
-        }
-    };
+    let kind_name = required_str(object, "kind", "decorations.invalid_span")?;
+    let kind = DecorationKind::from_name(kind_name).ok_or_else(|| {
+        clay_error(format!(
+            "decorations.invalid_span: unsupported decoration kind `{kind_name}`"
+        ))
+    })?;
     let font_role = match object.get("fontRole") {
         None | Some(Value::Null) => None,
         Some(Value::String(role)) => match DocumentFontRole::from_name(role) {
@@ -171,7 +170,84 @@ fn span_from_value(
         }
     };
     span.font_role = font_role;
+    span.target = decoration_target_from_value(object.get("target"))?;
+    span.inlay = inlay_from_value(object.get("inlay"))?;
     Ok(span)
+}
+
+fn inlay_from_value(value: Option<&Value>) -> Result<Option<InlayHintPayload>, JsErrorBox> {
+    let Some(value) = value.filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| clay_error("decorations.invalid_span: inlay must be an object"))?;
+    let label = required_str(object, "label", "decorations.invalid_span")?.to_string();
+    let placement = object
+        .get("placement")
+        .and_then(Value::as_str)
+        .unwrap_or("after");
+    InlayHintPayload::from_name(placement, label)
+        .map(Some)
+        .ok_or_else(|| clay_error("decorations.invalid_span: inlay payload rejected"))
+}
+
+pub(super) fn decoration_target_from_value(
+    value: Option<&Value>,
+) -> Result<Option<DecorationTarget>, JsErrorBox> {
+    let Some(value) = value.filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| clay_error("decorations.invalid_span: target must be an object"))?;
+    let kind = required_str(object, "kind", "decorations.invalid_span")?;
+    let target = match kind {
+        "workspacePath" | "WorkspacePath" => DecorationTarget::WorkspacePath {
+            relative_path: required_str(object, "relativePath", "decorations.invalid_span")?
+                .to_string(),
+            range: optional_byte_range(object)?,
+        },
+        "documentRange" | "DocumentRange" => DecorationTarget::DocumentRange {
+            range: required_byte_range(object)?,
+        },
+        "displayOnly" | "DisplayOnly" => DecorationTarget::DisplayOnly {
+            text: required_str(object, "text", "decorations.invalid_span")?.to_string(),
+        },
+        other => {
+            return Err(clay_error(format!(
+                "decorations.invalid_span: unknown target kind `{other}`"
+            )));
+        }
+    };
+    target
+        .sanitized()
+        .map(Some)
+        .ok_or_else(|| clay_error("decorations.invalid_span: target payload rejected"))
+}
+
+fn required_byte_range(object: &Map<String, Value>) -> Result<TextByteRange, JsErrorBox> {
+    optional_byte_range(object)?.ok_or_else(|| {
+        clay_error("decorations.invalid_span: target range requires byteStart and byteEnd")
+    })
+}
+
+fn optional_byte_range(object: &Map<String, Value>) -> Result<Option<TextByteRange>, JsErrorBox> {
+    match (object.get("byteStart"), object.get("byteEnd")) {
+        (None, None) => Ok(None),
+        (Some(start), Some(end)) => {
+            let byte_start = start.as_u64().ok_or_else(|| {
+                clay_error("decorations.invalid_span: byteStart must be an unsigned integer")
+            })?;
+            let byte_end = end.as_u64().ok_or_else(|| {
+                clay_error("decorations.invalid_span: byteEnd must be an unsigned integer")
+            })?;
+            Ok(Some(TextByteRange::new(byte_start, byte_end)))
+        }
+        _ => Err(clay_error(
+            "decorations.invalid_span: target range requires byteStart and byteEnd",
+        )),
+    }
 }
 
 fn modifiers_from_value(value: Option<&Value>) -> Result<Modifiers, JsErrorBox> {

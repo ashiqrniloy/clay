@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSetCursorStyle
 js_facade: runtime/js/editor.js::clientSetCursorStyle
-backing_rust: src/editor/surface.rs::EditorSurface::set_caret_style_override
+backing_rust: src/editor/surface/mod.rs::EditorSurface::set_caret_style_override
 deno_op: op_clay_editor_set_cursor_style
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_set_cursor_style
 name: clientSetCursorStyle
@@ -125,8 +125,8 @@ Use `editor.clientSetCursorStyle` when the user asks for set cursor style throug
 
 - JS facade: `runtime/js/editor.js::clientSetCursorStyle`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_set_cursor_style` (`op_clay_editor_set_cursor_style`)
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::set_caret_style_override`
-- Paint: `src/editor/surface.rs::EditorSurface::paint_caret` (shape-aware), `src/editor/layout.rs::caret_cell_for_visible_byte_offset`
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::set_caret_style_override`
+- Paint: `src/editor/surface/mod.rs::EditorSurface::paint_caret` (shape-aware), `src/editor/layout.rs::caret_cell_for_visible_byte_offset`
 
 ## Lookup metadata
 

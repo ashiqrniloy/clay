@@ -7,9 +7,9 @@
 - Decision direction: `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md`.
 - Patterns: `.agents/skills/project-patterns/references/mode-primitive-first.md`, `authority-boundaries.md`, `extensions-and-ai.md`, `language-capability-sequencing.md`, and `protocol-and-performance.md`.
 - Protocol primitives: `src/protocol/decorations.rs`, `diagnostics.rs`, `completion.rs`, and `mod.rs`.
-- Server primitives: `src/server/decorations.rs`, `diagnostics.rs`, `completion.rs`, `parse_coordinator.rs`, `command_execution.rs`, `workspace.rs`, `js_runtime.rs`, `git.rs`, and `runtime_sandbox.rs`.
-- Package authority: `src/packages/permissions.rs`, `authorization.rs`, `record.rs`, and `service.rs`.
-- Client/UI primitives: `src/client/mod.rs`, `src/editor/surface.rs`, `src/masonry_editor.rs`, and `src/shell/transient_menu.rs`.
+- Server primitives: `src/server/decorations.rs`, `diagnostics.rs`, `completion.rs`, `parse_coordinator.rs`, `command_execution.rs`, `workspace.rs`, `js_runtime/mod.rs`, `git.rs`, and `runtime_sandbox.rs`.
+- Package authority: `src/packages/permissions.rs`, `authorization.rs`, `record/mod.rs`, and `service.rs`.
+- Client/UI primitives: `src/client/mod.rs`, `src/editor/surface/mod.rs`, `src/masonry_editor.rs`, and `src/shell/transient_menu.rs`.
 - Budgets: `src/perf/budgets.rs`; protocol framing: `src/protocol/codec.rs`.
 - Tests: `tests/range_diagnostics.rs`, `completion_provider.rs`, `editor_performance_invariants.rs`, `performance_protocol.rs`, and `primitives_docs.rs`.
 
@@ -60,7 +60,7 @@ A generic language-intelligence provider that receives only bounded Clay-provide
 
 ### Persistent runtime handler tokens
 
-`src/server/parse_coordinator.rs::JsParseHandlerRegistration` stores a resolver-validated package, metadata, runtime-issued token, parse unit, and timeout—not a raw JavaScript callback. `ParseCoordinator` owns cancellation, generations, current versions, stale-result rejection, and result/diagnostic channels. `src/server/js_runtime.rs` invokes tokens on the persistent server runtime with timeout, heap, import, and sanitized-diagnostic boundaries. New package language-intelligence handlers should reuse this token/module boundary and lifecycle rather than carrying function values or creating another JavaScript runtime.
+`src/server/parse_coordinator.rs::JsParseHandlerRegistration` stores a resolver-validated package, metadata, runtime-issued token, parse unit, and timeout—not a raw JavaScript callback. `ParseCoordinator` owns cancellation, generations, current versions, stale-result rejection, and result/diagnostic channels. `src/server/js_runtime/mod.rs` invokes tokens on the persistent server runtime with timeout, heap, import, and sanitized-diagnostic boundaries. New package language-intelligence handlers should reuse this token/module boundary and lifecycle rather than carrying function values or creating another JavaScript runtime.
 
 ### Existing process precedents
 

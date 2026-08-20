@@ -17,8 +17,10 @@ Fixtures:
   ui-review-loading         deterministic loading-state SDUI panel
   ui-review-error           configuration/runtime error state
   ui-review-recovery        disconnected/recovery state after server stop
+  ui-review-large-typography user-owned large typography state
   ui-review-completion      completion-ready document (interactive capture)
   ui-review-command-centre command centre (interactive capture)
+  ui-review-rust            authorized Rust analyzer/inlay states (interactive capture)
 
 The command needs a Linux desktop AT-SPI bus, Python GI AT-SPI bindings, and
 xdg-desktop-portal Screenshot. Missing capture tooling exits 2 and writes an
@@ -56,7 +58,7 @@ while (($#)); do
 done
 
 case "$fixture" in
-    ui-review-default|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-completion|ui-review-command-centre) ;;
+    ui-review-default|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-large-typography|ui-review-completion|ui-review-command-centre|ui-review-rust) ;;
     *)
         echo "unknown --fixture: ${fixture:-<missing>}" >&2
         usage >&2
@@ -78,6 +80,14 @@ workspace=$root/workspace
 socket=$root/review.sock
 mkdir -p "$config_dir" "$data_home" "$home/.config/clay" "$workspace" "$root/tmp"
 chmod 700 "$config_home" "$config_dir" "$data_home" "$home" "$home/.config" "$home/.config/clay" "$workspace" "$root/tmp"
+
+# The Rust fixture keeps Clay configuration/data isolated but lets the fixed
+# rustup language-server descriptor inherit the host HOME for its installed
+# toolchain. Other fixtures remain fully private.
+runtime_home="$home"
+if [[ "$fixture" == ui-review-rust ]]; then
+    runtime_home="${CLAY_UI_REVIEW_LANGUAGE_SERVER_HOME:-${HOME:-$home}}"
+fi
 
 server_pid=""
 client_pid=""
@@ -113,7 +123,26 @@ unresolved() {
     if [[ -n "${latest_dump:-}" && -s "$latest_dump" ]]; then
         cp "$latest_dump" "$output/accessibility.partial.txt"
     fi
-    printf 'UNRESOLVED\nreason=%s\n' "$reason" > "$output/review.status"
+    if [[ "$fixture" == ui-review-rust && -f "$root/portal_capture.py" ]]; then
+        local toggled_output
+        toggled_output="$(dirname "$output")/inlay-toggled-off"
+        mkdir -p "$toggled_output"
+        cp "$root/server.log" "$output/analyzer-server.log" 2>/dev/null || true
+        cp "$root/client.log" "$output/client.log" 2>/dev/null || true
+        cp "$root/server.log" "$toggled_output/analyzer-server.log" 2>/dev/null || true
+        cp "$root/client.log" "$toggled_output/client.log" 2>/dev/null || true
+        python3 "$root/portal_capture.py" "$output/screenshot.png" > "$root/portal-unresolved.out" 2> "$root/portal-unresolved.err" || true
+        if [[ -f "$output/screenshot.png" ]]; then
+            cp "$output/screenshot.png" "$toggled_output/screenshot.png"
+        fi
+        if [[ -f "$output/accessibility.partial.txt" ]]; then
+            cp "$output/accessibility.partial.txt" "$toggled_output/accessibility.partial.txt"
+        fi
+        printf 'UNRESOLVED\nreason=%s\nstate=inlay-visible\n' "$reason" > "$output/review.status"
+        printf 'UNRESOLVED\nreason=%s\nstate=inlay-toggled-off\n' "$reason" > "$toggled_output/review.status"
+    else
+        printf 'UNRESOLVED\nreason=%s\n' "$reason" > "$output/review.status"
+    fi
     echo "UI review unresolved: $reason" >&2
     exit 2
 }
@@ -244,13 +273,25 @@ fi
 
 # Keep the review document fixture deterministic and bounded.
 printf 'fn hello hello_world helper\n' > "$workspace/review.rs"
-printf 'Loading workspace…\n' > "$workspace/loading.txt"
+if [[ "$fixture" == ui-review-rust ]]; then
+    mkdir -p "$workspace/src"
+    cp "$repo/tests/fixtures/lsp/rust/Cargo.toml" "$workspace/Cargo.toml"
+    cp "$repo/tests/fixtures/lsp/rust/Cargo.lock" "$workspace/Cargo.lock"
+    cp "$repo/tests/fixtures/lsp/rust/src/main.rs" "$workspace/src/main.rs"
+elif [[ "$fixture" == ui-review-loading ]]; then
+    printf 'Fixture document\n' > "$workspace/loading.txt"
+else
+    printf 'Loading workspace…\n' > "$workspace/loading.txt"
+fi
 
 document_name=""
 case "$fixture" in
+    ui-review-loading) document_name=loading.txt ;;
     ui-review-completion) document_name=review.rs ;;
+    ui-review-rust) document_name=src/main.rs ;;
 esac
-cp "$repo/tests/fixtures/configuration/$fixture/init.js" "$home/.config/clay/init.js"
+init_fixture="$repo/tests/fixtures/configuration/$fixture/init.js"
+cp "$init_fixture" "$home/.config/clay/init.js"
 
 if [[ -n "$document_name" ]]; then
     python3 - "$config_dir/layout.json" "$workspace" "$document_name" <<'PY'
@@ -279,8 +320,9 @@ cat > "$output/instructions.md" <<EOF
 - Screenshot: screenshot.png
 - Accessibility dump: accessibility.txt
 
-This run uses a private mode-700 temporary HOME/config/data/socket root and
-fixture-only documents. It never reads the ambient Clay configuration.
+This run uses a private mode-700 config/data/socket root and fixture-only
+documents. It never reads the ambient Clay configuration. The Rust fixture
+inherits host HOME only for the fixed rustup toolchain lookup.
 EOF
 case "$fixture" in
     ui-review-completion)
@@ -297,6 +339,16 @@ EOF
 Interactive step: press `Ctrl+Alt+P`, then press Enter in the terminal to
 capture the visible centered Command Centre. The script records UNRESOLVED
 instead of passing if the dialog/menu is not visible.
+EOF
+        ;;
+    ui-review-rust)
+        cat >> "$output/instructions.md" <<'EOF'
+
+Interactive steps: focus the editor, make a no-op edit (type one space, then
+Backspace), wait for the Rust inlay overlay, and press Enter to capture the
+visible state. Then press `Ctrl+Alt+I` and press Enter again to capture the
+client-local toggled-off state. The script records UNRESOLVED if the analyzer
+worker or inlay state cannot be verified.
 EOF
         ;;
     ui-review-recovery)
@@ -318,8 +370,11 @@ accessibility=python3-gi-atspi
 EOF
 
 (
-    cd "$repo"
-    exec env HOME="$home" XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
+    # Keep bootstrap workspace and fixture document IDs aligned: the server's
+    # default workspace is its current directory, while the loading SDUI tree
+    # targets document 1.
+    cd "$workspace"
+    exec env HOME="$runtime_home" XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
         TMPDIR="$root/tmp" "$repo/target/debug/clay" server "$socket"
 ) > "$root/server.log" 2>&1 &
 server_pid=$!
@@ -330,14 +385,9 @@ for _ in $(seq 1 "$((timeout_seconds * 10))"); do
     sleep 0.1
 done
 [[ -S "$socket" ]] || unresolved "timed out waiting for the isolated server socket"
-# Force one watcher-driven reload so runtime fixtures reach the connected tree,
-# matching the normal end-user init.js path without mutating repository files.
-sleep 0.2
-touch "$home/.config/clay/init.js"
-
 (
     cd "$repo"
-    exec env HOME="$home" XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
+    exec env HOME="$runtime_home" XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
         TMPDIR="$root/tmp" "$repo/target/debug/clay" client "$socket"
 ) > "$root/client.log" 2>&1 &
 client_pid=$!
@@ -374,17 +424,89 @@ wait_for_tree() {
     done
     return 1
 }
+wait_for_runtime_loading_tree() {
+    local deadline=$((SECONDS + timeout_seconds))
+    while ((SECONDS < deadline)); do
+        if ! kill -0 "$client_pid" 2>/dev/null; then
+            return 1
+        fi
+        if grep -Fq 'title: "Loading review"' "$root/client.log" \
+            && grep -Fq 'text: "Loading workspace…"' "$root/client.log"; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+wait_for_inlay() {
+    local deadline=$((SECONDS + timeout_seconds))
+    while ((SECONDS < deadline)); do
+        if ! kill -0 "$client_pid" 2>/dev/null; then
+            return 1
+        fi
+        if grep -F 'kind: InlayHint' "$root/client.log" \
+            | grep -Fq 'spans: [DecorationSpan'; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
 
 wait_for_tree 'Clay working area shell' || unresolved "Clay window/accessibility shell did not appear"
+# Force one watcher-driven reload only after the client has completed its
+# initial handshake, so runtime fixtures are delivered through the live
+# RuntimeStateSnapshot path instead of racing startup bootstrap.
+sleep 0.2
+touch "$home/.config/clay/init.js"
 
 case "$fixture" in
     ui-review-error)
         wait_for_tree 'Runtime' || unresolved "runtime error diagnostic did not appear"
         ;;
+    ui-review-loading)
+        wait_for_runtime_loading_tree || unresolved "loading SDUI tree did not appear"
+        cat > "$output/runtime-tree.txt" <<'EOF'
+RuntimeStateSnapshot=PASS
+sdui_panel=Loading review
+sdui_label=Loading workspace…
+EOF
+        printf '\nRuntime evidence: `runtime-tree.txt` records the delivered SDUI snapshot.\n' >> "$output/instructions.md"
+        ;;
     ui-review-recovery)
         stop_child "$server_pid"
         server_pid=""
         wait_for_tree 'Disconnected' || wait_for_tree 'Recovery:' || unresolved "disconnected/recovery state did not appear"
+        ;;
+    ui-review-rust)
+        if [[ ! -t 0 ]]; then
+            unresolved "Rust inlay states require a TTY for keyboard input"
+        fi
+        printf 'Rust fixture is live. Make a no-op edit, wait for visible inlays, then press Enter: ' >&2
+        read -r
+        wait_for_inlay || unresolved "Rust analyzer did not publish a non-empty inlay set"
+        capture_dump
+        mkdir -p "$output"
+        cp "$latest_dump" "$output/accessibility.txt"
+        if ! python3 "$root/portal_capture.py" "$output/screenshot.png" > "$root/portal-visible.out" 2> "$root/portal-visible.err"; then
+            unresolved "xdg-desktop-portal Screenshot failed for visible inlay state"
+        fi
+        printf 'PASS\nfixture=ui-review-rust\nstate=inlay-visible\n' > "$output/review.status"
+
+        toggled_output="$(dirname "$output")/inlay-toggled-off"
+        mkdir -p "$toggled_output"
+        printf 'Press Ctrl+Alt+I to toggle inlays off, then press Enter: ' >&2
+        read -r
+        capture_dump
+        cp "$latest_dump" "$toggled_output/accessibility.txt"
+        cp "$output/instructions.md" "$toggled_output/instructions.md"
+        cp "$output/metadata.txt" "$toggled_output/metadata.txt"
+        if ! python3 "$root/portal_capture.py" "$toggled_output/screenshot.png" > "$root/portal-off.out" 2> "$root/portal-off.err"; then
+            unresolved "xdg-desktop-portal Screenshot failed for toggled-off inlay state"
+        fi
+        printf 'PASS\nfixture=ui-review-rust\nstate=inlay-toggled-off\n' > "$toggled_output/review.status"
+        printf 'PASS\nfixture=ui-review-rust\nstates=inlay-visible,inlay-toggled-off\n' > "$output/review.status"
+        exit 0
         ;;
     ui-review-completion|ui-review-command-centre)
         if [[ ! -t 0 ]]; then

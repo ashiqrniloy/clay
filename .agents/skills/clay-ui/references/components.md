@@ -59,7 +59,7 @@ Phase 20.5 promoted `dropdown`, `collapse`, `modal` from reserved to implemented
 **New kind interaction states**:
 - `dropdown`: `Rest`/`Hover`/`Active`/`Focus`/`Disabled` via `component_state_color("surface.control", state)`; focus ring on `Focus`; the open item list is painted by `PackageDropdown` from its `items` (single source of truth for trigger label + selectable rows); selected item label from the widget's `selected_index`; ArrowUp/Down cycles, Enter/Space confirms and closes.
 - `collapse`: title row with `clay.ui.collapseToggle` action intent; focus ring on `Focus`; content children are shown/hidden by `PackageCollapse` via a layout clip (expanded/collapsed is widget-local state); Enter/Space toggles.
-- `modal`: `paint_tooltip_shell` chrome (state-independent, painted by the overlay host behind children); title + children; `Role::Dialog`; Tab/Shift+Tab cycles the modal's focusable descendants (focus trap, widget-local list); `z.modal` stacking order.
+- `modal`: `paint_tooltip_shell` chrome (state-independent, painted by the overlay host behind children); title + children; `Role::Dialog`; Tab/Shift+Tab cycles the modal's focusable descendants (focus trap, widget-local list); Escape emits `PackageModalDismiss` and routes its declared inert command intent; `z.modal` stacking order.
 - `textInput`: bordered field with `surface.control` fill; validation-state border color (`diagnostic.error`/`warning`/`success` or `border.subtle`); focus ring on `Focus`; placeholder text in `text.muted`; `Role::TextInput`; `style.validationState` (`none`/`error`/`warning`/`success`) and `style.placeholderColor` (color-role token) style variables.
 
 **Z-level stacking**: `TransientPackageOverlay` carries a `z_level_token: &'static str`; `PackageOverlayHost` sorts children by z-order: `z.overlay` (0) < `z.modal` (1) < `z.tooltip` (2). `from_menu_session` sets `"z.overlay"`; modal overlays set `"z.modal"`; tooltip-anchored overlays set `"z.tooltip"`.
@@ -71,6 +71,38 @@ Phase 20.5 promoted `dropdown`, `collapse`, `modal` from reserved to implemented
 **Centered Command Centre projection (Phase 24.4 / Plan 087)**: command/path sessions use one Clay-owned window-level host, one token-driven scrim, a centered width from `dimension.overlay.centered.width` (640 logical-pixel default), and modal Dialog/Menu/Status accessibility. Its result list is retained and scrollable; packages may register commands that appear in the catalogue but cannot open, drive, configure, or intercept this surface.
 
 **Overlay cursor inset**: `PackageOverlayHost` reads `ui_theme.scalar_f64("spacing.panel")` for overlay padding, consistent with `paint_tooltip_shell` which reads `ResolvedUiTheme` tokens directly.
+
+## Plan 088 package UI/layout contract
+
+Plan 088 Tasks 3–7 consume the existing catalog; they add no `ComponentKind`, style variable, token, package overlay anchor, manifest field, permission, or JS API. The package authoring boundary remains declarative and inert:
+
+- `PackageRegionWidget` and `SduiRegionWidget` clip retained children to their owning panel/overlay or region bounds. `PackagePanelHost`, `PackageOverlayHost`, `PackageModal`, and the SDUI region expose clipped-child semantics to accessibility consumers. A package `scroll` child receives flex sizing inside bounded panel/container compositions so long content scrolls within its host.
+- `modal` Escape emits `PackageModalDismiss` with the component's declared inert command intent; it does not give package code modal or native-widget authority. `statusItem` exposes a status role, and disabled package controls expose their disabled state.
+- Fixed slots remain Clay-owned (`main` plus optional `left`/`right`/`top`/`bottom`). The workspace browser may yield its left slot when pane width or user UI typography would leave the main editor unusable. The shell-owned tab bar follows active UI typography and logical window bounds; packages cannot own tabs, panes, the file browser, status chrome, welcome, completion, or centered Command Centre surfaces.
+- Responsive clamping, label clipping, path sanitization, focus containment, and theme/typography propagation are host layout/render responsibilities. Packages select semantic typography and typed tokens; they cannot supply breakpoints, concrete sizes/fonts, raw CSS/colors, native widgets, renderer callbacks, client JavaScript, or direct Masonry mutation.
+- `@clay/settings` demonstrates the package composition contract with `panel` + `scroll` + existing controls. `table` remains the only reserved package kind, and package overlays remain limited to `working-area`, `active-pane`, `main`, and `pointer`; `completion` and `centered` are Clay-internal origins.
+
+The complete package-facing explanation and validation/test commands live in [Creating Clay Packages — Plan 088 UI modernization authoring contract](../../../../docs/reference/packages/creating-packages.md#plan-088-ui-modernization-authoring-contract). These are host-owned layout and accessibility guarantees, not new package APIs.
+
+## Phase 28 editor-intelligence chrome
+
+Phase 28 adds no package-facing UI kind. Packages publish inert editor data;
+Clay owns presentation and interaction:
+
+- Fold ranges are validated background data. Clay paints disclosure chevrons in
+  `paint_gutter`, owns the client-local collapsed set, hides interior lines, and
+  routes `editor.clientToggleFold`; fold chevrons are not individual tab stops.
+- Link spans use the existing `TokenType::Link`/underline vocabulary. Clay
+  hit-tests visible spans, paints hover with `paint_tooltip_shell`, and routes
+  keyboard/pointer activation through typed decoration intent. Packages cannot
+  paint link chrome or receive pointer callbacks.
+- Inlay spans use the existing decoration transport with an inert bounded label
+  and `Before`/`After` placement. Clay paints muted overlay text after the main
+  token layout without Parley reflow; inlays are decorative/`aria-hidden` and
+  are toggled by `editor.toggleInlayHints`.
+- Package JavaScript never runs in paint, layout, pointer, scroll, keypress, or
+  text-event paths. No new `ComponentKind`, token, style variable, or native
+  widget is introduced for these surfaces.
 
 ## Typed Style Variables
 
@@ -100,15 +132,15 @@ Validated in `src/shell/components.rs`. Token-backed variables must reference a 
 |---------|--------|------|---------|
 | Shell root widget | internal | `src/masonry_shell.rs` | `ClayShellWidget`, owns working area above editor |
 | Pane split tree | internal | `src/shell/layout.rs` | Horizontal/vertical splits, ratio 0.05–0.95 |
-| Fixed panel slots | internal | `src/shell/layout.rs` | `left`/`right`/`top`/`bottom` with size/min/max/visible/collapsed/resized_by_user; the Clay workspace browser may be absent entirely when its per-tab visibility flag is off |
+| Fixed panel slots | internal | `src/shell/layout.rs` | `left`/`right`/`top`/`bottom` with size/min/max/visible/collapsed/resized_by_user; the Clay workspace browser may be absent entirely when its per-tab visibility flag is off, and its left slot yields to the editor when pane width or user UI typography makes the main region unusable |
 | Status bar | internal | editor/shell paint | Uses `statusBg`/`statusText` theme keys |
 | Welcome entry surface | internal | `src/masonry_welcome.rs` | Plan 087 Clay-owned empty/local-fallback entry state with sanitized workspace/status copy, `Open File`/`Open Folder` buttons routed through existing client commands, Group/Status accessibility, and no package-facing replacement or dialog authority |
 | Transient menu | internal | `src/shell/transient_menu.rs` | Bounded prompt/item list scored by the shared fuzzy subsequence matcher (`src/shell/fuzzy.rs`), focus policy, package provenance; server-owned Control Center/Path Browser sessions plus the Plan 087 retained projections and Phase 24.4 centered host |
 | Inline completion pop-up | internal | `src/shell/transient_menu.rs` | Plan 087 `TransientMenuOrigin::Completion` projection: caret/IME anchor, modeless selection, scroll composition, 8 visible-row cap, 480 logical-pixel width cap, stale/empty/error dismissal |
 | Fixed package panels | internal | `src/shell/package_ui.rs` | Slot-bound package panels with visibility |
 | Transient package overlays | internal | `src/shell/package_ui.rs` | Package-declared overlays using only `working-area`, `active-pane`, `main`, or `pointer`; centered and completion hosts are Clay-internal |
-| File browser | internal | `src/shell/file_browser.rs` | Workspace/selected-file browsing surface; Phase 22.8 starts with an editor-only hidden snapshot, toggles a per-tab left panel, and shows workspace name + full location when visible |
-| Editor chrome | internal | `src/editor/surface.rs` | Caret, selection, scrollbar, diagnostics paint |
+| File browser | internal | `src/shell/file_browser.rs` | Workspace/selected-file browsing surface; Phase 22.8 starts with an editor-only hidden snapshot, toggles a per-tab left panel, and shows sanitized workspace name + workspace-relative location when visible |
+| Editor chrome | internal | `src/editor/surface/mod.rs`, `src/editor/surface/chrome.rs` | Caret, selection, scrollbar, diagnostics, plus Phase 26.5 gutter / active-line / indent-guide / bracket-match paint. Toggles come from `editorRules.chrome` or `document_font_role` (monospace on, proportional off). Colors from `StyleRegistry` chrome keys, never SDUI tokens. Phase 26.6 wrap (`none` / `viewport` / `column`) and asymmetric insets live on the same surface. Phase 28 fold chevrons and collapsed-line hiding remain Clay-owned gutter/layout chrome; packages publish inert `FoldingRange` data under `render-folding`. Link hover uses `paint_tooltip_shell` and link activation uses a typed decoration intent; inlay hints are muted, decorative post-token overlays with no reflow. No new package-facing `ComponentKind`, token, style variable, or paint callback. |
 
 ## Clay-Native Chrome Primitives (internal)
 
@@ -116,15 +148,15 @@ Phase 20.2 introduced a native chrome primitive layer in `src/shell/primitives.r
 
 | Primitive | Status | File | Purpose | Token mapping | Accessibility role |
 |-----------|--------|------|---------|---------------|-------------------|
-| `paint_divider` | internal | `src/shell/primitives.rs` | Horizontal/vertical separator | `color.border`, `dimension.border.width` | `separator` |
-| `paint_focus_ring` | internal | `src/shell/primitives.rs` | Focus indicator ring | `color.focus.ring`, `dimension.focus.ring.width`, `dimension.focus.ring.offset` | Applied to focused element |
-| `paint_panel_chrome` | internal | `src/shell/primitives.rs` | Panel background/border with optional title/collapse/resize | `color.surface.panel`, `color.border`, `dimension.border.width`, `dimension.radius.panel`, `spacing.panel.padding` | `region` or `complementary` |
-| `paint_scroll_chrome` | internal | `src/shell/primitives.rs` | Scrollbar track/thumb with interaction states | `color.scrollbar.track`, `color.scrollbar.thumb`, `dimension.scrollbar.width`, `dimension.scrollbar.margin`, `dimension.scrollbar.min.thumb`, `dimension.radius.scrollbar` | `scrollbar` |
-| `paint_badge` | internal | `src/shell/primitives.rs` | Badge/tag with label and interaction states | `color.surface.badge`, `color.text.badge`, `dimension.radius.badge`, `spacing.badge.padding.x`, `spacing.badge.padding.y`, `typography.badge` | `status` or `note` |
-| `paint_kbd_hint` | internal | `src/shell/primitives.rs` | Keyboard shortcut hint | `color.surface.kbd`, `color.text.kbd`, `dimension.radius.kbd`, `spacing.kbd.padding.x`, `spacing.kbd.padding.y`, `typography.kbd` | `kbd` (via label) |
-| `paint_icon_slot` | internal | `src/shell/primitives.rs` | Standardized icon placeholder | `dimension.icon.size`, `dimension.icon.slot.size`, `color.text.muted`, `dimension.radius.icon` | `img` or `presentation` |
-| `paint_tooltip_shell` | internal | `src/shell/primitives.rs` | Tooltip background/border | `color.surface.overlay`, `color.border`, `dimension.border.width`, `dimension.radius.tooltip`, `spacing.tooltip.padding` | `tooltip` |
-| `paint_scrim` | internal | `src/shell/primitives.rs` | Full-window dim behind the centered Command Centre surface (Phase 24.4) | `color.surface.scrim`, `opacity.scrim` | `dialog` backdrop (Clay-internal; no package-facing surface) |
+| `paint_divider` | internal | `src/shell/primitives.rs` | Horizontal/vertical separator | `border.hairline`, `dimension.border.hairline` | `separator` |
+| `paint_focus_ring` | internal | `src/shell/primitives.rs` | Focus indicator ring | `border.focus`, `dimension.border.thin`, `radius.xs` | Applied to focused element |
+| `paint_panel_chrome` | internal | `src/shell/primitives.rs` | Panel background/border with optional title/collapse/resize | `surface.panel`, `border.subtle`, `dimension.border.hairline`, `radius.sm`, `spacing.panel` | `region` or `complementary` |
+| `paint_scroll_chrome` | internal | `src/shell/primitives.rs` | Scrollbar track/thumb with interaction states | `surface.scrollbar.track`, `surface.scrollbar`, `dimension.scrollbar.width`, `radius.xs` | `scrollbar` |
+| `paint_badge` | internal | `src/shell/primitives.rs` | Badge/tag with label and interaction states | `surface.badge`, `text.badge`, `radius.xs`, `spacing.badge`, `typography.detail`/`caption` | `status` or `note` |
+| `paint_kbd_hint` | internal | `src/shell/primitives.rs` | Keyboard shortcut hint | `surface.kbd`, `text.kbd`, `border.kbd`, `radius.xs`, `dimension.kbd.height`, `typography.caption` | `kbd` (via label) |
+| `paint_icon_slot` | internal | `src/shell/primitives.rs` | Standardized icon placeholder | `dimension.icon.size`, `text.icon`, `opacity.disabled` | `img` or `presentation` |
+| `paint_tooltip_shell` | internal | `src/shell/primitives.rs` | Tooltip background/border | `surface.tooltip`, `text.tooltip`, `border.hairline`, `dimension.border.hairline`, `radius.sm`, `elevation.overlay`, `z.tooltip`, `spacing.tooltip`, `typography.body` | `tooltip` |
+| `paint_scrim` | internal | `src/shell/primitives.rs` | Full-window dim behind the centered Command Centre surface (Phase 24.4) | `surface.scrim`, `opacity.scrim` | `dialog` backdrop (Clay-internal; no package-facing surface) |
 
 All primitives:
 - Read color/dimension/opacity/typography from `ResolvedUiTheme` tokens (no hardcoded values).
@@ -163,7 +195,7 @@ Reuse-first: before adding any of these, confirm no implemented kind composes to
 | Completion pop-up (uplift) | implemented | Clay-internal caret-adjacent completion projection | Plan 087: `TransientMenuOrigin::Completion`, IME/caret anchor, modeless focus policy, retained `scroll` composition, 8 visible rows, 480 logical-pixel width cap, selected-row scrolling, stale/empty/error dismissal. Not a package overlay anchor or component kind. |
 | Command palette | implemented | Clay-owned Command Centre surface | Phase 24.2/24.4: opens via `controlCenter.open`, lists the generation-stamped live command catalogue (built-ins + `shell.client*` + package commands) with effective keybindings/provenance detail, uses a centered 640-logical-pixel default width and retained scroll projection, and activates through the shared server path or `ShellClientCommandRequest`. The centered origin is Clay-internal; packages cannot open or drive it. |
 | Tooltip | planned | Hover hint | `overlay` anchored, `detail` typography |
-| Tabs | implemented | Tab strip (window tab bar) | Phase 22.3: shell-owned tab bar row above the working area; token-state cards (idle/hover/active/focus/disabled) via `tab_card_chrome`; the close glyph, switch-on-click, and server-registry reconciliation. The close glyph remains bespoke two-stroke internal chrome, not a package-facing icon primitive. Phase 22.7: cards shrink-to-fit until `TAB_BAR_CARD_MIN_WIDTH` (100px) binds, then the strip scrolls — wheel over the bar scrolls (one `f64` offset, clamped to the last card's right edge at the "+" slot), activation auto-scrolls the active card into view, cards clip to the strip, and hit-testing honors the offset. Scroll is bespoke internal chrome (the `scroll` component stays rejected for the strip — recorded ceiling). Generic paint contract (cards with labels + close affordance) so later phases can reuse it for panel/pane tabs; shell-level, not package-facing |
+| Tabs | implemented | Tab strip (window tab bar) | Phase 22.3: shell-owned tab bar row above the working area; token-state cards (idle/hover/active/focus/disabled) via `tab_card_chrome`; the close glyph, switch-on-click, and server-registry reconciliation. The close glyph remains bespoke two-stroke internal chrome, not a package-facing icon primitive. Phase 22.7/Plan 088 Task 6: cards shrink-to-fit until `TAB_BAR_CARD_MIN_WIDTH` (100px) binds, then the strip scrolls — wheel over the bar scrolls (one `f64` offset, clamped to the last card's right edge at the "+" slot), activation auto-scrolls the active card into view, cards clip to the strip, and hit-testing honors the offset; bar/card affordance geometry follows active UI typography while remaining clamped to logical window bounds. Scroll is bespoke internal chrome (the `scroll` component stays rejected for the strip — recorded ceiling). Generic paint contract (cards with labels + close affordance) so later phases can reuse it for panel/pane tabs; shell-level, not package-facing |
 | Split divider | implemented | Draggable pane/slot separator | Phase 20.3: `paint_divider` + drag interaction on `PaneSplitTree`; resize handles via `paint_panel_chrome` |
 | Badge / tag | planned | Status/count marker | `label` + muted pastel tokens |
 | Toast / notification | planned | Transient feedback | `overlay` + portal, auto-dismiss |

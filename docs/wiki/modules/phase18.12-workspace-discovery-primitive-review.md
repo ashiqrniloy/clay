@@ -18,7 +18,7 @@
 - `runtime/js/workspace.js`
 - `src/shell/layout.rs`
 - `src/shell/package_ui.rs`
-- `src/masonry_shell.rs`
+- `src/masonry_shell/mod.rs`
 - `src/masonry_sdui.rs`
 - `runtime/js/ui.js`
 - `src/server/command_execution.rs`
@@ -46,7 +46,7 @@ The headline finding is that most of the file browser can be built without new R
 
 - `src/shell/layout.rs` implements internal `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` state. `PaneSlotLayout` already has a mandatory `main` slot and optional fixed `left`, `right`, `top`, and `bottom` slots.
 - `FixedSlotId::Left` is the intended slot for file trees, outlines, and similar side panels; `FixedSlotId::Bottom` is intended for diagnostics, output, and transient menus.
-- `src/masonry_shell.rs::ClayShellWidget` places the editor child from installed layout state. Masonry layout reads validated state only and does not parse packages, run JavaScript, wait on IPC, or mutate package UI state during layout.
+- `src/masonry_shell/mod.rs::ClayShellWidget` places the editor child from installed layout state. Masonry layout reads validated state only and does not parse packages, run JavaScript, wait on IPC, or mutate package UI state during layout.
 - `src/shell/package_ui.rs::PackageUiRuntimeState` stores accepted fixed panels and transient overlays. Accepted fixed panels compose into `PaneSlotLayout` geometry; accepted transient overlays render separately and do not consume fixed slot geometry.
 - `docs/wiki/modules/masonry-shell.md` documents the Clay-owned shell root, slot geometry, inert layout updates, and structural observability without native handles.
 
@@ -164,7 +164,7 @@ Ordinary typing, caret movement, local edit application, scroll, paint, layout, 
 - Do not implement a full nested `.gitignore` parser or pull in a heavy ignore crate for the smallest working product. A closed Clay default ignore set plus optional root-level `.gitignore` is sufficient; defer hierarchy semantics.
 - Do not pass raw client-chosen paths straight to an open op. Every open/reveal action must route through `CommandExecution` with bounded args validated against roots and selected-file grants.
 - Do not make the file tree a package contribution for the smallest working product. The roadmap calls for a Clay-owned file browser UI; package panel contributions can consume the same primitives in later phases.
-- Do not add file-browser-specific Rust rendering branches in `masonry_sdui.rs` or `masonry_shell.rs`. Native widget mapping stays inside the existing Clay-owned component catalog. File browser UI is Clay-owned.
+- Do not add file-browser-specific Rust rendering branches in `masonry_sdui.rs` or `masonry_shell/mod.rs`. Native widget mapping stays inside the existing Clay-owned component catalog. File browser UI is Clay-owned.
 - Do not expose Masonry `Widget`/`WidgetId`/`WidgetPod`, native handles, Vello/Parley callbacks, raw op names, raw CSS, or client-side JavaScript as file-browser APIs.
 - Do not treat a public Clay JS API as implemented by adding only a raw op or inventory row; public APIs require facade, op, docs, registry, tests, security notes, and naming metadata.
 

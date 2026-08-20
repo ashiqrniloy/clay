@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSetSelection
 js_facade: runtime/js/editor.js::clientSetSelection
-backing_rust: src/editor/surface.rs::EditorSurface::select_word
+backing_rust: src/editor/surface/mod.rs::EditorSurface::select_word
 deno_op: op_clay_editor_set_selection
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_set_selection
 name: clientSetSelection
@@ -114,7 +114,7 @@ Use `editor.clientSetSelection` when the user asks for set selection through the
 
 - JS facade: `runtime/js/editor.js::clientSetSelection`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_set_selection` (`op_clay_editor_set_selection`)
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::select_word` (and `select_line`, `select_paragraph`)
+- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::select_word` (and `select_line`, `select_paragraph`)
 - Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
 
 ## Lookup metadata

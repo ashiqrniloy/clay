@@ -5,11 +5,24 @@
 - `src/bin/clay-server.rs`
 - `src/server/mod.rs`
 - `src/server/tab_registry.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/server/workspace.rs`
 - `src/server/document.rs`
 - `src/protocol/codec.rs`
 - `src/ipc.rs`
+
+## Module layout (Plan 090)
+
+`src/server/connection.rs` was split into a directory module in Plan 090 (task 2). The coordinator keeps the connection loop, identity/routing, welcome, and lifecycle cleanup; each dispatch family owns one private submodule:
+
+| File | Contents |
+|------|----------|
+| `src/server/connection/mod.rs` | `handle_connection_loop` + `handle_connection_with_analysis`, identity/routing, welcome snapshot, `cleanup_connection_documents` (single cleanup owner), capability pool, and the collocated test module |
+| `src/server/connection/documents.rs` | open/save/reload/close/status/list, `dispatch_edit_operation`, parse/analysis scheduling, `classify_open_document`, `open_document_followup_messages` |
+| `src/server/connection/workspace.rs` | `OpenSelectedFile`/`AddSelectedWorkspaceRoot`, file-browser helpers, `open_selected_file` |
+| `src/server/connection/tabs.rs` | `TabCommand` arm + `send_tab_*` helpers + `TabDispatch` (Continue/CloseConnection) |
+| `src/server/connection/menus.rs` | `MenuQueryUpdate`/`Backspace`/`SelectionMove`/`Activate`/`Cancel` + `open_command_centre_session` |
+| `src/server/connection/runtime.rs` | `SduiAction`/`CommandIntent`/`RequestResync`/`DecorationViewportRequest`/completion/language-intelligence + `execute_command_intent` + persist helpers |
 
 ## Overview
 
@@ -17,7 +30,7 @@ The server skeleton is a Tokio local-IPC server with platform transports for Uni
 
 ## How It Works
 
-`src/ipc.rs` owns `IpcEndpoint`, default endpoint selection, smoke endpoint generation, endpoint display, and child-process argument conversion so app and binary code do not treat every IPC address as a filesystem path. On Unix, the default endpoint wraps `$XDG_RUNTIME_DIR/clay.sock` when available, otherwise `clay.sock` under a per-user temp directory (`$TMPDIR/clay-<user>/`) that Clay creates before binding so the server's parent-directory ownership check passes on Linux. On Windows, the default endpoint is a local named pipe address of the form `\\.\pipe\clay-<user>`. `src/main.rs` uses the same endpoint model for default, client, server, restart, and smoke launches. On Linux, `clay restart` scans `/proc` for only the current Clay executable's `server` process on the default endpoint, stops it with bounded `SIGTERM`/`SIGKILL`, starts the replacement through the existing shell-free child command, and verifies readiness with the normal client handshake; it leaves clients, custom endpoints, and isolated smoke servers alone. The smoke path starts a managed child server, optionally forwards a named configuration fixture for runtime-backed SDUI validation, polls for early child exit during bounded readiness retries, and reports categorized diagnostics before opening the GUI. `clay-server` parses a supplied endpoint through this abstraction and passes it into `ServerConfig`. Both production binaries construct the server with fallible `IpcServer::try_new`; invalid configured/default workspace roots return typed `ServerError::InvalidWorkspaceRoot` through normal launch diagnostics instead of panicking. The older `IpcServer::new` convenience wrapper is test-only. On Unix, `IpcServer::run` validates the parent directory, removes only stale socket files, binds `UnixListener`, and keeps accepting connections. On Windows, `IpcServer::run` validates the local named-pipe prefix, creates a Tokio `NamedPipeServer`, awaits `connect()`, handles the already-connected race, then rotates back to create the next pipe instance. Each accepted client is handled in a spawned Tokio task so one connection does not block the accept loop, then the shared connection dispatcher runs over a generic Tokio `AsyncRead + AsyncWrite` stream rather than a Unix-specific stream type.
+`src/ipc.rs` owns `IpcEndpoint`, default endpoint selection, smoke endpoint generation, endpoint display, and child-process argument conversion so app and binary code do not treat every IPC address as a filesystem path. On Unix, the default endpoint wraps `$XDG_RUNTIME_DIR/clay.sock` when available, otherwise `clay.sock` under a per-user temp directory (`$TMPDIR/clay-<user>/`) that Clay creates before binding so the server's parent-directory ownership check passes on Linux. On Windows, the default endpoint is a local named pipe address of the form `\\.\pipe\clay-<user>`. `src/launch.rs` uses the same endpoint model for default, client, server, restart, and smoke launches. On Linux, `clay restart` scans `/proc` for only the current Clay executable's `server` process on the default endpoint, stops it with bounded `SIGTERM`/`SIGKILL`, starts the replacement through the existing shell-free child command, and verifies readiness with the normal client handshake; it leaves clients, custom endpoints, and isolated smoke servers alone. The smoke path starts a managed child server, optionally forwards a named configuration fixture for runtime-backed SDUI validation, polls for early child exit during bounded readiness retries, and reports categorized diagnostics before opening the GUI. `clay-server` parses a supplied endpoint through this abstraction and passes it into `ServerConfig`. Both production binaries construct the server with fallible `IpcServer::try_new`; invalid configured/default workspace roots return typed `ServerError::InvalidWorkspaceRoot` through normal launch diagnostics instead of panicking. The older `IpcServer::new` convenience wrapper is test-only. On Unix, `IpcServer::run` validates the parent directory, removes only stale socket files, binds `UnixListener`, and keeps accepting connections. On Windows, `IpcServer::run` validates the local named-pipe prefix, creates a Tokio `NamedPipeServer`, awaits `connect()`, handles the already-connected race, then rotates back to create the next pipe instance. Each accepted client is handled in a spawned Tokio task so one connection does not block the accept loop, then the shared connection dispatcher runs over a generic Tokio `AsyncRead + AsyncWrite` stream rather than a Unix-specific stream type.
 
 Each connection must send `ClientMessage::Hello` first. Production responds on a
 non-document bootstrap lane with:
@@ -82,7 +95,7 @@ Plan 059 fixes a root-cause framing corruption: `tokio::io::AsyncReadExt::read_e
 3. The main connection `select!` loop races only `mpsc::recv()` calls (both branches cancellation-safe).
 4. A `ReadPumpGuard` (`src/protocol/codec.rs`, newtype over `tokio::task::AbortHandle`) aborts the pump task on `Drop` — cleaned up on every return/error path.
 
-**Server** (`handle_connection_with_analysis` in `src/server/connection.rs`): previously used a single `&mut stream` for both reads and writes inside the `select!` loop. The sequential handshake (Hello → Welcome → … → capability) still uses the combined stream (no select!). After the handshake, the stream is split; the write half keeps the name `stream` so all 49 existing `&mut stream` write sites need zero code changes. The read-pump channel capacity is 64 (adequate for a single client's backpressure).
+**Server** (`handle_connection_with_analysis` in `src/server/connection/mod.rs`): previously used a single `&mut stream` for both reads and writes inside the `select!` loop. The sequential handshake (Hello → Welcome → … → capability) still uses the combined stream (no select!). After the handshake, the stream is split; the write half keeps the name `stream` so all 49 existing `&mut stream` write sites need zero code changes. The read-pump channel capacity is 64 (adequate for a single client's backpressure).
 
 **Client** (`run_connection` in `src/client/mod.rs`): already used `tokio::io::split`. The `codec.read_server_message(&mut reader)` select branch was replaced with `incoming_rx.recv()`. Channel capacity is `EDIT_QUEUE_CAPACITY` (256).
 
@@ -107,7 +120,7 @@ Plan 059 fixes a root-cause framing corruption: `tokio::io::AsyncReadExt::read_e
 
 ## Tests
 
-- `src/server/connection.rs`: deferred bind-before-document/SDUI handshake, per-tab initial snapshot publication, runtime diagnostic publication, editable/read-only access, edit acknowledgement, resync response, fail-closed cross-tab routing, file/workspace open/status dispatch, selected-folder workspace-root addition, file-browser directory navigation snapshot refresh, generic selected-file/file-browser open-time parse activation, preservation of file-browser action validation across open-time follow-ups, typed file IO failures, malformed-frame handling, and disconnect finalization (including peer-close races with queued asynchronous output) over generic in-memory async streams.
+- `src/server/connection/mod.rs`: deferred bind-before-document/SDUI handshake, per-tab initial snapshot publication, runtime diagnostic publication, editable/read-only access, edit acknowledgement, resync response, fail-closed cross-tab routing, file/workspace open/status dispatch, selected-folder workspace-root addition, file-browser directory navigation snapshot refresh, generic selected-file/file-browser open-time parse activation, preservation of file-browser action validation across open-time follow-ups, typed file IO failures, malformed-frame handling, and disconnect finalization (including peer-close races with queued asynchronous output) over generic in-memory async streams.
 - `tests/selected_file_markdown_smoke.rs`: non-GUI IPC smoke that starts `IpcServer`, loads `@clay/markdown` through `init.js`, proves a raw `OpenSelectedFile` without the server-issued capability is rejected, then consumes the replenished capability and asserts Markdown `BehaviorManifest` plus syntax `DecorationSet` output.
 - `src/server/document.rs`: canonical rope edit application, base-version enforcement, lease validation, region-lock rejection, and UTF-8 boundary rejection.
 - `src/ipc.rs`: endpoint tests verify platform-valid default endpoint selection, isolated smoke endpoints, and printable diagnostics.

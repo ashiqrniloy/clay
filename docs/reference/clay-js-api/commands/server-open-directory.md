@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverOpenDirectory
 js_facade: runtime/js/commands.js::serverOpenDirectory
-backing_rust: src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::list_directory; src/server/connection.rs::file_browser_snapshot_message
+backing_rust: src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::list_directory; src/server/connection/workspace.rs::file_browser_snapshot_message
 deno_op: op_clay_commands_execute_command
 deno_op_path: src/server/ops/commands.rs::op_clay_commands_execute_command
 name: serverOpenDirectory
@@ -98,7 +98,7 @@ Use `commands.serverOpenDirectory` only through the documented Clay JS facade or
 
 - JS facade: `runtime/js/commands.js::serverOpenDirectory`
 - Deno op: `src/server/ops/commands.rs::op_clay_commands_execute_command` (`op_clay_commands_execute_command`)
-- Backing Rust/current owner: `src/server/command_execution.rs::CommandExecutor::execute_workspace`; `src/server/workspace.rs::WorkspaceState::list_directory`; `src/server/connection.rs::file_browser_snapshot_message`
+- Backing Rust/current owner: `src/server/command_execution.rs::CommandExecutor::execute_workspace`; `src/server/workspace.rs::WorkspaceState::list_directory`; `src/server/connection/workspace.rs::file_browser_snapshot_message`
 
 ## Lookup metadata
 

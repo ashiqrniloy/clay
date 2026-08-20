@@ -943,7 +943,12 @@ pub(crate) fn centered_rect(bounds: Rect, width: f64, height: f64) -> Rect {
 }
 
 fn bottom_rect(main_rect: Rect) -> Rect {
-    let height = (main_rect.height() * 0.35).clamp(120.0, 240.0);
+    let available = main_rect.height().max(0.0);
+    let height = if available < 120.0 {
+        available
+    } else {
+        (available * 0.35).clamp(120.0, 240.0).min(available)
+    };
     Rect::new(
         main_rect.x0,
         main_rect.y1 - height,
@@ -1173,6 +1178,18 @@ mod tests {
             ),
             Rect::new(0.0, 0.0, 300.0, 200.0)
         );
+    }
+
+    #[test]
+    fn bottom_overlay_stays_inside_short_main_regions() {
+        for height in [48.0, 119.0, 120.0, 200.0] {
+            let main = Rect::new(0.0, 10.0, 300.0, 10.0 + height);
+            let overlay = bottom_rect(main);
+            assert!(overlay.x0 >= main.x0 && overlay.x1 <= main.x1);
+            assert!(overlay.y0 >= main.y0 && overlay.y1 <= main.y1);
+            assert!(overlay.height() <= main.height());
+        }
+        assert_eq!(bottom_rect(Rect::new(0.0, 0.0, 300.0, 80.0)).height(), 80.0);
     }
 
     #[test]

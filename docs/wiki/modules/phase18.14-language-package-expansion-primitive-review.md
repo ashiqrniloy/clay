@@ -22,7 +22,7 @@
 - `docs/wiki/modules/phase18.12-workspace-discovery-primitive-review.md`
 - `docs/wiki/modules/phase18.13-git-discovery-primitive-review.md`
 - `src/packages/modes.rs`
-- `src/packages/record.rs`
+- `src/packages/record/mod.rs`
 - `src/packages/manifest.rs`
 - `src/server/ops/modes.rs`
 - `src/server/ops/commands.rs`

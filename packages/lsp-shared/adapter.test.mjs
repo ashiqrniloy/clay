@@ -10,11 +10,18 @@ import {
   definitionToClay,
   diagnosticsToClay,
   hoverToClay,
+  inlayHintsToClay,
   parseCapabilities,
   semanticTokensToClay,
   signatureHelpToClay,
 } from "./mapping.js";
 import { fileUriToRelative, pathToFileUri, VersionedDocument } from "./positions.js";
+import {
+  DEFAULT_TOKEN_MODIFIERS,
+  DEFAULT_TOKEN_TYPES,
+  createLspBridge,
+  lspClientCapabilities,
+} from "./bridge.js";
 
 const bytes = (text) => new TextEncoder().encode(text);
 
@@ -300,6 +307,117 @@ test("pending request count and malformed JSON-RPC fail closed", async () => {
 
 test("empty child read reports deterministic server exit", async () => {
   await assert.rejects(() => new LspClient(new FakeSession()).pump(), /server_closed/);
+});
+
+test("factory token tables and diagnostic mode match rust/markdown defaults", () => {
+  assert.deepEqual([...DEFAULT_TOKEN_TYPES], [
+    "namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter",
+    "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword",
+    "modifier", "comment", "string", "number", "regexp", "operator", "decorator",
+  ]);
+  assert.deepEqual([...DEFAULT_TOKEN_MODIFIERS], [
+    "declaration", "definition", "readonly", "static", "deprecated", "abstract", "async",
+    "modification", "documentation", "defaultLibrary",
+  ]);
+  const pull = lspClientCapabilities({ diagnostics: "pull" });
+  assert.deepEqual(pull.textDocument.diagnostic, {
+    dynamicRegistration: false,
+    relatedDocumentSupport: false,
+  });
+  assert.deepEqual(pull.textDocument.semanticTokens.tokenTypes, [...DEFAULT_TOKEN_TYPES]);
+  const push = lspClientCapabilities({
+    diagnostics: "push",
+    features: ["completion", "hover", "definition", "codeAction"],
+  });
+  assert.equal(push.textDocument.diagnostic, undefined);
+  assert.equal(push.textDocument.signatureHelp, undefined);
+  assert.equal(push.textDocument.inlayHint, undefined);
+  const withInlay = lspClientCapabilities({ features: ["inlayHint"] });
+  assert.deepEqual(withInlay.textDocument.inlayHint, { dynamicRegistration: false });
+  const omitted = lspClientCapabilities();
+  assert.equal(omitted.textDocument.inlayHint, undefined);
+});
+
+test("createLspBridge advertises inlayHint only when enabled", () => {
+  const off = lspClientCapabilities({ features: ["hover"] });
+  assert.equal(off.textDocument.inlayHint, undefined);
+  const on = lspClientCapabilities({ features: ["hover", "inlayHint"] });
+  assert.equal(on.textDocument.inlayHint.dynamicRegistration, false);
+});
+
+test("inlay maps to decoration kind not syntax", () => {
+  const document = new VersionedDocument("fn main(x: i32) {}", 1, "utf-8");
+  const spans = inlayHintsToClay([
+    { position: { line: 0, character: 8 }, label: "x:", kind: 2 },
+    { position: { line: 0, character: 11 }, label: [{ value: ": " }, { value: "i32" }], kind: 1 },
+    { position: { line: 0, character: 0 }, label: "\u0007", kind: 1 },
+  ], document);
+  assert.equal(spans.length, 2);
+  assert.equal(spans[0].kind, "inlayHint");
+  assert.equal(spans[0].inlay.placement, "before");
+  assert.equal(spans[0].tokenType, "Parameter");
+  assert.equal(spans[1].kind, "inlayHint");
+  assert.equal(spans[1].inlay.label, ": i32");
+  assert.equal(spans[1].inlay.placement, "after");
+});
+
+test("factory rejects forged identity before session start", async () => {
+  let started = false;
+  const bridge = createLspBridge({
+    packageName: "@clay/lsp-rust",
+    contribution: "lsp-rust.server",
+    diagnosticSource: "rust-analyzer",
+    languageId: "rust",
+    diagnostics: "pull",
+    startSession: async () => { started = true; },
+    publishDecorations() {},
+    publishDiagnostics() {},
+    packageManifest: {},
+  });
+  await assert.rejects(
+    () => bridge.handle({
+      kind: "open",
+      identity: { package: "@evil/pkg", contribution: "lsp-rust.server" },
+      documentId: 1,
+      documentVersion: 1,
+      relativePath: "src/main.rs",
+      text: "",
+    }),
+    /invalid_identity/,
+  );
+  assert.equal(started, false);
+});
+
+test("language-server session start uses host-stamped options only", async () => {
+  let received;
+  const bridge = createLspBridge({
+    packageName: "@clay/lsp-rust",
+    contribution: "lsp-rust.server",
+    diagnosticSource: "rust-analyzer",
+    languageId: "rust",
+    diagnostics: "pull",
+    startSession: async (options) => {
+      received = options;
+      throw new Error("stop after capturing session options");
+    },
+    publishDecorations() {},
+    publishDiagnostics() {},
+    packageManifest: {},
+  });
+  await assert.rejects(
+    () => bridge.handle({
+      kind: "open",
+      identity: { package: "@clay/lsp-rust", contribution: "lsp-rust.server" },
+      documentId: 1,
+      documentVersion: 1,
+      workspaceRootId: 7,
+      canonicalRootPath: "/workspace",
+      relativePath: "src/main.rs",
+      text: "fn main() {}\n",
+    }),
+    /stop after capturing session options/,
+  );
+  assert.deepEqual(received, { contribution: "lsp-rust.server", workspaceRootId: 7 });
 });
 
 test("server requests require explicit allowlist", async () => {

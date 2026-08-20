@@ -1,7 +1,10 @@
 use clay::perf::budgets::{
     BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, CLIENT_EDIT_PAYLOAD_BUDGET_BYTES,
-    COMPLETION_MAX_VISIBLE_ROWS, COMPLETION_MAX_WIDTH_PX, DECORATION_PAYLOAD_BUDGET_BYTES,
-    EDIT_ACK_P95_BUDGET_MS, EDIT_ACK_PAYLOAD_BUDGET_BYTES, KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS,
+    COMPLETION_MAX_VISIBLE_ROWS, COMPLETION_MAX_WIDTH_PX, COMPLETION_RESULT_MAX_ITEMS,
+    COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES, DECORATION_PAYLOAD_BUDGET_BYTES,
+    EDIT_ACK_P95_BUDGET_MS, EDIT_ACK_PAYLOAD_BUDGET_BYTES, FOLDING_RANGE_PAYLOAD_BUDGET_BYTES,
+    INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES,
+    KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS, LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS,
     LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB, MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES,
     PANE_PAINT_P95_BUDGET_MS, RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS,
     SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
@@ -69,8 +72,12 @@ fn performance_docs_list_all_supported_benchmark_commands() {
         "cargo test --test security language_server_authority::",
         "cargo bench --bench first_party_language_baselines -- --save-baseline pre-lsp",
         "cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
+        "cargo bench --bench window_baselines responsive_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
         "cargo bench --bench window_baselines completion_open_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
         "cargo bench --bench window_baselines completion_filter_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
+        "cargo bench --bench window_baselines command_centre_open_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
+        "cargo bench --bench window_baselines completion_selection_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
+        "cargo bench --bench window_baselines accessibility_tree_update_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
         "cargo bench --bench window_baselines completion_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
     ] {
         assert!(
@@ -564,4 +571,212 @@ fn phase22_6_window_budget_constants_are_pinned_and_documented() {
             "performance guide must document Phase 22.6 budget marker `{expected}`"
         );
     }
+}
+
+#[test]
+fn plan088_responsive_layout_conformance_and_baseline_are_documented() {
+    let doc = performance_doc();
+    for expected in [
+        "Plan 088 modernization conformance and responsive layout baselines",
+        "responsive_layout_baselines",
+        "responsive_layout_work",
+        "responsive_layout_work_preserves_sidebar_and_editor_bounds",
+        "Screenshot goldens remain deferred",
+        "cargo bench --bench window_baselines responsive_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
+    ] {
+        assert!(
+            doc.contains(expected),
+            "performance guide must document Plan 088 guard/baseline marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn plan089_editor_menu_completion_and_accessibility_costs_are_documented() {
+    let doc = performance_doc();
+    let wiki = performance_fixtures_wiki_doc();
+    for expected in [
+        "Plan 089 editor, menu, tab, completion, and accessibility cost guards",
+        "command_centre_open_baselines",
+        "completion_selection_baselines",
+        "accessibility_tree_update_baselines",
+        "accessibility_updates_reuse_stable_virtual_ids_without_allocator_churn",
+        "retained_accessibility_update_fixture_stays_bounded",
+        "Criterion's saved-target comparisons remain advisory",
+        "existing `editor_baselines` `editor_render_adjacent`",
+    ] {
+        assert!(
+            doc.contains(expected) || wiki.contains(expected),
+            "performance docs/wiki must document Plan 089 cost marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn phase28_budget_constants_match_docs() {
+    assert_eq!(FOLDING_RANGE_PAYLOAD_BUDGET_BYTES, 2048);
+    assert_eq!(INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, 4096);
+    assert_eq!(
+        INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES,
+        INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES + FOLDING_RANGE_PAYLOAD_BUDGET_BYTES
+    );
+    assert_eq!(DECORATION_PAYLOAD_BUDGET_BYTES, 8192);
+    assert_eq!(COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES, 16 * 1024);
+    assert_eq!(COMPLETION_RESULT_MAX_ITEMS, 256);
+    assert_eq!(LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS, 4096);
+    assert_eq!(KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS, 16);
+    const {
+        assert!(KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS == 16);
+        assert!(FOLDING_RANGE_PAYLOAD_BUDGET_BYTES < DECORATION_PAYLOAD_BUDGET_BYTES);
+    }
+
+    let doc = performance_doc();
+    for expected in [
+        "Phase 28.7".to_string(),
+        "FOLDING_RANGE_PAYLOAD_BUDGET_BYTES".to_string(),
+        "INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES".to_string(),
+        format!("<= {} bytes", FOLDING_RANGE_PAYLOAD_BUDGET_BYTES),
+        format!(
+            "{} B when",
+            INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES
+        ),
+        format!("<= {} bytes", DECORATION_PAYLOAD_BUDGET_BYTES),
+        format!("<= {} bytes", COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES),
+        format!(
+            "<= {} ({})",
+            COMPLETION_RESULT_MAX_ITEMS, "COMPLETION_RESULT_MAX_ITEMS"
+        ),
+        format!(
+            "<= {} chars",
+            LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS
+        ),
+        format!(
+            "<= {} ms (P95, advisory)",
+            KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS
+        ),
+        "phase28_budget_constants_match_docs".to_string(),
+        "folding_and_inlay_payloads_deny_above_cap".to_string(),
+        "completion_ranking_stays_inside_existing_scan_budget".to_string(),
+    ] {
+        assert!(
+            doc.contains(&expected),
+            "performance guide must document Phase 28.7 budget marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn folding_and_inlay_payloads_deny_above_cap() {
+    let decorations = production_src("src/server/decorations.rs");
+    assert!(
+        decorations.contains("DECORATION_PAYLOAD_BUDGET_BYTES"),
+        "inlay/link reuse decoration publication; must keep the named cap"
+    );
+    assert!(
+        decorations.contains("PayloadBudgetExceeded"),
+        "oversized decoration (inlay/link) must deny, not truncate"
+    );
+
+    let intelligence = production_src("src/server/language_intelligence.rs");
+    assert!(
+        intelligence.contains("LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS"),
+        "hover payloads must keep the named markdown cap"
+    );
+
+    for path in ["src/protocol", "src/server", "src/editor"] {
+        for rust_file in rust_sources_under(path) {
+            let source = std::fs::read_to_string(&rust_file)
+                .unwrap_or_else(|error| panic!("read {}: {error}", rust_file.display()));
+            let body = production_body(&source);
+            if mentions_folding_publish(body) {
+                assert!(
+                    body.contains("FOLDING_RANGE_PAYLOAD_BUDGET_BYTES"),
+                    "{} publishes folding ranges without the named cap",
+                    rust_file.display()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn completion_ranking_stays_inside_existing_scan_budget() {
+    let completion = production_src("src/server/completion.rs");
+    assert!(
+        completion.contains("COMPLETION_RESULT_MAX_ITEMS"),
+        "buffer-word scan / ranking must keep the existing item cap"
+    );
+    assert!(
+        completion.contains("COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES"),
+        "buffer-word scan / ranking must keep the existing payload cap"
+    );
+    assert!(
+        completion.contains("estimated_result_payload_bytes"),
+        "scan must stop before exceeding the payload estimate"
+    );
+    for line in completion.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("fn ") && function_name_looks_like_rank(trimmed) {
+            let name = trimmed.split('(').next().unwrap_or(trimmed);
+            assert!(
+                completion.contains("COMPLETION_RESULT_MAX_ITEMS"),
+                "{name} must stay inside COMPLETION_RESULT_MAX_ITEMS"
+            );
+        }
+    }
+}
+
+fn production_src(path: &str) -> String {
+    let source = std::fs::read_to_string(concat_manifest(path))
+        .unwrap_or_else(|error| panic!("read {path}: {error}"));
+    production_body(&source).to_string()
+}
+
+fn concat_manifest(path: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path)
+}
+
+fn production_body(src: &str) -> &str {
+    if let Some(index) = src.find("\nmod tests") {
+        return &src[..index];
+    }
+    if let Some(index) = src.find("\n#[cfg(test)]") {
+        return &src[..index];
+    }
+    src
+}
+
+fn mentions_folding_publish(body: &str) -> bool {
+    body.contains("FoldingRange")
+        || body.contains("publish_folding")
+        || body.contains("serverPublishFoldingRanges")
+}
+
+fn function_name_looks_like_rank(fn_line: &str) -> bool {
+    let name = fn_line
+        .trim_start_matches("fn ")
+        .split(['<', '('])
+        .next()
+        .unwrap_or("");
+    name.contains("rank") || name.contains("score")
+}
+
+fn rust_sources_under(dir: &str) -> Vec<std::path::PathBuf> {
+    let root = concat_manifest(dir);
+    let mut stack = vec![root];
+    let mut files = Vec::new();
+    while let Some(path) = stack.pop() {
+        let entries = std::fs::read_dir(&path)
+            .unwrap_or_else(|error| panic!("read_dir {}: {error}", path.display()));
+        for entry in entries {
+            let entry = entry.unwrap_or_else(|error| panic!("dir entry: {error}"));
+            let child = entry.path();
+            if child.is_dir() {
+                stack.push(child);
+            } else if child.extension().is_some_and(|ext| ext == "rs") {
+                files.push(child);
+            }
+        }
+    }
+    files
 }

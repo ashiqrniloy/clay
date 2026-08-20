@@ -344,14 +344,14 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 82);
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 84);
 
     let facades = read("src/server/facades.rs")
         .lines()
         .filter_map(|line| line.split_once("\"clay:").map(|(_, rest)| rest))
         .filter_map(|rest| rest.split_once('"').map(|(name, _)| format!("clay:{name}")))
         .collect::<BTreeSet<_>>();
-    assert_exact_inventory(marked_section(&plan, "facade-inventory"), &facades, 22);
+    assert_exact_inventory(marked_section(&plan, "facade-inventory"), &facades, 23);
 
     let mut packages = BTreeSet::new();
     for entry in fs::read_dir(root().join("packages")).expect("read packages directory") {
@@ -1356,6 +1356,270 @@ fn plan087_ui_authoring_contract_is_consistent_across_catalog_and_guides() {
                 .contains("Completion reuses the Phase 18.8 `TransientMenuSession` bottom overlay"),
         "creating-packages.md must not retain the pre-Plan-087 completion renderer contract"
     );
+}
+
+#[test]
+fn plan088_ui_catalog_and_package_authoring_contract_are_consistent() {
+    let catalog = read(".agents/skills/clay-ui/references/components.md");
+    let tokens = read(".agents/skills/clay-ui/references/tokens.md");
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let navigation = read("docs/reference/ui-components.md");
+    let strategy = read("docs/reference/primitives/shell-layout-strategy.md");
+    let docs_index = read("docs/index.md");
+
+    for (path, text) in [
+        ("components.md", catalog.as_str()),
+        ("tokens.md", tokens.as_str()),
+        ("creating-packages.md", guide.as_str()),
+        ("ui-components.md", navigation.as_str()),
+        ("shell-layout-strategy.md", strategy.as_str()),
+    ] {
+        for marker in [
+            "Plan 088",
+            "no package-facing",
+            "no package JavaScript",
+            "ResolvedUiTheme",
+        ] {
+            assert!(
+                text.contains(marker),
+                "{path} must document Plan 088 package-boundary marker {marker:?}"
+            );
+        }
+    }
+
+    for marker in [
+        "PackageModalDismiss",
+        "clipped-child semantics",
+        "active UI typography",
+        "table` remains the only reserved",
+        "completion` and `centered` are Clay-internal",
+    ] {
+        assert!(
+            catalog.contains(marker),
+            "components.md missing Plan 088 catalog marker {marker:?}"
+        );
+    }
+
+    for marker in [
+        "## Plan 088 token consumption (no additions)",
+        "no core token or package token domain was added",
+        "typography.*",
+        "no visual alias is added",
+    ] {
+        assert!(
+            tokens.contains(marker),
+            "tokens.md missing Plan 088 token marker {marker:?}"
+        );
+    }
+
+    for marker in [
+        "### Plan 088 UI modernization authoring contract",
+        "panel` + `scroll`",
+        "PackageModalDismiss",
+        "Role::Status",
+        "logical window bounds",
+        "raw CSS/colors",
+        "The authoritative catalog and token consumption note",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md missing Plan 088 authoring marker {marker:?}"
+        );
+    }
+
+    for marker in [
+        "## Plan 088 UI modernization package contract",
+        "PackageModalDismiss",
+        "clipped-child accessibility semantics",
+        "completion` and",
+        "Creating Clay Packages — Plan 088 UI modernization authoring contract",
+    ] {
+        assert!(
+            navigation.contains(marker),
+            "ui-components.md missing Plan 088 navigation marker {marker:?}"
+        );
+    }
+
+    for anchor in ["working-area", "active-pane", "main", "pointer"] {
+        assert!(
+            guide.contains(anchor),
+            "creating-packages.md must retain package overlay anchor {anchor:?}"
+        );
+    }
+    assert!(
+        guide.contains("`completion` and `centered`")
+            && guide.contains("are internal origins")
+            && guide.contains("`table` remains reserved"),
+        "creating-packages.md must reject Clay-internal anchors and reserved kinds"
+    );
+    assert!(
+        docs_index.contains("[UI Components, Tokens, and Conformance](reference/ui-components.md)")
+            && docs_index
+                .contains("[Creating Clay Packages](reference/packages/creating-packages.md)"),
+        "docs/index.md must keep the UI catalog and package guide discoverable"
+    );
+    assert!(
+        !strategy.contains("tracks retained\nscroll-child clipping separately as `P1-087-UI-1`"),
+        "shell-layout-strategy.md must not retain the pre-Task-5 host-only wording"
+    );
+}
+
+#[test]
+fn phase28_package_authoring_contract_is_consistent() {
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let catalog = read(".agents/skills/clay-ui/references/components.md");
+    let navigation = read("docs/reference/ui-components.md");
+    let chrome = read("docs/reference/primitives/ui-chrome-primitives.md");
+    let registry = read("docs/reference/primitives/registry.md");
+    let decorations = read("docs/reference/clay-js-api/decorations/server-publish-decorations.md");
+
+    for marker in [
+        "## Phase 28 authoring contract",
+        "parse_key_sequence",
+        "comments[].linePrefix",
+        "render-folding",
+        "DecorationKind::Link",
+        "DecorationKind::InlayHint",
+        "DecorationIntent::{Hover,",
+        "features: [",
+        "inlayHint",
+        "paint_tooltip_shell",
+        "HTTP/HTTPS",
+        "no package JavaScript",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md missing Phase 28 authoring marker {marker:?}"
+        );
+    }
+    for marker in [
+        "Phase 28 editor-intelligence chrome",
+        "paint_gutter",
+        "paint_tooltip_shell",
+        "aria-hidden",
+        "No new package-facing `ComponentKind`",
+    ] {
+        assert!(
+            catalog.contains(marker),
+            "components.md missing Phase 28 catalog marker {marker:?}"
+        );
+    }
+    for marker in [
+        "## Phase 28 editor-intelligence chrome",
+        "typed decoration intent",
+        "HTTP/absolute/traversal",
+        "No new `ComponentKind`",
+    ] {
+        assert!(
+            navigation.contains(marker),
+            "ui-components.md missing Phase 28 navigation marker {marker:?}"
+        );
+    }
+    for marker in [
+        "Editor-intelligence chrome (Phase 28)",
+        "DecorationKind::Link",
+        "DecorationKind::InlayHint",
+        "paint_gutter",
+        "render-folding",
+    ] {
+        assert!(
+            chrome.contains(marker),
+            "ui-chrome-primitives.md missing Phase 28 marker {marker:?}"
+        );
+    }
+    for marker in [
+        "Link targets and inlay labels",
+        "DecorationIntent::{Hover, Activate}",
+        "createLspBridge({ features: [\"inlayHint\"] })",
+    ] {
+        assert!(
+            registry.contains(marker),
+            "registry.md missing Phase 28 marker {marker:?}"
+        );
+    }
+    for marker in [
+        "### Link and inlay spans",
+        "kind: \"link\"",
+        "kind: \"inlayHint\"",
+        "Link activation never mints",
+    ] {
+        assert!(
+            decorations.contains(marker),
+            "server-publish-decorations.md missing Phase 28 marker {marker:?}"
+        );
+    }
+}
+
+#[test]
+fn plan088_code_wiki_documents_modernization_contract() {
+    let index = read("docs/wiki/index.md");
+    for page in [
+        "modules/editor-theme-registry.md",
+        "modules/typography-registry-and-font-roles.md",
+        "modules/masonry-shell.md",
+        "modules/pane-document-views.md",
+        "modules/masonry-sdui-region.md",
+        "modules/slot-aware-package-ui.md",
+        "modules/workspace-file-browser.md",
+        "modules/performance-fixtures.md",
+        "modules/ui-review-harness.md",
+    ] {
+        assert!(
+            index.contains(&format!("]({page})")),
+            "docs/wiki/index.md must link Plan 088 implementation page {page}"
+        );
+    }
+    assert!(
+        index.contains("## Plan 088 UI modernization map"),
+        "wiki index must explain the Plan 088 implementation map"
+    );
+
+    for (path, markers) in [
+        (
+            "docs/wiki/modules/editor-theme-registry.md",
+            [
+                "## Plan 088 theme/token modernization",
+                "TEXT_CONTRAST_MIN = 4.5",
+            ],
+        ),
+        (
+            "docs/wiki/modules/masonry-shell.md",
+            [
+                "## Plan 088 shell verification and boundaries",
+                "tab_card_display_name",
+            ],
+        ),
+        (
+            "docs/wiki/modules/masonry-sdui-region.md",
+            [
+                "set_clips_children()",
+                "### Plan 088 Task 6 responsive layout",
+            ],
+        ),
+        (
+            "docs/wiki/modules/workspace-file-browser.md",
+            ["sanitize_browser_label", "root_display_path"],
+        ),
+        (
+            "docs/wiki/modules/performance-fixtures.md",
+            [
+                "## Plan 088 window and responsive baselines",
+                "responsive_layout_work",
+            ],
+        ),
+        (
+            "docs/wiki/modules/ui-review-harness.md",
+            ["plan088-modernization", "UNRESOLVED"],
+        ),
+    ] {
+        let text = read(path);
+        for marker in markers {
+            assert!(
+                text.contains(marker),
+                "{path} must document Plan 088 wiki marker {marker:?}"
+            );
+        }
+    }
 }
 
 #[test]

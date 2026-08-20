@@ -3,8 +3,8 @@
 ## Source
 
 - `src/server/mod.rs`
-- `src/server/js_runtime.rs`
-- `src/server/connection.rs`
+- `src/server/js_runtime/mod.rs`
+- `src/server/connection/mod.rs`
 - `src/server/{command_execution,control_center,locks}.rs`
 - `src/server/parse_coordinator.rs`
 - `src/server/{completion,language_intelligence,document_analysis}.rs`
@@ -68,7 +68,7 @@ Current Phase 19 boundary (Plan 054 complete): candidate preparation/commit thro
 ## Primitive Coverage
 
 - Runtime generation primitive: `RuntimeGenerationStore` in `src/server/mod.rs`.
-- package cache invalidation primitive: per-generation `loadPackage` cache in `runtime/js/packages.js` plus `PackageLoadEntryAllowlist` in `src/server/js_runtime.rs`.
+- package cache invalidation primitive: per-generation `loadPackage` cache in `runtime/js/packages.js` plus `PackageLoadEntryAllowlist` in `src/server/js_runtime/mod.rs`.
 - parse-handler generation replacement primitive: `ParseCoordinator::register_handler_for_generation`, `cancel_older_generations`, `cancel_generation`, `cancel_package`, and task-generation validation in `src/server/parse_coordinator.rs`; package-scoped cancellation reuses the same primitive for revocation.
 - Contribution cleanup primitive: `cancel_older_runtime_generations` plus `withdraw_package_contributions` in `src/server/mod.rs`, mirrored by `ModeRegistry::unregister_package_modes` and `CommandRegistry::remove_package_commands`.
 - Language-server generation teardown: `LanguageServerProcessService::shutdown_all` via `ClayJsRuntimeService::shutdown_generation_resources`.
@@ -77,7 +77,7 @@ Current Phase 19 boundary (Plan 054 complete): candidate preparation/commit thro
 - Reload command primitive: `runtime.reloadConfiguration`, built-in `ServerFirstWithLock { Behavior }`, empty permissions, global `Ctrl+Shift+R` default binding, and Control Center discovery with the chord displayed. `bindKey`/`unbindKey` may override or remove the default; package JavaScript cannot call it through `serverExecuteCommand`.
 - Runtime snapshot fan-out primitive: `ActiveRuntimeStateFanout` in `src/server/mod.rs` plus `src/protocol/runtime.rs` (`RuntimeStateSnapshot`, `RuntimeGenerationInstalled`). Connections subscribe, stamp `client_id` on send, and recover from `latest_runtime_snapshot_for` after lag.
 - Atomic client install primitive: `ClientRuntimeStateCandidate::validate` in `src/client/runtime_state.rs` plus `EditorWidget::install_runtime_state_snapshot` in `src/masonry_editor.rs`. Typography force-installs through `EditorSurface::install_runtime_typography`; package UI replaces through `PackageUiRuntimeState::install_runtime_snapshot`.
-- Stale-edit grace primitive: `BehaviorGraceState` in `src/server/behavior.rs` with `PREVIOUS_BEHAVIOR_GRACE_MS` / `PREVIOUS_BEHAVIOR_GRACE_MAX_TRANSACTIONS` ceilings; Edit/EditorIntent validation in `src/server/connection.rs`; client `InvalidBehaviorVersion` resync via `rejection_requests_resync`.
+- Stale-edit grace primitive: `BehaviorGraceState` in `src/server/behavior.rs` with `PREVIOUS_BEHAVIOR_GRACE_MS` / `PREVIOUS_BEHAVIOR_GRACE_MAX_TRANSACTIONS` ceilings; Edit/EditorIntent validation in `src/server/connection/mod.rs`; client `InvalidBehaviorVersion` resync via `rejection_requests_resync`.
 - Test/developer trigger: `IpcServer::trigger_developer_hot_reload`, marked `#[doc(hidden)]`, not exported through Clay JS facades, and delegated to command validation.
 
 Future packages should reuse `loadPackage`, `clay:modes`, and `clay:parse` registration. Do not add mode-specific Rust reload branches.

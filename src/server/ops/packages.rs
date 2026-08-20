@@ -9,10 +9,13 @@ use deno_error::JsErrorBox;
 use serde_json::{Value, json};
 
 use crate::packages::{
+    commands::PackageCommandDeclaration,
     manifest::{PackageDiagnostic, validate_manifest_value},
+    modes::ModeDeclaration,
     permissions::{PermissionValidationError, is_prohibited_authority, parse_permission},
-    record::{PackageRecordError, assemble_package_record},
+    record::{PackageRecord, PackageRecordError, assemble_package_record},
 };
+use crate::protocol::{KeyBindingContext, KeyBindingRule};
 
 use super::ClayOpState;
 
@@ -560,6 +563,9 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
             .expect("package service mutex poisoned");
         ensure_first_party_record_locked(&mut service, specifier)?
     };
+    if record.runtime_domain == crate::packages::bundled::RuntimeDomain::Trusted {
+        apply_package_record_contributions(clay_state, &record)?;
+    }
 
     let summary = {
         // Compute the validated on-disk `loadEntry` path and record the opaque
@@ -677,6 +683,147 @@ fn canonical_load_entry_paths(
         )));
     }
     Ok((absolute_load_entry, canonical_package_root))
+}
+
+pub(super) fn routing_policy_from_str(value: &str) -> Option<crate::protocol::RoutingPolicy> {
+    crate::protocol::RoutingPolicy::parse(value).ok()
+}
+
+pub(super) fn apply_package_record_contributions(
+    clay: &ClayOpState,
+    record: &PackageRecord,
+) -> Result<(), JsErrorBox> {
+    for pattern in &record.contributions.mode_patterns {
+        let declaration = ModeDeclaration {
+            package_name: record.manifest.name.clone(),
+            package_version: record.manifest.version.clone(),
+            api_prefix: record.manifest.clay.api_prefix.clone(),
+            mode_id: pattern.mode_id.clone(),
+            display_name: pattern.display_name.clone(),
+            document_font_role: pattern.document_font_role,
+            extensions: pattern.extensions.clone(),
+            mime_types: pattern.mime_types.clone(),
+            file_names: pattern.file_names.clone(),
+            file_name_patterns: pattern.file_name_patterns.clone(),
+            shebang_patterns: pattern.shebang_patterns.clone(),
+            content_probes: pattern.content_probes.clone(),
+        };
+        if let Err(error) = clay.register_mode(&record.manifest, declaration)
+            && error.rule != crate::packages::modes::ModeValidationRule::DuplicateModeId
+        {
+            return Err(JsErrorBox::generic(format!(
+                "packages.load_failed: {}",
+                error.message
+            )));
+        }
+    }
+
+    for command in &record.contributions.commands {
+        let Some(routing_policy) = routing_policy_from_str(&command.routing_policy) else {
+            return Err(JsErrorBox::generic(format!(
+                "packages.load_failed: unsupported command routingPolicy `{}`",
+                command.routing_policy
+            )));
+        };
+        let key_bindings = record
+            .contributions
+            .key_routing
+            .iter()
+            .filter_map(|binding| {
+                binding
+                    .key_binding
+                    .as_deref()
+                    .map(|key| (binding, key))
+            })
+            .filter(|(binding, _)| binding.command_id == command.id)
+            .map(|(binding, key)| {
+                let sequence = super::keybindings::parse_key_sequence(key).map_err(|error| {
+                    JsErrorBox::generic(format!(
+                        "packages.load_failed: invalid key binding for `{}`: {error}",
+                        command.id
+                    ))
+                })?;
+                let binding_routing_policy = match binding.routing_policy.as_deref() {
+                    Some(value) => routing_policy_from_str(value).ok_or_else(|| {
+                        JsErrorBox::generic(format!(
+                            "packages.load_failed: unsupported key routing policy `{value}` for `{}`",
+                            command.id
+                        ))
+                    })?,
+                    None => routing_policy.clone(),
+                };
+                Ok(KeyBindingRule {
+                    command_id: command.id.clone(),
+                    sequence,
+                    context: KeyBindingContext::EditorTextFocus,
+                    routing_policy: binding_routing_policy,
+                })
+            })
+            .collect::<Result<Vec<_>, JsErrorBox>>()?;
+        let declaration = PackageCommandDeclaration {
+            package_name: record.manifest.name.clone(),
+            package_version: record.manifest.version.clone(),
+            api_prefix: record.manifest.clay.api_prefix.clone(),
+            command_id: command.id.clone(),
+            display_name: command.display_name.clone(),
+            routing_policy,
+            key_bindings,
+            custom_properties: std::collections::BTreeMap::new(),
+            permissions: Vec::new(),
+        };
+        if let Err(error) = clay.register_command(&record.manifest, declaration)
+            && error.rule != crate::packages::commands::CommandValidationRule::DuplicateCommandId
+        {
+            return Err(JsErrorBox::generic(format!(
+                "packages.load_failed: {}",
+                error.message
+            )));
+        }
+    }
+
+    if !record.contributions.syntax_grammars.is_empty() {
+        match clay.register_syntax_grammar_package(record) {
+            Ok(_) => {}
+            Err(crate::server::syntax::SyntaxGrammarRegistryError::DuplicateContributionId {
+                ..
+            })
+            | Err(crate::server::syntax::SyntaxGrammarRegistryError::OwnedByNativeDescriptor {
+                ..
+            }) => {}
+            Err(error) => {
+                return Err(JsErrorBox::generic(format!(
+                    "packages.load_failed: {error:?}"
+                )));
+            }
+        }
+    }
+
+    if !record.contributions.completion_providers.is_empty()
+        && let Err(message) = clay.register_completion_provider_metadata(
+            super::completion::completion_provider_metas(record),
+        )
+        && !message.contains("already registered")
+    {
+        return Err(JsErrorBox::generic(format!(
+            "packages.load_failed: {message}"
+        )));
+    }
+
+    for component in &record.contributions.ui_components {
+        let declaration = serde_json::json!({
+            "kind": component.root_kind,
+            "id": component.id,
+        });
+        if let Err(error) = clay.register_component_contribution(&record.manifest, &declaration)
+            && error.rule != crate::server::ui::UiContributionRule::DuplicateId
+        {
+            return Err(JsErrorBox::generic(format!(
+                "packages.load_failed: {}",
+                error.message
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

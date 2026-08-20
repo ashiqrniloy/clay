@@ -23,7 +23,7 @@ const TOKEN_TYPES = new Map([
 ]);
 const TOKEN_MODIFIERS = new Map([
   ["declaration", "Declaration"], ["definition", "Definition"], ["readonly", "Readonly"],
-  ["static", "Static"], ["deprecated", "Deprecated"], ["abstract", "Abstract"],
+  ["static", "Static"], ["deprecated", "Deprecated"], ["unused", "Deprecated"], ["unnecessary", "Deprecated"], ["abstract", "Abstract"],
   ["async", "Async"], ["modification", "Modification"], ["documentation", "Documentation"],
   ["defaultLibrary", "DefaultLibrary"],
 ]);
@@ -100,6 +100,7 @@ export function parseCapabilities(initializeResult) {
     pullDiagnostics: providerEnabled(capabilities.diagnosticProvider),
     semanticTokensFull: semantic?.full ?? false,
     semanticTokensRange: semantic?.range ?? false,
+    inlayHint: providerEnabled(capabilities.inlayHintProvider),
     semanticLegend: {
       tokenTypes: legend.tokenTypes.slice(0, 256).map((item) => boundedString(item, 64)),
       tokenModifiers: legend.tokenModifiers.slice(0, 32).map((item) => boundedString(item, 64)),
@@ -197,6 +198,50 @@ export function completionToClay(result) {
       };
     }),
   }, RESULT_PAYLOAD_BYTES, "completions");
+}
+
+const MAX_INLAY_HINTS = 64;
+const MAX_INLAY_LABEL_CHARS = 64;
+
+function inlayLabelText(label) {
+  if (typeof label === "string") return label;
+  if (!Array.isArray(label)) return "";
+  return label.map((part) => (typeof part === "string" ? part : String(part?.value ?? ""))).join("");
+}
+
+function sanitizeInlayLabel(text) {
+  return [...String(text)]
+    .filter((ch) => ch.charCodeAt(0) >= 32)
+    .slice(0, MAX_INLAY_LABEL_CHARS)
+    .join("")
+    .trim();
+}
+
+export function inlayHintsToClay(hints, document) {
+  if (hints == null) return [];
+  if (!Array.isArray(hints) || hints.length > MAX_INLAY_HINTS) {
+    throw new Error("lsp.inlays_too_large: inlay hints exceed budget");
+  }
+  const spans = [];
+  for (const hint of hints) {
+    const label = sanitizeInlayLabel(inlayLabelText(hint?.label));
+    if (!label || !hint?.position) continue;
+    const offset = document.positionToByte(hint.position);
+    const end = document.bytes.length;
+    if (end === 0) continue;
+    const byteStart = offset < end ? offset : end - 1;
+    const byteEnd = byteStart + 1;
+    spans.push({
+      byteStart,
+      byteEnd,
+      kind: "inlayHint",
+      tokenType: hint.kind === 2 ? "Parameter" : "Type",
+      modifiers: [],
+      priority: 10,
+      inlay: { label, placement: hint.kind === 2 ? "before" : "after" },
+    });
+  }
+  return boundedPayload(spans, DECORATION_PAYLOAD_BYTES, "inlay_hints");
 }
 
 export function hoverToClay(result, document) {

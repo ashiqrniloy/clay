@@ -97,7 +97,7 @@ Use `workspace.serverListWorkspaceRoots` only through the documented Clay JS fac
 - JS facade: `runtime/js/workspace.js::serverListWorkspaceRoots`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_list_roots` (`op_clay_workspace_list_roots`)
 - Backing Rust/current owner: `src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace.rs::WorkspaceState::add_root`
-- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
+- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection/mod.rs`, and `src/server/workspace.rs`
 
 ## Lookup metadata
 

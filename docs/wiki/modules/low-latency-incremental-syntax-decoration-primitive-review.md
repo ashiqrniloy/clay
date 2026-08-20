@@ -12,11 +12,11 @@
 - `src/protocol/parse.rs`
 - `src/protocol/decorations.rs`
 - `src/server/document.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/server/parse_coordinator.rs`
 - `src/server/syntax.rs`
 - `src/server/decorations.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/perf/metrics.rs`
 - `benches/first_party_language_baselines.rs`
 - `tests/performance_protocol.rs`
@@ -151,11 +151,11 @@ Plan 057 (`plans/057-Syntax-Decoration-Continuity-and-Replacement-Correctness.md
 
 ### Fix 1: Same-Word Narrow-Syntax Provisional Inheritance
 
-`interpolate_decoration_span` in `src/editor/surface.rs` now receives the inserted text content (not just byte length). For narrow syntax spans (kind == Syntax, not broad token family), insertion at `span.byte_end` extends the span only when inserted text is non-empty and every character satisfies `is_completion_word_character` (Unicode `is_alphanumeric()` or `_`). Whitespace, newline, punctuation, brackets, and operators stop inheritance immediately.
+`interpolate_decoration_span` in `src/editor/surface/mod.rs` now receives the inserted text content (not just byte length). For narrow syntax spans (kind == Syntax, not broad token family), insertion at `span.byte_end` extends the span only when inserted text is non-empty and every character satisfies `is_completion_word_character` (Unicode `is_alphanumeric()` or `_`). Whitespace, newline, punctuation, brackets, and operators stop inheritance immediately.
 
-Source: `src/editor/surface.rs` — `edit_extent` returns `Option<(u64, u64, &str)>`, `interpolate_decoration_span` computes `same_word_suffix` flag, `is_completion_word_character` predicate.
+Source: `src/editor/surface/mod.rs` — `edit_extent` returns `Option<(u64, u64, &str)>`, `interpolate_decoration_span` computes `same_word_suffix` flag, `is_completion_word_character` predicate.
 
-Tests: `tests/syntax_grammar.rs` — `plan057_function_suffix_stays_decorated_through_local_ack_and_authoritative_states`; `tests/decoration_transport.rs` — `authoritative_syntax_corrects_inherited_suffix_without_clearing_unrelated_spans`; `src/editor/surface.rs` — `optimistic_narrow_token_families_inherit_same_word_suffixes`, `optimistic_narrow_span_stops_at_non_word_boundaries`, `optimistic_narrow_span_inherits_unicode_word_suffix`, `optimistic_non_syntax_layers_do_not_inherit_same_word_suffixes`.
+Tests: `tests/syntax_grammar.rs` — `plan057_function_suffix_stays_decorated_through_local_ack_and_authoritative_states`; `tests/decoration_transport.rs` — `authoritative_syntax_corrects_inherited_suffix_without_clearing_unrelated_spans`; `src/editor/surface/mod.rs` — `optimistic_narrow_token_families_inherit_same_word_suffixes`, `optimistic_narrow_span_stops_at_non_word_boundaries`, `optimistic_narrow_span_inherits_unicode_word_suffix`, `optimistic_non_syntax_layers_do_not_inherit_same_word_suffixes`.
 
 ### Fix 2: Complete Authoritative Replacement Chunks
 
@@ -180,18 +180,18 @@ Plan 058 (`plans/058-Exact-Range-Provisional-Decoration-Replacement.md`, superse
 
 ### Fix: Exact-Range Authoritative Viewport Subtraction
 
-`apply_set` in `src/editor/surface.rs` no longer deletes entire overlapping provisional chunks. Instead:
+`apply_set` in `src/editor/surface/mod.rs` no longer deletes entire overlapping provisional chunks. Instead:
 
 1. **Subtract**: `subtract_half_open_range` computes the left/right residual byte ranges outside the authoritative viewport and `subtract_provisional_chunk` splits a crossing provisional chunk into left and right `DecorationResidualSide` fragments, preserving spans whose byte ranges lie outside authority.
 2. **Install**: Authoritative spans are inserted inside the authority viewport, replacing any prior overlapping decoration.
 3. **Coalesce**: `coalesce_local_residual` merges fragmented residual chunks with adjacent compatible provisional chunks; `coalesce_compatible_spans` merges adjacent spans with identical kind/token_type/modifiers/scope/font_role/priority/provenance within each chunk.
 
-Source: `src/editor/surface.rs` — `DecorationResidualSide` enum, `subtract_half_open_range`, `subtract_provisional_chunk`, `coalesce_local_residual`, `coalesce_compatible_spans`, `decoration_chunk_byte_size`.
+Source: `src/editor/surface/mod.rs` — `DecorationResidualSide` enum, `subtract_half_open_range`, `subtract_provisional_chunk`, `coalesce_local_residual`, `coalesce_compatible_spans`, `decoration_chunk_byte_size`.
 
 Tests:
 - `tests/syntax_grammar.rs` — `plan058_repeated_comment_edits_do_not_grow_a_shifted_chunk_boundary_gap` (3 repeated insertions before byte 128, zero undecorated boundary bytes throughout), `plan058_first_party_languages_preserve_shifted_boundary_continuity` (5 first-party languages, 3 repeated insertions each).
 - `tests/decoration_transport.rs` — `plan058_empty_authority_after_insertion_preserves_shifted_right_residual`, `plan058_empty_authority_after_deletion_preserves_shifted_right_residual`, `plan058_repeated_insert_delete_authority_cycles_preserve_boundary_geometry` (128 insert/delete pairs).
-- `src/editor/surface.rs` — `half_open_subtraction_returns_zero_one_or_two_fragments`, `current_authority_replaces_only_its_viewport_and_coalesces_right_residual`, `authoritative_viewport_splits_crossing_provisional_span`, `repeated_authority_keeps_local_residual_cache_bounded` (512 cycles, exactly 2 chunks/2 spans, retained bytes ≤ `SYNTAX_CACHE_BUDGET_BYTES`), `authoritative_syntax_preserves_other_package_and_semantic_provisional_chunks`.
+- `src/editor/surface/mod.rs` — `half_open_subtraction_returns_zero_one_or_two_fragments`, `current_authority_replaces_only_its_viewport_and_coalesces_right_residual`, `authoritative_viewport_splits_crossing_provisional_span`, `repeated_authority_keeps_local_residual_cache_bounded` (512 cycles, exactly 2 chunks/2 spans, retained bytes ≤ `SYNTAX_CACHE_BUDGET_BYTES`), `authoritative_syntax_preserves_other_package_and_semantic_provisional_chunks`.
 - `tests/editor_performance_invariants.rs` — `exact_range_decoration_replacement_stays_off_edit_and_paint_hot_paths` (subtraction/coalescing absent from `apply_edit` and `paint` bodies).
 
 ### Verification
@@ -240,7 +240,7 @@ Tests:
 - `tests/language_intelligence.rs::{semantic_span_refines_syntax_while_syntax_chunk_remains_theme_resolved,semantic_publication_rejects_stale_invalid_forged_and_oversize_payloads}`: locks additive slower semantic refinement over retained syntax and rejects stale semantic publication.
 - `tests/parse_coordinator.rs::invalid_decoration_batch_member_rejects_whole_update`: proves malformed batch members publish no partial state.
 - `tests/decoration_transport.rs::{syntax_chunk_replacement_preserves_semantic_layer,optimistic_comment_style_extends_until_authoritative_replacement}`: locks layer-aware identity and end-to-end inert provisional continuity/correction.
-- `src/editor/surface.rs::tests`: covers UTF-8 interior insertion, broad/narrow edges, delete/replace geometry, non-syntax lifecycle, overlapping chunk replacement, reversed edits, and snapshot clearing.
+- `src/editor/surface/mod.rs::tests`: covers UTF-8 interior insertion, broad/narrow edges, delete/replace geometry, non-syntax lifecycle, overlapping chunk replacement, reversed edits, and snapshot clearing.
 - `src/server/parse_coordinator.rs::tests`: verifies one logical accepted-edit item, chunk fan-out metrics, one first-publication latency sample, and cancellation metadata.
 - `tests/performance_protocol.rs::syntax_pipeline_metrics_are_source_safe_and_retention_bounded`: locks metric names, numeric-only metadata, and recorder capacity.
 - `src/protocol/parse.rs::tests::exact_edit_and_stable_window_round_trip`: verifies exact edit and stable window metadata survive `rkyv` serialization.

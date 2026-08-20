@@ -23,7 +23,7 @@ Phase 18.15 replaces the free-form `style_token: String` on `DecorationSpan` wit
 
 ### Editor decoration state and paint path
 
-`EditorSurface::apply_decoration_set` stores `EditorDecorationState` gated by `document_id` + `document_version` match (mismatches render zero spans). `visible_decoration_ranges(&VisibleSnapshot)` is the single paint-time consumer: it filters spans to the visible byte range and maps each via `decoration_color(span.kind, &span.style_token)` to a `(Range<usize>, Color)`. Fourteen hardcoded `Color` constants (`PANEL_COLOR`, `TEXT_COLOR`, `PLACEHOLDER_COLOR`, `SELECTION_COLOR`, five `SYNTAX_*`, `SEMANTIC_DECORATION_COLOR`, `DIAGNOSTIC_DECORATION_COLOR`, `SEARCH_DECORATION_COLOR`, `CARET_COLOR`, `SCROLLBAR_COLOR`, `SCROLLBAR_TRACK_COLOR`) live in `src/editor/surface.rs`. The locked baseline colors are asserted by `free_form_style_token_decoration_colors_baseline_locked` (Plan 046 task 1). Source/test: `src/editor/surface.rs`.
+`EditorSurface::apply_decoration_set` stores `EditorDecorationState` gated by `document_id` + `document_version` match (mismatches render zero spans). `visible_decoration_ranges(&VisibleSnapshot)` is the single paint-time consumer: it filters spans to the visible byte range and maps each via `decoration_color(span.kind, &span.style_token)` to a `(Range<usize>, Color)`. Fourteen hardcoded `Color` constants (`PANEL_COLOR`, `TEXT_COLOR`, `PLACEHOLDER_COLOR`, `SELECTION_COLOR`, five `SYNTAX_*`, `SEMANTIC_DECORATION_COLOR`, `DIAGNOSTIC_DECORATION_COLOR`, `SEARCH_DECORATION_COLOR`, `CARET_COLOR`, `SCROLLBAR_COLOR`, `SCROLLBAR_TRACK_COLOR`) live in `src/editor/surface/mod.rs`. The locked baseline colors are asserted by `free_form_style_token_decoration_colors_baseline_locked` (Plan 046 task 1). Source/test: `src/editor/surface/mod.rs`.
 
 ### SDUI theme token system (typed scalars)
 
@@ -31,7 +31,7 @@ Phase 18.15 replaces the free-form `style_token: String` on `DecorationSpan` wit
 
 ### Theme token contribution declaration and validation
 
-`ThemeTokenContributionDescriptor { token, token_type, fallback, estimated_payload_bytes }` in `src/packages/record.rs`, parsed by `parse_theme_token_contributions`. Each declaration is bounded by `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` and passed through `reject_ui_prohibited_authority`, which recursively bans `rawOps`, `nativeHandle`, `nativeWidget`, `masonryWidget`, `widgetCallback`, `rendererCallback`, `drawCallback`, `clientHook`, `clientJavaScript`, `javascript`, `code`, `rawCss`, `cssText`, and any string containing `Deno.core.ops` or `op_clay_`. `theme_resolver_for_package_tokens` builds the resolver from declared tokens. Source/test: `src/packages/record.rs`.
+`ThemeTokenContributionDescriptor { token, token_type, fallback, estimated_payload_bytes }` in `src/packages/record/mod.rs`, parsed by `parse_theme_token_contributions`. Each declaration is bounded by `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` and passed through `reject_ui_prohibited_authority`, which recursively bans `rawOps`, `nativeHandle`, `nativeWidget`, `masonryWidget`, `widgetCallback`, `rendererCallback`, `drawCallback`, `clientHook`, `clientJavaScript`, `javascript`, `code`, `rawCss`, `cssText`, and any string containing `Deno.core.ops` or `op_clay_`. `theme_resolver_for_package_tokens` builds the resolver from declared tokens. Source/test: `src/packages/record/mod.rs`.
 
 ### Theme token registration op and facade
 
@@ -39,7 +39,7 @@ Phase 18.15 replaces the free-form `style_token: String` on `DecorationSpan` wit
 
 ### Decoration production (server side)
 
-The tree-sitter/native handler `decorations_for_window` in `src/server/syntax.rs` emits `DecorationSpan` entries with `style_token` strings (e.g. `keyword.control`) clamped to the viewport and capped at `MAX_SYNTAX_HIGHLIGHT_SPANS`. `schedule_open_parse` drives parse/decoration through `ParseCoordinator`; `open_document_followup_messages` in `src/server/connection.rs` ships the resulting `DecorationSet` to the client. Source: `src/server/syntax.rs`, `src/server/parse_coordinator.rs`, `src/server/connection.rs`.
+The tree-sitter/native handler `decorations_for_window` in `src/server/syntax.rs` emits `DecorationSpan` entries with `style_token` strings (e.g. `keyword.control`) clamped to the viewport and capped at `MAX_SYNTAX_HIGHLIGHT_SPANS`. `schedule_open_parse` drives parse/decoration through `ParseCoordinator`; `open_document_followup_messages` in `src/server/connection/mod.rs` ships the resulting `DecorationSet` to the client. Source: `src/server/syntax.rs`, `src/server/parse_coordinator.rs`, `src/server/connection/mod.rs`.
 
 ## Generic Phase 18.15 Primitive Gaps
 
@@ -89,7 +89,7 @@ Plan 046 completed the generic primitives described by this review:
 
 - `DecorationSpan` now carries `token_type: TokenType`, `modifiers: Modifiers`, and optional `scope` compatibility metadata. Legacy `styleToken` producers use `DecorationSpan::from_style_token`.
 - `src/editor/theme.rs::StyleRegistry` is the paint-time style source. It stores base UI colors, layer colors, a per-`TokenType` `[Color; 35]` syntax table, and per-token text-attribute defaults.
-- `clay.contributions.textStyles` is parsed as inert `TextStyleOverrideDescriptor` data in `src/packages/record.rs`; `reject_ui_prohibited_authority` rejects raw CSS, raw ops, callbacks, native handles, and client JavaScript.
+- `clay.contributions.textStyles` is parsed as inert `TextStyleOverrideDescriptor` data in `src/packages/record/mod.rs`; `reject_ui_prohibited_authority` rejects raw CSS, raw ops, callbacks, native handles, and client JavaScript.
 - `@clay/theme-gruvbox-material-dark` and `@clay/theme-gruvbox-material-light` ship as first-party inert packages with full 48-entry mappings (13 base UI keys + 35 token types).
 - `theme.setTheme` selects one active first-party theme from `init.js`, stores an `ActiveTheme` snapshot, and the client converts it to `StyleRegistry` before first paint.
 
@@ -100,9 +100,9 @@ Implementation details live in [Editor Theme Registry](editor-theme-registry.md)
 - `docs/wiki/modules/editor-theme-registry.md` — final Phase 18.15 implementation wiki.
 - `docs/reference/primitives/syntax-vocabulary.md` — locked two-axis vocabulary contract.
 - `src/protocol/decorations.rs`, `src/protocol/codec.rs` — decoration transport and codec.
-- `src/editor/surface.rs` — `decoration_color`, the 14 color constants, `visible_decoration_ranges`, baseline lock test.
+- `src/editor/surface/mod.rs` — `decoration_color`, the 14 color constants, `visible_decoration_ranges`, baseline lock test.
 - `src/shell/theme.rs` — SDUI `ThemeTokenType` / `ThemeTokenResolver` / `SduiThemeStyle`.
-- `src/packages/record.rs` — `ThemeTokenContributionDescriptor`, `parse_theme_token_contributions`, `reject_ui_prohibited_authority`.
+- `src/packages/record/mod.rs` — `ThemeTokenContributionDescriptor`, `parse_theme_token_contributions`, `reject_ui_prohibited_authority`.
 - `src/server/ops/ui.rs`, `runtime/js/ui.js` — `op_clay_ui_register_theme_token` / `serverRegisterThemeToken`.
 - `src/perf/budgets.rs` — `DECORATION_PAYLOAD_BUDGET_BYTES`, `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES`.
 - Plan 046 tasks 3–11 — implementation tasks that consume this review.
