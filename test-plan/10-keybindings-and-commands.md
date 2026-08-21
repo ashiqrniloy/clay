@@ -275,6 +275,7 @@ Deep references: `docs/development/accessibility.md`,
 | K75 | Open Command Centre/Path Browser and inspect the centered surface | Exactly one token-driven scrim and one named Dialog/Menu/Status tree exist; rows are clipped to the centered host and focus returns to the originating pane on Escape |
 | K76 | Trigger `PackageModalDismiss` with Escape on a package modal that declares an intent | Escape closes the modal and routes only the declared inert intent; no package JavaScript or native-widget authority runs in the key path |
 | K77 | Send unknown/forged shell or package command ids and attempt input while a menu is active | Deny-by-default diagnostics/no-op; no editor text/caret mutation, stale session activation, path leak, or disconnect |
+| K84 | Fresh empty-tab welcome: click Open File/Open Folder, then press `Ctrl+X Ctrl+P`, `Ctrl+\\`, and `Ctrl+T` | Native dialog actions emit; Command Centre opens; split and new-tab follow normal routes; no welcome text is inserted |
 
 ## Plan 088 task 12 Linux execution record (2026-08-15)
 
@@ -285,6 +286,7 @@ Deep references: `docs/development/accessibility.md`,
 | K75 | UNRESOLVED live / PASS structural | Retained Plan 087 Command Centre/Path Browser comparison trees plus clipping, single-scrim, modal-role, and focus-routing tests; current centered interaction was not safely targetable |
 | K76 | PASS automated / NOT RUN manually | `PackageModalDismiss` routing and Escape intent tests pass; native/package modal keyboard action could not be focused on this host |
 | K77 | PASS automated / NOT RUN manually | Shell allowlist, stale-session, package-authority, and key-routing tests pass; targeted input is blocked by `can_query_windows=false`/`can_focus_windows=false` |
+| K84 | PASS automated / NOT RUN manually | `welcome_button_pointer_press_emits_open_file_command` and `welcome_global_keybindings_emit_commands_without_editing_text` exercise real RenderRoot pointer/key dispatch; live desktop input remains host-dependent |
 
 ## Phase 28 editor-command aliases and package keymaps
 

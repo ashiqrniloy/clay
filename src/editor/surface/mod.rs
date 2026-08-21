@@ -935,6 +935,80 @@ impl EditorSurface {
         }
     }
 
+    /// Route a key against global bindings without enabling editor text edits.
+    ///
+    /// The welcome surface has no editable document interaction, but it still
+    /// needs global commands such as shell topology changes and command-center
+    /// opening. Client-edit behaviors are deliberately ignored here.
+    pub(crate) fn route_global_key_with_event(&mut self, key: &KeyStroke) -> EditorKeyOutcome {
+        let Some(manifest) = &self.document.behavior_manifest else {
+            return EditorKeyOutcome::unhandled();
+        };
+        let Ok(router) = ClientBehaviorState::new(manifest.clone()) else {
+            return EditorKeyOutcome::unhandled();
+        };
+
+        if self.pending_chord.as_ref().is_some_and(|pending| {
+            pending.started_at.elapsed()
+                >= std::time::Duration::from_millis(KEY_CHORD_PENDING_TIMEOUT_MS)
+        }) {
+            self.pending_chord = None;
+        }
+
+        let outcome = match &self.pending_chord {
+            Some(pending) => router.route_global_key_sequence(&pending.strokes, key),
+            None => router.route_global_key_sequence(&[], key),
+        };
+        match outcome {
+            ChordRouteOutcome::Matched(behavior) => {
+                self.pending_chord = None;
+                match behavior {
+                    RoutedBehavior::ClientEdit(..) | RoutedBehavior::Unhandled => {
+                        EditorKeyOutcome::unhandled()
+                    }
+                    behavior => self.dispatch_routed(behavior),
+                }
+            }
+            ChordRouteOutcome::Pending => {
+                let started_at = self
+                    .pending_chord
+                    .as_ref()
+                    .map(|pending| pending.started_at)
+                    .unwrap_or_else(std::time::Instant::now);
+                let mut strokes = self
+                    .pending_chord
+                    .take()
+                    .map(|pending| pending.strokes)
+                    .unwrap_or_default();
+                strokes.push(key.clone());
+                self.pending_chord = Some(PendingChord {
+                    strokes,
+                    started_at,
+                });
+                EditorKeyOutcome::consumed()
+            }
+            ChordRouteOutcome::Mismatch => {
+                self.pending_chord = None;
+                match router.route_global_key_sequence(&[], key) {
+                    ChordRouteOutcome::Matched(behavior) => match behavior {
+                        RoutedBehavior::ClientEdit(..) | RoutedBehavior::Unhandled => {
+                            EditorKeyOutcome::unhandled()
+                        }
+                        behavior => self.dispatch_routed(behavior),
+                    },
+                    ChordRouteOutcome::Pending => {
+                        self.pending_chord = Some(PendingChord {
+                            strokes: vec![key.clone()],
+                            started_at: std::time::Instant::now(),
+                        });
+                        EditorKeyOutcome::consumed()
+                    }
+                    ChordRouteOutcome::Mismatch => EditorKeyOutcome::unhandled(),
+                }
+            }
+        }
+    }
+
     pub fn document_state(&self) -> &EditorDocumentState {
         &self.document
     }

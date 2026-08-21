@@ -2987,6 +2987,12 @@ impl PackagePanelHost {
 impl Widget for PackagePanelHost {
     type Action = NoAction;
 
+    fn accepts_pointer_interaction(&self) -> bool {
+        // The host fills its parent for absolute child placement; only its
+        // mounted panel regions should claim pointer hits.
+        false
+    }
+
     fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
         for hosted in &mut self.panels {
             ctx.register_child(&mut hosted.pod);

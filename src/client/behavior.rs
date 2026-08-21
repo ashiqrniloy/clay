@@ -81,15 +81,37 @@ impl ClientBehaviorState {
         pending: &[KeyStroke],
         key: &KeyStroke,
     ) -> ChordRouteOutcome {
+        self.route_key_sequence_in_contexts(
+            pending,
+            key,
+            &[
+                KeyBindingContext::EditorTextFocus,
+                KeyBindingContext::Global,
+            ],
+        )
+    }
+
+    /// Match only global bindings. Welcome is not an editor text surface, but
+    /// global commands must still be reachable while it is visible.
+    pub(crate) fn route_global_key_sequence(
+        &self,
+        pending: &[KeyStroke],
+        key: &KeyStroke,
+    ) -> ChordRouteOutcome {
+        self.route_key_sequence_in_contexts(pending, key, &[KeyBindingContext::Global])
+    }
+
+    fn route_key_sequence_in_contexts(
+        &self,
+        pending: &[KeyStroke],
+        key: &KeyStroke,
+        contexts: &[KeyBindingContext],
+    ) -> ChordRouteOutcome {
         let candidate_len = pending.len() + 1;
-        let contexts = [
-            KeyBindingContext::EditorTextFocus,
-            KeyBindingContext::Global,
-        ];
         for context in contexts {
             let mut saw_prefix = false;
             for rule in self.active.keymaps.iter() {
-                if rule.context != context {
+                if &rule.context != context {
                     continue;
                 }
                 let sequence = &rule.sequence;

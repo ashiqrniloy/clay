@@ -28,7 +28,7 @@ Optional `--timeout <seconds>` (default 45, `CLAY_UI_REVIEW_TIMEOUT_SECONDS`). T
 3. Spawns `clay server <socket>` (no `--config-fixture`; that flag is bypassed because fixtures depend on the watcher path) from the private fixture workspace, then `clay client <socket>`. The workspace cwd keeps bootstrap document IDs aligned with the loading SDUI binding. Fixture `init.js` is copied before launch, and the script touches it only after the client shell/handshake is observable so the runtime snapshot is delivered through the live connection.
 4. Polls an embedded python3 GI-Atspi probe for the named state, then records `metadata.txt`, `instructions.md`, `accessibility.txt`, `screenshot.png`, and `review.status` into `--output`. The loading fixture additionally waits for exact `Loading review` / `Loading workspace…` fields in the delivered `RuntimeStateSnapshot` and writes `runtime-tree.txt`; it does not pass on a welcome-only tree.
 
-Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reason (`UNRESOLVED`) when the fixture state cannot be reached or the desktop accessibility bus is missing — never a false pass. Interactive TTY states (completion, Command Centre) are recorded `UNRESOLVED` off a TTY with their reasons.
+Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reason (`UNRESOLVED`) when the fixture state cannot be reached or the desktop accessibility bus is missing — never a false pass. Interactive TTY states (completion, Command Centre) are recorded `UNRESOLVED` off a TTY with their reasons. The default welcome capture is structural: it proves names, roles, bounds, and status text, but does not exercise mouse hit-testing or keyboard shortcuts; those paths are covered by the RenderRoot regressions `welcome_button_pointer_press_emits_open_file_command` and `welcome_global_keybindings_emit_commands_without_editing_text` in `src/masonry_editor.rs`.
 
 ### Fixtures
 
@@ -40,7 +40,7 @@ Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reaso
 | `ui-review-recovery` | empty comment | disconnected/reconnect-guidance state |
 | `ui-review-large-typography` | `setTypography` with UI 24 and document 20/21 | bounded large-type shell |
 | `ui-review-completion` | `loadPackage('@clay/rust')` + `completion.trigger` on `Ctrl+Space` | completion popup (interactive) |
-| `ui-review-command-centre` | `controlCenter.open` on `Ctrl+Alt+P` | centered Command Centre (interactive) |
+| `ui-review-command-centre` | `controlCenter.open` on `Ctrl+Alt+P` (single-stroke fixture override; not the shipped `Ctrl+X Ctrl+P` default) | centered Command Centre (interactive) |
 | `ui-review-rust` | language-server authorization + `editor.toggleInlayHints` binding | Rust analyzer/inlay states (interactive) |
 
 The probe first locates the `clay` application index by scanning desktop children (`app INDEX` with per-call timeouts — whole-desktop enumeration hangs on some hosts), then dumps only that subtree. Hosts without `python3` + `gi.repository.Atspi` are reported as a prerequisite skip, never a pass.

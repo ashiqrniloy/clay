@@ -1394,7 +1394,9 @@ impl Widget for EditorWidget {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorClientCommand, EditorWidget};
+    use std::{cell::RefCell, rc::Rc};
+
+    use super::{EditorAction, EditorClientCommand, EditorWidget};
     use crate::client::{ClientConnectionEvent, ClientEditQueue, ClientInitialState};
     use crate::editor::EditorCommand;
     use crate::masonry_package_region::PackageOverlayHost;
@@ -1407,10 +1409,11 @@ mod tests {
         FixedPackagePanel, FixedSlotId, FixedSlotState, PackagePanelVisibility,
         PackageUiComponentTree, PackageUiRuntimeUpdate, PaneSlotLayout,
     };
-    use masonry::app::{RenderRoot, RenderRootOptions, WindowSizePolicy};
+    use masonry::app::{RenderRoot, RenderRootOptions, RenderRootSignal, WindowSizePolicy};
+    use masonry::core::keyboard::{Code, Key, KeyState, KeyboardEvent, Modifiers};
     use masonry::core::{
         NewWidget, PointerButton, PointerButtonEvent, PointerEvent, PointerId, PointerInfo,
-        PointerState, PointerType, WidgetId,
+        PointerState, PointerType, TextEvent, WidgetId,
     };
     use masonry::dpi::{PhysicalPosition, PhysicalSize};
     use masonry::theme::default_property_set;
@@ -1677,6 +1680,143 @@ mod tests {
         assert!(
             (surface_width(&rr) - 480.0).abs() < 1.0,
             "width token override applies without layer recreation"
+        );
+    }
+
+    #[test]
+    fn welcome_button_pointer_press_emits_open_file_command() {
+        let root_widget = NewWidget::new(EditorWidget::with_initial_state(welcome_initial_state()));
+        let editor_id = root_widget.id();
+        let actions = Rc::new(RefCell::new(Vec::new()));
+        let sink = actions.clone();
+        let mut render_root = RenderRoot::new(
+            root_widget,
+            move |signal| {
+                if let RenderRootSignal::Action(action, _) = signal
+                    && let Ok(action) = action.downcast::<EditorAction>()
+                {
+                    sink.borrow_mut().push(*action);
+                }
+            },
+            render_root_options(),
+        );
+        let _ = render_root.redraw();
+
+        let welcome_id = render_root.edit_widget(editor_id, |mut widget| {
+            let editor = widget.try_downcast::<EditorWidget>().expect("editor");
+            editor.widget.view.welcome_widget_id()
+        });
+        let open_file_id = render_root
+            .get_widget(welcome_id)
+            .expect("welcome widget")
+            .children()[0]
+            .id();
+        let (origin, size) = {
+            let button = render_root
+                .get_widget(open_file_id)
+                .expect("open file button");
+            (
+                button.ctx().to_window(masonry::kurbo::Point::ZERO),
+                button.ctx().size(),
+            )
+        };
+        let pointer = PointerInfo {
+            pointer_id: Some(PointerId::PRIMARY),
+            persistent_device_id: None,
+            pointer_type: PointerType::Mouse,
+        };
+        let state = PointerState {
+            position: masonry::dpi::PhysicalPosition::new(
+                origin.x + size.width / 2.0,
+                origin.y + size.height / 2.0,
+            ),
+            ..Default::default()
+        };
+        render_root.handle_pointer_event(PointerEvent::Down(PointerButtonEvent {
+            pointer,
+            button: Some(PointerButton::Primary),
+            state: state.clone(),
+        }));
+        render_root.handle_pointer_event(PointerEvent::Up(PointerButtonEvent {
+            pointer,
+            button: Some(PointerButton::Primary),
+            state,
+        }));
+
+        assert!(actions.borrow().iter().any(|action| {
+            matches!(
+                action,
+                EditorAction::ClientUiCommand(route)
+                    if route.command_id == "documents.clientOpenFileDialog"
+            )
+        }));
+    }
+
+    #[test]
+    fn welcome_global_keybindings_emit_commands_without_editing_text() {
+        let (queue, mut messages) = crate::client::ClientEditQueue::bounded(8);
+        let root_widget = NewWidget::new(
+            EditorWidget::with_initial_state(welcome_initial_state()).with_edit_queue(queue),
+        );
+        let editor_id = root_widget.id();
+        let actions = Rc::new(RefCell::new(Vec::new()));
+        let sink = actions.clone();
+        let mut render_root = RenderRoot::new(
+            root_widget,
+            move |signal| {
+                if let RenderRootSignal::Action(action, _) = signal
+                    && let Ok(action) = action.downcast::<EditorAction>()
+                {
+                    sink.borrow_mut().push(*action);
+                }
+            },
+            render_root_options(),
+        );
+        assert!(render_root.focus_on(Some(editor_id)));
+
+        let ctrl_character = |character: &str, code: Code| {
+            TextEvent::Keyboard(KeyboardEvent {
+                key: Key::Character(character.to_string()),
+                code,
+                state: KeyState::Down,
+                modifiers: Modifiers::CONTROL,
+                ..KeyboardEvent::default()
+            })
+        };
+        render_root.handle_text_event(ctrl_character("x", Code::KeyX));
+        render_root.handle_text_event(ctrl_character("p", Code::KeyP));
+        render_root.handle_text_event(ctrl_character("\\", Code::Backslash));
+        render_root.handle_text_event(ctrl_character("t", Code::KeyT));
+
+        assert!(matches!(
+            messages.try_recv().expect("command-center command intent"),
+            ClientMessage::CommandIntent { command_id, .. }
+                if command_id == "controlCenter.open"
+        ));
+        let actions = actions.borrow();
+        assert!(actions.iter().any(|action| {
+            matches!(
+                action,
+                EditorAction::ClientUiCommand(route)
+                    if route.command_id == "shell.clientSplitPaneVertical"
+            )
+        }));
+        assert!(actions.iter().any(|action| {
+            matches!(
+                action,
+                EditorAction::ClientUiCommand(route)
+                    if route.command_id == "shell.clientTabNew"
+            )
+        }));
+        assert_eq!(
+            render_root.edit_widget(editor_id, |mut widget| {
+                widget
+                    .try_downcast::<EditorWidget>()
+                    .expect("editor")
+                    .widget
+                    .visible_text_for_test()
+            }),
+            ""
         );
     }
 

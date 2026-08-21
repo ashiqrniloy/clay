@@ -2286,6 +2286,24 @@ impl PaneDocumentView {
             return;
         }
         let outcome = self.editor.route_key_with_event(&key);
+        self.apply_key_outcome(ctx, outcome);
+    }
+
+    /// Route global bindings while the welcome surface has no editable text.
+    fn global_key(&mut self, ctx: &mut EventCtx<'_>, key: KeyStroke) {
+        if self.route_menu_key(ctx, &key) {
+            ctx.submit_action::<EditorAction>(EditorAction::MenuStateChanged);
+            return;
+        }
+        let outcome = self.editor.route_global_key_with_event(&key);
+        self.apply_key_outcome(ctx, outcome);
+    }
+
+    fn apply_key_outcome(
+        &mut self,
+        ctx: &mut EventCtx<'_>,
+        outcome: crate::editor::surface::EditorKeyOutcome,
+    ) {
         if outcome.consumed {
             // Phase 24.5: a pending chord stroke — consume it so it neither
             // inserts text nor bubbles to shell-level key handling.
@@ -3025,10 +3043,17 @@ impl PaneDocumentView {
         _props: &mut PropertiesMut<'_>,
         event: &TextEvent,
     ) {
+        use masonry::core::keyboard::{Key, KeyState, NamedKey};
         if self.welcome_visible {
+            if let TextEvent::Keyboard(key_event) = event
+                && key_event.state == KeyState::Down
+                && !key_event.is_composing
+                && let Some(stroke) = key_stroke_from_event(key_event)
+            {
+                self.global_key(ctx, stroke);
+            }
             return;
         }
-        use masonry::core::keyboard::{Key, KeyState, NamedKey};
         let modal_server_menu = self.menu_sync.server_owned
             && self
                 .menu_sync
@@ -3825,6 +3850,25 @@ impl Widget for PaneDocumentView {
 }
 
 // -- key/command helpers (ported from `masonry_editor.rs`) --
+
+fn key_stroke_from_event(key_event: &masonry::core::keyboard::KeyboardEvent) -> Option<KeyStroke> {
+    use masonry::core::keyboard::{Key, NamedKey};
+
+    let key = match &key_event.key {
+        Key::Character(text) => KeyCode::Character(text.clone()),
+        Key::Named(NamedKey::Enter) => KeyCode::Enter,
+        Key::Named(NamedKey::Tab) => KeyCode::Tab,
+        Key::Named(NamedKey::Backspace) => KeyCode::Backspace,
+        Key::Named(NamedKey::Delete) => KeyCode::Delete,
+        Key::Named(NamedKey::Escape) => KeyCode::Escape,
+        Key::Named(NamedKey::ArrowUp) => KeyCode::ArrowUp,
+        Key::Named(NamedKey::ArrowDown) => KeyCode::ArrowDown,
+        Key::Named(NamedKey::ArrowLeft) => KeyCode::ArrowLeft,
+        Key::Named(NamedKey::ArrowRight) => KeyCode::ArrowRight,
+        _ => return None,
+    };
+    Some(key_stroke(key, key_event))
+}
 
 pub(crate) fn key_stroke(
     key: KeyCode,
