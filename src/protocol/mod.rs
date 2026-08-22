@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod codec;
 pub mod completion;
 pub mod decorations;
@@ -11,6 +12,7 @@ pub mod runtime;
 pub mod sdui;
 pub mod textobjects;
 
+pub use agent::*;
 pub use completion::*;
 pub use decorations::*;
 pub use diagnostics::*;
@@ -64,8 +66,13 @@ pub use textobjects::*;
 /// and `EditorChrome.inlay_hints`.
 /// Version 23 (Phase 28.6) adds bounded completion recency hints to
 /// `CompletionRequest`; the ring is process-local and never persisted.
-/// Older server processes must not retain the previous wire semantics.
-pub const PROTOCOL_VERSION: u32 = 23;
+/// Version 24 (Phase 25) adds boxed `ClientMessage::Agent` /
+/// `ServerMessage::Agent` for the core-owned clay-agent host. Event union
+/// includes unused tool/permission variants for Phase 29.
+/// Version 25 publishes optional `PackageUiSnapshot.empty_tab` for the
+/// generic pane-content contribution. Older server processes must not
+/// retain the previous wire semantics.
+pub const PROTOCOL_VERSION: u32 = 25;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;
@@ -1477,6 +1484,12 @@ pub enum ClientMessage {
         client_id: ClientId,
         session_id: u64,
     },
+    /// Phase 25: client agent intent. Boxed so the union floor stays small.
+    /// Composer keystrokes never wait on this message.
+    Agent {
+        client_id: ClientId,
+        command: Box<AgentClientCommand>,
+    },
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -2197,6 +2210,9 @@ pub enum ServerMessage {
     ShellClientCommandRequest {
         command_id: String,
     },
+    /// Phase 25: server-authoritative agent snapshot/event/inventory.
+    /// Boxed. Never carries credential secrets.
+    Agent(Box<AgentServerMessage>),
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]

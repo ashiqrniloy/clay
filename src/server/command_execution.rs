@@ -407,6 +407,12 @@ pub(crate) fn is_settings_command(command_id: &str) -> bool {
     command_id.starts_with("settings.")
 }
 
+/// `@clay/chat` landing intents. Pickers are acknowledged here; Command
+/// Centre session kinds come in the next Phase 25 task. Empty submit is a no-op.
+pub(crate) fn is_chat_command(command_id: &str) -> bool {
+    command_id.starts_with("chat.")
+}
+
 /// Bounded appearance values accepted by `settings.setAppearance`.
 const SETTINGS_APPEARANCE_VALUES: &[&str] = &["light", "dark", "system"];
 
@@ -480,6 +486,40 @@ impl CommandExecutor {
         }
         Ok(CommandExecutionResult {
             command_id: request.command_id.clone(),
+            routing_policy: crate::protocol::RoutingPolicy::ServerFirst,
+            target: request.target,
+            status: CommandExecutionStatus::Accepted,
+        })
+    }
+
+    /// Chat landing intents. Empty/whitespace `chat.submit` is a no-op.
+    /// Picker commands acknowledge; they do not open a second overlay here.
+    pub fn execute_chat(
+        &self,
+        request: CommandExecutionRequest,
+    ) -> Result<CommandExecutionResult, CommandExecutionDiagnostic> {
+        if !is_chat_command(&request.command_id) {
+            return Err(diagnostic(
+                &request.command_id,
+                CommandExecutionRule::UnknownCommand,
+                "command is not a chat.* command",
+            ));
+        }
+        if request.command_id == "chat.submit" {
+            let value = argument_string(&request.arguments, "value")
+                .or_else(|| argument_string(&request.arguments, "text"))
+                .unwrap_or_default();
+            if value.trim().is_empty() {
+                return Ok(CommandExecutionResult {
+                    command_id: request.command_id,
+                    routing_policy: crate::protocol::RoutingPolicy::ServerFirst,
+                    target: request.target,
+                    status: CommandExecutionStatus::Accepted,
+                });
+            }
+        }
+        Ok(CommandExecutionResult {
+            command_id: request.command_id,
             routing_policy: crate::protocol::RoutingPolicy::ServerFirst,
             target: request.target,
             status: CommandExecutionStatus::Accepted,
@@ -703,6 +743,11 @@ macro_rules! builtin_commands {
 builtin_commands! {
     CONTROL_CENTER_COMMAND_ID => ("controlCenter.open", "Open Control Center", General),
     OPEN_PATH_BROWSER_COMMAND_ID => ("controlCenter.openPath", "Browse Filesystem", General),
+    OPEN_AGENT_PICKER_COMMAND_ID => ("agent.clientOpenAgentPicker", "Choose Agent", General),
+    OPEN_PROVIDER_PICKER_COMMAND_ID => ("agent.clientOpenProviderPicker", "Choose Provider", General),
+    OPEN_MODEL_PICKER_COMMAND_ID => ("agent.clientOpenModelPicker", "Choose Model", General),
+    OPEN_PROVIDER_SETUP_COMMAND_ID => ("agent.clientOpenProviderSetup", "Configure Provider", General),
+    OPEN_SESSION_PICKER_COMMAND_ID => ("agent.clientOpenSessionPicker", "Resume Session", General),
     RELOAD_CONFIGURATION_COMMAND_ID => ("runtime.reloadConfiguration", "Reload Configuration and Packages", Reload),
     REFRESH_WORKSPACE_COMMAND_ID => ("workspace.refresh", "Refresh Workspace", General),
     FOCUS_ACTIVE_DOCUMENT_COMMAND_ID => ("document.focus_active", "Focus Active Document", General),
@@ -1442,5 +1487,33 @@ mod tests {
         assert!(is_settings_command("settings.open"));
         assert!(!is_settings_command("controlCenter.open"));
         assert!(!is_settings_command("markdown.togglePreview"));
+    }
+
+    #[test]
+    fn chat_empty_submit_is_noop_and_pickers_accept() {
+        let executor = CommandExecutor::new();
+        for args in [json!({}), json!({ "value": "" }), json!({ "value": "   " })] {
+            let result = executor
+                .execute_chat(settings_request("chat.submit", args))
+                .expect("empty submit is a no-op");
+            assert_eq!(result.status, CommandExecutionStatus::Accepted);
+        }
+        for command_id in [
+            "chat.profile",
+            "chat.openAgentPicker",
+            "chat.openProviderPicker",
+            "chat.openModelPicker",
+        ] {
+            let result = executor
+                .execute_chat(settings_request(command_id, json!({})))
+                .expect("chat chrome commands accept");
+            assert_eq!(
+                result.status,
+                CommandExecutionStatus::Accepted,
+                "{command_id}"
+            );
+        }
+        assert!(is_chat_command("chat.submit"));
+        assert!(!is_chat_command("settings.open"));
     }
 }

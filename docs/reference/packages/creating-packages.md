@@ -121,13 +121,13 @@ Phase 18.3 now adds runtime-backed public APIs for package-owned slot UI contrib
 - `serverRegisterComponentContribution(manifest, declaration)` validates a bounded Clay component tree/catalog contribution.
 - `serverRegisterTransientOverlayContribution(manifest, declaration)` validates an overlay/menu/dialog-like transient contribution with anchor, focus, and dismissal policies.
 - `serverRegisterThemeToken(manifest, declaration)` validates package-prefixed typed theme tokens with same-type Clay core fallbacks.
-- Package metadata validation accepts `clay.contributions.ui.panels`, `ui.components`, `ui.overlays`, and `themeTokens` descriptors for load-time diagnostics/conflicts.
+- Package metadata validation accepts `clay.contributions.ui.panels`, `ui.components`, `ui.overlays`, `ui.paneContents`, and `themeTokens` descriptors for load-time diagnostics/conflicts.
 - Runtime composition maps accepted fixed panels to Clay-owned `PaneSlotLayout` state and transient overlays to a separate overlay layer; the editor remains in the mandatory `main` slot.
+- Empty/new-tab `main` is a pane-content contribution (`ui.serverRegisterPaneContentContribution`, activation `empty-tab`). One winner. No contribution → core Open File / Open Folder fallback (`WelcomeWidget`). First-party default landing is `@clay/chat` (`loadPackage("@clay/chat")`). See [Phase 25 authoring contract](#phase-25-authoring-contract-product-landing-and-pane-content).
 
 Still planned for package authors:
 
 - Public callable working-area, pane-split, and pane-slot layout mutation/default APIs. Packages cannot own, create, close, move, or directly mutate panes/splits (Phase 22.1); they interact only through the inert `serverRequestLayoutIntent` API.
-- A future pane-content contribution path so workspace apps (such as a terminal emulator, preview renderer, or diff view) can occupy a pane `main` slot as a content host. This path is **not yet public**; panes are generic content hosts internally (`PaneContentHost`), and since Phase 22.2 panes host Clay-owned document views (`PaneDocumentView`), but no package-facing API for contributing pane content exists yet.
 - Per-pane package chrome. Phase 22.2 keeps the SDUI sidebar, package panels, and package overlays connection-scoped (hosted per tab since Phase 22.3); packages cannot open documents into panes, name panes, target a pane, or contribute package UI inside a pane. Per-pane package chrome remains planned post-Phase 22.3. Pane↔document mapping, duplicate-open focus routing, and focused-pane open targeting are Clay-owned client behavior, not package APIs.
 - Tabs and the tab bar. Phase 22.3 implemented tabs as independent client views (one server connection and one split tree per tab, server-authoritative in-memory registry, shell-owned tab bar row below the top fixed panel slot). Packages cannot own tabs or the tab bar, cannot open/close/move/reorder tabs, cannot contribute tab bar chrome or per-tab package chrome, and gain no new surface from the tab model; `serverRequestLayoutIntent` remains their only layout surface. Per-tab package chrome stays still-planned. Window-state persistence (Phase 22.5) is client-owned internal state: `layout.json` is a user-owned file packages cannot read or write, and packages cannot observe or contribute to tab/split persistence.
 - Package state/data scopes.
@@ -703,12 +703,15 @@ expanding package authority. There is no new `ComponentKind`, style variable,
 token, manifest field, or JS API, and no package-facing `Completion` or
 `Centered` overlay anchor.
 
-- **Welcome entry state:** `WelcomeWidget` is a Clay-owned native Group/Status
-  surface shown for an empty connected pane and local fallback. It sanitizes the
-  workspace basename and recovery copy, then routes `Open File` and `Open
-  Folder` through Clay's existing `documents.clientOpenFileDialog` and
-  `workspace.clientOpenFolderDialog` client commands. Packages cannot replace
-  or inject the welcome surface and receive no native dialog authority.
+- **Welcome entry state:** `WelcomeWidget` is the Clay-owned native Group/Status
+  fallback for an empty connected pane when no `empty-tab` pane-content
+  contribution is loaded. It sanitizes the workspace basename and recovery
+  copy, then routes `Open File` and `Open Folder` through Clay's existing
+  `documents.clientOpenFileDialog` and `workspace.clientOpenFolderDialog`
+  client commands. Packages cannot replace or inject this core fallback widget
+  and receive no native dialog authority. The loaded product landing is a
+  package pane-content contribution (`@clay/chat` by default); replace or
+  extend that package, not `WelcomeWidget`.
 - **Completion projection:** package completion providers contribute only the
   existing bounded inert result data. Clay projects non-empty results through
   `completion_result_to_menu_session` with `TransientMenuOrigin::Completion`,
@@ -1472,8 +1475,11 @@ validated data through the documented facades.
 
 **Clay owns shell and layout.** Packages cannot create Masonry widgets, mutate
 the working area or pane/split tree, own fixed-slot geometry, contribute tab or
-pane chrome, replace the welcome/file-browser/status surfaces, or open/drive the
-Clay-owned completion and centered Command Centre surfaces. Fixed package panels
+pane chrome, replace the core `WelcomeWidget` fallback / file-browser / status
+surfaces, or open/drive the Clay-owned completion and centered Command Centre
+surfaces. Native file/folder dialogs and the tab bar stay host-owned. The
+loaded empty-tab landing is package-owned (`@clay/chat` or a user-approved
+replacement). Fixed package panels
 compose into Clay's mandatory `main` slot plus optional `left`, `right`, `top`,
 and `bottom` slots; transient package overlays remain limited to
 `working-area`, `active-pane`, `main`, and `pointer`. `completion` and `centered`
@@ -2481,6 +2487,52 @@ The target is recorded in a server-side disabled-provider set consulted by every
 
 See [`completion.serverDisableCompletion`](../clay-js-api/completion/server-disable-completion.md) for the full API reference.
 
+## Phase 25 authoring contract: product landing and pane content
+
+The empty/new-tab landing is a first-party package, not compiled chrome.
+`@clay/chat` is the default. Clay still owns the tab bar, Command Centre,
+native file/folder dialogs, catalog widgets, Prism/`clay-agent`, and the
+core `WelcomeWidget` fallback.
+
+### Pane-content contribution
+
+Declare one `empty-tab` winner in `clay.contributions.ui.paneContents` and
+register it from `loadEntry` with `ui.serverRegisterPaneContentContribution`.
+Use only catalog `ComponentKind` values. Action targets must be registered
+commands. No package JavaScript runs in Masonry paint, layout, pointer,
+scroll, keypress, or text-event handlers.
+
+```js
+import { loadPackage } from "clay:packages";
+await loadPackage("@clay/chat");
+```
+
+Without that line, empty tabs stay `WelcomeWidget` (Open File / Open Folder
+only). Load grants no filesystem, network, shell, daemon, or AI-mutation.
+
+### Replace and extend
+
+```json
+{
+  "clay": {
+    "replaces": ["@clay/chat"],
+    "extensionPoints": [
+      { "id": "chat.entrySurface", "operations": ["append", "replace"] },
+      { "id": "chat.chromeActions", "operations": ["append", "replace"] }
+    ]
+  }
+}
+```
+
+`clay.replaces: ["@clay/chat"]` needs exact user approval. The replacement
+stays in the third-party runtime; it cannot import trusted `@clay/chat`
+modules. `chat.entrySurface` / `chat.chromeActions` extend the first-party
+package without replacing it. Rollback restores `@clay/chat`.
+
+Core/bootstrap and `clay-agent` are not package-replaceable. Packages cannot
+create Masonry widgets or replace Command Centre, the tab bar, or native
+dialogs.
+
 ## Phase 28 authoring contract: editor commands, folding, decoration intent, and inlay hints
 
 Phase 28 extends existing generic package primitives. Packages still publish
@@ -2778,7 +2830,7 @@ Keep the `syntaxGrammars` block exactly as shipped in Phase 18.10. The same meta
 - **Completion providers**: register keyword/snippet providers with `completion.serverRegisterCompletionProvider`. Completion providers remain metadata-only and never ship executable handlers, raw callbacks, or client JavaScript. Derive `triggerCharacters` from the major-mode behavior manifest with `completion.completionTriggerCharactersFromEditorRules(editorRules)` so the editor's autocomplete triggers and the completion framework's provider selection stay aligned.
 - **Parse handlers**: register a mode-scoped parse handler with `parse.serverRegisterParseHandler` to derive decorations, folding ranges, diagnostics, or outline data. The handler runs as `Background`, cancellable, viewport-prioritized server work and never in paint/typing hot paths.
 - **Range diagnostics**: publish bounded `DiagnosticSet` data with `diagnostics.serverPublishDiagnostics` under `render-decorations`. Keep status failures on `RuntimeDiagnostic`; keep visual tints on `serverPublishDecorations`. See [Range Diagnostics](../primitives/diagnostics.md).
-- **UI contributions**: declare optional components, status items, transient overlays, panels, and theme tokens through the `clay:ui` contribution APIs. All UI contributions are inert declarations that Clay validates, composes, and renders through Clay-owned Masonry widgets. Packages never create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
+- **UI contributions**: declare optional components, status items, transient overlays, panels, empty-tab pane contents, and theme tokens through the `clay:ui` contribution APIs. All UI contributions are inert declarations that Clay validates, composes, and renders through Clay-owned Masonry widgets. Packages never create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
 - **Configuration**: Phase 18.14 language packages keep indent size, comment token, delimiter pairs, and autocomplete triggers as package-defined defaults. They do not introduce new user-tunable configuration keys in this phase. When user customization is justified in a later phase, expose package-prefixed options through the documented `configuration.setPackageOption` API and layout defaults through `ui.serverSetLayoutOverride`. Do not invent hidden JSON/TOML keys or undocumented config paths in `init.js`.
 
 ### Configuration contract for language packages
@@ -3054,7 +3106,7 @@ Do not:
 - Treat a transient menu session as a fixed bottom panel or as a generic `TransientOverlayContribution` that owns dynamic query state.
 - Request or declare the Clay-internal `centered` or `Completion` overlay anchors, caret-native bounds, or a completion-specific widget.
 - Treat package-authored accessibility labels as a path/HTML escape hatch; Clay sanitizes and bounds them before accessibility publication.
-- Treat the Clay-owned welcome surface or native file/folder dialogs as package-owned UI or dialog authority.
+- Treat the core `WelcomeWidget` fallback, native file/folder dialogs, tab bar, or Command Centre as package-owned UI or dialog authority. The loaded empty-tab landing is package-owned via `ui.paneContents`; replace `@clay/chat`, not those host surfaces.
 - Treat the Clay-owned file browser as a package-owned panel, package workspace-root provider, package marker/ignore-rule extension point, raw directory-listing API, or custom Masonry widget.
 - Treat multi-document sessions, dirty/save status chrome, conflict recovery menus, or pending-edit/disconnect/resync recovery as package-owned layout surfaces, native widgets, or clipboard/filesystem authority grants.
 - Open native save dialogs, write arbitrary files, invent package clipboard-contents APIs, or run reconnect/resync loops from package UI in place of Clay's documented command IDs and recovery menus.

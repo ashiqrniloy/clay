@@ -1,8 +1,9 @@
-//! Clay-owned first-launch entry surface.
+//! Clay-owned empty-tab fallback.
 //!
-//! The server still owns the tab's empty welcome document. This module owns
-//! only its native presentation and emits the existing client UI command
-//! routes for user-mediated file/folder dialogs.
+//! Shown when no package pane-content contribution wins empty-tab `main`.
+//! Open File / Open Folder only — no Chat chrome. A loaded entry-surface
+//! package replaces this via `PaneContent::Package` / the document-view
+//! package region.
 
 use std::cell::RefCell;
 use std::rc::Rc;

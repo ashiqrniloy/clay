@@ -32,6 +32,8 @@ use crate::{
         TransientMenuOriginData, TransientMenuSnapshotData, TransientMenuStatusData,
     },
     server::{
+        agent::AgentPickerInventory,
+        agent_picker::{AgentPicker, AgentPickerActivate},
         command_execution::{
             CommandExecutionDiagnostic, CommandExecutionRule, CommandExecutionTarget,
         },
@@ -92,6 +94,24 @@ impl ServerMenuSessions {
     /// bounded listing already installed. Mirrors [`Self::open_control_center`]
     /// exactly: one active session per connection, replaced id reported by
     /// the caller as `TransientMenuClosed` before the new snapshot.
+    pub(crate) fn open_agent_picker(
+        &mut self,
+        kind: crate::protocol::AgentPickerKind,
+        inventory: AgentPickerInventory,
+        package_profiles: Vec<(String, String)>,
+        generation_id: u64,
+    ) -> (TransientMenuSnapshotData, Option<u64>) {
+        self.next_session_id += 1;
+        let id = SERVER_MENU_SESSION_ID_HIGH_BIT | self.next_session_id;
+        let replaced_id = self.active.keys().next().copied();
+        self.active.clear();
+        let picker = AgentPicker::open(id, kind, inventory, package_profiles);
+        let session = ServerMenuSession::agent_picker(picker, id, generation_id);
+        let snapshot = snapshot_from_session(&session.session());
+        self.active.insert(id, session);
+        (snapshot, replaced_id)
+    }
+
     pub(crate) fn open_path_browser(
         &mut self,
         session: PathBrowserSession,
@@ -141,6 +161,7 @@ pub(crate) enum ServerMenuActivateOutcome {
     Navigate(std::path::PathBuf),
     OpenFile(std::path::PathBuf),
     OpenWorkspace(std::path::PathBuf),
+    Agent(AgentPickerActivate),
 }
 
 /// Result of an edit intent: the projected snapshot plus an optional relist
@@ -168,6 +189,7 @@ pub(crate) struct ServerMenuSession {
 pub(crate) enum ServerMenuSessionKind {
     ControlCenter(ControlCenter),
     PathBrowser(PathBrowserSession),
+    AgentPicker(AgentPicker),
 }
 
 impl ServerMenuSession {
@@ -184,6 +206,21 @@ impl ServerMenuSession {
             session_id,
             generation_id,
             kind: ServerMenuSessionKind::PathBrowser(session),
+        }
+    }
+
+    fn agent_picker(picker: AgentPicker, session_id: u64, generation_id: u64) -> Self {
+        Self {
+            session_id,
+            generation_id,
+            kind: ServerMenuSessionKind::AgentPicker(picker),
+        }
+    }
+
+    pub(crate) fn agent_picker_mut(&mut self) -> Option<&mut AgentPicker> {
+        match &mut self.kind {
+            ServerMenuSessionKind::AgentPicker(picker) => Some(picker),
+            _ => None,
         }
     }
 
@@ -216,6 +253,10 @@ impl ServerMenuSession {
                     relist,
                 }
             }
+            ServerMenuSessionKind::AgentPicker(picker) => MenuEdit {
+                snapshot: picker.set_query(query),
+                relist: None,
+            },
         }
     }
 
@@ -240,6 +281,10 @@ impl ServerMenuSession {
                     relist,
                 }
             }
+            ServerMenuSessionKind::AgentPicker(picker) => MenuEdit {
+                snapshot: picker.backspace(),
+                relist: None,
+            },
         }
     }
 
@@ -249,7 +294,7 @@ impl ServerMenuSession {
     /// cannot fire on a Control Center session.
     pub(crate) fn install_path_browser(&mut self, page: UserBrowsePage) -> TransientMenuSession {
         match &mut self.kind {
-            ServerMenuSessionKind::ControlCenter(_) => {}
+            ServerMenuSessionKind::ControlCenter(_) | ServerMenuSessionKind::AgentPicker(_) => {}
             ServerMenuSessionKind::PathBrowser(session) => session.install(page),
         }
         self.session()
@@ -259,7 +304,7 @@ impl ServerMenuSession {
     /// (items suppressed, activation fails closed, input stays recoverable).
     pub(crate) fn set_path_browser_error(&mut self, message: String) -> TransientMenuSession {
         match &mut self.kind {
-            ServerMenuSessionKind::ControlCenter(_) => {}
+            ServerMenuSessionKind::ControlCenter(_) | ServerMenuSessionKind::AgentPicker(_) => {}
             ServerMenuSessionKind::PathBrowser(session) => session.set_error(message),
         }
         self.session()
@@ -274,6 +319,7 @@ impl ServerMenuSession {
                 session.move_selection(delta);
                 session.menu_session(TransientMenuSessionId(self.session_id))
             }
+            ServerMenuSessionKind::AgentPicker(picker) => picker.move_selection(delta),
         }
     }
 
@@ -284,6 +330,7 @@ impl ServerMenuSession {
             ServerMenuSessionKind::PathBrowser(session) => {
                 session.menu_session(TransientMenuSessionId(self.session_id))
             }
+            ServerMenuSessionKind::AgentPicker(picker) => picker.session(),
         }
     }
 
@@ -297,7 +344,7 @@ impl ServerMenuSession {
     /// (the Control Center activates the same selection for primary and
     /// secondary; path mode descends on primary directory activation).
     pub(crate) fn activate(
-        &self,
+        &mut self,
         target: CommandExecutionTarget,
         kind: TransientMenuActivationData,
         current_generation_id: u64,
@@ -309,7 +356,7 @@ impl ServerMenuSession {
                 message: "menu session belongs to a replaced runtime generation".to_string(),
             });
         }
-        match &self.kind {
+        match &mut self.kind {
             ServerMenuSessionKind::ControlCenter(center) => {
                 let _ = kind; // Control Center: both kinds activate the selection
                 center
@@ -347,6 +394,14 @@ impl ServerMenuSession {
                     }),
                 }
             }
+            ServerMenuSessionKind::AgentPicker(picker) => picker
+                .activate(matches!(kind, TransientMenuActivationData::Secondary))
+                .map(ServerMenuActivateOutcome::Agent)
+                .map_err(|message| CommandExecutionDiagnostic {
+                    command_id: String::new(),
+                    rule: CommandExecutionRule::UnknownCommand,
+                    message,
+                }),
         }
     }
 }

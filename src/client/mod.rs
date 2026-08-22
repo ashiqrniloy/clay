@@ -931,6 +931,7 @@ pub enum ClientConnectionEvent {
     ShellClientCommandRequest {
         command_id: String,
     },
+    Agent(Box<crate::protocol::AgentServerMessage>),
     ServerError {
         code: ProtocolErrorCode,
         message: String,
@@ -1727,6 +1728,9 @@ async fn run_connection<S>(
                     }
                     Ok(message @ ServerMessage::EditTransaction { .. }) => {
                         let _ = events.send(ClientConnectionEvent::EditTransaction(message)).await;
+                    }
+                    Ok(ServerMessage::Agent(payload)) => {
+                        let _ = events.send(ClientConnectionEvent::Agent(payload)).await;
                     }
                     Ok(ServerMessage::TransientMenuSnapshot(snapshot)) => {
                         let _ = events
@@ -3709,6 +3713,7 @@ mod tests {
             },
             package_ui: crate::protocol::PackageUiSnapshot {
                 version: generation,
+                empty_tab: None,
             },
             documents: Vec::new(),
             diagnostics: Vec::new(),

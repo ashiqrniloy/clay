@@ -104,6 +104,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
     (
         "runtime/js/ui.js",
         &[
+            "serverRegisterPaneContentContribution",
             "serverRegisterPanelContribution",
             "serverRegisterComponentContribution",
             "serverRegisterTransientOverlayContribution",

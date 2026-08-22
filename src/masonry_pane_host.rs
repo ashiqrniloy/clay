@@ -7,6 +7,9 @@
 //! agnostic and workspace-bound by construction: it carries its pane identity,
 //! never a file path.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use masonry::accesskit::{Node, Role};
 #[cfg(test)]
 use masonry::core::WidgetId;
@@ -19,7 +22,10 @@ use masonry::peniko::Color;
 use masonry::vello::Scene;
 
 use crate::masonry_editor::EditorWidget;
+use crate::masonry_package_region::PackageRegionWidget;
 use crate::masonry_pane_document::PaneDocumentView;
+use crate::masonry_welcome::{WelcomeRenderContext, WelcomeState, WelcomeWidget};
+use crate::shell::package_ui::PackageUiComponentTree;
 use crate::shell::{PaneId, ResolvedUiTheme};
 
 /// Content mounted inside a [`PaneContentHost`].
@@ -29,17 +35,22 @@ use crate::shell::{PaneId, ResolvedUiTheme};
 /// `Document` for panes hosting a live [`PaneDocumentView`] (mounted by the
 /// app driver when a document opens into a placeholder pane).
 ///
-/// EXTENSION SEAM: this is a closed enum by design — a future pane kind
-/// (e.g. a terminal) would add a variant here and a matching branch in the
-/// host's paint/register/layout paths; whether a package-facing `Custom`
-/// variant (arbitrary package widgets mounted into a pane) is ever added is
-/// a Plan 079+ decision. Nothing outside the host may assume a variant set
-/// beyond these three.
+/// EXTENSION SEAM: closed enum. `Package` hosts a validated package region in
+/// empty/new-tab `main`. `Welcome` is the core fallback (Open File / Open
+/// Folder). A later terminal stays a distinct kind (PTY ≠ SDUI). Do not add
+/// product-named variants (`Agent`) or a trait-object `Custom`.
 #[doc(hidden)]
-pub enum PaneContent {
+pub(crate) enum PaneContent {
     Placeholder,
     Editor(WidgetPod<EditorWidget>),
     Document(WidgetPod<PaneDocumentView>),
+    /// Production empty-tab overlay lives on `PaneDocumentView`; this variant
+    /// is the pane-host seam for tests and later split-pane landing.
+    #[allow(dead_code)]
+    Package(WidgetPod<PackageRegionWidget>),
+    /// Same seam as `Package` for the core Open File / Open Folder fallback.
+    #[allow(dead_code)]
+    Welcome(WidgetPod<WelcomeWidget>),
 }
 
 /// Generic workspace-bound content host for one pane leaf.
@@ -123,29 +134,69 @@ impl PaneContentHost {
         ctx.request_accessibility_update();
     }
 
-    /// Mount a live document view in this pane (placeholder → document).
+    /// Mount a live document view in this pane (placeholder/package/welcome → document).
     pub fn set_document_view(
         &mut self,
         ctx: &mut MutateCtx<'_>,
         view: NewWidget<PaneDocumentView>,
     ) {
-        self.content = PaneContent::Document(view.to_pod());
-        ctx.children_changed();
+        self.replace_content(ctx, PaneContent::Document(view.to_pod()));
         ctx.request_accessibility_update();
     }
 
-    /// Remove the mounted document view (document → placeholder). The view pod
-    /// is detached immediately so Masonry's canonical children list stays
-    /// consistent.
-    pub fn clear_content(&mut self, ctx: &mut MutateCtx<'_>) {
-        if let PaneContent::Document(view) =
-            std::mem::replace(&mut self.content, PaneContent::Placeholder)
-        {
-            ctx.remove_child(view);
-        }
+    /// Host a validated package region in empty/new-tab `main`.
+    #[allow(dead_code)]
+    pub(crate) fn set_package_region(
+        &mut self,
+        ctx: &mut MutateCtx<'_>,
+        tree: &PackageUiComponentTree,
+        typography: crate::editor::typography::TypographyRegistry,
+        ui_theme: ResolvedUiTheme,
+    ) {
+        let mut region = PackageRegionWidget::new();
+        region.set_render_context(typography, ui_theme);
+        region.reconcile_tree(tree);
+        self.replace_content(ctx, PaneContent::Package(NewWidget::new(region).to_pod()));
         self.document_display_name = None;
-        ctx.children_changed();
         ctx.request_accessibility_update();
+    }
+
+    /// Core fallback: Open File / Open Folder only.
+    #[allow(dead_code)]
+    pub(crate) fn set_welcome(
+        &mut self,
+        ctx: &mut MutateCtx<'_>,
+        typography: crate::editor::typography::TypographyRegistry,
+        ui_theme: ResolvedUiTheme,
+    ) {
+        let state = Rc::new(RefCell::new(WelcomeState::default()));
+        let render = Rc::new(RefCell::new(WelcomeRenderContext {
+            typography,
+            ui_theme,
+        }));
+        self.replace_content(
+            ctx,
+            PaneContent::Welcome(NewWidget::new(WelcomeWidget::new(state, render)).to_pod()),
+        );
+        self.document_display_name = None;
+        ctx.request_accessibility_update();
+    }
+
+    /// Remove mounted content (document/package/welcome → placeholder).
+    pub fn clear_content(&mut self, ctx: &mut MutateCtx<'_>) {
+        self.replace_content(ctx, PaneContent::Placeholder);
+        self.document_display_name = None;
+        ctx.request_accessibility_update();
+    }
+
+    fn replace_content(&mut self, ctx: &mut MutateCtx<'_>, next: PaneContent) {
+        match std::mem::replace(&mut self.content, next) {
+            PaneContent::Document(view) => ctx.remove_child(view),
+            PaneContent::Package(region) => ctx.remove_child(region),
+            PaneContent::Welcome(welcome) => ctx.remove_child(welcome),
+            PaneContent::Editor(_) | PaneContent::Placeholder => {}
+        }
+        ctx.children_changed();
     }
 
     /// The mounted document view's widget id, if any (pane routing).
@@ -169,6 +220,16 @@ impl PaneContentHost {
         matches!(self.content, PaneContent::Placeholder)
     }
 
+    #[cfg(test)]
+    pub(crate) fn is_package(&self) -> bool {
+        matches!(self.content, PaneContent::Package(_))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_welcome(&self) -> bool {
+        matches!(self.content, PaneContent::Welcome(_))
+    }
+
     /// Test accessor for the placeholder fill color.
     #[cfg(test)]
     pub(crate) fn placeholder_background(&self) -> Color {
@@ -185,6 +246,8 @@ impl Widget for PaneContentHost {
         match &mut self.content {
             PaneContent::Editor(editor) => ctx.register_child(editor),
             PaneContent::Document(view) => ctx.register_child(view),
+            PaneContent::Package(region) => ctx.register_child(region),
+            PaneContent::Welcome(welcome) => ctx.register_child(welcome),
             PaneContent::Placeholder => {}
         }
     }
@@ -200,12 +263,24 @@ impl Widget for PaneContentHost {
         } else {
             bc.constrain(Size::new(400.0, 300.0))
         };
-        if let PaneContent::Editor(editor) = &mut self.content {
-            ctx.run_layout(editor, &BoxConstraints::tight(size));
-            ctx.place_child(editor, Point::ZERO);
-        } else if let PaneContent::Document(view) = &mut self.content {
-            ctx.run_layout(view, &BoxConstraints::tight(size));
-            ctx.place_child(view, Point::ZERO);
+        match &mut self.content {
+            PaneContent::Editor(editor) => {
+                ctx.run_layout(editor, &BoxConstraints::tight(size));
+                ctx.place_child(editor, Point::ZERO);
+            }
+            PaneContent::Document(view) => {
+                ctx.run_layout(view, &BoxConstraints::tight(size));
+                ctx.place_child(view, Point::ZERO);
+            }
+            PaneContent::Package(region) => {
+                ctx.run_layout(region, &BoxConstraints::tight(size));
+                ctx.place_child(region, Point::ZERO);
+            }
+            PaneContent::Welcome(welcome) => {
+                ctx.run_layout(welcome, &BoxConstraints::tight(size));
+                ctx.place_child(welcome, Point::ZERO);
+            }
+            PaneContent::Placeholder => {}
         }
         size
     }
@@ -253,6 +328,12 @@ impl Widget for PaneContentHost {
                 Some(name) => format!("Pane {} of {}: {}", self.pane_id.0, self.pane_count, name),
                 None => format!("Pane {} of {}: document", self.pane_id.0, self.pane_count),
             },
+            PaneContent::Package(_) => {
+                format!("Pane {} of {}: package", self.pane_id.0, self.pane_count)
+            }
+            PaneContent::Welcome(_) => {
+                format!("Pane {} of {}: welcome", self.pane_id.0, self.pane_count)
+            }
         });
     }
 
@@ -260,6 +341,8 @@ impl Widget for PaneContentHost {
         match &self.content {
             PaneContent::Editor(pod) => ChildrenIds::from_slice(&[pod.id()]),
             PaneContent::Document(pod) => ChildrenIds::from_slice(&[pod.id()]),
+            PaneContent::Package(pod) => ChildrenIds::from_slice(&[pod.id()]),
+            PaneContent::Welcome(pod) => ChildrenIds::from_slice(&[pod.id()]),
             PaneContent::Placeholder => ChildrenIds::new(),
         }
     }
@@ -438,6 +521,86 @@ mod tests {
             label_of(&update),
             Some("Empty pane 3 of 4"),
             "placeholder keeps pane identity"
+        );
+    }
+
+    fn sample_entry_tree() -> PackageUiComponentTree {
+        PackageUiComponentTree {
+            id: "demo.entry".into(),
+            kind: "panel".into(),
+            font_role: crate::protocol::FontRole::Ui,
+            text_variant: None,
+            title: Some("Entry".into()),
+            text: None,
+            label: None,
+            action_command_id: None,
+            items: Vec::new(),
+            children: Vec::new(),
+            disabled: false,
+            validation_state: None,
+        }
+    }
+
+    #[test]
+    fn empty_tab_hosts_package_or_welcome_and_open_file_switches_to_document() {
+        let menu_session_ids = Rc::new(Cell::new(0u64));
+        let sdui_ui_version = Rc::new(Cell::new(0u64));
+        let host = PaneContentHost::placeholder(PaneId(1)).with_pane_count(1);
+        let mut render_root = RenderRoot::new(NewWidget::new(host), |_| {}, render_root_options());
+
+        render_root.edit_base_layer(|mut widget| {
+            let mut host = widget.try_downcast::<PaneContentHost>().expect("host");
+            host.widget.set_welcome(
+                &mut host.ctx,
+                crate::editor::typography::TypographyRegistry::default(),
+                ResolvedUiTheme::default(),
+            );
+            assert!(host.widget.is_welcome());
+            assert!(host.widget.document_view_widget_id().is_none());
+        });
+        assert_eq!(
+            label_of(&access_tree(&mut render_root)),
+            Some("Pane 1 of 1: welcome")
+        );
+
+        render_root.edit_base_layer(|mut widget| {
+            let mut host = widget.try_downcast::<PaneContentHost>().expect("host");
+            host.widget.set_package_region(
+                &mut host.ctx,
+                &sample_entry_tree(),
+                crate::editor::typography::TypographyRegistry::default(),
+                ResolvedUiTheme::default(),
+            );
+            assert!(host.widget.is_package());
+            assert!(host.widget.document_view_widget_id().is_none());
+        });
+        assert_eq!(
+            label_of(&access_tree(&mut render_root)),
+            Some("Pane 1 of 1: package")
+        );
+
+        // Folder bind does not change the hosted content type.
+        render_root.edit_base_layer(|mut widget| {
+            let host = widget.try_downcast::<PaneContentHost>().expect("host");
+            assert!(host.widget.is_package());
+        });
+
+        render_root.edit_base_layer(|mut widget| {
+            let mut host = widget.try_downcast::<PaneContentHost>().expect("host");
+            host.widget.set_document_view(
+                &mut host.ctx,
+                NewWidget::new(PaneDocumentView::new(
+                    PaneId(1),
+                    menu_session_ids.clone(),
+                    sdui_ui_version.clone(),
+                )),
+            );
+            assert!(!host.widget.is_package());
+            assert!(host.widget.document_view_widget_id().is_some());
+        });
+        assert_eq!(
+            label_of(&access_tree(&mut render_root)),
+            Some("Pane 1 of 1: document")
         );
     }
 }

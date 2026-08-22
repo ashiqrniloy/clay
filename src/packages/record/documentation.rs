@@ -142,7 +142,8 @@ pub(super) fn validate_api_dependency_permissions(
             | "ui.serverRegisterTransientOverlayContribution"
             | "ui.serverRegisterThemeToken"
             | "ui.serverRegisterInputContribution"
-            | "ui.serverRegisterUiStateScope" => None,
+            | "ui.serverRegisterUiStateScope"
+            | "ui.serverRegisterPaneContentContribution" => None,
             "ui.serverSetLayoutOverride" | "configuration.setPackageOption" => {
                 Some(PackagePermission::PackageConfiguration)
             }

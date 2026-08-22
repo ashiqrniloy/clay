@@ -280,6 +280,16 @@ pub const COMMAND_CENTRE_LISTING_PAYLOAD_BUDGET_BYTES: usize = 64 * 1024;
 /// defaults ship; not yet CI-guarded.
 pub const KEY_CHORD_PENDING_TIMEOUT_MS: u64 = 1500;
 
+// Phase 25 agent-host budgets. Size caps live next to the wire types in
+// `src/protocol/agent.rs` and are hard. These wall-clock numbers are advisory
+// (Phase 21 stable-runner rule). Deterministic CI gates: mock spawn/first-delta
+// timeouts, slow-daemon dispatch < keypress budget, and paint/keypress source
+// scans. Agent pickers reuse Command Centre open/filter budgets.
+pub const AGENT_DAEMON_SPAWN_P95_BUDGET_MS: u64 = 2_000;
+pub const AGENT_PROMPT_TO_FIRST_DELTA_P95_BUDGET_MS: u64 = 2_000;
+/// Local apply of one already-received delta. Not model generation time.
+pub const AGENT_DELTA_IPC_P95_BUDGET_MS: u64 = 4;
+
 // Phase 22.6 (plan 077 task 5) window-model performance budgets. The two
 // wall-clock budgets are advisory, pinned from `cargo bench --bench
 // window_baselines` measurements (docs/development/performance.md, Phase

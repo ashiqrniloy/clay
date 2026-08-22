@@ -481,6 +481,7 @@ pub fn is_valid_api_prefix(value: &str) -> bool {
 /// provenance is pinned (e.g. `@clay/git` owns the `git` domain that the core
 /// git JS APIs also live under).
 pub const RESERVED_CORE_API_DOMAINS: &[&str] = &[
+    "agent",
     "application",
     "behavior",
     "clay",

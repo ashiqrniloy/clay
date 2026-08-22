@@ -8533,6 +8533,7 @@ fn clay_module_loader_denies_unallowlisted_first_party_url() {
     let loader = loader_with_allowlist(&[], None);
     for url in [
         "clay://packages/@clay/markdown/dist/load.js",
+        "clay://packages/@clay/chat/dist/load.js",
         "clay://packages/@clay/evil/x.js",
         "clay://packages/anything",
     ] {
@@ -8911,6 +8912,182 @@ async fn settings_package_registers_catalog_only_panel() {
     );
     assert!(kinds.contains(&"collapse"), "collapsible sections present");
     assert!(kinds.contains(&"button"), "action buttons present");
+}
+
+#[test]
+fn first_party_example_loads_chat_with_one_uncommented_line() {
+    let source = fs::read_to_string("examples/packages/first-party.js").unwrap();
+    assert!(
+        source.contains(r#"await loadPackage("@clay/chat");"#),
+        "canonical first-party module must opt into Chat with one uncommented load"
+    );
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        if trimmed.contains(r#"loadPackage("@clay/chat")"#) {
+            return;
+        }
+    }
+    panic!("@clay/chat load must not be comment-only");
+}
+
+#[test]
+fn chat_load_entry_is_execute_only() {
+    let load = fs::read_to_string("packages/chat/dist/load.js").unwrap();
+    assert!(!load.contains("Deno.core"));
+    assert!(!load.contains("clay:agent"));
+    assert!(!load.contains("serverRegisterCommand"));
+    assert!(
+        load.contains("export default loadChatPackage"),
+        "loadPackage must invoke the package-owned default export"
+    );
+}
+
+#[tokio::test]
+async fn third_party_cannot_import_trusted_chat_modules() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let service = ClayJsRuntimeService::default();
+    let error = service
+        .evaluate_third_party_module(
+            r#"import { loadChatPackage } from "clay://packages/@clay/chat/dist/load.js";"#,
+        )
+        .await
+        .expect_err("third-party runtime must not import trusted chat modules");
+    assert!(
+        error.to_string().contains("runtime.invalid_import")
+            || error.to_string().contains("denied"),
+        "unexpected deny: {error}"
+    );
+}
+
+#[tokio::test]
+async fn chat_package_registers_profile_and_empty_tab_entry() {
+    let root = config_fixture("chat-package-e2e");
+    fs::write(
+        root.join("init.js"),
+        r#"
+        import { loadPackage } from "clay:packages";
+        await loadPackage("@clay/chat");
+        "#,
+    )
+    .unwrap();
+    let service = ClayJsRuntimeService::default();
+    let result = service
+        .load_configuration_from_root(root)
+        .await
+        .expect("@clay/chat must load");
+    let entry = result
+        .ui_contributions
+        .empty_tab()
+        .expect("one empty-tab winner")
+        .expect("chat.entry must register");
+    assert_eq!(entry.id, "chat.entry");
+    assert_eq!(entry.package_name, "@clay/chat");
+    let contribution = result
+        .ui_contributions
+        .pane_contents
+        .iter()
+        .find(|content| content.id == "chat.entry")
+        .expect("chat.entry contribution");
+    assert!(
+        contribution
+            .action_targets
+            .iter()
+            .any(|id| id == "chat.submit")
+    );
+    assert!(
+        contribution
+            .action_targets
+            .iter()
+            .any(|id| id == "agent.clientOpenModelPicker")
+    );
+    assert!(
+        contribution
+            .action_targets
+            .iter()
+            .any(|id| id == "chat.cancel")
+    );
+    assert!(
+        contribution
+            .action_targets
+            .iter()
+            .any(|id| id == "documents.clientOpenFileDialog")
+    );
+    assert!(
+        contribution
+            .action_targets
+            .iter()
+            .any(|id| id == "workspace.clientOpenFolderDialog")
+    );
+    let mut kinds: Vec<&str> = Vec::new();
+    collect_kinds(&contribution.component_tree, &mut kinds);
+    assert!(kinds.contains(&"panel"));
+    assert!(kinds.contains(&"label"));
+    assert!(kinds.contains(&"button"));
+    assert!(kinds.contains(&"textInput"));
+    assert!(
+        contribution
+            .component_tree
+            .children
+            .iter()
+            .any(|child| { child.text.as_deref() == Some("What do you want to do today?") }),
+        "greeting copy lives in the package tree"
+    );
+    assert!(
+        contribution.component_tree.children.iter().any(|child| {
+            child
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("Configure a provider"))
+        }),
+        "unconfigured provider is instructional"
+    );
+    assert!(
+        contribution
+            .component_tree
+            .children
+            .iter()
+            .any(|child| { child.kind == "textInput" && child.id == "chat.composer" }),
+        "composer is present"
+    );
+    let (trusted, third_party) = service.command_registry_snapshots();
+    assert!(
+        trusted
+            .iter()
+            .any(|command| command.command_id == "chat.profile" && command.display_name == "Chat"),
+        "one-line load must register the Chat profile command"
+    );
+    assert!(
+        third_party
+            .iter()
+            .all(|command| !command.command_id.starts_with("chat.")),
+        "@clay/chat stays in the trusted domain"
+    );
+}
+
+#[tokio::test]
+async fn chat_package_absent_restores_core_empty_tab_fallback() {
+    let root = config_fixture("chat-package-unloaded");
+    fs::write(root.join("init.js"), "// no packages\n").unwrap();
+    let service = ClayJsRuntimeService::default();
+    let result = service
+        .load_configuration_from_root(root)
+        .await
+        .expect("empty init.js must load");
+    assert_eq!(
+        result.ui_contributions.empty_tab().expect("no conflict"),
+        None,
+        "no chat contribution → core Welcome fallback"
+    );
+    let (trusted, _) = service.command_registry_snapshots();
+    assert!(
+        trusted
+            .iter()
+            .all(|command| command.command_id != "chat.profile"),
+        "no loadPackage → no Chat profile"
+    );
 }
 
 #[tokio::test]

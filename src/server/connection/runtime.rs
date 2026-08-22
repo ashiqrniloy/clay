@@ -19,6 +19,7 @@ use crate::{
         completion::estimated_result_payload_bytes,
     },
     server::{
+        agent_picker::picker_kind_for_command,
         command_execution::{
             CONTROL_CENTER_COMMAND_ID, CommandExecutionRequest, CommandExecutionTarget,
             CommandExecutor, OPEN_PATH_BROWSER_COMMAND_ID,
@@ -104,6 +105,19 @@ pub(super) async fn execute_command_intent(
             }
         }
         return None;
+    }
+
+    if crate::server::command_execution::is_chat_command(&request.command_id) {
+        return match executor.execute_chat(request) {
+            Ok(_) => None,
+            Err(error) => Some(ServerMessage::Error {
+                code: ProtocolErrorCode::InvalidMessage,
+                message: format!(
+                    "command execution rejected: {:?}: {}",
+                    error.rule, error.message
+                ),
+            }),
+        };
     }
 
     if crate::server::command_execution::is_reload_command(&request.command_id) {
@@ -258,6 +272,18 @@ pub(super) fn settings_value(arguments: &serde_json::Value) -> Option<String> {
         })
         .and_then(serde_json::Value::as_str)
         .map(ToOwned::to_owned)
+}
+
+fn intent_text(intent: &SduiActionIntent) -> String {
+    intent
+        .arguments
+        .iter()
+        .find(|argument| argument.name == "value" || argument.name == "text")
+        .and_then(|argument| match &argument.value {
+            SduiActionValue::String(text) => Some(text.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
 }
 
 pub(super) fn sdui_command_request(intent: &SduiActionIntent) -> CommandExecutionRequest {
@@ -548,13 +574,76 @@ pub(super) async fn handle_sdui_action<S>(
     runtime_generation: &RuntimeGenerationStore,
     parse_coordinator: &crate::server::parse_coordinator::ParseCoordinator,
     document_analysis: &DocumentAnalysisCoordinator,
+    menu_sessions: &mut ServerMenuSessions,
+    tab_registry: &Arc<Mutex<TabRegistry>>,
     reload_server: Option<&IpcServer>,
     client_id: ClientId,
     intent: SduiActionIntent,
+    bound_tab_id: Option<TabId>,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    if intent.command_id == "chat.submit" || intent.command_id == "chat.cancel" {
+        if let Some(host) = reload_server.map(|server| &server.agent) {
+            let tab = bound_tab_id.unwrap_or(client_id);
+            let message = if intent.command_id == "chat.cancel" {
+                host.cancel_tab(tab).await
+            } else {
+                host.begin_prompt(tab, &intent_text(&intent)).await
+            };
+            codec
+                .write_server_message(stream, &ServerMessage::Agent(Box::new(message)))
+                .await?;
+        }
+        return Ok(());
+    }
+    if picker_kind_for_command(&intent.command_id).is_some() {
+        match open_command_centre_session(
+            &intent.command_id,
+            menu_sessions,
+            behavior,
+            runtime_generation,
+            document,
+            workspace,
+            tab_registry,
+            bound_tab_id,
+            reload_server.map(|server| &server.agent),
+        )
+        .await
+        {
+            Ok((replaced_id, snapshot)) => {
+                if let Some(replaced_id) = replaced_id {
+                    codec
+                        .write_server_message(
+                            stream,
+                            &ServerMessage::TransientMenuClosed {
+                                session_id: replaced_id,
+                            },
+                        )
+                        .await?;
+                }
+                codec
+                    .write_server_message(
+                        stream,
+                        &ServerMessage::TransientMenuSnapshot(Box::new(snapshot)),
+                    )
+                    .await?;
+            }
+            Err(message) => {
+                codec
+                    .write_server_message(
+                        stream,
+                        &ServerMessage::Error {
+                            code: ProtocolErrorCode::InvalidMessage,
+                            message,
+                        },
+                    )
+                    .await?;
+            }
+        }
+        return Ok(());
+    }
     let validation_response = {
         let state = sdui.lock().await;
         sdui_action_response(&state, &intent)
@@ -631,7 +720,10 @@ where
     // yields nothing on the wire, so bare `Accepted` accounting (the JS op
     // path) is unchanged. Opening replaces any active server session; the
     // client is told about the closed one.
-    if command_id == CONTROL_CENTER_COMMAND_ID || command_id == OPEN_PATH_BROWSER_COMMAND_ID {
+    if command_id == CONTROL_CENTER_COMMAND_ID
+        || command_id == OPEN_PATH_BROWSER_COMMAND_ID
+        || picker_kind_for_command(&command_id).is_some()
+    {
         match open_command_centre_session(
             &command_id,
             menu_sessions,
@@ -641,6 +733,7 @@ where
             workspace,
             tab_registry,
             bound_tab_id,
+            reload_server.map(|server| &server.agent),
         )
         .await
         {
@@ -674,6 +767,15 @@ where
                     .await?;
             }
         }
+        return Ok(());
+    }
+    if command_id == "chat.cancel"
+        && let Some(host) = reload_server.map(|server| &server.agent)
+    {
+        let message = host.cancel_tab(bound_tab_id.unwrap_or(client_id)).await;
+        codec
+            .write_server_message(stream, &ServerMessage::Agent(Box::new(message)))
+            .await?;
         return Ok(());
     }
     let response = execute_command_intent(

@@ -2751,6 +2751,104 @@ fn third_party_replacement_withdraws_trusted_target_atomically() {
     assert!(!service.inspect("@vendor/markdown-repl").unwrap().is_enabled);
 }
 
+#[test]
+fn third_party_replacement_withdraws_chat_and_stays_untrusted() {
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string("packages/chat/package.json").expect("read chat manifest"),
+    )
+    .expect("chat manifest parses");
+    let record = assemble_package_record(&manifest).expect("@clay/chat record assembles");
+    assert_eq!(record.manifest.name, "@clay/chat");
+    assert_eq!(
+        record.manifest.clay.permissions,
+        vec![PackagePermission::CommandRegistration]
+    );
+    assert!(
+        record
+            .contributions
+            .commands
+            .iter()
+            .any(|command| command.id == "chat.profile" && command.display_name == "Chat"),
+        "Chat profile is a package command, not a core stub"
+    );
+    assert!(
+        record
+            .manifest
+            .clay
+            .extension_points
+            .iter()
+            .any(|point| point.id == "chat.entrySurface")
+    );
+
+    let mut service = PackageService::new(
+        "/tmp/clay-chat-replacement-store",
+        Box::new(FakeBackend::new()),
+    );
+    service
+        .install_from_value_at_root(manifest, "packages/chat".into())
+        .unwrap();
+    service
+        .authorize_bundled_defaults("@clay/chat", "clay-bundled-default")
+        .unwrap();
+    service.enable("@clay/chat").unwrap();
+
+    let replacement = serde_json::json!({
+        "name": "@vendor/chat-repl",
+        "version": "1.0.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "vchat",
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "capabilities": [],
+            "permissions": ["command-registration"],
+            "modes": ["vchat"],
+            "replaces": ["@clay/chat"],
+            "docs": "./docs/index.md"
+        }
+    });
+    service
+        .install_from_value(replacement.clone())
+        .expect("replacement installs");
+    let repl_record = assemble_package_record(&replacement).unwrap();
+    service
+        .authorize_package(
+            "@vendor/chat-repl",
+            [
+                repl_record.manifest.clay.permissions.clone(),
+                vec![PackagePermission::PackageControl],
+            ]
+            .concat(),
+            AuthorizationRuntimeProfile::Sandboxed,
+            "user",
+        )
+        .unwrap();
+    service
+        .approve_package("@vendor/chat-repl", "test")
+        .unwrap();
+    service
+        .enable("@vendor/chat-repl")
+        .expect("approved replacement enables over @clay/chat");
+
+    assert!(
+        !service.inspect("@clay/chat").unwrap().is_enabled,
+        "@clay/chat withdraws atomically"
+    );
+    let winner = service
+        .enabled_records()
+        .find(|record| record.manifest.name == "@vendor/chat-repl")
+        .expect("replacement enabled record");
+    assert!(
+        format!("{winner:?}").contains("ThirdParty"),
+        "replacement must not enter the trusted runtime"
+    );
+
+    let rolled_back = service.rollback_replacement("@clay/chat").unwrap();
+    assert_eq!(rolled_back, "@vendor/chat-repl");
+    assert!(service.inspect("@clay/chat").unwrap().is_enabled);
+    assert!(!service.inspect("@vendor/chat-repl").unwrap().is_enabled);
+}
+
 /// Plan 061 task 12: a replacement never inherits the replaced target's
 /// language-server grant — it needs its own exact current grant, and the
 /// target's grant does not transfer during replacement.

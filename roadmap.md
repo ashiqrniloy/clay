@@ -243,148 +243,247 @@ Expected outcome:
   is performance-bounded and documented, and the new authority surface is
   review-clean.
 
-## Phase 25: ACP Coding Agent Adoption (Prism Agent, Clay Client)
+## Phase 25: AI-Native Entry, Prism 0.3.0 Host, and Chat
 
-Give Clay a coding agent through the Agent Client Protocol (ACP v1): Clay is
-the ACP **client** (editor), a Node daemon embedding `@arnilo/prism` 0.2.6+
-first-party packages is the ACP **agent**, and the two speak stdio JSON-RPC.
-Confirmed decisions: Prism runs in a spawned child process (never inside
-`deno_core` — real Node >= 20 is a runtime requirement and the process boundary
-is the right trust boundary); the Rust side uses the official
-`agent-client-protocol` crate (not a hand-rolled JSON-RPC client); Clay owns
-credentials and feeds them through Prism credential resolvers (Prism never
-reads `process.env` itself); all `@arnilo/prism-*` packages are pinned to one
-exact lockstep version and upgraded only as reviewed events. Upstream Prism
-defects and gaps that Clay depends on are tracked in
-`docs/development/prism-adoption-issues.md` (B1–B5 bugs, F1–F10 feature
-requests); B1–B4 and F1–F3 should land before Phase 25.3 editor integration.
+Make Clay greet the user as an AI-native workspace, not a text editor waiting
+for a folder. Product surfaces are first-party packages on Clay primitives:
+`@clay/chat` owns the default landing and the Chat profile; Phase 29's
+`@clay/coding-agent` owns the coding profile. Users load them with one-line
+`loadPackage`. A third-party package may `replaces` the landing with a
+completely different page, or `extends`/`replaces` the coding-agent package,
+through the existing package graph and user approval. Clay core owns the
+Prism host, credentials, IPC, catalog widgets, and Command Centre — not the
+greeting copy.
 
-### Phase 25.1: `clay-agent` Daemon (Prism ACP Agent Process)
+With `@clay/chat` loaded, launch and every new tab open that package's entry
+surface: greeting copy ("What do you want to do today?"), a focused composer,
+agent/provider/model pickers, and Open File / Open Folder as secondary
+actions. Chat works with no workspace. Without an entry-surface package, core
+fallback is Open File / Open Folder only. This phase adopts `@arnilo/prism`
+**0.3.0** as the agent runtime and ships generic host primitives later
+special-purpose agent packages reuse. Coding-agent tools, diffs, and AI-safe
+mutation move to Phase 29.
 
-Focus areas:
+This recasts the previous ACP-first Phase 25 draft. ACP v1 remains optional
+later interop (Zed-class editor protocol), not Clay’s native agent bus.
+Chat, provider setup, model selection, and multi-agent routing use Prism’s
+own `createAgent` / `createAgentSession` / `AgentEvent` / `AgentDefinition`
+surfaces. One Clay-owned Node daemon hosts every agent profile.
 
-- New first-party TypeScript package `clay-agent` embedding `@arnilo/prism`,
-  `@arnilo/prism-coding-agent`, `@arnilo/prism-coding-security`,
-  `@arnilo/prism-ag-ui/acp`, `@arnilo/prism-mcp`, one provider package per
-  roadmap provider (Alibaba, Ollama Cloud, OpenCode-go, Kimi, OpenAI OAuth,
-  Anthropic), and `@arnilo/prism-session-store-sqlite`.
-- Wire `createPrismAcpAgent` seams: local single-ownership `authorize`
-  (everything keyed to a local user identity for future remote clients),
-  `sessionFactory` over `createAgentSession` with the coding tool registry,
-  execution policy, and the native Linux sandbox adapter from
-  `@arnilo/prism-coding-security`.
-- Durable run lifecycle: `AgentRunLifecycle`, `AcpSessionStore`, and the 0.2.6
-  `recovery` seam over a SQLite store under Clay's per-user data directory, so
-  agent sessions, pending approvals, and in-flight runs survive daemon
-  restarts.
-- Host policy seams: `sessions` (list/load/delete/resume), `modes` matching the
-  roadmap agent loop (plan/execute/review), `configOptions`, `mcp.select`
-  allow-list, `coding.lifecycle` emitter.
-- Stdio transport from `@agentclientprotocol/sdk`'s node adapter; graceful
-  shutdown; structured logs; documented seam configuration.
+Working architecture (supersedes the 0.2.6 ACP-client draft):
 
-Expected outcome:
+- Prism runs in a spawned Node >= 20 child (`clay-agent`), never inside
+  `deno_core`. The process boundary is the trust boundary; package JS cannot
+  spawn or speak to the daemon.
+- Clay server owns the agent protocol over existing GUI IPC. The daemon
+  speaks a Clay-owned, bounded, stdio JSON-RPC wrapping Prism `AgentEvent`.
+  The event union is closed and already includes tool and permission
+  variants so Phase 29 does not rewrite IPC; Chat never emits them. Do not
+  pull AG-UI or ACP into the Rust client or `clay-agent`. Do not use
+  `prism --mode rpc` as the product transport.
+- Clay owns credentials and feeds them through Prism credential resolvers
+  (`@arnilo/prism-credentials-node`). Prism never reads `process.env`.
+  Secrets never appear in events, transcripts, menu snapshots, logs, or a11y
+  names.
+- Every first-party `@arnilo/prism-provider-*` package shipped in 0.3.0 is
+  loaded through the extension kernel. Auth UI is data-driven from each
+  package’s `registerAuthMethod` descriptors (`api_key` vs `oauth`), not a
+  hand-written per-provider screen. OpenAI-compatible custom endpoints cover
+  unknown vendors. Cursor SDK is not a Prism 0.3.0 package and is out of
+  scope.
+- Agent profiles are Prism `AgentDefinition` values registered by packages
+  (and later on-disk `AGENT.md` bundles). This phase's `@clay/chat` registers
+  **Chat** (no tools). **Coding Agent** is registered by `@clay/coding-agent`
+  in Phase 29, not a core disabled stub. Work / PA / Research / Finance are
+  later first-party packages.
+- User-selected agent for now. Task-based auto-routing is deferred.
+- Provider and model pickers are Command Centre session kinds, not native
+  dropdown widgets. Entry-surface buttons open the same sessions.
+- Empty pane hosts the loaded entry-surface package (default `@clay/chat`),
+  not an empty editor document with “Ready to edit” copy. Open File still
+  opens an editor in the pane; Open Folder binds a workspace to the tab and
+  leaves the entry surface in place. Core without that package is file/folder
+  fallback only.
+- Pin `@arnilo/prism` and first-party packages to exact **0.3.0** for the
+  first cut; upgrades are reviewed events. Prism 0.3.0’s independent
+  patch/minor line does not mean Clay floats versions.
 
-- `clay-agent` is spawnable standalone, advertises its real capabilities
-  through `initialize`, and an external ACP client (e.g. the SDK example
-  client) can run a full prompt/tool/approval round trip against it.
-
-### Phase 25.2: Clay Server ACP Client and Agent Process Manager
-
-Focus areas:
-
-- Rust ACP client in the Clay server over the official `agent-client-protocol`
-  and `agent-client-protocol-tokio` crates: typed methods, capability
-  negotiation, session updates, permission and elicitation requests.
-- Agent process manager next to the existing server connection machinery:
-  spawn/restart/health-check/log-capture for the `clay-agent` child, Node >= 20
-  detection with clear failure UX, per-session agent lifecycles.
-- Clay IPC/protocol extensions in `src/protocol` and server ops: agent
-  session ops (`new`/`list`/`load`/`resume`/`prompt`/`cancel`/`set_mode`/
-  `set_config_option`), agent process lifecycle ops, and forwarding of ACP
-  `session/update` notifications to the client over Clay IPC.
-- Request/response correlation over the GUI IPC for permission prompts and
-  elicitation forms, modeled on the existing transient menu/confirmation
-  session pattern; bounded payloads and the same protocol compatibility tests
-  as existing ops.
-
-Expected outcome:
-
-- A GUI agent pane can create a session, stream an assistant reply with tool
-  calls and usage, answer a permission prompt, and cancel a run, all through
-  typed protocol messages with CI-guarded compatibility tests.
-
-### Phase 25.3: Editor Filesystem Client Capability and AI-Safe Mutation
+### Phase 25.1: `clay-agent` Daemon (Prism 0.3.0 Host)
 
 Focus areas:
 
-- Implement the ACP client `fs/read_text_file` capability: map agent reads to
-  Clay server document snapshots including dirty (unsaved) buffers, with disk
-  fallback for unopened files.
-- Implement `fs/write_text_file` routed through the Clay document write path,
-  gated by the Phase "AI-Safe Mutation and Region Locks" contract: explicit
-  document versions, region locks, permission scopes, preview/apply/reject
-  flows, and conflict explanations — agent edits never bypass the same
-  authority model as package edits.
-- Render ACP `diff` tool-call content and `locations` in the UI: a diff review
-  surface (accept/reject per change), jump-to-line navigation, and
-  agent-activity markers in open documents.
-- Terminal client capability explicitly deferred until the terminal emulator
-  package exists; do not advertise `terminal` capabilities until then.
+- First-party TypeScript package `clay-agent` embedding `@arnilo/prism@0.3.0`,
+  `@arnilo/prism-providers` plus the enterprise adapters Prism umbrellas omit
+  (`@arnilo/prism-provider-azure`, `-bedrock`, `-vertex`),
+  `@arnilo/prism-credentials-node`, `@arnilo/prism-session-store-sqlite`,
+  `@arnilo/prism-model-router`, and `@arnilo/prism-tool-validator-json-schema`.
+  Do not load coding-agent, coding-security, ACP, MCP, browser, or web-tools
+  packages in this phase.
+- Extension kernel loads every first-party provider package with host-supplied
+  credential resolvers. Model catalogs come from each package’s static
+  featured list; caller-gated `list*Models` runs only on explicit user refresh,
+  never at setup.
+- `createAgent` / `createAgentSession` per Clay session. Profiles are
+  `AgentDefinition`s registered by Clay packages against the same kernel,
+  registries, store, and credential resolver. `@clay/chat` registers Chat:
+  no tools, no skills, package-owned system prompt. The daemon does not
+  hard-code Chat as the only profile.
+- SQLite session/run store under Clay’s per-user data directory. Sessions
+  survive daemon restart. Encrypted credential vault (and OS keychain when
+  available) in the same data dir; no silent plaintext fallback.
+- Stdio JSON-RPC: session new/list/load/resume/delete, prompt, cancel, steer,
+  provider list/status, model list/search, credential put/oauth-start/oauth-
+  poll/delete, agent-profile list. Bounded payloads, redacted errors, graceful
+  shutdown, structured logs with secret scrubbing.
+- Node >= 20 detection with a clear failure message. Daemon is Clay-core
+  owned, not a package-triggered process grant.
 
 Expected outcome:
 
-- The agent sees unsaved editor state, proposes edits through ACP diffs, and
-  applies them only through the reviewed, versioned, permission-scoped write
-  path with visible conflict boundaries between user edits and agent edits.
+- `clay-agent` is spawnable standalone. A prompt against a configured mock or
+  live provider streams `AgentEvent`s over stdio and persists the session
+  without any editor, ACP, or tool involvement.
 
-### Phase 25.4: Agent UX Surfaces (Chat, Approvals, Modes, Sessions)
+### Phase 25.2: Clay Server Agent Protocol and Process Manager
 
 Focus areas:
 
-- Agent chat pane and tool-call tree as SDUI surfaces reusing the Masonry pane
-  and package-UI patterns; streaming deltas, thinking/reasoning display once
-  Prism F1 lands, usage/context-window display once Prism B1 lands.
-- Permission approval and elicitation UI with the four ACP outcomes
-  (allow-once / allow-for-run / reject-once / reject-for-run) and sticky
-  decision visibility, wired to the existing approvals/permissions package
-  surfaces.
-- Mode selector (plan/execute/review) and boolean config options advertised
-  through `session.configOptions.boolean`; plan updates once Prism F5 lands
-  behind the client `plan` capability.
-- Session picker over `session/list` with resume/delete, restore-after-restart
-  via the durable recovery seam, and session titles once Prism F6 lands.
-- MCP server configuration UI feeding the agent-side `mcp.select` allow-list;
-  slash-command affordances once Prism F9 lands.
+- Agent process manager next to existing server connection machinery:
+  spawn/restart/health-check/log-capture for `clay-agent`, one daemon per
+  Clay server (not per tab). Tabs multiplex sessions through it.
+- Clay IPC in `src/protocol`: agent session ops, streaming event snapshots,
+  provider/model inventory, credential setup intents that never echo secrets,
+  agent-profile selection. Same compatibility-test gate as other ops.
+- Server is the authority for session identity, selected profile/provider/
+  model, and transcript snapshots. Client renders and forwards composer
+  input. Typing in the editor hot path never waits on the daemon.
+- New reserved core API domain `agent` (`RESERVED_CORE_API_DOMAINS`).
+  Commands such as `agent.serverPrompt`, `agent.serverCancel`,
+  `agent.serverRegisterProfile`, `agent.clientOpenProviderPicker`,
+  `agent.clientOpenModelPicker`, `agent.clientOpenAgentPicker`,
+  `agent.clientOpenProviderSetup`.
+- Last-used provider/model are documented `init.js` configuration APIs.
+  The live default profile is whichever loaded package registered one
+  (`loadPackage("@clay/chat")` in the canonical example), not a silent
+  compiled Chat surface.
 
 Expected outcome:
 
-- A user can run the full roadmap agent loop (plan, execute, review, test,
-  document, user to-do) in the GUI with visible approvals, diffs, modes, and
-  recoverable sessions, without leaving Clay's existing permission model.
+- GUI can create a chat session, stream a reply, cancel, and resume after
+  restart, all through typed protocol messages with CI-guarded compatibility
+  tests. No ACP crate on the Rust side.
 
-### Phase 25.5: Hardening, Budgets, and Documentation
+### Phase 25.3: Empty-Tab Pane Content and `@clay/chat`
 
 Focus areas:
 
-- Performance budgets for agent round trips (prompt first update, permission
-  round trip, diff apply) CI-guarded like existing budgets; bounded event and
-  payload sizes end to end (ACP caps, Clay IPC caps, SDUI payloads).
-- Security review of the trust boundary: agent child process privileges,
-  sandbox capability honesty on Linux (and deny-by-default `shell` on Windows
-  until a sandbox backend exists, matching Prism F10), credential flow,
-  ownership-scoped session persistence.
-- Protocol compatibility tests for every new Clay IPC message; generated
-  registry entries and Clay JS API docs for any new public surface; manual
-  test plan update per the documentation contract.
-- Dependency policy: exact Prism version pinning, upgrade checklist, and a
-  tracked re-evaluation of ACP v2/UNSTABLE exposure when Prism publishes it.
+- Open the Phase 22 pane-content contribution path (today not public). Empty
+  / new-tab `main` hosts at most one validated package SDUI tree through the
+  existing `PackageRegionWidget`. No Chat-named pane kind. Later terminal
+  stays a distinct kind (PTY ≠ SDUI).
+- Core fallback when no contribution is loaded: keep a slim `WelcomeWidget`
+  with Open File / Open Folder only. No fake welcome text document.
+- First-party `@clay/chat`: bundled, explicit `loadPackage("@clay/chat")`.
+  Registers the Chat profile and the default entry surface (greeting, agent/
+  provider/model buttons, Open File, Open Folder, focused composer). Chat
+  works with no workspace. Greeting copy lives in the package.
+- Open File still routes `documents.clientOpenFileDialog` and replaces the
+  pane with the editor on `DocumentOpened`. Open Folder still routes
+  `workspace.clientOpenFolderDialog` and binds the tab workspace without
+  dismissing the entry surface.
+- Catalog: reuse `button`, `list`, `scroll`; add generic multiline `textArea`
+  if `textInput` cannot host the composer. No `agentChat` one-off. Command
+  Centre remains host-owned (not a package dropdown).
+- `@clay/chat` declares extension points (`entrySurface`, `chromeActions`).
+  A third-party package may `replaces` `@clay/chat` (user approval) and ship a
+  different landing. Replacement stays in the third-party runtime.
+- Connection/runtime diagnostics stay visible. Global keybindings keep
+  working while the composer has focus.
 
 Expected outcome:
 
-- The agent integration is performance-bounded, review-clean, documented in
-  the registries and manual test plan, and safe to upgrade Prism deliberately.
-  
+- With `@clay/chat` loaded, opening Clay or a new tab shows the greeting and
+  a ready composer. File and folder remain one click away. Chat does not
+  require a workspace. Without the package, only the core file/folder
+  fallback appears. A replacement package can own the landing instead.
+
+### Phase 25.4: Command Centre Provider, Model, Agent, and Setup
+
+Focus areas:
+
+- New `TransientMenuSession` kinds on the existing centered Command Centre
+  (no second overlay system, shared fuzzy matcher): agent picker, provider
+  picker, model picker, provider setup.
+- Entry-surface buttons invoke the same commands as the Command Centre.
+  There is no parallel dropdown widget.
+- Provider picker lists every loaded Prism provider with configured/
+  unconfigured state. Last item is “Configure provider…”, which opens setup.
+- Provider setup is data-driven from Prism auth-method descriptors: API-key
+  secret field (masked, never snapshotted) or OAuth device-code (user code +
+  poll, then store). Custom OpenAI-compatible provider: base URL + key.
+  Successful setup makes that provider selectable immediately.
+- Model picker lists models from configured providers only, fuzzy-searchable,
+  grouped by provider. Explicit catalog refresh is a command, not a
+  background fetch on every keystroke.
+- Agent picker lists registered profiles only (Chat when `@clay/chat` is
+  loaded). Coding Agent appears when `@clay/coding-agent` loads in Phase 29.
+  Work / PA / Research / Finance appear when those packages load.
+- All four flows are also reachable as ordinary Command Centre commands so
+  keyboard-only use never needs landing buttons.
+
+Expected outcome:
+
+- User configures a provider (key or OAuth), picks a model, picks Chat, and
+  starts typing — from the `@clay/chat` entry surface or entirely from
+  Command Centre.
+
+### Phase 25.5: Chat Transcript and Session UX
+
+Focus areas:
+
+- Server-authoritative transcript: user/assistant/thinking/error/usage.
+  `@clay/chat` projects it through catalog list/scroll. No client-side model
+  calls. A replacement landing may project the same snapshots differently.
+- Composer: Enter sends, a documented chord inserts newline, Escape cancels
+  an in-flight run. Empty submit is a no-op.
+- Session list/resume/delete in Command Centre. New tab starts a new session;
+  restoring a session reopens the entry surface with history from the SQLite
+  store (redacted, bounded).
+- Unconfigured-provider empty state tells the user to configure a provider;
+  it does not fail as a generic server error.
+- No tools, no approvals, no diffs, no MCP, no slash-command runtime in this
+  phase. Thinking/usage render when Prism events carry them.
+
+Expected outcome:
+
+- A configured user with `@clay/chat` loaded can have a multi-turn LLM
+  conversation in Clay, cancel it, and resume it after restart.
+
+### Phase 25.6: Hardening, Budgets, and Documentation
+
+Focus areas:
+
+- Budgets: daemon spawn, prompt-to-first-delta, per-delta IPC, transcript
+  snapshot size, menu open/filter. CI-guarded like existing budgets. Deltas
+  never block keypress-to-local-paint.
+- Security review: child-process privileges, credential vault permissions,
+  OAuth redirect/device-code honesty, no secret leakage in protocol/logs/
+  a11y, package-code denial of daemon access, truthful “no sandbox / no
+  tools” language for Chat.
+- Protocol compatibility tests for every new IPC message; Clay JS API docs
+  and `examples/init.js` / `examples/packages/first-party.js` for `agent.*`
+  commands, `loadPackage("@clay/chat")`, and last-used model options;
+  generated registry; wiki; manual test plan; `clay-ui` catalog update for
+  pane-content contribution and `textArea` if added.
+- Dependency policy: exact 0.3.0 pin, upgrade checklist. First-party Clay
+  never speaks ACP or AG-UI. Revisit only if a later product goal is
+  third-party ACP agents or a web front-end sharing this daemon.
+
+Expected outcome:
+
+- Chat-first Prism 0.3.0 host is performance-bounded, review-clean, and the
+  stable base `@clay/coding-agent` (Phase 29) and later agent packages extend
+  without a second daemon or a second credential store.
 
 
 ## Phase 26: Editor Rendering Quality Foundation
@@ -832,40 +931,108 @@ documented; new formats consume it declaratively.
 
 Sequencing note: Phase 26 (rendering) first — new formats cannot be judged
 visually until paint is fixed; then 27 (data flow) before any new package is
-authored; 28 can proceed in parallel with 27. Tier 2 WASM execution stays
+authored; 28 can proceed in parallel with 27. Phase 25 (AI-native chat host)
+does not wait on 26–28; it is a different surface. Phase 29 (coding agent)
+requires Phase 25 plus AI-Safe Mutation. Tier 2 WASM execution stays
 scheduled with Phase 23 ecosystem work as planned; the adoption target once
 built is server-side capture→vocabulary mapping so third-party grammars are
 data-only packages.
 
-## ACP/AG-UI
+## Phase 29: Coding Agent, CLI-Parity, Clay UI (no ACP)
 
-## Coding agent
-- Basics like pi
+Ship first-party `@clay/coding-agent` on the Phase 25 host. Same daemon,
+credentials, provider/model UI, composer/transcript primitives, and `agent.*`
+APIs. No ACP, no AG-UI, no second process. The package registers the Coding
+Agent profile, tool UX, diffs, and approvals using Clay UI primitives — the
+same pattern as `@clay/chat`. Third-party packages may `extends` declared
+extension points (tools, skills, approvals, MCP allow-list, prompt) or
+`replaces` the whole package with user approval; replacement stays in the
+third-party runtime. Clay is the UI a CLI agent would have used a TTY for.
 
-### Loop
-- Roadmap
-- Spec/Requirements -> Acceptance Criteria
-- Plan 
-- Execute
-- Review (ponytail)
-- Test
-- Document
-- User to-do
+Bar: everything `@arnilo/prism-coding-agent` gives a CLI host, plus the
+editor-aware pieces a CLI cannot see. Do not ship a chat-with-tools toy.
 
-General details:
-- After every turn plan/task, OM compaction
-- If user decision required, choose the simplest and document in user to-do
-- Loop can be started at any stage
-- Can be run manually. Differentiate between auto and manual
-- Each step follows acceptance criteria separately as context injection
-- Context inspection
-- Caveman
-- Ponytail
-- Providers: Alibaba cloud, Ollama-cloud, Opencode-go, Kimi, OpenAI Oauth, Cursor SDK, Gemini SDK
+Dirty buffers do **not** go through ACP `fs/read_text_file`. Prism tools
+already take pluggable `ReadOperations` / `WriteOperations` / `EditOperations`.
+Clay implements those seams over the server document registry (dirty snapshot
+first, disk fallback). `createAcpFilesystemOperations` is unused.
 
+### CLI-parity contract
 
+| CLI agent capability | Clay surface |
+| --- | --- |
+| Multi-turn prompt, stream, cancel, steer | Phase 25 composer primitive + protocol |
+| Session persist / resume / list / delete | Phase 25 SQLite store |
+| Thinking + usage | Transcript rows from `AgentEvent` |
+| Compaction when context fills | `@arnilo/prism-compaction` / observational memory |
+| Nine tools: `shell` `read` `write` `edit` `repo_list` `repo_search` `glob` `delete` `move` | Same factories; `read`/`write`/`edit` use Clay document operations |
+| Opt-in Git tools | `createGitTools` registered on the coding profile |
+| `ask_user_decision` | Existing Clay confirmation / Command Centre session |
+| One-shot `shell` + output | Tool card in transcript; cwd = tab workspace |
+| Long-running processes | `createProcessSessions` streamed into tool cards; `pty: true` fail-closed until the terminal package |
+| Execution policy / approvals | `createCodingApprovalPolicy`; UI for allow-once / allow-for-run / reject-once / reject-for-run |
+| Linux sandbox | `@arnilo/prism-coding-security` native adapter; Windows `shell` deny-by-default |
+| Plan / todo markdown | `writeCodingPlanFile` / transcript plan block |
+| MCP | `@arnilo/prism-mcp` behind an explicit allow-list; off until configured |
+| Images in `read` | Supported; binary never silently falls back to a second path |
+| AGENT.md / skills | Prism host skills on the coding profile when wired |
+| Open-file / selection context | Injected by Clay server (CLI has no editor) |
+| Unsaved buffers | Clay document operations (CLI only sees disk) |
+| Apply edits with undo/lease/version | AI-Safe Mutation (below), not raw disk write of open docs |
+| Diff review | Editor diff surface + jump-to-line; not TTY patches only |
+| Interactive PTY | Deferred; terminal emulator package |
 
-#### Requirements list
+### Phase 29.1: Clay document operations and AI-safe mutation
+
+- Implement Prism `ReadOperations` / `WriteOperations` / `EditOperations` in
+  `clay-agent` as reverse-RPC to the Clay server. Prefer the open document
+  snapshot (including dirty). Disk only if the path is not open.
+- `delete` / `move` / `glob` / `repo_*` stay disk-backed. After those
+  mutate a path, server reloads or invalidates any open document on that path.
+- Writes and edits of open documents go through AI-Safe Mutation: explicit
+  document version, range, permission scope, preview/apply/reject, conflict
+  explanation. Agent edits never bypass package-edit authority.
+- No ACP filesystem client. No `createAcpFilesystemOperations`.
+
+### Phase 29.2: Coding profile, tools, sandbox, approvals
+
+- First-party `@clay/coding-agent` (`loadPackage("@clay/coding-agent")`)
+  registers the Coding Agent profile and its extension points. Load
+  `@arnilo/prism-coding-agent` and `@arnilo/prism-coding-security` in the
+  existing daemon when that package is enabled. Picker row appears because
+  the package registered, not because core un-stubs a reserved name.
+- Register `createCodingTools` + `createGitTools` + `createAskUserDecisionTool`
+  + `createProcessSessions` (no PTY backend).
+- Workspace required for Coding Agent. Chat still works with none. Open
+  Folder on the agent view is the grant.
+- Approvals use the Phase 25 permission event variants. Mutating tools wait.
+- Linux sandbox adapter; truthful “not sandboxed” language on Windows.
+
+### Phase 29.3: Tool UX, diffs, loop, MCP
+
+- Tool-call tree in the transcript (start/progress/finish/error). Shell and
+  process output are bounded cards, not a hidden log.
+- Diff review, jump-to-line, activity markers on open documents.
+- Agent loop UX: plan / execute / review / test / document / user to-do.
+  Observational-memory compaction. Caveman/Ponytail as opt-in Prism behavior
+  packages. Auto vs manual loop. Context inspection.
+- MCP allow-list configuration. Slash commands only if Prism host seams are
+  already wired — do not invent a second command language.
+
+Expected outcome:
+
+- User loads `@clay/coding-agent`, picks Coding Agent, grants a folder, and
+  gets a CLI-class coding agent inside Clay: tools, sandbox, approvals,
+  dirty-buffer awareness, diffs, sessions. No ACP on either side of the
+  process boundary. A third-party package can extend or replace this without
+  forking Clay core.
+
+## ACP / AG-UI interop (later, not first-party)
+
+Out of the first-party coding-agent path. Revisit ACP only if Clay must host
+third-party ACP agents or expose this agent to other ACP editors. Revisit
+AG-UI only if a web front-end must share the daemon. Do not add either crate
+to the Rust client or to `clay-agent` for Chat or Coding Agent.
 
 ## AI-Safe Mutation and Region Locks
 
@@ -891,10 +1058,17 @@ Expected outcome:
 
 ## Handling config, key binding, theme, font from UI with config file override
 
-## Agentic AI with Prism
-- Prism upgrade with Web agent for search with Exa, Firecrawl, Brave search
-- Agentic web action
-- Web bridge
+## Agentic AI with Prism (later, on the Phase 25 host)
+
+After `@clay/chat` (Phase 25) and `@clay/coding-agent` (Phase 29), the same
+`clay-agent` loads optional Prism capability packages — no new runtime:
+
+- Web agent: `@arnilo/prism-web-tools` (Brave / Exa / Firecrawl) behind
+  explicit user-configured credentials and allow-lists
+- Agentic web action / browser: `@arnilo/prism-browser` with host-owned
+  Playwright lifecycle
+- Web bridge only if a remote UI must share the daemon (AG-UI server
+  package), not as the native Clay path
 
 ## JSON
 
@@ -912,27 +1086,37 @@ Expected outcome:
 
 ## PDF mode with links to md files
 
-## Personal Assistant Agent
-- Extends markdown mode for personal knowledge management
-- To do lists
-- Schedule management
-- Automation for daily tasks
+## Personal Assistant Agent (later, Phase 25 host)
 
-## Work Agent
-- Extends markdown mode for work management
-- Office CLI with GUI
+First-party package registering a Prism `AgentDefinition` + picker row.
+Extends markdown mode for personal knowledge management, to-do lists,
+schedule, daily-task automation. No new daemon. Third-party extend/replace
+via declared extension points + user approval.
 
-## Research Agent
-- Reference management
-- Show reference from source
+## Work Agent (later, Phase 25 host)
 
-## Finance Agent
+First-party package. Work management; `@arnilo/prism-work-tools`
+(M365 / GWS) only with explicit OAuth connectors. No new daemon.
 
-## Clay agent
-- Update wiki for AI agents and access in user device
-- Extension writing methodology and knowledge system for AI agents
+## Research Agent (later, Phase 25 host)
 
-## UI update for managing agents
+First-party package. Reference management, citations from source, web-tools
+when that phase has landed. No new daemon.
+
+## Finance Agent (later, Phase 25 host)
+
+First-party package when a dedicated phase lands; not a core reserved stub.
+
+## Clay Agent (later)
+
+Meta-agent: wiki updates, extension-writing methodology, on-device knowledge
+for AI agents. Same host, same credential store.
+
+## UI for managing agents
+
+Shipped in Phase 25.4 (Command Centre agent/provider/model/setup). Later
+agent packages add picker rows and setup descriptors by registering
+profiles; they do not invent a new settings surface.
 
 ## Phase 21: Remote, Container, and Multi-Client Hardening
 

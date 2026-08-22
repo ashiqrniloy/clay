@@ -6,7 +6,7 @@ Use this before writing or updating any Clay plan.
 
 - **UI skill routing:** If work touches UI, theme, typography, tokens, components, layout, SDUI, or accessibility, run `npx ui-skills start` before reviewing or editing implementation; inspect the relevant category, load 1–3 selected skills, and record the routing evidence.
 - **Decision alignment:** Identify relevant decision logs and roadmap sections.
-- **Authority boundary:** State which component owns state, behavior, execution, persistence, and validation.
+- **Authority boundary:** State which component owns state, behavior, execution, persistence, and validation. Agent work uses `agent-host.md`: Prism in `clay-agent`, Clay IPC, no ACP/AG-UI for first-party agents. Product landings and agent profiles are packages (`product-surfaces-are-packages.md`); core owns host primitives, not greeting copy.
 - **Client hot path:** Confirm ordinary typing/rendering does not block on IPC, server work, JavaScript, AI, file IO, or full-document serialization.
 - **Server authority:** Preserve server ownership of canonical documents, versions, transactions, file/workspace authority, extension execution, leases, and locks.
 - **Behavior manifest:** If a feature changes hot-path editor behavior, decide whether it belongs in a server-issued behavior manifest, server-first command, or later phase.

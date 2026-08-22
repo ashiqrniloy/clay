@@ -86,3 +86,6 @@ Live AT-SPI aggregate smoke repeatedly scans the entire desktop tree and timed o
 ## 26-08-21 04:30 — p2-visual-recapture-input
 
 P2 recapture repeated the same Wayland limitation: static fixtures pass, but completion/Command Centre/fold/link/transform/inlay-toggle/resize states cannot be driven because doctor reports no keyboard backend (`/dev/uinput` denied, no xdotool/ydotool, RemoteDesktop AvailableDeviceTypes=0). Workaround was static capture plus explicit UNRESOLVED artifacts and structural/security tests. Prevent recurrence with a deterministic no-input fixture action path or keyboard-capable review host.
+## 26-08-22 17:55 — ui-review-harness-input
+
+UI review needed repeated temporary fixture directories and copied capture scripts because `scripts/capture-ui-review.sh` hard-codes fixture names and has no generic `--init`/package fixture path. Interactive menu verification also repeated as unresolved because Wayland host lacks keyboard input (`/dev/uinput` denied, no xdotool/ydotool/portal keyboard). Add a generic isolated package/init fixture option and a documented semantic/keyboard backend check to avoid this workaround.

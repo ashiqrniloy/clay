@@ -8,12 +8,14 @@
 - `src/protocol/parse.rs`
 - `src/protocol/folding.rs`
 - `src/protocol/language_intelligence.rs`
+- `src/protocol/agent.rs`
 - `tests/editor_intelligence_protocol.rs`
+- `tests/agent_protocol.rs`
 - `tests/typography_protocol.rs`
 
 ## Overview
 
-The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 introduced `DecorationViewportRequest`; version 3 accompanies grouped native decoration chunks and analyzer-only diagnostic semantics; version 4 introduces the Phase 19 complete `RuntimeStateSnapshot` / `RuntimeGenerationInstalled` reload contract; version 5 (Plan 059) adds `ServerMessage::DecorationBatch` for single-frame multi-chunk parse updates and pairs with the `ReadPumpGuard` cancellation-safe framing pattern; protocol v15 moves `InitialDocument` and initial workspace SDUI after tab binding. Phase 28 adds protocol versions 20–23 for `FoldingRangeSet`, Link targets, InlayHint payloads, and completion recency metadata; the current wire pin is 23. Older servers are rejected before incompatible message discriminants or parse-result semantics are used.
+The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 introduced `DecorationViewportRequest`; version 3 accompanies grouped native decoration chunks and analyzer-only diagnostic semantics; version 4 introduces the Phase 19 complete `RuntimeStateSnapshot` / `RuntimeGenerationInstalled` reload contract; version 5 (Plan 059) adds `ServerMessage::DecorationBatch` for single-frame multi-chunk parse updates and pairs with the `ReadPumpGuard` cancellation-safe framing pattern; protocol v15 moves `InitialDocument` and initial workspace SDUI after tab binding. Phase 28 adds protocol versions 20–23 for `FoldingRangeSet`, Link targets, InlayHint payloads, and completion recency metadata; Phase 25 bumps the pin to 24 for boxed `ClientMessage::Agent` / `ServerMessage::Agent`. The current wire pin is 24. Older servers are rejected before incompatible message discriminants or parse-result semantics are used.
 
 ## Responsibilities
 
@@ -129,7 +131,8 @@ stream ──tokio::io::split──▶ reader ──[read-pump task]──▶ mp
 - `tests/typography_protocol.rs`: codec round trip for all profiles/revision plus invalid profile and role-layer rejection coverage.
 - `src/client/mod.rs` and `src/server/connection/mod.rs`: bootstrap ordering and live-delivery tests consume the fifth `ActiveTypography` frame before post-bootstrap SDUI/capability traffic.
 - `src/protocol/codec.rs`: rejection tests for oversized Phase 5 frames, oversized manifest messages, invalid client archived bytes, invalid server/manifest archived bytes, compact generated framing/archive mutations, truncation sweeps, deterministic byte mutations, misaligned declared lengths, and read-side oversized declarations.
-- `tests/editor_intelligence_protocol.rs`: Phase 28 codec compatibility for protocol version 23, folding, Link/InlayHint `DecorationSet`/`DecorationBatch`, inert `DecorationTarget` click/hover data, completion recency, hover request/results, and bounded malformed-frame rejection.
+- `tests/editor_intelligence_protocol.rs`: Phase 28 codec compatibility for protocol version 24 handshake pin, folding, Link/InlayHint `DecorationSet`/`DecorationBatch`, inert `DecorationTarget` click/hover data, completion recency, hover request/results, and bounded malformed-frame rejection.
+- `tests/agent_protocol.rs`: Phase 25 boxed agent command/message round-trips, secret omission, malformed-frame rejection, reserved `agent` domain.
 - Relevant command: `cargo test protocol`.
 
 ## Related

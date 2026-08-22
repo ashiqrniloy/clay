@@ -981,7 +981,10 @@ mod tests {
             },
             active_typography: ActiveTypography::default(),
             sdui_tree: representative_sdui_tree(),
-            package_ui: PackageUiSnapshot { version: 2 },
+            package_ui: PackageUiSnapshot {
+                version: 2,
+                empty_tab: None,
+            },
             documents: vec![DocumentRuntimeRenderState {
                 document_id: 1,
                 document_version: 3,

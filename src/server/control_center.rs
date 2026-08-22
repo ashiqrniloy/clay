@@ -248,6 +248,10 @@ fn command_to_menu_item(command: &RegisteredCommand) -> TransientMenuItem {
     .with_provenance(provenance)
 }
 
+pub(crate) fn score_menu_item(item: &TransientMenuItem, query: &str) -> Option<i32> {
+    query_score(item, query)
+}
+
 fn query_score(item: &TransientMenuItem, query: &str) -> Option<i32> {
     if query.is_empty() {
         return Some(0);
@@ -451,6 +455,11 @@ mod tests {
         assert!(ids.contains(&"controlCenter.open"));
         assert!(ids.contains(&"runtime.reloadConfiguration"));
         assert!(ids.contains(&"workspace.refresh"));
+        assert!(ids.contains(&"agent.clientOpenAgentPicker"));
+        assert!(ids.contains(&"agent.clientOpenProviderPicker"));
+        assert!(ids.contains(&"agent.clientOpenModelPicker"));
+        assert!(ids.contains(&"agent.clientOpenProviderSetup"));
+        assert!(ids.contains(&"agent.clientOpenSessionPicker"));
 
         let reload = session
             .items()

@@ -108,9 +108,10 @@ use self::{
     typography::op_clay_theme_set_typography,
     ui::{
         op_clay_ui_register_component_contribution, op_clay_ui_register_input_contribution,
-        op_clay_ui_register_panel_contribution, op_clay_ui_register_theme_token,
-        op_clay_ui_register_transient_overlay_contribution, op_clay_ui_register_ui_state_scope,
-        op_clay_ui_request_layout_intent, op_clay_ui_set_layout_override,
+        op_clay_ui_register_pane_content_contribution, op_clay_ui_register_panel_contribution,
+        op_clay_ui_register_theme_token, op_clay_ui_register_transient_overlay_contribution,
+        op_clay_ui_register_ui_state_scope, op_clay_ui_request_layout_intent,
+        op_clay_ui_set_layout_override,
     },
     workspace::{
         op_clay_workspace_add_root, op_clay_workspace_cancel_listing,
@@ -1804,6 +1805,21 @@ impl ClayOpState {
             .set_engine_preference(target, tier)
     }
 
+    pub(super) fn register_pane_content_contribution(
+        &self,
+        package: &crate::packages::manifest::ClayPackageManifest,
+        declaration: &serde_json::Value,
+    ) -> Result<
+        crate::server::ui::RegisteredPaneContentContribution,
+        crate::server::ui::UiContributionDiagnostic,
+    > {
+        let command_ids = self.registered_command_ids();
+        self.ui
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .register_pane_content(package, declaration, &command_ids)
+    }
+
     pub(super) fn register_panel_contribution(
         &self,
         package: &crate::packages::manifest::ClayPackageManifest,
@@ -1946,7 +1962,7 @@ fn op_clay_runtime_record(state: &mut OpState, #[string] value: String) -> Resul
 }
 
 // Trusted domain: configuration evaluation and bundled first-party packages.
-// This is the full trusted op set (82 ops).
+// This is the full trusted op set (83 ops).
 extension!(
     clay_runtime_trusted_extension,
     ops = [
@@ -1962,6 +1978,7 @@ extension!(
         op_clay_theme_set_appearance,
         op_clay_theme_set_theme,
         op_clay_theme_set_typography,
+        op_clay_ui_register_pane_content_contribution,
         op_clay_ui_register_panel_contribution,
         op_clay_ui_register_component_contribution,
         op_clay_ui_register_transient_overlay_contribution,
@@ -2049,6 +2066,7 @@ extension!(
         op_clay_runtime_record,
         op_clay_sdui_define_node,
         op_clay_sdui_publish_tree,
+        op_clay_ui_register_pane_content_contribution,
         op_clay_ui_register_panel_contribution,
         op_clay_ui_register_component_contribution,
         op_clay_ui_register_transient_overlay_contribution,
@@ -2152,12 +2170,12 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 84);
-        // 45 = 37 public contribution ops (including folding publication) +
+        assert_eq!(trusted.len(), 85);
+        // 46 = 38 public contribution ops (including folding publication) +
         // the seven shared `editor-control` gated editor ops + the gated
         // programmatic execution op (follow-up round); visibility grants
         // nothing without approved permission + declared active mode.
-        assert_eq!(package.len(), 45);
+        assert_eq!(package.len(), 46);
         assert!(
             package.is_subset(&trusted),
             "every third-party op must also exist in the trusted extension"

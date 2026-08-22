@@ -614,6 +614,10 @@ impl EditorWidget {
     /// overlays + non-centered active menus) from the current state when it
     /// changed (plan 070 step 13e). Centered Command Centre menus are routed
     /// to the driver-owned window layer instead.
+    pub fn sync_empty_tab(&mut self, ctx: &mut MutateCtx<'_>) {
+        self.view.sync_empty_tab(ctx);
+    }
+
     pub fn sync_overlays(&mut self, ctx: &mut MutateCtx<'_>) {
         if !self.sdui.take_overlays_dirty() {
             return;
@@ -697,9 +701,14 @@ impl EditorWidget {
         value: &str,
     ) -> Option<crate::protocol::SduiActionIntent> {
         let mut host = this.ctx.get_mut(&mut this.widget.panel_host);
-        crate::masonry_package_region::PackagePanelHost::text_input_commit(
+        if let Some(intent) = crate::masonry_package_region::PackagePanelHost::text_input_commit(
             &mut host, area_id, value,
-        )
+        ) {
+            return Some(intent);
+        }
+        drop(host);
+        let region = this.ctx.get_mut(&mut this.widget.view.package_entry);
+        region.widget.text_input_commit(area_id, value)
     }
 
     /// Plan 071 caret-transport fix: whether the effective caret style
@@ -988,6 +997,8 @@ impl EditorWidget {
         self.sdui.apply_snapshot(candidate.sdui_tree.clone());
         self.sdui.install_package_ui_snapshot(&candidate.package_ui);
         self.sdui_ui_version.set(self.sdui.ui_version());
+        self.view
+            .set_empty_tab(candidate.package_ui.empty_tab.clone());
 
         // Per-document decorations/diagnostics apply to the pane-1 view only
         // here; the driver fans the other panes' documents out.
@@ -1329,7 +1340,9 @@ impl Widget for EditorWidget {
         if let Some(text_run_id) = text_run_id {
             children.push(text_run_id);
         }
-        if self.view.welcome_visible() {
+        if self.view.showing_package_entry() {
+            children.push(self.view.package_entry_widget_id().into());
+        } else if self.view.welcome_visible() {
             let (welcome_status_id, welcome_status) = accessibility_status_node(
                 self.view.welcome_widget_id(),
                 self.view.accessibility_label(),
@@ -1377,6 +1390,7 @@ impl Widget for EditorWidget {
         // (plan 070 step 13e).
         ChildrenIds::from_slice(&[
             self.view.welcome_widget_id(),
+            self.view.package_entry_widget_id(),
             self.panel_host.id(),
             self.region.id(),
             self.overlay_host.id(),
@@ -2777,6 +2791,7 @@ mod tests {
             },
             package_ui: crate::protocol::PackageUiSnapshot {
                 version: generation,
+                empty_tab: None,
             },
             documents: vec![crate::protocol::DocumentRuntimeRenderState {
                 document_id,

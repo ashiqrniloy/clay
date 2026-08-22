@@ -33,8 +33,8 @@ use clay::masonry_editor::{EditorAction, EditorWidget};
 use clay::masonry_pane_document::PaneDocumentView;
 use clay::masonry_shell::ClayShellWidget;
 use clay::protocol::{
-    ClientId, DocumentMetadata, SduiActionIntent, SduiActionValue, TabId, TabRegistrySnapshot,
-    WorkspaceRootId,
+    ClientId, DocumentMetadata, RoutingPolicy, SduiActionIntent, SduiActionValue, TabId,
+    TabRegistrySnapshot, WorkspaceRootId,
 };
 use clay::shell::{PaneId, PersistedTabState, PersistedWindowState, TransientMenuSession};
 
@@ -329,6 +329,16 @@ impl Driver {
         // definition navigation) record the active pane as the open target so
         // the answering DocumentOpened loads into exactly that pane even if
         // focus moves before the server responds.
+        if matches!(
+            intent.command_id.as_str(),
+            "documents.clientOpenFileDialog" | "workspace.clientOpenFolderDialog"
+        ) {
+            self.spawn_native_dialog_command(client::ClientUiCommandRoute {
+                command_id: intent.command_id,
+                routing_policy: RoutingPolicy::ClientUiCommand,
+            });
+            return;
+        }
         if let Some(request) = open_intent_pending_request(&intent) {
             self.record_pending_open(ctx, window_id, request);
         }

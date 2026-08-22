@@ -1,5 +1,6 @@
 # Loadable first-party package roots under packages/.
 # Unlisted directories (stray extras) are never trusted.
+root = "chat"
 root = "git"
 root = "javascript"
 root = "lsp-javascript"

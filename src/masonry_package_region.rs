@@ -195,6 +195,14 @@ impl PackageRegionWidget {
         self.pods.get(&id_hash).map(|record| record.id)
     }
 
+    /// First composer `TextArea` in document order, if the tree has one.
+    pub(crate) fn first_text_input_id(&self) -> Option<WidgetId> {
+        self.focusable_sink
+            .iter()
+            .copied()
+            .find(|id| self.text_input_intents.contains_key(id))
+    }
+
     /// Wholesale reconcile (no `MutateCtx`): rebuild the subtree from `tree`.
     /// Used by standalone tests and as the fallback when the root kind changes.
     pub(crate) fn reconcile_tree(&mut self, tree: &PackageUiComponentTree) {
@@ -2827,8 +2835,9 @@ impl Widget for PackageTextInput {
     }
 
     fn accessibility_role(&self) -> Role {
-        // The inner `TextArea` reports `Role::TextInput`; this wrapper groups it.
-        Role::Group
+        // Keep the package field named at its host node; the inner TextArea
+        // supplies editable text/value semantics as its child.
+        Role::TextInput
     }
 
     fn accessibility(
@@ -4146,6 +4155,22 @@ mod tests {
         let (input, _) =
             PackageTextInput::from_component(&filled, 0, TypographyRegistry::default(), theme);
         assert!(!input.is_empty, "non-empty field hides the placeholder");
+    }
+
+    #[test]
+    fn first_text_input_id_follows_document_order() {
+        let tree = component(json!({
+            "kind": "panel",
+            "id": "root",
+            "title": "Chat",
+            "children": [
+                { "kind": "button", "id": "go", "label": "Go" },
+                { "kind": "textInput", "id": "composer", "title": "Message" }
+            ]
+        }));
+        let mut region = PackageRegionWidget::new();
+        region.reconcile_tree(&tree);
+        assert!(region.first_text_input_id().is_some());
     }
 
     #[test]

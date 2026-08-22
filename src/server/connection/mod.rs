@@ -11,8 +11,8 @@ use tokio::{
 };
 
 use crate::protocol::{
-    ClientId, ClientMessage, DocumentId, PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic,
-    ServerMessage, TabCommand, TabId, TabRegistrySnapshot, WorkspaceRootId,
+    AgentServerMessage, ClientId, ClientMessage, DocumentId, PROTOCOL_VERSION, ProtocolErrorCode,
+    RuntimeDiagnostic, ServerMessage, TabCommand, TabId, TabRegistrySnapshot, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
@@ -145,7 +145,8 @@ fn client_message_identity(message: &ClientMessage) -> Option<ClientId> {
         | ClientMessage::MenuBackspace { client_id, .. }
         | ClientMessage::MenuSelectionMove { client_id, .. }
         | ClientMessage::MenuActivate { client_id, .. }
-        | ClientMessage::MenuCancel { client_id, .. } => Some(*client_id),
+        | ClientMessage::MenuCancel { client_id, .. }
+        | ClientMessage::Agent { client_id, .. } => Some(*client_id),
         ClientMessage::CompletionRequest { request } => Some(request.client_id),
         ClientMessage::LanguageIntelligenceRequest { request } => Some(request.client_id),
         ClientMessage::SelectionQueryRequest { request } => Some(request.client_id),
@@ -477,6 +478,9 @@ where
         tokio::sync::mpsc::channel::<ServerMessage>(
             crate::perf::budgets::CONNECTION_RESULT_LANE_CAPACITY,
         );
+    let mut agent_rx = reload_server
+        .as_ref()
+        .map(|server| server.agent.subscribe());
     let dropped_results = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     // Plan 060 T4 (P0-3): authorized per-connection subscriptions. Parse and
     // analysis payloads route only to documents this connection opened; the
@@ -827,6 +831,25 @@ where
             message = language_intelligence_rx.recv() => {
                 if let Some(message) = message {
                     codec.write_server_message(&mut stream, &message).await?;
+                }
+                continue;
+            }
+            agent_event = async {
+                match agent_rx.as_mut() {
+                    Some(rx) => Some(rx.recv().await),
+                    None => {
+                        std::future::pending::<()>().await;
+                        None
+                    }
+                }
+            } => {
+                if let Some(Ok(payload)) = agent_event {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::Agent(Box::new((*payload).clone())),
+                        )
+                        .await?;
                 }
                 continue;
             }
@@ -1237,9 +1260,12 @@ where
                     &runtime_generation,
                     &parse_coordinator,
                     &document_analysis,
+                    &mut menu_sessions,
+                    &tab_registry,
                     reload_server.as_ref(),
                     client_id,
                     intent,
+                    bound_tab_id,
                 )
                 .await?;
             }
@@ -1335,6 +1361,22 @@ where
                         },
                     )
                     .await?;
+            }
+            ClientMessage::Agent { command, .. } => {
+                if let Some(server) = reload_server.as_ref() {
+                    server.agent.dispatch(*command);
+                } else {
+                    codec
+                        .write_server_message(
+                            &mut stream,
+                            &ServerMessage::Agent(Box::new(AgentServerMessage::Diagnostic {
+                                code: "agent.unavailable".to_string(),
+                                message: "agent host is not attached to this connection"
+                                    .to_string(),
+                            })),
+                        )
+                        .await?;
+                }
             }
         }
     }

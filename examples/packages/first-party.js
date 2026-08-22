@@ -78,6 +78,8 @@ await grantLanguageServer({
 //                           @clay/lsp-javascript  @clay/lsp-markdown
 //                           (authorize first, above; load grammar
 //                            packages before their LSP bridges)
+//   Chat landing:           @clay/chat   (default empty-tab surface;
+//                            omit this line → core Open File/Folder only)
 //   Settings UI:            @clay/settings
 //   Themes:                 @clay/theme-gruvbox-material-dark
 //                           @clay/theme-gruvbox-material-light
@@ -92,6 +94,7 @@ await loadPackage("@clay/markdown");   // prose mode + parser + prose movement
 await loadPackage("@clay/rust");       // code mode + tree-sitter grammar
 await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
+await loadPackage("@clay/chat");       // empty-tab Chat landing
 await loadPackage("@clay/settings");   // settings panel (theme/appearance UI)
 await loadPackage("@clay/lsp-rust");        // after the grant above
 await loadPackage("@clay/lsp-typescript");

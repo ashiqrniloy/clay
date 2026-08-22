@@ -120,6 +120,7 @@ mod tests {
             },
             package_ui: PackageUiSnapshot {
                 version: generation,
+                empty_tab: None,
             },
             documents: vec![DocumentRuntimeRenderState {
                 document_id: 1,

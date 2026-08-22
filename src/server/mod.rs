@@ -1,3 +1,6 @@
+#[doc(hidden)]
+pub mod agent;
+pub(crate) mod agent_picker;
 mod behavior;
 pub mod command_execution;
 pub mod completion;
@@ -592,6 +595,8 @@ pub struct IpcServer {
     /// snapshots to its stream; lagged receivers resync from the mutex.
     tab_registry: Arc<Mutex<tab_registry::TabRegistry>>,
     tab_registry_tx: broadcast::Sender<TabRegistrySnapshot>,
+    /// One clay-agent child per server. Lazy-spawned on first agent command.
+    pub(crate) agent: agent::AgentHost,
     /// Test-only barrier that parks candidate evaluation until the test releases
     /// it. Production builds omit this field entirely.
     #[cfg(test)]
@@ -667,6 +672,7 @@ impl IpcServer {
         let document_id_allocator = Arc::new(AtomicU64::new(1));
         let bootstrap_state =
             TabServerState::from_workspace(workspace, Arc::clone(&document_id_allocator));
+        let agent = agent::AgentHost::for_server(config.configuration_root.as_deref());
 
         Ok(Self {
             config,
@@ -703,6 +709,7 @@ impl IpcServer {
                 crate::perf::budgets::RUNTIME_STATE_BROADCAST_CAPACITY,
             )
             .0,
+            agent,
             #[cfg(test)]
             reload_barrier: ReloadCandidateBarrier::default(),
         })
@@ -1240,7 +1247,20 @@ impl IpcServer {
                 overrides: Vec::new(),
                 design_tokens: Vec::new(),
             });
-        let runtime_diagnostics = self.runtime_diagnostics.lock().await.snapshot();
+        let mut runtime_diagnostics = self.runtime_diagnostics.lock().await.snapshot();
+        let empty_tab = match evaluation.ui_contributions.empty_tab() {
+            Ok(winner) => winner,
+            Err(ids) => {
+                runtime_diagnostics.push(RuntimeDiagnostic::error(
+                    "ui.pane_content_conflict",
+                    format!(
+                        "multiple empty-tab pane-content contributions: {}",
+                        ids.join(", ")
+                    ),
+                ));
+                None
+            }
+        };
         let runtime_snapshot = build_runtime_state_snapshot(
             generation_id,
             &behavior,
@@ -1251,6 +1271,7 @@ impl IpcServer {
             evaluation.published_decoration_set.clone(),
             evaluation.published_diagnostic_set.clone(),
             runtime_diagnostics,
+            empty_tab,
         )?;
         // Fail closed before commit when the complete snapshot cannot fit one
         // bounded IPC frame. Partial/live mutation must not begin.
@@ -1757,12 +1778,11 @@ fn build_runtime_state_snapshot(
     published_decorations: Option<crate::protocol::DecorationSet>,
     published_diagnostics: Option<crate::protocol::DiagnosticSet>,
     diagnostics: Vec<RuntimeDiagnostic>,
+    empty_tab: Option<crate::protocol::EmptyTabContent>,
 ) -> Result<RuntimeStateSnapshot, RuntimeDiagnostic> {
     let package_ui = crate::protocol::PackageUiSnapshot {
-        // Package UI payloads are not on the wire yet; advance the version with
-        // the runtime generation so clients clear previous package UI under the
-        // same atomic install boundary.
         version: runtime_generation_id,
+        empty_tab,
     };
     let documents = open_documents
         .iter()
@@ -3231,6 +3251,29 @@ await loadPackage("@clay/typescript");"#,
             "no package diagnostics from the example tree; diagnostics: {:?}",
             outcome.diagnostics
         );
+        let chat_entry = evaluation
+            .ui_contributions
+            .empty_tab()
+            .expect("example empty-tab must not conflict")
+            .expect("first-party.js loadPackage(@clay/chat) must install the landing");
+        assert_eq!(chat_entry.id, "chat.entry");
+        assert_eq!(chat_entry.package_name, "@clay/chat");
+        let manifest = evaluation
+            .behavior_manifest
+            .as_ref()
+            .expect("example must publish a behavior manifest");
+        let (_, catalogue) = server
+            .runtime_generation
+            .command_catalogue_snapshot(manifest)
+            .await
+            .expect("example catalogue must validate");
+        assert!(
+            catalogue
+                .commands()
+                .iter()
+                .any(|command| command.command_id == "chat.profile"),
+            "one-line Chat load must register chat.profile"
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -4320,6 +4363,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             sdui_tree: default_document_tree(1, 1),
             package_ui: crate::protocol::PackageUiSnapshot {
                 version: generation,
+                empty_tab: None,
             },
             documents: Vec::new(),
             diagnostics: Vec::new(),
@@ -5677,6 +5721,7 @@ mod tests {
             live_clients: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             tab_registry,
             tab_registry_tx: tokio::sync::broadcast::channel(16).0,
+            agent: super::agent::AgentHost::inert(),
             #[cfg(test)]
             reload_barrier: super::ReloadCandidateBarrier::default(),
         }

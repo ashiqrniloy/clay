@@ -102,6 +102,7 @@ The task should require:
 
 - Clay remains the owner of the working area, pane/split tree, fixed pane slots, component catalog, action routing, theme/style token model, and native Masonry widget implementation.
 - Packages declare inert UI/layout/input/action/data/style contributions through documented Clay/package JS APIs; they must not directly create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
+- Empty/new-tab `main` is a package pane-content contribution (one winner). Core fallback is Open File / Open Folder only. Do not plan product-named pane kinds (`Agent`) or irreplaceable native landings. Agent profiles are registered by first-party packages (`loadPackage`), not compiled stubs.
 - Any new UI/layout primitive is generic and reusable across packages/modes, not Markdown-specific or package-specific Rust branching.
 - Fixed vs transient panel behavior, slot ownership, package/user override precedence, action routing, focus/input routing, and style token mapping are documented and tested when introduced or changed.
 - `docs/reference/packages/creating-packages.md` is updated in the same phase with implemented APIs, examples, limitations, migration notes, permissions, testing guidance, and any temporary fallback paths.
@@ -114,7 +115,7 @@ Recommended task title when a separate task is useful:
 
 Place this task near package UI/layout implementation tasks and before final documentation/wiki verification.
 
-Decision source: `decision-logs/2026-06-09-1431-clay-owned-shell-layout-and-package-ui-contribution-model.md`.
+Decision sources: `decision-logs/2026-06-09-1431-clay-owned-shell-layout-and-package-ui-contribution-model.md`, `decision-logs/2026-08-21-2152-product-surfaces-are-replaceable-packages.md`.
 
 ## Clay JS API Task
 

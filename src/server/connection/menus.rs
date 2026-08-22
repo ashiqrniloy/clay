@@ -13,6 +13,8 @@ use crate::{
         codec::{Codec, CodecError},
     },
     server::{
+        agent::AgentHost,
+        agent_picker::{AgentPickerActivate, package_profile_commands, picker_kind_for_command},
         command_execution::{
             CONTROL_CENTER_COMMAND_ID, CommandExecutionTarget, OPEN_PATH_BROWSER_COMMAND_ID,
         },
@@ -51,6 +53,7 @@ pub(super) async fn open_command_centre_session(
     workspace: &Arc<Mutex<WorkspaceState>>,
     tab_registry: &Arc<Mutex<TabRegistry>>,
     bound_tab_id: Option<TabId>,
+    agent: Option<&AgentHost>,
 ) -> Result<(Option<u64>, TransientMenuSnapshotData), String> {
     if command_id == CONTROL_CENTER_COMMAND_ID {
         let document_id = document.lock().await.document_id();
@@ -85,6 +88,23 @@ pub(super) async fn open_command_centre_session(
             Err(error) => session.set_error(error.to_string()),
         }
         let (snapshot, replaced_id) = menu_sessions.open_path_browser(session, generation_id);
+        Ok((replaced_id, snapshot))
+    } else if let Some(kind) = picker_kind_for_command(command_id) {
+        let inventory = match agent {
+            Some(host) => host.picker_inventory().await,
+            None => crate::server::agent::AgentPickerInventory::default(),
+        };
+        let document_id = document.lock().await.document_id();
+        let active_manifest = behavior.lock().await.manifest_for(document_id).clone();
+        let (generation_id, profiles) = match runtime_generation
+            .command_catalogue_snapshot(&active_manifest)
+            .await
+        {
+            Ok((generation_id, catalogue)) => (generation_id, package_profile_commands(&catalogue)),
+            Err(_) => (runtime_generation.generation_id().await, Vec::new()),
+        };
+        let (snapshot, replaced_id) =
+            menu_sessions.open_agent_picker(kind, inventory, profiles, generation_id);
         Ok((replaced_id, snapshot))
     } else {
         Err(format!(
@@ -366,6 +386,19 @@ where
         // through the shared intent dispatcher (workspace/settings/reload
         // side effects included); shell `ClientUiCommand` items produce the
         // narrow shell-command request the client re-parses deny-by-default.
+        Ok(ServerMenuActivateOutcome::Agent(outcome)) => {
+            handle_agent_picker_outcome(
+                codec,
+                stream,
+                menu_sessions,
+                reload_server,
+                client_id,
+                bound_tab_id,
+                session_id,
+                outcome,
+            )
+            .await
+        }
         Ok(ServerMenuActivateOutcome::Dispatch(activation)) => {
             menu_sessions.cancel(session_id);
             codec
@@ -377,7 +410,9 @@ where
                     // opens the Path Browser through the same shared helper
                     // as its keybinding (the closed Control Center frame was
                     // already pushed above).
-                    if request.command_id == OPEN_PATH_BROWSER_COMMAND_ID {
+                    if request.command_id == OPEN_PATH_BROWSER_COMMAND_ID
+                        || picker_kind_for_command(&request.command_id).is_some()
+                    {
                         match open_command_centre_session(
                             &request.command_id,
                             menu_sessions,
@@ -387,6 +422,7 @@ where
                             workspace,
                             tab_registry,
                             bound_tab_id,
+                            reload_server.map(|server| &server.agent),
                         )
                         .await
                         {
@@ -481,6 +517,150 @@ where
             Ok(())
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_agent_picker_outcome<S>(
+    codec: Codec,
+    stream: &mut S,
+    menu_sessions: &mut ServerMenuSessions,
+    reload_server: Option<&IpcServer>,
+    client_id: ClientId,
+    bound_tab_id: Option<TabId>,
+    session_id: u64,
+    outcome: AgentPickerActivate,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let host = reload_server.map(|server| &server.agent);
+    match outcome {
+        AgentPickerActivate::StayOpen => {
+            push_active_picker(codec, stream, menu_sessions, client_id, session_id).await
+        }
+        AgentPickerActivate::PutSecret {
+            provider,
+            name,
+            secret,
+        } => {
+            if let Some(host) = host {
+                let _ = host.put_credential(&provider, &name, &secret).await;
+            }
+            menu_sessions.cancel(session_id);
+            codec
+                .write_server_message(stream, &ServerMessage::TransientMenuClosed { session_id })
+                .await?;
+            Ok(())
+        }
+        AgentPickerActivate::StartOauth { provider } => {
+            if let Some(host) = host
+                && let Ok(start) = host.start_oauth(&provider).await
+                && let Some(session) = menu_sessions.get_mut(session_id)
+                && let Some(picker) = session.agent_picker_mut()
+            {
+                let uri = if start.user_code.is_empty() {
+                    start.authorization_url
+                } else {
+                    start.verification_uri
+                };
+                picker.enter_oauth(start.login_id, start.user_code, uri);
+            }
+            push_active_picker(codec, stream, menu_sessions, client_id, session_id).await
+        }
+        AgentPickerActivate::PollOauth { login_id } => {
+            let done = match host {
+                Some(host) => matches!(
+                    host.poll_oauth(&login_id).await,
+                    Ok(crate::server::agent::AgentOauthPoll::Complete)
+                ),
+                None => false,
+            };
+            if done {
+                menu_sessions.cancel(session_id);
+                codec
+                    .write_server_message(
+                        stream,
+                        &ServerMessage::TransientMenuClosed { session_id },
+                    )
+                    .await?;
+                Ok(())
+            } else {
+                push_active_picker(codec, stream, menu_sessions, client_id, session_id).await
+            }
+        }
+        AgentPickerActivate::Select { kind, id } => {
+            if let Some(host) = host {
+                host.select_picker(kind, &id).await;
+            }
+            menu_sessions.cancel(session_id);
+            codec
+                .write_server_message(stream, &ServerMessage::TransientMenuClosed { session_id })
+                .await?;
+            Ok(())
+        }
+        AgentPickerActivate::Resume {
+            session_id: agent_session,
+        } => {
+            if let Some(host) = host {
+                let tab = bound_tab_id.unwrap_or(client_id);
+                let snapshot = host.resume_tab(tab, &agent_session).await;
+                codec
+                    .write_server_message(stream, &ServerMessage::Agent(Box::new(snapshot)))
+                    .await?;
+            }
+            menu_sessions.cancel(session_id);
+            codec
+                .write_server_message(stream, &ServerMessage::TransientMenuClosed { session_id })
+                .await?;
+            Ok(())
+        }
+        AgentPickerActivate::Delete {
+            session_id: agent_session,
+        } => {
+            if let Some(host) = host {
+                host.dispatch(crate::protocol::AgentClientCommand::DeleteSession {
+                    session_id: agent_session,
+                });
+                let inventory = host.picker_inventory().await;
+                if let Some(session) = menu_sessions.get_mut(session_id)
+                    && let Some(picker) = session.agent_picker_mut()
+                {
+                    picker.replace_inventory(inventory);
+                }
+            }
+            push_active_picker(codec, stream, menu_sessions, client_id, session_id).await
+        }
+    }
+}
+
+async fn push_active_picker<S>(
+    codec: Codec,
+    stream: &mut S,
+    menu_sessions: &mut ServerMenuSessions,
+    client_id: ClientId,
+    session_id: u64,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let Some(session) = menu_sessions.get_mut(session_id) else {
+        codec
+            .write_server_message(
+                stream,
+                &unknown_menu_session_diagnostic(client_id, session_id),
+            )
+            .await?;
+        return Ok(());
+    };
+    codec
+        .write_server_message(
+            stream,
+            &ServerMessage::TransientMenuSnapshot(Box::new(snapshot_from_session(
+                &session.session(),
+            ))),
+        )
+        .await?;
+    Ok(())
 }
 
 pub(super) async fn handle_menu_cancel<S>(

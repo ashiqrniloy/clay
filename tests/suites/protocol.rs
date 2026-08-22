@@ -1,3 +1,5 @@
+#[path = "../agent_protocol.rs"]
+mod agent_protocol;
 #[path = "../clay_js_api_inventory.rs"]
 mod clay_js_api_inventory;
 #[path = "../clay_js_doc_registry.rs"]

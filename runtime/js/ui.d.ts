@@ -55,6 +55,13 @@ export interface ComponentContributionDefinition {
     action?: UiActionIntent;
     [property: string]: unknown;
 }
+export type PaneContentActivation = "empty-tab";
+export interface PaneContentContributionDefinition {
+    id: string;
+    activation: PaneContentActivation;
+    component: ComponentContributionDefinition;
+    actionTargets?: string[];
+}
 export interface PanelContributionDefinition {
     id: string;
     slot: PanelSlot;
@@ -125,6 +132,7 @@ export interface PackageLayoutIntentDefinition {
     ratio: number;
     position?: "first" | "second";
 }
+export declare function serverRegisterPaneContentContribution(declaration: PaneContentContributionDefinition): Record<string, unknown>;
 export declare function serverRegisterPanelContribution(declaration: PanelContributionDefinition): Record<string, unknown>;
 export declare function serverRegisterComponentContribution(declaration: ComponentContributionDefinition): Record<string, unknown>;
 export declare function serverRegisterTransientOverlayContribution(declaration: TransientOverlayContributionDefinition): Record<string, unknown>;

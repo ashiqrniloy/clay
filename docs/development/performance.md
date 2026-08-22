@@ -861,6 +861,45 @@ reachable only from the user-driven built-in path-mode surface:
   grant paths; a file open converts browse authority into exactly one grant
   through the same selected-file open path as before.
 
+## Phase 25 agent-host budgets
+
+Phase 25 (plan 096) budgets the Prism host the same way as Command Centre:
+deterministic size/source gates on every push; wall-clock spawn and
+first-delta numbers stay advisory until the Phase 21 stable-runner rule.
+Agent pickers reuse Command Centre open/filter budgets. Deltas never block
+keypress-to-local-paint: `dispatch` returns after queueing, and paint reads
+the last snapshot only.
+
+### Advisory wall-clock (`src/perf/budgets.rs`)
+
+| Constant | Value | What it covers |
+| --- | --- | --- |
+| `AGENT_DAEMON_SPAWN_P95_BUDGET_MS` | 2000 | first `clay-agent` spawn + `initialize` |
+| `AGENT_PROMPT_TO_FIRST_DELTA_P95_BUDGET_MS` | 2000 | mock/local first `message_delta`; real model time is not CI |
+| `AGENT_DELTA_IPC_P95_BUDGET_MS` | 4 | apply one already-received delta into the transcript |
+| `COMMAND_CENTRE_OPEN_P95_BUDGET_MS` | 50 | agent/provider/model/setup/session picker open |
+| `COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS` | 4 | picker filter keystroke |
+
+### Hard size caps (`src/protocol/agent.rs`)
+
+| Constant | Value | What it covers |
+| --- | --- | --- |
+| `AGENT_MAX_PROMPT_BYTES` | 32 KiB | composer/prompt fail-closed |
+| `AGENT_DELTA_MAX_TEXT_BYTES` | 8 KiB | one inbound delta slice |
+| `AGENT_MAX_ENTRY_TEXT_BYTES` | 32 KiB | one coalesced transcript entry |
+| `AGENT_MAX_SNAPSHOT_ENTRIES` | 200 | retained entry count |
+| `AGENT_TRANSCRIPT_SNAPSHOT_BUDGET_BYTES` | 256 KiB | sum of retained entry text |
+| `AGENT_DAEMON_MAX_LINE_BYTES` | 1 MiB | NDJSON line / codec frame |
+
+### Deterministic hard guards
+
+| Guard | Claim |
+| --- | --- |
+| `slow_daemon_submit_does_not_block_caller` | prompt dispatch stays inside `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` |
+| `mock_daemon_prompt_persists_no_secret_on_ack` | first mock delta arrives inside the first-delta budget |
+| `transcript_caps_delta_entry_and_snapshot_bytes` | size caps hold |
+| `agent_io_stays_off_paint_and_keypress` | paint/keypress sources do not call the daemon |
+
 ## Phase 28.7 command/intelligence payload pins
 
 Phase 28.7 (plan 094) reuses existing Phase 16/18 budgets. Phase 28.6

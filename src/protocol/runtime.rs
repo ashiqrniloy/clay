@@ -29,14 +29,27 @@ pub type RuntimeGenerationId = u64;
 
 /// Versioned package-UI replacement carried inside a runtime snapshot.
 ///
-/// Contribution payloads remain empty until package UI is published over IPC.
-/// A non-zero version still advances so clients clear previous package UI under
-/// the same atomic install boundary as behavior/theme/SDUI.
+/// `empty_tab` carries the one-winner pane-content contribution for new/empty
+/// `main` slots. Absent means the core Open File / Open Folder fallback.
+/// Two competing empty-tab contributions resolve to `None` plus a diagnostic.
 #[derive(
     rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq, Default,
 )]
 pub struct PackageUiSnapshot {
     pub version: u64,
+    pub empty_tab: Option<EmptyTabContent>,
+}
+
+/// Server-authoritative empty-tab `main` contribution.
+///
+/// `component_json` is the already-validated inert catalog tree. Recursive
+/// rkyv trees overflow the Archive bound; JSON stays bounded by the SDUI
+/// snapshot budget and is re-parsed on the client with `from_declaration`.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct EmptyTabContent {
+    pub id: String,
+    pub package_name: String,
+    pub component_json: String,
 }
 
 /// Per-document decoration/diagnostic reset and optional initial sets.

@@ -46,16 +46,19 @@ use crate::masonry_editor::{
     ClipboardCommandOutcome, EditorAction, EditorClientCommand, EditorConnectionStatus,
     EditorStatus, SduiStatusObservation,
 };
+use crate::masonry_package_region::PackageRegionWidget;
 use crate::masonry_welcome::{
     WelcomeRenderContext, WelcomeState, WelcomeWidget, accessibility_status_node,
 };
 use crate::perf::metrics::global_recorder;
 use crate::protocol::{
-    ActiveTheme, ActiveTypography, BehaviorManifest, CompletionRequestId, CompletionResultSet,
+    ActiveTheme, ActiveTypography, AgentServerMessage, AgentSessionSnapshot, AgentTranscriptKind,
+    AgentWireEvent, BehaviorManifest, CompletionRequestId, CompletionResultSet,
     DecorationActivatePlan, DecorationIntent, DecorationTarget, DocumentId, DocumentVersion,
-    EditRejection, EditorCommandRequest, FileErrorCode, FontRole, KeyCode, KeyModifiers, KeyStroke,
-    LanguageIntelligenceRequestId, LanguageIntelligenceResult, ProtocolErrorCode,
-    RuntimeDiagnostic, SduiActionIntent, WorkspaceRootId, plan_decoration_activate,
+    EditRejection, EditorCommandRequest, EmptyTabContent, FileErrorCode, FontRole, KeyCode,
+    KeyModifiers, KeyStroke, LanguageIntelligenceRequestId, LanguageIntelligenceResult,
+    ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiNodeId,
+    WorkspaceRootId, plan_decoration_activate,
 };
 use crate::shell::transient_menu::TransientMenuFocusPolicy;
 use crate::shell::{
@@ -253,6 +256,10 @@ impl PaneMenuSync {
         self.push(menu, true);
     }
 
+    fn push_server_keep_query(&mut self, menu: Option<TransientMenuSession>) {
+        self.push(menu, true);
+    }
+
     /// Connection-shared session-id allocation (monotonic, saturating).
     fn next_session_id(&self) -> u64 {
         let id = self.session_ids.get();
@@ -283,6 +290,11 @@ pub struct PaneDocumentView {
     welcome_render: Rc<RefCell<WelcomeRenderContext>>,
     welcome_visible: bool,
     welcome_workspace: String,
+    pub(crate) package_entry: WidgetPod<PackageRegionWidget>,
+    empty_tab: Option<EmptyTabContent>,
+    empty_tab_dirty: bool,
+    agent: AgentSessionSnapshot,
+    agent_running: bool,
     /// Phase 22.7 (C4): transient-menu state — session copy, pending push,
     /// session-id allocator (grouped; see [`PaneMenuSync`]).
     menu_sync: PaneMenuSync,
@@ -324,6 +336,7 @@ impl Default for PaneDocumentView {
             welcome_state.clone(),
             welcome_render.clone(),
         ));
+        let package_entry = WidgetPod::new(PackageRegionWidget::new());
         Self {
             pane_id: PaneId(1),
             editor,
@@ -339,6 +352,18 @@ impl Default for PaneDocumentView {
             welcome_render,
             welcome_visible: false,
             welcome_workspace: "Workspace".to_string(),
+            package_entry,
+            empty_tab: None,
+            empty_tab_dirty: false,
+            agent: AgentSessionSnapshot {
+                session_id: String::new(),
+                profile: String::new(),
+                provider: String::new(),
+                model: String::new(),
+                leaf_id: None,
+                entries: Vec::new(),
+            },
+            agent_running: false,
             menu_sync: PaneMenuSync::default(),
             layout_invalidated: false,
             sessions: DocumentSessionStore::default(),
@@ -847,12 +872,16 @@ impl PaneDocumentView {
             ClientConnectionEvent::TransientMenuSnapshot(snapshot) => {
                 // Phase 24.1: server-authoritative display copy; keys route
                 // back as menu intents, visuals update only from snapshots.
-                self.push_server_menu(
-                    Some(TransientMenuSession::from_snapshot_data(&snapshot)),
-                    &snapshot.query,
-                );
+                // Secret steps project bullets; keep the local send buffer.
+                let menu = TransientMenuSession::from_snapshot_data(&snapshot);
+                if !snapshot.query.is_empty() && snapshot.query.chars().all(|ch| ch == '•') {
+                    self.menu_sync.push_server_keep_query(Some(menu));
+                } else {
+                    self.push_server_menu(Some(menu), &snapshot.query);
+                }
                 false
             }
+            ClientConnectionEvent::Agent(message) => self.apply_agent_message(*message),
             ClientConnectionEvent::TransientMenuClosed { session_id } => {
                 // Phase 24.1: clear only the matching server session (a stale
                 // close for a replaced id must not touch the active menu).
@@ -919,6 +948,10 @@ impl PaneDocumentView {
         }
         if let Some(diagnostic) = snapshot.diagnostics.last() {
             changed |= self.apply_runtime_status_diagnostic(diagnostic);
+        }
+        if self.empty_tab != snapshot.package_ui.empty_tab {
+            self.set_empty_tab(snapshot.package_ui.empty_tab.clone());
+            changed = true;
         }
         changed
     }
@@ -2086,8 +2119,107 @@ impl PaneDocumentView {
         self.welcome.id()
     }
 
+    pub(crate) fn package_entry_widget_id(&self) -> masonry::core::WidgetId {
+        self.package_entry.id()
+    }
+
     pub(crate) fn register_welcome_child(&mut self, ctx: &mut RegisterCtx<'_>) {
         ctx.register_child(&mut self.welcome);
+        ctx.register_child(&mut self.package_entry);
+    }
+
+    pub(crate) fn showing_package_entry(&self) -> bool {
+        self.welcome_visible && self.empty_tab.is_some()
+    }
+
+    pub(crate) fn set_empty_tab(&mut self, content: Option<EmptyTabContent>) {
+        if self.empty_tab == content {
+            return;
+        }
+        self.empty_tab = content;
+        self.empty_tab_dirty = true;
+        self.layout_invalidated = true;
+    }
+
+    pub fn sync_empty_tab(&mut self, ctx: &mut MutateCtx<'_>) {
+        if !self.empty_tab_dirty {
+            return;
+        }
+        self.empty_tab_dirty = false;
+        if let Some(content) = &self.empty_tab {
+            let value = match serde_json::from_str(&content.component_json) {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            let Ok(mut tree) =
+                crate::shell::package_ui::PackageUiComponentTree::from_declaration(&value)
+            else {
+                return;
+            };
+            paint_agent_transcript(&mut tree, &self.agent, self.agent_running);
+            let typography = self.editor.typography().clone();
+            let ui_theme = self.editor.ui_theme().clone();
+            let composer = {
+                let mut region = ctx.get_mut(&mut self.package_entry);
+                region.widget.set_render_context(typography, ui_theme);
+                region.widget.reconcile_tree_live(&mut region.ctx, &tree);
+                self.agent
+                    .entries
+                    .is_empty()
+                    .then(|| region.widget.first_text_input_id())
+                    .flatten()
+            };
+            if let Some(composer) = composer {
+                // The package entry was stashed while the core welcome was
+                // visible. Unstash before requesting focus; otherwise Masonry's
+                // focus pass rejects the target before the next layout exposes it.
+                ctx.set_stashed(&mut self.package_entry, false);
+                ctx.set_focus(composer);
+            }
+        }
+        ctx.request_layout();
+        ctx.request_accessibility_update();
+    }
+
+    fn apply_agent_message(&mut self, message: AgentServerMessage) -> bool {
+        match message {
+            AgentServerMessage::Snapshot(snapshot) => {
+                self.agent_running = false;
+                self.agent = snapshot;
+            }
+            AgentServerMessage::Event { event, .. } => {
+                match &event {
+                    AgentWireEvent::Started { .. } => self.agent_running = true,
+                    AgentWireEvent::Finished { .. } | AgentWireEvent::Error { .. } => {
+                        self.agent_running = false;
+                    }
+                    AgentWireEvent::Tool { .. } | AgentWireEvent::Permission { .. } => {}
+                    _ => {}
+                }
+                if !matches!(
+                    event,
+                    AgentWireEvent::Tool { .. } | AgentWireEvent::Permission { .. }
+                ) {
+                    self.agent.apply_event(&event);
+                }
+            }
+            AgentServerMessage::Diagnostic { message, .. } => {
+                if message == "cancelled" {
+                    self.agent_running = false;
+                } else if message != "empty prompt" {
+                    self.agent
+                        .entries
+                        .push(crate::protocol::AgentTranscriptEntry::new(
+                            AgentTranscriptKind::Error,
+                            message,
+                        ));
+                }
+            }
+            _ => return false,
+        }
+        self.empty_tab_dirty = true;
+        self.layout_invalidated = true;
+        true
     }
 
     pub(crate) fn request_welcome_render(&mut self, ctx: &mut MutateCtx<'_>) {
@@ -2291,6 +2423,25 @@ impl PaneDocumentView {
 
     /// Route global bindings while the welcome surface has no editable text.
     fn global_key(&mut self, ctx: &mut EventCtx<'_>, key: KeyStroke) {
+        if key.key == KeyCode::Escape
+            && self.agent_running
+            && self.showing_package_entry()
+            && !self.menu_sync.server_owned
+        {
+            if let Some(queue) = &self.edit_queue {
+                let _ = queue.enqueue_sdui_action(
+                    0,
+                    SduiActionIntent::command(
+                        "chat.cancel",
+                        SduiActionSource::Button {
+                            node_id: SduiNodeId(0),
+                        },
+                    ),
+                );
+            }
+            ctx.set_handled();
+            return;
+        }
         if self.route_menu_key(ctx, &key) {
             ctx.submit_action::<EditorAction>(EditorAction::MenuStateChanged);
             return;
@@ -3441,8 +3592,11 @@ impl PaneDocumentView {
             rect.x0 + local.x1,
             rect.y0 + local.y1,
         ));
-        ctx.set_stashed(&mut self.welcome, !self.welcome_visible);
-        if self.welcome_visible {
+        let show_package = self.showing_package_entry();
+        let show_welcome = self.welcome_visible && !show_package;
+        ctx.set_stashed(&mut self.welcome, !show_welcome);
+        ctx.set_stashed(&mut self.package_entry, !show_package);
+        if show_welcome || show_package {
             let status_height = self
                 .editor
                 .typography()
@@ -3453,8 +3607,13 @@ impl PaneDocumentView {
                 (rect.height() - status_height).max(0.0),
             );
             let constraints = BoxConstraints::tight(welcome_size);
-            let _ = ctx.run_layout(&mut self.welcome, &constraints);
-            ctx.place_child(&mut self.welcome, Point::new(rect.x0, rect.y0));
+            if show_package {
+                let _ = ctx.run_layout(&mut self.package_entry, &constraints);
+                ctx.place_child(&mut self.package_entry, Point::new(rect.x0, rect.y0));
+            } else {
+                let _ = ctx.run_layout(&mut self.welcome, &constraints);
+                ctx.place_child(&mut self.welcome, Point::new(rect.x0, rect.y0));
+            }
         }
         size
     }
@@ -3749,6 +3908,7 @@ impl Widget for PaneDocumentView {
 
     fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
         ctx.register_child(&mut self.welcome);
+        ctx.register_child(&mut self.package_entry);
     }
 
     fn layout(
@@ -3823,7 +3983,9 @@ impl Widget for PaneDocumentView {
             children.push(text_run_id);
         }
         children.push(status_id);
-        if self.welcome_visible {
+        if self.showing_package_entry() {
+            children.push(self.package_entry.id().into());
+        } else if self.welcome_visible {
             let (welcome_status_id, welcome_status) = accessibility_status_node(
                 self.welcome.id(),
                 self.welcome_state.borrow().accessibility_label(),
@@ -3837,7 +3999,7 @@ impl Widget for PaneDocumentView {
     }
 
     fn children_ids(&self) -> ChildrenIds {
-        ChildrenIds::from_slice(&[self.welcome.id()])
+        ChildrenIds::from_slice(&[self.welcome.id(), self.package_entry.id()])
     }
 
     fn accepts_focus(&self) -> bool {
@@ -4036,6 +4198,61 @@ fn edit_rejection_summary(reason: &EditRejection) -> String {
         } => format!(
             "Edit rejected (stale behavior): local bv{behavior_version}, server bv{server_behavior_version}"
         ),
+    }
+}
+
+fn paint_agent_transcript(
+    tree: &mut crate::shell::package_ui::PackageUiComponentTree,
+    snapshot: &AgentSessionSnapshot,
+    running: bool,
+) {
+    if tree.id == "chat.transcript" {
+        tree.items = snapshot
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                let mut item = crate::shell::package_ui::PackageUiListItem::new(
+                    format!("chat.msg.{index}"),
+                    transcript_label(entry),
+                    None,
+                );
+                item.disabled = true;
+                item.detail = Some(format!("{:?}", entry.kind));
+                item
+            })
+            .collect();
+    }
+    if tree.id == "chat.providerHint" {
+        tree.text = Some(if snapshot.provider.is_empty() {
+            "Configure a provider to start chatting.".to_string()
+        } else {
+            format!("{}/{}", snapshot.provider, snapshot.model)
+        });
+    }
+    if tree.id == "chat.status" {
+        tree.text = Some(if running {
+            "Streaming".to_string()
+        } else {
+            snapshot
+                .entries
+                .iter()
+                .rev()
+                .find(|entry| entry.kind == AgentTranscriptKind::Error)
+                .map(|entry| format!("Error: {}", entry.text))
+                .unwrap_or_else(|| "Ready".to_string())
+        });
+    }
+    for child in &mut tree.children {
+        paint_agent_transcript(child, snapshot, running);
+    }
+}
+
+fn transcript_label(entry: &crate::protocol::AgentTranscriptEntry) -> String {
+    match entry.kind {
+        AgentTranscriptKind::Thinking => format!("Thinking: {}", entry.text),
+        AgentTranscriptKind::Error => format!("Error: {}", entry.text),
+        _ => entry.text.clone(),
     }
 }
 
@@ -5328,6 +5545,27 @@ mod tests {
             menu.origin(),
             crate::shell::transient_menu::TransientMenuOrigin::Centered
         );
+    }
+
+    #[test]
+    fn agent_tool_events_do_not_change_transcript() {
+        let (queue, _receiver) = ClientEditQueue::bounded(8);
+        let mut view = view_with_queue(queue);
+        assert!(
+            view.apply_connection_event(ClientConnectionEvent::Agent(Box::new(
+                crate::protocol::AgentServerMessage::Event {
+                    session_id: "s".into(),
+                    event: crate::protocol::AgentWireEvent::Tool {
+                        session_id: "s".into(),
+                        run_id: "r".into(),
+                        phase: crate::protocol::AgentToolPhase::Started,
+                        name: "read".into(),
+                        tool_call_id: "t".into(),
+                    },
+                }
+            )))
+        );
+        assert!(view.agent.entries.is_empty());
     }
 
     #[test]

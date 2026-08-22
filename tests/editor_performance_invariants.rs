@@ -382,6 +382,20 @@ fn completion_projection_is_bounded_and_stays_out_of_paint() {
 }
 
 #[test]
+fn agent_daemon_work_is_absent_from_editor_hot_paths() {
+    let surface_source = fs::read_to_string("src/editor/surface/mod.rs").expect("surface readable");
+    let widget_source =
+        fs::read_to_string("src/masonry_editor.rs").expect("editor widget readable");
+    let client_source = fs::read_to_string("src/client/mod.rs").expect("client readable");
+    let combined = format!("{surface_source}\n{widget_source}\n{client_source}");
+    assert_absent(
+        &combined,
+        &["AgentHost", "clay-agent", "session.prompt", "op_clay_agent"],
+        "editor key/text/paint/client path must not run clay-agent I/O",
+    );
+}
+
+#[test]
 fn language_server_process_work_is_absent_from_editor_hot_paths() {
     let surface_source = fs::read_to_string("src/editor/surface/mod.rs").expect("surface readable");
     let widget_source =

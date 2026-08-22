@@ -19,8 +19,9 @@ The package guide remains the authoring contract; these internal surfaces
 are cataloged here so package authors do not mistake them for extension points:
 
 - **Welcome entry surface:** `WelcomeWidget` is Clay-owned empty/local-fallback
-  presentation. It exposes existing file/folder command routes only; packages
-  cannot replace it or gain dialog authority.
+  presentation when no `empty-tab` pane-content is loaded. It exposes existing
+  file/folder command routes only; packages cannot replace this fallback or
+  gain dialog authority. The loaded landing is package pane-content (`@clay/chat`).
 - **Completion:** `TransientMenuOrigin::Completion` is a Clay-owned modeless
   caret/IME projection with an 8 visible-row and 480 logical-pixel cap,
   retained scrolling, stale/empty/error dismissal, and sanitized status/a11y
@@ -49,9 +50,10 @@ records the boundaries that are easiest to confuse with package extension
 points:
 
 - Clay owns the working area, pane/split tree, fixed slots, tab bar, status
-  chrome, welcome surface, file browser, completion projection, and centered
-  Command Centre. Packages contribute inert component trees, action intents,
-  input/state metadata, and typed semantic tokens only.
+  chrome, core welcome fallback, file browser, completion projection, and
+  centered Command Centre. The loaded empty-tab landing is package pane-content
+  (`@clay/chat` by default). Packages contribute inert component trees, action
+  intents, input/state metadata, and typed semantic tokens only.
 - Retained package/SDUI hosts clip children to their owning bounds and expose
   clipped-child accessibility semantics. A nested `scroll` component receives
   bounded flex space inside panels; `modal` Escape routes its declared inert

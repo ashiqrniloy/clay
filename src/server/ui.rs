@@ -77,6 +77,7 @@ pub(crate) struct PackageUiRegistry {
     ui_state_scopes: BTreeMap<String, RegisteredPackageUiStateScope>,
     layout_overrides: BTreeMap<String, RegisteredPackageLayoutOverride>,
     layout_intents: BTreeMap<String, RegisteredLayoutIntent>,
+    pane_contents: BTreeMap<String, RegisteredPaneContentContribution>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -89,6 +90,7 @@ pub(crate) struct PackageUiRegistrySnapshot {
     pub(crate) ui_state_scopes: Vec<RegisteredPackageUiStateScope>,
     pub(crate) layout_overrides: Vec<RegisteredPackageLayoutOverride>,
     pub(crate) layout_intents: Vec<RegisteredLayoutIntent>,
+    pub(crate) pane_contents: Vec<RegisteredPaneContentContribution>,
 }
 
 impl PackageUiRegistrySnapshot {
@@ -152,6 +154,23 @@ impl PackageUiRegistrySnapshot {
                 .collect(),
         }
     }
+
+    /// One empty-tab winner, or `Err` of sorted contribution IDs on conflict.
+    pub(crate) fn empty_tab(
+        &self,
+    ) -> Result<Option<crate::protocol::EmptyTabContent>, Vec<String>> {
+        let mut candidates: Vec<&RegisteredPaneContentContribution> = self
+            .pane_contents
+            .iter()
+            .filter(|entry| entry.activation == "empty-tab")
+            .collect();
+        candidates.sort_by(|left, right| left.id.cmp(&right.id));
+        match candidates.as_slice() {
+            [] => Ok(None),
+            [winner] => Ok(Some(winner.to_wire())),
+            many => Err(many.iter().map(|entry| entry.id.clone()).collect()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +190,28 @@ pub(crate) struct RegisteredPanelContribution {
     pub(crate) action_targets: Vec<String>,
     pub(crate) provenance: UiContributionProvenance,
     pub(crate) estimated_payload_bytes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RegisteredPaneContentContribution {
+    pub(crate) id: String,
+    pub(crate) activation: String,
+    pub(crate) component_id: String,
+    pub(crate) component_tree: PackageUiComponentTree,
+    pub(crate) component_json: String,
+    pub(crate) action_targets: Vec<String>,
+    pub(crate) provenance: UiContributionProvenance,
+    pub(crate) estimated_payload_bytes: usize,
+}
+
+impl RegisteredPaneContentContribution {
+    fn to_wire(&self) -> crate::protocol::EmptyTabContent {
+        crate::protocol::EmptyTabContent {
+            id: self.id.clone(),
+            package_name: self.provenance.package_name.clone(),
+            component_json: self.component_json.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -312,6 +353,7 @@ impl PackageUiRegistry {
             ui_state_scopes: self.ui_state_scopes.values().cloned().collect(),
             layout_overrides: self.layout_overrides.values().cloned().collect(),
             layout_intents: self.layout_intents.values().cloned().collect(),
+            pane_contents: self.pane_contents.values().cloned().collect(),
         }
     }
 
@@ -423,6 +465,90 @@ impl PackageUiRegistry {
             estimated_payload_bytes: size,
         };
         self.panels.insert(id, registered.clone());
+        Ok(registered)
+    }
+
+    pub(crate) fn register_pane_content(
+        &mut self,
+        package: &ClayPackageManifest,
+        declaration: &Value,
+        registered_command_ids: &[String],
+    ) -> Result<RegisteredPaneContentContribution, UiContributionDiagnostic> {
+        let context = UiDiagnosticContext::from_package(package, None);
+        validate_provenance(package, &context)?;
+        let size = payload_size(declaration);
+        if size > SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES {
+            return Err(context.error(
+                UiContributionRule::PayloadTooLarge,
+                None,
+                format!(
+                    "pane-content contribution payload ({size} bytes) exceeds SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES ({SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES} bytes)"
+                ),
+            ));
+        }
+        reject_prohibited_authority(declaration, &context)?;
+        let object = declaration.as_object().ok_or_else(|| {
+            context.error(
+                UiContributionRule::InvalidComponent,
+                None,
+                "pane-content contribution declaration must be an object",
+            )
+        })?;
+        let id = package_owned_string(object, "id", package, UiContributionRule::InvalidId)?;
+        let context = UiDiagnosticContext::from_package(package, Some(id.clone()));
+        if self.pane_contents.contains_key(&id) {
+            return Err(context.error(
+                UiContributionRule::DuplicateId,
+                Some(&id),
+                "pane-content contribution IDs must be unique",
+            ));
+        }
+        let activation = required_str(
+            object,
+            "activation",
+            UiContributionRule::InvalidPolicy,
+            &context,
+        )?;
+        if activation != "empty-tab" {
+            return Err(context.error(
+                UiContributionRule::InvalidPolicy,
+                Some(&id),
+                "pane-content activation must be empty-tab",
+            ));
+        }
+        let theme_resolver = self.theme_resolver();
+        let mut component_context =
+            ComponentValidationContext::new(package, registered_command_ids, &theme_resolver);
+        let component = required_object(
+            object,
+            "component",
+            UiContributionRule::InvalidComponent,
+            &context,
+        )?;
+        let component_value = object.get("component").expect("required component exists");
+        let component_id = component_context.validate_component_object(component)?;
+        let component_tree =
+            PackageUiComponentTree::from_declaration(component_value).map_err(|message| {
+                context.error(UiContributionRule::InvalidComponent, Some(&id), message)
+            })?;
+        let mut action_targets =
+            string_array(object.get("actionTargets"), "actionTargets", &context)?;
+        validate_registered_actions(&action_targets, registered_command_ids, &context)?;
+        action_targets.extend(component_context.action_targets);
+        action_targets.sort();
+        action_targets.dedup();
+
+        let registered = RegisteredPaneContentContribution {
+            id: id.clone(),
+            activation: activation.to_string(),
+            component_id,
+            component_json: component_value.to_string(),
+            component_tree,
+            action_targets,
+            provenance: UiContributionProvenance::from(package),
+            estimated_payload_bytes: size,
+        };
+        self.pane_contents.insert(id, registered.clone());
         Ok(registered)
     }
 
@@ -1496,12 +1622,25 @@ fn validate_prefixed_public_id(
     Ok(())
 }
 
+const CLIENT_DIALOG_ACTIONS: &[&str] = &[
+    "documents.clientOpenFileDialog",
+    "workspace.clientOpenFolderDialog",
+    "agent.clientOpenAgentPicker",
+    "agent.clientOpenProviderPicker",
+    "agent.clientOpenModelPicker",
+    "agent.clientOpenProviderSetup",
+    "agent.clientOpenSessionPicker",
+];
+
 fn validate_registered_actions(
     action_targets: &[String],
     registered_command_ids: &[String],
     context: &UiDiagnosticContext,
 ) -> Result<(), UiContributionDiagnostic> {
     for command_id in action_targets {
+        if CLIENT_DIALOG_ACTIONS.contains(&command_id.as_str()) {
+            continue;
+        }
         if !registered_command_ids
             .iter()
             .any(|registered| registered == command_id)
@@ -2670,5 +2809,72 @@ mod tests {
             )
             .unwrap();
         assert_eq!(registered.position, "second");
+    }
+
+    fn other_package() -> ClayPackageManifest {
+        validate_manifest_value(&json!({
+            "name": "@other/landing",
+            "version": "0.1.0",
+            "clay": {
+                "apiPrefix": "other",
+                "entry": "./dist/index.js",
+                "permissions": ["command-registration"],
+                "modes": ["other"]
+            }
+        }))
+        .unwrap()
+    }
+
+    fn entry_declaration(id: &str, command: &str) -> serde_json::Value {
+        json!({
+            "id": id,
+            "activation": "empty-tab",
+            "actionTargets": [command],
+            "component": {
+                "kind": "panel",
+                "id": format!("{id}.root"),
+                "title": "Entry",
+                "children": [{
+                    "kind": "button",
+                    "id": format!("{id}.open"),
+                    "label": "Open File",
+                    "action": { "commandId": command }
+                }]
+            }
+        })
+    }
+
+    #[test]
+    fn pane_content_one_winner_two_conflict_and_replacement_withdraws() {
+        let mut registry = PackageUiRegistry::new();
+        let first = package();
+        let second = other_package();
+        let commands = vec!["markdown.openFile".to_string(), "other.open".to_string()];
+
+        let registered = registry
+            .register_pane_content(
+                &first,
+                &entry_declaration("markdown.entry", "markdown.openFile"),
+                &commands,
+            )
+            .unwrap();
+        assert_eq!(registered.activation, "empty-tab");
+        let winner = registry.snapshot().empty_tab().unwrap().unwrap();
+        assert_eq!(winner.id, "markdown.entry");
+        assert_eq!(winner.package_name, "@clay/markdown");
+
+        registry
+            .register_pane_content(
+                &second,
+                &entry_declaration("other.entry", "other.open"),
+                &commands,
+            )
+            .unwrap();
+        let conflict = registry.snapshot().empty_tab().unwrap_err();
+        assert_eq!(conflict, vec!["markdown.entry", "other.entry"]);
+
+        registry.pane_contents.remove("markdown.entry");
+        let restored = registry.snapshot().empty_tab().unwrap().unwrap();
+        assert_eq!(restored.id, "other.entry");
     }
 }

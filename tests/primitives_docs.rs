@@ -344,7 +344,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 84);
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 85);
 
     let facades = read("src/server/facades.rs")
         .lines()
@@ -372,7 +372,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
         }
     }
     let package_section = marked_section(&plan, "package-inventory");
-    assert_exact_inventory(package_section, &packages, 14);
+    assert_exact_inventory(package_section, &packages, 15);
     assert_eq!(package_section.matches("`packages/lsp-shared`").count(), 1);
 }
 
@@ -1546,6 +1546,45 @@ fn phase28_package_authoring_contract_is_consistent() {
         assert!(
             decorations.contains(marker),
             "server-publish-decorations.md missing Phase 28 marker {marker:?}"
+        );
+    }
+}
+
+#[test]
+fn phase25_package_authoring_contract_is_consistent() {
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let catalog = read(".agents/skills/clay-ui/references/components.md");
+    let navigation = read("docs/reference/ui-components.md");
+    for marker in [
+        "## Phase 25 authoring contract",
+        "serverRegisterPaneContentContribution",
+        "loadPackage(\"@clay/chat\")",
+        "chat.entrySurface",
+        "chat.chromeActions",
+        "clay.replaces",
+        "clay-agent",
+        "WelcomeWidget",
+        "Command Centre",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md missing Phase 25 authoring marker {marker:?}"
+        );
+    }
+    for marker in [
+        "loaded empty-tab landing is package pane-content",
+        "WelcomeWidget",
+        "no package-facing replacement",
+    ] {
+        assert!(
+            catalog.contains(marker),
+            "components.md missing Phase 25 catalog marker {marker:?}"
+        );
+    }
+    for marker in ["@clay/chat", "empty-tab", "WelcomeWidget"] {
+        assert!(
+            navigation.contains(marker),
+            "ui-components.md missing Phase 25 navigation marker {marker:?}"
         );
     }
 }

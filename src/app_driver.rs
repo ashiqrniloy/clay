@@ -73,7 +73,10 @@ impl Driver {
         self.folder_dialog_in_flight = None;
     }
 
-    fn spawn_native_dialog_command(&mut self, command: clay::client::ClientUiCommandRoute) {
+    pub(crate) fn spawn_native_dialog_command(
+        &mut self,
+        command: clay::client::ClientUiCommandRoute,
+    ) {
         let Some(proxy) = self.proxy.clone() else {
             return;
         };
@@ -145,6 +148,7 @@ impl Driver {
                 editor.widget.sync_region(&mut editor.ctx);
                 editor.widget.sync_panels(&mut editor.ctx);
                 editor.widget.sync_overlays(&mut editor.ctx);
+                editor.widget.sync_empty_tab(&mut editor.ctx);
                 if editor.widget.take_layout_invalidation() {
                     editor.ctx.request_layout();
                 }
@@ -208,6 +212,7 @@ impl Driver {
                     editor.widget.sync_region(&mut editor.ctx);
                     editor.widget.sync_panels(&mut editor.ctx);
                     editor.widget.sync_overlays(&mut editor.ctx);
+                    editor.widget.sync_empty_tab(&mut editor.ctx);
                     if editor.widget.take_layout_invalidation() {
                         editor.ctx.request_layout();
                     }
@@ -218,6 +223,7 @@ impl Driver {
                     editor.widget.take_pending_menu()
                 } else if let Some(mut view) = widget.try_downcast::<PaneDocumentView>() {
                     let changed = view.widget.apply_connection_event(event);
+                    view.widget.sync_empty_tab(&mut view.ctx);
                     if view.widget.take_layout_invalidation() {
                         view.ctx.request_layout();
                     }
@@ -1380,6 +1386,7 @@ impl AppDriver for Driver {
                                 editor.widget.sync_region(&mut editor.ctx);
                                 editor.widget.sync_panels(&mut editor.ctx);
                                 editor.widget.sync_overlays(&mut editor.ctx);
+                                editor.widget.sync_empty_tab(&mut editor.ctx);
                                 if changed {
                                     editor.ctx.request_render();
                                     editor.ctx.request_accessibility_update();
@@ -1785,6 +1792,7 @@ impl Driver {
                 editor.widget.sync_region(&mut editor.ctx);
                 editor.widget.sync_panels(&mut editor.ctx);
                 editor.widget.sync_overlays(&mut editor.ctx);
+                editor.widget.sync_empty_tab(&mut editor.ctx);
                 if changed {
                     editor.ctx.request_render();
                     editor.ctx.request_accessibility_update();

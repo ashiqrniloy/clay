@@ -123,6 +123,28 @@ underline/rest styling, caret/keyboard activation, safe target planning, and
 HTTP/traversal denial; adding native link semantics later must remain a generic
 Clay-owned AccessKit surface, not a package callback or client-JavaScript path.
 
+## Phase 25 Chat landing review (2026-08-22)
+
+The Phase 25 review captured the core fallback, `@clay/chat` dark/light
+unconfigured landing, large UI typography, runtime-error, and disconnected
+recovery states under
+`code-reviews/screenshots/2026-08-22-plan096-ui-review/`. The review used
+`npx ui-skills start` with `jakubkrehel/better-accessibility`, then
+`computer-use-linux_get_app_state` before inspection. AT-SPI verified named
+`Agent`, `Provider`, `Model`, `Open File`, `Open Folder`, and `Cancel` buttons,
+a reachable package region, and a focused `Message` composer. Provider/model/
+agent/setup/session menus and stream/cancel states remain `UNRESOLVED` because
+this Wayland host has no keyboard-capable input backend.
+
+The first live Chat capture exposed an AccessKit orphan-node panic: the
+connection-owned `EditorWidget` registered `PaneDocumentView::package_entry`
+without attaching it in the editor accessibility parent. The fix is in
+`src/masonry_editor.rs`; `src/masonry_pane_document.rs` also unstashes the
+package entry before requesting initial composer focus. These are host-owned
+a11y invariants, not package callbacks. The remaining Phase 25 follow-up is
+multiline composer semantics/direct naming for the inner text area; current
+Chat uses the generic single-line `textInput` contract.
+
 ## Invariants and Constraints
 
 - Every run uses a fresh mode-700 root: no ambient `~/.config/clay`, no default socket, no ambient server/config.
