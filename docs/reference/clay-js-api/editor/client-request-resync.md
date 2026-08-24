@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientRequestResync
 js_facade: runtime/js/editor.js::clientRequestResync
-backing_rust: src/masonry_editor.rs::EditorWidget::request_resync_active_document; src/client/mod.rs::ClientEditQueue::enqueue_request_resync
+backing_rust: src/client_commands.rs::EditorClientCommand; src/client/mod.rs::ClientEditQueue::enqueue_request_resync
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientRequestResync
@@ -94,7 +94,7 @@ Use `editor.clientRequestResync` only as a documented command ID for `bindKey` o
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientRequestResync`
-- Editor: `src/masonry_editor.rs::EditorWidget::request_resync_active_document`
+- Editor: `src/client/mod.rs::ClientEditQueue::enqueue_request_resync`
 - Queue: `src/client/mod.rs::ClientEditQueue::enqueue_request_resync`
 - Keybinding allowlist: `src/server/ops/keybindings.rs`
 

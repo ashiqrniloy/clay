@@ -56,7 +56,7 @@ custom_properties:
     type: string[]
     default: []
     description: Registered package command IDs allowed for component-scoped actions.
-security: Validates package-prefixed input IDs, supported pointer/focus/selection policies, manifest-declared modes, registered action targets, provenance, and payload ceilings; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, raw native event callbacks, or key-routing authority.
+security: Validates package-prefixed input IDs, supported pointer/focus/selection policies, manifest-declared modes, registered action targets, provenance, and payload ceilings; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, raw native event callbacks, or key-routing authority.
 agent_guidance: Use `ui.serverRegisterInputContribution` for inert pointer/focus/action metadata only; keep keys in behavior manifests/keybindings and never expose raw event callbacks, native handles, raw ops, CSS, or client-side JavaScript hooks.
 lookup_tags: [ui, package-ui, input, focus, action-routing, clay-js-api, phase18.4, runtime-backed]
 app_visible: true
@@ -75,7 +75,7 @@ Register bounded package-owned pointer, focus, and component action metadata thr
 
 `serverRegisterInputContribution` accepts a validated package manifest and an inert input declaration. Clay validates the package prefix, target component ID, pointer click/drag policy, focus policy, selection policy, optional mode context, registered action targets, payload size, and provenance before storing the route in the package UI registry.
 
-Accepted declarations become installed shell runtime state (`PackageInputRouting`). Masonry input handlers read that already-validated state only; they do not execute package JavaScript, run package validation, block on IPC, evaluate configuration, expose native event callbacks, or mutate package-owned widgets.
+Accepted declarations become installed shell runtime state (`PackageInputRouting`). Client input handlers read that already-validated state only; they do not execute package JavaScript, run package validation, block on IPC, evaluate configuration, expose native event callbacks, or mutate package-owned widgets.
 
 Key routing is intentionally excluded. Packages must continue to use behavior manifests and `clay:keybindings` for keyboard shortcuts and predictable text behavior.
 
@@ -159,13 +159,13 @@ Registration throws when the manifest is invalid, IDs are not package-prefixed, 
 
 ## Permissions and security
 
-The validator rejects raw callbacks, raw `Deno.core.ops`, op names, native widget handles, Masonry widget handles, raw CSS/style strings, client-side JavaScript hooks, unregistered commands, unsupported scopes/policies, undeclared context modes, and oversize payloads. This API does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callback, or key-routing authority.
+The validator rejects raw callbacks, raw `Deno.core.ops`, op names, native widget handles, client widget handles, raw CSS/style strings, client-side JavaScript hooks, unregistered commands, unsupported scopes/policies, undeclared context modes, and oversize payloads. This API does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callback, or key-routing authority.
 
 Validation runs at package load, configuration, or explicit UI update time. Runtime input handling reads installed inert `PackageInputRouting` state and preserves client-first predictable text behavior.
 
 ## Agent guidance
 
-Use this API for inert package input declarations only. Keep keyboard behavior in behavior manifests/keybindings, route side effects through registered commands, and never add Markdown-specific, package-specific, raw Masonry, raw native callback, raw op, raw CSS, or client-side JavaScript branches.
+Use this API for inert package input declarations only. Keep keyboard behavior in behavior manifests/keybindings, route side effects through registered commands, and never add Markdown-specific, package-specific, raw renderer, raw native callback, raw op, raw CSS, or client-side JavaScript branches.
 
 ## Backing implementation
 

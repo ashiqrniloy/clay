@@ -556,7 +556,7 @@ pub(super) fn op_clay_editor_execute_command(
     }
     // Known-command allowlist: only IDs the client can dispatch as editor
     // commands (movement/selection/caret/multi-cursor/textobject/smart-select).
-    let known = crate::masonry_editor::EditorClientCommand::from_command_id(command_id).is_some()
+    let known = crate::client_commands::EditorClientCommand::from_command_id(command_id).is_some()
         || crate::protocol::SelectionQuery::from_command_id(command_id).is_some();
     if !known {
         return Err(JsErrorBox::generic(format!(

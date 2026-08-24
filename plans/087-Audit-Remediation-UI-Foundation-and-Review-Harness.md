@@ -32,7 +32,7 @@ Scope: Build the smallest repeatable visual-review workflow, replace the prototy
   - Approach:
     - Documentation Reviewed:
       - `.agents/skills/clay-ui/SKILL.md`, `references/components.md`, `references/tokens.md`, `docs/reference/ui-components.md`.
-      - `npx ui-skills start`, `vercel-labs/web-design-guidelines`, `ibelick/fixing-accessibility`; current interface guidelines fetched from their official source.
+      - the UI guidance current at execution time, `vercel-labs/web-design-guidelines`, `ibelick/fixing-accessibility`; current interface guidelines fetched from their official source.
       - Project patterns: `package-ui-layout.md`, `ui-visual-review.md`, `ui-modernization.md`, `authority-boundaries.md`, `protocol-and-performance.md`.
     - Options Considered:
       - Add bespoke welcome/completion widgets immediately: rejected; catalog composition and shared menu host exist.

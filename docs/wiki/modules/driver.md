@@ -1,5 +1,11 @@
 # Driver Module Map (tab subsystem, Phases 22.7–22.8)
 
+> **Historical — removed in Plan 097 Phase 12.** The native client driver was
+> deleted; tab lifecycle, reconnect, and layout persistence now live in the
+> Tauri bridge and React workspace controller:
+> [Tauri/React Desktop Cutover](tauri-react-cutover.md),
+> [React Tabs, Splits, and Layout Persistence](react-tabs-and-splits.md).
+
 The app driver is the client-side orchestrator that owns the multi-connection
 tab model: per-tab state, tab lifecycle (mount/switch/close/reconnect),
 server registry reconciliation, the restore state machine, and window-state

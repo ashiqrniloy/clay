@@ -1,76 +1,100 @@
 # UI Observability and SDUI Structural Regression
 
-Clay's Phase 15 UI regression coverage is intentionally structural and headless. It validates the server-driven UI (SDUI) editor/sidebar composition by inspecting typed observable state instead of comparing rendered pixels.
+Clay's UI regression coverage is intentionally structural and headless. It
+validates the server-driven UI (SDUI) editor/sidebar/package composition by
+inspecting typed observable state instead of comparing rendered pixels. After
+the Plan 097 cutover, the rendered client is the Tauri v2 + React shell, so
+the hard structural layer is the frontend Vitest suites plus the retained
+server-side SDUI snapshot validation; pixel goldens remain deferred.
 
 ## Structural layout regression in Clay
 
-"Structural layout regression" means tests assert the UI semantics and layout-adjacent facts that must remain stable across rendering backends:
+"Structural layout regression" means tests assert the UI semantics and layout-adjacent facts that must remain stable across rendering details:
 
-- which SDUI node kinds are present (`Panel`, `Label`, `Button`, `List`, `EditorView`, `Flex`, and `Stack`);
+- which SDUI node kinds are present (`Panel`, `Label`, `Button`, `List`, `EditorView`, `Flex`, `Stack`, plus the package catalog extensions such as `Dropdown`/`Modal`/`TextInput`);
 - panel titles, visible label text, button labels, and list item IDs/labels;
 - editor-view bindings such as `document_id` and `expected_version`;
-- layout summary facts that can be computed without a real window, such as whether a sidebar is present and whether the editor region is non-empty;
-- accessibility role/label coverage for rendered SDUI nodes; and
-- GUI chrome status text and runtime diagnostics.
+- layout facts computable without a real desktop, such as slot composition (top/left/right/bottom/status), sidebar presence, and non-empty editor regions;
+- accessibility role/label coverage for rendered nodes; and
+- shell status text and runtime diagnostics.
 
-This coverage is designed to run under normal test commands without opening a window, allocating a GPU surface, or depending on platform font/rasterization behavior. Pixel-buffer / GPU snapshots remain deferred after the Phase 20 Masonry 0.4 revisit: `masonry_testing::TestHarness` / `assert_render_snapshot` exist, but the harness hardcodes Vello `use_cpu: true`, so goldens would not exercise Clay's production GPU path and would still be brittle across fonts/DPI/AA. See `decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`.
+This coverage runs under normal test commands without opening a window,
+allocating a GPU surface, or depending on platform font/rasterization
+behavior. GPU-backed pixel snapshots remain deferred: golden images would be
+brittle across fonts/DPI/AA/backends and add no authority guarantees. The
+pre-cutover native `TestHarness` revisit and re-deferral rationale is
+recorded in `decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`
+(historical).
 
 ## Observable state used by tests
 
-SDUI structural tests use `SduiObservableSnapshot` from `src/masonry_sdui.rs`. A test applies a representative SDUI snapshot or update to `SduiNativeState`, calls `observable_snapshot(...)`, and compares the resulting typed fields. This lets tests assert exact UI structure while avoiding screenshots and golden image files.
+Current-state structural coverage:
 
-GUI status tests use `SduiStatusObservation` from `src/masonry_editor.rs`. `EditorWidget::status_observation()` returns the status line, connection label, access label, latest sync version, any active runtime diagnostic message, compact active `theme_label`, dirty/display-name markers, composing flag, pending-edit count, and sanitized recovery summary without painting or starting a window. Accessibility labels are composed by `src/editor/accessibility.rs` and stay consistent with that observation, including `Theme …`, `Composing.`, dirty/display-name, and recovery markers. SDUI/shell roots publish `Role::Group`; transient menus publish `Role::Menu` / `Role::MenuItem`. Phase 20 save/conflict recovery menus reuse the same transient-menu accessibility path when `StaleFileMetadata` or `DirtyDocument` failures arrive. Pending-edit depth, edit rejections, disconnect reconnect guidance, and explicit `clientRequestResync` / `clientDismissRecovery` recovery menus also surface through the same status/accessibility channel rather than stderr-only diagnostics.
+- Frontend component suites (`frontend/src/test/*.test.tsx`,
+  `frontend/src/command-centre`, `frontend/src/settings`, `frontend/src/sdui`)
+  render real React surfaces under jsdom and assert tree shape, labels, roles,
+  provenance, typed action payloads, and state preservation across
+  reconciliation.
+- Server-side SDUI snapshot validation (`src/server/ui.rs`,
+  `src/protocol/runtime.rs`) validates trees, slots, visibility, action
+  targets, duplicate IDs, and bounded payload sizes before anything reaches a
+  client; the runtime suite pins these invariants.
+- The generation-stamped wire snapshot carries host-stamped provenance and
+  trust-domain labels so tests can assert exactly what the renderer will
+  project (`docs/wiki/modules/react-sdui-package-ui.md`).
 
-Markdown mode uses the same structural strategy. The deterministic `markdown-mode` fixture publishes a `Markdown Preview` panel with mode, parse, decorations, preview, and toggle-action text; `markdown_structural_sdui_snapshot_matches_fixture` verifies those visible labels through `SduiNativeState` without a window or GPU surface. Phase 18.5 also keeps large-file Markdown status structural and inert: package SDUI can report `full`, `windowed`, `degraded`, or `plain-text-fallback` highlighting with sanitized fixed strings, including a policy label for partial/viewport-only highlighting and plain-text fallback. This is the regression layer for the Markdown preview/status workflow.
+Status and diagnostics remain server-owned: runtime diagnostic events carry
+sanitized messages to the workspace controller, which surfaces them through
+the footer status live region (`role="status"`); recovery menus (pending-edit
+depth, edit rejections, disconnect guidance, explicit resync/dismiss) surface
+through server-owned menu snapshots rather than stderr-only diagnostics.
 
-The main focused command for this coverage is:
+Markdown mode uses the same structural strategy (`markdown_structural_sdui_snapshot_matches_fixture`). The deterministic `markdown-mode` fixture publishes a `Markdown Preview` panel with mode, parse, decorations, preview, and toggle-action text; fixture captures verify those visible labels without a GPU surface. Large-file Markdown status stays
+structural and inert: package SDUI can report `full`, `windowed`, `degraded`,
+or `plain-text-fallback` highlighting with sanitized fixed strings, including
+a policy label for partial/viewport-only highlighting and plain-text fallback.
+
+The main focused commands for this coverage are:
 
 ```text
-cargo test -p clay --lib masonry_sdui
-```
-
-Useful adjacent checks include:
-
-```text
-cargo test -p clay --lib masonry_editor
+npm --prefix frontend run test
 cargo test --all-targets
 ```
 
-## Relationship to window-driver smoke coverage
+## Relationship to desktop smoke coverage
 
-Manual and app-managed window smoke validation remains documented in [Launch and GUI Smoke Validation](launch-and-gui-smoke.md). Use `cargo run -- smoke-gui` when you need to observe actual native window behavior, local IPC startup, runtime-backed SDUI publication, or GUI status text in a real desktop session.
+Manual and app-managed smoke validation remains documented in [Launch and GUI Smoke Validation](launch-and-gui-smoke.md). Launch the Tauri desktop (`clay`) when you need to observe actual webview behavior, local IPC startup, runtime-backed SDUI publication, or status text in a real desktop session.
 
-The automated structural tests do not replace window smoke runs. They provide deterministic coverage for tree shape, update handling, accessibility labels, status observations, and payload guardrails; window smoke validates that those states are visible through the native application shell.
+The automated structural tests do not replace desktop smoke runs. They provide deterministic coverage for tree shape, update handling, accessibility labels, status observations, and payload guardrails; a desktop run validates that those states are visible through the real application shell.
 
-Plan 087's repeatable live review wrapper is `scripts/capture-ui-review.sh`. It
-uses the existing `clay server`/`clay client` launch path with a mode-700
-private root, fixed `900×600` logical window request, fixture-only documents,
-and bounded cleanup. It stores a portal PNG plus a Clay-only AT-SPI dump under
-a caller-selected artifact directory. Missing desktop capture prerequisites
-produce `review.status`=`UNRESOLVED` and exit 2; they never weaken structural
-CI coverage or become a false visual pass. See [Launch and GUI Smoke
-Validation](launch-and-gui-smoke.md#repeatable-ui-review-harness-plan-087-task-2)
+Plan 087's repeatable live review wrapper is `scripts/capture-ui-review.sh`.
+It launches the current Tauri build with a mode-700 private root, fixed
+fixture-only documents, and bounded cleanup. It stores a portal PNG plus a
+Clay-only AT-SPI dump under a caller-selected artifact directory. Missing
+desktop capture prerequisites produce `review.status`=`UNRESOLVED` and exit 2;
+they never weaken structural CI coverage or become a false visual pass. See
+[Launch and GUI Smoke Validation](launch-and-gui-smoke.md#repeatable-ui-review-harness-plan-087-task-2)
 for fixture names, interaction checkpoints, and output files.
 
-## Deferred GPU-backed pixel snapshot path
+Known AT-SPI ceiling on the current stack: WebKitGTK does not expose static
+text inside the footer/live region as accessible names or Text-interface
+content, so name-based dumps cannot see connection/diagnostic status text.
+Interactive keyboard states additionally require a TTY this host cannot
+provide; both ceilings are recorded in `test-plan/index.md`.
 
-Phase 20 revisited Masonry 0.4 `TestHarness` / `assert_render_snapshot` and **re-deferred** pixel / GPU snapshots with evidence (`decision-logs/2026-07-18-0352-phase20-pixel-snapshot-redeferral.md`):
+## Deferred pixel snapshot path
 
-- Masonry now has a headless capture path, but `TestHarness` forces `use_cpu: true`. That is intentional for CPU determinism and does **not** match Clay's production `masonry_winit` renderer (`use_cpu: false`, wgpu texture blit).
-- Clay therefore does not depend on `masonry_testing`, does not land golden PNGs, and keeps structural observability as the hard CI layer.
-- Renderer upgrades that could improve GPU fidelity (newer Vello/Parley/wgpu) remain blocked until a newer Masonry release; Masonry 0.4.0 is still the latest published line.
+Pixel/GPU snapshots stay deferred. Prerequisites before promoting them:
 
-Promote GPU-backed pixel snapshots only when all of the following exist:
-
-1. a deterministic offscreen render target that works in CI without an interactive desktop and can run the **production GPU** path (`use_cpu: false`) or an explicitly accepted GPU-faithful alternative;
+1. a deterministic offscreen render target that works in CI without an interactive desktop and exercises the production webview rendering;
 2. fixed font, DPI, scale-factor, theme, and window-size inputs;
-3. stable screenshot capture for the native SDUI editor/sidebar composition;
+3. stable screenshot capture for the SDUI editor/sidebar composition;
 4. golden image review/update workflow with clear commands and platform expectations;
 5. tolerance rules for antialiasing or backend differences; and
 6. security review confirming that the render harness does not open remote listeners, read user documents, expose secrets, or grant client filesystem/shell authority.
 
-Until those prerequisites exist, structural snapshots are the hard automated regression layer and GPU-backed pixel snapshots remain deferred follow-up work. GPU-backed pixel snapshots remain deferred for Markdown mode as well; its automated smoke coverage stays structural, typed, headless, and independent of platform font/rasterization differences.
+Until then, structural snapshots are the hard automated regression layer — including Markdown mode, whose automated smoke coverage stays structural, typed, headless, and independent of platform font/rasterization differences.
 
 ## Performance and payload context
 
-SDUI payload size guardrails are tracked in [Performance Fixtures and Baseline Workflow](performance.md#sdui-payload-budget-findings). The observability tests should stay cheap, typed, and headless; they must not add synchronous JavaScript, IPC, filesystem, GPU, or window work to the ordinary typing/rendering hot path. Markdown large-file policy/status decisions are load/open/reload/configuration or explicit viewport-refresh work; paint reads already-validated SDUI and decoration state only.
+SDUI payload size guardrails are tracked in [Performance Fixtures and Baseline Workflow](performance.md#sdui-payload-budget-findings). The observability tests should stay cheap, typed, and headless; they must not add synchronous JavaScript, IPC, filesystem, GPU, or window work to the ordinary typing/rendering hot path. Markdown large-file policy/status decisions are load/open/reload/configuration or explicit viewport-refresh work; renders read already-validated SDUI and decoration state only.

@@ -1,0 +1,34 @@
+/* Catalog `modal`: token-driven scrim + dialog chrome, z.modal stacking. */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  /* Opacity lives on the fill, not the overlay, so the dialog stays opaque. */
+  background: color-mix(
+    in srgb,
+    var(--clay-surface-scrim) calc(var(--clay-opacity-scrim) * 100%),
+    transparent
+  );
+  z-index: var(--clay-z-modal, 40);
+  display: grid;
+  place-items: center;
+}
+
+.dialog {
+  background: var(--clay-surface-overlay);
+  color: var(--clay-text-primary);
+  border: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-strong);
+  border-radius: 0;
+  min-width: 320px;
+  max-width: min(var(--clay-dimension-overlay-centered-width, 640px), 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: var(--clay-spacing-md, 16px);
+}
+
+.title {
+  margin: 0 0 var(--clay-spacing-sm, 12px);
+  font-size: var(--clay-text-title-size);
+  line-height: var(--clay-text-title-line-height);
+}

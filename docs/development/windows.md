@@ -73,6 +73,24 @@ If a broad test command tries to execute a helper binary and Windows reports `os
 
 Do not use Linux-host cross-compilation as the required Windows gate for normal work. Some dependencies build C code and need Windows/MSVC headers; from Linux, `cargo check --target x86_64-pc-windows-msvc --all-targets` can fail before Clay code is checked because headers such as `stdio.h` are unavailable.
 
+## Tauri desktop (Phase 11)
+
+Linux remains the blocking CI and packaging host. The Tauri shell uses the
+same local named-pipe IPC as the native client (`\\.\pipe\clay-<user>`).
+`CLAY_ENDPOINT` may override the pipe name; values containing `://` are
+rejected. WebView2 is the Windows renderer; do not add remote CSP origins or
+privileged Tauri plugins to make Windows packaging easier.
+
+Windows MSI/NSIS bundle targets are not required for Phase 11. When a Windows
+host is available, optional checks are:
+
+```powershell
+npm --prefix frontend ci
+npm --prefix frontend run build
+cargo test -p clay-desktop --lib --quiet
+cargo test -p clay-desktop --test config_security --quiet
+```
+
 ## Manual Smoke Test
 
 After the checks pass, verify the command-first startup paths documented in [Launch and GUI Smoke Validation](launch-and-gui-smoke.md):
@@ -93,7 +111,7 @@ cargo run -- smoke-gui --config-fixture windows-markdown-open
 
 The fixture loads `@clay/markdown` and binds `Ctrl+O` to `documents.clientOpenFileDialog` through `init.js`. The route opens the Windows native file browser with Markdown filters (`.md`, `.markdown`, `.mdown`) plus an all-files fallback; cancellation is a non-error no-op. Selecting a regular UTF-8 file sends an explicit selected-file open request to the server, which validates and grants only that file before replacing the GUI buffer. When `@clay/markdown` is loaded, selected `.md`, `.markdown`, and `.mdown` files also activate Markdown mode and receive viewport-bounded Markdown decorations/status for manual smoke validation. Type in the opened file to confirm local editing remains responsive, then skip save for this phase.
 
-Windows clipboard checks for Plan 060 T13 remain host-manual (Linux CI does not claim Windows execution): copy/cut/paste both through native chords and configured client commands. Linux-only portal generation gating does not change the Windows modal COM path. Clay retains text-only `arboard` because Masonry's private copypasta context exposes no `DriverCtx` read fallback; the image feature/dependency subtree is disabled. A future deletion requires this Windows smoke plus Linux pure-Wayland/X11 and macOS parity.
+Windows clipboard checks for Plan 060 T13 remain host-manual (Linux CI does not claim Windows execution): copy/cut/paste through native chords and configured client commands. Since the Plan 097 cutover the client performs clipboard work through the WebView2 webview/CodeMirror inside explicit commands only; the removed native `arboard` backend required a dedicated Windows smoke, which no longer applies.
 
 Windows-specific expected behavior:
 

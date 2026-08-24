@@ -1,6 +1,6 @@
 # UI Chrome Primitives (Phase 20.2)
 
-Phase 20.2 introduced a native chrome primitive layer in `src/shell/primitives.rs`. These are `pub(crate)` inert paint helpers that read from `ResolvedUiTheme` tokens and render UI chrome (dividers, focus rings, panel backgrounds/borders, scrollbars, badges, keyboard hints, icon slots, tooltip shells). Phase 20.4 added state-color helpers (`component_state_color`, `list_row_fill_color`, `disabled_text_color`) that centralize the `InteractionState`→token mapping used by the SDUI paint path.
+Phase 20.2 introduced a chrome primitive layer (pre-cutover: the `pub(crate)` paint helpers in `src/shell/primitives.rs`, removed with the native client). These are inert chrome renderers reading from resolved theme tokens: dividers, focus rings, panel backgrounds/borders, scrollbars, badges, keyboard hints, icon slots, and tooltip shells — now realized as token-driven React components/CSS classes with the same catalog contract. Phase 20.4 added state-color helpers (`component_state_color`, `list_row_fill_color`, `disabled_text_color`) that centralize the `InteractionState`→token mapping.
 
 ## Architecture
 
@@ -36,11 +36,11 @@ Each primitive maps to an accessibility role:
 
 ### Tab bar chrome (Phase 22.3, accessibility Phase 22.6)
 
-The tab strip (`tab_card_chrome` in `src/shell/primitives.rs`, `TabCard`
-geometry in `src/masonry_shell.rs`) is painted chrome, not a package-facing
-widget. Its accessibility surface is a shell-owned virtual `TabList` node
-(`Workspace tabs`) with one `Tab` per card — sanitized workspace basename,
-`selected` on the active card — present only when two or more cards exist.
+The tab strip is shell chrome, not a package-facing widget (pre-cutover it
+lived in the removed native primitive/shell modules; the React tab bar
+carries the same contract). Its accessibility surface is a shell-owned `TabList`
+(`Window tabs`) with one `Tab` per card — sanitized workspace basename,
+`selected` on the active card — present when tabs exist.
 Split dividers were already covered by `paint_divider` → `separator`.
 Announcements for tab/split changes come from the shell's persistent
 `Status` live-region node (`Live::Polite`), one per user action. See
@@ -58,7 +58,7 @@ Phase 28 extends editor data without adding package-facing chrome primitives:
   handles typed hover/activate intent; packages publish targets, not callbacks.
 - Inlay hints are `DecorationKind::InlayHint` spans with bounded inert labels.
   Clay paints them as muted overlay text after the main token layout with no
-  Parley reflow. They are decorative/`aria-hidden`; the visibility toggle is a
+  text reflow. They are decorative/`aria-hidden`; the visibility toggle is a
   Clay command, not a package component.
 - No package JavaScript runs in paint, layout, pointer, scroll, keypress, or
   text-event handlers. `render-folding` and `render-decorations` publish data
@@ -82,7 +82,7 @@ Phase 28 extends editor data without adding package-facing chrome primitives:
 
 ## State-color helpers (Phase 20.4)
 
-Phase 20.4 added three `pub(crate)` helpers in `src/shell/primitives.rs` that centralize the `InteractionState`→token mapping. The SDUI paint path (`src/masonry_sdui.rs`) calls these instead of branching on state inline, so token routing and state mapping have one source.
+Phase 20.4 centralized the `InteractionState`→token mapping in three helpers. Pre-cutover they were `pub(crate)` Rust functions in `src/shell/primitives.rs`; the current client applies the identical mapping through CSS component classes keyed by state attributes, keeping token routing and state mapping single-source.
 
 | Helper | Signature | Mapping |
 |--------|-----------|---------|
@@ -90,33 +90,33 @@ Phase 20.4 added three `pub(crate)` helpers in `src/shell/primitives.rs` that ce
 | `list_row_fill_color` | `(theme, state: InteractionState, selected: bool) -> Color` | `Disabled`→`surface.disabled` × `opacity.disabled`; `Hover`/`Active`→`surface.hover`/`surface.active` (override selection); `Rest`/`Focus`→`surface.selected` if `selected` else `surface.list` |
 | `disabled_text_color` | `(theme) -> Color` | `text.disabled` × `opacity.disabled` (alpha-multiply) |
 
-All three are token-driven (read `ResolvedUiTheme::color` / `opacity`) and apply `opacity.disabled` via the module's alpha-multiply pattern (not `Brush::with_alpha`, which sets rather than multiplies). They are `pub(crate)`; packages cannot call them. The SDUI paint path uses `component_state_color(theme, "surface.control", state)` for `button` fills, `list_row_fill_color(theme, state, item.selected)` for `list` rows, and `disabled_text_color(theme)` for `label`/`statusItem`/`button` disabled text.
+All three are token-driven (resolved theme color/opacity tables) and apply `opacity.disabled` by alpha multiplication rather than replacement; packages cannot call them. The rendered surfaces use the same mapping for `button` fills, `list` rows, and `label`/`statusItem`/`button` disabled text.
 
 ## Routing
 
-### SDUI chrome routing (src/masonry_sdui.rs)
+### SDUI chrome routing
 
-- **Sidebar chrome**: `paint()` → `paint_panel_chrome()`
-- **Package fixed panel chrome**: `paint_package_fixed_panels()` → `paint_panel_chrome()`
-- **Package overlay chrome**: `paint_package_overlays()` → `paint_tooltip_shell()`
-- **Centered Command Centre backdrop**: root-layer `PackageOverlayHost::paint()` → `paint_scrim()` once over cached window bounds, then existing tooltip-shell chrome. This is a translucent scrim only; no blur, filter, or offscreen pass.
+- **Sidebar chrome**: panel chrome styling on the SDUI sidebar surface.
+- **Package fixed panel chrome**: same panel chrome applied to projected package panels.
+- **Package overlay chrome**: tooltip/popover chrome on transient overlays.
+- **Centered Command Centre backdrop**: one translucent scrim behind the modal dialog; no blur, filter, or offscreen pass.
 
-### Editor chrome routing (src/editor/surface/mod.rs)
+### Editor chrome routing
 
-- **Scrollbar chrome**: `paint_vertical_scrollbar()` → `paint_scroll_chrome()`
-- Editor text/caret/selection/diagnostics remain on `StyleRegistry` (editor-owned color authority)
+- **Scrollbar chrome**: rendered through the shared scroll-chrome primitive styling.
+- Editor text/caret/selection/diagnostics remain on the editor theme registry (editor-owned color authority).
 
 ### No changes needed
 
-- `src/shell/package_ui.rs`: data structures only; paint done in `masonry_sdui.rs`
-- `src/shell/transient_menu.rs`: data structures only; paint done in `masonry_sdui.rs`
+- `src/shell/package_ui.rs`: data/state only; rendering done by the React projection (`frontend/src/sdui`)
+- `src/shell/transient_menu.rs`: server-side session state only; rendering done by the React Command Centre
 
 ## Conformance contract
 
 Enforced by `tests/ui_primitive_conformance.rs`:
 
-1. **No color literals**: Shell/SDUI chrome paint files contain no `Color::from_rgb8`/`Color::from_rgba8` literals outside `primitives.rs` and `theme.rs`. Phase 20.4 added `src/editor/surface/mod.rs` (editor chrome) to the color-guard set.
-2. **No hardcoded sizes**: Shell/SDUI chrome paint files contain no hardcoded chrome-size constants (`SCROLLBAR_WIDTH`, `BORDER_WIDTH`, etc.) outside `primitives.rs` and `theme.rs`. Phase 20.4 added `src/masonry_editor.rs` (status bar) to the size-guard set.
+1. **No color literals**: component styles contain no raw color literals outside the token catalog (`frontend/src/**.module.css` guard + catalog tests).
+2. **No hardcoded sizes**: component styles use token-driven spacing/radius variables, not fixed chrome-size constants.
 3. **Primitive routing**: Package components map onto primitives by construction (SDUI paint routes chrome through primitive helpers).
 4. **Token-driven**: Each primitive reads from `ResolvedUiTheme` (`theme.color()`, `theme.scalar_f64()` for spacing/radius, `theme.dimension()` for logical dimensions, and `theme.opacity()`).
 5. **State-complete**: Interactive primitives handle all `InteractionState` variants including `Disabled`.
@@ -135,7 +135,7 @@ Editor chrome is **not** SDUI chrome (Plan 071 task 12): caret shape/blink and t
 - **Caret color**: stays theme-owned — the `caret` theme token, overridable through theme-token contributions like any other color. Shape/blink and color are deliberately separate authorities.
 - **Ligatures**: follow the mode's font role. Each `FontProfile` (monospace/proportional/ui) carries a user-owned `LigaturePolicy`; a mode's `defaultFontRole` selects which profile applies to its document text. No package capability grants ligature overrides. See [Semantic Typography Roles](typography.md#ligature-policy).
 
-Rendering of both surfaces stays in native code (`paint_caret` in `src/editor/surface/mod.rs`; parley `StyleProperty::FontFeatures` in the layout path); no package JavaScript runs in caret paint or text shaping.
+Rendering of both surfaces stays inside the editor implementation (CodeMirror caret extension; font-feature settings from the resolved profile); no package JavaScript runs in caret rendering or text shaping.
 
 See [Creating Clay Packages](../packages/creating-packages.md#ui-chrome-conformance-phase-202) for the full package authoring contract.
 

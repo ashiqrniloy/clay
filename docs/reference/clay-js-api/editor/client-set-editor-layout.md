@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSetEditorLayout
 js_facade: runtime/js/editor.js::clientSetEditorLayout
-backing_rust: src/editor/surface/mod.rs::EditorSurface::set_editor_layout
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_editor_set_editor_layout
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_set_editor_layout
 name: clientSetEditorLayout
@@ -41,7 +41,7 @@ Set the user-owned document wrap-policy override through the `clay:editor` Clay 
 
 ## Description
 
-`clientSetEditorLayout` is the public API for **Set Editor Layout**. The `op_clay_editor_set_editor_layout` deno op validates typed arguments (deny-by-default enum, clamped column cap), publishes the override to every connected client editor surface, and returns the validated descriptor. The client applies it through `EditorSurface::set_editor_layout`, which takes precedence over the per-mode manifest `editorRules.layout.wrap` and the `WrapPolicy::from_font_role` default. Packages cannot forge this override: the op is registered in the trusted runtime extension only, so third-party package code cannot resolve it; the `editor-control` trust gate additionally allows trusted-domain user configuration (`~/.config/clay/init.js`) outside any package activation.
+`clientSetEditorLayout` is the public API for **Set Editor Layout**. The `op_clay_editor_set_editor_layout` deno op validates typed arguments (deny-by-default enum, clamped column cap), publishes the override to every connected client editor surface, and returns the validated descriptor. The client applies it through CodeMirror wrap/editor-layout configuration (`frontend/src/editor/extensions/behavior.ts`), which takes precedence over the per-mode manifest `editorRules.layout.wrap` and the `WrapPolicy::from_font_role` default. Packages cannot forge this override: the op is registered in the trusted runtime extension only, so third-party package code cannot resolve it; the `editor-control` trust gate additionally allows trusted-domain user configuration (`~/.config/clay/init.js`) outside any package activation.
 
 Authority: `configuration-driven-client-ui-state`. Runtime path: `configuration-api-to-client-ui`. Wrap policy is layout-affecting geometry; changing it invalidates the layout cache key and repaints, but does not route ordinary keypresses through JavaScript or block paint/input on server work. The override survives configuration reload (the channel and current-value store are shared across runtime generations).
 
@@ -102,9 +102,9 @@ Use `editor.clientSetEditorLayout` when the user asks to set the editor wrap pol
 
 - JS facade: `runtime/js/editor.js::clientSetEditorLayout`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_set_editor_layout` (`op_clay_editor_set_editor_layout`)
-- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::set_editor_layout`
-- Transport: `ServerMessage::EditorLayoutOverride` (protocol v18) → `ClientConnectionEvent::EditorLayoutOverride` → `PaneDocumentView::apply_connection_event`; publisher `ClayOpState::publish_editor_layout_override`, lane `ClayJsRuntimeService::subscribe_editor_layout` / `editor_layout_override`.
-- Layout: `EditorSurface::resolved_wrap` / `layout_max_width` (Phase 26.6).
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Transport: `ServerMessage::EditorLayoutOverride` (protocol v18) → `ClientConnectionEvent::EditorLayoutOverride` → the React editor controller `frontend/src/editor/extensions/controller.ts` (React/CodeMirror controller); publisher `ClayOpState::publish_editor_layout_override`, lane `ClayJsRuntimeService::subscribe_editor_layout` / `editor_layout_override`.
+- Layout: CodeMirror wrap resolution in `frontend/src/editor/extensions/behavior.ts` (Phase 26.6 port).
 
 ## Lookup metadata
 

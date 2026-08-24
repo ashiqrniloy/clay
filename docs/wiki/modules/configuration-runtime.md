@@ -100,6 +100,24 @@ Phase 20.6 adds `PersistedPreferences` in `src/server/configuration.rs`: a close
 
 A single documented precedence applies on every startup/reload (highest wins): `ui-session` (`preferences.json`, written by `settings.setTheme`/`settings.setAppearance`) > `init-js` (`init.js` `setTheme`/`setAppearance`/`setTypography`) > canonical/package default (appearance-derived Modus default or Clay core default). `apply_persisted_preferences` runs in the `src/server/js_runtime/mod.rs` harvest immediately after `init.js` evaluation, so a UI choice always overrides the equivalent `init.js` call. Canonical-default resolution (Modus Operandi/Vivendi) also runs in the harvest when no explicit theme was set. Full implementation, settings surface, and the `@clay/settings` package details: [Phase 20.6 Theme Package Segregation and Settings UI](phase20.6-theme-segregation-settings-ui.md).
 
+## Plan 097 Phase 9 React diagnostics and settings
+
+The Tauri bridge continues to forward the existing retained/live
+`RuntimeDiagnostic` family and complete runtime snapshots. React stores the
+latest diagnostic per tab and projects its sanitized message in the shell
+status footer; it adds no watcher/reload protocol or frontend configuration
+store. `runtime.reloadConfiguration` still runs through the server command
+executor and failed candidates preserve the prior generation.
+
+The trusted `@clay/settings` React panel now completes typography value
+carriage: it sends one JSON argument containing all three profiles and all seven
+hierarchy ratios. `execute_settings` and `validate_typography_request` reject
+missing, malformed, unknown, or out-of-bound values before
+`persist_preference("typography", ...)`; reload applies the same parser again.
+Theme, appearance, and reset retain their existing closed-key atomic store and
+precedence. No new `clay:configuration` API, option, keybinding, or example
+configuration entry was introduced.
+
 ## Phase 28 editor command configuration review
 
 Phase 28 reuses existing configuration surfaces instead of adding a second

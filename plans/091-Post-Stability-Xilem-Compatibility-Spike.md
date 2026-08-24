@@ -158,7 +158,7 @@ Dependency matrix resolves one Masonry/winit line with no production upgrade req
   - Approach:
     - Documentation Reviewed:
       - `.agents/skills/clay-ui/SKILL.md`, component/token catalogs, `docs/reference/ui-components.md`.
-      - `npx ui-skills start`; selected accessibility/design guidance.
+      - the UI guidance current at execution time; selected accessibility/design guidance.
       - Project patterns `ui-modernization.md`, `package-ui-layout.md`, `authority-boundaries.md`.
     - Options Considered:
       - Migrate editor or shell root first: rejected; highest flexibility/hot-path/state risk.

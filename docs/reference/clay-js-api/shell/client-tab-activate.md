@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientTabActivate
 js_facade: runtime/js/shell.js::clientTabActivate
-backing_rust: src/driver/restore.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell/window_tabs.rs::ShellClientCommand (command mapping)
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientTabActivate
@@ -37,7 +37,7 @@ Return the stable bindable command ID for activating a specific tab by number.
 
 Activate Tab The numbered family `shell.clientTabActivate.N` exists for `N` in `1..=9`; each variant activates the `N`-th tab in the user-visible card order (the server-authoritative `TabRegistry` order, entry-less mounted tabs appended). Positions beyond the tab count are silent no-ops; positions beyond 9 do not exist as command IDs (10+ tabs are reachable by next/prev or card click). The tab switch is optimistic client-side and reconciles against the server's pushed `TabRegistrySnapshot`.
 
-Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Tab switching happens later only after an explicit user key/command route reaches the driver's tab-command dispatcher.
+Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Tab switching happens later only after an explicit user key/command route reaches the React workspace controller's tab-command handler `frontend/src/shell/workspace-controller.ts` (React workspace controller).
 
 ## When to use
 
@@ -108,7 +108,7 @@ Use `shell.clientTabActivate` only as a documented command ID for `bindKey` to r
 
 - JS facade: `runtime/js/shell.js::clientTabActivate`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/driver/restore.rs::Driver::apply_tab_command` (tab-order policy resolvers + execution); `src/masonry_shell/window_tabs.rs::ShellClientCommand` (command mapping)
+- Backing Rust/current owner: `src/client_commands.rs::ShellClientCommand (client-local; React tab bar, frontend/src/app/layout/tab-bar.tsx)` (tab-order policy resolvers + execution); `src/client_commands.rs::ShellClientCommand` (command mapping)
 
 ## Lookup metadata
 

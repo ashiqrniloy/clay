@@ -40,8 +40,19 @@ pub type LanguageIntelligenceProviderGeneration = u64;
 
 /// Which feature a request or result targets. One coordinator serves all four.
 #[derive(
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LanguageIntelligenceFeature {
     Hover,
     GoToDefinition,
@@ -52,7 +63,19 @@ pub enum LanguageIntelligenceFeature {
 /// Canonical UTF-8 byte range within a Clay document. `byte_start <= byte_end`;
 /// both are validated against the document at its exact version by the
 /// coordinator before publication.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct TextByteRange {
     pub byte_start: u64,
     pub byte_end: u64,
@@ -76,7 +99,18 @@ impl TextByteRange {
 /// Clay document or a known workspace root plus a normalized relative path.
 /// Raw absolute paths, `file://`/external URIs, and traversal (`..`) are
 /// rejected by validation.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TextLocation {
     OpenDocument {
         document_id: DocumentId,
@@ -93,21 +127,54 @@ pub enum TextLocation {
 
 /// Optional byte range a hover applies to, plus bounded Markdown/plain-text
 /// content rendered client-side as inert text.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct HoverResult {
     pub range: Option<TextByteRange>,
     pub markdown: String,
 }
 
 /// Bounded, deterministically ordered definition locations.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct GoToDefinitionResult {
     pub locations: Vec<TextLocation>,
 }
 
 /// One inert versioned text replacement. Phase 18.20 carries edit previews
 /// only; they are never auto-applied.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct RangeEdit {
     pub range: TextByteRange,
     pub replacement: String,
@@ -115,7 +182,18 @@ pub struct RangeEdit {
 
 /// Inert edit preview bound to an exact open-document version. The coordinator
 /// stale-drops a preview whose version no longer matches.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct EditPreview {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -125,7 +203,18 @@ pub struct EditPreview {
 /// One code action. A command-backed action references a registered command ID
 /// and executes later through `CommandExecution`; a direct edit is an inert
 /// preview only in Phase 18.20.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct CodeAction {
     pub range: TextByteRange,
     pub title: String,
@@ -136,20 +225,53 @@ pub struct CodeAction {
 }
 
 /// Bounded set of code actions for a request range.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct CodeActionResult {
     pub actions: Vec<CodeAction>,
 }
 
 /// One signature parameter. Inert label/documentation text only.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParameterInformation {
     pub label: String,
     pub documentation: String,
 }
 
 /// One signature candidate. Inert label/documentation/parameter text only.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct SignatureInformation {
     pub label: String,
     pub documentation: String,
@@ -157,7 +279,18 @@ pub struct SignatureInformation {
 }
 
 /// Bounded signature help with validated active indexes.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct SignatureHelpResult {
     pub signatures: Vec<SignatureInformation>,
     pub active_signature: Option<u16>,
@@ -165,7 +298,18 @@ pub struct SignatureHelpResult {
 }
 
 /// Feature-tagged result body carried inside one versioned envelope.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LanguageIntelligencePayload {
     Hover(HoverResult),
     GoToDefinition(GoToDefinitionResult),
@@ -175,7 +319,19 @@ pub enum LanguageIntelligencePayload {
 
 /// Inert status carried alongside a result. Maps to transient UI state without
 /// executing provider code.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LanguageIntelligenceStatus {
     /// The provider produced a result for the feature.
     Ok,
@@ -189,7 +345,18 @@ pub enum LanguageIntelligenceStatus {
 
 /// A typed, versioned language-intelligence request enqueued after a local-first
 /// command/intent captures the current document/version/cursor byte offset.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct LanguageIntelligenceRequest {
     pub request_id: LanguageIntelligenceRequestId,
     pub client_id: ClientId,
@@ -203,7 +370,18 @@ pub struct LanguageIntelligenceRequest {
 
 /// Bounded, versioned, provenance-bearing server-to-client result envelope for
 /// one request.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct LanguageIntelligenceResult {
     pub request_id: LanguageIntelligenceRequestId,
     pub client_id: ClientId,
@@ -219,7 +397,19 @@ pub struct LanguageIntelligenceResult {
 
 /// Validation failure for a [`LanguageIntelligenceRequest`] before any provider
 /// work is scheduled.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LanguageIntelligenceRequestRejection {
     /// The cursor byte offset is not a valid (ordered) point reference.
     InvalidCursorOffset,
@@ -234,7 +424,18 @@ impl LanguageIntelligenceRequest {
 }
 
 /// Which string or nested field exceeded a budget, for typed rejection.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LanguageIntelligenceField {
     HoverMarkdown,
     Title,
@@ -249,7 +450,18 @@ pub enum LanguageIntelligenceField {
 }
 
 /// Why a language-intelligence result was rejected before client publication.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LanguageIntelligenceRejection {
     UnorderedByteRange {
         byte_start: u64,

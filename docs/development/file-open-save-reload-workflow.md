@@ -89,7 +89,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 When `Ctrl+S` fires:
 
 1. The keybinding matches `documents.serverSaveDocument` in the behavior manifest.
-2. The `EditorWidget` intercepts the command locally (before the generic server `CommandExecutor` route) and calls `request_save_active_document`.
+2. The editor host intercepts the command locally (before the generic server `CommandExecutor` route) and calls the save flow.
 3. The edit queue sends `ClientMessage::SaveDocument` for the active document's ID and current confirmed version.
 4. The server `save_document_unlocked` reauthorizes the canonical path, compares disk metadata for staleness, writes atomically, and returns `ServerMessage::DocumentSaved { document_id, version, dirty }`.
 5. The client receives `ClientConnectionEvent::DocumentSaved`: dirty chrome clears, stale conflict diagnostics clear, and the version updates.
@@ -178,7 +178,7 @@ When `reload_document` is called without `force` on a dirty document, the server
 
 ### Accessibility during conflict
 
-Recovery menus are exposed as `Role::Menu` with `Role::MenuItem` children in the AccessKit tree. Menu item labels include the action description and whether the item is selected.
+Recovery menus are server-owned menu snapshots rendered by the React client as accessible listbox/menu surfaces; item labels include the action description and selected state.
 
 ## Multi-Document Sessions
 
@@ -206,7 +206,7 @@ bindKey("Ctrl+Tab", "editor.clientShowOpenDocuments", { scope: "editor" });
 | All-files fallback | `*.*` | `*` (normalized) | `allowsOtherFileTypes: true` | N/A |
 | Clipboard copy/cut/paste | `Ctrl+C`/`X`/`V` | `Ctrl+C`/`X`/`V` | `Cmd+C`/`X`/`V` | persistent text-only client `arboard` sink |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y` | same | `Cmd+Z` / `Cmd+Shift+Z` | 256-entry inverse stack |
-| IME preedit overlay | OS IME via Masonry | ibus/fcitx when available | OS IME via Masonry | paint-only until commit |
+| IME preedit overlay | WebKitGTK IME → CodeMirror composition | ibus/fcitx when available | same path per platform | composition is local until commit |
 | Snapshot retain (64 docs) | yes | yes | yes | yes |
 | Undo/redo (256 entries) | yes | yes | yes | yes |
 | Save/conflict recovery menus | yes | yes | yes | yes |

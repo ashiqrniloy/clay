@@ -101,7 +101,7 @@ Use `editor.serverInsertText` when the user asks for insert text through the Cla
 - JS facade: `runtime/js/editor.js::serverInsertText`
 - Future Deno op: `src/server/ops/editor.rs::op_clay_editor_insert_text` (`op_clay_editor_insert_text`)
 - Backing Rust/current owner: `src/server/document.rs::DocumentState::apply_edit`
-- Current implementation audit path: `src/editor/surface/mod.rs::EditorSurface::insert_text_with_event; src/server/document.rs::DocumentState::apply_edit`
+- Current implementation audit path: `src/server/document.rs::DocumentState::apply_edit`
 
 ## Lookup metadata
 

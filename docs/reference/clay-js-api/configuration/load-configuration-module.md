@@ -43,7 +43,7 @@ Load a local modular configuration file from the runtime-backed `~/.config/clay/
 
 `loadConfigurationModule` is the runtime-backed public API for **Load Configuration Module**. It implements Clay's modular local configuration contract inside the constrained Phase 13 server-side JavaScript runtime.
 
-Authority: `configuration-api`. Runtime path: `server-side-configuration-loader-runtime`. Configuration starts at `~/.config/clay/init.js`; this API lets that entry point declare additional local configuration modules, such as `./keys.js` or `./editor.js`, through the Phase 13 server-side JavaScript runtime. Ordinary keypress handling, Masonry paint/layout, IPC frame handling, and editor rendering must not wait on this API.
+Authority: `configuration-api`. Runtime path: `server-side-configuration-loader-runtime`. Configuration starts at `~/.config/clay/init.js`; this API lets that entry point declare additional local configuration modules, such as `./keys.js` or `./editor.js`, through the Phase 13 server-side JavaScript runtime. Ordinary keypress handling, client paint/layout, IPC frame handling, and editor rendering must not wait on this API.
 
 ## When to use
 

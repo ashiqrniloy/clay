@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientShowOpenDocuments
 js_facade: runtime/js/editor.js::clientShowOpenDocuments
-backing_rust: src/masonry_pane_document.rs::PaneDocumentView::show_open_documents_menu; src/editor/document_session.rs::DocumentSessionStore; src/masonry_pane_document.rs::PaneDocumentView::activate_document; src/app_driver.rs::Driver (cross-pane aggregation and ActivateDocumentInPane routing)
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientShowOpenDocuments
@@ -99,8 +99,8 @@ Use `editor.clientShowOpenDocuments` only as a documented command ID for `bindKe
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientShowOpenDocuments`
-- Pane menu: `src/masonry_pane_document.rs::PaneDocumentView::show_open_documents_menu`
-- Activate path: `src/masonry_pane_document.rs::PaneDocumentView::activate_document` (own pane); `src/app_driver.rs::Driver` cross-pane aggregation and `ActivateDocumentInPane` routing
+- Pane menu: `src/client_commands.rs::EditorClientCommand (client-local; React command surface)`
+- Activate path: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React workspace controller, frontend/src/shell/workspace-controller.ts)` (own pane); `src/client_commands.rs` (client command routing) cross-pane aggregation and `ActivateDocumentInPane` routing
 - Session store: `src/editor/document_session.rs::DocumentSessionStore`
 - Keybinding allowlist: `src/server/ops/keybindings.rs`
 

@@ -1,0 +1,62 @@
+/*
+ * Host-owned fallback tokens. The runtime theme adapter overwrites every
+ * variable here with Rust-resolved values at bootstrap; these defaults only
+ * keep the shell presentable in the instant before the snapshot lands.
+ * Values mirror the core catalog (`src/shell/theme.rs`); they are never
+ * extended by hand — new tokens arrive through the resolved snapshot.
+ */
+:root {
+  --clay-surface-main: #100f17;
+  --clay-surface-panel: #21202b;
+  --clay-surface-overlay: #2a2838;
+  --clay-surface-scrim: #000000;
+  --clay-surface-control: #39354a;
+  --clay-surface-list: #292835;
+  --clay-surface-selected: #3d385c;
+  --clay-surface-hover: #2d2b3d;
+  --clay-surface-active: #343147;
+  --clay-surface-disabled: #1b1a24;
+  --clay-surface-badge: #39354a;
+  --clay-surface-kbd: #292835;
+  --clay-surface-scrollbar: #6f6a87;
+  --clay-surface-scrollbar-track: #21202b;
+  --clay-text-primary: #eeeaff;
+  --clay-text-muted: #b9b2cf;
+  --clay-text-disabled: #6f6a87;
+  --clay-text-badge: #eeeaff;
+  --clay-text-kbd: #eeeaff;
+  --clay-accent-primary: #7c6fff;
+  --clay-focus-ring: #968aff;
+  --clay-border-hairline: #282638;
+  --clay-border-subtle: #2f2c40;
+  --clay-border-strong: #3d385c;
+  --clay-border-focus: #7c6fff;
+  --clay-border-kbd: #2f2c40;
+  --clay-diagnostic-error: #ff6b6b;
+  --clay-diagnostic-warning: #ffc66b;
+  --clay-diagnostic-success: #6bffb0;
+  --clay-opacity-disabled: 0.55;
+  --clay-opacity-scrim: 0.5;
+  --clay-spacing-xxs: 4px;
+  --clay-spacing-xs: 8px;
+  --clay-spacing-sm: 12px;
+  --clay-spacing-md: 16px;
+  --clay-spacing-lg: 24px;
+  --clay-motion-fast: 100ms;
+  --clay-z-modal: 40;
+
+  /* Structural defaults until typography installs. */
+  --clay-font-ui: system-ui, sans-serif;
+  --clay-font-monospace: ui-monospace, monospace;
+  --clay-font-proportional: serif;
+  --clay-text-body-size: 13px;
+  --clay-text-body-line-height: 15.6px;
+
+  /* Editor vocabulary only covers pre-bootstrap/DEV-fixture paint. Rust's
+     resolved 37-entry snapshot overwrites these before a live document. */
+  --clay-editor-keyword-color: var(--clay-accent-primary);
+  --clay-editor-type-color: var(--clay-diagnostic-warning);
+  --clay-editor-string-color: var(--clay-diagnostic-success);
+  --clay-editor-comment-color: var(--clay-text-muted);
+  --clay-editor-link-color: var(--clay-accent-primary);
+}

@@ -24,8 +24,8 @@ rendering/syntax engine, no package JavaScript in paint/layout hot paths.
 
 Before reviewing existing UI, planning, designing, or editing any UI-related
 task in this plan — theme, typography, tokens, editor chrome, rendering,
-visual evidence — run `npx ui-skills start`. Inspect the relevant category,
-load the smallest useful skill set (prefer 1, never more than 3), and apply
+visual evidence — use the current project UI skill requirements. Inspect the relevant category,
+load the complete mandatory project-local UI skill stack, and apply
 it to Clay's native Masonry/Parley/Vello token context. Repeat per
 independently executed task; prior evidence does not satisfy the gate. Record
 command, category, and selected slugs in the task's evidence. Load
@@ -95,7 +95,7 @@ command, category, and selected slugs in the task's evidence. Load
     - Baseline checklist: every planned visual change has a before image.
 
   - Completion Evidence (2026-08-18 18:28 +06):
-    - UI preflight completed before UI review: ran `npx ui-skills start`, inspected `visual` with `npx ui-skills list --category visual`, selected and loaded `ibelick/baseline-ui` with `npx ui-skills get ibelick/baseline-ui`; translated its web-oriented guidance to Clay's native Masonry/Parley/Vello, typed-token, user-owned typography model. Reviewed `.agents/skills/clay-ui/SKILL.md`, `references/components.md`, `references/tokens.md`, patterns `ui-modernization.md`, `ui-visual-review.md`, `typography-role-ownership.md`, `language-capability-sequencing.md`, `package-manifest-single-source.md`, the approved Phase 26 decisions, editor theme/decoration wiki pages, and rendering/typography/syntax primitive references.
+    - UI preflight completed before UI review: used the UI guidance current at execution time, inspected `visual` with the UI guidance current at execution time, selected and loaded `ibelick/baseline-ui` with the UI guidance current at execution time; translated its web-oriented guidance to Clay's native Masonry/Parley/Vello, typed-token, user-owned typography model. Reviewed `.agents/skills/clay-ui/SKILL.md`, `references/components.md`, `references/tokens.md`, patterns `ui-modernization.md`, `ui-visual-review.md`, `typography-role-ownership.md`, `language-capability-sequencing.md`, `package-manifest-single-source.md`, the approved Phase 26 decisions, editor theme/decoration wiki pages, and rendering/typography/syntax primitive references.
     - Reused the Plan 087/088 harness behavior through a temporary wrapper around `scripts/capture-ui-review.sh`; no product source or committed harness change. All runs used private mode-700 HOME/XDG/workspace/socket roots, fixture-only documents, AT-SPI, and xdg-desktop-portal Screenshot at 900×600 logical size. Physical PNGs are 1920×1200 on this host.
     - Captured 12 `PASS` artifacts under `code-reviews/screenshots/2026-08-18-phase26-baseline/`: Rust, TypeScript, JavaScript, and Markdown under the canonical default (`theme-modus-vivendi`), `@clay/theme-gruvbox-material-light`, and `@clay/theme-gruvbox-material-dark`. Markdown fixture includes headings, paragraph, strong/emphasis, link, quote, list, and fenced Rust code. Each state has `screenshot.png`, `accessibility.txt`, `instructions.md`, `metadata.txt`, and `review.status`; `review-log.md` records the matrix and capture method. Accessibility dumps expose Clay frame, working-area shell, editor pane, editable document entry, status bar, basename, and theme; no retained dump contains a host path or secret.
     - Recorded current budgets: `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS = 16`, `DECORATION_PAYLOAD_BUDGET_BYTES = 8192`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES = 4096`. Recorded commands: `cargo bench --bench editor_baselines editor_render_adjacent -- --sample-size 10 --warm-up-time 1 --measurement-time 2`, `cargo bench --bench editor_baselines editor_scroll_viewport -- --sample-size 10 --warm-up-time 1 --measurement-time 2`, `cargo test --test protocol performance_protocol::`, `cargo test --test editor editor_performance_invariants::`, and `cargo bench --no-run`. `cargo bench --no-run` completed successfully. Existing suites recorded: `editor_baselines`, `protocol_server_baselines`, `runtime_sdui_baselines`, `markdown_baselines`, `first_party_language_baselines`, `window_baselines`.
@@ -298,7 +298,7 @@ command, category, and selected slugs in the task's evidence. Load
     - Markdown fixture: fenced block and quote produce background panels under each theme.
 
   - Completion Evidence (2026-08-18):
-    - UI preflight: `npx ui-skills start` → category `visual` → `ibelick/baseline-ui`; clay-ui `tokens.md` / `components.md` (no new SDUI tokens; editor `StyleRegistry` owns this axis).
+    - UI preflight: the UI guidance current at execution time → category `visual` → `ibelick/baseline-ui`; clay-ui `tokens.md` / `components.md` (no new SDUI tokens; editor `StyleRegistry` owns this axis).
     - `StyleSpec.background: Option<Color>` theme-resolved from `(kind, token_type, modifiers)`. No `DecorationSpan`/rkyv field. SearchMatch + Quote + CodeBlock default tints; `Modifiers::DEPRECATED` uses `unused` wash. Theme `textStyles` gain `background` hex; new base-UI keys `searchMatch` / `unused`.
     - Normalize carries background in run equality/precedence. SearchMatch layer rank raised above Syntax so highlights win. Paint fills run rects after selection, before `render_text`.
     - LSP: `unused`/`unnecessary` map to `Deprecated` in `packages/lsp-shared/mapping.js` (synced to first-party lsp packages).
@@ -341,7 +341,7 @@ command, category, and selected slugs in the task's evidence. Load
     - Manual: Markdown heading hierarchy screenshots (final review task).
 
   - Completion Evidence (2026-08-19):
-    - UI preflight: `npx ui-skills start` → category `visual` → `jakubkrehel/better-typography`; clay-ui tokens/components (no new SDUI tokens; editor `StyleRegistry` owns the ladder).
+    - UI preflight: the UI guidance current at execution time → category `visual` → `jakubkrehel/better-typography`; clay-ui tokens/components (no new SDUI tokens; editor `StyleRegistry` owns the ladder).
     - Default ladder: H1..H6 = 1.50/1.33/1.17/1.08/1.00/0.92, CodeSpan = 0.90, else 1.0. Clamp `(0, 4]` via `HIERARCHY_SCALE_MIN/MAX` (same as UI hierarchy). Plan sample `1.0/0.87/0.75` + `[0.75,1.0]` left H1 at body size — rejected as the defect.
     - Applied at existing Parley `FontSize` push (`profile.size() * run.scale`). Theme `textStyles.scale` is milli-`u16` on the wire; no `DecorationSpan` field.
     - Line metrics: kept uniform `document_line_height`; `ponytail:` ceiling on `conservative_document_line_height`. Per-line heights deferred (26.6 visual viewport).
@@ -384,7 +384,7 @@ command, category, and selected slugs in the task's evidence. Load
     - Tokens: catalog doc-drift test (`cargo test`) stays green.
 
   - Completion Evidence (2026-08-19):
-    - UI preflight: `npx ui-skills start` → category `visual` → `jakubkrehel/better-typography` (tabular/right-aligned gutter digits). clay-ui tokens/components updated; no new SDUI token domain — chrome colors live on `StyleRegistry` like `searchMatch`.
+    - UI preflight: the UI guidance current at execution time → category `visual` → `jakubkrehel/better-typography` (tabular/right-aligned gutter digits). clay-ui tokens/components updated; no new SDUI token domain — chrome colors live on `StyleRegistry` like `searchMatch`.
     - `EditorChrome` on `EditorBehaviorRules` (`gutter`/`activeLine`/`indentGuides`/`bracketMatch`). `None` derives from `document_font_role` (monospace on, proportional/inherit off). `editorRules.chrome` parsed in `modes.rs`; `buildCodeEditingManifest` passes it through.
     - Paint: active-line + indent guides + bracket fills before glyphs in `layout.rs`; gutter numbers right-aligned in existing `TEXT_INSET` (no layout-width change). Colors: `gutterFg`, `gutterFgActive`, `lineHighlight`, `indentGuide`, `bracketMatch`.
     - Bracket scan: `matching_pair_byte_within` with 64 KiB ceiling (`ponytail:`). Same-char pairs skipped (existing motion limit).
@@ -426,7 +426,7 @@ command, category, and selected slugs in the task's evidence. Load
     - Config precedence: user `init.js` override beats manifest default.
 
   - Completion Evidence (2026-08-19):
-    - UI preflight: `npx ui-skills start` → category `visual` → `jakubkrehel/better-typography` (measure 60–75, wrap deliberately). clay-ui tokens/components + creating-packages updated.
+    - UI preflight: the UI guidance current at execution time → category `visual` → `jakubkrehel/better-typography` (measure 60–75, wrap deliberately). clay-ui tokens/components + creating-packages updated.
     - `WrapPolicy::{None,Viewport,Column(u16)}` on `EditorBehaviorRules.layout`. Omitted → role default (monospace `none`, proportional `column` 72, inherit/no-manifest `viewport`). `editorRules.layout` parsed in `modes.rs`; `buildCodeEditingManifest` forwards it.
     - Insets: 32h / 20v; gutter on uses 48 left. `None` → `break_all_lines(None)` + `visual_scroll_x`. Column width = `min(pane, cols * 0.6em)`.
     - User override: `EditorSurface::set_editor_layout` wins over manifest; JS `setEditorLayout` stays on the later API task.
@@ -463,7 +463,7 @@ command, category, and selected slugs in the task's evidence. Load
     - Budget tests: new paint-path budgets asserted; existing keypress budget non-regression.
 
   - Completion Evidence (2026-08-19):
-    - UI preflight: `npx ui-skills start` → category `accessibility` → `jakubkrehel/better-accessibility`.
+    - UI preflight: the UI guidance current at execution time → category `accessibility` → `jakubkrehel/better-accessibility`.
     - Root cause: AccessKit walk recursed into stashed widgets (hidden welcome) and advertised focus on detached pane hosts. `vendor/masonry_core` now skips stashed subtrees and clamps `TreeUpdate.focus` to a still-parented widget or the window. `apply_tree_change` re-focuses a surviving pane after detach. Opening a document requests layout so welcome is stashed before the next a11y pass.
     - Regression: `dirty_focused_pane_menu_and_discard_keep_consumer_focus_live` runs the live path (open dirty `a.txt` → conflict menu → FileOperationFailed → discard/close) through `accesskit_consumer::Tree`.
     - Budgets: `GUTTER_PAINT_P95_BUDGET_MS` (2), `ACTIVE_LINE_PAINT_P95_BUDGET_MS` (1), `BRACKET_MATCH_PAINT_P95_BUDGET_MS` (1), `DECORATION_BACKGROUND_FILL_P95_BUDGET_MS` (2) documented and locked to fit inside `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS`.
@@ -498,7 +498,7 @@ command, category, and selected slugs in the task's evidence. Load
     - Review checklist covering every state matrix row with pass/fail recorded.
 
   - Completion Evidence (2026-08-19):
-    - UI preflight: `npx ui-skills start` → categories `visual` + `accessibility` → `jakubkrehel/better-typography` + `jakubkrehel/better-accessibility`. clay-ui components/tokens + `ui-visual-review.md`.
+    - UI preflight: the UI guidance current at execution time → categories `visual` + `accessibility` → `jakubkrehel/better-typography` + `jakubkrehel/better-accessibility`. clay-ui components/tokens + `ui-visual-review.md`.
     - 17 isolated captures under `code-reviews/screenshots/2026-08-18-phase26-review/` (Rust/TS/JS/Markdown × default + gruvbox-light + gruvbox-dark + modus-operandi, plus `rust-longline-default`). All `review.status=PASS`. Fixture-only; no host paths in a11y dumps.
     - computer-use-linux: `get_app_state` first; live Clay tree = focused Frame → working-area shell → pane → multi-line Entry (`review.rs`, theme) + StatusBar. Window-cropped screenshot confirms gutter/indent/active-line/opaque tokens.
     - Pass: opaque distinct syntax; H1–H6 ladder; quote/fence fills; code chrome on / prose chrome off; wrap-none overflow.

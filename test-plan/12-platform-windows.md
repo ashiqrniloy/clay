@@ -37,3 +37,9 @@ promises parity; otherwise record as known platform gaps.
 
 - Windows cross-compilation/smoke from a Linux host is NOT a pass condition
   for normal work (project policy).
+
+## Plan 097 post-cutover status record (2026-08-24)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| W1–W7 | NOT EXECUTED on this host | Linux is the required pass platform; the current client is Tauri v2 (WebKitGTK on Linux, WebView2 on Windows). Windows verification stays a long-term target per project policy and `docs/development/windows.md`; run this module only when explicitly requested |

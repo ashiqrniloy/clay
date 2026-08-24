@@ -1,21 +1,54 @@
 ---
 name: clay-ui
-description: Clay app UI conventions, reusable primitives, component catalog, theme tokens, typography hierarchy, and shell layout model. Use for ANY Clay UI work — revamping or adding components, panels, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, dialogs, tooltips, split layouts, theme/token/typography changes, or package UI contributions. Enforces primitives-first and visual proof: agents must reuse the documented component catalog, route through `npx ui-skills start`, then inspect screenshots and accessibility state of implemented UI before calling UI work complete.
+description: Clay app UI conventions, mandatory project-local design-skill stack, reusable primitives, component catalog, theme tokens, typography hierarchy, and shell layout model. Use for ANY Clay UI work — revamping or adding components, panels, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, dialogs, tooltips, split layouts, theme/token/typography changes, or package UI contributions. Enforces the required design-skill stack plus Clay layout/spatial-engineering directives, primitives-first implementation, complete output, and visual/accessibility proof.
 ---
 
 # Clay UI
 
-Clay is a native Rust GUI app (Masonry/winit + Vello/Parley). All UI visuals are owned by Clay core; packages declare inert components and typed tokens only. This skill is the single source of truth for reusable UI primitives and components.
+Clay currently ships a native Rust GUI (Masonry/winit + Vello/Parley) and is migrating to a Tauri v2 + React client. Clay core owns host visuals in both renderers; packages declare inert components and typed tokens only. This skill is the single source of truth for reusable Clay UI primitives and components.
 
-## Step 0 (mandatory): Route through ui-skills
+## Step 0 (mandatory): Load the complete UI skill stack
 
-Before reviewing existing UI, planning, designing, or implementing any UI work, run:
+Before reviewing existing UI, planning, designing, or implementing each UI task, read:
 
-```bash
-npx ui-skills start
-```
+1. `.agents/skills/clay-ui/SKILL.md`
+2. `.agents/skills/clay-ui/references/components.md`
+3. `.agents/skills/clay-ui/references/tokens.md`
+4. `.agents/skills/impeccable/SKILL.md`
+5. `.agents/skills/full-output-enforcement/SKILL.md`
+6. `.agents/skills/high-end-visual-design/SKILL.md`
+7. `.agents/skills/design-taste-frontend/SKILL.md`
 
-Then inspect the relevant category (`npx ui-skills list --category <category>`) and load the smallest useful skill set (`npx ui-skills get <slug>`; prefer 1, max 3). This is a per-task gate; do not reuse routing evidence from an earlier task. Record the selected category/slugs when the work is plan-driven. Apply the loaded guidance to Clay's native context — Clay has no CSS/Tailwind; translate web guidance into Clay theme tokens, typography variants, and Masonry primitives. Do not start source review or UI edits until this routing step is complete.
+All four design/output skills are mandatory; do not select a subset. Clay's layout and web-engineering directives are part of this skill (see below). Load them again for every independently executed UI task. In plans, list all seven files under that task's `Approach -> Documentation Reviewed`; plan-level evidence alone is insufficient.
+
+Synthesize rather than blindly concatenate their aesthetics:
+
+- User brief, existing Clay product identity, accessibility, security, authority boundaries, catalog compatibility, and typed theme/token ownership are hard constraints.
+- `impeccable` owns product-context workflow, critique, bounded visual verification, and production craft.
+- `full-output-enforcement` forbids placeholders, partial component states, or omitted deliverables.
+- `high-end-visual-design` and `design-taste-frontend` provide anti-generic composition, typography, material, responsive, asset, and motion scrutiny. Adapt marketing-page rules to Clay's Operate-mode desktop UI; do not force AIDA, hero sections, decorative motion, hardcoded fonts/colors, or GSAP where they do not serve the task.
+- The Layout and Spatial Engineering / Web Engineering Directives sections below supply rigid information hierarchy, mechanical precision, grid discipline, and data-density rules without forcing one palette or motif when the brief disagrees.
+- Current native work translates applicable web guidance into Clay tokens, typography variants, Masonry primitives, and AccessKit semantics. Target React work uses the same semantic tokens through host-generated CSS custom properties and CodeMirror adapters.
+
+Do not start source review or UI edits until this complete stack is loaded and reconciled against the task brief.
+
+## Layout and Spatial Engineering
+
+The layout must appear mathematically engineered. It rejects conventional web padding in favor of visible compartmentalization.
+
+*   **The Blueprint Grid:** Strict adherence to CSS Grid architectures. Elements do not float; they are anchored precisely to grid tracks and intersections.
+*   **Visible Compartmentalization:** Extensive utilization of solid borders (`1px` or `2px solid`) to delineate distinct zones of information. Horizontal rules (`<hr>`) frequently span the entire container width to segregate operational units.
+*   **Bimodal Density:** Layouts oscillate between extreme data density (tightly packed monospace metadata clustered together) and vast expanses of calculated negative space framing macro-typography.
+*   **Geometry:** Absolute rejection of `border-radius`. All corners must be exactly 90 degrees to enforce mechanical rigidity.
+
+Clay adaptation: apply these as structure and density discipline through typed Clay tokens and cataloged primitives — never raw colors, concrete fonts, or off-catalog widgets. Where Clay's product identity requires rounded corners or softer surfaces, the user brief and existing catalog win over these defaults.
+
+## Web Engineering Directives
+
+1.  **Grid Determinism:** Utilize `display: grid; gap: 1px;` with contrasting parent/child background colors to generate mathematically perfect, razor-thin dividing lines without complex border declarations.
+2.  **Semantic Rigidity:** Construct the DOM using precise semantic tags (`<data>`, `<samp>`, `<kbd>`, `<output>`, `<dl>`) to accurately reflect the technical nature of the telemetry.
+
+Clay adaptation: directives apply to the Tauri/React target renderer; native Masonry equivalents use the matching token-driven primitive (dividing lines from tokens, semantic roles from AccessKit semantics, fluid type from `UiTextVariant` levels).
 
 ## Step 1 (mandatory): Inspect implemented UI
 

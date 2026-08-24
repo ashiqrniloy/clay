@@ -14,7 +14,7 @@
 //! render unchanged. Task 5 will layer active-theme overrides over these
 //! defaults; the closed-enum default fallback stays here.
 
-use masonry::peniko::Color;
+use crate::color::Color;
 
 use crate::protocol::{
     CaretStyle, DecorationKind, DiagnosticSeverity, HIERARCHY_SCALE_MAX, HIERARCHY_SCALE_MIN,
@@ -50,19 +50,6 @@ const fn default_syntax_backgrounds() -> [Option<Color>; 35] {
 /// via the already-public `clay::editor::theme` module.
 pub use crate::shell::theme::{ContrastFailure, validate_active_theme_contrast};
 
-/// Resolved visual style for one decoration span: an opaque foreground
-/// `color`, an optional theme-resolved `background` fill, plus the text
-/// attributes the span's modifiers request (or the theme declares by default).
-/// Backgrounds never travel on `DecorationSpan`; themes resolve them from
-/// `(kind, token_type, modifiers)`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct TextAttributes {
-    pub bold: bool,
-    pub italic: bool,
-    pub underline: bool,
-    pub strike: bool,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StyleSpec {
     pub color: Color,
@@ -76,15 +63,10 @@ pub struct StyleSpec {
     pub scale: f32,
 }
 
-impl StyleSpec {
-    pub(crate) const fn attributes(self) -> TextAttributes {
-        TextAttributes {
-            bold: self.bold,
-            italic: self.italic,
-            underline: self.underline,
-            strike: self.strike,
-        }
-    }
+/// Serialize an already-resolved editor color for the webview projection.
+pub fn color_hex(color: Color) -> String {
+    let rgba = color.to_rgba8();
+    format!("#{:02x}{:02x}{:02x}{:02x}", rgba.r, rgba.g, rgba.b, rgba.a)
 }
 
 /// Base UI (non-decoration) colors consulted by the editor and shell chrome.

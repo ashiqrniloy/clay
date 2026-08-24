@@ -153,10 +153,10 @@ fn assert_full_theme_mapping(specifier: &str, dir: &str, keyword_bold: bool) {
             token: o.token.clone(),
             color: o
                 .color
-                .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
+                .map(|[r, g, b, a]| clay::color::Color::from_rgba8(r, g, b, a)),
             background: o
                 .background
-                .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
+                .map(|[r, g, b, a]| clay::color::Color::from_rgba8(r, g, b, a)),
             bold: o.bold,
             italic: o.italic,
             underline: o.underline,
@@ -414,10 +414,10 @@ fn gruvbox_themes_status_chrome_meets_aa_contrast() {
                 token: o.token.clone(),
                 color: o
                     .color
-                    .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
+                    .map(|[r, g, b, a]| clay::color::Color::from_rgba8(r, g, b, a)),
                 background: o
                     .background
-                    .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
+                    .map(|[r, g, b, a]| clay::color::Color::from_rgba8(r, g, b, a)),
                 bold: o.bold,
                 italic: o.italic,
                 underline: o.underline,

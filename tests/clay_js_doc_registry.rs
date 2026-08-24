@@ -800,7 +800,7 @@ fn generated_registry_preserves_configuration_metadata() {
     );
     assert_eq!(
         cursor_style.backing_rust,
-        "src/editor/surface/mod.rs::EditorSurface::set_caret_style_override"
+        "src/client_commands.rs::EditorClientCommand"
     );
     assert_eq!(cursor_style.deno_op, "op_clay_editor_set_cursor_style");
     assert!(cursor_style.permissions.is_empty());
@@ -2293,6 +2293,86 @@ fn canonical_example_cross_checks_editor_layout_options_against_inventory() {
 }
 
 #[test]
+fn canonical_example_cross_checks_remaining_configuration_options_against_inventory() {
+    // Plan 097: the canonical example's remaining active configuration
+    // surfaces (cursor style, pane focus policy, syntax engine preference)
+    // must cross-check option names and enum values against the validated
+    // api-inventory.toml custom_properties, not prose: each surface is
+    // documented exactly once and the inventory lists the same options.
+    let root = repository_root();
+    let example = std::fs::read_to_string(root.join("examples/init.js"))
+        .expect("read canonical init.js example");
+    let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
+
+    let cases: &[(&str, &[&str], &[&str])] = &[
+        (
+            "editor.clientSetCursorStyle",
+            &[
+                "shape             \"bar\" | \"line\" | \"block\" | \"underline\"",
+                "blink             \"solid\" | \"blink\" | \"phase\" | \"smooth\"",
+                "stopBlinkOnTyping boolean",
+            ],
+            &[
+                "shape",
+                "blink",
+                "widthPx",
+                "heightPct",
+                "hollow",
+                "stopBlinkOnTyping",
+            ],
+        ),
+        (
+            "shell.setPaneFocusPolicy",
+            &["paneFocusPolicy  \"click\" | \"cursor\""],
+            &["paneFocusPolicy"],
+        ),
+        (
+            "syntax.setSyntaxEnginePreference",
+            &[
+                "tier:   \"native\" | \"wasm\" | \"javascript\" (alias \"js\")",
+                "Packages cannot promote themselves over the native tier",
+            ],
+            &["target", "tier"],
+        ),
+    ];
+    for (id, markers, properties) in cases {
+        let api = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("{id} must be a registered public configuration API"));
+        assert_eq!(api.visibility, "public");
+        let property_names: BTreeSet<_> = api
+            .custom_properties
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        for property in *properties {
+            assert!(
+                property_names.contains(property),
+                "inventory must list {property} in {id} custom_properties, got {property_names:?}"
+            );
+        }
+        for marker in *markers {
+            assert_eq!(
+                example.matches(marker).count(),
+                1,
+                "canonical example must annotate {id} option exactly once: {marker}"
+            );
+        }
+    }
+
+    // The example keeps exactly one ACTIVE cursor-style call; the pane focus
+    // and syntax preference calls remain commented (server defaults) and are
+    // checked by their annotations above.
+    assert_eq!(
+        example
+            .matches("\nclientSetCursorStyle({ shape: \"bar\", blink: \"blink\" });")
+            .count(),
+        1,
+        "canonical example must keep one active cursor-style call"
+    );
+}
+
+#[test]
 fn configuration_api_documents_phase20_6_appearance_and_precedence() {
     // Plan 067 task 11: Phase 20.6 treats appearance + persistence as
     // documented Clay JS configuration APIs. setAppearance is a registry-
@@ -2375,4 +2455,54 @@ fn configuration_api_documents_phase20_6_appearance_and_precedence() {
         registry.by_id("configuration.setAppearance").is_none(),
         "appearance must not be a clay:configuration API; it lives in clay:theme"
     );
+}
+
+#[test]
+fn canonical_example_active_configuration_is_copy_safe() {
+    // Plan 097: the ACTIVE (uncommented) lines of the canonical example must
+    // stay copy-safe — no credentials, remote endpoints, broad grants, or
+    // unsafe adoption idioms. Commented documentation/templates may discuss
+    // those topics; only executed lines are checked.
+    let root = repository_root();
+    let mut scanned = Vec::new();
+    for relative in [
+        "examples/init.js",
+        "examples/packages/first-party.js",
+        "examples/packages/third-party.js",
+    ] {
+        let text = std::fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|e| panic!("read {relative}: {e}"));
+        for line in text.lines() {
+            let execution = match line.find("//") {
+                Some(index) => &line[..index],
+                None => line,
+            };
+            let execution = execution.trim();
+            if execution.is_empty() {
+                continue;
+            }
+            scanned.push((relative.to_string(), execution.to_string()));
+        }
+    }
+    let forbidden: &[(&str, &str)] = &[
+        ("://", "remote endpoint"),
+        ("password", "credential"),
+        ("api_key", "credential"),
+        ("apikey", "credential"),
+        ("secret", "credential"),
+        ("Bearer ", "credential"),
+        ("BEGIN ", "credential key block"),
+        (
+            "github:",
+            "raw third-party adoption is not copy-safe by default",
+        ),
+    ];
+    for (relative, execution) in &scanned {
+        for (marker, reason) in forbidden {
+            assert!(
+                !execution.contains(marker),
+                "{relative} active line `{execution}` contains {marker} ({reason})"
+            );
+        }
+    }
 }

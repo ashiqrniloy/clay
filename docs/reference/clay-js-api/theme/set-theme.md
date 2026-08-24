@@ -85,7 +85,7 @@ Prefer the shipped `@clay/theme-gruvbox-material-dark` or `@clay/theme-gruvbox-m
 
 ## Backing implementation
 
-`runtime/js/theme.js::setTheme` calls `op_clay_theme_set_theme`, which resolves package `textStyles` into `ActiveTheme`; `EditorSurface` converts it to `StyleRegistry` before paint.
+`runtime/js/theme.js::setTheme` calls `op_clay_theme_set_theme`, which resolves package `textStyles` into `ActiveTheme`; the React theme adapter (`frontend/src/theme/adapter.ts`) converts it into CSS custom properties before paint.
 
 ## Lookup metadata
 

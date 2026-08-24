@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSelectAllMatches
 js_facade: runtime/js/editor.js::clientSelectAllMatches
-backing_rust: src/editor/surface/mod.rs::EditorSurface::select_all_matches
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientSelectAllMatches
@@ -33,7 +33,7 @@ Replace the selection set with every occurrence of the current selection or word
 
 ## Description
 
-`clientSelectAllMatches` returns the stable bindable command ID `editor.clientSelectAllMatches` for **Select All Matches** (Plan 071 task 9). All occurrences become selections; the occurrence containing the original caret stays primary. Copy unions every range in document order. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientSelectAllMatches` returns the stable bindable command ID `editor.clientSelectAllMatches` for **Select All Matches** (Plan 071 task 9). All occurrences become selections; the occurrence containing the original caret stays primary. Copy unions every range in document order. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local by the React/CodeMirror controller; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -90,8 +90,8 @@ Use `editor.clientSelectAllMatches` when the user asks for Select All Matches th
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientSelectAllMatches`
-- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::select_all_matches`
-- Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Key-driven dispatch: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)`
 
 ## Lookup metadata
 

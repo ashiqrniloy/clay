@@ -188,13 +188,9 @@ fn catalog_enum_kinds() -> Vec<String> {
     kinds
 }
 
-/// Phase 20.7 task 5: the component catalog is drift-free across the doc table,
-/// the `ComponentKind` enum, and the `component_state_palette` paint path. A
-/// kind added to the doc without an enum variant (or vice versa), or an enum
-/// variant without a `component_state_palette` match arm, fails here. Closes the
-/// code-vs-catalog drift gap identified in Plan 068 task 2.
+/// Component catalog stays aligned across docs, Rust validation, and React projection.
 #[test]
-fn catalog_is_drift_free_across_doc_enum_and_paint_path() {
+fn catalog_is_drift_free_across_doc_enum_and_react_registry() {
     let doc_kinds = catalog_doc_kinds();
     let enum_kinds = catalog_enum_kinds();
     assert_eq!(
@@ -202,32 +198,13 @@ fn catalog_is_drift_free_across_doc_enum_and_paint_path() {
         "components.md implemented kinds must match ComponentKind::parse variants exactly"
     );
 
-    // Every catalog kind must have a `component_state_palette` match arm in the
-    // paint path. We check the palette fn body (not the whole file) so a kind
-    // string appearing only in an unrelated comment does not satisfy the guard.
-    let sdui_path = format!("{}/src/masonry_sdui.rs", manifest_dir());
-    let sdui_src =
-        fs::read_to_string(&sdui_path).unwrap_or_else(|err| panic!("read masonry_sdui.rs: {err}"));
-    let palette_body = sdui_src
-        .split("fn component_state_palette(")
-        .nth(1)
-        .expect("component_state_palette must exist in src/masonry_sdui.rs");
-    // The palette fn ends at the next `#[test]`-bounded fn in the test module;
-    // for the non-test definition, the fn body ends at the next top-level
-    // `pub(crate) fn`/`fn ` at the same indentation. Slice to the closing brace
-    // of the fn by finding the next `\n    fn ` (test-helpers are indented) or
-    // `\npub(crate) fn ` boundary, whichever comes first.
-    let palette_fn_end = palette_body
-        .find("\n    fn ")
-        .or_else(|| palette_body.find("\npub(crate) fn "))
-        .unwrap_or(palette_body.len());
-    let palette_fn = &palette_body[..palette_fn_end];
-
+    let registry_path = format!("{}/frontend/src/sdui/registry.tsx", manifest_dir());
+    let registry = fs::read_to_string(&registry_path)
+        .unwrap_or_else(|err| panic!("read React SDUI registry: {err}"));
     for kind in &enum_kinds {
-        let needle = format!("\"{kind}\"");
         assert!(
-            palette_fn.contains(&needle),
-            "component_state_palette must have a match arm for catalog kind `{kind}` (paint path drift)"
+            registry.contains(&format!("case \"{kind}\":")),
+            "React SDUI registry must project catalog kind `{kind}`"
         );
     }
 }

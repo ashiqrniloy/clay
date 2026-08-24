@@ -1,11 +1,72 @@
-# Accessibility (Phase 22.6 and 24.4)
+# Accessibility
 
-Phase 22.6 (plan 077 tasks 3–4) establishes the accessibility contract for
-the Clay window model: accessibility roles and names for the tab bar, tab
-cards, and panes, plus polite screen-reader announcements for tab and split
-changes. This page is the contract reference; the structural tests in
-`src/masonry_shell/mod.rs` (via `WindowEvent::EnableAccessTree` + `RenderRoot`
-tree updates) enforce the exact tree shape described here.
+The production desktop client is Tauri v2 + React. This page keeps the current
+webview contract first; the native Masonry contract below is historical context
+for Plans 077–090 and is not a current source path.
+
+## Current Tauri/React client (Plan 097 Phase 12)
+
+### Roles and names
+
+| Surface | Role | Name/state | Source |
+| --- | --- | --- | --- |
+| Application shell | `banner`, one `main`, `contentinfo` | `Clay workspace` on `main`; route and connection state in footer | `frontend/src/app/layout/app-shell.tsx` |
+| Window tabs | `tablist` + `tab` | `Window tabs`; selected tab exposes `aria-selected` | `frontend/src/app/layout/tab-bar.tsx` |
+| Pane | `section` | `Pane {N}`; empty panes use named `Empty tab` group | `frontend/src/shell/PaneTree.tsx` |
+| Editor chrome | `region` | `Editor {sanitized path or workspace basename}` | `frontend/src/editor/ClayEditor.tsx` |
+| Editor text | CodeMirror textbox/entry | `Document editor`; local editable/read-only state | `frontend/src/editor/create-editor.ts`, `frontend/src/editor/extensions/accessibility.ts` |
+| Connection status | `status` + `aria-live=polite` | visible `Connected`, `Disconnected`, or bounded diagnostic | `frontend/src/app/layout/app-shell.tsx` |
+| Package status | `status` | declared status text only | `frontend/src/sdui/registry.tsx` |
+
+The shell owns landmark structure, pane containment, document focus, and status
+announcements. `ClayEditor` keeps text in CodeMirror rather than React state;
+React owns only editor chrome and the host region. Absolute document/workspace
+paths are reduced to a basename before they become editor labels. Package UI
+uses the catalog wrappers and receives no DOM callback, Tauri handle, raw CSS,
+filesystem path, or executable code.
+
+### Modal, menu, and package semantics
+
+- `ClayModal` uses React Aria's modal dialog, `aria-modal`, Escape dismissal,
+  focus containment, scrim dismissal, and focus restoration.
+- `ClayList` projects bounded server-owned items as a labelled `listbox` with
+  `option` selection. Command Centre and Path Browser use one dialog, one
+  search textbox, a bounded list, and one polite result-count status.
+- `ClayDropdown` uses a labelled select/button and listbox; `ClayCollapse`
+  exposes a disclosure button with `aria-expanded` and controlled content.
+- Chat exposes a named region, setup button group, polite transcript `log`,
+  status line, labelled `Message` textbox, and submit/cancel action.
+- Fixed package panels remain clipped by their host slot. Inert package action
+  intents carry only registered command IDs and bounded primitive arguments;
+  focus, selected/disabled state, contrast, and modal containment remain
+  Clay-owned.
+
+### Review and verification contract
+
+Every UI-changing plan must capture the real Linux Tauri window and inspect the
+AT-SPI subtree after `get_app_state`, plus app-only fixture screenshots at wide
+and narrow sizes when live compositor targeting is unavailable. Structural
+React tests must assert roles, labels, disabled state, live regions, focus
+containment, and typed intent routing. A missing keyboard/window-targeting
+backend is recorded as `UNRESOLVED`; fixture rest-state screenshots or source
+inspection do not become an interactive pass.
+
+Plan 097 Phase 12 evidence:
+`code-reviews/screenshots/2026-08-24-tauri-react-parity/review-log.md`.
+The artifact retains 20 app-only CDP screenshots (1440×900 and 780×900) with
+paired AX snapshots for editor, intelligence, package UI, settings, command
+centre, empty command centre, path browser, Chat, splits, and combined state
+surfaces. Real Tauri AT-SPI dumps cover welcome, opened editor, tabs/splits, and
+Chat. Portal screenshots containing unrelated desktop windows were deleted;
+no retained screenshot contains host paths or secrets. Physical keyboard-only
+completion, command-centre, native-dialog, settings, and tab/pane re-run stayed
+`UNRESOLVED` because this host has no safe input backend (`/dev/uinput` denied,
+no `xdotool`/`ydotool`, and Wayland portal input does not target Clay).
+
+## Historical native-client contract (Plans 077–090)
+
+The sections below describe removed Masonry/AccessKit implementation and are
+retained only to explain historical tests, decisions, and migration evidence.
 
 ## Roles and names
 

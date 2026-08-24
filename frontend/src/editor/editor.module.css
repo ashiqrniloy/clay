@@ -1,0 +1,148 @@
+/* Editor host: one compartment filling the pane main slot. */
+
+.host {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  min-height: 0;
+  background: var(--clay-surface-main);
+}
+
+.chrome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--clay-spacing-sm, 12px);
+  padding: var(--clay-spacing-xxs, 4px) var(--clay-spacing-sm, 12px);
+  background: var(--clay-surface-panel);
+  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--clay-spacing-sm, 12px);
+  min-width: 0;
+  flex: 1 0 100%;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+}
+
+.path {
+  min-width: 12rem;
+  height: 2rem;
+  padding: 0 var(--clay-spacing-xs, 8px);
+  border: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-subtle);
+  background: var(--clay-surface-control);
+  color: var(--clay-text-primary);
+  font: inherit;
+  font-size: var(--clay-text-status-size);
+}
+
+.path:focus-visible {
+  outline: 2px solid var(--clay-focus-ring);
+  outline-offset: 1px;
+}
+
+.canvas {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.canvas :global(.cm-editor) {
+  height: 100%;
+}
+
+.canvas :global(.cm-gutters) {
+  background: var(--clay-surface-panel);
+  color: var(--clay-text-muted);
+  border-right: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+}
+
+.canvas :global(.cm-activeLine),
+.canvas :global(.cm-activeLineGutter) {
+  background: var(--clay-surface-hover);
+}
+
+.canvas :global(.cm-tooltip),
+.canvas :global(.cm-panels) {
+  border: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-strong);
+  background: var(--clay-surface-overlay);
+  color: var(--clay-text-primary);
+  box-shadow: none;
+}
+
+.canvas :global(.cm-tooltip-autocomplete > ul > li) {
+  padding: var(--clay-spacing-xxs, 4px) var(--clay-spacing-xs, 8px);
+}
+
+.canvas :global(.cm-tooltip-autocomplete > ul > li[aria-selected]) {
+  background: var(--clay-surface-selected);
+  color: var(--clay-text-primary);
+}
+
+.canvas :global(.cm-clay-inlay)::after {
+  content: attr(data-label);
+  color: var(--clay-text-muted);
+  background: var(--clay-surface-panel);
+  font-size: var(--clay-text-detail-size);
+  padding-inline: var(--clay-spacing-xxs, 4px);
+}
+
+.canvas :global(.cm-clay-link) {
+  cursor: pointer;
+  text-underline-offset: var(--clay-dimension-border-thin, 2px);
+}
+
+.canvas :global(.cm-clay-hover) {
+  max-width: 65ch;
+  padding: var(--clay-spacing-tooltip, 8px);
+  white-space: pre-wrap;
+}
+
+.canvas :global(.cm-diagnostic-error) {
+  border-left-color: var(--clay-diagnostic-error);
+}
+
+.canvas :global(.cm-diagnostic-warning) {
+  border-left-color: var(--clay-diagnostic-warning);
+}
+
+.canvas :global(.cm-diagnostic-info) {
+  border-left-color: var(--clay-diagnostic-info);
+}
+
+.canvas :global(.cm-panel.cm-clay-actions form) {
+  display: flex;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: var(--clay-spacing-xs, 8px);
+}
+
+.canvas :global(.cm-panel.cm-clay-actions button) {
+  border: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-subtle);
+  background: var(--clay-surface-control);
+  color: var(--clay-text-primary);
+  padding: var(--clay-spacing-xxs, 4px) var(--clay-spacing-xs, 8px);
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: var(--clay-spacing-lg, 24px);
+}
+
+.alert {
+  flex-basis: 100%;
+}

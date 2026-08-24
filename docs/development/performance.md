@@ -59,18 +59,11 @@ Compile benchmark targets without running timing loops, which is the preferred C
 cargo bench --no-run
 ```
 
-Run a short local smoke of the visible-extraction baseline:
-
-```text
-cargo bench --bench editor_baselines editor_visible_extraction -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-```
-
-Run short local Markdown verification baselines:
-
-```text
-cargo bench --bench markdown_baselines markdown_activation_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-cargo bench --bench markdown_baselines markdown_parse_and_decoration_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-```
+The `editor_baselines` and `markdown_baselines` Criterion groups were removed
+with the native client at Plan 097 Phase 12; their dated results below remain
+as the historical record. Markdown parser cost is now measured by the retained
+`tools/bench/markdown-parser.mjs` harness; editor work-count bounds are pinned
+by the lib `server::syntax` tests.
 
 Run the large Markdown parser harness. The install command populates local `packages/markdown/node_modules` only; do not commit it.
 
@@ -118,7 +111,7 @@ Native syntax observability separates one accepted edit from parser/query work a
 | `syntax.parse.cancelled_superseded` | Aborted superseded task count with the cancelled task's document/version. |
 | `syntax.edit_to_publish` | Accepted-edit to first current-version native decoration publication duration. One sample is retained per accepted document/version even when multiple chunks publish. |
 
-All syntax metrics carry only numeric document IDs, document versions, counts, byte counts, and durations. They contain no document text, captures, query text, clipboard data, package code, or paths. Collection occurs in server background parse/publication paths, never Masonry paint or text-event handlers.
+All syntax metrics carry only numeric document IDs, document versions, counts, byte counts, and durations. They contain no document text, captures, query text, clipboard data, package code, or paths. Collection occurs in server background parse/publication paths, never in client render or input handlers.
 
 Use deterministic work-count tests as blocking gates:
 
@@ -128,14 +121,12 @@ cargo test --lib server::parse_coordinator::tests
 cargo test --test protocol performance_protocol::syntax_pipeline_metrics
 ```
 
-Use the existing five-language Criterion fixture for advisory latency and throughput distributions:
-
-```text
-cargo bench --bench first_party_language_baselines first_party_incremental_edit -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-cargo bench --bench first_party_language_baselines --no-run
-```
-
-`first_party_incremental_edit` covers Rust, TypeScript, TSX, JavaScript, and Markdown and measures parse-through-ready-decoration work while reporting fixture-byte throughput. Wall-clock values remain machine-local and advisory until a stable CI baseline is established; work-count and retention assertions are deterministic.
+The five-language `first_party_incremental_edit` Criterion group (Rust,
+TypeScript, TSX, JavaScript, Markdown parse-through-ready-decoration work with
+fixture-byte throughput) was removed with the native client at cutover;
+wall-clock values below remain machine-local history. Current equivalents: the
+lib `server::syntax::tests` / `server::parse_coordinator::tests` work-count and
+retention assertions plus the frontend editor suites.
 
 ## Plan 056 low-latency syntax Linux verification (2026-07-19)
 
@@ -157,7 +148,7 @@ Command:
 cargo bench --bench first_party_language_baselines first_party_incremental_edit -- --sample-size 10 --warm-up-time 1 --measurement-time 2
 ```
 
-Deterministic coverage supplies the work-count evidence that Criterion intentionally does not print: one `syntax.parse.logical_work_items` item per accepted edit/version, one current-version parser invocation per stable window, changed-range query bytes, bounded fan-out via `syntax.decoration.chunks`, superseded-task cancellation, and one `syntax.edit_to_publish` sample for first current-version publication. `tests/performance_protocol.rs::syntax_pipeline_metrics_are_source_safe_and_retention_bounded`, `tests/parse_coordinator.rs`, and `tests/syntax_grammar.rs` passed in the full Linux run; malformed edits/ranges, stale versions, oversized payloads, wrong provenance, and generation replacement fail closed. Metrics remain numeric-only and never include source text or paths.
+Deterministic coverage supplies the work-count evidence that Criterion intentionally does not print: one `syntax.parse.logical_work_items` item per accepted edit/version, one current-version parser invocation per stable window, changed-range query bytes, bounded fan-out via `syntax.decoration.chunks`, superseded-task cancellation, and one `syntax.edit_to_publish` sample for first current-version publication. the then-present `tests/performance_protocol.rs::syntax_pipeline_metrics_are_source_safe_and_retention_bounded`, `tests/parse_coordinator.rs`, and `tests/syntax_grammar.rs` suites passed in that run (since consolidated into the lib `server::syntax`/`server::parse_coordinator` tests and the protocol suite); malformed edits/ranges, stale versions, oversized payloads, wrong provenance, and generation replacement fail closed. Metrics remain numeric-only and never include source text or paths.
 
 ## Plan 057 syntax-continuity Linux verification (2026-07-19)
 
@@ -216,15 +207,15 @@ Phase 14 splits budgets into two categories:
 
 | Focus area | Initial budget | Enforcement |
 | --- | --- | --- |
-| Client edit payload (`ClientMessage::Edit`) | <= 512 bytes | `cargo test --test protocol performance_protocol::` (`representative_protocol_payloads_fit_phase14_budgets`) |
-| Edit acknowledgement payload (`ServerMessage::EditAck`) | <= 128 bytes | `cargo test --test protocol performance_protocol::` |
-| Behavior manifest payload (`ServerMessage::BehaviorManifest`) | <= 2048 bytes | `cargo test --test protocol performance_protocol::` |
+| Client edit payload (`ClientMessage::Edit`) | <= 512 bytes | payload budget pins in `tests/performance_budgets.rs` + codec round-trip tests |
+| Edit acknowledgement payload (`ServerMessage::EditAck`) | <= 128 bytes | `EDIT_ACK_PAYLOAD_BUDGET_BYTES` pin in `tests/performance_budgets.rs` |
+| Behavior manifest payload (`ServerMessage::BehaviorManifest`) | <= 2048 bytes | `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` pin in `tests/performance_budgets.rs` |
 | Package manifest metadata (`clay.*` incl. contributions and extension points) | <= 8192 bytes | `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`; `cargo test --test protocol performance_budgets::` |
-| SDUI snapshot payload (`ServerMessage::SduiSnapshot`) | <= 4096 bytes | `cargo test --test protocol performance_protocol::` |
-| SDUI update payload (`ServerMessage::SduiUpdate`) | <= 1024 bytes | `cargo test --test protocol performance_protocol::` |
-| Client edit queue depth and responsiveness | bounded queue (default capacity 256), no blocking enqueue on full queue | `cargo test --test protocol performance_protocol::` (`client_edit_queue_reports_depth_without_blocking_input`) |
-| Ordinary typing route | local shadow update must happen before server acknowledgement | `cargo test --test protocol performance_protocol::` (`ordinary_edit_updates_shadow_before_ack`) |
-| Viewport/layout invariants | viewport-bounded extraction and targeted layout invalidation invariants hold | `cargo test --test editor editor_performance_invariants::` |
+| SDUI snapshot payload (`ServerMessage::SduiSnapshot`) | <= 4096 bytes | `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES` pin in `tests/performance_budgets.rs` |
+| SDUI update payload (`ServerMessage::SduiUpdate`) | <= 1024 bytes | `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` pin in `tests/performance_budgets.rs` |
+| Client edit queue depth and responsiveness | bounded queue (default capacity 256), no blocking enqueue on full queue | `ClientEditQueue::bounded` unit tests in `src/client/mod.rs`; bridge forwarder tests |
+| Ordinary typing route | local shadow update must happen before server acknowledgement | frontend optimistic-sync tests (`frontend/src/test/editor.test.tsx`, sync/session suites) |
+| Viewport/layout invariants | viewport-bounded extraction and targeted layout invalidation invariants hold | CodeMirror library-owned viewport rendering + position-map tests (`src/editor/position_map.rs`, frontend editor suites) |
 | Bench target integrity | benchmark scaffolding compiles in CI-friendly mode | `cargo bench --no-run` |
 
 ### SDUI Payload Budget Findings
@@ -567,80 +558,59 @@ until the Phase 21 stable-CI-runner promotion rule is met.
 | Multi-pane decoration traffic | per-pane <= 8192 bytes (`DECORATION_PAYLOAD_BUDGET_BYTES`); 4-pane aggregate <= 32768 bytes (`MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES`) | `four_pane_decoration_aggregate_payload_fits_budget` |
 | Phase 22.6 constants | pinned values + docs markers | `phase22_6_window_budget_constants_are_pinned_and_documented` |
 
-### Advisory local baseline budgets (machine-variant)
+### Advisory wall-clock budgets (historical native-client record)
 
-Measured 2026-08-08 (`cargo bench --bench window_baselines`, sample 10):
+The pre-cutover native client measured these with the since-removed
+`window_baselines` Criterion target (2026-08-08, sample 10):
 `pane_paint_baselines` 1/2/4 panes ≈ 69/382/743 ns;
 `tab_switch_baselines` 1/2/4 panes ≈ 88/389/807 ns — linear in pane count,
 with the tab-switch pass roughly one chrome geometry pass over the target
 tab. The advisory ceilings are pinned with ~1000x headroom for debug builds
-and assistive-technology overhead; promote to hard CI thresholds only after
-the Phase 21 stable-runner evidence rule is satisfied.
+and assistive-technology overhead (advisory ceilings pinned as
+`PANE_PAINT_P95_BUDGET_MS` / `TAB_SWITCH_P95_BUDGET_MS`; current-state React
+commit and tab-switch guarantees are enforced by the deterministic frontend
+and bridge tests above).
 
-| Focus area | Initial advisory budget | Observe with |
-| --- | --- | --- |
-| Per-pane paint (`pane_paint_baselines`, geometry proxy) | <= 1 ms (P95, advisory) | `cargo bench --bench window_baselines pane_paint_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2` |
-| Tab switch (`tab_switch_baselines`, geometry proxy) | <= 1 ms (P95, advisory) | `cargo bench --bench window_baselines tab_switch_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2` |
-
-The pane/tab geometry benches measure the shell chrome computation a paint
-pass (or a switch's layout pass) performs; editor-surface paint stays
-viewport-bounded and is benched separately under `editor_baselines`. Run the
-full Phase 22.6 window bench set with:
-
-```text
-cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-```
+<= 1 ms (P95, advisory) per pane paint and per tab switch remains the pinned
+Phase 22.6 budget row.
 
 ### Phase 24.4 centered overlay guards (deterministic)
 
 The centered Command Centre surface keeps paint/layout work independent of
 document size: one token-driven full-window scrim fill plus the existing
-bounded retained overlay subtree. `centered_overlay_work_is_bounded_and_scrim_is_single_pass`
-(`tests/editor_performance_invariants.rs`) checks the single scrim fill, the
-single window-level host, window-bounded geometry, and rejection of
-blur/offscreen/filter/JS/IPC/IO work; `centered_layer_reconciles_in_place_and_removes_idempotently`
-and the open/close-cycle and theme-switch tests (`src/masonry_editor.rs`)
-check that query/selection/theme snapshots reuse the retained layer and leave
-no orphan root layers.
-
-`window_baselines` gained the advisory `centered_overlay_baselines` group
-(`centered_overlay_geometry_work`, one scrim rect + one surface rect + one
-rect per hosted overlay — O(overlay count), no document text).
+bounded overlay subtree. The React Command Centre modal keeps one scrim, one
+window-level host, window-bounded geometry, and no
+blur/offscreen/filter/IPC/IO work in the render path; open/close cycles reuse
+the mounted dialog without orphan roots (`frontend/src/command-centre`
+component tests). The pre-cutover `centered_overlay_baselines` Criterion group
+was removed with `window_baselines`.
 
 ## Plan 087 focused UI regression coverage
 
 Plan 087 keeps UI regression in two layers: deterministic structural and
-accessibility guards are blocking, while Criterion timings are local/advisory
-signals. No pixel goldens are added because the available Masonry harness is
-CPU-only and does not exercise Clay's production GPU renderer.
+accessibility guards are blocking, while timing measurements stay local/advisory.
+No pixel goldens are used; visual evidence comes from the CDP fixture captures
+under `code-reviews/screenshots/2026-08-24-tauri-react-parity/`.
 
 Blocking coverage includes:
 
-- `masonry_welcome::tests::welcome_state_matrix_has_actionable_accessible_statuses`
-  checks loading, connected, runtime-error, local-fallback, and disconnected
-  entry states with basename-only workspace labels and no ambient path leakage.
-- `masonry_pane_document::tests::completion_result_rejects_foreign_document_and_behavior_provenance`
-  rejects completion results carrying a foreign document or behavior version
-  before replacing the current menu.
-- `editor_performance_invariants::completion_projection_is_bounded_and_stays_out_of_paint`
-  checks the shared eight-row/480-pixel geometry caps and keeps completion
-  projection, filesystem, JavaScript, IPC, and shell work out of paint.
-- `masonry_package_region::tests::completion_menu_accessibility_is_modeless_and_consumer_valid`
-  checks caret anchoring, modeless containment, selected-state labels, absent
-  command targets, and `accesskit_consumer` acceptance. Existing 60-result
-  centered containment and 256-item sanitized-label tests remain blocking.
+- `frontend/src/test/shell.test.tsx` and the welcome-state component checks:
+  loading, connected, runtime-error, local-fallback, and disconnected entry
+  states with basename-only workspace labels and no ambient path leakage.
+- `frontend/src/sdui` registry tests reject stale snapshots carrying a foreign document or behavior version before replacing rendered content.
+- Frontend editor extension suites keep completion projection bounded (shared
+  eight-row/480-pixel caps) and keep completion projection, filesystem,
+  JavaScript, IPC, and shell work off the keystroke-to-local-paint path.
+- Command Centre component tests check caret anchoring semantics of the server
+  snapshot, modeless containment, selected-state labels, and absent command
+  targets. Existing 60-result centered containment and 256-item
+  sanitized-label tests remain blocking.
 
-`window_baselines` also records advisory `completion_open_baselines`,
-`completion_filter_baselines`, and `completion_layout_baselines` groups. They
-exercise the real bounded transient-menu projection, shared fuzzy matcher, and
-caret geometry helper at 1/8/60/256-item scales and edge-adjacent caret
-positions. Run short local samples with:
-
-```text
-cargo bench --bench window_baselines completion_open_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-cargo bench --bench window_baselines completion_filter_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-cargo bench --bench window_baselines completion_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-```
+`window_baselines` also recorded advisory `completion_open_baselines`,
+`completion_filter_baselines`, and `completion_layout_baselines` groups over
+the bounded transient-menu projection, shared fuzzy matcher, and caret
+geometry helper at 1/8/60/256-item scales (removed at cutover; dated medians
+below remain the historical record).
 
 Local advisory run (2026-08-14, optimized Criterion profile, 10 samples, 1 s
 warm-up, 2 s measurement) produced these median estimates:
@@ -656,11 +626,10 @@ accessibility-tree, stale-provenance, and no-hot-path checks are the hard gate.
 
 ## Plan 089 editor, menu, tab, completion, and accessibility cost guards
 
-Plan 089 extends existing benchmark targets instead of adding a second performance
-framework. The editor baseline already measures the typing/local-paint proxy
-(`editor_render_adjacent`) and the protocol/runtime targets retain queue,
-acknowledgement, configuration, and SDUI costs. `window_baselines` now adds the
-missing bounded surfaces:
+Plan 089 extended the then-existing native benchmark targets with bounded
+surfaces (`command_centre_open_baselines`, `completion_selection_baselines`,
+`accessibility_tree_update_baselines` in `window_baselines`) — all removed at
+the Plan 097 Phase 12 cutover; their dated measurements below remain history.
 
 - `command_centre_open_baselines`: 16/60/256 inert catalogue projections;
 - `completion_selection_baselines`: selected last-row projection at 1/8/60/256
@@ -674,21 +643,16 @@ completion and Command Centre query updates. No benchmark opens IPC, invokes
 package JavaScript, reads documents/files, or creates a network/process
 authority boundary.
 
-Run the complete fixed-input window set with the same Plan 088 settings:
+Live verification still covering these surfaces:
 
 ```text
-cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+cargo test --test runtime lsp_bridge::
 ```
 
-Focused additions:
-
-```text
-cargo bench --bench window_baselines command_centre_open_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-cargo bench --bench window_baselines completion_selection_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-cargo bench --bench window_baselines accessibility_tree_update_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-```
-
-The blocking guards are `editor_performance_invariants::accessibility_updates_reuse_stable_virtual_ids_without_allocator_churn` and `retained_accessibility_update_fixture_stays_bounded`, plus the existing no-document-reserialization, no-hot-path-IPC/JS, completion-bound, payload, and responsive-layout tests. Virtual accessibility IDs derive from retained widget ownership and typed slots; they do not call `WidgetId::next()` during tree passes.
+The blocking guards are the retained no-document-reserialization,
+no-hot-path-IPC/JS, completion-bound, payload, and responsive-layout pins plus
+the frontend Command Centre/editor suites. (The stable-virtual-ID accessibility
+guards were removed with the native tree builder.)
 
 ### Plan 089 local before/after record (2026-08-16)
 
@@ -789,22 +753,16 @@ promotion rule is met.
   shell work.
 - `responsive_layout_work_preserves_sidebar_and_editor_bounds` covers the
   production SDUI left-slot decision at narrow, normal, wide, and large-UI
-  typography inputs. Existing shell, SDUI, package-overlay, contrast, and
-  AccessKit tests remain the state-level behavioral matrix.
+  typography inputs. Existing shell, SDUI, package-overlay, and contrast
+  tests remain the state-level behavioral matrix.
 
-### Advisory responsive layout baseline
+### Responsive layout bounds (historical timing note)
 
-`window_baselines` adds `responsive_layout_baselines`, which measures the real
-`SduiNativeState::sidebar_geometry` and
-`editor_region_for_document` decision at 320/900/1200 logical pixels and UI
-sizes 12/24/96. The helper returns only sanitized layout flags; it does not
-emit document text, paths, package code, or screenshots.
-
-Run a short local sample with:
-
-```text
-cargo bench --bench window_baselines responsive_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
-```
+The pre-cutover `responsive_layout_baselines` Criterion group measured the
+sidebar/region geometry helper at 320/900/1200 logical pixels and UI sizes
+12/24/96; the bench was removed with the native client. The decision itself is
+unchanged and pinned by `responsive_layout_work_preserves_sidebar_and_editor_bounds`;
+wide/narrow visual evidence comes from the UI-review harness captures.
 
 This baseline is diagnostic only. The blocking contract is the typed layout
 matrix and bounded geometry tests; do not promote wall-clock values to CI
@@ -830,12 +788,18 @@ measurement to this phase).
 `KEY_CHORD_PENDING_TIMEOUT_MS` (1500, advisory) bounds a stale pending
 multi-stroke chord: the chord cancels and the next key re-evaluates fresh.
 
-### Deterministic hard guards (`tests/editor_performance_invariants.rs`)
+### Deterministic hard guards (pre-cutover suite removed; claims retained)
 
-| Guard | Claim |
-| --- | --- |
-| `command_centre_open_filter_and_listing_stay_bounded_off_hot_paths` | menu open reads no document text and bounds the browse listing plan by `COMMAND_CENTRE_LISTING_MAX_ENTRIES`; per-keystroke filters (menu sessions + path browser) touch no `DocumentState`; listing snapshot types appear in no paint/layout body (pure paint files and the pane document's `paint_in`/`paint_status_line`/`paint`) |
-| `pending_chord_buffer_grows_one_stroke_per_pending_outcome` | the pending buffer grows by exactly one validated stroke in exactly the Pending arm and every other path clears it (runtime proof: `editor_pending_chord_buffer_never_exceeds_longest_bound_sequence`) |
+The pre-cutover `tests/editor_performance_invariants.rs` suite was removed with
+the native client (`accessibility_updates_reuse_stable_virtual_ids_without_allocator_churn`
+and `retained_accessibility_update_fixture_stays_bounded` among its guards;
+see the performance-fixtures wiki page). Current equivalents: menu open reads
+no document text and bounds the browse listing plan by
+`COMMAND_CENTRE_LISTING_MAX_ENTRIES` (server connection/menu-session tests);
+per-keystroke filters touch no `DocumentState`; the React Command Centre
+renders only bounded server listings (`frontend/src/command-centre` tests);
+the pending chord buffer keeps its one-stroke-per-outcome bound (lib chord
+tests).
 
 ### Browse-grant authority review (recorded 2026-08-13)
 
@@ -934,3 +898,32 @@ Wall-clock stays advisory (Phase 21). Structural gates are hard in
 | Completion recency hints | <= 4 × 64 chars | `CompletionRequest::validate`; boxed request field avoids `ClientMessage` size growth |
 | Hover markdown | <= 4096 chars | language-intelligence validation + `folding_and_inlay_payloads_deny_above_cap` |
 | Keypress-to-local-paint | <= 16 ms (P95, advisory) | `completion_ranking_is_not_on_keypress_to_local_paint_path` + `hover_intent_is_not_on_paint_or_layout_path` |
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Wide/narrow rendered surfaces | PASS static | 20 CDP captures under `code-reviews/screenshots/2026-08-24-tauri-react-parity/` at 1440×900 and 780×900 show no clipping, duplicate overlay, or visible layout jank |
+| Editor/package/Chat render cost | PASS structural; stream feel unresolved | Existing CodeMirror, SDUI, AG-UI, list, and hot-path tests pass; provider setup/input prevented a live streaming-latency claim |
+| Bundle budget | PASS | Frontend build: shell 160.6 kB gzip / 180 kB budget; total 343.2 kB / 400 kB budget |
+| Keyboard/filter/resize feel | UNRESOLVED live | Host cannot safely deliver keyboard or compositor resize actions; no visual pass inferred from source/tests |
+
+No performance budget was changed.
+
+## Tauri / React client budgets
+
+The webview bundle replaces the removed native-client Criterion groups as the
+client-side size gate. `npm --prefix frontend run check:budget` is the hard
+gzip gate (`frontend/scripts/bundle-budget.mjs`, wired into CI).
+
+| Surface | Budget | Enforcement |
+| --- | --- | --- |
+| Startup shell | <= 180 kB gzip (startup shell) | `frontend/scripts/bundle-budget.mjs` |
+| Total frontend | <= 400 kB gzip (total frontend) | `frontend/scripts/bundle-budget.mjs` |
+
+Latest measured production build (2026-08-24): shell 160.6 kB gzip,
+total 343.2 kB gzip — within budget, none raised. Lazy workflow/chat/package
+chunks are classified separately from the shell so async features never
+inflate the startup path. Keystroke-to-local-paint stays owned by CodeMirror
+with bounded ordered deltas queued asynchronously; server work, package
+JavaScript, IPC batching, and AI streams never sit on the local paint path.

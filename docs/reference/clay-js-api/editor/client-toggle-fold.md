@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientToggleFold
 js_facade: runtime/js/editor.js::clientToggleFold
-backing_rust: src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command; src/editor/surface/mod.rs::EditorSurface::toggle_fold
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientToggleFold
@@ -33,7 +33,7 @@ Returns the stable command ID `editor.clientToggleFold` for collapsing or expand
 
 ## Description
 
-The facade does not publish or discover ranges. It only names the client-local command. After explicit routing, `EditorSurface::toggle_fold` updates collapse state for the caret's containing range, invalidates the fold-aware layout cache, and keeps range transport, chevron painting, and hidden-line remapping in Clay-owned Rust code.
+The facade does not publish or discover ranges. It only names the client-local command. After explicit routing, The CodeMirror folding extension (`frontend/src/editor/extensions/folding.ts`) updates collapse state for the caret's containing range; fold range transport and hidden-line semantics stay in Clay-owned Rust code.
 
 ## When to use
 
@@ -96,8 +96,8 @@ Use the editor command only for user routing. Use `serverPublishFoldingRanges` f
 
 - JS facade: `runtime/js/editor.js::clientToggleFold`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key`
-- Command mapping: `src/masonry_editor.rs::EditorClientCommand::from_command_id`
-- Local state: `src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command` and `src/editor/surface/mod.rs::EditorSurface::toggle_fold`
+- Command mapping: `src/client_commands.rs::EditorClientCommand`
+- Local state: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)` and `src/client_commands.rs::EditorClientCommand`
 - Range publication API: [`folding.serverPublishFoldingRanges`](../folding/server-publish-folding-ranges.md)
 
 ## Lookup metadata

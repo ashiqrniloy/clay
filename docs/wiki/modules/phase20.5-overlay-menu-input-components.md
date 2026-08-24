@@ -97,5 +97,5 @@ cargo test --test editor --quiet
 - [Transient Menu Session](transient-menu-session.md)
 - [Shell Primitives](shell-primitives.md)
 - [Phase 20.4 Core Component Uplift](phase20.4-core-component-uplift-primitive-review.md)
-- [UI Component Catalog](../../.agents/skills/clay-ui/references/components.md)
+- [UI Component Catalog](../../../.agents/skills/clay-ui/references/components.md)
 - [Package Authoring Guide](../../reference/packages/creating-packages.md)

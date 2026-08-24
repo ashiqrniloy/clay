@@ -1,0 +1,34 @@
+/* Badge / kbd / divider chrome primitives (catalog planned entries with
+ * locked token mappings). */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  background: var(--clay-surface-badge);
+  color: var(--clay-text-badge);
+  border-radius: var(--clay-radius-xs, 2px);
+  padding: 0 var(--clay-spacing-badge, 4px);
+  font-size: var(--clay-text-caption-size);
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  background: var(--clay-surface-kbd);
+  color: var(--clay-text-kbd);
+  border: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-kbd);
+  border-radius: var(--clay-radius-xs, 2px);
+  min-height: var(--clay-dimension-kbd-height, 20px);
+  padding: 0 var(--clay-spacing-xxs, 4px);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+}
+
+.divider {
+  border: none;
+  border-top: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+  margin: 0;
+  width: 100%;
+}

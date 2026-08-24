@@ -1,0 +1,17 @@
+.host {
+  height: 100%;
+  min-height: 0;
+}
+
+.empty {
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--clay-spacing-xs, 8px);
+  margin-top: var(--clay-spacing-sm, 12px);
+}

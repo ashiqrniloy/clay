@@ -587,6 +587,49 @@ fn source_paths_named_by_public_metadata_exist() {
 }
 
 #[test]
+fn inventory_rust_paths_name_existing_source_files() {
+    // Migration guard: every `src/*.rs` path named in inventory metadata must
+    // exist today. Removed native-client modules (masonry_*,
+    // editor/surface, app_driver, driver/restore) must not be cited as
+    // backing/current owners; use retained renderer-neutral Rust or the
+    // React/CodeMirror frontend owner instead.
+    fn names_rust_paths(value: &str) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        let bytes = value.as_bytes();
+        let mut index = 0;
+        while let Some(offset) = value[index..].find("src/") {
+            let start = index + offset;
+            let at_token_start = start == 0
+                || !bytes[start - 1].is_ascii_alphanumeric()
+                    && !matches!(bytes[start - 1], b'-' | b'_' | b'/' | b'.');
+            if at_token_start && let Some(end) = value[start..].find(".rs") {
+                names.insert(value[start..start + end + 3].to_string());
+            }
+            index = start + 4;
+        }
+        names
+    }
+    for entry in inventory_entries() {
+        let id = entry.get("id");
+        for field in ["backing_rust", "current_rust_owner"] {
+            for path in names_rust_paths(entry.get(field)) {
+                let message = format!(
+                    concat!(
+                        "{id}: {field} names missing source file {path}; point at a retained ",
+                        "renderer-neutral owner (src/client_commands.rs, src/server/*, ",
+                        "src/shell/layout.rs) or the React/CodeMirror frontend owner"
+                    ),
+                    id = id,
+                    field = field,
+                    path = path
+                );
+                assert!(root().join(&path).is_file(), "{message}");
+            }
+        }
+    }
+}
+
+#[test]
 fn documentation_validation_is_read_only() {
     let inventory = root().join("docs/reference/clay-js-api/api-inventory.toml");
     let registry = root().join("docs/generated/clay-js-api-registry.json");

@@ -16,8 +16,13 @@ Create or update actionable, numbered, documentation-backed implementation plans
 5. If `.agents/skills/project-patterns/` exists, use it before writing task approaches and cite relevant pattern files.
 6. For phase implementation plans that add or change an editor mode, language mode, JS package, extension point, or reusable capability, include a dedicated primitive-review task before implementation. The task must inventory existing primitives, document what can be achieved with them, plan only generic reusable new primitives when required, and then build package/mode functionality on top of those primitives.
 7. For any plan that touches Clay app UI (components, panels, overlays, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, theme, typography, tokens, or layout), apply the UI requirements:
-   - **Hard UI preflight gate:** before reviewing existing UI, planning UI work, designing, or editing UI files, run `npx ui-skills start`. Then inspect the relevant category, select the smallest useful set (prefer 1, never more than 3), load each selected skill, and apply it to Clay's native context. A prior task's routing does not satisfy this gate for a new task; record the command, category, and selected skill slugs in plan evidence.
-   - Load the `clay-ui` skill and read `.agents/skills/clay-ui/references/components.md` and `.agents/skills/clay-ui/references/tokens.md` after routing.
+   - **Hard UI skill gate:** before reviewing existing UI, planning UI work, designing, or editing UI files, load `.agents/skills/clay-ui/SKILL.md` plus its component/token references and all four mandatory project-local skills:
+     - `.agents/skills/impeccable/SKILL.md`
+     - `.agents/skills/full-output-enforcement/SKILL.md`
+     - `.agents/skills/high-end-visual-design/SKILL.md`
+     - `.agents/skills/design-taste-frontend/SKILL.md`
+   - Apply the full stack to each independently executed UI task. A prior task's loading evidence does not satisfy a new task. Project authority, accessibility, catalog/token rules, existing product identity, and the user brief resolve conflicting aesthetic advice.
+   - Every UI task in the plan must list `clay-ui` and all four mandatory skills under `Approach -> Documentation Reviewed`; a plan-level mention alone is insufficient.
    - Tasks must reuse cataloged primitives and components first; building custom components outside the catalog requires explicit justification in the task's `Options Considered`.
    - Include one post-implementation **visual and accessibility review** task before final documentation/wiki work. It must launch a real representative UI, take and inspect screenshots for every changed state, and record screenshot paths plus findings. When computer-use capability is available, start with `get_app_state`, inspect the accessibility tree, and verify keyboard focus, roles, labels, and interaction for changed controls. If live UI or computer use is unavailable, record the blocker and run the strongest available structural/accessibility checks; do not claim visual review passed.
 8. Load project-specific plan requirements deterministically:
@@ -92,7 +97,7 @@ When executing a plan:
 
 1. Read the full plan.
 2. Select the first unchecked task unless the user names a specific task.
-3. If the selected task touches UI, run the UI preflight gate (`npx ui-skills start` → inspect category → load 1–3 selected skills) **before reviewing implementation or editing files**. Do not treat routing recorded for another task as sufficient.
+3. If the selected task touches UI, load `clay-ui` and all four mandatory project-local UI skills named in the UI skill gate **before reviewing implementation or editing files**. Do not treat evidence recorded for another task as sufficient.
 4. Re-read relevant project patterns, loaded project-specific plan requirements, decision logs, and existing wiki pages for files/modules being changed.
 5. Implement only the selected task unless dependencies require a small, explicitly noted prerequisite.
 6. Run the task's listed tests/checks and any directly relevant validation.

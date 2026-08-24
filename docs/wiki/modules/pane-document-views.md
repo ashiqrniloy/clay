@@ -1,5 +1,9 @@
 # Pane Document Views (Phase 22.2)
 
+> **Historical — removed in Plan 097 Phase 12.** Per-pane hosting moved to the
+> React workspace: [React CodeMirror Editor](react-codemirror-editor.md) and
+> [React Tabs, Splits, and Layout Persistence](react-tabs-and-splits.md).
+
 ## Source
 
 - `src/masonry_pane_document.rs` — `PaneDocumentView` (per-pane editor view)

@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientKeepSelection
 js_facade: runtime/js/editor.js::clientKeepSelection
-backing_rust: src/editor/surface/mod.rs::EditorSurface::keep_selection
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientKeepSelection
@@ -33,7 +33,7 @@ Keep only the primary selection, dropping every other caret.
 
 ## Description
 
-`clientKeepSelection` returns the stable bindable command ID `editor.clientKeepSelection` for **Keep Selection** (Plan 071 task 9). Helix keep_primary_selection semantics: the primary selection keeps its range; all secondary carets are removed. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientKeepSelection` returns the stable bindable command ID `editor.clientKeepSelection` for **Keep Selection** (Plan 071 task 9). Helix keep_primary_selection semantics: the primary selection keeps its range; all secondary carets are removed. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local by the React/CodeMirror controller; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -90,8 +90,8 @@ Use `editor.clientKeepSelection` when the user asks for Keep Selection through t
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientKeepSelection`
-- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::keep_selection`
-- Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Key-driven dispatch: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)`
 
 ## Lookup metadata
 

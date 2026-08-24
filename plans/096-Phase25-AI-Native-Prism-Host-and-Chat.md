@@ -65,7 +65,7 @@ transcript), Command Centre session kinds for agent/provider/model/setup/
 sessions, core empty-tab fallback.
 
 Before reviewing existing UI, planning, designing, or editing any UI-related
-task, run `npx ui-skills start`. Inspect the category, load 1–3 skills,
+task, use the current project UI skill requirements. Load the complete mandatory project-local UI skill stack,
 apply them to Clay's native Masonry/Parley/Vello token context. Repeat per
 independently executed UI task; prior evidence does not satisfy the next
 task. After routing, load `.agents/skills/clay-ui/` plus
@@ -75,11 +75,11 @@ task. After routing, load `.agents/skills/clay-ui/` plus
 Plan-creation routing (2026-08-21):
 
 ```text
-npx ui-skills start
-npx ui-skills list --category interaction
-npx ui-skills list --category accessibility
-npx ui-skills get prototyperai/build-primitive
-npx ui-skills get jakubkrehel/better-accessibility
+load the complete mandatory project-local UI skill stack
+load the complete mandatory project-local UI skill stack
+load the complete mandatory project-local UI skill stack
+load the complete mandatory project-local UI skill stack
+load the complete mandatory project-local UI skill stack
 ```
 
 Plan-alignment routing (2026-08-22): same commands/skills. Ownership
@@ -251,7 +251,7 @@ hard-coded native Chat widget.
       - `.agents/skills/clay-ui/references/components.md`
       - `.agents/skills/clay-ui/references/tokens.md`
       - `docs/reference/ui-components.md`
-      - ui-skills task routing: `npx ui-skills start`; architecture category;
+      - legacy selection workflow task routing: the UI guidance current at execution time; architecture category;
         `mattpocock/codebase-design` (deep reusable interfaces, deletion test)
       - Prior plan routing: `prototyperai/build-primitive`,
         `jakubkrehel/better-accessibility`
@@ -314,9 +314,9 @@ hard-coded native Chat widget.
       - `packages/settings/` as SDUI package precedent
       - `docs/wiki/modules/phase25-agent-host-primitive-review.md`
   - Completion Evidence:
-    - UI preflight completed for this task: `npx ui-skills start`,
-      `npx ui-skills list --category architecture`, and
-      `npx ui-skills get mattpocock/codebase-design`; `clay-ui`, component
+    - UI preflight completed for this task: the UI guidance current at execution time,
+      the UI guidance current at execution time, and
+      the UI guidance current at execution time; `clay-ui`, component
       catalog, token catalog, UI navigation, and relevant project patterns
       were read.
     - Local Cargo metadata confirms `masonry v0.4.0`; `cargo tree -i

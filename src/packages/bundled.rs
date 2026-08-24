@@ -414,6 +414,13 @@ mod tests {
             ids.extend(contributions.sdui.iter().map(|d| d.region_id.as_str()));
             ids.extend(contributions.ui_components.iter().map(|d| d.id.as_str()));
             ids.extend(contributions.ui_panels.iter().map(|d| d.id.as_str()));
+            ids.extend(
+                value["clay"]["contributions"]["ui"]["paneContents"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|entry| entry["id"].as_str()),
+            );
             ids.extend(contributions.syntax_grammars.iter().map(|d| d.id.as_str()));
             ids.extend(
                 crate::server::syntax::SyntaxGrammarRegistry::native_owned_grammar_ids(

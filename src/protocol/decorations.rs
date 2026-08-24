@@ -1,7 +1,18 @@
 use crate::protocol::{DocumentFontRole, DocumentId, DocumentVersion, TextByteRange};
 
 /// Package provenance retained on every decoration publication.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct DecorationProvenance {
     pub package_name: String,
     pub package_version: String,
@@ -10,8 +21,19 @@ pub struct DecorationProvenance {
 
 /// Known inert decoration kinds. The client maps these to native styles only.
 #[derive(
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DecorationKind {
     Syntax,
     Semantic,
@@ -62,7 +84,18 @@ pub enum DecorationIntent {
 }
 
 /// Optional activatable payload on a [`DecorationKind::Link`] span.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DecorationTarget {
     WorkspacePath {
         relative_path: String,
@@ -270,8 +303,19 @@ fn paths_equal(left: &str, right: &str) -> bool {
 /// resolve via the optional `scope` escape (see [`DecorationSpan::scope`]);
 /// `token_type` is always one of these closed variants.
 #[derive(
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TokenType {
     // LSP SemanticTokenType base (23).
     Namespace,
@@ -330,7 +374,10 @@ pub enum TokenType {
     PartialEq,
     Eq,
     Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase")]
 pub struct Modifiers(pub u16);
 
 impl Modifiers {
@@ -545,7 +592,18 @@ impl TokenType {
 /// free-form style-token string (e.g. `"keyword.control"`) for third-party theme
 /// longest-prefix resolution; first-party production always sets it via
 /// [`DecorationSpan::from_style_token`].
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct DecorationSpan {
     pub byte_start: u64,
     pub byte_end: u64,
@@ -563,13 +621,36 @@ pub struct DecorationSpan {
 }
 
 /// Overlay label. Inert: no command, no URL.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct InlayHintPayload {
     pub label: String,
     pub placement: InlayPlacement,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum InlayPlacement {
     Before,
     After,
@@ -688,7 +769,19 @@ impl DecorationSpan {
 }
 
 /// Cache key for one versioned decoration chunk.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct DecorationChunkKey {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -699,7 +792,18 @@ pub struct DecorationChunkKey {
 }
 
 /// Bounded, versioned server-to-client decoration payload for one document viewport or chunk.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct DecorationSet {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,

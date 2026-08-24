@@ -48,7 +48,7 @@ custom_properties:
     type: enum
     default: required
     description: Bounded schema kind, one of `boolean`, `number`, `string`, `enum`, or `object`.
-security: Validates package-prefixed IDs, supported state scopes, lifecycle metadata, schema kind, target IDs, provenance, hidden-key rejection, prohibited authority fields, and payload ceilings; registers schemas only and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, state-value mutation, hidden globals, or raw JSON blob authority.
+security: Validates package-prefixed IDs, supported state scopes, lifecycle metadata, schema kind, target IDs, provenance, hidden-key rejection, prohibited authority fields, and payload ceilings; registers schemas only and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, state-value mutation, hidden globals, or raw JSON blob authority.
 agent_guidance: Use `ui.serverRegisterUiStateScope` for inert state schema and lifecycle declarations only. Do not store package state values, raw documents, hidden configuration, native handles, callbacks, raw ops, CSS, or client-side JavaScript through this API.
 lookup_tags: [ui, package-ui, state, lifecycle, clay-js-api, phase18.4, runtime-backed]
 app_visible: true
@@ -67,7 +67,7 @@ Register bounded package-owned UI state scope schemas and lifecycle metadata thr
 
 `serverRegisterUiStateScope` accepts a validated package manifest and an inert UI state-scope declaration. Clay validates the package prefix, scope, owner, lifetime, persistence contract, implementation status, targeted component/pane/overlay ID, schema kind, provenance, prohibited authority fields, and payload size before storing the declaration in the package UI registry.
 
-This API registers schemas and lifecycle metadata only. It does not accept state values, arbitrary JSON blobs, persisted document/workspace data, hidden globals, native widget handles, callbacks, raw CSS, raw Deno ops, or client-side JavaScript. Registration runs during package load/configuration/update work; Masonry paint/layout/pointer/key/text hot paths read already-installed inert metadata only and do not execute package JavaScript or serialize full documents.
+This API registers schemas and lifecycle metadata only. It does not accept state values, arbitrary JSON blobs, persisted document/workspace data, hidden globals, native widget handles, callbacks, raw CSS, raw Deno ops, or client-side JavaScript. Registration runs during package load/configuration/update work; client paint/layout/pointer/key/text hot paths read already-installed inert metadata only and do not execute package JavaScript or serialize full documents.
 
 ## When to use
 
@@ -144,11 +144,11 @@ Registration throws when the manifest is invalid, IDs are not package-prefixed, 
 
 ## Permissions and security
 
-`serverRegisterUiStateScope` does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package installation/enable/disable, WASM, raw op, native widget, direct Masonry, raw CSS, renderer callback, state-value mutation, or client-side JavaScript authority. It registers inert schema/lifecycle metadata only and rejects hidden globals, raw state blobs, callbacks, native handles, raw ops, CSS, executable code, and initial/default state values.
+`serverRegisterUiStateScope` does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package installation/enable/disable, WASM, raw op, native widget, direct client widget, raw CSS, renderer callback, state-value mutation, or client-side JavaScript authority. It registers inert schema/lifecycle metadata only and rejects hidden globals, raw state blobs, callbacks, native handles, raw ops, CSS, executable code, and initial/default state values.
 
 ## Agent guidance
 
-Agents should keep package state lifecycle declarations generic and primitive-first. Do not add Markdown-specific Rust branches, hidden JSON/TOML state keys, raw Masonry handles, package-authored native widget mutation, or package JavaScript execution in UI hot paths. Mark unsupported persistence/mutation semantics as `implementationStatus: "deferred"` instead of implying authority.
+Agents should keep package state lifecycle declarations generic and primitive-first. Do not add Markdown-specific Rust branches, hidden JSON/TOML state keys, raw client handles, package-authored native widget mutation, or package JavaScript execution in UI hot paths. Mark unsupported persistence/mutation semantics as `implementationStatus: "deferred"` instead of implying authority.
 
 ## Backing implementation
 

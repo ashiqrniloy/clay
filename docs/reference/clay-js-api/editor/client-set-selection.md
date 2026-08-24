@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSetSelection
 js_facade: runtime/js/editor.js::clientSetSelection
-backing_rust: src/editor/surface/mod.rs::EditorSurface::select_word
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_editor_set_selection
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_set_selection
 name: clientSetSelection
@@ -45,7 +45,7 @@ Set the selection through the `clay:editor` Clay JavaScript facade.
 
 ## Description
 
-`clientSetSelection` is the public API for **Set Selection**. The `op_clay_editor_set_selection` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. Key-driven selection is served client-local by the direction-specific `editor.clientSetSelection.*` command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`).
+`clientSetSelection` is the public API for **Set Selection**. The `op_clay_editor_set_selection` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. Key-driven selection is served client-local by the direction-specific `editor.clientSetSelection.*` command IDs (allowlisted, routed `ClientUiCommand`, dispatched client-local by the React/CodeMirror controller).
 
 Authority: `client-local-ui-state`. Runtime path: `client-local-hot-path`. Shift-arrow, pointer-drag, Ctrl+L (line), and Ctrl+D (word) selection update local state and are not serialized unless followed by a document edit.
 
@@ -114,8 +114,8 @@ Use `editor.clientSetSelection` when the user asks for set selection through the
 
 - JS facade: `runtime/js/editor.js::clientSetSelection`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_set_selection` (`op_clay_editor_set_selection`)
-- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::select_word` (and `select_line`, `select_paragraph`)
-- Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand` (and `select_line`, `select_paragraph`)
+- Key-driven dispatch: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)`
 
 ## Lookup metadata
 

@@ -18,12 +18,14 @@ Clay uses server-authoritative documents with optimistic client shadows.
 
 ## Client Owns
 
-- Native rendering and input handling.
-- Masonry/Vello/Parley UI surface.
-- Viewport, caret, selection, pointer, focus, local UI transient state.
-- Local shadow rope/cache for immediate editing.
+- Tauri-hosted React rendering, DOM accessibility semantics, and input presentation.
+- CodeMirror `EditorState`/`EditorView` hot-path editing state.
+- Viewport, caret, selection, pointer, focus, and local UI transient state.
+- Local document shadow/cache for immediate editing.
 - Pending edit queue and client transaction IDs.
-- Execution of server-issued hot-path behavior manifests.
+- Execution of server-issued hot-path behavior manifests through bounded frontend adapters.
+
+Tauri Rust owns only window/webview lifecycle, narrow OS integration, server process/connection management, and translation between frontend DTOs and the existing server protocol. It does not become canonical document/package/workspace authority.
 
 ## Document Access Pattern
 
@@ -110,6 +112,14 @@ Clay uses server-authoritative documents with optimistic client shadows.
   replacement package never inherits the replaced target's grant.
 - Decision log source:
   `decision-logs/2026-08-13-2223-degraded-language-server-grant-tolerated-at-load-package.md`.
+
+## Tauri/React Client Migration
+
+- Preserve server-authoritative documents and per-document ordering while porting the client; do not move canonical state into React, Zustand, CodeMirror, or Tauri managed state.
+- Ordinary typing applies to CodeMirror first and queues bounded deltas asynchronously; no Tauri/server round trip precedes local paint.
+- Use strings for Rust identifiers that may exceed JavaScript's safe integer range and convert UTF-16 editor positions at one reviewed Rust/frontend boundary.
+- Main webview receives narrow Clay commands only; broad Tauri filesystem/shell/process capabilities remain denied.
+- Decision source: `decision-logs/2026-08-23-0052-tauri-react-client-architecture.md`.
 
 ## Planning Guidance
 

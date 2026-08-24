@@ -160,11 +160,13 @@ labels, a `TabList`/`Tab` tree for the tab bar (module 14), and one polite
 `Status` live-region node announcing pane/tab actions exactly once per user
 action. Deep reference:
 `docs/development/accessibility.md` (roles/names table, announcement
-strings, sanitization budgets). Automated equivalents: the shell's
-structural a11y tests (`cargo test --lib accessibility` in
-`src/masonry_shell.rs`) build the exact `TreeUpdate` and assert every role,
-name, and announcement string below — a screen reader is not required for
-the tree shape, only for the human hearing check.
+strings, sanitization budgets). Automated equivalents: the React shell
+landmark/role/live-region assertions (`frontend/src/test/shell.test.tsx`)
+and React Aria's focus/split-pane semantics — a screen reader is not
+required for the tree shape, only for the human hearing check. Note: on the
+current WebKitGTK stack static text inside live regions is not exposed via
+AT-SPI accessible names or the Text interface, so announcements must be
+verified with a screen reader, not an AT-SPI name dump.
 
 | # | Action | Expected |
 |---|--------|----------|
@@ -341,3 +343,12 @@ not SDUI — packages contribute chrome only as inert manifest data.
 |---|---|---|
 | S43/S44 | PASS automated regression; live partial | `dirty_focused_pane_menu_and_discard_keep_consumer_focus_live` exercises the exact crash path (dirty pane → save-conflict menu via `apply_menu_sync` → `FileOperationFailed DirtyDocument` → discard → close) asserting the consumer focus stays live at every step; `dirty_pane_close_rejection_and_discarded_removal_keep_focus_consumer_safe` covers the rejection path. The Plan 086 crash log is superseded — the panic no longer reproduces in the automated suite. Live attempt (2026-08-19): a real Clay instance with an open document accepted typed input (doc v2, dirty) and stayed alive with an intact AT-SPI tree; the `Ctrl+Alt+W` chord itself is host-blocked (portal delivers single keys only — review-log V9), so the live menu path was not re-driven |
 | S45/S46 | PASS live (single-pane) / structural (multi-pane) | `code-reviews/screenshots/2026-08-18-phase26-review/rust-*` (chrome on) vs `markdown-*` (chrome off) show per-mode chrome; per-pane chrome isolation is covered by the pane-scoped paint tests (`pane_paint_baselines`, per-pane decoration aggregate guard) |
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Two-pane composition | PASS static visual/a11y | `code-reviews/screenshots/2026-08-24-tauri-react-parity/splits/fixture-*` shows editor and welcome pane within bounds at wide/narrow sizes |
+| Real split/tab tree | PASS AT-SPI structure | `tabs-splits/accessibility.txt` exposes Pane 1 editor, separator, Pane 2 Empty tab and named actions |
+| Split resize/focus keyboard flow | UNRESOLVED live; PASS structural | Host cannot safely target the Tauri window or deliver chords; split-tree and workspace-controller tests pass |
+| Path-label safety | PASS | Split fixture now shows sanitized `ws` basename rather than `/tmp/ws`; editor regression test covers the root cause |

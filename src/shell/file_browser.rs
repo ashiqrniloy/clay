@@ -131,7 +131,7 @@ impl FileBrowserState {
 
         Ok(Self {
             root_id,
-            root_display_name: crate::editor::accessibility::sanitize_document_display_name(
+            root_display_name: crate::sanitize::sanitize_document_display_name(
                 &root_metadata.display_name,
             ),
             current_directory: relative_path,
@@ -374,7 +374,7 @@ fn sanitize_browser_label(value: &str) -> String {
     let safe: String = value
         .chars()
         .filter(|ch| !ch.is_control())
-        .take(crate::editor::accessibility::ACCESSIBILITY_DISPLAY_NAME_MAX_CHARS)
+        .take(crate::sanitize::DISPLAY_NAME_MAX_CHARS)
         .collect();
     if safe.is_empty() {
         "untitled".to_string()

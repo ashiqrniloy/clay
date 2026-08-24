@@ -1,0 +1,1431 @@
+{
+  "version": 1,
+  "updated": "2026-08-23T18:55:00Z",
+  "native_client_frozen": true,
+  "status_vocabulary": [
+    "pending",
+    "ported",
+    "verified",
+    "approved-removed"
+  ],
+  "baseline_blockers": [
+    "AT-SPI/accesskit_consumer TreeUpdate panic risk on focused dirty-pane close paths (Plan 086 crash; Phase 26 regression tests added, live AT-SPI risk remains a release blocker until the Tauri client replaces AccessKit/AT-SPI plumbing)",
+    "cargo test --all-targets FAIL packages::bundled::tests::bundled_extension_points_match_real_contributions: \"@clay/chat extension point chat.entrySurface declares scope `chat.entry` that names no real contribution of the package\" (src/packages/bundled.rs:432)",
+    "cargo test --test security FAIL rust_visibility_api_mapping::phase24_5_command_centre_sessions_are_not_a_package_programmatic_surface: open_command_centre_session( call-site count 4, expected 3 (src/server/connection/menus.rs + runtime.rs)",
+    "Historical Control Center test timeout (>60 s) from the pre-freeze audit was not reproducible in the 2026-08-23 baseline run; treated as resolved unless it recurs"
+  ],
+  "capabilities": [
+    {
+      "capability_id": "launch.connection.lifecycle",
+      "title": "Server/client lifecycle, lease, observer, restart, status line",
+      "area": "launch",
+      "status": "verified",
+      "migration_phase": 2,
+      "current_owner": [
+        "src/launch.rs",
+        "src/ipc.rs",
+        "src/bin/clay-server.rs",
+        "src/driver/mod.rs"
+      ],
+      "current_tests": [
+        "tests/manual_smoke_docs.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/01-launch-and-connection.md",
+          "steps": [
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5",
+            "L6",
+            "L7",
+            "L8",
+            "L9",
+            "L10",
+            "L11",
+            "L12",
+            "L13",
+            "L14",
+            "L15",
+            "L16",
+            "L17",
+            "L18",
+            "L19",
+            "L20",
+            "L21",
+            "L22"
+          ]
+        }
+      ],
+      "public_apis": [
+        "application.quit"
+      ],
+      "protocol_messages": {
+        "client": [
+          "Hello"
+        ],
+        "server": [
+          "Welcome",
+          "Error"
+        ],
+        "agent": []
+      },
+      "target_owner": "src-tauri/src + frontend/src/state/connection-store.ts",
+      "target_tests": "frontend bridge integration tests + test-plan/01",
+      "primitives": [],
+      "verified_automated": "frontend bridge integration tests + test-plan/01",
+      "verified_manual": "test-plan/01-launch-and-connection.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "configuration.initjs.runtime",
+      "title": "init.js evaluation, diagnostics, live reload, runtime generations",
+      "area": "configuration",
+      "status": "verified",
+      "migration_phase": 9,
+      "current_owner": [
+        "src/server/js_runtime.rs",
+        "src/server/configuration.rs",
+        "runtime/js/configuration.js"
+      ],
+      "current_tests": [
+        "tests/persistent_runtime_hot_reload.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/02-configuration-init-js.md",
+          "steps": [
+            "C1",
+            "C2",
+            "C3",
+            "C4",
+            "C5",
+            "C6",
+            "C7",
+            "C8",
+            "C9",
+            "C10",
+            "C11",
+            "C12",
+            "C13",
+            "C14",
+            "C15",
+            "C16",
+            "C17",
+            "C18",
+            "C19",
+            "C20",
+            "C21",
+            "C22",
+            "C23",
+            "C24",
+            "C25",
+            "C26",
+            "C27",
+            "C28",
+            "C29"
+          ]
+        }
+      ],
+      "public_apis": [
+        "configuration.loadConfigurationModule",
+        "configuration.getConfigurationState",
+        "configuration.setPackageOption"
+      ],
+      "protocol_messages": {
+        "client": [
+          "RuntimeGenerationInstalled"
+        ],
+        "server": [],
+        "agent": []
+      },
+      "target_owner": "frontend/src/command-centre + frontend/src/settings + frontend/src/shell/workspace-controller.ts",
+      "target_tests": "frontend CommandCentre/Settings/workspace tests + Rust reload/settings suites + test-plan/02",
+      "primitives": [
+        "PackageLayoutOverride",
+        "PackageOwnedConfiguration",
+        "PackagePermissionDeclaration"
+      ],
+      "verified_automated": "frontend CommandCentre/Settings/workspace tests + Rust reload/settings suites + test-plan/02",
+      "verified_manual": "test-plan/02-configuration-init-js.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "files.workspace.documents",
+      "title": "Open/save/reload/conflicts, workspace roots, browsing, Path Browser, Git status",
+      "area": "documents",
+      "status": "verified",
+      "migration_phase": 5,
+      "current_owner": [
+        "src/server/document.rs",
+        "src/shell/file_browser.rs",
+        "src/shell/path_browser.rs",
+        "src/masonry_pane_document.rs"
+      ],
+      "current_tests": [
+        "tests/package_loading.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/03-files-and-workspace.md",
+          "steps": [
+            "F1",
+            "F2",
+            "F3",
+            "F3a",
+            "F3b",
+            "F3c",
+            "F4",
+            "F5",
+            "F6",
+            "F7",
+            "F8",
+            "F9",
+            "F10",
+            "F11",
+            "F12",
+            "F12a",
+            "F13",
+            "F14",
+            "F15",
+            "F16",
+            "F17",
+            "F18",
+            "F19",
+            "F20",
+            "F21",
+            "F22",
+            "F23",
+            "F23a",
+            "F23b",
+            "F24",
+            "F25",
+            "F26",
+            "F27",
+            "F28",
+            "F29",
+            "F30",
+            "F31",
+            "F32",
+            "F33",
+            "F34",
+            "F35",
+            "F36",
+            "F37",
+            "F38",
+            "F39",
+            "F40",
+            "F41",
+            "F42",
+            "F43",
+            "F44",
+            "F45",
+            "F46",
+            "F47"
+          ]
+        }
+      ],
+      "public_apis": [
+        "documents.serverGetDocumentSnapshot",
+        "documents.serverGetDocumentLease",
+        "documents.serverOpenDocument",
+        "documents.serverSaveDocument",
+        "documents.serverReloadDocument",
+        "documents.serverGetDocumentStatus",
+        "documents.serverListDocuments",
+        "workspace.serverListWorkspaceRoots",
+        "documents.clientOpenFileDialog",
+        "workspace.serverAddWorkspaceRoot",
+        "workspace.serverDiscoverWorkspaceRootForPath",
+        "workspace.serverListDirectory",
+        "workspace.serverCreateListingCancelToken",
+        "workspace.serverCancelListing",
+        "git.serverListGitStatuses",
+        "git.serverRefreshGitStatus",
+        "workspace.clientOpenFolderDialog"
+      ],
+      "protocol_messages": {
+        "client": [
+          "OpenDocument",
+          "OpenSelectedFile",
+          "AddSelectedWorkspaceRoot",
+          "SaveDocument",
+          "ReloadDocument",
+          "GetDocumentStatus",
+          "ListDocuments",
+          "RequestResync",
+          "CloseDocument"
+        ],
+        "server": [
+          "InitialDocument",
+          "FileOpenCapabilityIssued",
+          "DocumentOpened",
+          "DocumentSaved",
+          "DocumentReloaded",
+          "DocumentStatus",
+          "DocumentList",
+          "FileOperationFailed",
+          "DocumentClosed"
+        ],
+        "agent": []
+      },
+      "target_owner": "frontend/src/shell + frontend/src/command-centre + src-tauri/src/commands.rs",
+      "target_tests": "frontend workspace/menu tests + desktop bridge tests + server path/dialog suites + test-plan/03",
+      "primitives": [
+        "BoundedFileListService",
+        "BuiltInUserBrowseListing",
+        "WorkspaceRootDiscovery"
+      ],
+      "verified_automated": "frontend workspace/menu tests + desktop bridge tests + server path/dialog suites + test-plan/03",
+      "verified_manual": "test-plan/03-files-and-workspace.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "editing.core.pipeline",
+      "title": "Typing, undo/redo, clipboard, IME, optimistic edit queue, transforms",
+      "area": "editor",
+      "status": "verified",
+      "migration_phase": 5,
+      "current_owner": [
+        "src/editor/surface/mod.rs",
+        "src/masonry_pane_document.rs",
+        "src/client/behavior.rs"
+      ],
+      "current_tests": [
+        "tests/editor_performance_invariants.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/04-core-editing.md",
+          "steps": [
+            "E1",
+            "E2",
+            "E3",
+            "E4",
+            "E5",
+            "E6",
+            "E7",
+            "E8",
+            "E9",
+            "E10",
+            "E11",
+            "E12",
+            "E13",
+            "E14",
+            "E15",
+            "E16",
+            "E17",
+            "E18",
+            "E19",
+            "E20",
+            "E21",
+            "E22",
+            "E23",
+            "E24",
+            "E25",
+            "E26",
+            "E27",
+            "E28",
+            "E29",
+            "E30",
+            "E31",
+            "E32",
+            "E33",
+            "E34",
+            "E35",
+            "E36"
+          ]
+        }
+      ],
+      "public_apis": [
+        "editor.serverInsertText",
+        "editor.serverInsertNewline",
+        "editor.serverDeleteRange",
+        "editor.clientExecuteEditorCommand",
+        "editor.clientScrollTo",
+        "editor.clientSetViewport",
+        "editor.clientSetEditorLayout",
+        "editor.clientCopySelection",
+        "editor.clientCutSelection",
+        "editor.clientPasteClipboard",
+        "editor.clientUndo",
+        "editor.clientRedo",
+        "editor.clientShowOpenDocuments",
+        "editor.clientRequestResync",
+        "editor.clientDismissRecovery",
+        "editor.toggleComment",
+        "editor.toggleListMarker",
+        "editor.rotateHeading"
+      ],
+      "protocol_messages": {
+        "client": [
+          "Edit",
+          "EditorIntent"
+        ],
+        "server": [
+          "EditAck",
+          "EditRejected",
+          "EditTransaction",
+          "ResyncSnapshot"
+        ],
+        "agent": []
+      },
+      "target_owner": "frontend/src/editor/ClayEditor.tsx + sync/*",
+      "target_tests": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
+      "primitives": [
+        "DocumentClassification",
+        "KeyRoutingOverride",
+        "MajorModeActivation",
+        "TextTransform"
+      ],
+      "verified_automated": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
+      "verified_manual": "test-plan/04-core-editing.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "movement.selection",
+      "title": "Word/paragraph/line movement, sticky column, selection, text objects",
+      "area": "editor",
+      "status": "verified",
+      "migration_phase": 7,
+      "current_owner": [
+        "src/editor/cursor.rs",
+        "src/editor/selection.rs"
+      ],
+      "current_tests": [
+        "tests/syntax_grammar.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/05-movement-and-selection.md",
+          "steps": [
+            "M1",
+            "M2",
+            "M3",
+            "M4",
+            "M5",
+            "M6",
+            "M7",
+            "M8",
+            "M9",
+            "M10",
+            "M11",
+            "M12",
+            "M13"
+          ]
+        }
+      ],
+      "public_apis": [
+        "editor.clientMoveCursor",
+        "editor.clientSetSelection",
+        "editor.clientSelectTextobject",
+        "editor.clientSmartSelect"
+      ],
+      "protocol_messages": {
+        "client": [],
+        "server": [],
+        "agent": []
+      },
+      "target_owner": "frontend/src/editor/extensions/keymaps.ts",
+      "target_tests": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
+      "primitives": [],
+      "verified_automated": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
+      "verified_manual": "test-plan/05-movement-and-selection.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "multicursor",
+      "title": "Multi-cursor add/column select/select-next/undo semantics",
+      "area": "editor",
+      "status": "verified",
+      "migration_phase": 7,
+      "current_owner": [
+        "src/editor/cursor.rs"
+      ],
+      "current_tests": [
+        "tests/syntax_grammar.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/06-multi-cursor.md",
+          "steps": [
+            "X1",
+            "X2",
+            "X3",
+            "X4",
+            "X5",
+            "X6",
+            "X7",
+            "X8",
+            "X9",
+            "X10",
+            "X11",
+            "X12",
+            "X13",
+            "X14",
+            "X15"
+          ]
+        }
+      ],
+      "public_apis": [
+        "editor.clientAddCursor",
+        "editor.clientColumnSelect",
+        "editor.clientSelectNextMatch",
+        "editor.clientSelectPrevMatch",
+        "editor.clientSelectAllMatches",
+        "editor.clientCancelMultipleSelections",
+        "editor.clientKeepSelection",
+        "editor.clientRemoveSelection",
+        "editor.clientUndoCursorMove"
+      ],
+      "protocol_messages": {
+        "client": [],
+        "server": [],
+        "agent": []
+      },
+      "target_owner": "frontend/src/editor/extensions/keymaps.ts",
+      "target_tests": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
+      "primitives": [],
+      "verified_automated": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
+      "verified_manual": "test-plan/06-multi-cursor.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "caret.typography.rendering",
+      "title": "Caret shape/blink, font roles, typography hierarchy, editor layout/wrap",
+      "area": "rendering",
+      "status": "verified",
+      "migration_phase": 7,
+      "current_owner": [
+        "src/editor/surface/caret.rs",
+        "src/editor/typography.rs",
+        "src/editor/layout.rs"
+      ],
+      "current_tests": [
+        "tests/typography_protocol.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/07-caret-and-typography.md",
+          "steps": [
+            "T1",
+            "T2",
+            "T3",
+            "T4",
+            "T5",
+            "T6",
+            "T7",
+            "T8",
+            "T9",
+            "T10",
+            "T11",
+            "T12",
+            "T13",
+            "T14",
+            "T15",
+            "T16",
+            "T17",
+            "T18",
+            "T19",
+            "T20",
+            "T21",
+            "T22",
+            "T23",
+            "T24",
+            "T25",
+            "T26",
+            "T27"
+          ]
+        }
+      ],
+      "public_apis": [
+        "editor.clientSetCursorStyle"
+      ],
+      "protocol_messages": {
+        "client": [],
+        "server": [
+          "CaretStyleOverride",
+          "EditorLayoutOverride"
+        ],
+        "agent": []
+      },
+      "target_owner": "frontend/src/theme/* + CodeMirror theme extensions",
+      "target_tests": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
+      "primitives": [
+        "SemanticTypographyRole"
+      ],
+      "verified_automated": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
+      "verified_manual": "test-plan/07-caret-and-typography.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "syntax.textobjects.intelligence",
+      "title": "Grammar, textobjects, folds, links, inlays, diagnostics, completion, LSP",
+      "area": "intelligence",
+      "status": "verified",
+      "migration_phase": 7,
+      "current_owner": [
+        "src/server/parse.rs",
+        "src/editor/surface/decoration.rs",
+        "src/editor/surface/diagnostic.rs",
+        "src/shell/fuzzy.rs"
+      ],
+      "current_tests": [
+        "tests/completion_provider.rs",
+        "tests/decoration_transport.rs",
+        "tests/language_intelligence.rs",
+        "tests/lsp_bridge.rs",
+        "tests/syntax_grammar.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/08-syntax-and-textobjects.md",
+          "steps": [
+            "S1",
+            "S2",
+            "S3",
+            "S4",
+            "S5",
+            "S6",
+            "S7",
+            "S8",
+            "S9",
+            "S10",
+            "S11",
+            "S12",
+            "S13",
+            "S14",
+            "S15",
+            "S16",
+            "S17",
+            "S18",
+            "S19",
+            "S20",
+            "S21",
+            "S22",
+            "S23",
+            "S24",
+            "S25",
+            "S26",
+            "S27",
+            "S28",
+            "S29",
+            "S30",
+            "S31",
+            "S32"
+          ]
+        }
+      ],
+      "public_apis": [
+        "behavior.getActiveBehaviorManifest",
+        "behavior.listBehaviorRoutes",
+        "behavior.buildCodeEditingManifest",
+        "syntax.serverRegisterSyntaxGrammar",
+        "syntax.setSyntaxEnginePreference",
+        "completion.serverRegisterCompletionProvider",
+        "completion.serverDisableCompletion",
+        "completion.serverListCompletionProvidersForTrigger",
+        "completion.completionTriggerCharactersFromEditorRules",
+        "language.serverRegisterLanguageIntelligenceProvider",
+        "language.serverRegisterDocumentAnalyzer",
+        "language-server.authorizeLanguageServer",
+        "language-server.startLanguageServerSession",
+        "folding.serverPublishFoldingRanges",
+        "editor.clientToggleFold",
+        "editor.toggleInlayHints",
+        "decorations.serverPublishDecorations",
+        "diagnostics.serverPublishDiagnostics",
+        "parse.serverRegisterParseHandler"
+      ],
+      "protocol_messages": {
+        "client": [
+          "DecorationViewportRequest",
+          "CompletionRequest",
+          "LanguageIntelligenceRequest",
+          "SelectionQueryRequest"
+        ],
+        "server": [
+          "BehaviorManifest",
+          "DecorationSet",
+          "FoldingRangeSet",
+          "DecorationBatch",
+          "DiagnosticSet",
+          "RuntimeDiagnostic",
+          "CompletionResult",
+          "CompletionRejected",
+          "LanguageIntelligenceResult",
+          "LanguageIntelligenceRejected",
+          "SelectionQueryResult"
+        ],
+        "agent": []
+      },
+      "target_owner": "frontend/src/editor/extensions/{decorations,diagnostics,completion,folding,intelligence}.ts",
+      "target_tests": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
+      "primitives": [
+        "CompletionTriggerAndResult",
+        "DecorationRange",
+        "DiagnosticSpan",
+        "FoldingRange",
+        "IncrementalParseUpdate",
+        "LanguageIntelligenceRequestAndResult",
+        "SyntaxGrammarContribution"
+      ],
+      "verified_automated": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
+      "verified_manual": "test-plan/08-syntax-and-textobjects.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "packages.modes.settings.themes",
+      "title": "Package loading/trust, modes, settings UI, themes/appearance/typography config",
+      "area": "packages",
+      "status": "verified",
+      "migration_phase": 8,
+      "current_owner": [
+        "src/packages/record.rs",
+        "src/server/js_runtime.rs",
+        "src/shell/theme.rs"
+      ],
+      "current_tests": [
+        "tests/package_loading.rs",
+        "tests/theme_packages.rs",
+        "tests/runtime_sandbox_harness.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/09-packages-and-modes.md",
+          "steps": [
+            "P1",
+            "P2",
+            "P3",
+            "P4",
+            "P5",
+            "P6",
+            "P7",
+            "P8",
+            "P9",
+            "P10",
+            "P11",
+            "P12",
+            "P13",
+            "P14",
+            "P15",
+            "P16",
+            "P17",
+            "P18",
+            "P19",
+            "P20",
+            "P21",
+            "P22",
+            "P23",
+            "P24",
+            "P25",
+            "P26",
+            "P27",
+            "P28",
+            "P29",
+            "P30",
+            "P31",
+            "P32",
+            "P33",
+            "P34",
+            "P35",
+            "P36",
+            "P37",
+            "P38",
+            "P39",
+            "P40",
+            "P41",
+            "P42"
+          ]
+        }
+      ],
+      "public_apis": [
+        "packages.serverValidatePackageManifest",
+        "packages.serverValidatePackagePermissions",
+        "packages.serverLoadPackage",
+        "modes.serverRegisterModePattern",
+        "modes.serverClassifyDocument",
+        "modes.serverActivateMajorMode",
+        "packages.loadPackage",
+        "theme.setTheme",
+        "theme.setAppearance",
+        "theme.setTypography"
+      ],
+      "protocol_messages": {
+        "client": [],
+        "server": [
+          "ActiveTheme",
+          "ActiveTypography"
+        ],
+        "agent": []
+      },
+      "target_owner": "frontend/src/packages/* + frontend/src/settings/*",
+      "target_tests": "frontend package fixture/registry + server package loading/settings/chat suites + test-plan/09 P32-P36",
+      "primitives": [
+        "DocumentClassification",
+        "MajorModeActivation",
+        "PackageOwnedConfiguration",
+        "PackageThemeTokenDeclaration",
+        "PackageTrustDomainClassification"
+      ],
+      "verified_automated": "frontend package fixture/registry + server package loading/settings/chat suites + test-plan/09 P32-P36",
+      "verified_manual": "test-plan/09-packages-and-modes.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "package.sdui.ui.registry",
+      "title": "SDUI component kinds, inert UI contributions, token registration, layout intents",
+      "area": "sdui",
+      "status": "verified",
+      "migration_phase": 8,
+      "current_owner": [
+        "src/server/ui.rs",
+        "src/shell/components.rs",
+        "src/shell/package_ui.rs",
+        "src/masonry_sdui.rs"
+      ],
+      "current_tests": [
+        "tests/ui_primitive_conformance.rs",
+        "tests/package_ui_conformance.rs"
+      ],
+      "manual_steps": [],
+      "public_apis": [
+        "sdui.definePanel",
+        "sdui.defineLabel",
+        "sdui.defineButton",
+        "sdui.defineList",
+        "sdui.defineEditorView",
+        "sdui.defineFlex",
+        "sdui.defineStack",
+        "sdui.publishTree",
+        "ui.serverRegisterPanelContribution",
+        "ui.serverRegisterComponentContribution",
+        "ui.serverRegisterTransientOverlayContribution",
+        "ui.serverRegisterInputContribution",
+        "ui.serverRegisterThemeToken",
+        "ui.serverRegisterUiStateScope",
+        "ui.serverSetLayoutOverride",
+        "ui.serverRequestLayoutIntent"
+      ],
+      "protocol_messages": {
+        "client": [
+          "SduiAction"
+        ],
+        "server": [
+          "SduiSnapshot",
+          "SduiUpdate",
+          "RuntimeStateSnapshot"
+        ],
+        "agent": []
+      },
+      "target_owner": "frontend/src/sdui/* registry",
+      "target_tests": "frontend/src/sdui/*.test.ts* + desktop runtime projection + server UI wire snapshot",
+      "primitives": [
+        "ComponentContribution",
+        "PackageInputContribution",
+        "PackageUiStateScope",
+        "PanelContribution",
+        "SduiPanelStatusContribution",
+        "TransientOverlayContribution"
+      ],
+      "verified_automated": "frontend/src/sdui/*.test.ts* + desktop runtime projection + server UI wire snapshot",
+      "verified_manual": "Phase 4-10 retained visual/accessibility review evidence under code-reviews/screenshots/"
+    },
+    {
+      "capability_id": "keybindings.commands.menus",
+      "title": "bindKey/unbind, command execution, Control Centre/menu sessions, chords",
+      "area": "commands",
+      "status": "verified",
+      "migration_phase": 9,
+      "current_owner": [
+        "src/server/menu_sessions.rs",
+        "src/server/control_center.rs",
+        "src/shell/transient_menu.rs"
+      ],
+      "current_tests": [
+        "tests/command_execution.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/10-keybindings-and-commands.md",
+          "steps": [
+            "K1",
+            "K2",
+            "K3",
+            "K4",
+            "K5",
+            "K6",
+            "K60",
+            "K61",
+            "K62",
+            "K63",
+            "K64",
+            "K65",
+            "K66",
+            "K67",
+            "K68",
+            "K7",
+            "K8",
+            "K9",
+            "K10",
+            "K11",
+            "K12",
+            "K13",
+            "K14",
+            "K15",
+            "K16",
+            "K17",
+            "K18",
+            "K69",
+            "K70",
+            "K71",
+            "K72",
+            "K73",
+            "K74",
+            "K75",
+            "K76",
+            "K77",
+            "K19",
+            "K20",
+            "K21",
+            "K22",
+            "K23",
+            "K24",
+            "K25",
+            "K26",
+            "K27",
+            "K28",
+            "K29",
+            "K30",
+            "K31",
+            "K32",
+            "K33",
+            "K34",
+            "K35",
+            "K36",
+            "K37",
+            "K38",
+            "K39",
+            "K40",
+            "K41",
+            "K42",
+            "K43",
+            "K44",
+            "K45",
+            "K46",
+            "K47",
+            "K48",
+            "K49",
+            "K50",
+            "K51",
+            "K52",
+            "K53",
+            "K54",
+            "K55",
+            "K56",
+            "K57",
+            "K58",
+            "K59",
+            "K84",
+            "K78",
+            "K79",
+            "K80",
+            "K81",
+            "K82",
+            "K83",
+            "K85",
+            "K86",
+            "K87",
+            "K88",
+            "K89",
+            "K90",
+            "K91"
+          ]
+        }
+      ],
+      "public_apis": [
+        "keybindings.bindKey",
+        "keybindings.unbindKey",
+        "keybindings.listKeyBindings",
+        "commands.serverRegisterCommand",
+        "commands.serverListCommands",
+        "commands.serverExecuteCommand",
+        "commands.serverOpenFile",
+        "commands.serverRevealInTree",
+        "commands.serverOpenDirectory"
+      ],
+      "protocol_messages": {
+        "client": [
+          "CommandIntent",
+          "MenuQueryUpdate",
+          "MenuBackspace",
+          "MenuSelectionMove",
+          "MenuActivate",
+          "MenuCancel"
+        ],
+        "server": [
+          "TransientMenuSnapshot",
+          "TransientMenuClosed",
+          "EditorCommandRequest"
+        ],
+        "agent": []
+      },
+      "target_owner": "frontend/src/command-centre + frontend/src/editor/extensions + frontend/src/shell/workspace-controller.ts",
+      "target_tests": "frontend CommandCentre/workspace/editor tests + server menu/chord suites + test-plan/10",
+      "primitives": [
+        "BuiltInUserBrowseListing",
+        "CommandDeclaration",
+        "CommandExecution",
+        "TransientMenuSession"
+      ],
+      "verified_automated": "frontend CommandCentre/workspace/editor tests + server menu/chord suites + test-plan/10",
+      "verified_manual": "test-plan/10-keybindings-and-commands.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "performance.budgets.feel",
+      "title": "Latency budgets: typing, paint, tab switch, menus, completion, benches",
+      "area": "performance",
+      "status": "verified",
+      "migration_phase": 11,
+      "current_owner": [
+        "benches/window_baselines.rs",
+        "benches/editor_baselines.rs",
+        "benches/runtime_sdui_baselines.rs"
+      ],
+      "current_tests": [
+        "tests/performance_budgets.rs",
+        "tests/editor_performance_invariants.rs",
+        "tests/performance_protocol.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/11-performance.md",
+          "steps": [
+            "Q1",
+            "Q2",
+            "Q3",
+            "Q4",
+            "Q5",
+            "Q6",
+            "Q7",
+            "Q11",
+            "Q8",
+            "Q9",
+            "Q10",
+            "Q12",
+            "Q13",
+            "Q14",
+            "Q15",
+            "Q16",
+            "Q17",
+            "Q18",
+            "Q19",
+            "Q20",
+            "Q21",
+            "Q22",
+            "Q23",
+            "Q24",
+            "Q25",
+            "Q26",
+            "Q27",
+            "Q28",
+            "Q29",
+            "Q30",
+            "Q31",
+            "Q32",
+            "Q33"
+          ]
+        }
+      ],
+      "public_apis": [],
+      "protocol_messages": {
+        "client": [],
+        "server": [],
+        "agent": []
+      },
+      "target_owner": "frontend/scripts/bundle-budget.mjs + src-tauri/src/release.rs + docs/development/performance.md",
+      "target_tests": "tests/performance_budgets.rs::tauri_react_bundle_budgets_are_documented + frontend check:budget",
+      "primitives": [],
+      "verified_automated": "tests/performance_budgets.rs::tauri_react_bundle_budgets_are_documented + frontend check:budget",
+      "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "platform.windows",
+      "title": "Windows MSVC toolchain, named pipes, native dialogs",
+      "area": "platform",
+      "status": "verified",
+      "migration_phase": 11,
+      "current_owner": [
+        "docs/development/windows.md"
+      ],
+      "current_tests": [],
+      "manual_steps": [
+        {
+          "module": "test-plan/12-platform-windows.md",
+          "steps": [
+            "W1",
+            "W2",
+            "W3",
+            "W4",
+            "W5",
+            "W6",
+            "W7"
+          ]
+        }
+      ],
+      "public_apis": [],
+      "protocol_messages": {
+        "client": [],
+        "server": [],
+        "agent": []
+      },
+      "target_owner": "src/ipc.rs + src-tauri/src/release.rs + docs/development/windows.md",
+      "target_tests": "src-tauri release networked_endpoints_are_rejected; Linux CI does not run Windows packaging",
+      "primitives": [],
+      "verified_automated": "src-tauri release networked_endpoints_are_rejected; Linux CI does not run Windows packaging",
+      "verified_manual": "test-plan/12-platform-windows.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "shell.splits.panes",
+      "title": "Pane split tree, resize/focus policies, fixed slots, per-pane views, pane a11y",
+      "area": "shell",
+      "status": "verified",
+      "migration_phase": 6,
+      "current_owner": [
+        "src/shell/layout.rs",
+        "src/masonry_shell/mod.rs",
+        "src/masonry_pane_host.rs"
+      ],
+      "current_tests": [
+        "tests/window_management_protocol.rs",
+        "tests/ui_primitive_conformance.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/13-window-splits.md",
+          "steps": [
+            "S1",
+            "S2",
+            "S3",
+            "S4",
+            "S5",
+            "S6",
+            "S7",
+            "S8",
+            "S9",
+            "S10",
+            "S11",
+            "S12",
+            "S13",
+            "S14",
+            "S15",
+            "S16",
+            "S17",
+            "S18",
+            "S19",
+            "S20",
+            "S21",
+            "S22",
+            "D1",
+            "D2",
+            "D3",
+            "D4",
+            "D5",
+            "D6",
+            "D7",
+            "D8",
+            "D9",
+            "D10",
+            "D11",
+            "D12",
+            "D13",
+            "D14",
+            "D15",
+            "D16",
+            "D17",
+            "D18",
+            "D19",
+            "S23",
+            "S24",
+            "S25",
+            "S26",
+            "S27",
+            "S28",
+            "S29",
+            "S30",
+            "S31",
+            "S32",
+            "S33",
+            "S34",
+            "S35",
+            "S36",
+            "S37",
+            "S38",
+            "S39",
+            "S40",
+            "S41",
+            "S42",
+            "S43",
+            "S44",
+            "S45",
+            "S46"
+          ]
+        }
+      ],
+      "public_apis": [
+        "shell.clientSplitPaneVertical",
+        "shell.clientSplitPaneRight",
+        "shell.clientSplitPaneDown",
+        "shell.clientSplitPaneHorizontal",
+        "shell.clientAddEqualPane",
+        "shell.clientClosePane",
+        "shell.clientFocusPaneNext",
+        "shell.clientFocusPanePrev",
+        "shell.clientResizePaneLeft",
+        "shell.clientResizePaneRight",
+        "shell.clientResizePaneUp",
+        "shell.clientResizePaneDown",
+        "shell.clientMovePaneNext",
+        "shell.clientMovePanePrev",
+        "shell.setPaneFocusPolicy"
+      ],
+      "protocol_messages": {
+        "client": [],
+        "server": [
+          "ShellPreferences",
+          "ShellClientCommandRequest"
+        ],
+        "agent": []
+      },
+      "target_owner": "frontend/src/shell/{panes,splits}/*",
+      "target_tests": "frontend split-tree tests + test-plan/13",
+      "primitives": [
+        "PaneSlotLayout",
+        "PaneSplitTree",
+        "WorkingAreaLayout"
+      ],
+      "verified_automated": "frontend split-tree tests + test-plan/13",
+      "verified_manual": "test-plan/13-window-splits.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "tabs.workspaces.persistence",
+      "title": "Independent tab clients, per-tab isolation, keyboard tabs, persistence/reconnect",
+      "area": "shell",
+      "status": "verified",
+      "migration_phase": 6,
+      "current_owner": [
+        "src/server/connection.rs",
+        "src/driver/mod.rs",
+        "src/driver/restore.rs",
+        "src/masonry_shell/window_tabs.rs"
+      ],
+      "current_tests": [
+        "tests/window_management_protocol.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/14-tabs.md",
+          "steps": [
+            "T1",
+            "T2",
+            "T3",
+            "T4",
+            "T5",
+            "T6",
+            "T7",
+            "T8",
+            "T9",
+            "T10",
+            "T11",
+            "T12",
+            "T13",
+            "T14",
+            "T15",
+            "T16",
+            "T17",
+            "T18",
+            "T19",
+            "T20",
+            "T21",
+            "T22",
+            "T23",
+            "T24",
+            "T25",
+            "T26",
+            "T27",
+            "T28",
+            "T29",
+            "T30",
+            "T31",
+            "T32",
+            "T33",
+            "T34",
+            "T35",
+            "T36",
+            "T37",
+            "T38",
+            "T39",
+            "T40",
+            "T41",
+            "T42",
+            "T43",
+            "T44",
+            "T45",
+            "T46",
+            "T47",
+            "T48",
+            "T49",
+            "T50",
+            "T51",
+            "T52",
+            "T53",
+            "T54",
+            "T55",
+            "T56",
+            "T57",
+            "T58",
+            "T59",
+            "T60",
+            "T61",
+            "T62",
+            "T63",
+            "T64",
+            "T65",
+            "T66",
+            "T67",
+            "T68",
+            "T69",
+            "T70",
+            "T71",
+            "T72",
+            "T73",
+            "T74",
+            "T75",
+            "T76"
+          ]
+        }
+      ],
+      "public_apis": [
+        "shell.clientTabNext",
+        "shell.clientTabPrev",
+        "shell.clientTabNew",
+        "shell.clientTabClose",
+        "shell.clientTabMoveLeft",
+        "shell.clientTabMoveRight",
+        "shell.clientTabActivate",
+        "shell.clientTabMoveTo"
+      ],
+      "protocol_messages": {
+        "client": [
+          "TabCommand"
+        ],
+        "server": [
+          "TabRegistry"
+        ],
+        "agent": []
+      },
+      "target_owner": "frontend/src/shell/tabs/* + persistence/layout.ts",
+      "target_tests": "frontend tab isolation tests + test-plan/14",
+      "primitives": [
+        "TabBarChrome",
+        "TabRegistryBinding"
+      ],
+      "verified_automated": "frontend tab isolation tests + test-plan/14",
+      "verified_manual": "test-plan/14-tabs.md execution records and phase UI review evidence"
+    },
+    {
+      "capability_id": "agent.chat.prism",
+      "title": "Prism clay-agent daemon sessions, streaming, transcript, AG-UI transport",
+      "area": "agent",
+      "status": "verified",
+      "migration_phase": 10,
+      "current_owner": [
+        "clay-agent/",
+        "src/server/agent_agui.rs (target)",
+        "src/protocol/agent.rs"
+      ],
+      "current_tests": [
+        "tests/agent_protocol.rs"
+      ],
+      "manual_steps": [],
+      "public_apis": [],
+      "protocol_messages": {
+        "client": [
+          "Agent"
+        ],
+        "server": [
+          "Agent"
+        ],
+        "agent": [
+          "Snapshot",
+          "Event",
+          "Inventory",
+          "Picker",
+          "CredentialAck",
+          "Diagnostic"
+        ]
+      },
+      "target_owner": "src-tauri/src/bridge/agent.rs + frontend/src/{agent,chat}/*",
+      "target_tests": "AG-UI event mapping tests",
+      "primitives": [
+        "CommandDeclaration",
+        "CommandExecution"
+      ],
+      "verified_automated": "AG-UI event mapping tests",
+      "verified_manual": "Phase 4-10 retained visual/accessibility review evidence under code-reviews/screenshots/"
+    },
+    {
+      "capability_id": "accessibility.semantics",
+      "title": "AccessKit/AT-SPI tree roles/names/announcements, editable text, focus order",
+      "area": "accessibility",
+      "status": "verified",
+      "migration_phase": 4,
+      "current_owner": [
+        "src/masonry_shell/accessibility.rs",
+        "src/editor/accessibility.rs"
+      ],
+      "current_tests": [
+        "tests/live_atspi_smoke.rs"
+      ],
+      "manual_steps": [],
+      "public_apis": [],
+      "protocol_messages": {
+        "client": [],
+        "server": [],
+        "agent": []
+      },
+      "target_owner": "React Aria semantics + axe companion tests",
+      "target_tests": "axe + keyboard focus tests; visual review task",
+      "primitives": [],
+      "verified_automated": "axe + keyboard focus tests; visual review task",
+      "verified_manual": "Phase 4-10 retained visual/accessibility review evidence under code-reviews/screenshots/"
+    },
+    {
+      "capability_id": "security.trust-domains",
+      "title": "Two JS trust domains, provenance, capability grants, IPC validation bounds",
+      "area": "security",
+      "status": "verified",
+      "migration_phase": 8,
+      "current_owner": [
+        "src/server/js_runtime.rs",
+        "src/packages/record.rs"
+      ],
+      "current_tests": [
+        "tests/runtime_sandbox_harness.rs",
+        "tests/rust_visibility_api_mapping.rs"
+      ],
+      "manual_steps": [],
+      "public_apis": [],
+      "protocol_messages": {
+        "client": [],
+        "server": [],
+        "agent": []
+      },
+      "target_owner": "unchanged server authority + Tauri capability tests",
+      "target_tests": "package graph/loading/cross-domain/conformance negative suites + Tauri capability denial",
+      "primitives": [
+        "CrossDomainRequestEnvelope",
+        "ExtensionPointDeclaration",
+        "PackageAdoptionRecord",
+        "PackageRelationRequest",
+        "PackageReplacementRecord",
+        "PackageTrustDomainClassification"
+      ],
+      "verified_automated": "package graph/loading/cross-domain/conformance negative suites + Tauri capability denial",
+      "verified_manual": "Phase 4-10 retained visual/accessibility review evidence under code-reviews/screenshots/"
+    }
+  ]
+}

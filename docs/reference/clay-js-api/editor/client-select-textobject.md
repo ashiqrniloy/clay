@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSelectTextobject
 js_facade: runtime/js/editor.js::clientSelectTextobject
-backing_rust: src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/masonry_editor.rs::EditorWidget::apply_selection_query_result
+backing_rust: src/client_commands.rs::EditorClientCommand; src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges
 deno_op: op_clay_editor_select_textobject
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_select_textobject
 name: clientSelectTextobject
@@ -109,7 +109,7 @@ Use `editor.clientSelectTextobject` when the user asks for structural/text-objec
 - JS facade: `runtime/js/editor.js::clientSelectTextobject`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_select_textobject`
 - Server query runner: `src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges`
-- Client application: `src/masonry_editor.rs::EditorWidget::apply_selection_query_result`
+- Client application: `src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges`
 - Query files: `packages/rust/queries/textobjects.scm`, `packages/typescript/queries/textobjects.scm`, `packages/javascript/queries/textobjects.scm`
 
 ## Lookup metadata

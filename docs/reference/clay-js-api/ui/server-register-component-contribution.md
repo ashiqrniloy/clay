@@ -48,8 +48,8 @@ custom_properties:
     type: string[]
     default: []
     description: Registered package-prefixed command IDs referenced by component action intents.
-security: Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.
-agent_guidance: Use `ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, Masonry names, CSS strings, or executable client hooks.
+security: Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.
+agent_guidance: Use `ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, client-machinery names, CSS strings, or executable client hooks.
 lookup_tags: [ui, package-ui, component-catalog, style-tokens, clay-js-api, phase18.3, phase20.5, runtime-backed]
 app_visible: true
 help_visible: true
@@ -67,7 +67,7 @@ Register a bounded inert Clay component tree for package UI through the runtime-
 
 `serverRegisterComponentContribution` validates and stores a package-owned component root that can be reused by package panels and overlays. Clay validates component IDs, supported component kinds, child traversal limits, typed style variables, theme-token compatibility, action intents, and prohibited authority fields before the component can affect native UI state.
 
-The API documents Clay's package-facing component catalog. It does not expose Masonry widgets, Vello/Parley callbacks, raw CSS, raw op names, native handles, or executable client-side JavaScript.
+The API documents Clay's package-facing component catalog. It does not expose client widgets, renderer callbacks, raw CSS, raw op names, native handles, or executable client-side JavaScript.
 
 ## When to use
 
@@ -147,13 +147,13 @@ Fails when the manifest is invalid, IDs are not package-prefixed, the kind is un
 
 No additional permission is required for inert component metadata. Component action targets must refer to registered commands whose own permissions and routing policies are validated separately.
 
-Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.
+Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 
 ## Agent guidance
 
-Use `ui.serverRegisterComponentContribution` when the user asks for a public Clay JS API for package component trees or style-token-validated component catalog entries. Do not bypass with raw Rust constructors, raw `Deno.core.ops`, protocol DTOs, Masonry widgets, raw CSS, renderer callbacks, hidden config keys, or client-side JavaScript execution.
+Use `ui.serverRegisterComponentContribution` when the user asks for a public Clay JS API for package component trees or style-token-validated component catalog entries. Do not bypass with raw Rust constructors, raw `Deno.core.ops`, protocol DTOs, client widgets, raw CSS, renderer callbacks, hidden config keys, or client-side JavaScript execution.
 
 ## Backing implementation
 

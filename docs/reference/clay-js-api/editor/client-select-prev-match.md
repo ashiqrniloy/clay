@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSelectPrevMatch
 js_facade: runtime/js/editor.js::clientSelectPrevMatch
-backing_rust: src/editor/surface/mod.rs::EditorSurface::select_next_match
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientSelectPrevMatch
@@ -33,7 +33,7 @@ Select the previous occurrence of the current selection or word as a new primary
 
 ## Description
 
-`clientSelectPrevMatch` returns the stable bindable command ID `editor.clientSelectPrevMatch` for **Select Previous Match** (Plan 071 task 9). Symmetric backwards variant of select-next-match: each press adds the previous occurrence as a new caret, wrapping once around the document. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientSelectPrevMatch` returns the stable bindable command ID `editor.clientSelectPrevMatch` for **Select Previous Match** (Plan 071 task 9). Symmetric backwards variant of select-next-match: each press adds the previous occurrence as a new caret, wrapping once around the document. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local by the React/CodeMirror controller; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -90,8 +90,8 @@ Use `editor.clientSelectPrevMatch` when the user asks for Select Previous Match 
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientSelectPrevMatch`
-- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::select_next_match`
-- Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Key-driven dispatch: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)`
 
 ## Lookup metadata
 

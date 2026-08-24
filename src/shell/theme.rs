@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use masonry::peniko::Color;
+use crate::color::Color;
 
 use crate::editor::typography::UiTextVariant;
 use crate::shell::layout::FixedSlotId;
@@ -209,6 +209,10 @@ impl MotionDuration {
     /// Upper bound keeps motion perceptible and bounded for reduced-motion
     /// and budget guards; adjust only with a measured, documented rationale.
     pub(crate) const MAX_MILLIS: f64 = 1000.0;
+
+    pub(crate) fn as_millis(self) -> f64 {
+        self.0
+    }
 
     pub(crate) fn from_millis(value: f64) -> Option<Self> {
         if value.is_finite() && (0.0..=Self::MAX_MILLIS).contains(&value) {
@@ -2435,5 +2439,321 @@ mod tests {
         .expect("valid widen")
         .panel_defaults();
         assert_eq!(widened, again);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public resolved-theme snapshot for the React client (Plan 097 Phase 4)
+//
+// The Tauri bridge resolves the active [`ActiveTheme`] once per install into
+// a flat token map and projects it into CSS custom properties. Resolution,
+// validation, and level naming stay Rust authority; the frontend adapter only
+// performs the mechanical name → `--clay-*` projection.
+
+/// Every core token name, mirroring `core_theme_value` and the Core Tokens
+/// tables in `.agents/skills/clay-ui/references/tokens.md` (drift is pinned
+/// by conformance tests).
+pub const CORE_TOKEN_NAMES: &[&str] = &[
+    "accent.muted",
+    "accent.primary",
+    "border.focus",
+    "border.hairline",
+    "border.kbd",
+    "border.strong",
+    "border.subtle",
+    "density.compact",
+    "density.default",
+    "density.spacious",
+    "diagnostic.error",
+    "diagnostic.info",
+    "diagnostic.success",
+    "diagnostic.warning",
+    "dimension.border.hairline",
+    "dimension.border.thick",
+    "dimension.border.thin",
+    "dimension.icon.size",
+    "dimension.kbd.height",
+    "dimension.overlay.centered.width",
+    "dimension.panel.side.default",
+    "dimension.panel.side.max",
+    "dimension.panel.side.min",
+    "dimension.panel.vertical.default",
+    "dimension.panel.vertical.max",
+    "dimension.panel.vertical.min",
+    "dimension.scrollbar.width",
+    "dimension.sidebar.default",
+    "elevation.none",
+    "elevation.overlay",
+    "elevation.raised",
+    "focus.ring",
+    "motion.fast",
+    "motion.instant",
+    "motion.normal",
+    "motion.slow",
+    "opacity.disabled",
+    "opacity.full",
+    "opacity.scrim",
+    "radius.lg",
+    "radius.none",
+    "radius.panel",
+    "radius.sm",
+    "radius.xs",
+    "spacing.badge",
+    "spacing.inline",
+    "spacing.lg",
+    "spacing.md",
+    "spacing.none",
+    "spacing.panel",
+    "spacing.row",
+    "spacing.sm",
+    "spacing.tooltip",
+    "spacing.xl",
+    "spacing.xs",
+    "spacing.xxl",
+    "spacing.xxs",
+    "surface.active",
+    "surface.badge",
+    "surface.control",
+    "surface.disabled",
+    "surface.hover",
+    "surface.kbd",
+    "surface.list",
+    "surface.main",
+    "surface.overlay",
+    "surface.panel",
+    "surface.scrim",
+    "surface.scrollbar",
+    "surface.scrollbar.track",
+    "surface.selected",
+    "surface.tooltip",
+    "text.badge",
+    "text.disabled",
+    "text.icon",
+    "text.kbd",
+    "text.muted",
+    "text.primary",
+    "text.tooltip",
+    "typography.body",
+    "typography.caption",
+    "typography.detail",
+    "typography.display",
+    "typography.section",
+    "typography.status",
+    "typography.title",
+    "z.base",
+    "z.modal",
+    "z.overlay",
+    "z.panel",
+    "z.tooltip",
+];
+
+/// Wire form of one resolved typed token value.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum ThemeTokenValueDto {
+    /// CSS-ready `#rrggbb` (opaque) or `#rrggbbaa`.
+    Color(String),
+    /// Bounded non-negative scalar (spacing/radius/dimension/motion ms).
+    Scalar(f64),
+    /// Opacity `[0, 1]`.
+    Opacity(f32),
+    /// Validated level name (elevation/z-level/density).
+    Level(String),
+    /// Semantic text variant name (`body`, `title`, …).
+    Variant(String),
+}
+
+fn color_to_css(color: Color) -> String {
+    let rgba = color.to_rgba8();
+    if rgba.a == 255 {
+        format!("#{:02x}{:02x}{:02x}", rgba.r, rgba.g, rgba.b)
+    } else {
+        format!("#{:02x}{:02x}{:02x}{:02x}", rgba.r, rgba.g, rgba.b, rgba.a)
+    }
+}
+
+impl ResolvedThemeValue {
+    fn into_dto(self) -> ThemeTokenValueDto {
+        match self {
+            Self::Color(color) => ThemeTokenValueDto::Color(color_to_css(color)),
+            Self::F64(value) | Self::Dimension(value) => ThemeTokenValueDto::Scalar(value),
+            Self::F32(value) => ThemeTokenValueDto::Opacity(value),
+            Self::MotionDuration(duration) => ThemeTokenValueDto::Scalar(duration.as_millis()),
+            Self::Typography(variant) => ThemeTokenValueDto::Variant(
+                match variant {
+                    UiTextVariant::Body => "body",
+                    UiTextVariant::Status => "status",
+                    UiTextVariant::Title => "title",
+                    UiTextVariant::Detail => "detail",
+                    UiTextVariant::Display => "display",
+                    UiTextVariant::Section => "section",
+                    UiTextVariant::Caption => "caption",
+                }
+                .to_string(),
+            ),
+            Self::Elevation(level) => ThemeTokenValueDto::Level(
+                match level {
+                    ElevationLevel::None => "none",
+                    ElevationLevel::Raised => "raised",
+                    ElevationLevel::Overlay => "overlay",
+                }
+                .to_string(),
+            ),
+            Self::ZLevel(level) => ThemeTokenValueDto::Level(level.as_str().to_string()),
+            Self::Density(level) => ThemeTokenValueDto::Level(
+                match level {
+                    DensityLevel::Compact => "compact",
+                    DensityLevel::Default => "default",
+                    DensityLevel::Spacious => "spacious",
+                }
+                .to_string(),
+            ),
+        }
+    }
+}
+
+/// Resolve the complete core-token surface for an [`ActiveTheme`] snapshot:
+/// design-token overrides first, then the legacy editor base palette
+/// projection, then core fallbacks — exactly the layering the native client
+/// paints with. Contrast validation runs first so a below-AA theme never
+/// produces a snapshot.
+pub fn resolve_theme_token_snapshot(
+    snapshot: &crate::protocol::ActiveTheme,
+) -> Result<std::collections::BTreeMap<String, ThemeTokenValueDto>, ContrastFailure> {
+    validate_active_theme_contrast(snapshot)?;
+    let base = crate::editor::theme::StyleRegistry::from_active_theme(snapshot).base;
+    let resolved = ResolvedUiTheme::from_active_theme(&snapshot.design_tokens)
+        .map_err(|_| ContrastFailure {
+            foreground: "<malformed override>",
+            background: "<malformed override>",
+            ratio: 0.0,
+            threshold: TEXT_CONTRAST_MIN,
+        })?
+        .with_base_ui(&base);
+    let mut map = std::collections::BTreeMap::new();
+    for name in CORE_TOKEN_NAMES {
+        let Some(value) = resolved.resolved(name) else {
+            continue;
+        };
+        map.insert((*name).to_string(), value.into_dto());
+    }
+    Ok(map)
+}
+
+/// Spacing rhythm multiplier for the active density level: `0.875` compact /
+/// `1.0` default / `1.125` spacious. Read from a resolved snapshot map.
+pub fn density_spacing_scale(
+    tokens: &std::collections::BTreeMap<String, ThemeTokenValueDto>,
+) -> f64 {
+    match tokens.get("density.default") {
+        Some(ThemeTokenValueDto::Level(level)) => match level.as_str() {
+            "compact" => 0.875,
+            "spacious" => 1.125,
+            _ => 1.0,
+        },
+        _ => 1.0,
+    }
+}
+
+#[cfg(test)]
+mod theme_snapshot_tests {
+    use super::*;
+    use crate::protocol::{ActiveTheme, UiDesignTokenOverride, WireDesignTokenValue};
+
+    fn empty_theme() -> ActiveTheme {
+        ActiveTheme {
+            specifier: String::new(),
+            overrides: Vec::new(),
+            design_tokens: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn core_token_names_are_complete_and_resolvable() {
+        assert_eq!(CORE_TOKEN_NAMES.len(), 91);
+        for name in CORE_TOKEN_NAMES {
+            assert!(
+                core_theme_value(name).is_some(),
+                "CORE_TOKEN_NAMES entry {name} has no core value"
+            );
+        }
+        // Sorted for deterministic snapshots.
+        let mut sorted = CORE_TOKEN_NAMES.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(sorted.as_slice(), CORE_TOKEN_NAMES);
+    }
+
+    #[test]
+    fn snapshot_resolves_every_token_from_core_fallbacks() {
+        let map =
+            resolve_theme_token_snapshot(&empty_theme()).expect("core defaults pass contrast");
+        assert_eq!(map.len(), CORE_TOKEN_NAMES.len());
+        // The legacy editor-base projection layers above core fallbacks, so an
+        // empty theme resolves surfaces to the editor default palette.
+        assert_eq!(
+            map.get("surface.main"),
+            Some(&ThemeTokenValueDto::Color("#181818".to_string()))
+        );
+        // Tokens outside the base projection stay core.
+        assert_eq!(map.get("radius.xs"), Some(&ThemeTokenValueDto::Scalar(2.0)));
+        assert_eq!(
+            map.get("density.default"),
+            Some(&ThemeTokenValueDto::Level("default".to_string()))
+        );
+        assert!(matches!(
+            map.get("opacity.disabled"),
+            Some(ThemeTokenValueDto::Opacity(value)) if (*value - 0.55).abs() < 1e-6
+        ));
+        assert_eq!(
+            map.get("typography.title"),
+            Some(&ThemeTokenValueDto::Variant("title".to_string()))
+        );
+        assert_eq!(
+            map.get("motion.fast"),
+            Some(&ThemeTokenValueDto::Scalar(100.0))
+        );
+        assert_eq!(map.get("radius.xs"), Some(&ThemeTokenValueDto::Scalar(2.0)));
+    }
+
+    #[test]
+    fn override_wins_over_core_fallback() {
+        let theme = ActiveTheme {
+            design_tokens: vec![UiDesignTokenOverride {
+                token: "surface.hover".to_string(),
+                value: WireDesignTokenValue::Color([0xff, 0x00, 0x00, 0xff]),
+                provenance: "@test/theme".to_string(),
+            }],
+            ..empty_theme()
+        };
+        let map = resolve_theme_token_snapshot(&theme).expect("valid");
+        assert_eq!(
+            map.get("surface.hover"),
+            Some(&ThemeTokenValueDto::Color("#ff0000".to_string()))
+        );
+        // Untouched neighbors keep their resolved (base-projected/core) values.
+        assert_eq!(map.get("radius.xs"), Some(&ThemeTokenValueDto::Scalar(2.0)));
+    }
+
+    #[test]
+    fn density_scale_reads_resolved_level() {
+        assert_eq!(
+            density_spacing_scale(&std::collections::BTreeMap::new()),
+            1.0
+        );
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(
+            "density.default".to_string(),
+            ThemeTokenValueDto::Level("compact".to_string()),
+        );
+        assert!((density_spacing_scale(&map) - 0.875).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn dto_round_trips_through_json() {
+        let map = resolve_theme_token_snapshot(&empty_theme()).expect("valid");
+        let json = serde_json::to_string(&map).expect("serialize");
+        let back: std::collections::BTreeMap<String, ThemeTokenValueDto> =
+            serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, map);
     }
 }

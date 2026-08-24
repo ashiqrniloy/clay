@@ -1,0 +1,65 @@
+/* Window tab strip: shrink-to-fit cards, hairline dividers, active/hover
+ * states from tokens. Scroll behavior arrives with live multi-tab work. */
+
+.tabList {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  flex: 1;
+  overflow-x: auto;
+  background: var(--clay-surface-main);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+  background: var(--clay-surface-panel);
+  color: var(--clay-text-muted);
+  border: none;
+  border-right: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+  border-radius: 0;
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  min-width: fit-content;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--clay-text-detail-size);
+}
+
+.tab[data-hovered] {
+  background: var(--clay-surface-hover);
+  color: var(--clay-text-primary);
+}
+
+.tab[data-selected] {
+  background: var(--clay-surface-selected);
+  color: var(--clay-text-primary);
+}
+
+.tab[data-focused],
+.tab:focus-visible {
+  outline: 2px solid var(--clay-focus-ring);
+  outline-offset: -2px;
+}
+
+.close {
+  background: transparent;
+  color: inherit;
+  border: none;
+  padding: 0 var(--clay-spacing-xxs, 4px);
+  cursor: pointer;
+  font-size: var(--clay-text-caption-size);
+}
+
+.empty {
+  padding: 0 var(--clay-spacing-sm, 12px);
+  display: flex;
+  align-items: center;
+}
+
+.dirty {
+  width: 0.45rem;
+  height: 0.45rem;
+  background: var(--clay-accent-primary);
+}

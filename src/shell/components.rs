@@ -8,8 +8,16 @@ use serde_json::{Map, Value};
 
 use crate::protocol::FontRole;
 
-use super::primitives::InteractionState;
 use super::theme::{ThemeTokenResolver, ThemeTokenType};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InteractionState {
+    Rest,
+    Hover,
+    Active,
+    Focus,
+    Disabled,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ComponentKind {
@@ -544,7 +552,7 @@ mod tests {
     /// edit cannot silently narrow or widen a kind's applicable states.
     #[test]
     fn applicable_states_table_matches_components_md() {
-        use crate::shell::primitives::InteractionState;
+        use super::InteractionState;
         use ComponentKind::*;
         use InteractionState::*;
 

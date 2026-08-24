@@ -149,6 +149,24 @@ ln -s /tmp/clay-manual/a.txt /tmp/clay-manual/link.txt
 | F41 | PASS welcome / BLOCKED browser | Current tree proves non-color-only welcome/status names and no path leak; browser tree could not be targeted safely on this host |
 | F35/F36 | NOT RUN manually | Welcome-return structural coverage passes (`new welcome_entry_reclaims_workspace_sidebar_space`, `S35`); direct Open Folder/last-document interaction remains blocked by targeted input |
 
+## Plan 097 Phase 9 Tauri/React desktop workflow steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| F42 | Use empty-tab Open File in the Tauri client, select a file, then cancel a second picker | Existing native backend opens off the render thread; selection travels directly through the single-use selected-path capability; cancel is a no-op and no absolute path enters DOM/package data |
+| F43 | Use Open Folder and the tab `+` action | Open Folder rebinds only the active tab workspace through the existing directory grant; `+` opens a folder picker and creates one independent tab bootstrap without exposing the selected path to React |
+| F44 | Open Path Browser with `Ctrl+X Ctrl+F`; filter, descend, ascend, direct-jump, and cancel | One React modal/list projection updates only from server snapshots; semantic Backspace ascends; no filesystem work or local fuzzy matching runs in React |
+| F45 | `Enter` a file and `Alt+Enter` a directory in Path Browser | Server resolves only installed canonical entries; file gets one `SingleFile` grant, directory gets one tab-bound `Directory` root; menu closes before document/tab updates |
+| F46 | Toggle workspace browser, open files, and run Git refresh/status commands | Existing validated SDUI/file-browser tree and Git command/status data render through React; package/server filesystem authority remains unchanged |
+| F47 | Switch tabs or reload while Path Browser is open | Explicit close removes only the owning tab's menu; stale intents fail bounded; no hidden session or cross-tab path grant remains |
+
+## Plan 097 Phase 9 execution record (2026-08-23)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| F42–F43 | PASS Rust/bridge path; native picker interaction BLOCKED | Tauri desktop tests pass and keep `core:default` only; commands reuse Clay's existing native backend and `ClientEditQueue` capability helpers. Computer-use reports no keyboard backend, so portal selection was not falsely claimed |
+| F44–F47 | PASS automated + deterministic React fixture | Command/path lifecycle suites and frontend opaque-intent tests pass; command active/empty wide+narrow screenshots and accessibility snapshots are under `code-reviews/screenshots/2026-08-23-tauri-react-phase9/` |
+
 ## Negative checks
 
 - Opening files grants access to the selected file + workspace roots only —
@@ -189,3 +207,14 @@ ln -s /tmp/clay-manual/a.txt /tmp/clay-manual/link.txt
   defaults without changing the command id; `Alt+Enter` is the fixed
   secondary activation (not configurable in 24.3).
 - Windows dialog specifics belong to module 12.
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Path Browser rest state | PASS static visual/a11y | `code-reviews/screenshots/2026-08-24-tauri-react-parity/path-browser/fixture-{wide,narrow}.*` shows one bounded modal, Search field, two results, count, and action instructions |
+| Editor path display | PASS | `editor/fixture-*` no longer exposes the `/tmp/ws` fixture root; `ClayEditor` reduces absolute labels to a basename and the editor test locks this behavior |
+| File/folder dialog and path activation | UNRESOLVED interaction | No safe keyboard/window-targeting backend on this host; native dialog path remains covered by bridge/server/security suites |
+
+Retained evidence contains fixture paths only; unrelated full-desktop portal
+screenshots were removed.

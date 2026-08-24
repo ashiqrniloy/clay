@@ -834,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn first_party_package_keymaps_match_parsed_sequences_and_key_events() {
+    fn first_party_package_keymaps_match_shared_parser() {
         let package: Value =
             serde_json::from_str(include_str!("../../../packages/markdown/package.json"))
                 .expect("Markdown package manifest must be valid JSON");
@@ -843,59 +843,13 @@ mod tests {
             .expect("Markdown package must declare keyRouting");
 
         for keymap in keymaps {
-            let command_id = keymap["commandId"]
-                .as_str()
-                .expect("keyRouting commandId must be a string");
             let key = keymap["key"]
                 .as_str()
                 .expect("keyRouting key must be a string");
             let parsed = parse_keymap(keymap).expect("package keymap must parse");
             let expected = super::super::keybindings::parse_key_sequence(key)
                 .expect("shared key sequence parser must accept package key");
-            assert_eq!(
-                parsed.sequence, expected,
-                "sequence parity for {command_id}"
-            );
-
-            let mut manifest = crate::protocol::BehaviorManifest::minimal_text_editing(1);
-            manifest
-                .commands
-                .push(crate::protocol::CommandDeclaration::server_intent(
-                    command_id, command_id,
-                ));
-            manifest.keymaps.push(parsed);
-            let state = crate::client::behavior::ClientBehaviorState::new(manifest)
-                .expect("package keymap must produce a valid manifest");
-            let mut pending = Vec::new();
-            for (index, stroke) in expected.iter().enumerate() {
-                let event = match &stroke.key {
-                    crate::protocol::KeyCode::Character(text) => crate::protocol::KeyStroke {
-                        key: crate::protocol::KeyCode::Character(text.to_uppercase()),
-                        modifiers: stroke.modifiers,
-                    },
-                    key => crate::protocol::KeyStroke {
-                        key: key.clone(),
-                        modifiers: stroke.modifiers,
-                    },
-                };
-                let outcome = state.route_key_sequence(&pending, &event);
-                if index + 1 == expected.len() {
-                    assert!(
-                        matches!(
-                            outcome,
-                            crate::client::behavior::ChordRouteOutcome::Matched(_)
-                        ),
-                        "parsed {key:?} must match its key event for {command_id}"
-                    );
-                } else {
-                    assert_eq!(
-                        outcome,
-                        crate::client::behavior::ChordRouteOutcome::Pending,
-                        "parsed {key:?} must hold a prefix for {command_id}"
-                    );
-                    pending.push(stroke.clone());
-                }
-            }
+            assert_eq!(parsed.sequence, expected, "sequence parity for {key}");
         }
     }
 }

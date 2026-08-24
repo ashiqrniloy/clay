@@ -61,27 +61,17 @@ fn performance_docs_list_all_supported_benchmark_commands() {
     for command in [
         "cargo bench",
         "cargo bench --no-run",
-        "cargo bench --bench editor_baselines editor_visible_extraction -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
         "cargo bench --bench protocol_server_baselines -- --save-baseline phase14-baseline",
         "cargo bench --bench protocol_server_baselines -- --baseline phase14-baseline",
         "cargo bench --bench protocol_server_baselines -- --baseline-lenient phase14-baseline",
-        "cargo bench --bench markdown_baselines markdown_activation_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
-        "cargo bench --bench markdown_baselines markdown_parse_and_decoration_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
         "node --check tools/bench/markdown-parser.mjs",
         "node tools/bench/markdown-parser.mjs --dry-run --sizes 1MiB --source-limit 8",
         "node --expose-gc tools/bench/markdown-parser.mjs --sizes 64KiB,256KiB,1MiB,5MiB,16MiB --parser markdown-it,adapter,windowed-adapter --iterations 1 --warmup 0 --json",
-        "cargo test --test protocol performance_protocol::",
+        "cargo test --test protocol performance_budgets::",
+        "cargo test --lib server::syntax::tests",
+        "cargo test --lib server::parse_coordinator::tests",
         "cargo test --test runtime lsp_bridge::",
         "cargo test --test security language_server_authority::",
-        "cargo bench --bench first_party_language_baselines -- --save-baseline pre-lsp",
-        "cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
-        "cargo bench --bench window_baselines responsive_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
-        "cargo bench --bench window_baselines completion_open_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
-        "cargo bench --bench window_baselines completion_filter_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
-        "cargo bench --bench window_baselines command_centre_open_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
-        "cargo bench --bench window_baselines completion_selection_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
-        "cargo bench --bench window_baselines accessibility_tree_update_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
-        "cargo bench --bench window_baselines completion_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
     ] {
         assert!(
             doc.contains(command),
@@ -534,11 +524,9 @@ fn plan087_focused_ui_regression_coverage_is_documented() {
         "completion_open_baselines",
         "completion_filter_baselines",
         "completion_layout_baselines",
-        "completion_projection_is_bounded_and_stays_out_of_paint",
-        "completion_result_rejects_foreign_document_and_behavior_provenance",
-        "accesskit_consumer",
+        "eight-row/480-pixel caps",
+        "reject stale snapshots carrying a foreign document or behavior version",
         "No pixel goldens",
-        "wall-clock results remain local/advisory",
     ] {
         assert!(
             doc.contains(expected),
@@ -567,7 +555,7 @@ fn phase22_6_window_budget_constants_are_pinned_and_documented() {
         format!("<= {} ms (P95, advisory)", PANE_PAINT_P95_BUDGET_MS),
         format!("<= {} ms (P95, advisory)", TAB_SWITCH_P95_BUDGET_MS),
         format!("<= {} bytes", MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES),
-        "cargo bench --bench window_baselines".to_string(),
+        "PANE_PAINT_P95_BUDGET_MS".to_string(),
     ] {
         assert!(
             doc.contains(&expected),
@@ -612,7 +600,6 @@ fn plan088_responsive_layout_conformance_and_baseline_are_documented() {
         "responsive_layout_work",
         "responsive_layout_work_preserves_sidebar_and_editor_bounds",
         "Screenshot goldens remain deferred",
-        "cargo bench --bench window_baselines responsive_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
     ] {
         assert!(
             doc.contains(expected),
@@ -809,4 +796,19 @@ fn rust_sources_under(dir: &str) -> Vec<std::path::PathBuf> {
         }
     }
     files
+}
+
+#[test]
+fn tauri_react_bundle_budgets_are_documented() {
+    let doc = performance_doc();
+    for expected in [
+        "<= 180 kB gzip (startup shell)",
+        "<= 400 kB gzip (total frontend)",
+        "npm --prefix frontend run check:budget",
+    ] {
+        assert!(
+            doc.contains(expected),
+            "performance guide must document Tauri/React budget: {expected}"
+        );
+    }
 }

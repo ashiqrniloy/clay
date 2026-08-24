@@ -35,7 +35,7 @@ Discover a bounded marker-based workspace root for an already-authorized path.
 
 `serverDiscoverWorkspaceRootForPath` is the Phase 18.12 runtime-backed Clay JS API for **Discover Workspace Root For Path**. It is exposed through the curated `clay:workspace` facade so package/configuration/runtime code does not call raw ops or Rust internals.
 
-This API is server-first background/action work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths.
+This API is server-first background/action work. It must not run in ordinary typing, client paint, client layout, pointer, scroll, keypress, or text-event hot paths.
 
 ## When to use
 

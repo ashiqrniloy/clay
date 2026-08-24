@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientSplitPaneRight
 js_facade: runtime/js/shell.js::clientSplitPaneRight
-backing_rust: src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree
+backing_rust: src/client_commands.rs::EditorClientCommand; src/shell/layout.rs::PaneSplitTree
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientSplitPaneRight
@@ -37,7 +37,7 @@ Return the stable bindable command ID for the right-split alias: resolves to the
 
 The alias resolves to the existing `SplitPaneVertical` handler — the same side-by-side layout (`SplitOrientation::Horizontal`) as `shell.clientSplitPaneVertical`: the focused pane keeps its left half and a new pane occupies the right half. The pane cap is `MAX_PANES_PER_TAB = 4`; the split is a no-op at cap.
 
-Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Pane topology mutation happens later only after an explicit user key/command route reaches `ClayShellWidget::apply_shell_client_command`. The command operates purely client-side: bounded `PaneSplitTree` rebuild + `reconcile_pane_hosts`, no server round-trip, no package JavaScript, no IPC.
+Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Pane topology mutation happens later only after an explicit user key/command route reaches the React workspace controller `frontend/src/shell/workspace-controller.ts` (React workspace controller). The command operates purely client-side: bounded `PaneSplitTree` rebuild + stable-ID reconciliation in the React PaneTree, no server round-trip, no package JavaScript, no IPC.
 
 ## When to use
 
@@ -104,7 +104,7 @@ Use `shell.clientSplitPaneRight` only as a documented command ID for `bindKey` t
 
 - JS facade: `runtime/js/shell.js::clientSplitPaneRight`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command` (alias routed in `ShellClientCommand::from_command_id`); `src/shell/layout.rs::PaneSplitTree`
+- Backing Rust/current owner: `src/client_commands.rs::ShellClientCommand (client-local; React PaneTree and workspace controller)` (alias routed in `ShellClientCommand::from_command_id`); `src/shell/layout.rs::PaneSplitTree`
 
 ## Lookup metadata
 

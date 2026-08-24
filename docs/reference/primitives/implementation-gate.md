@@ -60,7 +60,7 @@ The canonical package validation, permission validation, conflict handling, and 
 
 ## Performance and Hot-Path Policy
 
-Package validation and mode activation are load/open/reload/configuration-time operations. They must not be documented or wired as ordinary typing, paint, Masonry layout, or text-event handler work.
+Package validation and mode activation are load/open/reload/configuration-time operations. They must not be documented or wired as ordinary typing, render, layout, or input-handler work.
 
 - Manifest and permission validation run at package fixture/load time.
 - Document classification and major-mode activation run when a document is opened, reloaded, or explicitly reclassified.

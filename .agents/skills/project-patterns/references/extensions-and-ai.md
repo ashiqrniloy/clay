@@ -2,10 +2,11 @@
 
 ## JavaScript Extensions
 
-- JavaScript runs on the server through `deno_core`, not in the Rust client.
+- Package and mode logic runs on the server through `deno_core`, not in the Tauri Rust core or ordinary React hot paths.
 - Extensions register commands, modes, UI declarations, permissions, and behavior definitions.
-- The server compiles extension registrations into behavior manifests and SDUI updates.
-- Ordinary typing must not synchronously wait on JavaScript execution.
+- The server compiles extension registrations into behavior manifests and SDUI updates rendered by the Clay-owned React registry.
+- First-party trusted presentation modules may be compiled into the frontend; third-party custom UI requires an isolated surface and cannot receive direct Tauri IPC.
+- Ordinary typing must not synchronously wait on package JavaScript execution or React rerenders.
 
 ## Hot Reload
 

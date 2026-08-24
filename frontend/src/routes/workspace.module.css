@@ -1,0 +1,21 @@
+/* Workspace route: the live surface wired to bridge session state. */
+
+.workspace {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: var(--clay-spacing-lg, 24px);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-md, 16px);
+  align-items: center;
+  text-align: center;
+}
+
+.editor {
+  height: 100%;
+  min-height: 0;
+}

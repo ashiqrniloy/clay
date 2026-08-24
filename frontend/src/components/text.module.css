@@ -1,0 +1,53 @@
+/* Catalog `label` kind: semantic text variants, no fill, muted/disabled
+ * states from tokens. */
+
+.text {
+  margin: 0;
+  color: var(--clay-text-primary);
+  font-family: var(--clay-font-ui);
+}
+
+.muted {
+  color: var(--clay-text-muted);
+}
+
+.disabled {
+  color: var(--clay-text-disabled);
+  opacity: var(--clay-opacity-disabled);
+}
+
+.display {
+  font-size: var(--clay-text-display-size);
+  line-height: var(--clay-text-display-line-height);
+}
+.title {
+  font-size: var(--clay-text-title-size);
+  line-height: var(--clay-text-title-line-height);
+}
+.section {
+  font-size: var(--clay-text-section-size);
+  line-height: var(--clay-text-section-line-height);
+}
+.body {
+  font-size: var(--clay-text-body-size);
+  line-height: var(--clay-text-body-line-height);
+}
+.status {
+  font-size: var(--clay-text-status-size);
+  line-height: var(--clay-text-status-line-height);
+}
+.detail {
+  font-size: var(--clay-text-detail-size);
+  line-height: var(--clay-text-detail-line-height);
+}
+.caption {
+  font-size: var(--clay-text-caption-size);
+  line-height: var(--clay-text-caption-line-height);
+}
+
+.monospace {
+  font-family: var(--clay-font-monospace);
+}
+.proportional {
+  font-family: var(--clay-font-proportional);
+}

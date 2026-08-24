@@ -1,0 +1,37 @@
+.surface {
+  display: grid;
+  gap: var(--clay-spacing-sm, 12px);
+  width: min(
+    calc(
+      var(--clay-dimension-overlay-centered-width, 640px) - 2 *
+        var(--clay-spacing-md, 16px) -
+        var(--clay-dimension-border-hairline, 1px) -
+        var(--clay-dimension-border-hairline, 1px)
+    ),
+    calc(
+      90vw - 2 * var(--clay-spacing-md, 16px) -
+        var(--clay-dimension-border-hairline, 1px) -
+        var(--clay-dimension-border-hairline, 1px)
+    )
+  );
+}
+
+.surface [role="listbox"] {
+  max-height: min(50vh, 420px);
+  overflow: auto;
+}
+
+.empty {
+  min-height: calc(var(--clay-spacing-xxl, 48px) * 2);
+  display: grid;
+  place-items: center;
+  border-top: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-subtle);
+}
+
+.status {
+  color: var(--clay-text-muted);
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-status-size);
+  font-variant-numeric: tabular-nums;
+}

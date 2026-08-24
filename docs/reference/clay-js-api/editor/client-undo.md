@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientUndo
 js_facade: runtime/js/editor.js::clientUndo
-backing_rust: src/masonry_editor.rs::EditorWidget::undo; src/editor/surface/mod.rs::EditorSurface::undo_with_event; src/editor/history.rs::EditHistory
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientUndo
@@ -35,7 +35,7 @@ Return the stable bindable command ID for undoing the latest local edit on the a
 
 `clientUndo` is the public Clay JS API descriptor for **Undo**. It returns the stable command ID `editor.clientUndo` so configuration, help, key-binding discovery, and agents can name the undo route without hard-coding Rust shortcuts or inventing a server undo protocol.
 
-Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Undo happens later only after an explicit user key/command route reaches the native editor widget. The command pops the per-document client history stack, applies the inverse insert/delete/replace locally, restores caret/selection, and enqueues a normal optimistic `Edit` under the editable lease. Read-only observers are a no-op. Empty undo stacks are a no-op. Rejected inverse edits recover through the existing resync path.
+Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Undo happens later only after an explicit user key/command route reaches the React/CodeMirror clipboard handler `frontend/src/editor/extensions/controller.ts` (React/CodeMirror controller). The command pops the per-document client history stack, applies the inverse insert/delete/replace locally, restores caret/selection, and enqueues a normal optimistic `Edit` under the editable lease. Read-only observers are a no-op. Empty undo stacks are a no-op. Rejected inverse edits recover through the existing resync path.
 
 ## When to use
 
@@ -104,7 +104,7 @@ Use `editor.clientUndo` only as a documented command ID for `bindKey`. Avoid raw
 
 - JS facade: `runtime/js/editor.js::clientUndo`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/masonry_editor.rs::EditorWidget::undo`; `src/editor/surface/mod.rs::EditorSurface::undo_with_event`; `src/editor/history.rs::EditHistory`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand (client-local; React/CodeMirror undo history)`; `src/client_commands.rs::EditorClientCommand`; `src/editor/history.rs::EditHistory`
 
 ## Lookup metadata
 

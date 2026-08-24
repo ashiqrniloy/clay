@@ -1,5 +1,7 @@
 # Document Leases and Region Locks
 
+> Lease/region-lock server semantics are current. `EditorSurface` references are historical native-client records; today the read-only gate lives in the frontend document session ([Frontend Edit Synchronization](frontend-edit-synchronization.md)).
+
 ## Source
 
 - `src/protocol/mod.rs`

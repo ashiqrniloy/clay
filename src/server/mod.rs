@@ -1,5 +1,6 @@
 #[doc(hidden)]
 pub mod agent;
+pub mod agent_agui;
 pub(crate) mod agent_picker;
 mod behavior;
 pub mod command_execution;
@@ -461,7 +462,7 @@ impl RuntimeGenerationStore {
 }
 
 fn shell_command_catalogue() -> Vec<RegisteredCommand> {
-    crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE
+    crate::client_commands::SHELL_CLIENT_COMMAND_CATALOGUE
         .iter()
         .map(|(command_id, display_name)| RegisteredCommand {
             package_name: "clay".to_string(),
@@ -1248,8 +1249,36 @@ impl IpcServer {
                 design_tokens: Vec::new(),
             });
         let mut runtime_diagnostics = self.runtime_diagnostics.lock().await.snapshot();
-        let empty_tab = match evaluation.ui_contributions.empty_tab() {
-            Ok(winner) => winner,
+        let package_ui = {
+            let packages = service
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            evaluation
+                .ui_contributions
+                .wire_snapshot(generation_id, |provenance| {
+                    packages
+                        .enabled_records()
+                        .find(|record| {
+                            record.manifest.name == provenance.package_name
+                                && record.manifest.version == provenance.package_version
+                                && record.manifest.clay.api_prefix == provenance.api_prefix
+                        })
+                        .map_or(
+                            crate::protocol::PackageUiTrustDomain::ThirdParty,
+                            |record| match record.runtime_domain {
+                                crate::packages::bundled::RuntimeDomain::Trusted => {
+                                    crate::protocol::PackageUiTrustDomain::Trusted
+                                }
+                                crate::packages::bundled::RuntimeDomain::ThirdParty => {
+                                    crate::protocol::PackageUiTrustDomain::ThirdParty
+                                }
+                            },
+                        )
+                })
+        };
+        let package_ui = match package_ui {
+            Ok(snapshot) => snapshot,
             Err(ids) => {
                 runtime_diagnostics.push(RuntimeDiagnostic::error(
                     "ui.pane_content_conflict",
@@ -1258,7 +1287,12 @@ impl IpcServer {
                         ids.join(", ")
                     ),
                 ));
-                None
+                evaluation
+                    .ui_contributions
+                    .wire_snapshot(generation_id, |_| {
+                        crate::protocol::PackageUiTrustDomain::ThirdParty
+                    })
+                    .unwrap_or_default()
             }
         };
         let runtime_snapshot = build_runtime_state_snapshot(
@@ -1271,7 +1305,7 @@ impl IpcServer {
             evaluation.published_decoration_set.clone(),
             evaluation.published_diagnostic_set.clone(),
             runtime_diagnostics,
-            empty_tab,
+            package_ui,
         )?;
         // Fail closed before commit when the complete snapshot cannot fit one
         // bounded IPC frame. Partial/live mutation must not begin.
@@ -1778,12 +1812,8 @@ fn build_runtime_state_snapshot(
     published_decorations: Option<crate::protocol::DecorationSet>,
     published_diagnostics: Option<crate::protocol::DiagnosticSet>,
     diagnostics: Vec<RuntimeDiagnostic>,
-    empty_tab: Option<crate::protocol::EmptyTabContent>,
+    package_ui: crate::protocol::PackageUiSnapshot,
 ) -> Result<RuntimeStateSnapshot, RuntimeDiagnostic> {
-    let package_ui = crate::protocol::PackageUiSnapshot {
-        version: runtime_generation_id,
-        empty_tab,
-    };
     let documents = open_documents
         .iter()
         .map(|document| {
@@ -4363,7 +4393,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             sdui_tree: default_document_tree(1, 1),
             package_ui: crate::protocol::PackageUiSnapshot {
                 version: generation,
-                empty_tab: None,
+                ..Default::default()
             },
             documents: Vec::new(),
             diagnostics: Vec::new(),
@@ -5754,10 +5784,10 @@ mod tests {
         for command_id in crate::server::command_execution::builtin_server_command_ids() {
             assert!(ids.contains(command_id));
         }
-        for (command_id, _) in crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE {
+        for (command_id, _) in crate::client_commands::SHELL_CLIENT_COMMAND_CATALOGUE {
             assert!(ids.contains(command_id));
             assert!(
-                crate::masonry_shell::ShellClientCommand::from_command_id(command_id).is_some()
+                crate::client_commands::ShellClientCommand::from_command_id(command_id).is_some()
             );
         }
 

@@ -69,6 +69,19 @@ intercept menu input, or obtain browse authority.
 The snapshots remain inert display data. Path activation continues through the
 server-owned `PathBrowserSession` and existing grant conversion rules.
 
+## Plan 097 Phase 9 React projection
+
+`frontend/src/command-centre/CommandCentre.tsx` consumes the same bounded
+snapshot and intent families. React Aria supplies modal focus containment,
+Escape handling, focus restoration, labelled textbox/listbox/option semantics,
+and the polite result count. The query and selected row remain controlled by
+the server snapshot; React sends full query updates, semantic backspace,
+relative selection movement, opaque primary/secondary activation, and cancel.
+Command, Path Browser, and picker sessions share this component. The per-tab
+workspace controller drops the session on the existing close/reload/tab
+lifecycle events. No second catalogue, fuzzy matcher, path resolver, grant
+logic, or package extension point exists in the frontend.
+
 ## Tests and extension guidance
 
 Focused implementation coverage lives beside the code:

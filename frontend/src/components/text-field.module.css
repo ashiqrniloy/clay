@@ -1,0 +1,49 @@
+/* Catalog `textInput`: bordered field, placeholder in text.muted,
+ * validation-state border, focus ring, disabled dimming. */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-xxs, 4px);
+}
+
+.label {
+  color: var(--clay-text-muted);
+  font-size: var(--clay-text-detail-size);
+}
+
+.input {
+  background: var(--clay-surface-control);
+  color: var(--clay-text-primary);
+  border: var(--clay-dimension-border-thin, 2px) solid var(--clay-border-subtle);
+  border-radius: 0;
+  padding: var(--clay-spacing-xs, 8px);
+  font-family: inherit;
+  font-size: var(--clay-text-body-size);
+}
+
+.input::placeholder {
+  color: var(--clay-text-muted);
+}
+
+.input[data-focused],
+.input:focus-visible {
+  border-color: var(--clay-border-focus);
+  outline: none;
+}
+
+.error {
+  border-color: var(--clay-diagnostic-error);
+}
+.warning {
+  border-color: var(--clay-diagnostic-warning);
+}
+.success {
+  border-color: var(--clay-diagnostic-success);
+}
+
+.input[data-disabled] {
+  background: var(--clay-surface-disabled);
+  color: var(--clay-text-disabled);
+  opacity: var(--clay-opacity-disabled);
+}

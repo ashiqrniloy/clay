@@ -2,8 +2,6 @@
 mod decoration_intent_authority;
 #[path = "../language_server_authority.rs"]
 mod language_server_authority;
-#[path = "../live_atspi_smoke.rs"]
-mod live_atspi_smoke;
 #[path = "../package_conflicts.rs"]
 mod package_conflicts;
 #[path = "../package_graph.rs"]

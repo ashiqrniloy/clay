@@ -1,8 +1,10 @@
+#![allow(dead_code)] // Persisted layout schema retains operations exercised by compatibility tests.
+
 // Phase 18.2 installs generic shell layout foundations before every split
 // constructor/update path is exercised by non-test runtime code.
 use std::collections::{BTreeMap, BTreeSet};
 
-use masonry::kurbo::{Point, Rect};
+use kurbo::{Point, Rect};
 
 const DEFAULT_WORKING_AREA_ID: WorkingAreaId = WorkingAreaId(1);
 pub(crate) const DEFAULT_PANE_ID: PaneId = PaneId(1);

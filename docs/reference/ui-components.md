@@ -58,7 +58,7 @@ points:
   clipped-child accessibility semantics. A nested `scroll` component receives
   bounded flex space inside panels; `modal` Escape routes its declared inert
   `PackageModalDismiss` intent; `statusItem` and disabled controls expose their
-  AccessKit state.
+  AT-SPI state.
 - Responsive slot yielding, label clipping, path sanitization, focus
   containment, and active user typography propagation remain Clay-native
   layout/render responsibilities. Package overlays remain limited to
@@ -67,7 +67,7 @@ points:
 - Existing typed tokens and cached `ResolvedUiTheme`/typography metrics are
   reused. Packages cannot declare breakpoints, concrete fonts/sizes, raw
   CSS/colors, native widgets, renderer callbacks, client JavaScript, or direct
-  Masonry mutation. `table` remains reserved.
+  renderer mutation. `table` remains reserved.
 
 See [Creating Clay Packages — Plan 088 UI modernization authoring contract](packages/creating-packages.md#plan-088-ui-modernization-authoring-contract)
 and the [token catalog](../../.agents/skills/clay-ui/references/tokens.md#plan-088-token-consumption-no-additions).
@@ -95,7 +95,7 @@ and the [UI Chrome Primitives](primitives/ui-chrome-primitives.md) reference.
 ## Reference Documents
 
 - [UI Chrome Primitives](primitives/ui-chrome-primitives.md) — Phase 20.2 native chrome primitive layer (`src/shell/primitives.rs`): divider, focus ring, panel chrome, scroll chrome, badge, kbd hint, icon slot, tooltip shell, and the Phase 24.4 token-driven scrim; token mapping, interaction states, accessibility roles, and the conformance contract.
-- [Clay Shell and Package UI/Layout Strategy](primitives/shell-layout-strategy.md) — shell vocabulary, working area, pane/split tree, fixed/transient slots, package UI/state/style contract, and the Masonry implementation boundary.
+- [Clay Shell and Package UI/Layout Strategy](primitives/shell-layout-strategy.md) — shell vocabulary, working area, pane/split tree, fixed/transient slots, package UI/state/style contract, and the Tauri/React client implementation boundary.
 - [Creating Clay Packages](packages/creating-packages.md) — package authoring guide. The Components section and the UI and Layout Model section define the package-facing authoring contract; the Styling and Themes section and the Phase 20.1/20.4/20.7 authoring contracts define token/theme usage. Implemented-vs-planned markers in the guide match the component catalog exactly.
 
 ## Conformance Rules (Phase 20.7)

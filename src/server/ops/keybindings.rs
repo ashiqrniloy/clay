@@ -341,7 +341,7 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
     if crate::protocol::SelectionQuery::from_command_id(command_id).is_some() {
         return true;
     }
-    if crate::masonry_editor::EditorClientCommand::from_command_id(command_id).is_some() {
+    if crate::client_commands::EditorClientCommand::from_command_id(command_id).is_some() {
         return true;
     }
     // Phase 22.4: the numbered tab families parse the same way (1..=9 only).
@@ -518,7 +518,7 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
             | "shell.clientTabMoveRight"
     ) {
         Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
-    } else if crate::masonry_editor::EditorClientCommand::from_command_id(command_id).is_some() {
+    } else if crate::client_commands::EditorClientCommand::from_command_id(command_id).is_some() {
         Ok(crate::protocol::RoutingPolicy::ClientFirstPredictable)
     } else {
         Ok(crate::protocol::RoutingPolicy::ServerFirst)

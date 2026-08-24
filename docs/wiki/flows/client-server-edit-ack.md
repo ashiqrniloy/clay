@@ -1,5 +1,7 @@
 # Client/Server Edit Acknowledgement Flow
 
+> Historical native-client record for the GUI wiring portions. The current client path is [Frontend Edit Synchronization](frontend-edit-synchronization.md) and the bridge session is [Desktop Typed Bridge](../modules/desktop-typed-bridge.md).
+
 ## Source
 
 - `src/client/mod.rs`

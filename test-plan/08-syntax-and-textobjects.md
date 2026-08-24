@@ -150,7 +150,7 @@ Setup: load `@clay/rust`, `@clay/markdown`, and the authorized
 
 ## Phase 28.7 P2 visual and interaction recapture (2026-08-21)
 
-UI preflight used `npx ui-skills start`, category `accessibility`, selected
+UI preflight used the UI guidance current at execution time, category `accessibility`, selected
 `rams/rams`, and `computer-use-linux_get_app_state` before review. Static and
 unresolved fixture evidence is under
 `code-reviews/screenshots/2026-08-21-phase28.7-p2-recapture/`; retained fold/link
@@ -166,3 +166,11 @@ rest captures remain under `code-reviews/screenshots/2026-08-20-phase28-primitiv
 | S32 | PARTIAL; unresolved live discoverability | Fold/inlay semantics remain structural PASS. Link rest styling is visible, but custom editor exposes no separate AT-SPI Link node or purpose announcement; this remains an explicit product follow-up. |
 
 No existing step was deleted or weakened.
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Syntax, diagnostic, folding, and inlay rest state | PASS static | `code-reviews/screenshots/2026-08-24-tauri-react-parity/intelligence/fixture-*` shows the bounded CodeMirror projection and diagnostic/inlay/fold styling |
+| Link/inlay/fold interaction | UNRESOLVED live; PASS structural/security | Host keyboard/pointer targeting is unavailable; decoration, target-denial, folding, inlay, and no-network tests pass |
+| Accessibility semantics | PASS rest state / known link ceiling | AX snapshot contains editor region/document entry; decorative inlays/folds are not controls. Custom editor still has no separate AT-SPI Link node, as previously documented |

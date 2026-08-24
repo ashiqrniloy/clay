@@ -36,8 +36,8 @@ custom_properties:
     type: enum
     default: second
     description: One of `first` or `second`; controls which side the new pane occupies.
-hot_path_policy: Evaluated during package load/configuration work only; Masonry hot paths read already-validated inert state.
-security: does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden layout keys, direct Masonry widgets, native widget handles, raw CSS, or renderer callbacks. Packages cannot mutate native layout directly; intents are advisory and composed at Clay's discretion.
+hot_path_policy: Evaluated during package load/configuration work only; client hot paths read already-validated inert state.
+security: does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden layout keys, direct client widgets, native widget handles, raw CSS, or renderer callbacks. Packages cannot mutate native layout directly; intents are advisory and composed at Clay's discretion.
 agent_guidance: Use only documented typed intent records; never expose hidden keys, raw ops, callbacks, native handles, raw CSS, or client-side JavaScript.
 lookup_tags: [ui, package-ui, layout-intent, split, configuration, clay-js-api, phase20.3, runtime-backed]
 app_visible: true
@@ -110,11 +110,11 @@ Throws `ui.layout_intent_failed` for invalid package prefix on `id`, duplicate `
 
 ## Permissions and security
 
-Requires: `package-configuration`. Server-side validation is required before any layout intent is accepted. This API does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, or hidden layout-key authority. Packages cannot mutate native layout directly; intents are advisory and composed at Clay's discretion.
+Requires: `package-configuration`. Server-side validation is required before any layout intent is accepted. This API does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, or hidden layout-key authority. Packages cannot mutate native layout directly; intents are advisory and composed at Clay's discretion.
 
 ## Agent guidance
 
-Use documented typed intent records only. Do not add Masonry-specific or package-specific Rust branches.
+Use documented typed intent records only. Do not add renderer-specific or package-specific Rust branches.
 
 ## Backing implementation
 

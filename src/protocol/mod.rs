@@ -70,9 +70,10 @@ pub use textobjects::*;
 /// `ServerMessage::Agent` for the core-owned clay-agent host. Event union
 /// includes unused tool/permission variants for Phase 29.
 /// Version 25 publishes optional `PackageUiSnapshot.empty_tab` for the
-/// generic pane-content contribution. Older server processes must not
-/// retain the previous wire semantics.
-pub const PROTOCOL_VERSION: u32 = 25;
+/// generic pane-content contribution.
+/// Version 26 carries complete validated package panels, overlays, components,
+/// input routes, and host-stamped provenance/trust labels.
+pub const PROTOCOL_VERSION: u32 = 26;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;
@@ -88,8 +89,35 @@ pub type LeaseId = u64;
 pub type RegionLockId = u64;
 pub type WorkspaceRootId = u64;
 
+/// Serde boundary helpers for wire fields that exceed JavaScript's
+/// `Number.MAX_SAFE_INTEGER`. Menu session ids carry the server high bit
+/// (`1 << 63`), so they cross the JSON bridge as strings, never numbers.
+pub mod menu_session_id_serde {
+    pub fn serialize<S: serde::Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+        let text = <String as serde::Deserialize>::deserialize(deserializer)?;
+        text.parse::<u64>()
+            .map_err(|_| serde::de::Error::custom("menu session id must be a u64 decimal string"))
+    }
+}
+
 /// Closed semantic profile selected by Clay-owned typography configuration.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum FontRole {
     Monospace,
     Proportional,
@@ -99,7 +127,19 @@ pub enum FontRole {
 /// Document-only role used for a document default or syntax/semantic override.
 /// `Inherit` leaves a decoration on its document default; UI is deliberately
 /// absent because diagnostics/search and document syntax cannot select it.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DocumentFontRole {
     Inherit,
     Monospace,
@@ -136,7 +176,18 @@ impl FontRole {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentMetadata {
     pub document_id: DocumentId,
     pub version: DocumentVersion,
@@ -147,7 +198,18 @@ pub struct DocumentMetadata {
     pub path: String,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum FileErrorCode {
     UnknownWorkspaceRoot,
     UnknownDocument,
@@ -165,7 +227,18 @@ pub enum FileErrorCode {
     InternalError,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DocumentAccess {
     ReadOnly,
     Editable { lease_id: LeaseId },
@@ -180,20 +253,52 @@ impl DocumentAccess {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum EditOperation {
     Insert { byte_offset: u64, text: String },
     Delete { start: u64, end: u64 },
     Replace { start: u64, end: u64, text: String },
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum EditorIntent {
     InsertText { byte_offset: u64, text: String },
     DeleteRange { start: u64, end: u64 },
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct BehaviorManifest {
     pub manifest_id: String,
     pub behavior_version: BehaviorVersion,
@@ -497,14 +602,36 @@ fn default_commands() -> Vec<CommandDeclaration> {
     commands
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum BehaviorScope {
     GlobalDefault,
     Document { document_id: DocumentId },
     Language { language_id: String },
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct KeyBindingRule {
     pub command_id: String,
     pub sequence: Vec<KeyStroke>,
@@ -582,7 +709,18 @@ impl KeyBindingRule {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct KeyStroke {
     pub key: KeyCode,
     pub modifiers: KeyModifiers,
@@ -597,7 +735,18 @@ impl KeyStroke {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum KeyCode {
     Character(String),
     Enter,
@@ -611,7 +760,19 @@ pub enum KeyCode {
     ArrowRight,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct KeyModifiers {
     pub shift: bool,
     pub control: bool,
@@ -628,14 +789,36 @@ impl KeyModifiers {
     };
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum KeyBindingContext {
     EditorTextFocus,
     CompletionMenu,
     Global,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct CommandDeclaration {
     pub command_id: String,
     pub display_name: String,
@@ -681,14 +864,36 @@ impl CommandDeclaration {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum CommandAuthority {
     BuiltInClientEdit,
     ServerIntent,
     ClientUi,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum RoutingPolicy {
     ClientFirstPredictable,
     ClientFirstRequiresAck,
@@ -719,7 +924,18 @@ impl RoutingPolicy {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LockScope {
     Range,
     Document,
@@ -731,7 +947,18 @@ pub enum LockScope {
 /// they share one classifier. `Code` with `treat_underscore_as_word = true`
 /// reproduces the historical `is_completion_word_character` classifier
 /// (`_` || Unicode alphanumeric) exactly.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum WordSeparatorPolicy {
     /// Word characters are Unicode alphanumeric; underscore is a word
     /// character iff `treat_underscore_as_word` is true. Punctuation and
@@ -763,7 +990,19 @@ impl WordSeparatorPolicy {
 }
 
 /// Paragraph boundary style for vertical paragraph motion.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ParagraphStyle {
     /// Paragraphs are separated by a truly empty line.
     BlankLine,
@@ -776,7 +1015,19 @@ pub enum ParagraphStyle {
 /// phase that consults the laid-out text. Kept as a named variant so the
 /// configuration vocabulary is complete.
 /// `ponytail:` ScreenLine behaves as Character until visual-line data is wired.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LineMovementStyle {
     Character,
     ScreenLine,
@@ -784,7 +1035,18 @@ pub enum LineMovementStyle {
 
 /// Movement configuration shipped in [`EditorBehaviorRules`]. Language-
 /// agnostic; packages override via manifest data, never per-language Rust.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct MovementRules {
     pub word_separators: WordSeparatorPolicy,
     pub treat_underscore_as_word: bool,
@@ -828,7 +1090,19 @@ impl Default for MovementRules {
 
 /// Caret glyph shape. `Bar`/`Line` are a thin vertical stroke, `Block` covers
 /// the character cell, `Underline` is a horizontal stroke at the line baseline.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum CaretShape {
     Bar,
     Line,
@@ -841,7 +1115,19 @@ pub enum CaretShape {
 /// `Phase`/`Smooth` are named for a future alpha-ramp; today they render with
 /// discrete on/off timing derived from `period_ms`.
 /// `ponytail:` Phase/Smooth use discrete timing until per-frame alpha is wired.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum BlinkStyle {
     Solid,
     Blink {
@@ -896,7 +1182,18 @@ impl BlinkStyle {
 /// theme-owned (`BaseUiColors::caret`); this struct owns shape + blink only so
 /// it never carries raw colour. Language-agnostic; packages override via
 /// manifest data, never per-language Rust.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct CaretStyle {
     pub shape: CaretShape,
     /// Stroke thickness for Bar/Line/Underline, in pixels.
@@ -978,7 +1275,17 @@ impl Default for CaretStyle {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorBehaviorRules {
     pub text_edits: Vec<TextEditCapability>,
     pub enter: EnterRule,
@@ -1012,13 +1319,37 @@ pub struct EditorBehaviorRules {
 }
 
 /// Wrap + measure. Packages declare this; users can override it client-side.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorLayoutRules {
     pub wrap: WrapPolicy,
 }
 
 /// How document text wraps inside the pane.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum WrapPolicy {
     /// No wrap; horizontal scroll. Code default.
     None,
@@ -1047,7 +1378,19 @@ impl WrapPolicy {
 }
 
 /// Generic editor chrome toggles. Any mode can declare them; paint is client-side.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorChrome {
     pub gutter: bool,
     pub active_line: bool,
@@ -1143,14 +1486,36 @@ impl EditorBehaviorRules {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TextEditCapability {
     Insert,
     Delete,
     Replace,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum EnterRule {
     /// Copy the indentation of the previous line only.
     PreserveLeadingWhitespace,
@@ -1182,19 +1547,52 @@ pub enum EnterRule {
     },
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct TabRule {
     pub mode: TabMode,
     pub spaces_per_tab: u8,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TabMode {
     InsertSpaces,
     InsertTabCharacter,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct PairRule {
     pub open: String,
     pub close: String,
@@ -1211,12 +1609,34 @@ impl PairRule {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum PairRuleContext {
     CaretOrSelection,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct CommentContinuationRule {
     pub line_prefix: String,
     pub continue_prefix: String,
@@ -1225,7 +1645,18 @@ pub struct CommentContinuationRule {
 /// Deterministic local reflow applied when an electric-character trigger is
 /// typed. Executed entirely by Rust-known transform engines on the client from
 /// manifest data; no callbacks, JavaScript, or IPC are involved.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ElectricEffect {
     /// Outdent the current line by one indentation unit when the trigger is
     /// typed as the first non-whitespace character on an over-indented line,
@@ -1237,7 +1668,18 @@ pub enum ElectricEffect {
 /// `}`); the effect is a declarative reflow. Any language package can declare
 /// its own rules; the Rust client executes only [`ElectricEffect`] variants it
 /// knows, so packages contribute rule parameters only.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ElectricCharacterRule {
     pub trigger: String,
     pub effect: ElectricEffect,
@@ -1253,13 +1695,35 @@ impl ElectricCharacterRule {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct AutocompleteTrigger {
     pub trigger: String,
     pub routing_policy: RoutingPolicy,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct RegionLockConflict {
     pub lock_id: RegionLockId,
     pub start: u64,
@@ -1268,7 +1732,18 @@ pub struct RegionLockConflict {
     pub created_at_version: DocumentVersion,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum LockOwner {
     Server,
     Client { client_id: ClientId },
@@ -1276,7 +1751,18 @@ pub enum LockOwner {
     AiAgent { agent_id: String },
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum EditRejection {
     StaleVersion {
         client_base_version: DocumentVersion,
@@ -1306,7 +1792,23 @@ pub enum EditRejection {
     },
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(
+    tag = "family",
+    content = "payload",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ClientMessage {
     Hello {
         protocol_version: u32,
@@ -1451,6 +1953,7 @@ pub enum ClientMessage {
     /// are dropped server-side with a bounded diagnostic, never an error.
     MenuQueryUpdate {
         client_id: ClientId,
+        #[serde(with = "menu_session_id_serde")]
         session_id: u64,
         query: String,
     },
@@ -1461,11 +1964,13 @@ pub enum ClientMessage {
     /// resyncs from every snapshot.
     MenuBackspace {
         client_id: ClientId,
+        #[serde(with = "menu_session_id_serde")]
         session_id: u64,
     },
     /// Relative selection movement (arrow keys); the server clamps.
     MenuSelectionMove {
         client_id: ClientId,
+        #[serde(with = "menu_session_id_serde")]
         session_id: u64,
         delta: i64,
     },
@@ -1475,6 +1980,7 @@ pub enum ClientMessage {
     /// activation; kind semantics are interpreted by the session kind.
     MenuActivate {
         client_id: ClientId,
+        #[serde(with = "menu_session_id_serde")]
         session_id: u64,
         kind: TransientMenuActivationData,
     },
@@ -1482,6 +1988,7 @@ pub enum ClientMessage {
     /// `ServerMessage::TransientMenuClosed`.
     MenuCancel {
         client_id: ClientId,
+        #[serde(with = "menu_session_id_serde")]
         session_id: u64,
     },
     /// Phase 25: client agent intent. Boxed so the union floor stays small.
@@ -1492,14 +1999,37 @@ pub enum ClientMessage {
     },
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DiagnosticSeverity {
     Info,
     Warning,
     Error,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeDiagnostic {
     pub severity: DiagnosticSeverity,
     pub code: String,
@@ -1530,7 +2060,18 @@ impl RuntimeDiagnostic {
 /// [`crate::editor::theme::StyleRegistry`] at the point the active theme is
 /// applied. This is pure style data: no code, ops, widgets, or CSS (Plan 046,
 /// decision 2026-07-09-0352).
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct TextThemeOverride {
     /// Override target: a [`TokenType`] variant name or a base-UI color key
     /// (e.g. `Keyword`, `panelBg`).
@@ -1556,7 +2097,18 @@ pub const MAX_FONT_FAMILY_BYTES: usize = 128;
 pub const MIN_FONT_SIZE: f32 = 6.0;
 pub const MAX_FONT_SIZE: f32 = 96.0;
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Default)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct FontProfile {
     pub families: Vec<String>,
     pub size: f32,
@@ -1572,7 +2124,17 @@ pub struct FontProfile {
 /// size data (those stay user-owned per `typography-role-ownership`), only
 /// feature toggles a package or user may declare. Resolved client-side into a
 /// `parley` `FontSettings<FontFeature>` list at typography install time.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct LigaturePolicy {
     /// Enable standard ligatures (`liga`, `clig`). Default `true` keeps the
     /// historical ligature-on shaping Clay relied on implicitly.
@@ -1705,7 +2267,17 @@ fn is_generic_font_family(family: &str) -> bool {
 }
 
 /// Complete typography snapshot transported separately from [`ActiveTheme`].
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ActiveTypography {
     pub revision: u64,
     pub monospace: FontProfile,
@@ -1722,7 +2294,18 @@ pub struct ActiveTypography {
 /// Bounded hierarchy of UI text-variant scale ratios. Each scale multiplies
 /// the selected role's base size; packages cannot supply these values. All
 /// scales must be finite and within `(0, HIERARCHY_SCALE_MAX]`.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct UiTypographyHierarchy {
     pub display: f32,
     pub title: f32,
@@ -1842,7 +2425,17 @@ impl Default for ActiveTypography {
 /// Typed override value for a UI design token. The variant present must match
 /// the core token's type (validated before install). Levels travel as
 /// validated names so the protocol stays independent of shell-side level enums.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum WireDesignTokenValue {
     /// `color-role` override as RGBA bytes.
     Color([u8; 4]),
@@ -1856,7 +2449,17 @@ pub enum WireDesignTokenValue {
 }
 
 /// Bounded inert typed UI design-token override shipped within [`ActiveTheme`].
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct UiDesignTokenOverride {
     /// Core Clay token name being overridden (e.g. `surface.hover`).
     pub token: String,
@@ -1870,7 +2473,18 @@ pub struct UiDesignTokenOverride {
 /// evaluates `init.js`) to the client (which owns the `ClayShellWidget`).
 /// Currently carries only the pane-focus policy (`"click"` or `"cursor"`).
 /// Pure inert data: no callbacks, no JS execution, no native handles.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ShellPreferences {
     /// Pane-focus policy: `"click"` (default) or `"cursor"` (focus follows
     /// pointer hover). Validated server-side; the client maps the string to
@@ -1882,7 +2496,18 @@ pub struct ShellPreferences {
 /// real separate client connection bound to a workspace root; the registry
 /// holds order, the active tab, and the per-tab workspace + client binding so
 /// tab structure survives client reconnects.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct TabEntry {
     pub tab_id: TabId,
     pub workspace_root_id: WorkspaceRootId,
@@ -1896,7 +2521,18 @@ pub struct TabEntry {
 /// Phase 22.3: full tab registry snapshot. Broadcast to every connection on
 /// any mutation and replayed on handshake; the client applies it to its tab
 /// bar and per-tab connection map. Inert data only.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct TabRegistrySnapshot {
     /// Tab order (server-authoritative; reorderable since Phase 22.4 via
     /// `TabCommand::MoveLeft`/`MoveRight`/`MoveTo`).
@@ -1921,7 +2557,18 @@ pub struct TabRegistrySnapshot {
 /// front/back (boundary no-ops — no wraparound); `MoveTo` moves a tab to a
 /// 1-based position (`position` outside `1..=tab_count` is rejected). Moves
 /// preserve the active tab's status (the registry tracks `active` by `TabId`).
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TabCommand {
     New { workspace_root: String },
     OpenWorkspace { tab_id: TabId, root: String },
@@ -1937,7 +2584,17 @@ pub enum TabCommand {
 /// records) to the client (which owns the editor `StyleRegistry`). Sent once
 /// during the welcome handshake when `setTheme("...")` ran in `init.js`; the
 /// client reconstructs and installs the registry before/at startup paint.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ActiveTheme {
     /// Selected package specifier (e.g. `@clay/theme-gruvbox-material-dark`).
     pub specifier: String,
@@ -1958,8 +2615,19 @@ pub struct ActiveTheme {
 /// available it resolves to dark (Modus Vivendi). An explicit `setTheme`
 /// specifier always wins over appearance-derived selection.
 #[derive(
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Appearance {
     Light,
     Dark,
@@ -2008,13 +2676,40 @@ impl Appearance {
 }
 
 /// Concrete light/dark choice after resolving `Appearance::System`.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ResolvedAppearance {
     Light,
     Dark,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+)]
+#[serde(
+    tag = "family",
+    content = "payload",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ServerMessage {
     Welcome {
         client_id: ClientId,
@@ -2215,7 +2910,18 @@ pub enum ServerMessage {
     Agent(Box<AgentServerMessage>),
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ProtocolErrorCode {
     UnsupportedProtocolVersion,
     InvalidMessage,

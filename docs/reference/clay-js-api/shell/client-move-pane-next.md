@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientMovePaneNext
 js_facade: runtime/js/shell.js::clientMovePaneNext
-backing_rust: src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree
+backing_rust: src/client_commands.rs::EditorClientCommand; src/shell/layout.rs::PaneSplitTree
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientMovePaneNext
@@ -37,7 +37,7 @@ Return the stable bindable command ID for swapping the focused pane with the nex
 
 Move Pane Next swaps the focused pane's leaf ID with the next pane in reading order, preserving tree shape and split ratios. The active pane follows the moved ID. No-op at the end of reading order.
 
-Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Pane topology mutation happens later only after an explicit user key/command route reaches `ClayShellWidget::apply_shell_client_command`. The command operates purely client-side: bounded `PaneSplitTree` rebuild + `reconcile_pane_hosts`, no server round-trip, no package JavaScript, no IPC.
+Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Pane topology mutation happens later only after an explicit user key/command route reaches the React workspace controller `frontend/src/shell/workspace-controller.ts` (React workspace controller). The command operates purely client-side: bounded `PaneSplitTree` rebuild + stable-ID reconciliation in the React PaneTree, no server round-trip, no package JavaScript, no IPC.
 
 ## When to use
 
@@ -104,7 +104,7 @@ Use `shell.clientMovePaneNext` only as a documented command ID for `bindKey` to 
 
 - JS facade: `runtime/js/shell.js::clientMovePaneNext`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command`; `src/shell/layout.rs::PaneSplitTree`
+- Backing Rust/current owner: `src/client_commands.rs::ShellClientCommand (client-local; React PaneTree and workspace controller)`; `src/shell/layout.rs::PaneSplitTree`
 
 ## Lookup metadata
 

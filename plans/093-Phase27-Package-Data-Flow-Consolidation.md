@@ -35,7 +35,7 @@ removes the hand-edited fingerprint tax those edits would otherwise pay.
 UI scope: this phase does **not** change Masonry/settings/shell UI.
 "Package inspection UI" in the roadmap is the existing CLI surface
 (`clay package inspect`) plus `PackageInspection` fields. No
-`npx ui-skills` gate and no visual/a11y screenshot task.
+the UI guidance current at execution time gate and no visual/a11y screenshot task.
 
 ## Objectives
 

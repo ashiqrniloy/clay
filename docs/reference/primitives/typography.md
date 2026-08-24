@@ -17,7 +17,7 @@ User configuration is documented by [`theme.setTypography`](../clay-js-api/theme
 
 ## Ligature Policy
 
-Each `FontProfile` carries a `ligatures` policy (Plan 071 task 7) that resolves to parley `StyleProperty::FontFeatures` at layout time. Ownership mirrors the role table above: ligatures are **user-owned typography baseline**, not mode- or package-owned.
+Each `FontProfile` carries a `ligatures` policy (Plan 071 task 7) that resolves to editor font-feature settings at render time. Ownership mirrors the role table above: ligatures are **user-owned typography baseline**, not mode- or package-owned.
 
 - **Semantic toggles first**: `enableStandard` (maps to `liga` + `clig`) and `enableContextual` (maps to `calt`) cover the ordinary ligature decision. `discretionaryFeatures`/`disableFeatures` accept bounded OpenType tag lists, and `rawFeatures` accepts a bounded CSS-font-feature string as the escape hatch for stylistic alternates (`ss0X`, `cv0X`, `zero`, `onum`, ...).
 - **Default behavior**: a `setTypography` profile that omits `ligatures`, and every profile before the first `setTypography` call, resolves to `LigaturePolicy::default()` — standard and contextual ligatures enabled. Disabling ligatures is explicit user configuration (`enableStandard: false, enableContextual: false`), never an implicit default.
@@ -120,7 +120,7 @@ Theme `textStyles[].scale` overrides clamp to the UI hierarchy range `(0, 4]`. D
 
 Each user profile is an ordered family stack ending in a generic fallback. Named families resolve on the client; Clay retains the role-appropriate generic fallback when names are unavailable. Packages cannot inspect installed fonts or react to resolution results.
 
-A changed complete typography snapshot increments the server revision and invalidates client layout once. Document cache keys include typography revision, style revision, document role, text/viewport revisions, and width. Mixed inline roles use the larger active document profile as a conservative geometry baseline; visible Parley layout provides shaped line/caret metrics. UI profile changes reset SDUI geometry and scale paint, hit, row, and accessibility bounds together.
+A changed complete typography snapshot increments the server revision and invalidates client layout once. Document cache keys include typography revision, style revision, document role, text/viewport revisions, and width. Mixed inline roles use the larger active document profile as a conservative geometry baseline; the editor's shaped layout provides line/caret metrics. UI profile changes reset SDUI geometry and scale paint, hit, row, and accessibility bounds together.
 
 ## Performance Contract
 
@@ -132,7 +132,7 @@ A changed complete typography snapshot increments the server revision and invali
 
 ## Security Contract
 
-Package declarations are inert semantic names. Validators reject concrete or executable font authority including `fontFamily`, `fontFamilies`, `fontSize`, `fontStack`, font paths, font bytes, URLs, downloads, raw CSS, raw Parley properties, renderer callbacks, native widget handles, client-side JavaScript, and raw `Deno.core.ops`.
+Package declarations are inert semantic names. Validators reject concrete or executable font authority including `fontFamily`, `fontFamilies`, `fontSize`, `fontStack`, font paths, font bytes, URLs, downloads, raw CSS, raw renderer properties, renderer callbacks, native widget handles, client-side JavaScript, and raw `Deno.core.ops`.
 
 Semantic role declaration grants no filesystem, network, shell, package-manager, extension loading, AI, WASM, workspace mutation, native UI, or client-runtime authority. Invalid roles fail closed before publication/activation; they never fall through as concrete family names.
 
@@ -143,7 +143,7 @@ Primary source paths:
 - Protocol and validation: `src/protocol/mod.rs`, `src/protocol/decorations.rs`, `src/packages/record/mod.rs`, `src/server/ui.rs`
 - Mode/range parsing: `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/ops/decorations.rs`, `src/server/syntax.rs`
 - Client resolution/layout: `src/editor/typography.rs`, `src/editor/layout.rs`, `src/editor/surface/mod.rs`
-- Native UI/components: `src/masonry_editor.rs`, `src/masonry_sdui.rs`, `src/shell/package_ui.rs`, `src/shell/theme.rs`
+- Native UI/components: `src/shell/package_ui.rs`, `src/shell/theme.rs`; rendered by the React theme adapter (`frontend/src/theme`)
 
 Deterministic coverage lives in `tests/typography_protocol.rs`, `tests/markdown_mode.rs`, `tests/decoration_transport.rs`, `tests/editor_performance_invariants.rs`, `tests/package_loading.rs`, `tests/package_primitive_gate.rs`, and module tests beside the source paths above. Manual coverage is the Phase 18.16.5 matrix in `docs/development/launch-and-gui-smoke.md`.
 

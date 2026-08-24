@@ -1,5 +1,9 @@
 # Masonry Editor Widget Status Observability
 
+> **Historical implementation — removed by Plan 097 Phase 12.** See
+> [Tauri/React Desktop Cutover](tauri-react-cutover.md) and
+> [React CodeMirror Editor](react-codemirror-editor.md) for current ownership.
+
 ## Source
 
 - `src/masonry_editor.rs`

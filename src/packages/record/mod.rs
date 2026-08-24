@@ -354,10 +354,10 @@ impl TextStyleOverrideDescriptor {
             token: self.token.clone(),
             color: self
                 .color
-                .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
+                .map(|[r, g, b, a]| crate::color::Color::from_rgba8(r, g, b, a)),
             background: self
                 .background
-                .map(|[r, g, b, a]| masonry::peniko::Color::from_rgba8(r, g, b, a)),
+                .map(|[r, g, b, a]| crate::color::Color::from_rgba8(r, g, b, a)),
             bold: self.bold,
             italic: self.italic,
             underline: self.underline,
@@ -1303,7 +1303,7 @@ mod tests {
         let kw_override = kw.to_override();
         assert_eq!(
             kw_override.color,
-            Some(masonry::peniko::Color::from_rgba8(0xc7, 0x92, 0xea, 0xff))
+            Some(crate::color::Color::from_rgba8(0xc7, 0x92, 0xea, 0xff))
         );
         assert_eq!(kw_override.bold, Some(true));
     }

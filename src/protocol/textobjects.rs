@@ -17,8 +17,19 @@ pub const MAX_SELECTION_QUERY_CURSORS: usize = 256;
 /// follow Helix-style `textobject.<kind>.<inner|around>` naming (e.g.
 /// `textobject.function.around`). Unknown kinds are rejected deny-by-default.
 #[derive(
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TextobjectKind {
     Function,
     Class,
@@ -67,8 +78,19 @@ impl TextobjectKind {
 
 /// Which occurrence of the object to select relative to the caret.
 #[derive(
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TextobjectDirection {
     /// The innermost object containing the caret.
     Current,
@@ -92,8 +114,19 @@ impl TextobjectDirection {
 /// Smart-select walks the AST: expand grows the selection to the smallest
 /// enclosing node range, shrink returns to the largest node range inside it.
 #[derive(
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SmartSelectAction {
     Expand,
     Shrink,
@@ -110,7 +143,19 @@ impl SmartSelectAction {
 }
 
 /// The selection query carried by one request.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SelectionQuery {
     Textobject {
         kind: TextobjectKind,
@@ -125,7 +170,19 @@ pub enum SelectionQuery {
 }
 
 /// One client selection captured at request time (byte offsets).
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct SelectionQueryCursor {
     pub anchor: u64,
     pub focus: u64,
@@ -133,7 +190,18 @@ pub struct SelectionQueryCursor {
 
 /// A typed, versioned selection query enqueued after a UI-reactive command
 /// captures the current document/version/selection state locally.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct SelectionQueryRequest {
     pub request_id: u64,
     pub client_id: ClientId,
@@ -147,7 +215,19 @@ pub struct SelectionQueryRequest {
 }
 
 /// Validation failure for a [`SelectionQueryRequest`] before any server work.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SelectionQueryRequestRejection {
     TooManySelections,
 }
@@ -162,7 +242,19 @@ impl SelectionQueryRequest {
 }
 
 /// One resulting byte range for a selection.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct SelectionQueryRange {
     pub start: u64,
     pub end: u64,
@@ -171,7 +263,18 @@ pub struct SelectionQueryRange {
 /// Server-to-client result envelope for one selection query. `ranges` aligns
 /// index-for-index with the request's `selections`; `None` entries mean "no
 /// object found for this caret — leave that selection unchanged".
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct SelectionQueryResult {
     pub request_id: u64,
     pub client_id: ClientId,

@@ -557,3 +557,27 @@ await loadConfigurationModule({
   path: "./packages/third-party.js",
   optional: true,
 });
+
+// ----------------------------------------------------------------------------
+// 12. Agent setup guidance — clay-agent host + @clay/chat
+// ----------------------------------------------------------------------------
+// Clay's agent (chat) capability is server-owned end to end; this file
+// configures NO provider credentials, profiles, or models:
+//
+//   - The Clay server manages its own Node >= 20 child process (`clay-agent`)
+//     that hosts Prism sessions (one daemon per server). Package JavaScript
+//     can never spawn or speak to it.
+//   - Provider/profile/model selection stays server-owned in the chat UI;
+//     credentials live in an encrypted vault / OS keychain (set on first
+//     use), never in `process.env` and never in this file. Do NOT paste API
+//     keys, tokens, or other secrets into init.js or package modules — they
+//     would become plaintext configuration and violate Clay's authority
+//     model.
+//   - The chat landing surface is the @clay/chat first-party package, loaded
+//     in packages/first-party.js (section 11): omit that loadPackage line to
+//     get the core Open File/Folder empty tab instead.
+//   - There is deliberately no `agent*`/`chat*`/`provider*` export in
+//     clay:configuration: session setup is interactive and server-owned, and
+//     hidden-key workarounds are rejected by policy.
+//   - LSP tooling setup (`authorizeLanguageServer`) is documented with the
+//     package loads in packages/first-party.js.

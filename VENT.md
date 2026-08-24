@@ -89,3 +89,6 @@ P2 recapture repeated the same Wayland limitation: static fixtures pass, but com
 ## 26-08-22 17:55 — ui-review-harness-input
 
 UI review needed repeated temporary fixture directories and copied capture scripts because `scripts/capture-ui-review.sh` hard-codes fixture names and has no generic `--init`/package fixture path. Interactive menu verification also repeated as unresolved because Wayland host lacks keyboard input (`/dev/uinput` denied, no xdotool/ydotool/portal keyboard). Add a generic isolated package/init fixture option and a documented semantic/keyboard backend check to avoid this workaround.
+## 26-08-24 12:49 — tauri-react-visual-review
+
+UI review repeatedly hit same AT-SPI/tooling friction: whole desktop enumeration blocks on a blank child, and the existing capture harness still matched native `clay`/`Clay working area shell` identifiers after Tauri cutover; wrapper cleanup also left `clay-desktop` children until explicitly tracked. Workaround: per-index bounded probes, current app/landmark matching, and explicit child cleanup. Prevent recurrence with one bounded AT-SPI discovery API keyed to app PID/name plus process-group ownership in the harness.

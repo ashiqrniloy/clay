@@ -185,7 +185,7 @@ impl ControlCenter {
                 message: "selected item is not in the Control Center catalogue".to_string(),
             })?;
         if *routing == RoutingPolicy::ClientUiCommand
-            || crate::masonry_editor::EditorClientCommand::from_command_id(&action.command_id)
+            || crate::client_commands::EditorClientCommand::from_command_id(&action.command_id)
                 .is_some()
         {
             return Ok(ServerMenuActivation::ShellClientCommand(
@@ -203,7 +203,7 @@ impl ControlCenter {
 }
 
 fn is_executable_from_control_center(command_id: &str, routing_policy: &RoutingPolicy) -> bool {
-    crate::masonry_editor::EditorClientCommand::from_command_id(command_id).is_some()
+    crate::client_commands::EditorClientCommand::from_command_id(command_id).is_some()
         || !matches!(
             routing_policy,
             RoutingPolicy::ClientFirstPredictable | RoutingPolicy::ClientFirstRequiresAck
@@ -570,7 +570,7 @@ mod tests {
 
     #[test]
     fn selected_shell_client_item_produces_shell_activation() {
-        let shell_commands = crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE
+        let shell_commands = crate::client_commands::SHELL_CLIENT_COMMAND_CATALOGUE
             .iter()
             .map(|(command_id, display_name)| RegisteredCommand {
                 package_name: "clay".to_string(),
@@ -643,7 +643,7 @@ mod tests {
 
     #[test]
     fn shell_client_catalogue_entries_are_visible_and_parser_allowlisted() {
-        let shell_commands = crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE
+        let shell_commands = crate::client_commands::SHELL_CLIENT_COMMAND_CATALOGUE
             .iter()
             .map(|(command_id, display_name)| RegisteredCommand {
                 package_name: "clay".to_string(),
@@ -672,12 +672,12 @@ mod tests {
 
         assert_eq!(
             ids.len(),
-            crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE.len()
+            crate::client_commands::SHELL_CLIENT_COMMAND_CATALOGUE.len()
         );
-        for (command_id, _) in crate::masonry_shell::SHELL_CLIENT_COMMAND_CATALOGUE {
+        for (command_id, _) in crate::client_commands::SHELL_CLIENT_COMMAND_CATALOGUE {
             assert!(ids.contains(command_id));
             assert!(
-                crate::masonry_shell::ShellClientCommand::from_command_id(command_id).is_some()
+                crate::client_commands::ShellClientCommand::from_command_id(command_id).is_some()
             );
         }
     }

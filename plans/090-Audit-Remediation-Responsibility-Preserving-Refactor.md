@@ -33,7 +33,7 @@ Scope: Extract existing responsibilities into plain modules/functions. Preserve 
       - Wiki (all read in full): `server-ipc-skeleton.md`, `embedded-js-runtime.md`, `masonry-editor.md`, `masonry-shell.md`, `pane-document-views.md`, `transient-menu-round-trip.md`, `package-loading.md`.
       - `.agents/skills/clay-ui/SKILL.md` (architecture map, golden rules) + `references/components.md`/`tokens.md` via `src/shell/components.rs`/`theme.rs`; UI primitive constraints recorded in map.
       - Project patterns (read): `authority-boundaries.md`, `package-runtime-trust-domains.md`, `package-ui-layout.md`, `protocol-and-performance.md`, `planning-checklist.md`.
-      - UI-skills routing evidence: `npx ui-skills start` ran; catalog inspected (`npx ui-skills list`) — all entries are web/frontend skills (Tailwind, landing pages, ARIA/HTML a11y); none applies to a zero-visual-change native Rust ownership refactor. No skill loaded; `clay-ui` skill + catalogs are the applicable UI-constraint source. Recorded to satisfy the planning checklist gate.
+      - UI-skills routing evidence: the UI guidance current at execution time ran; catalog inspected (the UI guidance current at execution time) — all entries are web/frontend skills (Tailwind, landing pages, ARIA/HTML a11y); none applies to a zero-visual-change native Rust ownership refactor. No skill loaded; `clay-ui` skill + catalogs are the applicable UI-constraint source. Recorded to satisfy the planning checklist gate.
       - Audit P2-1/P2-2/P2-3/P2-4 in `code-reviews/2026-08-14-comprehensive-implementation-and-ui-ux-review.md`; source inventory: 62,457 lines across the seven large files (connection 11,535; js_runtime 13,333; surface 8,327; server/mod 6,353; masonry_shell 6,064; record 5,406; main 3,731).
     - Options Considered:
       - Split by file size alone: rejected.
@@ -398,9 +398,9 @@ Scope: Extract existing responsibilities into plain modules/functions. Preserve 
       - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`.
       - `docs/development/architecture-ownership.md` (single shell/tab/accessibility ownership).
     - UI Routing Evidence:
-      - `npx ui-skills start` ✅.
-      - Category inspected: `accessibility` via `npx ui-skills list --category accessibility`.
-      - Smallest selected skill: `rams/rams` via `npx ui-skills get rams/rams`; its web/WCAG guidance was translated to Clay's native Masonry/AccessKit roles, focus, names, states, and token-driven surfaces. No visual redesign or UI source edit performed.
+      - the UI guidance current at execution time ✅.
+      - Category inspected: `accessibility` via the UI guidance current at execution time.
+      - Smallest selected skill: `rams/rams` via the UI guidance current at execution time; its web/WCAG guidance was translated to Clay's native Masonry/AccessKit roles, focus, names, states, and token-driven surfaces. No visual redesign or UI source edit performed.
     - Options Considered:
       - Continue repairing the host screenshot/window setup: rejected for this plan; no user-facing UI surface changed and the work would add environment churn.
       - Claim the invalid portal output as visual evidence: rejected; it captured unrelated desktop content and was deleted.
@@ -410,9 +410,9 @@ Scope: Extract existing responsibilities into plain modules/functions. Preserve 
       - The attempted capture blocker and deleted invalid outputs remain documented in `code-reviews/screenshots/2026-08-14-plan090-refactor-parity/REVIEW.md`; no further visual retry is required for Plan 090.
     - API Notes and Examples:
       ```bash
-      npx ui-skills start
-      npx ui-skills list --category accessibility
-      npx ui-skills get rams/rams
+      load the complete mandatory project-local UI skill stack
+      load the complete mandatory project-local UI skill stack
+      load the complete mandatory project-local UI skill stack
       scripts/capture-ui-review.sh --fixture ui-review-default \\
         --output code-reviews/screenshots/2026-08-14-plan090-refactor-parity/default
       CLAY_LIVE_A11Y_SMOKE=1 cargo test --test security \\
@@ -518,7 +518,7 @@ Scope: Extract existing responsibilities into plain modules/functions. Preserve 
       - Affected module files: `01-launch-and-connection.md`, `02-configuration-init-js.md`, `03-files-and-workspace.md`, `04-core-editing.md`, `09-packages-and-modes.md`, `10-keybindings-and-commands.md`, `11-performance.md`, `13-window-splits.md`, and `14-tabs.md`.
       - `.agents/skills/create-plan/references/clay.md` Manual Test Plan Task.
       - `.agents/skills/project-patterns/references/planning-checklist.md` and `protocol-and-performance.md`.
-      - UI routing for the accessibility-bearing parity harness: `npx ui-skills start`; `accessibility`; `rams/rams`. No UI source review or edit was performed because Plan 090 changes no rendered surface.
+      - UI routing for the accessibility-bearing parity harness: the UI guidance current at execution time; `accessibility`; `rams/rams`. No UI source review or edit was performed because Plan 090 changes no rendered surface.
     - Options Considered:
       - Omit manual task silently: rejected by project rule.
       - Re-run every interaction step despite zero user-facing change: rejected; it would duplicate existing Plan 089 evidence and create false scope.

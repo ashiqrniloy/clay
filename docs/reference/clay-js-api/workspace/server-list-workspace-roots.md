@@ -35,7 +35,7 @@ List server-configured workspace root metadata without exposing unrestricted hos
 
 `serverListWorkspaceRoots` is the runtime-backed public API for **List Workspace Roots**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols, protocol messages, or future raw op wrappers.
 
-Authority: `server-authoritative-workspace-query`. Runtime path: `server-first-query`. Workspace root metadata lookup is a background/help/programmatic query and never runs in editor input, Masonry paint/layout, or ordinary edit acknowledgement hot paths. Phase 22.8 keeps tab selection out of this API: connection messages enumerate only the caller's bound tab workspace, and the facade exposes no arbitrary `TabId` selector.
+Authority: `server-authoritative-workspace-query`. Runtime path: `server-first-query`. Workspace root metadata lookup is a background/help/programmatic query and never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths. Phase 22.8 keeps tab selection out of this API: connection messages enumerate only the caller's bound tab workspace, and the facade exposes no arbitrary `TabId` selector.
 
 ## When to use
 

@@ -28,7 +28,7 @@ custom_properties:
     type: array<number|string>
     default: required
     description: Known directory workspace-root ids the session may bind to.
-hot_path_policy: Evaluated during configuration root evaluation only (init.js); never executed during typing, parsing, Masonry layout, or paint hot paths. First loadPackage call seals authority mutation for the runtime generation.
+hot_path_policy: Evaluated during configuration root evaluation only (init.js); never executed during typing, parsing, client layout, or paint hot paths. First loadPackage call seals authority mutation for the runtime generation.
 security: deny-by-default; never auto-authorized for bundled packages; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript; binds exact package provenance, contribution fingerprint, canonical executable, inherited-environment declaration, and approved directory roots; starts no process at grant time; grant evaluation happens before any package code executes; loaded package code cannot self-grant even though it can import the same facade.
 agent_guidance: Use only for documented language-server contributions. Never expose hidden env vars, JSON/TOML keys, shell strings, or unvalidated executables.
 lookup_tags: [configuration, language-server, grant, init-js, phase18.20, runtime-backed, deny-by-default]

@@ -1,5 +1,9 @@
 # Shell Primitives (Phase 20.2)
 
+> **Historical native implementation — removed by Plan 097 Phase 12.** React
+> catalog components and CSS custom properties now own presentation; see
+> [Tauri/React Desktop Cutover](tauri-react-cutover.md).
+
 **Module:** `src/shell/primitives.rs`
 **Phase:** 20.2 — Clay UI Primitive Library Foundation
 **Status:** Implemented (2026-07-24)

@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientClosePane
 js_facade: runtime/js/shell.js::clientClosePane
-backing_rust: src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree; src/app_driver.rs::Driver (dirty guard, document release, conflict-menu sync); src/masonry_pane_document.rs::PaneDocumentView::guard_pane_close / close_pane
+backing_rust: src/client_commands.rs::EditorClientCommand; src/shell/layout.rs::PaneSplitTree
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientClosePane
@@ -42,7 +42,7 @@ Since Phase 22.2 panes host document views of the tab's workspace, so closing a 
 - A **dirty** document blocks the close: the pane's save-conflict menu (the existing server-owned save/reload path) must resolve first. No lease is released and no topology changes until the conflict is resolved.
 - A **clean** pane releases its document: the pane sends capability-gated close requests for its active document and every retained session in its session store (bounded by the 64-session ceiling), then closes the pane. The release goes through the same server authority as every document close; the client never drops a lease unilaterally.
 
-Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Pane topology mutation happens later only after an explicit user key/command route reaches the driver, which guards dirty documents, releases clean documents through `PaneDocumentView::close_pane`, and rebuilds the bounded `PaneSplitTree` + `reconcile_pane_hosts` in `ClayShellWidget`. Topology mutation is client-local; document release is the only server round-trip and it is capability-gated.
+Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Pane topology mutation happens later only after an explicit user key/command route reaches the React workspace controller, which guards dirty documents, releases clean documents through the close flow, and rebuilds the bounded `PaneSplitTree` in the React PaneTree (`frontend/src/shell/PaneTree.tsx`). Topology mutation is client-local; document release is the only server round-trip and it is capability-gated.
 
 ## When to use
 
@@ -109,7 +109,7 @@ Use `shell.clientClosePane` only as a documented command ID for `bindKey` to rem
 
 - JS facade: `runtime/js/shell.js::clientClosePane`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/app_driver.rs::Driver::apply_shell_client_command` (dirty guard, document release, conflict-menu sync); `src/masonry_shell/mod.rs::ClayShellWidget::apply_shell_client_command`; `src/shell/layout.rs::PaneSplitTree`; `src/masonry_pane_document.rs::PaneDocumentView::guard_pane_close` / `close_pane`
+- Backing Rust/current owner: `src/client_commands.rs::ShellClientCommand` (dirty guard, document release, conflict-menu sync); `src/client_commands.rs::ShellClientCommand (client-local; React PaneTree and workspace controller)`; `src/shell/layout.rs::PaneSplitTree`; `src/client_commands.rs::EditorClientCommand (client-local close guard; React workspace controller)` / `close_pane`
 
 ## Lookup metadata
 

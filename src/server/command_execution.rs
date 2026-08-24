@@ -164,7 +164,7 @@ impl CommandExecutor {
             ));
         }
         validate(command, &request)?;
-        if crate::masonry_editor::EditorClientCommand::from_command_id(&command.command_id)
+        if crate::client_commands::EditorClientCommand::from_command_id(&command.command_id)
             .is_some()
         {
             return Err(diagnostic(
@@ -470,10 +470,29 @@ impl CommandExecutor {
                 }
             }
             "settings.setTypography" => {
-                // Value bounds (sizes 6–96, families ≤128 bytes, 7-field
-                // hierarchy) are enforced by the `setTypography` op at apply
-                // time; catalog textInput fields render a `validationState`
-                // style for out-of-bound feedback.
+                let Some(raw) = argument_string(&request.arguments, "typography") else {
+                    return Err(diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        "settings.setTypography requires a complete typography argument",
+                    ));
+                };
+                let value = serde_json::from_str(&raw).map_err(|_| {
+                    diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        "settings.setTypography typography argument is not valid JSON",
+                    )
+                })?;
+                crate::server::ops::typography::validate_typography_request(&value).map_err(
+                    |message| {
+                        diagnostic(
+                            &request.command_id,
+                            CommandExecutionRule::InvalidArguments,
+                            message,
+                        )
+                    },
+                )?;
             }
             "settings.open" | "settings.close" | "settings.reset" => {}
             _ => {
@@ -1464,21 +1483,39 @@ mod tests {
     #[test]
     fn settings_set_typography_and_lifecycle_commands_accept() {
         let executor = CommandExecutor::new();
-        for command_id in [
-            "settings.setTypography",
-            "settings.open",
-            "settings.close",
-            "settings.reset",
-        ] {
+        let typography = json!({
+            "monospace": { "families": ["monospace"], "size": 16 },
+            "proportional": { "families": ["sans-serif"], "size": 16 },
+            "ui": { "families": ["system-ui"], "size": 12 },
+            "hierarchy": {
+                "display": 1.5, "title": 1.16, "section": 1.08,
+                "body": 1.0, "status": 1.0, "detail": 0.83, "caption": 0.75
+            }
+        });
+        let result = executor
+            .execute_settings(settings_request(
+                "settings.setTypography",
+                json!({ "typography": typography.to_string() }),
+            ))
+            .expect("complete typography accepts");
+        assert_eq!(result.status, CommandExecutionStatus::Accepted);
+        for command_id in ["settings.open", "settings.close", "settings.reset"] {
             let result = executor
                 .execute_settings(settings_request(command_id, json!({})))
-                .expect("lifecycle/typography settings commands accept");
+                .expect("lifecycle settings commands accept");
             assert_eq!(
                 result.status,
                 CommandExecutionStatus::Accepted,
                 "{command_id}"
             );
         }
+        let rejected = executor
+            .execute_settings(settings_request(
+                "settings.setTypography",
+                json!({ "typography": "{}" }),
+            ))
+            .expect_err("partial typography fails closed");
+        assert_eq!(rejected.rule, CommandExecutionRule::InvalidArguments);
     }
 
     #[test]

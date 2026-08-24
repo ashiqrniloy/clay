@@ -255,7 +255,7 @@ the keybinding surface. Deep reference:
 
 Deep references: `docs/development/accessibility.md`,
 `docs/wiki/modules/transient-menu-session.md`,
-`docs/wiki/modules/masonry-sdui-region.md`.
+`docs/wiki/modules/react-sdui-package-ui.md`.
 
 | # | Action | Expected |
 |---|--------|----------|
@@ -288,6 +288,26 @@ Deep references: `docs/development/accessibility.md`,
 | K77 | PASS automated / NOT RUN manually | Shell allowlist, stale-session, package-authority, and key-routing tests pass; targeted input is blocked by `can_query_windows=false`/`can_focus_windows=false` |
 | K84 | PASS automated / NOT RUN manually | `welcome_button_pointer_press_emits_open_file_command` and `welcome_global_keybindings_emit_commands_without_editing_text` exercise real RenderRoot pointer/key dispatch; live desktop input remains host-dependent |
 
+## Plan 097 Phase 9 React Command Centre steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| K85 | Press `Ctrl+X Ctrl+P` in CodeMirror | One React Aria modal Dialog opens with labelled Search textbox, bounded ListBox/options, selected row, and polite result count; editor text does not change |
+| K86 | Type quickly, Backspace, and use ArrowUp/ArrowDown | React sends query/semantic-backspace/relative-selection intents only; displayed query and selection follow server snapshots; selection scrolls inside the bounded list |
+| K87 | Press Enter, Alt+Enter, Escape, and click a row | Primary/secondary activation and cancel use the opaque session ID; server closes before dispatch; pointer selection first sends relative movement then activation |
+| K88 | Activate pane/tab/editor/client-dialog commands from the catalogue | `ShellClientCommandRequest` passes a closed frontend dispatcher; exact commands reuse workspace/CodeMirror/native-dialog paths; forged sibling IDs do nothing |
+| K89 | Activate package, Git, settings, and reload commands | Server registry/provenance/generation validation remains in force; package JS runs server-side only; diagnostics/status update without a parallel frontend executor |
+| K90 | Inspect focus with modal open, close with Escape, reopen after tab switch/reload | Focus enters the search field, Tab remains contained, Escape restores origin, and stale/closed sessions cannot act |
+| K91 | Empty/error query and narrow window | Empty message and `0 results` are announced; modal remains usable without horizontal overflow at 460 px and uses one scrim/dialog only |
+
+## Plan 097 Phase 9 execution record (2026-08-23)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| K85–K87/K90 | PASS React interaction/a11y + server suites | `CommandCentre.test.tsx`, menu session/connection tests, and `command-centre-a11y.txt`; React Aria dialog/listbox semantics and Escape restoration are covered. Desktop keyboard backend unavailable, so physical chord replay is not claimed |
+| K88–K89 | PASS automated | Workspace closed dispatcher tests, exact-manifest client UI projection test, existing command catalogue/provenance/reload/Git suites |
+| K91 | PASS visual + a11y | `command-centre-final.png`, `command-centre-narrow.png`, `command-centre-empty.png` and paired accessibility snapshots under `code-reviews/screenshots/2026-08-23-tauri-react-phase9/` |
+
 ## Phase 28 editor-command aliases and package keymaps
 
 Deep references: `docs/reference/packages/creating-packages.md`,
@@ -314,7 +334,7 @@ under `docs/reference/clay-js-api/editor/`.
 
 ## Phase 28.7 P2 visual and interaction recapture (2026-08-21)
 
-UI preflight used `npx ui-skills start`, category `accessibility`, selected
+UI preflight used the UI guidance current at execution time, category `accessibility`, selected
 `rams/rams`, and `computer-use-linux_get_app_state` before review. Evidence is
 under `code-reviews/screenshots/2026-08-21-phase28.7-p2-recapture/`.
 
@@ -325,3 +345,12 @@ under `code-reviews/screenshots/2026-08-21-phase28.7-p2-recapture/`.
 | Accessibility/focus containment | PASS static/structural; UNRESOLVED interactive | Static shell/recovery trees expose named controls/status/menu roles; keyboard focus return and transient-menu interaction require a keyboard-capable host. |
 
 No existing step was deleted or weakened.
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Command Centre/path modal rest state | PASS static visual/a11y | `command-centre/`, `command-centre-empty/`, and `path-browser/` fixture captures show one labelled modal, Search textbox, bounded options, selected state/count, and no horizontal overflow |
+| Query/move/activate/cancel keyboard flow | UNRESOLVED live; PASS component/server tests | No safe development keyboard/window-targeting backend; `CommandCentre.test.tsx`, workspace routing, menu-session, and authority tests pass |
+| Modal focus/containment | PASS structural/static | React Aria modal tests and AX snapshots cover dialog semantics; physical focus traversal remains host-blocked |
+| Shell status announcement | PASS | `AppShell` footer status now has `role=status` and `aria-live=polite`, locked by `frontend/src/test/shell.test.tsx` |

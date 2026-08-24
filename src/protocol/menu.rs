@@ -37,7 +37,18 @@ fn truncate(value: &str, max_chars: usize) -> String {
 }
 
 /// Wire projection of a menu item's display data. Actions stay server-side.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct TransientMenuItemData {
     pub id: String,
     pub label: String,
@@ -70,7 +81,18 @@ impl TransientMenuItemData {
 /// Wire projection of the session status. `Cancelled` never crosses the wire:
 /// a cancelled server session is removed and reported via
 /// [`crate::protocol::ServerMessage::TransientMenuClosed`.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TransientMenuStatusData {
     Active,
     Empty { message: String },
@@ -78,7 +100,19 @@ pub enum TransientMenuStatusData {
 
 /// Mirrors `TransientMenuFocusPolicy` (shell layer). Default `Modal` for
 /// server-owned palettes; `Modeless` for future HUD-style pickers.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TransientMenuFocusPolicyData {
     Modal,
     Modeless,
@@ -88,7 +122,19 @@ pub enum TransientMenuFocusPolicyData {
 /// (`Bottom`/`Pointer`/`Main`) or, Phase 24.4, the window-centered Command
 /// Centre surface (`Centered`). Additive: `CommandPalette` remains the
 /// compatibility spelling for the bottom origin.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TransientMenuOriginData {
     CommandPalette,
     ContextMenu,
@@ -102,7 +148,19 @@ pub enum TransientMenuOriginData {
 /// item (path mode: open the directory as the tab's workspace). Kind
 /// semantics are interpreted server-side by the session kind, never by the
 /// client. Closed enum: unknown archive values fail closed at decode.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TransientMenuActivationData {
     Primary,
     Secondary,
@@ -111,8 +169,20 @@ pub enum TransientMenuActivationData {
 /// Bounded inert display snapshot of a server-owned transient menu session.
 /// Boxed inside `ServerMessage` so the variant's inline size never inflates
 /// the union floor that small payloads like `EditAck` pay.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct TransientMenuSnapshotData {
+    #[serde(with = "crate::protocol::menu_session_id_serde")]
     pub session_id: u64,
     pub prompt: String,
     pub query: String,

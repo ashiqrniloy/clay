@@ -79,6 +79,20 @@ The SDUI left-slot decision is constraint-driven: cached `ResolvedUiTheme::Panel
 
 The package contract remains unchanged: component kinds, style variables, typed tokens, overlay anchors, and permissions are additive-only and no new Plan 088 public API was added. Host conformance still rejects raw styles/authority and enforces WCAG contrast/state completeness at install/theme-apply boundaries.
 
+## Plan 097 Phase 8 Tauri/React projection
+
+The same validated `SduiTree` and `SduiTreeUpdate` now cross the Tauri bridge
+for the target client. `frontend/src/sdui/state.ts` stores a node-ID map,
+rejects stale base versions, and changes only targeted nodes. `renderer.tsx`
+uses the existing stable IDs as React keys and maps the current seven SDUI
+kinds onto Clay components plus the real CodeMirror pane slot. Package UI uses
+a separate complete `PackageUiSnapshot`; see [React SDUI and Package UI
+Projection](react-sdui-package-ui.md).
+
+This adds no package JS/client authority and does not replace the frozen native
+parity oracle before Phase 12. Package JavaScript, validation, action authority,
+document bindings, payload budgets, and server versions stay unchanged.
+
 ## Payload Costs and Codec Scope
 
 Representative SDUI payload costs are measured in `src/protocol/codec.rs` with deterministic unit tests that construct a static multi-region tree without starting the GUI. Current `rkyv` payload sizes, excluding the 4-byte length prefix, are:
@@ -172,6 +186,7 @@ let tree = SduiTree {
 ## Related
 
 - [SDUI / Package-UI Retained Masonry Reconciliation](masonry-sdui-region.md)
+- [React SDUI and Package UI Projection](react-sdui-package-ui.md)
 - [Protocol Codec](protocol-codec.md)
 - [Client Snapshot Bootstrap](client-snapshot-bootstrap.md)
 - [Editor Theme Registry](editor-theme-registry.md)

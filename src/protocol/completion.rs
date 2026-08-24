@@ -41,7 +41,18 @@ pub type CompletionProviderGeneration = u64;
 /// Package or built-in provenance retained on every completion item and result
 /// set. Mirrors `DecorationProvenance`: package name, version, and the
 /// package-prefixed API identifier.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct CompletionProvenance {
     pub package_name: String,
     pub package_version: String,
@@ -63,7 +74,18 @@ impl CompletionProvenance {
 /// Why a completion request was issued. Trigger classification stays local and
 /// manifest-driven; this is inert metadata carried to the server so providers
 /// can shape results without executable trigger callbacks.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum CompletionTrigger {
     /// A trigger character declared by an installed behavior manifest
     /// (`EditorBehaviorRules.autocomplete_triggers`). The carried string is the
@@ -78,7 +100,19 @@ pub enum CompletionTrigger {
 /// Byte range in the document that a completion result replaces when an item is
 /// accepted. `byte_start` must be <= `byte_end` and both must be valid offsets
 /// within the requesting document at the request's `document_version`.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct CompletionReplacementRange {
     pub byte_start: u64,
     pub byte_end: u64,
@@ -103,7 +137,18 @@ impl CompletionReplacementRange {
 /// manual `completion.trigger` command. Carries enough metadata for the
 /// server-side provider lane to stale-drop against newer edits, cursor moves,
 /// mode changes, or provider generation changes.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct CompletionRequest {
     pub request_id: CompletionRequestId,
     pub client_id: ClientId,
@@ -131,8 +176,19 @@ pub struct CompletionRequest {
 /// `crate::editor::snippet::parse_snippet` parser. Snippet syntax carries no
 /// executable transforms, commands, or externally-resolved variables.
 #[derive(
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum CompletionItemTextFormat {
     /// `insert_text` is inserted verbatim. The default and historic behavior.
     #[default]
@@ -142,7 +198,18 @@ pub enum CompletionItemTextFormat {
 }
 
 /// One inert completion suggestion. Fields are text-replacement data only.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct CompletionItem {
     /// Short human-readable label shown in the completion picker.
     pub label: String,
@@ -199,7 +266,19 @@ impl CompletionItem {
 
 /// Status carried alongside a `CompletionResultSet`. Inert metadata only; the
 /// client maps status to transient menu state without executing provider code.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum CompletionStatus {
     /// At least one item was produced.
     Ok,
@@ -215,7 +294,18 @@ pub enum CompletionStatus {
 /// Why a completion result was rejected before client publication. Distinct from
 /// `CompletionStatus`: rejections drop the result entirely; status publishes a
 /// (possibly empty) result set.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum CompletionRejection {
     /// The result's `document_version` is older than the document's current
     /// version (the cursor or text moved on).
@@ -254,7 +344,19 @@ pub enum CompletionRejection {
 
 /// Which item string field exceeded its per-field budget. Used by
 /// [`CompletionRejection::ItemFieldTooLong`].
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum CompletionItemField {
     Label,
     InsertText,
@@ -265,7 +367,18 @@ pub enum CompletionItemField {
 /// Bounded, versioned server-to-client completion result payload for one
 /// request. Mirrors the `DecorationSet` shape: document/version metadata, a
 /// bounded item vector, and package/built-in provenance.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct CompletionResultSet {
     pub request_id: CompletionRequestId,
     pub client_id: ClientId,
@@ -336,7 +449,19 @@ impl CompletionResultSet {
 /// Validation failure for a [`CompletionRequest`] before it is dispatched to the
 /// server-side provider lane. Distinct from [`CompletionRejection`]: request
 /// validation runs before any provider work is scheduled.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum CompletionRequestRejection {
     /// The replacement range is not ordered (`byte_start > byte_end`).
     InvalidReplacementRange,

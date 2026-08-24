@@ -39,6 +39,15 @@ raw CSS.
   `workspace.clientOpenFolderDialog`.
 - New tab starts a new session. Session picker resume reloads bounded history.
 
+## Streaming (Phase 10)
+
+Prompt, streaming, cancellation, transcript, session list/resume/delete,
+thinking, usage, and error states are rendered by the desktop client through
+one core-owned AG-UI stream (`TauriClayAgent`). The declaration above stays
+the presentation source for landing copy and action targets; the streaming
+lane adds no package JavaScript, no daemon access, and no Tauri authority.
+See the agent-surface section of the package authoring guide.
+
 ## Extension points
 
 - `chat.entrySurface` — replace or append the empty-tab landing.

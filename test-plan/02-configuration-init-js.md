@@ -63,6 +63,22 @@ cp -r examples/. ~/.config/clay/   # init.js + packages/first-party.js + package
 | C24 | Add an unknown config key or raw `Deno.core.ops.op_clay_*` call | Deny-by-default diagnostic; no undocumented authority, native widget, filesystem, network, shell, or raw-op access is granted |
 | C25 | Confirm `init.js` has no `setPackagePreset` / `clay.preset` knob; presets live in package.json | One-line `loadPackage` still enough; no new configuration key |
 
+## Plan 097 Phase 9 Tauri/React configuration steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| C26 | Open the React Command Centre, select `runtime.reloadConfiguration` | Existing server reload transaction runs; success diagnostic appears in shell status; no frontend configuration evaluator/store is created |
+| C27 | Break a watched configuration module, trigger reload, then fix it | Sanitized failure diagnostic reaches the active tab; old runtime generation/theme/package UI remains installed; fixed reload replaces it atomically |
+| C28 | Open React settings, change theme/appearance, then reload/relaunch | `preferences.json` retains the choice with `ui-session` precedence; React receives one resolved theme/runtime snapshot and does not parse raw theme data |
+| C29 | Change all typography profiles/ratios, then submit an invalid size or partial hierarchy | Valid complete transaction persists and applies once; invalid transaction is disabled client-side and rejected server-side without changing the prior preference/generation |
+
+## Plan 097 Phase 9 execution record (2026-08-23)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| C26–C27 | PASS automated / live failure edit not rerun | Existing reload/watcher atomicity suites pass; `workspace-controller` projects live diagnostics and `command-centre` tests route activation; shell footer uses latest per-tab diagnostic |
+| C28–C29 | PASS fixture + automated | Settings wide/narrow/expanded/error artifacts under `code-reviews/screenshots/2026-08-23-tauri-react-phase9/`; 83 frontend tests and Rust settings/configuration tests pass; no secret/raw theme values appear in accessibility snapshots |
+
 ## Negative checks
 
 - Configuration JavaScript runs ONLY at startup/reload — typing, scrolling,
@@ -110,3 +126,13 @@ mv ~/.config/clay/init.js.bak ~/.config/clay/init.js 2>/dev/null || rm ~/.config
 rm -rf ~/.config/clay/packages
 mv ~/.config/clay/packages.bak ~/.config/clay/packages 2>/dev/null || true
 ```
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Theme/settings surface | PASS static | `code-reviews/screenshots/2026-08-24-tauri-react-parity/settings/fixture-{wide,narrow}.png` and AX snapshots show labelled Theme/Appearance controls and disclosure state |
+| Large typography | PASS automated/static coverage | Current typography validation and bundle checks pass; static state coverage remains in `states/` and the existing typography captures |
+| Live reload/theme switching | UNRESOLVED interaction | Host cannot safely focus Clay or deliver keyboard chords. No live reload pass inferred from fixture screenshots |
+
+No configuration API or hidden authority was added by this review.

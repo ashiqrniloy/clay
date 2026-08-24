@@ -247,7 +247,7 @@ fn every_server_message() -> Vec<AgentServerMessage> {
 
 #[test]
 fn phase25_protocol_version_is_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 25);
+    assert_eq!(PROTOCOL_VERSION, 26);
 }
 
 #[test]
@@ -513,9 +513,9 @@ fn phase25_dependencies_deny_acp_agui_mcp() {
 #[test]
 fn agent_io_stays_off_paint_and_keypress() {
     let paint = common::hot_path_concat(&[
-        "src/masonry_pane_document.rs",
-        "src/masonry_welcome.rs",
-        "src/masonry_editor.rs",
+        "frontend/src/editor/ClayEditor.tsx",
+        "frontend/src/editor/extensions/controller.ts",
+        "frontend/src/editor/sync/session.ts",
     ]);
     assert_absent(
         &paint,

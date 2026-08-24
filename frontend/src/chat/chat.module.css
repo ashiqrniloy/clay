@@ -1,0 +1,149 @@
+/* Chat surface — token-only styling, blueprint-grid compartmentalization.
+   Visible 1px compartments via grid gap on contrasting surfaces. */
+
+.chat {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
+  height: 100%;
+  min-height: 0;
+  background: var(--clay-surface-main);
+  color: var(--clay-text-main);
+  border: 1px solid var(--clay-border-hairline);
+}
+
+.header {
+  display: grid;
+  gap: var(--clay-spacing-xs);
+  padding: var(--clay-spacing-lg) var(--clay-spacing-lg) var(--clay-spacing-md);
+  border-bottom: 2px solid var(--clay-border-strong);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--clay-border-hairline);
+  border-bottom: 1px solid var(--clay-border-hairline);
+}
+
+.actions > * {
+  flex: 0 0 auto;
+}
+
+.transcriptScroll {
+  overflow-y: auto;
+  min-height: 0;
+  padding: var(--clay-spacing-md) var(--clay-spacing-lg);
+  display: grid;
+  gap: var(--clay-spacing-sm);
+  align-content: start;
+  background: var(--clay-surface-panel);
+}
+
+.user,
+.assistant,
+.thinking,
+.error {
+  margin: 0;
+  max-width: 72ch;
+}
+
+.user {
+  justify-self: end;
+  padding: var(--clay-spacing-sm) var(--clay-spacing-md);
+  border: 1px solid var(--clay-border-strong);
+  background: var(--clay-surface-badge);
+}
+
+.assistant {
+  justify-self: start;
+  padding: var(--clay-spacing-sm) var(--clay-spacing-md);
+  border-left: 2px solid var(--clay-accent-primary);
+}
+
+.thinking {
+  font-family: var(--clay-font-monospace);
+}
+
+.usage {
+  justify-self: center;
+}
+
+.error [data-clay-kind],
+.error {
+  border-left: 2px solid var(--clay-diagnostic-error);
+  padding-left: var(--clay-spacing-sm);
+}
+
+.empty {
+  margin: auto;
+  padding: var(--clay-spacing-xl) 0;
+  text-align: center;
+}
+
+.sessions {
+  border-top: 1px solid var(--clay-border-hairline);
+  padding: var(--clay-spacing-sm) var(--clay-spacing-lg);
+  max-height: 30%;
+  overflow-y: auto;
+}
+
+.sessionList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  background: var(--clay-border-hairline);
+}
+
+.sessionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--clay-spacing-md);
+  padding: var(--clay-spacing-xs) var(--clay-spacing-sm);
+  background: var(--clay-surface-main);
+}
+
+.sessionId {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionActions {
+  display: inline-flex;
+  gap: var(--clay-spacing-xs);
+  flex: 0 0 auto;
+}
+
+.composerArea {
+  border-top: 2px solid var(--clay-border-strong);
+}
+
+.statusLine {
+  margin: 0;
+  padding: var(--clay-spacing-xs) var(--clay-spacing-lg);
+  border-bottom: 1px solid var(--clay-border-hairline);
+  background: var(--clay-surface-panel);
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--clay-spacing-sm);
+  padding: var(--clay-spacing-md) var(--clay-spacing-lg);
+}
+
+.composerActions {
+  display: inline-flex;
+}
+
+.footerCommands {
+  display: flex;
+  gap: 1px;
+  background: var(--clay-border-hairline);
+  border-top: 1px solid var(--clay-border-hairline);
+}

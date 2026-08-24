@@ -1,7 +1,19 @@
 use crate::protocol::{BehaviorVersion, DecorationSet, DiagnosticSet, DocumentId, DocumentVersion};
 
 /// Byte range metadata used by incremental parse notifications and results.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseByteRange {
     pub start: u64,
     pub end: u64,
@@ -41,7 +53,10 @@ impl ParseByteRange {
     Eq,
     PartialOrd,
     Ord,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase")]
 pub struct ParsePoint {
     pub row: u64,
     pub column: u64,
@@ -64,7 +79,19 @@ impl ParsePoint {
 }
 
 /// Exact server-accepted edit coordinates between consecutive document versions.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseInputEdit {
     pub base_document_version: DocumentVersion,
     pub document_version: DocumentVersion,
@@ -100,7 +127,18 @@ impl ParseInputEdit {
 }
 
 /// Server-prepared, bounded document text supplied to package parsers.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseWindowSnapshot {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -133,7 +171,19 @@ impl ParseWindowSnapshot {
 }
 
 /// Bounded parse-input policy used by generic large-file schedulers.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParsePolicy {
     pub max_window_bytes: u64,
     pub guard_bytes: u64,
@@ -158,7 +208,18 @@ impl ParsePolicy {
 }
 
 /// A package/mode parse-window request before text has been materialized.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseWindowRequest {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -171,7 +232,19 @@ pub struct ParseWindowRequest {
 }
 
 /// Retained syntax/cache memory budget metadata.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct SyntaxMemoryBudget {
     pub budget_bytes: u64,
     pub retained_bytes: u64,
@@ -195,7 +268,19 @@ impl SyntaxMemoryBudget {
 }
 
 /// Coarsest unit a package parser can update incrementally.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ParseUnit {
     File,
     Region,
@@ -203,7 +288,18 @@ pub enum ParseUnit {
 }
 
 /// Compact, versioned server-side notification sent to a package parse handler.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseEditNotification {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -220,21 +316,56 @@ pub struct ParseEditNotification {
 }
 
 /// Engine-neutral parser recovery capture before document-range translation.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct SyntaxDiagnosticCapture {
     pub byte_start: u64,
     pub byte_end: u64,
     pub kind: SyntaxDiagnosticKind,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SyntaxDiagnosticKind {
     Error,
     Missing,
 }
 
 /// Inert incremental parse update produced by a server-side package parser.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct IncrementalParseUpdate {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,

@@ -1,0 +1,47 @@
+/* Shell chrome: header/tab strip, status bar, working-area grid. Mechanical
+ * geometry: hairline dividers, zero radius, grid-anchored regions. */
+
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  background: var(--clay-surface-main);
+}
+
+.header {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  background: var(--clay-border-hairline);
+  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--clay-spacing-sm, 12px);
+  background: var(--clay-surface-panel);
+  color: var(--clay-text-muted);
+  font-size: var(--clay-text-section-size);
+  letter-spacing: 0.08em;
+  user-select: none;
+}
+
+.workingArea {
+  height: 100%;
+  min-height: 0;
+  background: var(--clay-surface-main);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-sm, 12px);
+  border-top: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+  background: var(--clay-surface-panel);
+  color: var(--clay-text-muted);
+  padding: var(--clay-spacing-xxs, 4px) var(--clay-spacing-sm, 12px);
+  font-size: var(--clay-text-status-size);
+}

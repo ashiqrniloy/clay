@@ -1,5 +1,12 @@
 # Clay: Architecture Specification
 
+> **Status: original vision document (historical).** Written before
+> implementation, this spec describes the original Masonry/Vello client
+> design. The shipped architecture keeps the server/package model below but
+> replaced the native client with a Tauri v2 + React + CodeMirror desktop
+> shell (Plan 097). Current-state documentation lives in `docs/index.md`,
+> `docs/development/architecture-ownership.md`, and the code wiki.
+
 ## 1. The Vision: A Programmable Environment
 
 Clay is not just a text editor; it is a general-purpose, AI-native application environment.

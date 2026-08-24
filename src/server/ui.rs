@@ -156,6 +156,7 @@ impl PackageUiRegistrySnapshot {
     }
 
     /// One empty-tab winner, or `Err` of sorted contribution IDs on conflict.
+    #[cfg(test)]
     pub(crate) fn empty_tab(
         &self,
     ) -> Result<Option<crate::protocol::EmptyTabContent>, Vec<String>> {
@@ -167,9 +168,55 @@ impl PackageUiRegistrySnapshot {
         candidates.sort_by(|left, right| left.id.cmp(&right.id));
         match candidates.as_slice() {
             [] => Ok(None),
-            [winner] => Ok(Some(winner.to_wire())),
+            [winner] => Ok(Some(
+                winner.to_wire(crate::protocol::PackageUiTrustDomain::ThirdParty),
+            )),
             many => Err(many.iter().map(|entry| entry.id.clone()).collect()),
         }
+    }
+
+    pub(crate) fn wire_snapshot(
+        &self,
+        version: u64,
+        trust_domain: impl Fn(&UiContributionProvenance) -> crate::protocol::PackageUiTrustDomain,
+    ) -> Result<crate::protocol::PackageUiSnapshot, Vec<String>> {
+        let empty_tab = {
+            let mut candidates: Vec<_> = self
+                .pane_contents
+                .iter()
+                .filter(|entry| entry.activation == "empty-tab")
+                .collect();
+            candidates.sort_by(|left, right| left.id.cmp(&right.id));
+            match candidates.as_slice() {
+                [] => None,
+                [winner] => Some(winner.to_wire(trust_domain(&winner.provenance))),
+                many => return Err(many.iter().map(|entry| entry.id.clone()).collect()),
+            }
+        };
+        Ok(crate::protocol::PackageUiSnapshot {
+            version,
+            empty_tab,
+            panels: self
+                .panels
+                .iter()
+                .map(|panel| panel.to_wire(trust_domain(&panel.provenance)))
+                .collect(),
+            overlays: self
+                .overlays
+                .iter()
+                .map(|overlay| overlay.to_wire(trust_domain(&overlay.provenance)))
+                .collect(),
+            components: self
+                .components
+                .iter()
+                .map(|component| component.to_wire(trust_domain(&component.provenance)))
+                .collect(),
+            input_routes: self
+                .input_contributions
+                .iter()
+                .map(|input| input.to_wire(trust_domain(&input.provenance)))
+                .collect(),
+        })
     }
 }
 
@@ -186,6 +233,7 @@ pub(crate) struct RegisteredPanelContribution {
     pub(crate) slot: String,
     pub(crate) default_visibility: String,
     pub(crate) component_id: String,
+    pub(crate) component_json: String,
     pub(crate) component_tree: PackageUiComponentTree,
     pub(crate) action_targets: Vec<String>,
     pub(crate) provenance: UiContributionProvenance,
@@ -204,12 +252,47 @@ pub(crate) struct RegisteredPaneContentContribution {
     pub(crate) estimated_payload_bytes: usize,
 }
 
+impl UiContributionProvenance {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::PackageUiProvenance {
+        crate::protocol::PackageUiProvenance {
+            package_name: self.package_name.clone(),
+            package_version: self.package_version.clone(),
+            api_prefix: self.api_prefix.clone(),
+            trust_domain,
+        }
+    }
+}
+
+impl RegisteredPanelContribution {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::PackagePanelContent {
+        crate::protocol::PackagePanelContent {
+            id: self.id.clone(),
+            slot: self.slot.clone(),
+            visibility: self.default_visibility.clone(),
+            component_json: self.component_json.clone(),
+            action_targets: self.action_targets.clone(),
+            provenance: self.provenance.to_wire(trust_domain),
+        }
+    }
+}
+
 impl RegisteredPaneContentContribution {
-    fn to_wire(&self) -> crate::protocol::EmptyTabContent {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::EmptyTabContent {
         crate::protocol::EmptyTabContent {
             id: self.id.clone(),
             package_name: self.provenance.package_name.clone(),
             component_json: self.component_json.clone(),
+            action_targets: self.action_targets.clone(),
+            provenance: self.provenance.to_wire(trust_domain),
         }
     }
 }
@@ -217,6 +300,7 @@ impl RegisteredPaneContentContribution {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisteredComponentContribution {
     pub(crate) id: String,
+    pub(crate) component_json: String,
     pub(crate) root_kind: String,
     pub(crate) component_count: usize,
     pub(crate) style_variable_count: usize,
@@ -232,10 +316,42 @@ pub(crate) struct RegisteredTransientOverlayContribution {
     pub(crate) focus_policy: String,
     pub(crate) dismissal_policy: String,
     pub(crate) component_id: String,
+    pub(crate) component_json: String,
     pub(crate) component_tree: PackageUiComponentTree,
     pub(crate) action_targets: Vec<String>,
     pub(crate) provenance: UiContributionProvenance,
     pub(crate) estimated_payload_bytes: usize,
+}
+
+impl RegisteredComponentContribution {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::PackageComponentContent {
+        crate::protocol::PackageComponentContent {
+            id: self.id.clone(),
+            component_json: self.component_json.clone(),
+            action_targets: self.action_targets.clone(),
+            provenance: self.provenance.to_wire(trust_domain),
+        }
+    }
+}
+
+impl RegisteredTransientOverlayContribution {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::PackageOverlayContent {
+        crate::protocol::PackageOverlayContent {
+            id: self.id.clone(),
+            anchor: self.anchor.clone(),
+            focus_policy: self.focus_policy.clone(),
+            dismissal_policy: self.dismissal_policy.clone(),
+            component_json: self.component_json.clone(),
+            action_targets: self.action_targets.clone(),
+            provenance: self.provenance.to_wire(trust_domain),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -263,6 +379,27 @@ pub(crate) struct RegisteredPackageInputContribution {
     pub(crate) action_targets: Vec<String>,
     pub(crate) provenance: UiContributionProvenance,
     pub(crate) estimated_payload_bytes: usize,
+}
+
+impl RegisteredPackageInputContribution {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::PackageInputRouteContent {
+        crate::protocol::PackageInputRouteContent {
+            id: self.id.clone(),
+            scope: self.scope.clone(),
+            component_id: self.component_id.clone(),
+            pointer_click: self.pointer_click.clone(),
+            pointer_action: self.pointer_action.clone(),
+            pointer_drag: self.pointer_drag.clone(),
+            focus_policy: self.focus_policy.clone(),
+            selection_policy: self.selection_policy.clone(),
+            context_modes: self.context_modes.clone(),
+            action_targets: self.action_targets.clone(),
+            provenance: self.provenance.to_wire(trust_domain),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -459,6 +596,7 @@ impl PackageUiRegistry {
             slot: slot.to_string(),
             default_visibility: default_visibility.to_string(),
             component_id,
+            component_json: component_value.to_string(),
             component_tree,
             action_targets,
             provenance: UiContributionProvenance::from(package),
@@ -602,6 +740,7 @@ impl PackageUiRegistry {
         action_targets.dedup();
         let registered = RegisteredComponentContribution {
             id: id.clone(),
+            component_json: declaration.to_string(),
             root_kind,
             component_count: component_context.component_count,
             style_variable_count: component_context.style_variable_count,
@@ -699,6 +838,7 @@ impl PackageUiRegistry {
             focus_policy: focus_policy.to_string(),
             dismissal_policy: dismissal_policy.to_string(),
             component_id,
+            component_json: component_value.to_string(),
             component_tree,
             action_targets,
             provenance: UiContributionProvenance::from(package),
@@ -2116,6 +2256,18 @@ mod tests {
         assert!(runtime.has_fixed_panels());
         assert!(runtime.fixed_panel_for_slot(FixedSlotId::Right).is_some());
         assert_eq!(runtime.transient_overlay_count(), 1);
+        let wire = snapshot
+            .wire_snapshot(8, |_| crate::protocol::PackageUiTrustDomain::Trusted)
+            .expect("one pane-content winner");
+        assert_eq!(wire.version, 8);
+        assert_eq!(wire.panels.len(), 1);
+        assert_eq!(wire.overlays.len(), 1);
+        assert_eq!(wire.components.len(), 2);
+        assert_eq!(
+            wire.panels[0].provenance.trust_domain,
+            crate::protocol::PackageUiTrustDomain::Trusted
+        );
+        assert!(serde_json::from_str::<Value>(&wire.panels[0].component_json).is_ok());
         assert!(
             package
                 .clay

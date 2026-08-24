@@ -1,5 +1,9 @@
 # Masonry Shell Runtime
 
+> **Historical implementation — removed by Plan 097 Phase 12.** See
+> [Tauri/React Desktop Cutover](tauri-react-cutover.md) and
+> [React Tabs, Splits, and Layout Persistence](react-tabs-and-splits.md).
+
 ## Source
 
 - `src/masonry_shell/mod.rs`

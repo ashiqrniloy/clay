@@ -11,8 +11,9 @@ trees, and per-pane documents across full restarts — plus the Phase 22.7
 tab-bar overflow scroll (cards shrink to a 100 px minimum, then the strip
 scrolls under the wheel). Deep references:
 `docs/reference/primitives/shell-layout-strategy.md` (Phase 22.3 + 22.4 +
-22.5 sections), `docs/wiki/modules/masonry-shell.md` (tab bar + lifecycle),
-`docs/wiki/modules/tabs-and-clients.md` (registry + driver policies),
+22.5 sections), `docs/wiki/modules/react-tabs-and-splits.md` (React tab bar
++ lifecycle), `docs/wiki/modules/tabs-and-clients.md` (registry + driver
+policies),
 `docs/wiki/modules/multi-document-sessions.md` (reconnect restoration),
 `docs/reference/clay-js-api/shell/client-tab-*.md` + `examples/init.js`
 sections 7–8 (the tab command IDs/chords and per-active-tab pane
@@ -185,9 +186,10 @@ At a ~900 px window, 5 cards still fit (the last card shrinks to ~124 px)
 and overflow starts at 6+ cards. The `+` affordance stays pinned at the
 bar's right edge; cards clip at its left boundary. Deep reference:
 `docs/reference/ui-components.md` Tabs row (Phase 22.7 scroll behavior).
-Automated equivalents: `tab_bar_cards_never_below_min_width`,
-`tab_bar_wheel_scroll_clamps`, `tab_bar_hit_test_honors_scroll`, and
-`activating_offscreen_tab_scrolls_it_into_view` in `src/masonry_shell.rs`.
+Automated equivalents: the tab-bar minimum-width clamp and scroll styles
+(`frontend/src/app/layout/tab-bar.module.css`) plus the Plan 097 Phase 12
+review captures (`code-reviews/screenshots/2026-08-24-tauri-react-parity/tabs-splits/`);
+the Masonry-era unit tests were removed with the native client.
 
 Setup: use `Ctrl+T` (or `+`) to open workspaces `/tmp/clay-manual`,
 `/tmp/clay-manual-tab2`, … `/tmp/clay-manual-tab7` (8 tabs total), then
@@ -370,3 +372,11 @@ roots containing distinct filenames/content.
 | T74 | PASS structural | Dark/light captures and bundled contrast tests pass; no raw colors were introduced |
 | T75 | PASS live | `code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/recovery/` shows `Connection lost` / `Connection: Disconnected` consistently in the welcome panel, status chrome, and AT-SPI tree after the `request_welcome_render` fix; the Plan 088 P1 stale WelcomeWidget Connected status is resolved |
 | T76 | PASS structural | `high_dpi_layout_uses_logical_bounds_from_physical_size` passes; live DPI/window resize is covered by the multi-window smoke test (module 01 L20) |
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Tab bar/single workspace | PASS static/real AT-SPI | Fixture captures expose `Window tabs`/selected Workspace; `tabs-splits/accessibility.txt` confirms the real Tauri tree |
+| Tab/split persistence and switching | PASS automated; UNRESOLVED physical interaction | Layout/persistence/controller tests pass; host keyboard/window targeting prevented a live switch/reload sequence |
+| Tab labels and path privacy | PASS | Real and fixture trees expose workspace/document basenames only; no retained PNG includes a host absolute path |

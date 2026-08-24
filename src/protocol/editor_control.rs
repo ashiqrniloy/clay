@@ -16,7 +16,18 @@ pub const MAX_EDITOR_COMMAND_MODE_ID_BYTES: usize = 128;
 /// (movement/selection/caret/multi-cursor/textobject/smart-select). The
 /// client drops unknown IDs silently; stale or malformed requests never
 /// mutate document text.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorCommandRequest {
     /// Direction-specific argless editor command ID, e.g.
     /// `editor.clientMoveCursor.nextWordStart`.

@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSetViewport
 js_facade: runtime/js/editor.js::clientSetViewport
-backing_rust: src/editor/surface/mod.rs::EditorSurface::update_visible_line_count_for_height
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_editor_set_viewport
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_set_viewport
 name: clientSetViewport
@@ -104,8 +104,8 @@ Use `editor.clientSetViewport` when the user asks for set editor viewport throug
 
 - JS facade: `runtime/js/editor.js::clientSetViewport`
 - Future Deno op: `src/server/ops/editor.rs::op_clay_editor_set_viewport` (`op_clay_editor_set_viewport`)
-- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::update_visible_line_count_for_height`
-- Current implementation audit path: `src/editor/viewport.rs::Viewport; src/editor/buffer.rs::EditorBuffer::visible_snapshot`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Current implementation audit path: `src/client_commands.rs::EditorClientCommand (client-local viewport state)`
 
 ## Lookup metadata
 

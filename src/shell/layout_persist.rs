@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Reads legacy layout.json while React owns live layout operations.
+
 //! Layout persistence for the clay window.
 //!
 //! Serializes to `$XDG_CONFIG_HOME/clay/layout.json` (or `~/.config/clay/layout.json`).
@@ -367,6 +369,25 @@ pub fn save_window_state(state: &PersistedWindowState) {
 /// bootstrap in every case (a v1 file still applies through the 20.3 path).
 pub fn load_window_state() -> Option<PersistedWindowState> {
     parse_window_state(&load_layout()?)
+}
+
+/// Validated v2 JSON for the Tauri bridge. Hostile/legacy documents yield `None`.
+pub fn load_window_state_json() -> Option<serde_json::Value> {
+    load_window_state().map(|state| serialize_window_state(&state))
+}
+
+/// Parse-only: `None` when the document is not a usable v2 window state.
+pub fn parse_window_state_json(value: &serde_json::Value) -> Option<serde_json::Value> {
+    parse_window_state(value).map(|state| serialize_window_state(&state))
+}
+
+/// Persist a frontend-supplied v2 document after the same structural
+/// validation as `parse_window_state`. Rejects hostile input.
+pub fn save_window_state_from_json(value: &serde_json::Value) -> Result<(), String> {
+    let state = parse_window_state(value)
+        .ok_or_else(|| "layout rejected: not a valid v2 window state".to_string())?;
+    save_window_state(&state);
+    Ok(())
 }
 
 /// Load the raw layout document (v1 or v2 shape); `None` on missing/corrupt.

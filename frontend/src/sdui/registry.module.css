@@ -1,0 +1,54 @@
+.surface,
+.panel,
+.container,
+.column {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-sm, 12px);
+}
+
+.surface {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--clay-surface-panel);
+  color: var(--clay-text-primary);
+  padding: var(--clay-spacing-md, 16px);
+}
+
+.panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--clay-surface-panel);
+  padding: 0;
+}
+
+.row {
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--clay-spacing-xs, 8px);
+}
+
+.stack {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  gap: var(--clay-spacing-xs, 8px);
+}
+
+.scroll {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-color: var(--clay-surface-scrollbar)
+    var(--clay-surface-scrollbar-track);
+}
+
+.scroll:focus-visible {
+  outline: var(--clay-dimension-border-thin, 2px) solid var(--clay-focus-ring);
+  outline-offset: calc(-1 * var(--clay-dimension-border-thin, 2px));
+}

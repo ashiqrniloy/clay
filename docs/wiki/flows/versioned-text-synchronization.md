@@ -1,5 +1,7 @@
 # Versioned Text Synchronization
 
+> Native-client portions (`EditorSurface`/`EditorWidget`) are historical; the optimistic-version/shadow/resync semantics remain implemented in the retained `clay::client` module and the current frontend path is [Frontend Edit Synchronization](frontend-edit-synchronization.md).
+
 ## Source
 
 - `src/protocol/mod.rs`

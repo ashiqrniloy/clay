@@ -16,7 +16,7 @@ This document is architecture-only. It introduces no runtime code in Phase 16.
 Incremental parsing must not participate in the ordinary keypress-to-local-paint path.
 
 - Local predictable edits remain `ClientFirstPredictable` behavior-manifest work on the Rust client.
-- Parse tasks are `Background` routing policy tasks and must not delay input handling, client shadow updates, Masonry text-event handlers, or paint.
+- Parse tasks are `Background` routing policy tasks and must not delay input handling, client shadow updates, or client render/input work.
 - The typing hot path must stay within `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS`; parse scheduling and result publication are asynchronous follow-up work.
 - Parse notifications and results are bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` and parse-produced decoration payloads are additionally bounded by `DECORATION_PAYLOAD_BUDGET_BYTES` before client delivery.
 - A slow or unavailable package parser degrades decoration freshness only; it never prevents the client from showing the locally edited text.
@@ -94,7 +94,7 @@ A future `src/server/parse_coordinator.rs` is the preferred attachment point bec
 
 ## Parse Result Shape
 
-Package parse handlers return inert data. They do not return executable renderers, client callbacks, raw ops, or direct Masonry/Vello instructions.
+Package parse handlers return inert data. They do not return executable renderers, client callbacks, raw ops, or direct renderer instructions.
 
 ```text
 ParseResult {

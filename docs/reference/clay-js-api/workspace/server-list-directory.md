@@ -47,7 +47,7 @@ List a bounded page of workspace-root-relative file entries with server ignore r
 
 `serverListDirectory` is the Phase 18.12 runtime-backed Clay JS API for **List Directory**. It is exposed through the curated `clay:workspace` facade so package/configuration/runtime code does not call raw ops or Rust internals.
 
-This API is server-first background/action work. It snapshots root authority under the workspace lock, then traverses through a bounded blocking worker without holding that lock. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths.
+This API is server-first background/action work. It snapshots root authority under the workspace lock, then traverses through a bounded blocking worker without holding that lock. It must not run in ordinary typing, client paint, client layout, pointer, scroll, keypress, or text-event hot paths.
 
 ## When to use
 

@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: toggleInlayHints
 js_facade: runtime/js/editor.js::toggleInlayHints
-backing_rust: src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command; src/editor/surface/mod.rs::EditorSurface::toggle_inlay_hints
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: toggleInlayHints
@@ -33,7 +33,7 @@ Returns the stable command ID `editor.toggleInlayHints` for showing or hiding in
 
 ## Description
 
-The facade only returns a command ID. After explicit routing, `EditorSurface::toggle_inlay_hints` flips a client-local visibility override. Inlay labels remain inert decoration data; Clay owns overlay paint and does not reflow the main Parley layout. Code-mode chrome defaults inlays on, while prose-mode chrome defaults them off, unless the local override is set.
+The facade only returns a command ID. After explicit routing, the CodeMirror decorations extension (`frontend/src/editor/extensions/decorations.ts`) flips a client-local visibility override. Inlay labels remain inert decoration data; CodeMirror owns overlay paint and wrapping. Code-mode chrome defaults inlays on, while prose-mode chrome defaults them off, unless the local override is set.
 
 ## When to use
 
@@ -96,9 +96,9 @@ Prefer this command for user visibility control. Do not add a new LSP capability
 
 - JS facade: `runtime/js/editor.js::toggleInlayHints`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key`
-- Command mapping: `src/masonry_editor.rs::EditorClientCommand::from_command_id`
-- Local state: `src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command` and `src/editor/surface/mod.rs::EditorSurface::toggle_inlay_hints`
-- Inlay publication/paint: `packages/lsp-shared/bridge.js`, `src/protocol/decorations.rs`, and `src/editor/surface/mod.rs`
+- Command mapping: `src/client_commands.rs::EditorClientCommand`
+- Local state: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)` and `src/client_commands.rs::EditorClientCommand`
+- Inlay publication/paint: `packages/lsp-shared/bridge.js`, `src/protocol/decorations.rs`, and the React/CodeMirror decorations extension `frontend/src/editor/extensions/decorations.ts`
 
 ## Lookup metadata
 

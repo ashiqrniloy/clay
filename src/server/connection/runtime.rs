@@ -65,10 +65,9 @@ pub(super) async fn execute_command_intent(
         // change applies live through the canonical apply path (persist →
         // reload → init.js re-eval + preferences apply → RuntimeStateSnapshot
         // fanout). `setTheme`/`setAppearance` carry their value as
-        // `arguments.item_id`; `setTypography` has no value payload yet (free-
-        // form textInput value carriage is a follow-up protocol task), so it
-        // validates and acknowledges without persisting. `settings.reset`
-        // clears the persisted preferences store.
+        // `arguments.item_id`; `setTypography` carries one bounded complete
+        // typography JSON argument that is revalidated before persistence.
+        // `settings.reset` clears the persisted preferences store.
         let validated = match executor.execute_settings(request.clone()) {
             Ok(result) => result,
             Err(error) => {
@@ -81,6 +80,10 @@ pub(super) async fn execute_command_intent(
                 });
             }
         };
+        let client_projection = matches!(
+            validated.command_id.as_str(),
+            "settings.open" | "settings.close"
+        );
         if let Some(server) = reload_server {
             match persist_settings_change(server, &validated.command_id, &request.arguments).await {
                 Ok(PersistOutcome::Reloaded(outcome)) => {
@@ -104,7 +107,9 @@ pub(super) async fn execute_command_intent(
                 }
             }
         }
-        return None;
+        return client_projection.then_some(ServerMessage::ShellClientCommandRequest {
+            command_id: validated.command_id,
+        });
     }
 
     if crate::server::command_execution::is_chat_command(&request.command_id) {
@@ -204,8 +209,7 @@ pub(super) enum PersistOutcome {
     /// Preference persisted and the runtime reloaded; the reload outcome is
     /// forwarded so the caller can surface any reload diagnostic.
     Reloaded(crate::server::RuntimeReloadOutcome),
-    /// Command acknowledged without persistence (e.g. `settings.open`,
-    /// `settings.close`, `settings.setTypography` which has no value payload).
+    /// Command acknowledged without persistence (`settings.open`/`settings.close`).
     Acknowledged,
 }
 
@@ -219,10 +223,10 @@ pub(super) async fn persist_settings_change(
     arguments: &serde_json::Value,
 ) -> Result<PersistOutcome, String> {
     use crate::server::configuration::ConfigurationRuntime;
-    let Some(config_root) = server.config.configuration_root.as_ref() else {
-        return Err("settings persistence requires a configured configuration root".to_string());
+    let Some(config_root) = server.effective_configuration_root() else {
+        return Err("settings persistence requires an active configuration root".to_string());
     };
-    let runtime = ConfigurationRuntime::from_config_root(config_root)
+    let runtime = ConfigurationRuntime::from_config_root(&config_root)
         .map_err(|error| format!("settings persistence root error: {error}"))?;
     let should_reload = match command_id {
         "settings.setTheme" => {
@@ -243,14 +247,27 @@ pub(super) async fn persist_settings_change(
                 .map(|_| true)
                 .map_err(|error| format!("settings.setAppearance persistence failed: {error}"))?
         }
+        "settings.setTypography" => {
+            let raw = arguments
+                .as_object()
+                .and_then(|object| object.get("typography"))
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| {
+                    "settings.setTypography requires a complete typography argument".to_string()
+                })?;
+            let value: serde_json::Value = serde_json::from_str(raw)
+                .map_err(|_| "settings.setTypography typography is not valid JSON".to_string())?;
+            crate::server::ops::typography::validate_typography_request(&value)?;
+            runtime
+                .persist_preference("typography", value)
+                .map(|_| true)
+                .map_err(|error| format!("settings.setTypography persistence failed: {error}"))?
+        }
         "settings.reset" => runtime
             .clear_preferences()
             .map(|_| true)
             .map_err(|error| format!("settings.reset failed: {error}"))?,
-        // settings.open / settings.close / settings.setTypography: no
-        // persistable value yet (setTypography free-form value carriage is a
-        // follow-up protocol task). Acknowledge without reloading.
-        "settings.open" | "settings.close" | "settings.setTypography" => false,
+        "settings.open" | "settings.close" => false,
         _ => false,
     };
     if should_reload {
@@ -578,12 +595,39 @@ pub(super) async fn handle_sdui_action<S>(
     tab_registry: &Arc<Mutex<TabRegistry>>,
     reload_server: Option<&IpcServer>,
     client_id: ClientId,
+    ui_version: u64,
     intent: SduiActionIntent,
     bound_tab_id: Option<TabId>,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let package_action = runtime_generation
+        .latest_runtime_snapshot_for(client_id)
+        .await
+        .is_some_and(|snapshot| {
+            snapshot
+                .package_ui
+                .allows_action(ui_version, &intent.command_id)
+        });
+    if !package_action {
+        let validation_response = {
+            let state = sdui.lock().await;
+            if state.cloned_tree_or_default().ui_version != ui_version {
+                Some(ServerMessage::Error {
+                    code: ProtocolErrorCode::InvalidMessage,
+                    message: "SDUI action version is stale".to_string(),
+                })
+            } else {
+                sdui_action_response(&state, &intent)
+            }
+        };
+        if let Some(response) = validation_response {
+            codec.write_server_message(stream, &response).await?;
+            return Ok(());
+        }
+    }
+
     if intent.command_id == "chat.submit" || intent.command_id == "chat.cancel" {
         if let Some(host) = reload_server.map(|server| &server.agent) {
             let tab = bound_tab_id.unwrap_or(client_id);
@@ -642,14 +686,6 @@ where
                     .await?;
             }
         }
-        return Ok(());
-    }
-    let validation_response = {
-        let state = sdui.lock().await;
-        sdui_action_response(&state, &intent)
-    };
-    if let Some(response) = validation_response {
-        codec.write_server_message(stream, &response).await?;
         return Ok(());
     }
     let response = execute_command_intent(
@@ -769,6 +805,17 @@ where
         }
         return Ok(());
     }
+    let is_client_ui =
+        manifest_allows_client_ui(behavior.lock().await.manifest_for(document_id), &command_id);
+    if is_client_ui {
+        codec
+            .write_server_message(
+                stream,
+                &ServerMessage::ShellClientCommandRequest { command_id },
+            )
+            .await?;
+        return Ok(());
+    }
     if command_id == "chat.cancel"
         && let Some(host) = reload_server.map(|server| &server.agent)
     {
@@ -798,6 +845,19 @@ where
         codec.write_server_message(stream, &response).await?;
     }
     Ok(())
+}
+
+fn manifest_allows_client_ui(manifest: &BehaviorManifest, command_id: &str) -> bool {
+    if matches!(
+        command_id,
+        "documents.clientOpenFileDialog" | "workspace.clientOpenFolderDialog"
+    ) {
+        return true;
+    }
+    manifest.commands.iter().any(|command| {
+        command.command_id == command_id
+            && command.routing_policy == crate::protocol::RoutingPolicy::ClientUiCommand
+    })
 }
 
 #[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
@@ -1067,4 +1127,26 @@ where
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_ui_projection_requires_exact_manifest_declaration() {
+        let manifest = BehaviorManifest::minimal_text_editing(1);
+        assert!(manifest_allows_client_ui(
+            &manifest,
+            "documents.clientOpenFileDialog"
+        ));
+        assert!(!manifest_allows_client_ui(
+            &manifest,
+            "documents.clientOpenFileDialog.evil"
+        ));
+        assert!(!manifest_allows_client_ui(
+            &manifest,
+            "runtime.reloadConfiguration"
+        ));
+    }
 }

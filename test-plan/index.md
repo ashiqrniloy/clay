@@ -25,6 +25,49 @@ ligature glyphs, IME feel, native dialogs, focus, timing.
   module file lists the files it needs, or points at a shared setup).
 - Font for ligature checks: Fira Code (`FiraCode Nerd Font Mono` works).
 
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+Current desktop launch is Tauri v2 + React: `clay` and `clay client` launch
+`clay-desktop`; `clay server` remains standalone. The dated review artifact is
+`code-reviews/screenshots/2026-08-24-tauri-react-parity/`.
+
+The review retains 20 app-only CDP screenshots and paired AX snapshots at
+1440×900 and 780×900 for editor, intelligence, package UI, settings,
+Command Centre (active/empty), Path Browser, Chat, splits, and combined
+loading/empty/error states. Real Tauri AT-SPI dumps cover welcome, opened
+editor, tabs/splits, and Chat. Static visual and rest-state accessibility checks
+pass. Keyboard-only completion, command/path activation, native dialog,
+settings, and tab/pane interaction remain explicitly `UNRESOLVED`: this host
+has denied `/dev/uinput`, no `xdotool`/`ydotool`, and no Wayland portal path that
+can target Clay. Full-desktop portal screenshots with unrelated windows were
+removed; no retained screenshot contains host paths or secrets.
+
+Review fixes: editor labels no longer expose an absolute workspace fallback,
+and the shell connection status is a polite live region. The only low-priority
+follow-up is the unselected Settings theme control's repeated `Theme Theme`
+accessible name. See the per-module records below and
+`docs/development/accessibility.md` for the current role contract.
+
+## Plan 097 manual-test-plan execution record (2026-08-24, post-cutover)
+
+Executed against the current `target/debug/clay` / `clay-desktop` Tauri build
+via `scripts/capture-ui-review.sh` (isolated config/data/workspace per run):
+
+| Fixture | Result | Evidence/notes |
+|---|---|---|
+| ui-review-default | PASS | AT-SPI tree exposes `clay-desktop` frame, `Clay workspace`, `Window tabs` page-tab list (selected `Workspace` tab), `Pane 1`, named Open File/Open Folder actions, and status bar |
+| ui-review-large-typography | PASS | Large UI typography renders in bounds; controls legible |
+| ui-review-command-centre | UNRESOLVED | Interactive state requires a TTY for keyboard capture — documented host ceiling (no `/dev/uinput`, no xdotool/ydotool, no Wayland portal input path) |
+| ui-review-error | UNRESOLVED | New finding: the sanitized runtime diagnostic never appears in an AT-SPI name dump because WebKitGTK does not expose static text inside the footer/live region as accessible names or Text-interface content (verified with a targeted AtspiText probe; even the `Connected` status text is invisible to AT-SPI). Diagnostic delivery itself is covered by automated tests (server diagnostic broadcast → workspace-controller handling → `app-shell.tsx` resolvedStatus render). Follow-up: expose footer/live-region text to AT-SPI, then re-enable this step |
+| Frontend production build budgets | PASS | shell 160.6/180 kB gzip; total 343.2/400 kB gzip |
+
+Modules 05 (movement/selection), 06 (multi-cursor), and 12 (Windows) received
+dated status records below: interactive keyboard steps stay UNRESOLVED on this
+host; their logic is pinned by frontend editor tests and CodeMirror built-ins.
+Stale native-era step references (deleted Masonry unit tests and wiki deep
+references) were replaced with current equivalents in modules 01, 04, 07, 10,
+13, and 14 — no existing behavior step was weakened.
+
 ## Module map
 
 | # | Module file | Covers | Deep-reference doc |
@@ -42,7 +85,7 @@ ligature glyphs, IME feel, native dialogs, focus, timing.
 | 11 | [Performance](11-performance.md) | large files, scroll/type latency, parse feel, window-model budgets (22.6: pane paint / tab switch / decoration aggregate), centered Command Centre rendering feel (24.4: one panel + scrim, width clamping, no duplicate overlays, no blur jank), Command Centre open/filter feel + chord pending feel (24.5 advisory budgets), completion popup feel/caps (Plan 087), Plan 088 responsive/high-DPI/typography geometry, and Phase 28 fold/link/inlay/ranking budgets | `docs/development/performance.md` |
 | 12 | [Platform: Windows](12-platform-windows.md) | MSVC toolchain, named pipes, native dialogs | `docs/development/windows.md` |
 | 13 | [Window splits](13-window-splits.md) | split/close/add-equal/move/resize panes, pane focus policies, per-pane document views + concurrent modes (22.2), Phase 22.8 per-tab multi-document isolation, shell keybinding overrides (per active tab since 22.3), direction-named split aliases (22.7), per-tab persistence cross-check (22.5), pane a11y roles + split/pane announcements (22.6) | `docs/reference/primitives/shell-layout-strategy.md`, `docs/development/accessibility.md` |
-| 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, selected-root tab binding and per-tab workspace/document isolation (22.8), open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), tab a11y (TabList/Tab roles, activate/create/close announcements) + cross-tab grant isolation/denial checks (22.6/22.8), tab-bar overflow scroll (22.7), active-typography geometry and sanitized tab labels (Plan 088), single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/masonry-shell.md`, `docs/wiki/modules/tabs-and-clients.md`, `docs/development/accessibility.md` |
+| 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, selected-root tab binding and per-tab workspace/document isolation (22.8), open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), tab a11y (TabList/Tab roles, activate/create/close announcements) + cross-tab grant isolation/denial checks (22.6/22.8), tab-bar overflow scroll (22.7), active-typography geometry and sanitized tab labels (Plan 088), single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/react-tabs-and-splits.md`, `docs/wiki/modules/tabs-and-clients.md`, `docs/development/accessibility.md` |
 
 ## Coverage matrix (what to run when)
 
@@ -67,10 +110,34 @@ ligature glyphs, IME feel, native dialogs, focus, timing.
 | Plan 089 validation, performance, timeout diagnostics, and multi-window/scale/Wayland platform checks | 01 (L18–L22), 04 (E22–E24), 07 (T15/T18–T19), 09 (P16–P21), 10 (K73–K77), 11 (Q15–Q19), 13 (S36–S42), 14 (T71–T76) |
 | Phase 26 rendering quality (theme color/background/scale axes, heading size ladder, wrap policies, editor chrome, decoration backgrounds, dirty-pane close fix) | 04 (E25–E27), 07 (T20–T27), 08 (S16–S19), 09 (P22–P24), 11 (Q20–Q23), 13 (S43–S46) |
 | Phase 28 editor commands/intelligence (comment/list/heading transforms, package keymaps, folding, links, inlays, completion ranking, editable-text accessibility) | 01 launch gate, 04 (E28–E36), 08 (S21–S32), 09 (P29–P31), 10 (K78–K83), 11 (Q24–Q27) |
+| Plan 097 Phase 8 React SDUI/package UI and trust domains | 01 launch gate, 09 (P32–P36), 11 (Q28–Q30) |
+| Plan 097 Phase 9 React Command Centre, paths, configuration, settings, and desktop workflows | 01 launch gate, 02 (C26–C29), 03 (F42–F47), 09 (P37–P42), 10 (K85–K91), 11 (Q31–Q33) |
+| Plan 097 Phase 5 CodeMirror editing + optimistic document sync | 04 (E-series), 03 (open/save/reload), 11 (type latency) |
+| Plan 097 Phase 6 panes/splits/tabs/per-tab workspaces/persistence | 13, 14, 03 (workspace roots), 01 (reconnect) |
+| Plan 097 Phase 7 editor interaction/rendering/completions/language intelligence | 04, 05, 06, 07, 08, 11 |
+| Plan 097 Phase 10 AG-UI chat over Tauri channels | 09 (@clay/chat surface), 10 (chat intents), 11 (stream feel) |
+| Plan 097 Phase 11 release hardening/packaging/updates/security | 01 (launch identity), 11 (budgets), 12 (platform policy) |
+| Plan 097 Phase 12 parity certification/cutover/native removal | 01, 13, 14 + full regression pass of modules above |
+
+## Plan 097 Phase 9 Linux execution record (2026-08-23)
+
+React fixture review covered active/empty/narrow Command Centre, labelled
+search/listbox/options/live count, settings collapsed/expanded/narrow/invalid
+states, and token-only containment. Evidence:
+`code-reviews/screenshots/2026-08-23-tauri-react-phase9/`. C26–C29,
+F42–F47, P37–P42, and K85–K91 record exact automated/live boundaries.
+`computer-use-linux_get_app_state` ran first; AT-SPI worked but development
+keyboard input was unavailable, so CDP supplied DOM interaction/accessibility
+evidence and native picker selection remains explicitly blocked. No existing
+step was removed or weakened.
+
+## Plan 097 Phase 8 Linux execution record (2026-08-23)
+
+React fixture review covered package slots, SDUI editor composition, settings controls, status contribution, dropdown interaction, narrow/wide layout, and large typography. Evidence: `code-reviews/screenshots/2026-08-23-tauri-react-phase8/`. P32–P36 and Q28–Q30 record exact automated/live boundaries. CDP provided the rendered accessibility tree because AT-SPI exposed only the Chrome frame and compositor targeting omitted Chrome-for-Testing. No existing step was removed or weakened.
 
 ## Plan 088 task 12 Linux execution record (2026-08-15)
 
-Executed against the current `cargo build` on real Linux/GNOME Wayland. Mandatory UI preflight for this task was `npx ui-skills start`; selected review skills were `wshobson/wcag-audit-patterns` (accessibility/testing) and `vercel-labs/web-design-guidelines` (visual/accessibility), translated to Clay's native Masonry/token/AT-SPI context. `computer-use-linux get_app_state` and `doctor` ran before launch; AT-SPI/screenshot capture works, but `can_query_windows=false` and `can_focus_windows=false`, so targeted keyboard, resize, and native-dialog actions are not claimed as passes.
+Executed against the current `cargo build` on real Linux/GNOME Wayland. Mandatory UI preflight for this task was the UI guidance current at execution time; selected review skills were `wshobson/wcag-audit-patterns` (accessibility/testing) and `vercel-labs/web-design-guidelines` (visual/accessibility), applied to Clay's token/AT-SPI context. `computer-use-linux get_app_state` and `doctor` ran before launch; AT-SPI/screenshot capture works, but `can_query_windows=false` and `can_focus_windows=false`, so targeted keyboard, resize, and native-dialog actions are not claimed as passes.
 
 | Modules/steps | Result | Evidence |
 |---|---|---|
@@ -167,7 +234,7 @@ covered by the automated suites named in each module record.
 ## Phase 28 manual test-plan execution record (2026-08-20)
 
 Executed against a fresh `cargo build --bin clay` on real Linux/GNOME
-Wayland. UI preflight for this task: `npx ui-skills start`; categories
+Wayland. UI preflight for this task: the UI guidance current at execution time; categories
 `accessibility` and `testing` inspected; selected
 `jakubkrehel/better-accessibility`. AT-SPI and xdg-desktop-portal captures were
 available. Full evidence: `code-reviews/screenshots/2026-08-20-phase28-manual/manual-test-plan.md`.
@@ -188,7 +255,7 @@ explicit host/tooling blockers and remain linked to Plan 095 follow-ups.
 ## Phase 28.7 P2 visual, interaction, and accessibility recapture (2026-08-21)
 
 Executed against the current `target/debug/clay` on real Linux/GNOME Wayland.
-The UI preflight ran for this task: `npx ui-skills start`, category
+The UI preflight ran for this task: the UI guidance current at execution time, category
 `accessibility`, selected `rams/rams`, then
 `computer-use-linux_get_app_state` and `computer-use-linux_doctor` ran before
 interaction. Static fixture states passed; the desktop reports no development

@@ -100,8 +100,8 @@ Each Clay phase plan that implements or materially changes package UI, mode UI, 
 
 The task should require:
 
-- Clay remains the owner of the working area, pane/split tree, fixed pane slots, component catalog, action routing, theme/style token model, and native Masonry widget implementation.
-- Packages declare inert UI/layout/input/action/data/style contributions through documented Clay/package JS APIs; they must not directly create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
+- Clay remains the owner of the working area, pane/split tree, fixed pane slots, React component registry, action routing, theme/style token model, and Tauri/webview security boundary. During migration, current Masonry widgets are parity inventory, not the target package API.
+- Packages declare inert UI/layout/input/action/data/style contributions through documented Clay/package JS APIs; they must not mutate host layout, inject uncontrolled host CSS, receive direct Tauri IPC, or call raw `Deno.core.ops`. First-party trusted UI modules may be compiled into the frontend; arbitrary third-party custom UI requires an isolated surface.
 - Empty/new-tab `main` is a package pane-content contribution (one winner). Core fallback is Open File / Open Folder only. Do not plan product-named pane kinds (`Agent`) or irreplaceable native landings. Agent profiles are registered by first-party packages (`loadPackage`), not compiled stubs.
 - Any new UI/layout primitive is generic and reusable across packages/modes, not Markdown-specific or package-specific Rust branching.
 - Fixed vs transient panel behavior, slot ownership, package/user override precedence, action routing, focus/input routing, and style token mapping are documented and tested when introduced or changed.
@@ -220,17 +220,19 @@ Decision source: user instruction 2026-08-04 (test-plan/ folder + per-plan manua
 
 ## Clay UI Primitives-First Task
 
-Each Clay plan that touches the app UI (components, panels, overlays, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, theme, typography, tokens, or layout) must route through UI skill selection and reuse the established UI catalog before proposing new UI code.
+Each Clay plan that touches the app UI (components, panels, overlays, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, theme, typography, tokens, or layout) must load the complete project-local UI skill stack and reuse the established UI catalog before proposing new UI code.
 
 The plan should require:
 
-- Before reviewing existing UI or planning, designing, or implementing any UI task, run `npx ui-skills start`; inspect the relevant category and load the smallest useful skill set (prefer 1, max 3). Repeat this per independently executed UI task and record the selected category/slugs in plan evidence.
-- Load the `clay-ui` skill (`.agents/skills/clay-ui/`) and read its `references/components.md` and `references/tokens.md` before writing UI tasks. Read `docs/reference/ui-components.md` for the navigation/contract entry point that links the catalog, token tables, chrome primitives, package authoring guide, and Phase 20.7 conformance rules.
+- Before reviewing existing UI or planning, designing, or implementing each UI task, load `.agents/skills/clay-ui/SKILL.md`, its `references/components.md` and `references/tokens.md`, plus `.agents/skills/impeccable/SKILL.md`, `.agents/skills/full-output-enforcement/SKILL.md`, `.agents/skills/high-end-visual-design/SKILL.md`, and `.agents/skills/design-taste-frontend/SKILL.md`. All four design/output skills are mandatory; do not select a subset or reuse loading evidence from another task. The Clay layout/spatial-engineering directives are part of `clay-ui` itself.
+- List all seven skill/catalog files under every UI task's `Approach -> Documentation Reviewed`; a plan-level mention alone is insufficient. Read `docs/reference/ui-components.md` for the navigation/contract entry point that links the catalog, token tables, chrome primitives, package authoring guide, and Phase 20.7 conformance rules.
+- Reconcile conflicting aesthetic guidance through the user brief, Clay product identity, accessibility, security, authority, catalog compatibility, and typed token ownership. Adapt marketing-page guidance to Clay's Operate-mode desktop UI instead of forcing AIDA, hero sections, hardcoded palettes/fonts, or decorative motion.
 - Reuse cataloged components, primitives, style variables, and theme tokens first; a custom component outside the catalog requires explicit justification in the task's `Options Considered`.
-- New components, primitives, tokens, or layout rules must be generic and reusable across packages, token-driven (no raw colors, CSS, concrete font families, or point sizes), and state-complete (hover/active/focus/disabled).
+- New components, primitives, tokens, or layout rules must be generic and reusable across packages, token-driven (no raw colors, uncontrolled package CSS, concrete font families, or point sizes), and state-complete (hover/active/focus/disabled). Target web components consume host-generated CSS custom properties and preserve the same semantic token ownership.
 - Component kinds, style variables, and token names are additive-only so existing packages keep working.
 - Keep the catalog current: the plan must include updating `.agents/skills/clay-ui/references/components.md` / `references/tokens.md` and `docs/reference/packages/creating-packages.md` for any UI surface change. Documentation drift across the catalog, `creating-packages.md`, `docs/reference/ui-components.md`, and `docs/index.md` fails `cargo test` (Phase 20.8).
 - Preserve the shell layout contract: `main` slot plus optional `left`/`right`/`top`/`bottom` fixed panels whose sizes remain user-configurable (min/max/collapse/resize).
+- Apply `.agents/skills/project-patterns/references/tauri-react-client.md` to all new migration plans: separate server authority, CodeMirror-local typing, narrow Tauri capabilities, stable-ID React reconciliation, and no permanent dual client.
 
 Recommended task title:
 

@@ -1,30 +1,18 @@
 pub(crate) mod behavior;
-pub mod clipboard;
 pub mod file_dialog;
-pub(crate) mod runtime_state;
 
 pub use behavior::ClientUiCommandRoute;
 pub use behavior::language_intelligence_feature_for_command;
-pub use clipboard::{
-    ClipboardError, ClipboardSink, SystemClipboard, copy_text_to_system_clipboard,
-    read_text_from_system_clipboard,
-};
 pub use file_dialog::{
     FileDialogFilter, FileDialogResult, markdown_file_dialog_filters, open_folder_dialog,
     open_markdown_file_dialog,
 };
-pub(crate) use runtime_state::{ClientRuntimeStateCandidate, ClientRuntimeStateInstallError};
-
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
-use crate::editor::{
-    EditorCompletionRequestEvent, EditorEditEvent, EditorLanguageIntelligenceRequestEvent,
-    EditorSelectionQueryRequestEvent,
-};
 use crate::ipc::IpcEndpoint;
 use crate::perf::{
     budgets::{COMPLETION_RECENCY_MAX_ITEM_CHARS, COMPLETION_RECENCY_MAX_ITEMS},
@@ -64,6 +52,45 @@ const PIPE_BUSY_RETRY_ATTEMPTS: usize = 50;
 #[cfg(windows)]
 const ERROR_PIPE_BUSY: i32 = 231;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorEditEvent {
+    pub document_id: DocumentId,
+    pub base_version: DocumentVersion,
+    pub behavior_version: BehaviorVersion,
+    pub operation: EditOperation,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EditorCompletionRequestEvent {
+    pub(crate) document_id: DocumentId,
+    pub(crate) document_version: DocumentVersion,
+    pub(crate) behavior_version: BehaviorVersion,
+    pub(crate) cursor_byte_offset: u64,
+    pub(crate) replacement_range: crate::protocol::CompletionReplacementRange,
+    pub(crate) trigger: crate::protocol::CompletionTrigger,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EditorLanguageIntelligenceRequestEvent {
+    pub(crate) document_id: DocumentId,
+    pub(crate) document_version: DocumentVersion,
+    pub(crate) behavior_version: BehaviorVersion,
+    pub(crate) cursor_byte_offset: u64,
+    pub(crate) feature: crate::protocol::LanguageIntelligenceFeature,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EditorSelectionQueryRequestEvent {
+    pub(crate) document_id: DocumentId,
+    pub(crate) document_version: DocumentVersion,
+    pub(crate) behavior_version: BehaviorVersion,
+    pub(crate) query: crate::protocol::SelectionQuery,
+    pub(crate) selections: Vec<crate::protocol::SelectionQueryCursor>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientInitialState {
     pub client_id: ClientId,
@@ -87,7 +114,8 @@ pub struct PendingEdit {
     pub operation: EditOperation,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientResyncSnapshot {
     pub document_id: DocumentId,
     pub version: DocumentVersion,
@@ -327,9 +355,11 @@ pub struct ClientEditQueue {
     lease_id: Option<crate::protocol::LeaseId>,
     sync_state: Arc<Mutex<ClientSyncState>>,
     file_open_capability: Arc<Mutex<Option<String>>>,
+    #[allow(dead_code)]
     completion_recency: Arc<Mutex<VecDeque<String>>>,
 }
 
+#[allow(dead_code)]
 impl ClientEditQueue {
     pub fn bounded(capacity: usize) -> (Self, mpsc::Receiver<ClientMessage>) {
         let (sender, receiver) = mpsc::channel(capacity);
@@ -359,6 +389,16 @@ impl ClientEditQueue {
             file_open_capability: Arc::new(Mutex::new(None)),
             completion_recency: Arc::new(Mutex::new(VecDeque::new())),
         }
+    }
+
+    pub fn enqueue_raw(
+        &self,
+        message: ClientMessage,
+    ) -> Result<(), tokio::sync::mpsc::error::TrySendError<ClientMessage>> {
+        // Bridge path: send a validated client message verbatim. Edits and
+        // editor intents MUST use the dedicated enqueue methods so optimistic
+        // version bookkeeping runs.
+        self.sender.try_send(message)
     }
 
     pub fn enqueue_edit_event(
@@ -830,7 +870,13 @@ pub struct ClientSession {
     pub events: mpsc::Receiver<ClientConnectionEvent>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(
+    tag = "kind",
+    content = "data",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ClientConnectionEvent {
     EditAck {
         document_id: DocumentId,
@@ -863,6 +909,12 @@ pub enum ClientConnectionEvent {
         document_id: DocumentId,
         version: DocumentVersion,
         dirty: bool,
+    },
+    /// Reply to `GetDocumentStatus`; carries the authoritative metadata
+    /// (including `workspace_root_id`) the React client needs before it can
+    /// open persisted documents during layout restore.
+    DocumentStatus {
+        metadata: DocumentMetadata,
     },
     DocumentClosed {
         document_id: DocumentId,
@@ -953,9 +1005,8 @@ impl ClientConnectionEvent {
             | ClientConnectionEvent::DocumentClosed { document_id, .. } => Some(*document_id),
             ClientConnectionEvent::ResyncSnapshot(snapshot) => Some(snapshot.document_id),
             ClientConnectionEvent::DocumentOpened { metadata, .. }
-            | ClientConnectionEvent::DocumentReloaded { metadata, .. } => {
-                Some(metadata.document_id)
-            }
+            | ClientConnectionEvent::DocumentReloaded { metadata, .. }
+            | ClientConnectionEvent::DocumentStatus { metadata } => Some(metadata.document_id),
             ClientConnectionEvent::FileOperationFailed { document_id, .. } => *document_id,
             ClientConnectionEvent::DecorationSet(set) => Some(set.document_id),
             ClientConnectionEvent::DecorationBatch(sets) => sets.first().map(|set| set.document_id),
@@ -1635,6 +1686,11 @@ async fn run_connection<S>(
                             .send(ClientConnectionEvent::DocumentClosed { document_id, closed })
                             .await;
                     }
+                    Ok(ServerMessage::DocumentStatus { metadata }) => {
+                        let _ = events
+                            .send(ClientConnectionEvent::DocumentStatus { metadata })
+                            .await;
+                    }
                     Ok(ServerMessage::DocumentReloaded { metadata, text }) => {
                         // Phase 22.2: each document owns its tracking state, so
                         // reloads rewrite only the reloaded document's state
@@ -1833,7 +1889,7 @@ mod tests {
     };
     #[cfg(any(unix, windows))]
     use super::{ClientSession, connect};
-    use crate::editor::{EditorCompletionRequestEvent, EditorEditEvent};
+    use super::{EditorCompletionRequestEvent, EditorEditEvent};
     #[cfg(any(unix, windows))]
     use crate::ipc::IpcEndpoint;
     #[cfg(any(unix, windows))]
@@ -2174,7 +2230,7 @@ mod tests {
 
     #[tokio::test]
     async fn language_intelligence_request_is_enqueued_as_non_blocking_message() {
-        use crate::editor::EditorLanguageIntelligenceRequestEvent;
+        use super::EditorLanguageIntelligenceRequestEvent;
         use crate::protocol::LanguageIntelligenceFeature;
 
         let (queue, mut receiver) = ClientEditQueue::bounded(1);
@@ -3713,7 +3769,7 @@ mod tests {
             },
             package_ui: crate::protocol::PackageUiSnapshot {
                 version: generation,
-                empty_tab: None,
+                ..Default::default()
             },
             documents: Vec::new(),
             diagnostics: Vec::new(),

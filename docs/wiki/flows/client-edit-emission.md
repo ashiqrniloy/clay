@@ -1,5 +1,7 @@
 # Client Edit Emission
 
+> Historical native-client record. The Masonry editor and `EditorWidget` were removed in Plan 097 Phase 12; the current keystroke path is [Frontend Edit Synchronization](frontend-edit-synchronization.md).
+
 ## Source
 
 - `src/editor/surface/mod.rs`

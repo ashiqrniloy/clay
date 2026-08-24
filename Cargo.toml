@@ -5,16 +5,8 @@ edition = "2024"
 default-run = "clay"
 autotests = false
 
-[patch.crates-io]
-# Masonry 0.4 exposes its synthetic top-level Window node as an AT-SPI
-# target, but RenderRoot dispatches it as a WidgetId. Keep the exact pinned
-# crate locally until upstream guards this event-ingress seam.
-masonry_core = { path = "vendor/masonry_core" }
-# AccessKit's 0.17 AT-SPI adapter exposes writable Entry state but omits the
-# standard EditableText D-Bus interface. Keep the exact pinned versions local
-# until upstream carries the generic interface/action bridge.
-accesskit_atspi_common = { path = "vendor/accesskit_atspi_common" }
-accesskit_unix = { path = "vendor/accesskit_unix" }
+[workspace]
+members = ["src-tauri"]
 
 [profile.dev]
 debug = "line-tables-only"
@@ -27,14 +19,12 @@ inherits = "test"
 debug = 2
 
 [dependencies]
-arboard = { version = "3.6.1", default-features = false }
 crop = "0.4.3"
 deno_core = "0.400.0"
 deno_error = "=0.7.1"
-masonry = "0.4.0"
-masonry_winit = "0.4.0"
-parley = "0.6.0"
+kurbo = "0.13"
 rkyv = "0.8.17"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.145"
 streaming-iterator = "0.1.9"
 tokio = { version = "1.52.2", features = ["rt", "rt-multi-thread", "macros", "net", "fs", "io-util", "process", "sync", "time"] }
@@ -43,14 +33,13 @@ tree-sitter-javascript = "0.25"
 tree-sitter-md-025 = { version = "0.5.6", features = ["parser"] }
 tree-sitter-rust = "0.24.2"
 tree-sitter-typescript = "0.23.2"
-winit = "0.30.13"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 url = "2.5.8"
-zbus = { version = "5.15.0", default-features = false, features = ["blocking-api"] }
+zbus = { version = "5.15.0", default-features = false, features = ["blocking-api", "tokio"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.2"
@@ -72,7 +61,6 @@ features = [
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }
-accesskit_consumer = "0.31.0"
 
 [build-dependencies]
 serde_json = "1.0.145"
@@ -86,33 +74,13 @@ name = "runtime"
 path = "tests/suites/runtime.rs"
 
 [[test]]
-name = "editor"
-path = "tests/suites/editor.rs"
+name = "presentation"
+path = "tests/suites/presentation.rs"
 
 [[test]]
 name = "protocol"
 path = "tests/suites/protocol.rs"
 
 [[bench]]
-name = "editor_baselines"
-harness = false
-
-[[bench]]
 name = "protocol_server_baselines"
-harness = false
-
-[[bench]]
-name = "runtime_sdui_baselines"
-harness = false
-
-[[bench]]
-name = "markdown_baselines"
-harness = false
-
-[[bench]]
-name = "first_party_language_baselines"
-harness = false
-
-[[bench]]
-name = "window_baselines"
 harness = false

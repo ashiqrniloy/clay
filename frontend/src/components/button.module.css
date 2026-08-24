@@ -1,0 +1,68 @@
+/* Clay button — five interaction states from tokens, zero radius
+ * (mechanical geometry), variants default/muted/primary/danger. */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--clay-spacing-inline, 6px);
+  border: var(--clay-dimension-border-hairline, 1px) solid transparent;
+  border-radius: 0;
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-body-size);
+  cursor: pointer;
+  transition:
+    background-color var(--clay-motion-fast, 100ms) linear,
+    border-color var(--clay-motion-fast, 100ms) linear;
+}
+
+/* Rest */
+.default {
+  background: var(--clay-surface-control);
+  color: var(--clay-text-primary);
+}
+.muted {
+  background: transparent;
+  color: var(--clay-text-muted);
+}
+.primary {
+  background: var(--clay-accent-primary);
+  color: var(--clay-surface-main);
+}
+.danger {
+  background: var(--clay-surface-control);
+  color: var(--clay-diagnostic-error);
+}
+
+/* Hover */
+.default[data-hovered],
+.default:not([data-disabled]):not([data-pressed]):hover {
+  background: var(--clay-surface-hover);
+}
+.muted[data-hovered] {
+  color: var(--clay-text-primary);
+}
+.primary[data-hovered] {
+  filter: brightness(1.1);
+}
+
+/* Active (pressed) */
+.default[data-pressed],
+.muted[data-pressed] {
+  background: var(--clay-surface-active);
+}
+
+/* Focus */
+.button[data-focused],
+.button:focus-visible {
+  outline: 2px solid var(--clay-focus-ring);
+  outline-offset: 1px;
+}
+
+/* Disabled */
+.button[data-disabled] {
+  background: var(--clay-surface-disabled);
+  color: var(--clay-text-disabled);
+  opacity: var(--clay-opacity-disabled);
+  cursor: default;
+}

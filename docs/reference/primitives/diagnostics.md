@@ -10,7 +10,7 @@ Phase 18.17 defines one reusable byte-range diagnostic contract for explicit pac
 | Syntax/semantic/search tint | `DecorationSpan` / `DecorationSet` | Additive visual vocabulary. `DecorationKind::Diagnostic` is a visual layer only and cannot carry diagnostic message metadata or source replacement. |
 | Inline range diagnostic | `DiagnosticSpan` / `DiagnosticSet` | Versioned, viewport-bounded, source-keyed metadata rendered as severity squiggles. |
 
-Diagnostics remain paint-only. They cannot choose `DocumentFontRole`, alter Parley shaping, erase syntax/semantic attributes, or replace decoration chunks.
+Diagnostics remain decoration-only. They cannot choose `DocumentFontRole`, alter text shaping, erase syntax/semantic attributes, or replace decoration chunks.
 
 ## Protocol Shape
 
@@ -54,7 +54,7 @@ Only an explicit analyzer package may publish `DiagnosticSet` data through the v
 - Server validation lives in `src/server/diagnostics.rs`; transport is `ServerMessage::DiagnosticSet`.
 - Client `EditorDiagnosticState` retains near-viewport chunks under `DIAGNOSTIC_CACHE_BUDGET_BYTES`.
 - `StyleRegistry::diagnostic_style(severity)` resolves `diagnosticError` / `diagnosticWarning` / `diagnosticInfo`.
-- Native paint strokes Clay-owned zig-zag marks from cached Parley line-local rectangles. Diagnostic arrival requests render without rebuilding text layout.
+- The editor draws Clay-owned squiggly marks from cached line-local rectangles; diagnostic arrival requests re-render without rebuilding text layout.
 - Syntax, Semantic, Diagnostic, and Search remain additive layers; diagnostics cannot choose font roles or erase syntax/semantic styling.
 
 Future LSP packages map LSP diagnostic fields onto this same inert contract. Phase 18.17 does not spawn language servers or grant LSP process authority.

@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientScrollTo
 js_facade: runtime/js/editor.js::clientScrollTo
-backing_rust: src/editor/viewport.rs::Viewport::scroll_lines
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_editor_scroll_to
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_scroll_to
 name: clientScrollTo
@@ -114,8 +114,8 @@ Use `editor.clientScrollTo` when the user asks for scroll editor through the Cla
 
 - JS facade: `runtime/js/editor.js::clientScrollTo`
 - Future Deno op: `src/server/ops/editor.rs::op_clay_editor_scroll_to` (`op_clay_editor_scroll_to`)
-- Backing Rust/current owner: `src/editor/viewport.rs::Viewport::scroll_lines`
-- Current implementation audit path: `src/editor/surface/mod.rs::EditorSurface::scroll_lines; src/editor/surface/mod.rs::EditorSurface::scroll_vertical_pixels`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Current implementation audit path: `src/client_commands.rs::EditorClientCommand`
 
 ## Lookup metadata
 

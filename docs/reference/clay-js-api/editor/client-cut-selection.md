@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientCutSelection
 js_facade: runtime/js/editor.js::clientCutSelection
-backing_rust: src/masonry_editor.rs::EditorWidget::cut_selection_to_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface/mod.rs::EditorSurface::selected_text
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientCutSelection
@@ -35,7 +35,7 @@ Return the stable bindable command ID for cutting the current native editor sele
 
 `clientCutSelection` is the public Clay JS API descriptor for **Cut Selection**. It returns the stable command ID `editor.clientCutSelection` so configuration, help, key-binding discovery, and agents can name the cut-selection route without hard-coding Rust shortcuts or raw clipboard operations.
 
-Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Cut happens later only after an explicit user key/command route reaches the native editor widget. The command reads only `EditorSurface::selected_text()`, writes that text to the OS clipboard, and then deletes the selection through the ordinary local edit enqueue path. Collapsed selections are a no-op. If the clipboard write fails, the selection is not deleted and a sanitized runtime diagnostic is reported.
+Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Cut happens later only after an explicit user key/command route reaches the React/CodeMirror clipboard handler `frontend/src/editor/extensions/controller.ts` (React/CodeMirror controller). The command reads only the active CodeMirror selection, writes that text to the OS clipboard, and then deletes the selection through the ordinary local edit enqueue path. Collapsed selections are a no-op. If the clipboard write fails, the selection is not deleted and a sanitized runtime diagnostic is reported.
 
 ## When to use
 
@@ -94,7 +94,7 @@ No additional permission is required to name or bind the command ID.
 
 Bindable client UI command ID only; after explicit user routing it writes only the current non-empty native editor selection to the OS clipboard and then deletes that selection through the ordinary local edit path, and this API does not grant filesystem/workspace authority, arbitrary clipboard text writes, clipboard inspection APIs for packages/configuration/AI, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, or client-side JavaScript authority.
 
-Cut selection is client-local UI work. Clipboard writes stay off server command execution, workspace APIs, filesystem paths, package loading, JS evaluation, Masonry paint/layout, and ordinary key-insertion paths. Deletion reuses the ordinary optimistic local edit path.
+Cut selection is client-local UI work. Clipboard writes stay off server command execution, workspace APIs, filesystem paths, package loading, JS evaluation, client paint/layout, and ordinary key-insertion paths. Deletion reuses the ordinary optimistic local edit path.
 
 ## Agent guidance
 
@@ -104,7 +104,7 @@ Use `editor.clientCutSelection` only as a documented command ID for `bindKey`. A
 
 - JS facade: `runtime/js/editor.js::clientCutSelection`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/masonry_editor.rs::EditorWidget::cut_selection_to_system_clipboard`; `src/client/clipboard.rs::SystemClipboard`; `src/editor/surface/mod.rs::EditorSurface::selected_text`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand (client-local; React/CodeMirror clipboard)`; `src/client/clipboard.rs::SystemClipboard`; `src/client_commands.rs::EditorClientCommand`
 
 ## Lookup metadata
 

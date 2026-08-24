@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSelectNextMatch
 js_facade: runtime/js/editor.js::clientSelectNextMatch
-backing_rust: src/editor/surface/mod.rs::EditorSurface::select_next_match
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientSelectNextMatch
@@ -33,7 +33,7 @@ Select the next occurrence of the current selection or word as a new primary car
 
 ## Description
 
-`clientSelectNextMatch` returns the stable bindable command ID `editor.clientSelectNextMatch` for **Select Next Match** (Plan 071 task 9). On a collapsed caret the first press selects the word under the caret; each further press adds the next occurrence as a new caret. Search wraps once around the document and stops when every occurrence is selected. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientSelectNextMatch` returns the stable bindable command ID `editor.clientSelectNextMatch` for **Select Next Match** (Plan 071 task 9). On a collapsed caret the first press selects the word under the caret; each further press adds the next occurrence as a new caret. Search wraps once around the document and stops when every occurrence is selected. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local by the React/CodeMirror controller; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -90,8 +90,8 @@ Use `editor.clientSelectNextMatch` when the user asks for Select Next Match thro
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientSelectNextMatch`
-- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::select_next_match`
-- Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Key-driven dispatch: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)`
 
 ## Lookup metadata
 

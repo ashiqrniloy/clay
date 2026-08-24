@@ -1,0 +1,41 @@
+/* Host-owned global styles. Components style themselves through Clay
+ * semantic tokens (CSS custom properties) only — no raw colors or sizes in
+ * component CSS modules. */
+@import "./tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--clay-surface-main);
+  color: var(--clay-text-primary);
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-body-size);
+  line-height: var(--clay-text-body-line-height);
+  font-feature-settings: var(--clay-font-feature-settings, normal);
+}
+
+/* Focus is never removed without replacement: token-driven focus-visible. */
+:focus-visible {
+  outline: 2px solid var(--clay-focus-ring);
+  outline-offset: 1px;
+}
+
+::selection {
+  background: var(--clay-surface-selected);
+  color: var(--clay-text-primary);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--clay-surface-scrollbar)
+    var(--clay-surface-scrollbar-track);
+}

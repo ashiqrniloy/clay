@@ -1,5 +1,10 @@
 # Rendering Primitives
 
+> **Historical (native rendering removed in Plan 097 Phase 12).** Rendering is
+> now React + CodeMirror; the inert-declaration contracts below are carried by
+> the current strategy reference:
+> `docs/reference/primitives/rendering-strategy.md`.
+
 ## Source
 
 - `docs/reference/primitives/rendering-strategy.md`

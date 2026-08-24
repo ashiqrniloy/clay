@@ -983,7 +983,7 @@ mod tests {
             sdui_tree: representative_sdui_tree(),
             package_ui: PackageUiSnapshot {
                 version: 2,
-                empty_tab: None,
+                ..Default::default()
             },
             documents: vec![DocumentRuntimeRenderState {
                 document_id: 1,

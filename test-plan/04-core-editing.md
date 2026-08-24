@@ -159,7 +159,7 @@ module 10 when they have no default chord.
 
 ## Phase 28.7 P1 editable-text accessibility execution record (2026-08-21)
 
-Fresh Linux/GNOME Wayland review used `npx ui-skills start` with the
+Fresh Linux/GNOME Wayland review used the UI guidance current at execution time with the
 `accessibility` category and `jakubkrehel/better-accessibility`, then
 `computer-use-linux get_app_state`, `doctor`, and targeted AT-SPI inspection
 against the isolated `ui-review-rust` fixture. The current build exposes the
@@ -170,12 +170,12 @@ state, bounded text content, and caret metadata. Evidence:
 | Checks | Result | Evidence |
 |---|---|---|
 | E34 | PASS live | `editable-text.txt` records `supports_editable_text=true`, `Accessible,Component,EditableText,Text`, `character_count=94`, and focused multiline states; `accessibility.txt` records the Clay Entry/status tree; screenshot captures the active editor. |
-| E35 | UNRESOLVED keyboard live; PASS structural + AT-SPI set-value/selection path | `masonry_editor::tests::editor_accessibility_exposes_editable_text_value_selection_and_stable_run` covers value, text run, stable ID, selection action, replacement, and undo. AT-SPI `SetTextContents` reached document v2; selection action returned success. `computer-use-linux doctor` reports no keyboard backend (`uinput` denied, no xdotool/ydotool, Wayland portal input unavailable), so physical keyboard insertion/undo is not falsely claimed. |
+| E35 | UNRESOLVED keyboard live; PASS structural + AT-SPI set-value/selection path | At execution time the (now-removed) native editor a11y unit test covered value, text run, stable ID, selection action, replacement, and undo; current equivalents are CodeMirror's built-in editable-text role plus `frontend/src/test/editor.test.tsx` region/label assertions. AT-SPI `SetTextContents` reached document v2; selection action returned success. `computer-use-linux doctor` reports no keyboard backend (`uinput` denied, no xdotool/ydotool, Wayland portal input unavailable), so physical keyboard insertion/undo is not falsely claimed. |
 | E36 | PASS structural | Read-only mutation actions are omitted and existing inactive/hidden-pane stashing plus package-region accessibility tests keep package UI out of the editor target. |
 
 ## Phase 28.7 P2 visual and interaction recapture (2026-08-21)
 
-UI preflight used `npx ui-skills start`, category `accessibility`, selected
+UI preflight used the UI guidance current at execution time, category `accessibility`, selected
 `rams/rams`, then `computer-use-linux_get_app_state` and `doctor` before the
 isolated review fixtures. Static evidence is under
 `code-reviews/screenshots/2026-08-21-phase28.7-p2-recapture/`.
@@ -189,3 +189,12 @@ isolated review fixtures. Static evidence is under
 
 No existing step was deleted or weakened. Interactive unresolved states remain
 explicit rather than inferred from static screenshots.
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Editor chrome and CodeMirror document | PASS visual/a11y rest state | `code-reviews/screenshots/2026-08-24-tauri-react-parity/editor/fixture-*`; real `editor-opened/accessibility.txt` exposes named editor controls and Document editor entry |
+| Diagnostics/completion/intelligence rest state | PASS static | `intelligence/fixture-*` shows syntax, diagnostic, fold, and inlay projections; AX snapshot remains bounded |
+| Physical typing, undo, completion trigger | UNRESOLVED live; PASS structural | Host has no safe keyboard backend. Existing local-edit, CodeMirror, completion, editable-text, and hot-path tests pass |
+| Absolute path safety | PASS | Editor fallback now uses sanitized workspace basename; `frontend/src/test/editor.test.tsx` prevents `/tmp/ws` from reaching chrome/region labels |

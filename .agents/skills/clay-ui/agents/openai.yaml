@@ -1,4 +1,4 @@
 interface:
   display_name: "Clay UI"
-  short_description: "Clay app UI primitives, components, and tokens"
-  default_prompt: "Use $clay-ui to build or review Clay UI with cataloged primitives and tokens, then inspect implemented states with screenshots and computer-use accessibility checks."
+  short_description: "Clay UI catalog and mandatory design stack"
+  default_prompt: "Use $clay-ui and its four mandatory project-local skills to build or review complete, token-driven Clay UI, then verify screenshots and accessibility state."

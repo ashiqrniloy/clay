@@ -3,7 +3,7 @@
 ## IPC Protocol
 
 - Keep protocol semantics separate from codec implementation.
-- Use `rkyv` behind a small length-prefixed codec boundary.
+- Keep the Rust server transport on `rkyv` behind a small length-prefixed codec boundary. Tauri Rust translates validated server messages into bounded JSON-compatible frontend DTOs and typed channels; React never decodes archived bytes.
 - Validate received archived bytes before access.
 - Bound frame sizes before allocation.
 - Treat all IPC input as fallible, even local IPC.
@@ -27,7 +27,7 @@ Phase 3 may not fully enforce these fields, but plans should avoid message shape
 
 - No full-document IPC for ordinary edits.
 - No synchronous server/JavaScript round trip before rendering normal typing.
-- No IPC work in Masonry paint or text-event handlers.
+- No Tauri/server IPC wait in CodeMirror transaction application, React render, layout, or browser input handlers.
 - Use bounded queues for outgoing client edits.
 - Use per-document edit ordering, not global serialization across all documents.
 - Use deltas/transactions instead of snapshots except for initial load, resync, or an atomically installed runtime-generation replacement whose mutually dependent state fits one bounded frame.

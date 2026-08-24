@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientMoveCursor
 js_facade: runtime/js/editor.js::clientMoveCursor
-backing_rust: src/editor/surface/mod.rs::EditorSurface::move_word_start
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_editor_move_cursor
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_move_cursor
 name: clientMoveCursor
@@ -49,7 +49,7 @@ Move the caret through the `clay:editor` Clay JavaScript facade.
 
 ## Description
 
-`clientMoveCursor` is the public API for **Move Cursor**. The `op_clay_editor_move_cursor` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. Key-driven movement is served client-local by the direction-specific `editor.clientMoveCursor.*` command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`).
+`clientMoveCursor` is the public API for **Move Cursor**. The `op_clay_editor_move_cursor` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. Key-driven movement is served client-local by the direction-specific `editor.clientMoveCursor.*` command IDs (allowlisted, routed `ClientUiCommand`, dispatched client-local by the React/CodeMirror controller).
 
 Authority: `client-local-ui-state`. Runtime path: `client-local-hot-path`. Arrow/Home/End and Ctrl+arrow word/paragraph movement update local caret/viewport state without IPC, server work, or JavaScript.
 
@@ -122,8 +122,8 @@ Use `editor.clientMoveCursor` when the user asks to move cursor through the Clay
 
 - JS facade: `runtime/js/editor.js::clientMoveCursor`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_move_cursor` (`op_clay_editor_move_cursor`)
-- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::move_word_start` (and `move_paragraph`, `move_first_non_blank`, `move_last_non_blank`, `move_matching_pair`)
-- Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand` (and `move_paragraph`, `move_first_non_blank`, `move_last_non_blank`, `move_matching_pair`)
+- Key-driven dispatch: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)`
 
 ## Lookup metadata
 

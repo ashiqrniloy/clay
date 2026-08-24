@@ -48,3 +48,9 @@ with packages `@clay/rust` + `@clay/markdown` loaded.
 - camelCase sub-word movement exists in the core but has no command-ID/key
   surface yet — identifiers are single words in all modes.
 - `line_movement: screenLine` falls back to character movement (no soft wrap).
+
+## Plan 097 post-cutover status record (2026-08-24)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| Movement/selection logic (M1–M13) | PASS by automated equivalents; UNRESOLVED keyboard live | CodeMirror owns caret/selection primitives; position mapping is pinned by the frontend `position_map` tests and editor extension tests. Physical keyboard steps remain UNRESOLVED on this host (`/dev/uinput` denied, no xdotool/ydotool, no Wayland portal input) — not claimed as a live pass |

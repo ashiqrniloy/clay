@@ -177,7 +177,7 @@ Phase 18 must measure Markdown mode against existing typed constants in `src/per
 - Default permissions: `[]` for inert mode declarations, key bindings, text transforms, SDUI panel declarations, and local decoration metadata.
 - Required permission-bearing primitives before execution: `mode-registration`, `mode-activation`, `command-registration`, `render-decorations`, and `parse-document` as defined by `docs/reference/primitives/package-security.md`.
 - The package cannot access filesystem paths beyond document content already open in Clay.
-- The package cannot use network, shell, AI mutation, remote listeners, WASM execution, raw `Deno.core.ops`, direct Masonry/widget mutation, or client-side JavaScript authority.
+- The package cannot use network, shell, AI mutation, remote listeners, WASM execution, raw `Deno.core.ops`, direct renderer/widget mutation, or client-side JavaScript authority.
 - All behavior must use documented Clay JS APIs; raw operation names are not user-facing package APIs.
 - Parse and command handlers run server-side and asynchronously; the client receives only validated behavior manifests, SDUI trees, and decoration/folding data.
 

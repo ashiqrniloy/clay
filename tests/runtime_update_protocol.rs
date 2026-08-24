@@ -29,7 +29,7 @@ fn valid_snapshot(generation: u64, client_id: u64) -> RuntimeStateSnapshot {
         },
         package_ui: PackageUiSnapshot {
             version: generation,
-            empty_tab: None,
+            ..Default::default()
         },
         documents: vec![DocumentRuntimeRenderState {
             document_id: 1,

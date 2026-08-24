@@ -8,7 +8,18 @@ use crate::protocol::{DecorationProvenance, DiagnosticSeverity, DocumentId, Docu
 pub const TREE_SITTER_DIAGNOSTIC_SOURCE: &str = "tree-sitter";
 
 /// One inert source-associated byte-range diagnostic.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagnosticSpan {
     pub byte_start: u64,
     pub byte_end: u64,
@@ -20,7 +31,19 @@ pub struct DiagnosticSpan {
 }
 
 /// Replacement key for one source's versioned viewport diagnostic chunk.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagnosticChunkKey {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -31,7 +54,18 @@ pub struct DiagnosticChunkKey {
 }
 
 /// Bounded source snapshot for one document viewport. Empty spans clear the chunk.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagnosticSet {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,

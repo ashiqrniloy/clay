@@ -1,6 +1,6 @@
 # Rendering Customization Strategy
 
-Phase 16 defines rendering customization as **server-validated inert declarations**. Packages may describe what should be rendered, but the Rust client decides how to render it with Masonry, Parley, and Vello. No package JavaScript runs in client paint, layout, keypress, scroll, pointer, or text-event handlers.
+Rendering customization is **server-validated inert declarations**. Packages may describe what should be rendered; the client decides how to render it (React + CodeMirror in the Tauri shell). No package JavaScript runs in client paint — i.e. no package code in render, layout, keypress, scroll, or pointer handlers.
 
 This document is architecture-only. It introduces no runtime code in Phase 16.
 
@@ -8,7 +8,7 @@ This document is architecture-only. It introduces no runtime code in Phase 16.
 
 - Let mode and package authors provide syntax highlighting, semantic emphasis, diagnostics, layout hints, render intents, and package UI contributions.
 - Preserve the authority boundary from `.agents/skills/project-patterns/references/authority-boundaries.md`: the server validates package output; the client owns native rendering and local UI state.
-- Preserve `.agents/skills/project-patterns/references/protocol-and-performance.md`: no full-document IPC for ordinary edits, no synchronous JavaScript/server round trip before normal typing is painted, no IPC work in Masonry paint or text-event handlers, and viewport-bounded updates.
+- Preserve `.agents/skills/project-patterns/references/protocol-and-performance.md`: no full-document IPC for ordinary edits, no synchronous JavaScript/server round trip before normal typing is painted locally, no IPC work in render or input handlers, and viewport-bounded updates.
 
 ## Rendering Primitive Paths
 
@@ -17,7 +17,7 @@ This document is architecture-only. It introduces no runtime code in Phase 16.
 | Inline decorations | `DecorationSet` chunks carried by `IncrementalParseUpdate::decoration_updates` | Implemented Phase 18.16/Plan 056 | Existing protocol/client render hook | `DECORATION_PAYLOAD_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` | Package/native grammar code produces spans server-side; one parse/capture pass fans out complete captures into stable 128-byte sets, and the server validates every member's schema, byte ranges, document version, provenance, priority, and payload before streaming normal decoration messages. |
 | Layout hints | `LayoutHintUpdate` or fields inside render-intent declarations | Planned/deferred until a concrete consumer needs it | New declaration shape | `DECORATION_PAYLOAD_BUDGET_BYTES` for editor-adjacent hints; `SDUI_*` budgets when represented as SDUI | Server validates bounded hint values; client maps them to known local layout affordances only. |
 | Block/inline render intents | `RenderIntent` records for known intents such as preview block, code block adornment, emphasis band, or inline badge | Planned/deferred | New declaration shape, may share `DecorationUpdate` envelope initially | `DECORATION_PAYLOAD_BUDGET_BYTES` | Server validates intent kind/version and strips unknown executable data. Client renders only Rust-known intent kinds. |
-| Panels/status/preview UI | `SduiTree` / `SduiTreeUpdate` | Exists/extend | Reuses `src/protocol/sdui.rs`, `src/masonry_sdui.rs`, `src/masonry_sdui_region.rs`, and `sdui.*` APIs | `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES`, `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` | Server validates inert SDUI trees; client applies snapshots/updates via `SduiNativeState::apply_snapshot`/`apply_update`, which feed a retained reconciled Masonry subtree (`SduiRegionWidget`) hosted as a child of `EditorWidget`. |
+| Panels/status/preview UI | `SduiTree` / `SduiTreeUpdate` | Exists/extend | Reuses `src/protocol/sdui.rs` and the `sdui.*` APIs | `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES`, `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` | Server validates inert SDUI trees and ships generation-stamped snapshots; the React renderer (`frontend/src/sdui`) reconciles stable node IDs in place. |
 | Behavior-driven local rendering setup | Behavior manifest install | Exists/extend | Reuses behavior manifest path for deterministic local editor behavior, not for arbitrary painting | `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` | Server publishes inert behavior manifests; client executes Rust-known behavior engines only. |
 
 ## Decoration Span Shape
@@ -72,11 +72,11 @@ Typography is inert rendering data governed by [Semantic Typography Roles](typog
 - mode `defaultFontRole` selects `monospace` or `proportional` for document text;
 - syntax/semantic decoration `fontRole` may override an eligible byte range with `monospace` or `proportional`;
 - text-bearing component `style.fontRole` selects `ui`, `monospace`, or `proportional`, defaulting to `ui`;
-- packages never provide family names, stacks, font files/URLs/bytes/downloads, absolute sizes, raw Parley properties, CSS, or renderer callbacks.
+- packages never provide family names, stacks, font files/URLs/bytes/downloads, absolute sizes, raw renderer properties, CSS, or renderer callbacks.
 
 The server validates semantic names, range/layer authorization, component-kind support, provenance, versions, UTF-8 boundaries, and payload bounds before client installation. The client normalizes visible decoration boundaries outside paint, resolves user-owned stacks/sizes through `TypographyRegistry`, and includes typography/style revisions plus document role in layout cache keys. Named-family fallback resolution is client-local; unavailable names retain a generic fallback without server font inspection or package notification.
 
-Document line/scroll/caret geometry derives from resolved document profiles and shaped Parley metrics. Shell/SDUI/component paint, rows, hit regions, scrolling, status geometry, and accessibility bounds share resolved UI metrics. Paint, input, layout, pointer, scroll, and text-event paths perform no package JavaScript, blocking IPC, filesystem/network access, font download, or server-side installed-font discovery.
+Document line/scroll/caret geometry derives from resolved document profiles and the editor's shaped metrics. Shell/SDUI/component rendering, rows, hit regions, scrolling, status geometry, and accessibility bounds share resolved UI metrics (installed as `--clay-*` custom properties). Render, input, layout, pointer, and scroll paths perform no package JavaScript, blocking IPC, filesystem/network access, font download, or server-side installed-font discovery.
 
 ## Range Diagnostics
 
@@ -84,7 +84,7 @@ Range diagnostics are a distinct rendering path documented in [Range Diagnostics
 
 - `DiagnosticSet` publishes versioned, viewport-bounded, source-keyed `DiagnosticSpan` records with severity, code, message, and provenance;
 - explicit analyzer packages and future LSP bridges share the `serverPublishDiagnostics` validation/transport/paint contract; Tree-sitter recovery nodes do not publish diagnostics;
-- paint draws theme-owned squiggles from `StyleRegistry::diagnostic_style` and cached Parley line rectangles;
+- rendering draws theme-owned squiggles from the diagnostic style registry and cached line rectangles;
 - Syntax, Semantic, Diagnostic, and Search layers remain additive; diagnostics cannot choose font roles or erase syntax/semantic styling;
 - payload/count/cache limits use `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_MAX_SPANS_PER_SET`, and `DIAGNOSTIC_CACHE_BUDGET_BYTES`.
 
@@ -120,24 +120,41 @@ Unknown intents are ignored or rejected by the server according to the render-in
 
 Package-owned panels, status views, preview panes, buttons, and lists reuse the existing SDUI path:
 
-- Protocol shapes live in `src/protocol/sdui.rs`.
-- Client native state lives in `src/masonry_sdui.rs` (`SduiNativeState`); snapshots/updates are applied via `SduiNativeState::apply_snapshot`/`apply_update` **outside paint handlers**.
-- Rendering is a retained reconciled Masonry subtree, not an immediate-mode paint pass: `SduiRegionWidget` (`src/masonry_sdui_region.rs`) diffs the SDUI tree by stable `SduiNodeId`, reuses surviving `WidgetPod`s in place, and maps each kind to a real Masonry widget — `SduiLabel`, `SduiButton`, `SduiListRow`, `EditorViewWidget` (a binding/slot component), under a Clay-owned `SduiScrollViewport`. It is hosted as a real child of `EditorWidget`, so Masonry routes layout, paint, pointer, focus, scroll, and a11y through the standard widget tree.
-- `src/masonry_editor.rs` receives `ClientConnectionEvent::SduiSnapshot`/`SduiUpdate` in `apply_connection_event` and syncs the region in place (stable identity preserved across updates); no package work runs in `paint`/`layout`/event handlers.
-- SDUI snapshots are bounded by `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES`; updates are bounded by `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES`.
+- Protocol shapes live in `src/protocol/sdui.rs`; server-side validation and
+  composition live in `src/server/ui.rs` and `src/protocol/runtime.rs`
+  (generation-stamped snapshots with host-stamped provenance/trust labels).
+- The React renderer (`frontend/src/sdui`) reconciles stable node IDs in place
+  — surviving DOM keeps state, and no package work runs inside render or event
+  handlers. Slots (top/left/right/bottom/status), overlays, and empty-tab
+  content are composed by shell-owned components
+  (`frontend/src/shell/PackageWorkspace.tsx`).
+- SDUI snapshots are bounded by `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES`; updates
+  are bounded by `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES`.
 
-The earlier "temporary compatibility bridge" status (immediate-mode `SduiNativeState::paint`) is retired; the sidebar panel chrome is painted by `SduiRegionWidget` itself. SDUI remains the package UI contribution path for panels and preview/status regions. It is not the inline syntax-highlighting path; span-level editor decorations use `DecorationUpdate` so the editor can map ranges directly into its text layout/rendering pipeline.
+SDUI remains the package UI contribution path for panels, overlays, and
+preview/status regions. It is not the inline syntax-highlighting path;
+span-level editor decorations use `DecorationUpdate` so CodeMirror can map
+ranges directly into its text-layout pipeline.
 
 ## Client Rendering Attachment Points
 
-Current client rendering is split between the editor surface and the retained SDUI/package-UI widget tree:
+Current client rendering splits between the CodeMirror editor host and the React SDUI/package projection:
 
-- `src/masonry_editor.rs::EditorWidget::apply_connection_event` applies server events before paint and syncs the hosted child widgets (`SduiRegionWidget`, `PackagePanelHost`, `PackageOverlayHost`) in place via `MutateCtx`. A future `DecorationUpdate` event should be handled here or in an editor-specific connection event path, then forwarded to `EditorSurface` as validated cached data.
-- `src/masonry_editor.rs::EditorWidget::paint` fills the background and paints the editor canvas (`self.editor.paint_in_rect`); the SDUI sidebar, fixed package panels, and transient overlays render through hosted Masonry child widgets (children pass, after `paint`); `post_paint` draws the status line. No package work belongs in this function.
-- `src/editor/surface/mod.rs::EditorSurface::paint` computes visible lines and delegates text rendering to the layout layer. A future decoration hook should attach at the visible snapshot/layout-cache boundary so only visible spans are translated into Parley style ranges.
-- `src/masonry_sdui_region.rs::SduiRegionWidget` reconciles the SDUI tree into retained Masonry widgets (`SduiLabel`/`SduiButton`/`SduiListRow`/`EditorViewWidget` under `SduiScrollViewport`) which paint themselves with Parley text layout and Vello `Scene` fills/text draws; sidebar chrome is painted by the region widget. `SduiNativeState` (`src/masonry_sdui.rs`) holds inert validated state and drives reconciliation; it no longer has an immediate-mode paint path.
+- `frontend/src/shell/workspace-controller.ts` applies server events outside
+  render and forwards document decorations/diagnostics to pane sessions as
+  validated cached data.
+- `frontend/src/editor/ClayEditor.tsx` hosts CodeMirror; decoration,
+  diagnostic, completion, and intelligence extensions map validated ranges
+  into editor marks at the visible-document boundary.
+- `frontend/src/sdui/SduiRenderer.tsx` reconciles the SDUI tree by stable node
+  ID; `frontend/src/shell/PackageWorkspace.tsx` composes slots, overlays, and
+  status items with visible provenance.
 
-New inline decoration rendering should map validated spans to known Parley style attributes and Vello scene primitives inside Rust. The hook should not allocate or parse unbounded package data during paint; all range validation, priority resolution, stale-version checks, and viewport filtering happen before the next paint.
+New inline decoration rendering maps validated spans to known CodeMirror mark
+decorations inside the extension layer. The hook must not allocate or parse
+unbounded package data during render; all range validation, priority
+resolution, stale-version checks, and viewport filtering happen server-side or
+before the render commit.
 
 ## Server-Side Compilation and Validation
 
@@ -168,9 +185,9 @@ Rendering updates are incremental and viewport-prioritized:
 Packages cannot:
 
 - Inject arbitrary GPU draw calls.
-- Mutate Masonry widgets directly.
-- Run synchronous JavaScript in client Masonry paint, layout, keypress, pointer, scroll, or text-event handlers.
-- Provide CSS, native widget callbacks, Vello scene callbacks, Parley builder callbacks, raw `Deno.core.ops`, or client-side JavaScript hooks.
+- Mutate client component internals or DOM directly.
+- Run synchronous JavaScript in client render, layout, keypress, pointer, or scroll handlers.
+- Provide CSS, native widget callbacks, renderer scene callbacks, raw `Deno.core.ops`, or client-side JavaScript hooks.
 - Bypass declared package prefix/provenance or payload budgets.
 - Gain filesystem, network, shell, AI, WASM, or native-widget authority through rendering declarations.
 
@@ -220,25 +237,30 @@ Validation runs outside paint/key/text hot paths and remains bounded by `DECORAT
 
 Invalid or unsupported queries, artifacts, or captures fail closed for that package: Clay keeps the document editable through its active major mode and publishes no syntax decorations for the failed grammar. Runtime performs no network fetch, shell/package-manager build, native-library load, or client-side JavaScript execution.
 
-## Phase 26 rendering axes (implemented)
+## Phase 26 rendering axes (implemented; pre-cutover paths historical)
 
-Status: **implemented** in Phase 26.1–26.6. These stay theme/layout primitives — no new `DecorationKind`, no package pixels, no paint-path JS.
+Status: implemented in Phase 26.1–26.6 as theme/layout primitives — no new
+`DecorationKind`, no package pixels, no render-path JS. The axes below were
+first realized in the removed native editor and are carried by the current
+React/CodeMirror client through the same theme/`editorRules` data:
 
-| Axis | Primitive | Where |
+| Axis | Primitive | Current carrier |
 | --- | --- | --- |
-| Opaque syntax colors | `StyleSpec.color` | `src/editor/theme.rs` |
-| Background fill | `StyleSpec.background` → `VisibleTextStyleRun.background`, painted before glyphs | `src/editor/layout.rs` |
-| Size ladder | `StyleSpec.scale` on Syntax/Semantic only | `src/editor/layout.rs` FontSize |
-| Editor chrome | `EditorChrome` (gutter / active line / indent guides / bracket match) | `src/editor/surface/chrome.rs` |
-| Wrap / insets | `WrapPolicy` + token-aligned insets | `src/editor/surface/mod.rs` |
+| Opaque syntax colors | `StyleSpec.color` | `src/editor/theme.rs` → theme adapter → CodeMirror highlight style |
+| Background fill | `StyleSpec.background` → visible text run background | CodeMirror decoration mark class from `textStyles` |
+| Size ladder | `StyleSpec.scale` on Syntax/Semantic only | editor font-size classes from resolved typography |
+| Editor chrome | `EditorChrome` (gutter / active line / indent guides / bracket match) | CodeMirror gutter/active-line/indentmark extensions (`frontend/src/editor/extensions`) |
+| Wrap / insets | `WrapPolicy` + token-aligned insets | CodeMirror `EditorView.lineWrapping` + theme spacing variables |
 
-`DecorationSpan` is unchanged (no rkyv background/scale fields). Themes contribute `background` and `scale` through `textStyles`. Chrome and wrap are `editorRules` data, not SDUI.
+`DecorationSpan` is unchanged (no background/scale fields). Themes contribute
+`background` and `scale` through `textStyles`. Chrome and wrap are
+`editorRules` data, not SDUI.
 
 ## Phase 17/18 Follow-Up
 
 - Extend chunk publication with explicit empty chunk-clearing metadata if package adapters need to clear an individual off-viewport package chunk without publishing replacement spans.
 - Define concrete protocol messages for `DecorationUpdate` and, if needed, `LayoutHintUpdate`.
 - Add client event handling outside paint handlers and store validated decorations in editor state.
-- Add a Parley/Vello style-range application hook in the editor text layout path.
+- Add a style-range application hook in the editor text layout extension layer.
 - Add payload-bound, stale-version, priority-overlap, and viewport-filtering tests.
 - Reuse SDUI for Markdown preview/status panels instead of extending inline decoration payloads for panel UI.

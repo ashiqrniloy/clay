@@ -1,10 +1,16 @@
-# Architecture Ownership Map (Plan 090 baseline)
+# Architecture Ownership Map (post-Plan 097 cutover)
 
-Pre-refactor baseline for Plan 090: one page of who owns what, so each
-extraction seam has exactly one named owner and no extraction can relocate or
-duplicate authority. Dependency direction: **coordinator → private
-responsibility module → existing state/typed result**; no new trait unless
-multiple current implementations already require one.
+> Current-state ownership for the Tauri v2 + React desktop client and the
+> unchanged authoritative Clay server. The pre-migration native-client
+> ownership record lives in git history and in
+> [Tauri/React Desktop Cutover](../wiki/modules/tauri-react-cutover.md);
+> the deleted native-client widgets are guarded against return by
+> `removed_native_client_modules_cannot_return`.
+
+One page of who owns what, so each change has exactly one named owner and no
+change can relocate or duplicate authority. Dependency direction:
+**coordinator → private responsibility module → existing state/typed result**;
+no new trait unless multiple current implementations already require one.
 
 ## Server modules
 
@@ -16,39 +22,43 @@ multiple current implementations already require one.
 | `packages/record.rs` (5,406) | None (pure assembly) | `assemble_package_record` coordinator: manifest reuse + contribution-family parsers + docs/perf/API-dependency metadata | Load/enable/config-time only; never editor hot path | None | Package-prefixed IDs, permission checks, provenance, payload budgets, `PackageRecordError`/`PackageRecordRule` vocabulary, `Box<str>` diagnostics | None |
 | `server/menu_sessions.rs` + `control_center.rs` | `ServerMenuSessions` per connection, `ControlCenter` (persisted `selected_index`) | Server-owned menu session lifecycle: open/replace/filter/move/activate/cancel, tab-switch cancel, generation-stamped catalogue | Connection task (server-authoritative) | None | Query clamp, `TRANSIENT_MENU_MAX_*`, stale-generation rejection, activation resolves from installed entries only | Drop-on-exit sweep (connection-close is the single cleanup path) |
 
-## Client modules
+## Desktop client modules (Tauri v2 + React)
 
-| Widget/Owner | State owns | Behavior owns | Presentation/exe | Validation | Cleanup |
+| Owner | State owns | Behavior owns | Presentation/exe | Validation | Cleanup |
 |---|---|---|---|---|---|
-| `Driver` (`src/driver/{mod,reconcile,restore}.rs`) | Per-tab `TabState` (edit-queue clone, pending opens, server `tab_id`), active tab, registry snapshot, restore machine | Event classification (`document_id()`), `route_document_event`/`route_document_opened`/`fan_out_event`, tab lifecycle (open/close/switch/reconnect), pending-open attribution, v2 persistence writer | Spawns per-tab event bridges; `PersistenceDue` debounce write | `decide_open_route` owner>pending>active; no-op duplicate opens; dirty-close gate | `apply_registry_reconcile` uninstall; reconnect cancellation flags; persist flush on quit |
-| `ClayShellWidget` (`masonry_shell.rs`, 6,064) | `tabs: BTreeMap<ClientId, TabChrome>` + `active_tab`, tab-bar cards/geometry/scroll, `TabChrome` (working-area layout, `pane_hosts`, `pane_targets`, `registered_panes`, focus policy, orphans) | Window-level tab bar, pane host placement + reconcile, split drag/resize/collapse, pane focus policy, a11y tree (TabList/Tab/Status virtual nodes), announcements | Masonry layout/paint/pointer/a11y only; stash inactive tabs | Layout/package-UI update stale-version checks, `tab_card_display_name` sanitization, logical-window clamp | `pending_orphans`/`chrome_orphans` (editor pane host never detaches), `remove_child` before drop, registry-reconcile uninstall |
-| `EditorWidget` (`masonry_editor.rs`) | Connection chrome: SDUI native state, `PackagePanelHost`/`PackageOverlayHost` children, shell prefs, runtime-snapshot validation, master `ClientEditQueue` | Applies chrome-scoped events, mirrors runtime baseline, forwards document events to pane-1 view, clipboard (explicit commands only) | GUI-thread event application; never blocks paint/input | `ClientRuntimeStateCandidate` validation before atomic install; sanitized diagnostics | Overlay/menu dismissal on disconnect/replace |
-| `PaneDocumentView` (`masonry_pane_document.rs`) | Per-pane: `EditorSurface`, `DocumentSessionStore` (max 64), `EditorStatus`, `PaneMenuSync`, request bookkeeping | Per-document editing, IME, menu sync (local + server-owned dispatch), completion projection, save/conflict chrome | Delegated widget entry points; `close_pane` releases leases | Version/document/behavior staleness guards before applying results | `close_pane` (active + retained sessions), dirty-close gate, blank-surface reset |
-| `PackageOverlayHost` (`masonry_editor.rs` child) | Retained overlay region | Hosts completion popup (anchor/geometry from pane view) + centered command-centre layer (scrim, modal containment) | Paints above region, below nothing; modeless completion keeps editor focus | Server snapshots hydrate as inert items; no action payloads cross | Re-layout on anchor/count change; dismiss on session close |
+| `src-tauri/src/server.rs` `Supervisor` | Child process handle, endpoint status | Spawn/adopt/kill `clay-server`, classify spawn errors, fail-closed disconnected marking | Owns nothing visual; exposes typed status commands only | Endpoint acceptance check before adoption | Kill on shell exit |
+| `src-tauri/src/bridge/*` (session/forwarder/dto/editor/layout/agent) | One live `clay::client` session, bounded ordered forwarder with latest-wins decoration coalescing, per-tab edit queues | Bootstrap/reconnect generations, sanitized size-capped request stamping, AG-UI event adaptation + channel fan-out | serde-derived protocol JSON over Tauri commands/channels; no UI logic | Envelope/tab-id validation, bounded frame sizes, orphan-free supervision | Forwarder drop closes channels; session drop releases server connection |
+| `frontend/src/app` (`AppShell`, router, `use-clay-session`) | Route, live phase/status text | Event subscription before bootstrap, reconnect UX | Landmarks (one `main`), header tabs, footer status live region | Status derived from connection phase; diagnostics override display only | Unmount unsubscribes events |
+| `frontend/src/shell` (`WorkspacePanes`, workspace controller, tab store) | Per-tab pane/split tree, per-tab workspaces, transient menu snapshot, settings-open flag | Server-authoritative menu intent routing (query/move/activate/cancel), client command routing (deny-by-default), dialog capability conversion via narrow Tauri commands | Split rendering, Command Centre / Path Browser modals, dirty-close confirm | Layout restore version checks; stale-version package-UI updates rejected | Tab close tears down pane sessions; layout persisted through existing Rust parser |
+| `frontend/src/editor` (`ClayEditor`, controller, extensions) | CodeMirror state, optimistic shadow + pending edit queue, decoration/diagnostic/completion/intelligence state | Local-first edits (bounded ordered deltas queued async), keymap projection from behavior manifests, save/reload/close flows | Editor region labeling, status chrome, theme styles as CSS custom properties | Version/document/behavior staleness guards before applying results; no server/JS round trip before local paint | Close releases leases; disconnect keeps local state for resync |
+| `frontend/src/sdui` + `PackageWorkspace` | Generation-stamped SDUI/package snapshots, stable-ID reconciliation map | Typed inert action emission (`command_id` + bounded args only) | Slot-composed panels/overlays/empty-tab content, provenance labels, trust-domain badges | Duplicate-ID/slot/visibility validation before install; ui_version match on actions | Snapshot replacement uninstalls superseded generation atomically |
+| `frontend/src/chat` (ChatPanel + agent transport) | AG-UI message snapshot, run status | `AbstractAgent` transport over Tauri channel; submit/cancel intents to declared commands | Transcript/composer presentation; composer interaction is local-only | Credential-free events; inert tool payloads | Abort cancels run; unsubscribe drops channel |
+| Retained neutral Rust modules (`src/shell/{layout,layout_persist,file_browser,path_browser,fuzzy,transient_menu}`, `src/editor/{position_map,theme,typography}`, `src/client`) | Layout tree/persistence schema, browser/path/fuzzy data, position maps, typography roles, `ClientEditQueue`/session event types | Pure computation used by both bridge and tests | No painting — renderer-neutral by contract | Same validation rules as before cutover | Drop semantics unchanged |
 
 ## Server-owned menu sessions — presentation bridge
 
-`server TransientMenuSession → client snapshot → pane view (snapshot hydration + key intent enqueue) → PackageOverlayHost (geometry/focus/a11y projection)`. Server owns session/filter/selection/activation. Client presentation owner must be ONE: geometry, focus restoration, visual host, and accessibility projection for the command centre live in the overlay host + `shell/transient_menu.rs` hydration; the driver routes snapshots chrome+fanned to panes but owns no menu state.
+`server TransientMenuSession → Tauri bridge forwarder → React workspace controller (snapshot state + typed intent enqueue) → CommandCentre modal (focus containment, listbox projection, polite count)`. Server owns session/filter/selection/activation. Client presentation ownership is ONE surface per concern: modal geometry/focus/restoration in the React Aria wrapper, intent emission through the bounded edit queue, accessibility strings from the sanitized snapshot. The workspace controller routes snapshots to panes but owns no menu session state.
 
 ## UI primitive constraints (apply to every shell/editor move)
 
-- Reuse catalog primitives/components (`src/shell/components.rs`, `docs/reference/primitives`, clay-ui `references/components.md` + `tokens.md`) before any new widget; extraction cannot hand-roll bespoke widgets where a catalog entry covers the need.
-- Token-only styling: colors/spacing/radii/opacity from typed Clay theme tokens; font role (`ui`/`monospace`/`proportional`) + `UiTextVariant` only. No raw colors, raw CSS, concrete families/sizes introduced by a move.
-- Inert contributions: packages declare inert validated UI + typed tokens; no package JS in paint/layout/pointer/key; no Masonry widget handles/raw ops; `serverRequestLayoutIntent` is the only public layout seam.
+- Reuse catalog primitives/components (`docs/reference/ui-components.md`, clay-ui `references/components.md` + `tokens.md`, React Aria Components) before any new component; a move cannot hand-roll bespoke UI where a catalog entry covers the need.
+- Token-only styling: colors/spacing/radii/opacity arrive as resolved `--clay-*` CSS custom properties from the Rust theme resolver; font role (`ui`/`monospace`/`proportional`) + `UiTextVariant` only. No raw colors, raw CSS values, concrete families/sizes introduced by a move.
+- Inert contributions: packages declare inert validated UI + typed tokens; no package JS in render/layout/pointer/key; no DOM handles/raw ops; `serverRequestLayoutIntent` remains the only public layout seam.
 - Additive-only catalog/token names; keep `references/components.md` / `tokens.md` current in the same change.
-- Duplicate overlay reconciliation, per-frame state mirroring, and full-tree invalidation are forbidden; one `PackageOverlayHost`, one reconcile path.
+- Duplicate overlay mounting, mirrored per-frame state, and full-tree re-render on every update are forbidden; one SduiRenderer reconcile path keyed by stable node IDs.
 
 ## Performance hot paths and guards (before any move)
 
 | Hot path | Budget / guard |
 |---|---|
-| Keypress → local paint | `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` = 16 ms; `pane_document_typing_requires_no_server_or_js`, `shell_command_dispatch_requires_no_server_or_js_runtime` |
-| Pane paint / tab switch | `PANE_PAINT_P95_BUDGET_MS` = 1 ms, `TAB_SWITCH_P95_BUDGET_MS` = 1 ms; `benches/window_baselines.rs` geometry benches |
+| Keypress → local glyph/caret update | `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` = 16 ms; CodeMirror applies edits locally first, bounded ordered deltas queue asynchronously (`frontend/src/editor` tests + `tests/suites/protocol.rs` hot-path guards) |
+| Pane render / tab switch | `PANE_PAINT_P95_BUDGET_MS` = 1 ms, `TAB_SWITCH_P95_BUDGET_MS` = 1 ms; React commit measured by the frontend test suite; no synchronous server/JS round trip in the keystroke path |
 | Edit ack / scroll-layout-render | `EDIT_ACK_P95_BUDGET_MS` = 40 ms, `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS` = 16 ms |
 | Command centre open / filter | `COMMAND_CENTRE_OPEN_P95_BUDGET_MS` = 50 ms, `FILTER_UPDATE_P95_BUDGET_MS` = 4 ms; listing payload 64 KiB, `TRANSIENT_MENU_MAX_ITEMS` = 256 |
-| Runtime eval / config / mode activation | `JS_RUNTIME_EVALUATION_TIMEOUT_MS` = 5 s, heap 128 MiB; `RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS` = 25 ms, `MODE_ACTIVATION_P95_BUDGET_MS` = 100 ms; `benches/runtime_sdui_baselines.rs` |
-| IPC frame / edit doc | `DEFAULT_MAX_FRAME_SIZE` = 1 MiB, `MAX_OPENABLE_FILE_BYTES` = 768 KiB, no full-doc IPC on ordinary edits |
-| Tests pinning these | `tests/editor_performance_invariants.rs`, `tests/ui_primitive_conformance.rs`, `tests/performance_budgets.rs`, `tests/package_loading.rs`, codec/malformed-archive suites |
+| Runtime eval / config / mode activation | `JS_RUNTIME_EVALUATION_TIMEOUT_MS` = 5 s, heap 128 MiB; `RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS` = 25 ms, `MODE_ACTIVATION_P95_BUDGET_MS` = 100 ms |
+| IPC frame / edit doc | `DEFAULT_MAX_FRAME_SIZE` = 1 MiB, `MAX_OPENABLE_FILE_BYTES` = 768 KiB, no full-doc IPC on ordinary edits (deltas only) |
+| Frontend bundle budgets | Startup shell ≤ 180 kB gzip, total application ≤ 400 kB gzip; enforced by `frontend/scripts/bundle-budget.mjs` in CI |
+| Tests pinning these | `src/perf/budgets.rs` constants, `benches/protocol_server_baselines.rs`, `tests/performance_budgets.rs`, `tests/package_loading.rs`, codec/malformed-archive suites, frontend Vitest editor/SDUI/agent suites |
 
 ## Security: canonical identity and cleanup authority (not relocatable)
 

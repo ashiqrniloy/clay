@@ -2,3 +2,6 @@
 node_modules/
 /packages/markdown/node_modules/
 /code-reviews
+/frontend/dist/
+/src-tauri/target/
+/src-tauri/gen/schemas/

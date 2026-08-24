@@ -1,0 +1,40 @@
+.group {
+  height: 100%;
+  min-height: 0;
+  background: var(--clay-border-hairline);
+}
+
+.pane {
+  height: 100%;
+  min-height: 0;
+  background: var(--clay-surface-main);
+  outline: var(--clay-dimension-border-hairline, 1px) solid transparent;
+}
+
+.pane.active {
+  outline-color: var(--clay-border-focus);
+}
+
+.separator {
+  background: var(--clay-border-strong);
+  flex: 0 0 var(--clay-dimension-border-thin, 2px);
+}
+
+.separator:focus-visible {
+  outline: 2px solid var(--clay-focus-ring);
+  outline-offset: 0;
+}
+
+.empty {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--clay-spacing-md, 16px);
+}
+
+.emptyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--clay-spacing-xs, 8px);
+}

@@ -100,8 +100,7 @@ Plan 088 manual-plan records link these findings to step ranges `L15–L19`, `F3
 
 ## Phase 28.7 P2 visual and accessibility recapture (2026-08-21)
 
-The P2 review ran the UI preflight again with `npx ui-skills start`, selected
-`rams/rams` from the `accessibility` category, then called
+The P2 review used the UI guidance current at execution time, then called
 `computer-use-linux_get_app_state` before any interaction. Fresh static
 fixtures passed and were inspected under
 `code-reviews/screenshots/2026-08-21-phase28.7-p2-recapture/`:
@@ -128,8 +127,8 @@ Clay-owned AccessKit surface, not a package callback or client-JavaScript path.
 The Phase 25 review captured the core fallback, `@clay/chat` dark/light
 unconfigured landing, large UI typography, runtime-error, and disconnected
 recovery states under
-`code-reviews/screenshots/2026-08-22-plan096-ui-review/`. The review used
-`npx ui-skills start` with `jakubkrehel/better-accessibility`, then
+`code-reviews/screenshots/2026-08-22-plan096-ui-review/`. The review used the
+UI guidance current at execution time, then called
 `computer-use-linux_get_app_state` before inspection. AT-SPI verified named
 `Agent`, `Provider`, `Model`, `Open File`, `Open Folder`, and `Cancel` buttons,
 a reachable package region, and a focused `Message` composer. Provider/model/
@@ -144,6 +143,55 @@ package entry before requesting initial composer focus. These are host-owned
 a11y invariants, not package callbacks. The remaining Phase 25 follow-up is
 multiline composer semantics/direct naming for the inner text area; current
 Chat uses the generic single-line `textInput` contract.
+
+## Plan 097 Phase 12 Tauri/React review (2026-08-24)
+
+The production desktop client is now Tauri v2 + React; the review harness
+therefore treats the Clay webview as the reviewed surface rather than a
+Masonry render tree. Evidence is retained under
+`code-reviews/screenshots/2026-08-24-tauri-react-parity/`:
+
+- 20 app-only CDP PNGs and paired accessibility snapshots at 1440×900 and
+  780×900 cover `states`, `editor`, `intelligence`, `package-ui`,
+  `command-centre`, `command-centre-empty`, `path-browser`, `settings`,
+  `chat`, and `splits`.
+- Real Tauri AT-SPI dumps cover the default welcome, opened editor,
+  tabs/splits, and Chat landing. They expose `Clay workspace`, `Window tabs`,
+  pane/editor names, named buttons, CodeMirror's document entry, Chat's log,
+  and the shell status path.
+- Portal PNGs from real desktop runs were inspected and removed when unrelated
+  terminal/window content was visible. No retained PNG contains host paths,
+  credentials, or user data. The path-browser fixture uses the safe display
+  label `workspace`; the editor fixture no longer falls back to `/tmp/ws`.
+  `scripts/capture-ui-review.sh` recognizes both legacy `clay` and current
+  `clay-desktop` AT-SPI application names, waits for the current `Clay
+  workspace` landmark, and tracks the Tauri child during cleanup.
+
+Review findings and resolutions:
+
+1. **Fixed:** editor chrome used the workspace root as a fallback label and
+   could expose an absolute path. `ClayEditor` now keeps relative document
+   paths and reduces absolute fallback values to a basename; regression is
+   covered by `frontend/src/test/editor.test.tsx`.
+2. **Fixed:** the shell connection status was visible but not a live region.
+   `AppShell` now wraps it in `role="status" aria-live="polite"`, covered by
+   `frontend/src/test/shell.test.tsx`.
+3. **Low follow-up:** an unselected settings theme control is announced as
+   `Theme Theme` because its label and placeholder are identical. It remains
+   operable and unambiguous; add a distinct generic dropdown placeholder if
+   screen-reader testing shows the repetition is harmful.
+4. **UNRESOLVED host limitation:** physical keyboard-only completion,
+   Command Centre/path activation, native dialogs, settings interaction, and
+   tab/pane keyboard flows could not be re-driven. `computer-use-linux doctor`
+   reports denied `/dev/uinput`, no `xdotool`/`ydotool`, and no Wayland portal
+   path that targets the Clay window. Static DOM/AX semantics and component,
+   bridge, server, and security tests pass; no interactive pass is inferred.
+
+Final verification for this review: Rust fmt/check/clippy and 1117 Rust lib
+plus 4 launch, 30 presentation, 184 protocol, 68 runtime, and 130 security
+tests pass; frontend format/lint/typecheck and 99 Vitest tests pass; frontend
+budgets are 160.6 kB shell / 343.2 kB total gzip against 180 / 400 kB limits;
+`security-audit.sh` and `package-smoke.sh` pass; Clay Agent tests pass 8/8.
 
 ## Invariants and Constraints
 
@@ -162,4 +210,4 @@ Chat uses the generic single-line `textInput` contract.
 - [Masonry Shell Runtime](masonry-shell.md) — shell/chrome hosting the states the harness captures
 - [Pane Document Views](pane-document-views.md) — welcome entry state and completion projection
 - [Centered Command Centre Surface](centered-command-centre-surface.md) — the centered modal the harness captures
-- [test-plan/index.md](../../test-plan/index.md) — manual step IDs per state (L12–L14, F32–F37, E16–E21, K69–K72, Q11–Q14, S33–S35)
+- [test-plan/index.md](../../../test-plan/index.md) — manual step IDs per state (L12–L14, F32–F37, E16–E21, K69–K72, Q11–Q14, S33–S35)

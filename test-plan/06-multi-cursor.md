@@ -48,3 +48,9 @@ reference: `docs/development/manual-editor-capabilities-test-plan.md`
 - Multi-caret undo replays one history entry per caret edit (batched undo
   not implemented).
 - `Ctrl+Shift+L` uses document-text matching, not search-engine matching.
+
+## Plan 097 post-cutover status record (2026-08-24)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| Multi-cursor logic (X1–X15) | PASS by automated equivalents; UNRESOLVED keyboard live | CodeMirror owns multiple-selection/range primitives; the editor extension and position-map frontend tests pin selection state handling. Physical keyboard steps remain UNRESOLVED on this host (`/dev/uinput` denied, no xdotool/ydotool, no Wayland portal input) — not claimed as a live pass |

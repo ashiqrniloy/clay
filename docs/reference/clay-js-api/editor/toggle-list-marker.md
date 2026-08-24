@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: toggleListMarker
 js_facade: runtime/js/editor.js::toggleListMarker
-backing_rust: src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command; src/editor/surface/mod.rs::EditorSurface::command(EditorCommand::ToggleListMarker)
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: toggleListMarker
@@ -96,8 +96,8 @@ Prefer this core command over package-specific transform logic. Configure marker
 
 - JS facade: `runtime/js/editor.js::toggleListMarker`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key`
-- Command mapping: `src/masonry_editor.rs::EditorClientCommand::from_command_id`
-- Local transform: `src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command` and `src/editor/surface/mod.rs::EditorSurface::command`
+- Command mapping: `src/client_commands.rs::EditorClientCommand`
+- Local transform: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)` and `src/client_commands.rs::EditorClientCommand`
 
 ## Lookup metadata
 

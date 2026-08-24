@@ -40,8 +40,8 @@ custom_properties:
     type: string[]
     default: []
     description: Registered package-prefixed command IDs that overlay components may emit.
-security: Validates package-prefixed overlay IDs, anchors, focus and dismissal policy, bounded component payloads, registered action targets, provenance, and conflicts while Clay owns z-order, focus, accessibility, and native overlay rendering; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.
-agent_guidance: Use `ui.serverRegisterTransientOverlayContribution` for declarative dismissible package overlays only; avoid fixed-slot panels, raw ops, native widget handles, direct Masonry APIs, raw CSS, renderer callbacks, client-side JavaScript hooks, and hidden focus/z-order settings.
+security: Validates package-prefixed overlay IDs, anchors, focus and dismissal policy, bounded component payloads, registered action targets, provenance, and conflicts while Clay owns z-order, focus, accessibility, and native overlay rendering; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.
+agent_guidance: Use `ui.serverRegisterTransientOverlayContribution` for declarative dismissible package overlays only; avoid fixed-slot panels, raw ops, native widget handles, direct client APIs, raw CSS, renderer callbacks, client-side JavaScript hooks, and hidden focus/z-order settings.
 lookup_tags: [ui, package-ui, overlay, focus-policy, clay-js-api, phase18.3, runtime-backed]
 app_visible: true
 help_visible: true
@@ -143,20 +143,20 @@ Fails when the manifest is invalid, the overlay ID is not package-prefixed, the 
 
 No additional permission is required for inert overlay metadata. Overlay action targets must resolve to registered commands, and those commands retain their own permission and routing constraints.
 
-Validates package-prefixed overlay IDs, anchors, focus and dismissal policy, bounded component payloads, registered action targets, provenance, and conflicts while Clay owns z-order, focus, accessibility, and native overlay rendering; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.
+Validates package-prefixed overlay IDs, anchors, focus and dismissal policy, bounded component payloads, registered action targets, provenance, and conflicts while Clay owns z-order, focus, accessibility, and native overlay rendering; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 
 ## Agent guidance
 
-Use `ui.serverRegisterTransientOverlayContribution` when the user asks for a public Clay JS API for package overlays. Avoid direct Rust calls, raw `Deno.core.ops`, protocol DTO construction, Masonry widgets, raw CSS, renderer callbacks, hidden focus/z-order keys, or client-side JavaScript execution.
+Use `ui.serverRegisterTransientOverlayContribution` when the user asks for a public Clay JS API for package overlays. Avoid direct Rust calls, raw `Deno.core.ops`, protocol DTO construction, client widgets, raw CSS, renderer callbacks, hidden focus/z-order keys, or client-side JavaScript execution.
 
 ## Backing implementation
 
 - JS facade: `runtime/js/ui.js::serverRegisterTransientOverlayContribution`
 - Deno op: `src/server/ops/ui.rs::op_clay_ui_register_transient_overlay_contribution` (`op_clay_ui_register_transient_overlay_contribution`)
 - Backing Rust/current owner: `src/server/ui.rs::PackageUiRegistry::register_overlay`
-- Runtime composition path: `src/shell/package_ui.rs::PackageUiRuntimeState`; `src/masonry_sdui.rs::SduiNativeState`
+- Runtime composition path: `src/shell/package_ui.rs::PackageUiRuntimeState`; `frontend/src/sdui/renderer.tsx (React SDUI host renders validated sdui trees; no native state)`
 
 ## Lookup metadata
 

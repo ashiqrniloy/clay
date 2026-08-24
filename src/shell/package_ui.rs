@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use masonry::kurbo::Rect;
+use kurbo::Rect;
 use serde_json::{Map, Value};
 
 use crate::{
@@ -300,11 +300,82 @@ impl PackageUiRuntimeState {
 
     /// Replace package UI for a runtime-generation snapshot.
     ///
-    /// Contribution payloads are empty until package UI crosses IPC, so this
-    /// clears previous panels/overlays/routes and advances the version to the
-    /// snapshot generation under one install boundary.
+    /// Atomically replace package UI from the validated runtime-generation
+    /// snapshot. Any impossible component decode fails closed to no package UI.
     pub(crate) fn install_runtime_snapshot(&mut self, snapshot: &PackageUiSnapshot) {
+        let panels = snapshot.panels.iter().map(|panel| {
+            let value: Value = serde_json::from_str(&panel.component_json).ok()?;
+            let component = PackageUiComponentTree::from_declaration(&value).ok()?;
+            let slot_id = match panel.slot.as_str() {
+                "left" => FixedSlotId::Left,
+                "right" => FixedSlotId::Right,
+                "top" => FixedSlotId::Top,
+                "bottom" => FixedSlotId::Bottom,
+                _ => return None,
+            };
+            Some((
+                slot_id,
+                FixedPackagePanel::new(
+                    panel.id.clone(),
+                    slot_id,
+                    PackagePanelVisibility::parse(&panel.visibility),
+                    component,
+                    panel.action_targets.clone(),
+                ),
+            ))
+        });
+        let overlays = snapshot.overlays.iter().map(|overlay| {
+            let value: Value = serde_json::from_str(&overlay.component_json).ok()?;
+            let component = PackageUiComponentTree::from_declaration(&value).ok()?;
+            Some(TransientPackageOverlay::new(
+                overlay.id.clone(),
+                PackageOverlayAnchor::parse(&overlay.anchor),
+                overlay.focus_policy.clone(),
+                overlay.dismissal_policy.clone(),
+                component,
+                overlay.action_targets.clone(),
+                "z.overlay",
+            ))
+        });
+        let Some(fixed_panels) = panels.collect::<Option<BTreeMap<_, _>>>() else {
+            self.clear_to_version(snapshot.version);
+            return;
+        };
+        let Some(transient_overlays) = overlays
+            .map(|overlay| overlay.map(|value| (value.id.clone(), value)))
+            .collect::<Option<BTreeMap<_, _>>>()
+        else {
+            self.clear_to_version(snapshot.version);
+            return;
+        };
         self.version = snapshot.version;
+        self.fixed_panels = fixed_panels;
+        self.transient_overlays = transient_overlays;
+        self.input_routing = snapshot
+            .input_routes
+            .iter()
+            .map(|route| {
+                (
+                    route.id.clone(),
+                    PackageInputRouting::new(
+                        route.id.clone(),
+                        route.scope.clone(),
+                        route.component_id.clone(),
+                        route.pointer_click.clone(),
+                        route.pointer_action.clone(),
+                        route.pointer_drag.clone(),
+                        route.focus_policy.clone(),
+                        route.selection_policy.clone(),
+                        route.context_modes.clone(),
+                        route.action_targets.clone(),
+                    ),
+                )
+            })
+            .collect();
+    }
+
+    fn clear_to_version(&mut self, version: u64) {
+        self.version = version;
         self.fixed_panels.clear();
         self.transient_overlays.clear();
         self.input_routing.clear();
@@ -499,7 +570,7 @@ impl TransientPackageOverlay {
         // Package-authored labels are normalized here, before Masonry sees the
         // payload; display/action data remains unchanged.
         let menu_a11y = MenuA11y {
-            prompt: crate::editor::accessibility::sanitize_recovery_summary(session.prompt())
+            prompt: crate::sanitize::sanitize_summary(session.prompt())
                 .unwrap_or_else(|| "Transient menu".to_string()),
             items: session
                 .items()
@@ -508,7 +579,7 @@ impl TransientPackageOverlay {
                 .map(|(index, item)| {
                     let selected = index == session.selected_index();
                     MenuA11yItem {
-                        label: crate::editor::accessibility::compose_menu_item_accessibility_label(
+                        label: crate::sanitize::menu_item_label(
                             &item.accessibility_label,
                             &item.label,
                             selected,
@@ -519,13 +590,12 @@ impl TransientPackageOverlay {
                 .collect(),
             status: match session.status() {
                 TransientMenuStatus::Empty { message } => {
-                    crate::editor::accessibility::sanitize_recovery_summary(message)
+                    crate::sanitize::sanitize_summary(message)
                 }
                 _ => None,
             },
-            result_count: (session.origin() == TransientMenuOrigin::Centered).then(|| {
-                crate::editor::accessibility::compose_menu_result_count(session.items().len())
-            }),
+            result_count: (session.origin() == TransientMenuOrigin::Centered)
+                .then(|| crate::sanitize::menu_result_count(session.items().len())),
         };
         // Phase 20.5: anchor selected by surface origin.
         let anchor = match session.origin() {
@@ -959,7 +1029,7 @@ fn bottom_rect(main_rect: Rect) -> Rect {
 
 #[cfg(test)]
 mod tests {
-    use masonry::kurbo::Rect;
+    use kurbo::Rect;
     use serde_json::json;
 
     use super::*;
@@ -1253,7 +1323,7 @@ mod tests {
             )],
             provenance: crate::protocol::CompletionProvenance::builtin_core(),
         };
-        let session = crate::shell::completion_result_to_menu_session(&result);
+        let session = crate::shell::transient_menu::completion_result_to_menu_session(&result);
         let overlay = TransientPackageOverlay::from_menu_session(&session);
 
         assert!(overlay.action_targets.is_empty());

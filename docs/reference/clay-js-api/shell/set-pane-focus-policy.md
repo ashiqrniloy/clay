@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: setPaneFocusPolicy
 js_facade: runtime/js/shell.js::setPaneFocusPolicy
-backing_rust: src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy; src/masonry_shell/mod.rs::ClayShellWidget::set_pane_focus_policy
+backing_rust: src/client_commands.rs::EditorClientCommand; src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy
 deno_op: op_clay_shell_set_pane_focus_policy
 deno_op_path: src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy
 name: setPaneFocusPolicy
@@ -97,7 +97,7 @@ Use `setPaneFocusPolicy({ paneFocusPolicy: "cursor" })` only when the user expli
 
 ## Backing implementation
 
-`runtime/js/shell.js::setPaneFocusPolicy` calls `op_clay_shell_set_pane_focus_policy` (`src/server/ops/shell.rs`), which validates the bounded enum and calls `ClayOpState::publish_shell_preferences`. The value is broadcast to connected clients as `ServerMessage::ShellPreferences` (protocol version 10), delivered as `ClientConnectionEvent::ShellPreferences`, and applied by `ClayShellWidget::set_pane_focus_policy` (`src/masonry_shell/mod.rs::PaneFocusPolicy::from_config_str` maps `"cursor"` → `FollowsCursor`, anything else → `ClickToFocus`).
+`runtime/js/shell.js::setPaneFocusPolicy` calls `op_clay_shell_set_pane_focus_policy` (`src/server/ops/shell.rs`), which validates the bounded enum and calls `ClayOpState::publish_shell_preferences`. The value is broadcast to connected clients as `ServerMessage::ShellPreferences` (protocol version 10), delivered as `ClientConnectionEvent::ShellPreferences`, and applied by the React PaneTree pane-focus policy (`src/client_commands.rs::ShellClientCommand` maps `"cursor"` → `FollowsCursor`, anything else → `ClickToFocus`).
 
 ## Lookup metadata
 

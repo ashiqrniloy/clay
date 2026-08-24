@@ -79,7 +79,7 @@ Execute in numeric order except Plan 089's isolated workflow work may overlap Pl
   - Approach:
     - Documentation Reviewed:
       - `.agents/skills/clay-ui/SKILL.md`, `references/components.md`, `references/tokens.md`.
-      - `npx ui-skills get ibelick/fixing-accessibility` guidance: stable semantics, names, keyboard/focus, dialogs, announcements.
+      - the UI guidance current at execution time guidance: stable semantics, names, keyboard/focus, dialogs, announcements.
       - Local rustdocs: `/tmp/clay-plan-doc-target/doc/accesskit/index.html`, `/tmp/clay-plan-doc-target/doc/masonry/index.html` for access-tree and widget contracts.
       - `docs/development/accessibility.md`; `src/masonry_package_region.rs::stable_menu_a11y_node_id`.
     - Options Considered:

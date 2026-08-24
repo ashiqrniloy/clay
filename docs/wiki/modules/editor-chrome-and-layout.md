@@ -1,5 +1,10 @@
 # Editor Chrome and Layout Geometry
 
+> **Historical (native editor removed in Plan 097 Phase 12).** The chrome/layout
+> contract is carried by the React editor extensions and theme adapter:
+> [React CodeMirror Editor](react-codemirror-editor.md). Protocol shapes and
+> server-side validation referenced below remain current.
+
 ## Source
 
 - `src/protocol/mod.rs` — `EditorChrome` (including `inlay_hints`), `WrapPolicy`, `EditorLayoutRules`, `EditorBehaviorRules.chrome`/`layout`.

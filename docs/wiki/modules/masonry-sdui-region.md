@@ -1,5 +1,10 @@
 # SDUI / Package-UI Retained Masonry Reconciliation
 
+> **Historical — removed in Plan 097 Phase 12.** The native Masonry SDUI
+> region was deleted with the native client. The stable-ID reconciliation
+> contract now lives in the React projection:
+> [React SDUI and Package UI Projection](react-sdui-package-ui.md).
+
 ## Source
 
 - `src/masonry_sdui_region.rs` — SDUI tree reconciler + leaf widgets + scroll viewport

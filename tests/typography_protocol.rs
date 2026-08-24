@@ -117,14 +117,9 @@ fn first_party_modes_declare_roles_without_rendering_language_branches() {
     }
 
     for path in [
-        "src/editor/layout.rs",
-        "src/editor/surface/mod.rs",
-        "src/editor/surface/caret.rs",
-        "src/editor/surface/command.rs",
-        "src/editor/surface/decoration.rs",
-        "src/editor/surface/diagnostic.rs",
-        "src/masonry_editor.rs",
-        "src/masonry_sdui.rs",
+        "frontend/src/editor/create-editor.ts",
+        "frontend/src/editor/extensions/controller.ts",
+        "frontend/src/sdui/registry.tsx",
     ] {
         let source = std::fs::read_to_string(path).unwrap();
         assert!(!source.contains("mode_id == \"markdown\""), "{path}");

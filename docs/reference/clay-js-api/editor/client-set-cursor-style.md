@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSetCursorStyle
 js_facade: runtime/js/editor.js::clientSetCursorStyle
-backing_rust: src/editor/surface/mod.rs::EditorSurface::set_caret_style_override
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_editor_set_cursor_style
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_set_cursor_style
 name: clientSetCursorStyle
@@ -57,7 +57,7 @@ Set the caret shape and blink through the `clay:editor` Clay JavaScript facade.
 
 ## Description
 
-`clientSetCursorStyle` is the public API for **Set Cursor Style**. The `op_clay_editor_set_cursor_style` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. The client applies the style through `EditorSurface::set_caret_style_override`, which takes precedence over the per-mode manifest `caret_style` and the editor `StyleRegistry` default.
+`clientSetCursorStyle` is the public API for **Set Cursor Style**. The `op_clay_editor_set_cursor_style` deno op validates typed arguments (deny-by-default enum) and returns the validated command descriptor. The client applies the style through the CodeMirror caret-style override (`frontend/src/editor/extensions/behavior.ts`), which takes precedence over the per-mode manifest `caret_style` and the editor `StyleRegistry` default.
 
 Authority: `configuration-driven-client-ui-state`. Runtime path: `configuration-api-to-client-ui`. Cursor styling is paint-time UI metadata; changing it does not route ordinary keypresses through JavaScript or block paint/input on server work. Caret **colour** stays theme-owned (`base.caret`); this API owns shape and blink only.
 
@@ -125,8 +125,8 @@ Use `editor.clientSetCursorStyle` when the user asks for set cursor style throug
 
 - JS facade: `runtime/js/editor.js::clientSetCursorStyle`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_set_cursor_style` (`op_clay_editor_set_cursor_style`)
-- Backing Rust/current owner: `src/editor/surface/mod.rs::EditorSurface::set_caret_style_override`
-- Paint: `src/editor/surface/mod.rs::EditorSurface::paint_caret` (shape-aware), `src/editor/layout.rs::caret_cell_for_visible_byte_offset`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Paint: `src/client_commands.rs::EditorClientCommand` (shape-aware), `src/editor/layout.rs::caret_cell_for_visible_byte_offset`
 
 ## Lookup metadata
 

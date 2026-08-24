@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientExecuteEditorCommand
 js_facade: runtime/js/editor.js::clientExecuteEditorCommand
-backing_rust: src/server/ops/editor.rs::op_clay_editor_execute_command; src/masonry_editor.rs::EditorWidget::apply_editor_command_request
+backing_rust: src/client_commands.rs::EditorClientCommand; src/server/ops/editor.rs::op_clay_editor_execute_command
 deno_op: op_clay_editor_execute_command
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_execute_command
 name: clientExecuteEditorCommand
@@ -96,7 +96,7 @@ Use `editor.clientExecuteEditorCommand` when the user asks for programmatic curs
 - JS facade: `runtime/js/editor.js::clientExecuteEditorCommand`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_execute_command`
 - Push wire: `src/protocol/editor_control.rs::EditorCommandRequest` (`ServerMessage::EditorCommandRequest`, protocol version 8)
-- Client dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_command_request`
+- Client dispatch: `src/client_commands.rs::EditorClientCommand; src/server/ops/editor.rs::op_clay_editor_execute_command`
 
 ## Lookup metadata
 

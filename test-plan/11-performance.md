@@ -149,6 +149,40 @@ hot-path limits are deterministic automated gates.
 | Q26 | Toggle inlay hints in a code document with provider data, then type and scroll | Overlay visibility changes without reflow or a second layout; labels remain bounded/muted; no LSP request is required for the local visibility toggle and ordinary typing stays local-optimistic |
 | Q27 | Hover a link while a completion/menu session is open, then activate safe and unsafe targets | Tooltip/intent work does not steal the active menu, start network work, or block typing; link/inlay decoration payload stays ≤8,192 bytes and HTTP/absolute/traversal activation remains display-only/denied |
 
+## Plan 097 Phase 8 SDUI/package renderer checks
+
+| # | Action | Expected |
+|---|--------|----------|
+| Q28 | Apply a one-node SDUI update beside focused package input/disclosure state | Update is targeted by stable ID; stale base versions drop; surviving object and React state identities remain unchanged |
+| Q29 | Build production frontend and inspect startup/package renderer chunks | Startup shell stays below 180 kB gzip; package renderer is code-split; total stays below 400 kB gzip |
+| Q30 | Type/scroll while package UI and a server SDUI panel are visible | Local editor paint remains wait-free; package JavaScript, JSON parsing, schema validation, and Tauri/server waits stay outside render/layout/input hot paths |
+
+## Plan 097 Phase 8 Linux execution record (2026-08-23)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| Q28 | PASS automated | `frontend/src/sdui/state.test.ts` validates targeted replacement, surviving identity, and stale-update denial; registry test retains text/disclosure state |
+| Q29 | PASS production build | Startup shell 164.3/180 kB gzip; code-split package renderer 27.8 kB gzip; total 299.3/400 kB gzip |
+| Q30 | PASS structural + existing editor budgets | 79 frontend tests passed in the implementation run; 1 MiB local typing and 1,000-span projection budgets stayed green; package projection reads cached parsed DTOs only |
+
+No performance budget was raised. Wide/narrow/large-type screenshots are under `code-reviews/screenshots/2026-08-23-tauri-react-phase8/`.
+
+## Plan 097 Phase 9 desktop workflow checks
+
+| # | Action | Expected |
+|---|--------|----------|
+| Q31 | Open/filter a 256-item Command Centre or Path Browser snapshot repeatedly | Existing 50 ms open / 4 ms filter advisory budgets remain; React performs no fuzzy/filesystem/package work and native bounded scrolling stays responsive |
+| Q32 | Trigger configuration reload, theme/appearance switch, and typography apply while typing | CodeMirror local edit/paint remains wait-free; configuration and preference work stays server-side and atomic; one runtime snapshot updates derived UI state |
+| Q33 | Build production frontend after command/settings chunks land | Startup shell stays below 180 kB gzip, total below 400 kB gzip; command/settings code remains behind lazy workspace/package chunks |
+
+## Plan 097 Phase 9 execution record (2026-08-23)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| Q31 | PASS deterministic/structural | Existing menu payload/work-count baselines plus 83 frontend tests; collections remain protocol-capped at 256 and no frontend scorer/listing exists |
+| Q32 | PASS structural/automated | Existing local edit performance tests and atomic reload/settings tests pass; workspace consumes only pushed snapshots/diagnostics |
+| Q33 | PASS production build | Startup shell 156.5/180 kB gzip; lazy workflow chunks 34.9 kB; total 304.9/400 kB; no budget raised |
+
 ## Phase 28 Linux execution record (2026-08-20)
 
 | Checks | Result | Evidence |
@@ -166,7 +200,7 @@ hot-path limits are deterministic automated gates.
 
 ## Phase 28.7 P2 visual and interaction recapture (2026-08-21)
 
-UI preflight used `npx ui-skills start`, category `accessibility`, selected
+UI preflight used the UI guidance current at execution time, category `accessibility`, selected
 `rams/rams`, and `computer-use-linux_get_app_state` before review. Static
 screenshots and AT-SPI dumps are under
 `code-reviews/screenshots/2026-08-21-phase28.7-p2-recapture/`.
@@ -180,3 +214,20 @@ screenshots and AT-SPI dumps are under
 | Narrow/wide layout | NOT RUN visually; PASS structural | Fixed review captures are 900 logical pixels; responsive bounds and typography geometry tests pass, but no resize pass is inferred. |
 
 No performance budget was changed.
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Wide/narrow rendered surfaces | PASS static | 20 CDP captures under `code-reviews/screenshots/2026-08-24-tauri-react-parity/` at 1440×900 and 780×900 show no clipping, duplicate overlay, or visible layout jank |
+| Editor/package/Chat render cost | PASS structural; stream feel unresolved | Existing CodeMirror, SDUI, AG-UI, list, and hot-path tests pass; provider setup/input prevented a live streaming-latency claim |
+| Bundle budget | PASS | Frontend build: shell 160.6 kB gzip / 180 kB budget; total 343.2 kB / 400 kB budget |
+| Keyboard/filter/resize feel | UNRESOLVED live | Host cannot safely deliver keyboard or compositor resize actions; no visual pass inferred from source/tests |
+
+## Plan 097 manual-test-plan re-measurement (2026-08-24, post-cutover)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Bundle budgets (fresh production build) | PASS | `npm run build` + `check:budget`: shell 160.6/180 kB gzip, total 343.2/400 kB gzip — no budget raised |
+| Rust gate timing | PASS | `cargo test --all-targets` suites complete in seconds each (protocol ≈0.2 s, security ≈0.15–0.45 s, runtime ≈0.3 s, presentation ≈0.05 s); no stalled suite |
+| Agent host | PASS structural | clay-agent unit tests pass (8 tests); daemon spawn/stream behavior unchanged by migration; live provider latency not claimable without credentials on this host |

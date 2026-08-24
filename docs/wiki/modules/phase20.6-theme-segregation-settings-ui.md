@@ -78,7 +78,7 @@ The surface is a fixed panel rather than a transient `modal` overlay because the
 
 - `settings.setTheme` — requires a bundled first-party `@clay/theme-*` specifier from `BUNDLED_PACKAGES`.
 - `settings.setAppearance` — requires `light` | `dark` | `system`.
-- `settings.setTypography` — accepted; bounds are enforced by the `setTypography` op at apply time (free-form `textInput` value carriage is a follow-up protocol task, so `setTypography` does not yet persist).
+- `settings.setTypography` — the Tauri/React trusted settings module sends one complete three-profile/seven-ratio JSON transaction; the shared typography parser validates it before atomic persistence and again during reload.
 
 `src/server/connection/runtime.rs::persist_settings_change` (`PersistOutcome`) merges `settings.setTheme` / `settings.setAppearance` / `settings.reset` into `~/.config/clay/preferences.json` (atomic tmp + rename) and triggers `reload_runtime_generation()` so the change applies live through the canonical apply path: persist → reload → `init.js` re-eval + `apply_persisted_preferences` → `RuntimeStateSnapshot` fanout. No restart required. Live theme apply rides the existing `RuntimeStateSnapshot` fanout (which already ships `ActiveTheme`); no separate `ThemeUpdates` broadcast primitive was needed.
 
@@ -153,7 +153,7 @@ settings.reset
 - The `clay:configuration` module stays closed; appearance is a `clay:theme` API. No undocumented configuration keys.
 - `preferences.json` is authority-rejecting and closed-key; corrupted/oversized fields are dropped, not fatal.
 - Theme packages are inert data — no renderer code, native widgets, raw ops, file/network/shell access, or workspace mutation. Non-`@clay/*` specifiers are denied by `setTheme`/`settings.setTheme`.
-- `settings.setTypography` validates but does not yet persist (free-form `textInput` value carriage is a follow-up protocol task); its bounds are enforced by the `setTypography` op at apply time, so a hand-written `typography` preference round-trips safely through reload today.
+- `settings.setTypography` persists only a complete validated transaction. Invalid families, sizes, hierarchy ratios, unknown fields, prohibited authority, or oversized payloads preserve the previous preference and runtime generation.
 - Settings live-apply rides the existing reload→`RuntimeStateSnapshot` fanout; no separate theme broadcast primitive was added (contrast/payload guardrails deferred to Phase 20.7).
 
 ## Tests
@@ -167,6 +167,19 @@ settings.reset
 - `tests/clay_js_doc_registry.rs`: `configuration_api_documents_phase20_6_appearance_and_precedence` (setAppearance registry-public, `appearance` custom_property, authority denial, configuration.md precedence/ui-session/preferences.json docs, closed `clay:configuration`).
 - `src/packages/bundled.rs`: `bundled_extension_points_match_real_contributions`, `inventory_matches_source_tree`, integrity/provenance tests include the Modus + settings entries.
 - Commands: `cargo test --lib packages::bundled`, `cargo test --lib theme`, `cargo test --test editor`, `cargo test --test protocol configuration`.
+
+## Plan 097 Phase 9 Tauri/React settings projection
+
+The target client compiles `frontend/src/settings/SettingsPanel.tsx` as the
+trusted presentation module for the exact bundled `@clay/settings` panel.
+`settings.open` and `settings.close` remain server-validated package commands;
+the server returns a narrow `ShellClientCommandRequest` only after validation,
+and the per-tab React controller toggles the panel. Theme/appearance actions
+keep the existing item-id path. Typography is now one complete bounded JSON
+argument built from the current Rust-resolved typography snapshot, validated by
+`validate_typography_request`, atomically written to `preferences.json`, and
+applied through the existing reload transaction. Third-party package surfaces
+cannot select this compiled module or call Tauri.
 
 ## Related
 

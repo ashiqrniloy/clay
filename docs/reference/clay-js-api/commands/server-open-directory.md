@@ -35,7 +35,7 @@ Navigate the Clay-owned workspace file browser to a root-relative directory thro
 
 `serverOpenDirectory` is the runtime-backed Clay JS API for **Open Directory**. It wraps the built-in `workspace.openDirectory` command and returns the validated navigation target. The same command ID is used by Clay-owned file-browser SDUI directory rows, which include the required `workspaceRootId` and `relativePath` arguments.
 
-This API is server-first background/action work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths. The server validates the directory with `WorkspaceState::list_directory` bounds and refreshes file-browser SDUI when invoked from the live file-browser action path.
+This API is server-first background/action work. It must not run in ordinary typing, client paint, client layout, pointer, scroll, keypress, or text-event hot paths. The server validates the directory with `WorkspaceState::list_directory` bounds and refreshes file-browser SDUI when invoked from the live file-browser action path.
 
 ## When to use
 

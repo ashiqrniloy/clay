@@ -493,7 +493,7 @@ Clay core/bootstrap, `core.text`, `core.code`, server authority, and native shel
     - Security: Host renders provenance/capabilities/processes/relations/wildcards/withdrawals/shared-runtime disclosure; package-authored descriptions are secondary and cannot hide authority facts or control approval actions.
   - Approach:
     - Documentation Reviewed:
-      - `npx ui-skills start` and `wshobson/interaction-design`: purposeful feedback, interruptible transitions, reduced motion.
+      - the UI guidance current at execution time and `wshobson/interaction-design`: purposeful feedback, interruptible transitions, reduced motion.
       - `.agents/skills/clay-ui/{SKILL.md,references/components.md,references/tokens.md}`.
       - `.agents/skills/project-patterns/references/package-ui-layout.md`.
     - Options Considered:

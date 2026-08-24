@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: toggleComment
 js_facade: runtime/js/editor.js::toggleComment
-backing_rust: src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command; src/editor/surface/mod.rs::EditorSurface::command(EditorCommand::ToggleComment)
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: toggleComment
@@ -96,8 +96,8 @@ Prefer `toggleComment()` over spelling the command ID manually. Reuse manifest c
 
 - JS facade: `runtime/js/editor.js::toggleComment`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key`
-- Command mapping: `src/masonry_editor.rs::EditorClientCommand::from_command_id`
-- Local transform: `src/masonry_pane_document.rs::PaneDocumentView::apply_editor_client_command` and `src/editor/surface/mod.rs::EditorSurface::command`
+- Command mapping: `src/client_commands.rs::EditorClientCommand`
+- Local transform: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)` and `src/client_commands.rs::EditorClientCommand`
 
 ## Lookup metadata
 

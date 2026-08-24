@@ -65,6 +65,28 @@ Workspace `/tmp/clay-manual` with `test.rs`, `test.md`, `plain.txt`.
 | P20 | Inspect package action provenance and available overlay origins | Package actions remain inert and provenance-labelled; packages cannot request `completion`/`centered`, own tabs/panes, or call native widgets/raw ops |
 | P21 | Apply a representative theme package with valid typed `designTokens` overrides, then return to a legacy `textStyles`-only theme | Typed overrides win only for their existing semantic roles; cached fallback/projection and AA validation remain intact; no package supplies structure, concrete fonts, or raw colors |
 
+## Plan 097 Phase 8 React package UI steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| P32 | Load `@clay/markdown`, `@clay/settings`, and a visible package-panel fixture in the Tauri/React client | Validated SDUI tree, fixed slot, status item, and editor render through the React registry; no native Masonry package renderer is required |
+| P33 | Type in a package `textInput`, expand a `collapse`, then apply an unrelated same-ID server update | Input value, focus, disclosure state, and scroll position survive; only replaced node properties change |
+| P34 | Compare bundled and adopted package surfaces | Visible provenance says `trusted package` only for exact bundled inventory; adopted surfaces say `third-party shared runtime`; neither surface receives Tauri APIs or arbitrary React/JSX |
+| P35 | Activate SDUI button/list/dropdown/text-input actions | One typed `SduiAction` reaches the server with current UI version and item/value metadata; stale/unknown/unregistered actions fail closed |
+| P36 | Remove or replace the empty-tab package and reload | One-line `loadPackage` restores the declared entry; unload shows core Open File/Open Folder fallback; approved replacement stays third-party and rollback restores the bundled target |
+
+## Plan 097 Phase 8 Linux execution record (2026-08-23)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P32 | PASS deterministic React fixture | `code-reviews/screenshots/2026-08-23-tauri-react-phase8/package-ui-wide-final.png` and `package-ui-narrow-final.png`; CDP exposes Workspace complementary region, editor textbox, Settings region, controls, and package status |
+| P33 | PASS automated + visual | `frontend/src/sdui/{state,registry}.test.*` preserves surviving object/input/disclosure state; wide/narrow/large-type captures remain contained |
+| P34 | PASS automated + rendered provenance | Package graph/loading/cross-domain suites pass; fixture renders exact host-stamped trusted label; `package_loading::spoofed_clay_prefixed_package_stays_third_party` and replacement tests pass |
+| P35 | PASS automated + CDP interaction | Registry and SDUI renderer tests assert typed payloads; `package-ui-dropdown.png` and CDP tree expose Dialog/ListBox/Option keyboard semantics |
+| P36 | PASS automated / live package replacement not rerun | Chat one-line registration and absent-package fallback tests pass; package graph adoption/revoke/replace/rollback suites pass |
+
+Linux `computer-use-linux_get_app_state` ran first. AT-SPI exposed only the Chrome frame and the compositor window list omitted Chrome-for-Testing, so no desktop-targeted keyboard claim is made; CDP supplied the bounded DOM accessibility and interaction evidence.
+
 ## Plan 088 task 12 Linux execution record (2026-08-15)
 
 | Checks | Result | Evidence |
@@ -75,6 +97,25 @@ Workspace `/tmp/clay-manual` with `test.rs`, `test.md`, `plain.txt`.
 | P19 | PASS strongest available evidence | `large-typography/` capture has no welcome a11y regression; responsive/label-clipping structural tests pass, but a live settings panel could not be opened |
 | P20 | PASS automated | Package catalog, provenance, anchor allowlist, raw-style denial, and public-surface tests pass; no new package authority was introduced |
 | P21 | PASS automated / NOT RUN visually | `theme_packages`, contrast, and typed-design-token validation tests pass; no bundled first-party theme currently ships a non-empty `designTokens` fixture for a live comparison |
+
+## Plan 097 Phase 9 React settings and package workflow steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| P37 | Select `settings.open` in React Command Centre | Server validates the loaded package command, then sends one narrow client projection; exact bundled settings panel opens for the active tab |
+| P38 | Switch all four bundled themes and light/dark/system appearance | Each selection emits one current-version declared `settings.*` intent; server validates bundled provenance, persists, reloads, and sends resolved tokens only |
+| P39 | Edit all three font fallback stacks, sizes, and seven hierarchy ratios; apply | One complete bounded typography transaction persists and reflows shell/editor once; package JavaScript and React never parse font files or fetch fonts |
+| P40 | Enter size `200`, empty families, a partial hierarchy, or ratio `0` | Apply is disabled with accessible invalid fields; forged submission fails shared server validation and preserves prior typography/preference |
+| P41 | Close/reopen settings, reload, disable `@clay/settings` | Close is server-approved; current persisted values remain; disabling/removing package removes command/surface authority and forces the local panel closed |
+| P42 | Inspect trusted and third-party settings-like package surfaces | Only exact bundled `@clay/settings` selects compiled trusted presentation; adopted packages remain declarative and have no React/Tauri/native-dialog access |
+
+## Plan 097 Phase 9 execution record (2026-08-23)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P37–P39/P41 | PASS deterministic fixture + automated | Settings screenshots/a11y snapshots under `code-reviews/screenshots/2026-08-23-tauri-react-phase9/`; server settings persistence/reload and frontend complete-transaction tests pass |
+| P40 | PASS interaction + automated | `settings-validation-error.png`; CDP confirmed Apply disabled at invalid size; frontend and Rust independently reject invalid/partial transactions |
+| P42 | PASS structural/security | Phase 8 provenance/trust suites remain green; settings module is gated by exact host snapshot provenance and no broad Tauri plugin capability was added |
 
 ## Negative checks
 
@@ -169,3 +210,14 @@ Deep references: `docs/reference/packages/creating-packages.md`,
 | Checks | Result | Evidence |
 |---|---|---|
 | P30 | UNRESOLVED live; PASS worker/bridge structural | The authorized Rust GUI path now resolves the shared helper, receives host-stamped session options, and carries the real tab workspace into the analyzer runtime. No `analysis.worker_failed` appeared; the first real inlay response was empty while rust-analyzer warmed up. Keyboard input was unavailable for the no-op edit and `Ctrl+Alt+I` toggle, so both retained states stay unresolved. Evidence: `code-reviews/screenshots/2026-08-20-phase28.7-followups/inlay-visible/` and `inlay-toggled-off/`. |
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Package UI beside editor | PASS static visual/a11y | `code-reviews/screenshots/2026-08-24-tauri-react-parity/package-ui/fixture-*` shows bounded package surface, editor, status footer, and no absolute path |
+| Settings package | PASS static visual/a11y | `settings/fixture-*` shows hidden/expanded sections, dropdown controls, apply/reset actions, and invalid-state-compatible layout |
+| Chat package landing | PASS static + real AT-SPI | `chat/fixture-*` and `chat-landing/accessibility.txt` expose provenance-backed setup actions, transcript log, composer, and status |
+| Package actions/trust domain | PASS automated | Package UI conformance, package loading, cross-domain, and replacement tests remain green |
+
+No package JavaScript or raw UI authority enters the frontend render path.

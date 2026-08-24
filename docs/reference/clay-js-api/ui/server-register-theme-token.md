@@ -36,7 +36,7 @@ custom_properties:
     type: enum
     default: package
     description: Provenance source for the declaration; Phase 18.3 accepts package declarations.
-security: Validates package-prefixed semantic token names, token types, same-type Clay core fallbacks, descriptions, provenance, and token conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, raw CSS, raw style strings, arbitrary raw colors, direct Masonry widgets, native widget handles, Vello callbacks, Parley callbacks, renderer callbacks, arbitrary GPU draw authority, or external authority.
+security: Validates package-prefixed semantic token names, token types, same-type Clay core fallbacks, descriptions, provenance, and token conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, raw CSS, raw style strings, arbitrary raw colors, direct client widgets, native widget handles, renderer callbacks, arbitrary GPU draw authority, or external authority.
 agent_guidance: Use `ui.serverRegisterThemeToken` for semantic package theme tokens only; do not expose raw colors, CSS, renderer callbacks, native handles, raw ops, hidden theme override keys, or client-side JavaScript style hooks.
 lookup_tags: [ui, package-ui, theme-token, style-tokens, clay-js-api, phase18.3, runtime-backed]
 app_visible: true
@@ -121,7 +121,7 @@ Fails when the manifest is invalid, the token is not package-prefixed, the type 
 
 No additional permission is required for inert package theme token declarations. Future user token overrides remain a separate planned configuration surface and are not granted by this API.
 
-Validates package-prefixed semantic token names, token types, same-type Clay core fallbacks, descriptions, provenance, and token conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, raw CSS, raw style strings, arbitrary raw colors, direct Masonry widgets, native widget handles, Vello callbacks, Parley callbacks, renderer callbacks, arbitrary GPU draw authority, or external authority.
+Validates package-prefixed semantic token names, token types, same-type Clay core fallbacks, descriptions, provenance, and token conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, raw CSS, raw style strings, arbitrary raw colors, direct client widgets, native widget handles, renderer callbacks, arbitrary GPU draw authority, or external authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 

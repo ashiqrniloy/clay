@@ -91,6 +91,7 @@ fi
 
 server_pid=""
 client_pid=""
+desktop_pid=""
 exit_status=0
 
 stop_child() {
@@ -110,6 +111,7 @@ stop_child() {
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
+    stop_child "$desktop_pid"
     stop_child "$client_pid"
     stop_child "$server_pid"
     rm -rf "$root"
@@ -185,7 +187,7 @@ def walk(node, depth):
     try:
         app = node.get_application()
         app_name = clean(app.get_name() if app is not None else "")
-        if app_name.lower() == "clay":
+        if app_name.lower() in {"clay", "clay-desktop"}:
             selected = "selected" if node.get_state_set().contains(Atspi.StateType.SELECTED) else "-"
             print("|".join([
                 str(depth), clean(node.get_role_name()), selected,
@@ -267,7 +269,7 @@ fi
 if ! command -v timeout >/dev/null 2>&1; then
     unresolved "timeout is unavailable"
 fi
-if ! timeout 5s python3 "$root/atspi_probe.py" prereq > "$root/atspi-prereq.txt" 2> "$root/atspi-prereq.err"; then
+if ! timeout 15s python3 "$root/atspi_probe.py" prereq > "$root/atspi-prereq.txt" 2> "$root/atspi-prereq.err"; then
     unresolved "Python GI AT-SPI bindings or a live AT-SPI bus are unavailable"
 fi
 
@@ -391,18 +393,26 @@ done
         TMPDIR="$root/tmp" "$repo/target/debug/clay" client "$socket"
 ) > "$root/client.log" 2>&1 &
 client_pid=$!
+for _ in {1..30}; do
+    desktop_pid=$(pgrep -P "$client_pid" -n 2>/dev/null || true)
+    [[ -n "$desktop_pid" ]] && break
+    sleep 0.1
+done
 
 latest_dump="$root/latest.dump"
 clay_index=""
 capture_dump() {
     if [[ -z "$clay_index" ]]; then
-        for index in $(seq 0 31); do
-            local name
-            name=$(timeout 1s python3 "$root/atspi_probe.py" app "$index" 2>/dev/null || true)
-            if [[ "$name" == "CLAY" ]]; then
-                clay_index=$index
-                break
-            fi
+        for _ in 1 2 3 4 5; do
+            for index in $(seq 0 31); do
+                local name
+                name=$(timeout 3s python3 "$root/atspi_probe.py" app "$index" 2>/dev/null || true)
+                if [[ "$name" == "CLAY" || "$name" == "CLAY-DESKTOP" ]]; then
+                    clay_index=$index
+                    break
+                fi
+            done
+            [[ -n "$clay_index" ]] && break
         done
     fi
     : > "$latest_dump"
@@ -453,7 +463,7 @@ wait_for_inlay() {
     return 1
 }
 
-wait_for_tree 'Clay working area shell' || unresolved "Clay window/accessibility shell did not appear"
+wait_for_tree 'Clay workspace' || unresolved "Clay window/accessibility shell did not appear"
 # Force one watcher-driven reload only after the client has completed its
 # initial handshake, so runtime fixtures are delivered through the live
 # RuntimeStateSnapshot path instead of racing startup bootstrap.

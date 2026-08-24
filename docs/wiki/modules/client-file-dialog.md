@@ -1,5 +1,10 @@
 # Client File Dialog Backend
 
+> **Partially historical.** The neutral filter/result types remain in
+> `src/client/file_dialog.rs`; the native COM/portal/NSOpenPanel backends were
+> replaced at Plan 097 Phase 12 by narrow Tauri dialog commands feeding the
+> same server grant paths: [React Command Centre](react-command-centre-desktop-workflows.md).
+
 ## Source
 
 - `src/client/file_dialog.rs`
@@ -38,6 +43,24 @@ On Windows, the backend uses the `windows` crate and Shell COM APIs:
 6. Convert `GetResult().GetDisplayName(SIGDN_FILESYSPATH)` to `PathBuf` and free the COM-allocated string.
 
 On Linux, both `open_markdown_file_dialog()` and `open_folder_dialog()` use `xdg-desktop-portal` over the D-Bus session bus through `zbus` (`org.freedesktop.portal.FileChooser.OpenFile`). File open passes Markdown/all-files filters as portal `filters` (`a(sa(us))`, with `*.*` normalized to `*`); folder open sets `directory=true`. The driver runs these portal calls on a background thread (Linux only) and re-enters the GUI via `EventLoopProxy` so the Wayland event loop keeps pumping (blocking OpenFile on the UI thread prevents the chooser from presenting). Before spawning, it reserves the matching generation; a duplicate cannot create another thread or portal request. The worker always sends `FileDialogCompleted` or `FolderDialogCompleted`, including cancellation and failure. The GUI clears and applies only the matching generation, so a late result cannot clear or act as a newer request. Thread-spawn failure clears immediately; event-send failure means the event loop is already shutting down and the `Driver` state is dropped. Explicit exit/window close clears both generations. Requests subscribe to a predicted `handle_token` Request path before `OpenFile` to avoid the Response race, and response code `2` surfaces as `Failed` rather than silent cancel. Returned `file://` URIs are converted to paths. On macOS, both dialogs use `NSOpenPanel` (Markdown extension tokens plus `allowsOtherFileTypes` for the all-files fallback; folder mode chooses directories only). On platforms other than Windows/Linux/macOS, both dialogs return `Unsupported` so the app can report a status diagnostic without panicking.
+
+## Plan 097 Phase 9 Tauri adapter
+
+`src-tauri/src/commands.rs` reuses this backend rather than adding a broad
+filesystem plugin. `dialog_open_file`, `dialog_open_folder`, and
+`tab_open_dialog` run the blocking backend on Tokio's blocking pool and reject
+duplicate same-kind dialogs with a bridge `busy` error. File/folder selection
+is never returned to React for document/workspace opens: the command passes the
+`PathBuf` directly to `BridgeState::accept_selected_path`, which uses
+`ClientEditQueue::enqueue_open_selected_file` or
+`enqueue_add_selected_workspace_root`. Those helpers consume the server-issued
+single-use selected-path capability. Server canonicalization and grant creation
+remain unchanged. New-tab selection similarly goes directly from Rust into
+`BridgeState::open_tab`; React receives only its normal bootstrap DTO.
+
+The main webview retains `core:default` only. No Tauri filesystem, shell,
+process, network, dialog, or clipboard plugin permission is exposed to package
+or frontend JavaScript.
 
 ## Invariants and Constraints
 

@@ -1249,7 +1249,9 @@ where
                 )
                 .await?;
             }
-            ClientMessage::SduiAction { intent, .. } => {
+            ClientMessage::SduiAction {
+                ui_version, intent, ..
+            } => {
                 runtime::handle_sdui_action(
                     codec,
                     &mut stream,
@@ -1264,6 +1266,7 @@ where
                     &tab_registry,
                     reload_server.as_ref(),
                     client_id,
+                    ui_version,
                     intent,
                     bound_tab_id,
                 )
@@ -2036,6 +2039,15 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
             )
         };
 
+        // 0. Open/close remain validated server commands but project one
+        //    narrow client UI request without reloading.
+        assert!(matches!(
+            settings_request("settings.open", "").await,
+            Some(ServerMessage::ShellClientCommandRequest { command_id })
+                if command_id == "settings.open"
+        ));
+        assert_eq!(server.runtime_generation.generation_id().await, 1);
+
         // 1. settings.setTheme selects Gruvbox Material Light (opt-in theme
         //    remains selectable), persists, and reloads live.
         let response =
@@ -2064,7 +2076,38 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
             "preferences.json persists appearance: {persisted}"
         );
 
-        // 3. A non-bundled @clay/theme-* specifier is rejected by execute_settings
+        // 3. Complete typography persists and reloads through the same parser.
+        let typography = serde_json::json!({
+            "monospace": { "families": ["Mono"], "size": 16 },
+            "proportional": { "families": ["Sans"], "size": 17 },
+            "ui": { "families": ["UI"], "size": 14 },
+            "hierarchy": {
+                "display": 1.5, "title": 1.16, "section": 1.08,
+                "body": 1.0, "status": 1.0, "detail": 0.83, "caption": 0.75
+            }
+        });
+        let response = execute_command_intent(
+            CommandExecutionRequest {
+                command_id: "settings.setTypography".to_string(),
+                arguments: serde_json::json!({ "typography": typography.to_string() }),
+                target: CommandExecutionTarget::Global,
+                provenance: None,
+                expected_permissions: Vec::new(),
+            },
+            Arc::clone(&workspace),
+            &document,
+            &sdui,
+            1,
+            Some(&server),
+            &settings_registry,
+        )
+        .await;
+        assert!(response.is_none(), "complete typography applies");
+        assert_eq!(server.runtime_generation.generation_id().await, 4);
+        let persisted = fs::read_to_string(&preferences).expect("typography persisted");
+        assert!(persisted.contains("\"typography\"") && persisted.contains("\"UI\""));
+
+        // 4. A non-bundled @clay/theme-* specifier is rejected by execute_settings
         //    and does not advance the generation (authority denial).
         let generation_before = server.runtime_generation.generation_id().await;
         let response = settings_request("settings.setTheme", "@clay/theme-evil").await;
@@ -2078,7 +2121,7 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
             "rejected settings intent does not reload"
         );
 
-        // 4. settings.reset clears the persisted store and reloads.
+        // 5. settings.reset clears the persisted store and reloads.
         let response = execute_command_intent(
             CommandExecutionRequest {
                 command_id: "settings.reset".to_string(),

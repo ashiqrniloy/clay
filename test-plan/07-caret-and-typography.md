@@ -85,8 +85,8 @@ typography kept (all-or-nothing replacement).
 
 | # | Config/action | Expected |
 |---|---------------|----------|
-| T18 | Run the headless rescale test (`cargo test --lib masonry_shell::tests::rescale_event_recomputes_logical_bounds_from_physical_size`) | Logical bounds remain 900×600 at 2× physical scale; tab bar and pane hosts stay inside bounds |
-| T19 | Run `CLAY_LIVE_WINDOW_SMOKE=1 cargo test --test security live_atspi_smoke::live_multi_window_scale_smoke -- --ignored --exact --test-threads=1` on a Wayland host | Two real Clay clients launch with large-typography init.js; AT-SPI exposes two PID-separated frames with positive bounds and scale factors between 0.5 and 4.0 |
+| T18 | Resize the desktop window across a display-scale change and confirm layout bounds; cross-check the Plan 097 Phase 12 wide/narrow fixture captures | Typography scales proportionally; tab bar, pane hosts, and status bar stay inside window bounds. (The headless Masonry rescale unit test was removed with the native client.) |
+| T19 | Launch two real Clay desktop clients on a Wayland host with large-typography init.js and dump AT-SPI per instance | Two distinct `clay-desktop` frames with positive bounds and scale factors between 0.5 and 4.0. (The automated `live_multi_window_scale_smoke` harness was removed with the native client; manual-only now.) |
 
 ## Known ceilings
 
@@ -138,3 +138,13 @@ runtime chrome override API (by design; packages cannot forge chrome).
 | T25 (light) | DEFECT — V4 | `*-modus-operandi/` code captures: the current-line gutter digit is invisible — `gutterFgActive` (default 0xf4f1ff) fails contrast against the light `lineHighlight`/panel background. Tracked in `code-reviews/screenshots/2026-08-18-phase26-review/review-log.md` V4; fix = light themes define `gutterFgActive` or the default becomes theme-aware |
 | T26 | PASS live | `markdown-*/` captures show no gutter/active-line/indent-guide chrome on proportional documents |
 | T27 | PASS automated | `style_for_resolves_theme_owned_backgrounds`, `text_style_overrides_can_set_background_axis`, `size_scale_ladder_descends_headings_and_clamps_theme_overrides`, and `tests/theme_packages.rs` dormant-token distinctness cover background/scale resolution and validation; live theme reload is host-blocked |
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Large type and responsive typography | PASS static/automated | `code-reviews/screenshots/2026-08-24-tauri-react-parity/states/fixture-*` plus existing typography validation; no clipping or overlap found at 1440×900/780×900 |
+| Theme/settings controls | PASS static; live switch unresolved | `settings/fixture-*` exposes labelled controls; live theme selection/reload needs a targetable keyboard host |
+| Status/focus contrast | PASS static/structural | Token contrast suites pass and visible focus styling remains present in the captured controls |
+
+No new theme budget or token was introduced.

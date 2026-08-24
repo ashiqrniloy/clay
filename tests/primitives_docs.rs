@@ -706,10 +706,8 @@ fn audit_exceptions_are_documented_and_unexpired() {
         })
         .filter(|id| id.starts_with("RUSTSEC-"))
         .collect();
-    assert!(
-        !ignored.is_empty(),
-        "audit.toml must list ignored advisories explicitly"
-    );
+    // An empty ignore list is the ideal state (zero vulnerability exceptions);
+    // any entry that IS listed must be documented with exactly one expiry.
     for id in &ignored {
         assert!(
             security_doc.contains(id),
@@ -765,7 +763,9 @@ fn classified_dependency_warnings_and_remediated_ids_are_documented() {
     for id in [
         "RUSTSEC-2025-0141",
         "RUSTSEC-2024-0436",
-        "RUSTSEC-2026-0192",
+        "RUSTSEC-2024-0370",
+        "RUSTSEC-2024-0429",
+        "RUSTSEC-2025-0098",
     ] {
         let row = security_doc
             .lines()

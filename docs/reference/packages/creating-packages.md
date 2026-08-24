@@ -38,19 +38,19 @@ Clay packages can contribute editor modes, commands, behavior manifests, parsers
 Clay's package model has three hard boundaries:
 
 1. **Packages run server-side JavaScript.** Package logic runs in Clay's constrained server-side JavaScript runtime.
-2. **The Rust client renders native UI.** The client owns Masonry/Vello/Parley rendering, input handling, focus, caret, selection, viewport, and transient native state.
-3. **Packages send declarations and handlers, not client code.** The client receives validated behavior manifests, UI/component snapshots, protocol updates, decoration spans, and command/action intents. It does not execute package JavaScript.
+2. **Clay clients render host-owned UI.** The Tauri/React target maps validated component trees through Clay's registry; the frozen native client remains the parity oracle during migration. Clients own presentation, focus, caret, selection, viewport, and transient local state.
+3. **Packages send declarations and handlers, not client code.** Clients receive validated behavior manifests, UI/component snapshots, protocol updates, decoration spans, and command/action intents. It does not execute package JavaScript or package JSX.
 
-Package authors should think in Clay concepts, not Masonry concepts. Masonry is Clay's internal native widget substrate.
+Package authors should think in Clay concepts, not web-platform concepts. The renderer (Tauri + React + CodeMirror) is Clay's internal client substrate.
 
 ```text
 Package JS declarations/handlers
   -> Clay server validation/composition
   -> inert protocol/UI/behavior/render data
-  -> Clay client native Masonry widgets/rendering
+  -> Clay-owned React registry (target) / native parity renderer (migration)
 ```
 
-Performance authoring rule: package UI/layout declaration work happens at package load, package validation, configuration evaluation, explicit command handling, or explicit UI update time. The validation/publication timing for package UI declarations, component trees, overlays, actions, and theme token resolution is load/config/update time before client installation; no package JavaScript runs in Masonry paint, layout, pointer, scroll, keypress, or text-event handlers. Typing, Masonry paint, Masonry layout, scroll, pointer, keypress, and text-event paths read already-validated inert state and do not run package JavaScript, package parsing, raw IPC waits, or package-authored native widget mutation.
+Performance authoring rule: package UI/layout declaration work happens at package load, package validation, configuration evaluation, explicit command handling, or explicit UI update time. The validation/publication timing for package UI declarations, component trees, overlays, actions, and theme token resolution is load/config/update time before client installation; no package JavaScript runs on the client hot path. Typing, rendering, layout, scroll, and pointer/key input read already-validated inert state and do not run package JavaScript, package parsing, raw IPC waits, or package-authored native widget mutation.
 
 ## Package Surfaces
 
@@ -104,15 +104,15 @@ Clay currently has foundations for:
 
 ### Phase 18.2 shell/layout runtime and Phase 18.3 slot-aware package UI
 
-The canonical Phase 18.1/18.2 shell/layout architecture reference is [Clay Shell and Package UI/Layout Strategy](../primitives/shell-layout-strategy.md). This guide summarizes the author-facing contract; the primitive reference owns the detailed vocabulary, Masonry boundary, validation expectations, internal runtime status, and planned primitive names.
+The canonical Phase 18.1/18.2 shell/layout architecture reference is [Clay Shell and Package UI/Layout Strategy](../primitives/shell-layout-strategy.md). This guide summarizes the author-facing contract; the primitive reference owns the detailed vocabulary, renderer boundary, validation expectations, internal runtime status, and planned primitive names.
 
 Phase 18.2 has implemented internally:
 
-- Clay-owned `ClayShellWidget` root above `EditorWidget`.
+- Clay-owned application shell (React `AppShell`) with the editor inside the working area.
 - Internal `WorkingAreaLayout` state for one working area, layout version, active/root pane, and editor component binding.
 - Internal `PaneSplitTree` state for the one-leaf default plus generic horizontal/vertical split topology with bounded split ratios and deterministic validation.
 - Internal `PaneSlotLayout` state with mandatory `main` plus optional fixed `left`, `right`, `top`, and `bottom` slots, including finite sizing, min/max clamp, visibility, collapse, and user-resize fields.
-- A retained reconciled SDUI left-slot subtree (`SduiRegionWidget` in `src/masonry_sdui_region.rs`) placed in Clay-owned left-slot geometry, plus structural shell observability that omits document text, native handles, raw action authority, raw CSS, raw ops, renderer callbacks, and executable package code. SDUI kinds render as real Masonry widgets (label/button/list/editor-view under a Clay-owned scroll viewport); the earlier immediate-mode compatibility paint path is retired.
+- A stable-ID React SDUI projection (`frontend/src/sdui`) placed in Clay-owned left-slot geometry, plus structural shell observability that omits document text, native handles, raw action authority, raw CSS, raw ops, renderer callbacks, and executable package code. SDUI kinds render as catalog components (label/button/list/editor-view); reconciliation reuses surviving DOM so local state survives updates.
 
 Phase 18.3 now adds runtime-backed public APIs for package-owned slot UI contributions:
 
@@ -139,7 +139,7 @@ Expected shell/layout/package guide updates by phase:
 
 | Phase | Authoring-contract update expected |
 | --- | --- |
-| Phase 18.1 | Architecture vocabulary, Masonry boundary, status markers, planned API inventory, conflicts/precedence, and anti-patterns documented here and in the primitive reference. |
+| Phase 18.1 | Architecture vocabulary, renderer boundary, status markers, planned API inventory, conflicts/precedence, and anti-patterns documented here and in the primitive reference. |
 | Phase 18.2 | Document implemented internal shell root, `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` runtime behavior while keeping public `clay:ui` package APIs marked planned/unavailable. |
 | Phase 18.3 | Document runtime-backed public APIs for slot-aware `PanelContribution`, `ComponentContribution`, `TransientOverlayContribution`, and `PackageThemeTokenDeclaration` registration, examples, diagnostics, package metadata, package permissions, and generated registry/API coverage. |
 | Phase 18.4 | Document implemented `PackageInputContribution`, `PackageUiStateScope`, `PackageLayoutOverride`, and package option customization APIs. |
@@ -154,15 +154,15 @@ Expected shell/layout/package guide updates by phase:
 | Phase 20.1 | Document the expanded typed token catalog (ten domains: `color-role`, `spacing`, `radius`, `typography`, `opacity`, `dimension`, `elevation`, `motion-duration`, `z-level`, `density`), the seven semantic `UiTextVariant` tokens and the user-owned `UiTypographyHierarchy`, `clay.contributions.designTokens` typed UI overrides shipped on `ActiveTheme`, and token-backed panel/sidebar/density defaults. Packages reference tokens and select variants only; they cannot ship concrete hierarchy scales, raw values, or new component kinds. |
 | Phase 20.3 | Document layout primitives: split divider drag, fixed slot resize/collapse, layout persistence, inert versioned `LayoutIntent` API (`serverRequestLayoutIntent`), focus/input routing across splits, transient surface anchoring, and package limitations (no native layout mutation, no raw widget access). |
 | Phase 20.4 | Document the core component uplift: every implemented `ComponentKind` now honors the active theme (SDUI paint reads `ResolvedUiTheme`, not core fallbacks), is state-complete (`Rest`/`Hover`/`Active`/`Focus`/`Disabled` from state tokens), and follows the 4pt spacing rhythm scaled by `density`/`spacing_scale()`; the status bar uses token-driven insets; editor chrome (caret/selection/scrollbar/diagnostics) stays on the editor `StyleRegistry`. Compatibility guarantee: no `ComponentKind`, style-variable, or token-name change — packages require no manifest or style edit. |
-| Phase 22.2 | Document the pane document-view contract: each pane hosts at most one document of its tab's workspace (`PaneDocumentView`; the pane↔document mapping is client-local view state, server authority unchanged), duplicate opens focus the existing pane, all open flows target the focused pane, and major modes run concurrently per pane via per-document behavior-manifest layers. Packages gain no new surface: they still cannot own panes, open documents into panes, or contribute per-pane chrome (SDUI sidebar/panels/overlays remain window-scoped; per-pane package chrome stays planned). |
+| Phase 22.2 | Document the pane document-view contract: each pane hosts at most one document of its tab's workspace (one document view per pane; the pane↔document mapping is client-local view state, server authority unchanged), duplicate opens focus the existing pane, all open flows target the focused pane, and major modes run concurrently per pane via per-document behavior-manifest layers. Packages gain no new surface: they still cannot own panes, open documents into panes, or contribute per-pane chrome (SDUI sidebar/panels/overlays remain window-scoped; per-pane package chrome stays planned). |
 | Phase 22.3 | Document the tab contract: tabs are independent client views — each tab owns its own server connection, workspace, split tree, chrome, and pending-open attribution; the server holds an in-memory server-authoritative tab registry (order, active tab, per-tab workspace + client binding) that survives client reconnects (disk persistence is 22.5); the tab bar is a shell-owned chrome row below the top fixed panel slot above the working area, hidden at ≤1 tab. Plan 088 Task 6 makes its geometry follow user UI typography and logical window bounds. Packages cannot own or contribute tab bar chrome and cannot open/close/move tabs (inert `serverRequestLayoutIntent` remains the only package layout surface); per-tab package chrome is still-planned (needs a later phase). |
 | Phase 22.4 | Document keyboard tab management: 24 Clay-owned `client_ui` tab command IDs (`clientTabNext`/`Prev`/`New`/`Close`/`MoveLeft`/`MoveRight` plus the numbered `clientTabActivate.1..9` and `clientTabMoveTo.1..9` families) with Global-scope default chords, server-registry reorder ops, explicit numbering/bounds/wraparound policies, and a driver-owned dirty-close confirm/save flow. Packages gain no surface: binding is a **user** configuration-time API (`keybindings.bindKey`/`unbindKey` in `~/.config/clay/init.js`), packages cannot bind or issue tab commands, cannot open/close/move/reorder tabs, and receive no new authority from the tab command IDs. The tab commands are `ClientUiCommand`-routed and — like the pane commands — are listed in the Control Center catalogue since Phase 24.2, with activation bridged back to the client shell driver through the server-approved `ShellClientCommandRequest` frame (packages still cannot emit that frame). |
 | Phase 24.2 | Document the Control Center catalogue contract: every validated registered command appears automatically in the menu when its package is loaded (built-ins, `shell.client*`, trusted/third-party registrations merged into one generation-stamped catalogue with effective keybindings and provenance detail); listing grants no authority; query/selection movement uses the shared bounded fuzzy subsequence matcher on the installed snapshot only; activation dispatches through the shared server execution path or the narrow server-approved `ShellClientCommandRequest` frame. Packages cannot open, drive, or intercept the menu session and cannot emit the shell-client frame. |
 | Phase 24.3 | Document the Path Browser contract (`controlCenter.openPath`, “Browse Filesystem”): a built-in session over the same transient-menu round trip with an editable path bar seeded from the active document's parent (then tab workspace root, then server cwd), bounded depth-1 listings, primary/secondary activation, and Backspace ascent. Browse authority is ephemeral and user-authorized by the built-in surface itself; navigation creates no grant, a file open converts it into one `SingleFile` grant, and Alt+Enter on a directory converts it into one `Directory` root grant for the bound tab only (other tabs untouched). Packages cannot open, populate, intercept, or receive paths from this built-in session, cannot emit its `MenuBackspace`/`MenuActivate` kind intents meaningfully (session ids are per-connection opaque), and gain no filesystem authority from it; the native file/folder dialogs remain the fallback. |
 | Phase 28 | Document the shared package key-routing grammar, manifest-driven line-prefix transforms, command-backing/fail-closed policy, `render-folding` publication, Link/Inlay decoration data, Clay-owned decoration intent and editor chrome, and opt-in `createLspBridge({ features: ["inlayHint"] })` refresh behavior. |
 | Phase 20.5 | Document the overlay, menu, and input component phase: `dropdown`, `collapse`, `modal` promoted from reserved to implemented; `textInput` added (focus, placeholder, `style.validationState`/`style.placeholderColor`); `table` remains reserved (no first-party need); all transient surfaces (command palette, context menu, menu bar, completion pop-up) uplifted onto shared `paint_package_overlays` + `paint_tooltip_shell` with z-level stacking (`z.overlay`<`z.modal`<`z.tooltip`); `TransientMenuOrigin` selects overlay anchor; keyboard nav complete for all new surfaces (dropdown ArrowUp/Down/Enter/Space, collapse Enter/Space, modal Tab focus-trap). Compatibility guarantee: no existing `ComponentKind`, style-variable, or token-name change; `placeholderColor` and `validationState` are additive. |
-| Plan 070 | Document the retained reconciliation cutover: SDUI kinds and package component trees now render through retained reconciled Masonry subtrees (`SduiRegionWidget` in `src/masonry_sdui_region.rs`, `PackageRegionWidget`/`PackagePanelHost`/`PackageOverlayHost` in `src/masonry_package_region.rs`) hosted as real children of `EditorWidget`, replacing the earlier immediate-mode `SduiNativeState::paint` compatibility bridge. Each kind maps to a real Masonry widget (`SduiLabel`/`SduiButton`/`SduiListRow`/`EditorViewWidget`, `PackageButton`/`PackageListRow`/`PackageCollapse`/`PackageDropdown`/`PackageTextInput`/`PackageModal`); Masonry routes layout/paint/pointer/focus/scroll/a11y through the standard widget tree. Compatibility guarantee: no `ComponentKind`, style-variable, token-name, or package-facing contract change — packages require no manifest or style edit; the cutover is a client-internal substrate change. |
-| Phase 22.1 | Document equal-area window splits: Clay-owned `PaneSplitTree` now supports `split_pane` (capped at 4 panes per tab), `close_pane`, `add_equal_pane` (comb tree, N+1 equal areas), `move_pane` (reading-order swap), and `keyboard_resize` (deepest-bordering divider, clamped). `ClayShellWidget` hosts one `PaneContentHost` per pane leaf (editor or placeholder); panes are generic content hosts, not just editor views — a future terminal emulator or other workspace app can occupy a pane without a new shell primitive. Packages **cannot** own, create, close, move, or directly mutate panes/splits; they interact only through the inert `serverRequestLayoutIntent` API (Phase 20.3). Direct topology mutation (`serverRegisterPaneSplitTree`) stays a planned stub. Default split/focus/resize keybindings are Clay-owned and user-overridable via `bindKey`. |
+| Plan 070 | Historical: introduced retained reconciliation in the native client (stable IDs, no immediate-mode repaint). Superseded by the Plan 097 Phase 8 React projection with the same contract: stable node IDs, in-place reconciliation, per-kind component mapping — no `ComponentKind`, style-variable, token-name, or package-facing contract change; packages require no manifest or style edit across substrate changes. |
+| Phase 22.1 | Document equal-area window splits: Clay-owned `PaneSplitTree` now supports `split_pane` (capped at 4 panes per tab), `close_pane`, `add_equal_pane` (comb tree, N+1 equal areas), `move_pane` (reading-order swap), and `keyboard_resize` (deepest-bordering divider, clamped). The shell hosts one content region per pane leaf (editor or placeholder); panes are generic content hosts, not just editor views — a future terminal emulator or other workspace app can occupy a pane without a new shell primitive. Packages **cannot** own, create, close, move, or directly mutate panes/splits; they interact only through the inert `serverRequestLayoutIntent` API (Phase 20.3). Direct topology mutation (`serverRegisterPaneSplitTree`) stays a planned stub. Default split/focus/resize keybindings are Clay-owned and user-overridable via `bindKey`. |
 | Phase 22.6 | Document the window-model hardening phase: accessibility roles/names (shell `TabList`/`Tab` nodes, numbered `Pane N of M` labels, polite `Status` live-region announcements), performance budgets (advisory pane-paint/tab-switch ceilings, hard 4-pane decoration aggregate), protocol compatibility tests for tab messages, and a per-tab authority review (grants are per-connection; `TabRegistry` binds identity and grants nothing). **No package-facing change**: packages gain no API, no permission, no tab/pane surface, and no a11y contribution point; the tab bar stays Clay-owned painted chrome with informational a11y nodes, and labels are sanitized display names only (no host paths, no document content). |
 
 Phase 18.3 `clay:ui` contribution examples for panels, components, overlays, and theme tokens are runtime-backed public APIs. Historical Phase 18.3 status used the row `PackageLayoutOverride` | `ui.serverSetLayoutOverride` | Planned for documented user/package layout overrides.; Phase 18.4 promotes that surface. Phase 18.6/18.7 promote the `loadPackage("@clay/markdown")` default, persistent-runtime mode/parse registration, and generic selected-file open-time activation. Plan 035 generalizes `loadPackage` to installed, authorized source-aware packages. Phase 19 hot reload is implemented as ordinary one-line `loadPackage` re-evaluation in a fresh runtime generation (see [Package Reload Lifecycle](#package-reload-lifecycle-phase-19)); no package-specific reload callback, `force` flag, or copied-manifest bootstrap is required. Examples for working-area layout, pane splits, pane-slot mutation, durable state-value mutation, and package enable/disable from configuration remain **Planned/target** design, not callable code. The Phase 18.2/18.3 Rust shell runtime shapes are not package author APIs.
@@ -458,7 +458,7 @@ Syntax grammar style maps and published syntax/semantic decorations may request 
 
 Range `fontRole` accepts `monospace` or `proportional`. Diagnostic/search layers, stale/out-of-bounds spans, and invalid UTF-8 boundaries cannot alter font role. Component text separately defaults to `ui` and follows the `style.fontRole` contract in [Components](#components).
 
-Never declare `fontFamily`, `fontFamilies`, `fontSize`, `fontStack`, font paths/bytes/URLs/downloads, raw CSS, raw Parley properties, or renderer callbacks. Semantic roles add no filesystem, network, shell, package-manager, extension, AI, WASM, workspace, native-widget, raw-op, or client-side JavaScript authority. Validation and role normalization remain outside paint/input/layout hot paths.
+Never declare `fontFamily`, `fontFamilies`, `fontSize`, `fontStack`, font paths/bytes/URLs/downloads, raw CSS, raw renderer properties, or renderer callbacks. Semantic roles add no filesystem, network, shell, package-manager, extension, AI, WASM, workspace, native-widget, raw-op, or client-side JavaScript authority. Validation and role normalization remain outside paint/input/layout hot paths.
 
 ### Persistent runtime, open-time activation, and parse boundaries
 
@@ -519,7 +519,7 @@ The grant scopes Clay's launch API and audit identity, not host OS access. Once 
 
 On selected-file open or successful reload refresh, Clay classifies the path through the generic `clay:modes` registry, uses `serverActivateClassifiedMode` with the stored activation metadata to activate the matching major mode for that document, then schedules a bounded parse through `ParseCoordinator`. User config does not reload the package per open and does not manually register every primitive. Parse handler registrations are generation-scoped: a newer generation replaces old handler tokens, cancels old-generation parse work, and rejects late old-runtime-generation task results before publication.
 
-Package parse work follows the no-client-JS / no-hot-path-JS invariant: it is never client JavaScript and never hot-path JavaScript. Parser functions run only on the server runtime worker after edit/open work has already been accepted. Ordinary keypress, Masonry paint/layout, pointer, scroll, and text-event handling read inert manifests/protocol data and do not call package JS. Slow parse work can make decorations stale, but it must not block local text display or edit acknowledgement.
+Package parse work follows the no-client-JS / no-hot-path-JS invariant: it is never client JavaScript and never hot-path JavaScript. Parser functions run only on the server runtime worker after edit/open work has already been accepted. Ordinary typing/rendering/input handling reads inert manifests/protocol data and does not call package JS. Slow parse work can make decorations stale, but it must not block local text display or edit acknowledgement.
 
 Budget contract for package parse handlers:
 
@@ -543,7 +543,7 @@ Forbidden anti-patterns:
 - Raw `Deno.core.ops` calls as package/user-facing API.
 - Markdown-only Rust branches such as `if path.ends_with(".md")`, `if mode_id == "markdown"`, or handwritten markdown-it token handling in server/client Rust.
 - Publishing representative/fake decorations from `init.js` instead of returning an `IncrementalParseUpdate` from the package parse handler.
-- Client-side JavaScript, native widget handles, direct Masonry widgets, raw CSS, renderer callbacks, or layout mutation hidden inside package UI/layout declarations.
+- Client-side JavaScript, native widget handles, direct renderer access, raw CSS, renderer callbacks, or layout mutation hidden inside package UI/layout declarations.
 
 ## Package Reload Lifecycle (Phase 19)
 
@@ -593,15 +593,15 @@ The same lifecycle applies equally to Markdown, Rust, TypeScript, JavaScript, Gi
 
 ## UI and Layout Model
 
-Clay owns a consistent shell layout for all packages and modes. See the [Clay Shell and Package UI/Layout Strategy](../primitives/shell-layout-strategy.md) for the canonical Phase 18.1/18.2 vocabulary/runtime status and for the rule that Masonry is Clay's internal widget/layout/rendering substrate, not a package author API.
+Clay owns a consistent shell layout for all packages and modes. See the [Clay Shell and Package UI/Layout Strategy](../primitives/shell-layout-strategy.md) for the canonical Phase 18.1/18.2 vocabulary/runtime status and for the rule that the client renderer is Clay's internal substrate, not a package author API.
 
 ### Unified UI/layout authoring contract across package sources
 
 The UI/layout authoring contract is identical for `@clay/*` packages and user-installed packages (npm, GitHub, git URL, tarball, local path). `@clay/*` only means a package was shipped by Clay — it is not a more capable package. After a user installs and authorizes a package from any source, it contributes UI/layout through the same `clay:ui` facades, the same `PackageService` validation, the same shell/slot/precedence rules, and the same conflict-resolution policy as a bundled Clay package.
 
 - User-installed packages may request the same UI/layout/native/client capabilities as Clay packages — `render-decorations`, `render-folding`, `completion-provider`, `package-configuration`, `package-control`, `native-ui`, and `client-runtime` — through the unified capability vocabulary, subject to the explicit user authorization grants described in [Unified Package Capability Model](../primitives/package-security.md#unified-package-capability-model). A package source never confers a capability implicitly; every powerful capability must be a separately implemented, user-approved grant recorded against the package identity, source, and provenance.
-- Native UI and client runtime are explicit capability/API work. A package does not get native widget handles, Masonry mutation, raw CSS, client-side JavaScript, or renderer callbacks merely because it was installed from npm or GitHub — those surfaces appear only when a documented `native-ui` / `client-runtime` capability is granted and a matching Clay API exists, is validated, and is revocable.
-- UI/layout declarations remain validated load/reload/configuration work. Panel, component, overlay, input, state-scope, layout-override, theme-token, and option contributions are validated at package load/enable time and applied through documented Clay JS APIs at configuration/package-update time; no package JavaScript runs in Masonry paint, layout, pointer, scroll, keypress, text-event, or edit-ack handlers.
+- Native UI and client runtime are explicit capability/API work. A package does not get native widget handles, direct renderer access, raw CSS, client-side JavaScript, or renderer callbacks merely because it was installed from npm or GitHub — those surfaces appear only when a documented `native-ui` / `client-runtime` capability is granted and a matching Clay API exists, is validated, and is revocable.
+- UI/layout declarations remain validated load/reload/configuration work. Panel, component, overlay, input, state-scope, layout-override, theme-token, and option contributions are validated at package load/enable time and applied through documented Clay JS APIs at configuration/package-update time; no package JavaScript runs on client render/layout/input/edit-ack paths.
 - UI/layout primitives stay generic and reusable. No UI/layout primitive branches on package source (no `if github_package` / `if npm_package` / `if third_party` Rust paths). Every package consumes the same shell/slot/component/theme primitives; Markdown and future modes consume these generic primitives rather than adding mode-specific Rust layout branches.
 - Editor chrome is not SDUI (Plan 071 task 12 / Phase 26.5). Caret shape/blink, gutter / active-line / indent-guide / bracket-match, and the font-ligature baseline are editor/typography chrome, never `ComponentKind` components. Packages contribute them only as inert manifest/configuration data: `editorRules.caretStyle`, optional `editorRules.chrome`, and `defaultFontRole`. Caret color remains the theme-owned `caret` token; chrome colors use `gutterFg` / `lineHighlight` / `indentGuide` / `bracketMatch`. No package capability grants paint-path authority. See [UI Chrome Primitives](../primitives/ui-chrome-primitives.md#package-authoring-contract) and [Semantic Typography Roles](../primitives/typography.md#ligature-policy).
 
@@ -771,7 +771,7 @@ Package authors should expect deterministic diagnostics for:
 - undeclared permissions for permission-bearing primitives
 - unsupported state scopes or hidden state keys
 - unknown typed style variables, unknown style/theme tokens, raw token values, or type-incompatible token fallbacks
-- raw CSS, raw style strings, raw ops, native widget handles, Masonry widget constructors, client-side JavaScript, and native renderer callbacks
+- raw CSS, raw style strings, raw ops, native widget handles, direct DOM constructors, client-side JavaScript, and native renderer callbacks
 - oversize layout/component/state payloads and `estimatedPayloadBytes` declarations beyond budget
 
 No package wins a layout conflict by load order alone. If a package needs slot priority, multi-panel ordering, overlay z-order, persisted pane selectors, or cross-window layout behavior, wait for a documented Clay API rather than inventing package-specific keys.
@@ -801,7 +801,7 @@ await publishTree(
 );
 ```
 
-The current `clay:sdui` helpers publish bounded inert node trees through server validation. They do not create Masonry widgets directly, run client-side JavaScript, own pane slots, or define the future package layout contract.
+The current `clay:sdui` helpers publish bounded inert node trees through server validation. They do not create client widgets directly, run client-side JavaScript, own pane slots, or define the future package layout contract.
 
 `clay:ui` inventory targets for the shell/layout contract include:
 
@@ -911,16 +911,16 @@ Component catalog status (single source of truth: [`.agents/skills/clay-ui/refer
 
 Status markers match the `clay-ui` catalog legend: `implemented` (usable now), `reserved` (name locked, validation rejects use until its phase), `planned` (approved for a future UI revamp phase), `internal` (Clay-native surface, not package-facing). `table` is the only reserved kind; no planned package-facing kind remains unimplemented after Phase 20.5. The catalog's "Planned Components (UI Revamp)" table tracks composition-only planned surfaces (tooltip, badge, toast, kbd hint, icon slot) that reuse implemented kinds. `tabs` is implemented as a shell-level (internal, not package-facing) surface: the Phase 22.3 tab bar is a Clay-owned chrome row with token-state cards, not a package-facing `ComponentKind`.
 
-Packages should not assume these are Masonry widget types. They are Clay components validated by `src/shell/components.rs` and rendered through Clay-owned native code.
+Packages should not assume these are concrete widget types. They are Clay components validated by `src/shell/components.rs` and rendered through Clay-owned React components.
 
 ### UI chrome conformance (Phase 20.2)
 
 Phase 20.2 introduced a native chrome primitive layer (`src/shell/primitives.rs`) that is the only way to paint UI chrome (dividers, focus rings, panel backgrounds/borders, scrollbars, badges, keyboard hints, icon slots, tooltip shells). Primitives are `pub(crate)` inert paint helpers that read from `ResolvedUiTheme` tokens.
 
-**Package mapping:** Package-declared `ComponentKind` components map onto primitives by construction. The SDUI paint path (`src/masonry_sdui.rs`) calls primitive helpers for chrome (panel backgrounds/borders, overlay backgrounds/borders, scrollbar chrome). Packages declare inert `ComponentKind` components only; they cannot call primitives directly.
+**Package mapping:** Package-declared `ComponentKind` components map onto primitives by construction. The React registry applies shared chrome styling (panel backgrounds/borders, overlay backgrounds/borders, scrollbar chrome). Packages declare inert `ComponentKind` components only; they cannot call primitives directly.
 
 **Conformance contract:**
-- Packages must not directly create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
+- Packages must not directly create client widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
 - Packages must not attempt to paint UI chrome directly; chrome is painted by Clay-owned primitives.
 - Package components are inert declarations; Clay renders them through native code and primitives.
 - Primitive customization flows through token contributions (`ui.serverRegisterThemeToken`, `clay.contributions.themeTokens`/`designTokens`), not package code.
@@ -933,7 +933,7 @@ Phase 20.2 introduced a native chrome primitive layer (`src/shell/primitives.rs`
 
 See `.agents/skills/clay-ui/references/components.md` for the full primitive inventory and token mappings.
 
-Component text defaults to the user-owned `ui` typography profile. Text-bearing `panel`, `label`, `button`, `list`, and `statusItem` declarations may request only a semantic `style.fontRole` of `"ui"`, `"monospace"`, or `"proportional"`; it selects the user-configured family stack and size together. Structural components and `editorView` cannot set `fontRole`. Packages must not provide `fontFamily`, `fontSize`, font stacks, raw Parley properties, CSS, font files, URLs, or renderer callbacks. `style.typography` remains a semantic Clay variant such as `typography.body`, `typography.title`, `typography.status`, `typography.display`, `typography.section`, `typography.detail`, or `typography.caption`, scaled from the configured role rather than an absolute size.
+Component text defaults to the user-owned `ui` typography profile. Text-bearing `panel`, `label`, `button`, `list`, and `statusItem` declarations may request only a semantic `style.fontRole` of `"ui"`, `"monospace"`, or `"proportional"`; it selects the user-configured family stack and size together. Structural components and `editorView` cannot set `fontRole`. Packages must not provide `fontFamily`, `fontSize`, font stacks, raw renderer properties, CSS, font files, URLs, or renderer callbacks. `style.typography` remains a semantic Clay variant such as `typography.body`, `typography.title`, `typography.status`, `typography.display`, `typography.section`, `typography.detail`, or `typography.caption`, scaled from the configured role rather than an absolute size.
 
 ```json
 {
@@ -983,7 +983,7 @@ Clay validates that:
 - stale action intents are rejected or disabled when command/component/package/document provenance no longer matches active state
 - client UI commands do not mutate documents directly
 
-Phase 18.4 component-scoped action routing composes this command contract with `serverRegisterInputContribution` and `serverSetLayoutOverride`: input/action defaults must reference registered package command IDs, declarations are validated at package load/configuration/update time, and Masonry hot paths read only installed inert action metadata.
+Phase 18.4 component-scoped action routing composes this command contract with `serverRegisterInputContribution` and `serverSetLayoutOverride`: input/action defaults must reference registered package command IDs, declarations are validated at package load/configuration/update time, and client hot paths read only installed inert action metadata.
 
 Phase 18.8 adds a server-owned `CommandExecution` boundary. SDUI actions, package UI action intents, behavior-manifest keybindings, and transient-menu selections all normalize to the same `CommandExecutionRequest`. The server validates command ID, routing policy, package provenance, declared permissions, target context, and bounded arguments before any side effect. Packages may declare commands and expose them in transient menus; they cannot execute commands directly from UI callbacks, bypass permission checks, or run command handlers in the Rust client.
 
@@ -1087,9 +1087,9 @@ Rejected package logic:
 - read arbitrary files directly
 - make network requests by default
 - spawn shell commands
-- mutate Masonry widgets
+- mutate client widgets directly
 - run JavaScript in client paint/input handlers
-- pass callbacks to Vello/Parley/native widgets
+- pass callbacks to native renderer internals
 
 ## Data and State
 
@@ -1381,7 +1381,7 @@ serverRequestLayoutIntent({
 
 Validation rejects: missing/wrong package prefix on `id`, duplicate `id`, invalid `orientation` (must be `horizontal` or `vertical`), `ratio` outside 0.05–0.95, invalid `position` (must be `first` or `second`; defaults to `second`), and payloads exceeding the SDUI budget.
 
-**Package limitations**: packages cannot mutate `WorkingAreaLayout`, `PaneSplitTree`, or `PaneSlotLayout` directly. They cannot access Masonry widget IDs, raw callbacks, renderer state, or the layout persistence file. Layout authority is Clay-owned; packages participate through inert validated declarations only.
+**Package limitations**: packages cannot mutate `WorkingAreaLayout`, `PaneSplitTree`, or `PaneSlotLayout` directly. They cannot access widget identities, raw callbacks, renderer state, or the layout persistence file. Layout authority is Clay-owned; packages participate through inert validated declarations only.
 
 ### Phase 20.4 authoring contract: core component uplift on the existing catalog
 
@@ -1404,7 +1404,7 @@ Phase 20.4 restyles every implemented `ComponentKind` to the minimalist design l
 
 **Spacing rhythm**: SDUI panel padding reads `spacing.md` (16, the 4pt-grid default content padding) scaled by `spacing_scale()` (density `compact`=0.875 / `default`=1.0 / `spacious`=1.125). The status bar uses token-driven insets (`spacing.sm` × `spacing_scale()`) with a `border.hairline` divider. Per-element `spacing.xs`/`sm`/`lg` differentiation is deferred to a later spacing pass; `panel_padding` is the single rhythm entry point consumed by SDUI geometry.
 
-**Editor chrome stays on the editor theme**: caret, selection, diagnostics, and the status bar background/text read from the editor `StyleRegistry` (`BaseUiColors`: `caret`, `selection`, `diagnostic*`, `statusBg`, `statusText`), which remains the single source of color for editor paint and is separate from SDUI typed tokens. The editor scrollbar routes through `paint_scroll_chrome` with `InteractionState` derived from pointer state (`EditorSurface::scrollbar_interaction_state`). No new `BaseUiColorKey` was added.
+**Editor chrome stays on the editor theme**: caret, selection, diagnostics, and the status bar background/text read from the editor `StyleRegistry` (`BaseUiColors`: `caret`, `selection`, `diagnostic*`, `statusBg`, `statusText`), which remains the single source of color for editor chrome and is separate from SDUI typed tokens. The editor scrollbar derives its interaction state from pointer state through the shared chrome styling. No new `BaseUiColorKey` was added.
 
 **Compatibility guarantee**: Phase 20.4 changes no `ComponentKind` (`src/shell/components.rs`), no typed style variable, no token name, and no package manifest field. Existing first-party packages (`@clay/markdown`, `@clay/git`, `@clay/rust`, `@clay/typescript`, `@clay/javascript`, the `lsp-*` bridges, `@clay/theme-gruvbox-material-*`) pass their test suite unmodified. `PackageUiComponentTree` and `PackageUiListItem` gained a `disabled` field (parsed from JSON, defaults `false`) so packages can declare disabled state, but existing declarations that omit it are unchanged.
 
@@ -1423,7 +1423,7 @@ Phase 20.4 restyles every implemented `ComponentKind` to the minimalist design l
 | Typed-token-only styling | Implemented | Raw colors, raw CSS, style strings, renderer callbacks, unknown/mistyped style-variable tokens | `src/shell/components.rs` (`validate_style_variables`/`validate_style_variable`/`reject_raw_style_token`); mapped to `UiContributionRule::ProhibitedAuthority` (raw CSS/color) or `InvalidThemeToken` (mistyped token) at the runtime boundary |
 | Reserved-kind gating | Implemented | Declaring a reserved `ComponentKind` (currently `table`) | `src/shell/components.rs` (`validate_component_kind`); `InvalidContributionDescriptor` |
 | Contrast / legibility | Implemented | Active theme whose status-chrome pairs fall below `TEXT_CONTRAST_MIN` (4.5) or `UI_CONTRAST_MIN` (3.0) | `src/shell/theme.rs` (`validate_active_theme_contrast`) + `src/server/ops/theme.rs` (`enforce_contrast`); a below-AA theme is not activated and records a `theme.contrast` diagnostic |
-| State-completeness | Implemented | Catalog drift between the `applicable_states(kind)` table and the documented per-kind interaction notes | `src/shell/components.rs` (`applicable_states`); pinned by `tests/masonry_sdui.rs` against `component_state_palette` |
+| State-completeness | Implemented | Catalog drift between the `applicable_states(kind)` table and the documented per-kind interaction notes | `src/shell/components.rs` (`applicable_states`); pinned by catalog conformance tests against the documented state palette |
 | Payload budgets | Implemented | SDUI snapshot estimate > 4096 B, update estimate > 1024 B; runtime tree > 16 KiB / > 128 nodes / > 16 depth / > 4096-char text node | `src/packages/record/mod.rs` + `src/server/ui.rs` + `src/server/ops/sdui.rs`; `PayloadBudgetExceeded` |
 | Raw-color / raw-size rejection | Implemented | Raw color values in component `style.*` variables; raw colors / raw CSS in `designTokens` overrides | `src/shell/components.rs` + `src/packages/record/mod.rs` |
 | Code-vs-catalog drift lint | Implemented | `ComponentKind` enum, `component_state_palette` match arms, typed-style-variable match arms, or `core_theme_value` match arms drifting from `components.md`/`tokens.md` | `tests/package_ui_conformance.rs` (four drift guards) |
@@ -1473,7 +1473,7 @@ core/package token, overlay anchor, manifest field, permission, or JS API.
 Existing packages remain valid and package authors continue to declare inert
 validated data through the documented facades.
 
-**Clay owns shell and layout.** Packages cannot create Masonry widgets, mutate
+**Clay owns shell and layout.** Packages cannot create client widgets, mutate
 the working area or pane/split tree, own fixed-slot geometry, contribute tab or
 pane chrome, replace the core `WelcomeWidget` fallback / file-browser / status
 surfaces, or open/drive the Clay-owned completion and centered Command Centre
@@ -1492,7 +1492,7 @@ child receives flex space inside the retained host and scrolls long content
 inside its owner; it does not create a new layout authority. `modal` remains a
 Clay-owned focus-trapped dialog: Escape emits `PackageModalDismiss` with the
 component's declared inert command intent, while no package callback or native
-widget handle crosses the boundary. `statusItem` maps to AccessKit `Role::Status`, and disabled package controls
+widget handle crosses the boundary. `statusItem` maps to `Role::Status` (AT-SPI status), and disabled package controls
 expose disabled state and gate actions.
 
 **Responsive behavior is host-owned.** Clay may yield a workspace-browser left
@@ -1509,7 +1509,7 @@ filesystem paths through chrome labels.
 text, border, spacing, radius, opacity, density, dimension, z-level, elevation,
 and semantic typography tokens. Theme resolution and typography metrics are
 cached at install/reload; package JavaScript, parsing, raw IPC, and token
-re-resolution never run in Masonry paint, layout, pointer, scroll, keypress, or
+re-resolution never run on client render/layout/pointer/scroll/key/input paths;
 text-event handlers. Packages cannot supply concrete typography hierarchy
 scales or `typography.*` design-token overrides.
 
@@ -1536,6 +1536,60 @@ These checks validate source/catalog/token parity, status markers, typed-token
 and raw-style rejection, reserved/internal surface boundaries, retained
 containment, and package anchor limits. They are host-authority checks, not
 package-facing conformance APIs.
+
+### Plan 097 Phase 8 Tauri/React renderer contract
+
+Phase 8 changes the host renderer, not package authoring APIs. `package.json`
+`clay.contributions` remains the single registration source and one-line
+`loadPackage` remains the default. The server publishes one generation-stamped,
+bounded `PackageUiSnapshot` containing empty-tab content, fixed panels,
+transient overlays, standalone/status components, input-route metadata, and
+host-stamped provenance. Tauri parses each validated component JSON string into
+a typed inert value before React observes it.
+
+The React registry implements every current kind except reserved `table`.
+Stable component and SDUI node IDs are React keys: unrelated updates retain
+focus, text input, disclosure, dropdown, and scroll state. Fixed panels compose
+around mandatory `main`; overlays stay in the host overlay layer; status items
+stay host chrome. Every action becomes one current-version `SduiAction` and is
+revalidated by the existing server command executor.
+
+Trust remains server-owned. `trusted package` is emitted only when the exact
+name/version/prefix resolves to an enabled compiled-inventory record with
+verified provenance/integrity. All other package surfaces are labelled
+`third-party shared runtime`. A label grants nothing: the third-party runtime
+still lacks internal ops/modules and direct Tauri access; no V8 value, package
+function, React component, JSX, CSS, script, or event handler crosses into the
+main webview. Arbitrary third-party custom web UI remains unsupported until an
+isolated-surface decision and implementation exist.
+
+Package authors need no migration edit. Continue using semantic tokens,
+current component kinds, declared command intents, documented overlay anchors,
+and one-line loading. The React host adds no package breakpoint, raw style,
+client runtime, filesystem, network, shell, native widget, or Tauri authority.
+
+Phase 9 adds no package menu, dialog, configuration, or desktop authority.
+Command Centre, Path Browser, and built-in pickers are one Clay-owned React
+projection of server-owned sessions. A package command may appear in the live
+catalogue, but packages cannot open, filter, select, intercept, or receive path
+results from that surface. Native file/folder choices travel from Tauri Rust
+directly into the existing selected-path capability and server grant path; no
+selected absolute path is exposed to package UI or the main DOM.
+
+The bundled `@clay/settings` panel may use a compiled trusted React presentation
+module because its exact provenance is in Clay's bundled inventory. It still
+emits only declared `settings.*` intents; theme, appearance, complete typography,
+and reset values are validated and persisted by server Rust. This does not let
+third-party packages contribute React modules. Their settings UI continues to
+use the declarative component catalog and documented package options.
+
+Renderer tests:
+
+```bash
+cargo test --lib server::ui::
+cargo test -p clay-desktop --all-targets
+cd frontend && npx vitest run src/sdui && npm run build && npm run check:budget
+```
 
 ## Rendering and Decorations
 
@@ -1959,7 +2013,7 @@ serverSetLayoutOverride({
 bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
-Performance rule remains: package UI/layout declaration, validation, panel registration, theme token declaration, and configuration evaluation are startup/load/configuration-time work. No package JavaScript runs in Masonry paint, layout, pointer, scroll, keypress, or text-event handlers.
+Performance rule remains: package UI/layout declaration, validation, panel registration, theme token declaration, and configuration evaluation are startup/load/configuration-time work. No package JavaScript runs on the client hot path.
 
 Anti-patterns for Phase 18.5:
 - Do not publish a default fixed panel from the package load path; optional panels start hidden.
@@ -1978,7 +2032,7 @@ Package authors should treat input, actions, state, and configuration as one val
 - Customize package defaults through `configuration.setPackageOption` and `ui.serverSetLayoutOverride`; hidden JSON/TOML/ad hoc layout, input, action, state, style, or theme keys are rejected.
 - Declare `package-configuration` when package defaults or options change behavior, and keep package-owned IDs package-prefixed.
 - Expect diagnostics to preserve package name, version, `apiPrefix`, primitive category, contribution ID, target, payload estimate, failed precedence rule, and failed validation rule.
-- Keep validation/publication/configuration work at startup, package load, configuration reload, explicit command handling, or explicit UI update time. No package JavaScript, package parsing, configuration evaluation, raw IPC wait, full-document serialization, or package-authored native widget mutation may run in Masonry paint/layout/pointer/scroll/key/text-event hot paths.
+- Keep validation/publication/configuration work at startup, package load, configuration reload, explicit command handling, or explicit UI update time. No package JavaScript, package parsing, configuration evaluation, raw IPC wait, full-document serialization, or package-authored native widget mutation may run on client render/layout/input hot paths.
 - Phase 18.5 Markdown replanning: first-party Markdown preview/status/input/state/configuration consumes these generic APIs. The package-owned `markdownLoadMode()` fallback entry consumes `serverRegisterModePattern`, `serverActivateMajorMode`, `serverRegisterCommand`, and `serverRegisterParseHandler` internally; the optional preview is a `PanelContribution` with `defaultVisibility: "hidden"` targeting the `right` slot; user customization uses `setPackageOption` and `serverSetLayoutOverride`; no default fixed panel is published on load. See the Phase 18.5 authoring contract section above.
 
 Deferred surfaces remain explicit: durable state-value mutation, persisted workspace/document/user-config storage, pane selector syntax, multi-panel ordering, overlay z-order, cross-window layout behavior, direct working-area/split/pane-slot mutation, and package enable/disable from configuration are planned/deferred until separate documented APIs ship.
@@ -2023,18 +2077,18 @@ The lifecycle for package-invoked commands is:
 4. **Enqueue** an inert command intent from the client when the user activates the action.
 5. **Execute** server-side: `CommandExecutor` validates command ID, routing policy, provenance, permissions, target context, argument budget, and session/action freshness before running the handler.
 
-Command execution is explicit server-first work. It may be async and cancellable, but it never runs synchronously in Masonry paint, layout, pointer, scroll, keypress, or text-event handlers. Ordinary typing remains client-first and does not wait for command execution.
+Command execution is explicit server-first work. It may be async and cancellable, but it never runs synchronously on the client render/input path. Ordinary typing remains client-first and does not wait for command execution.
 
 ### Performance rule
 
-Package command registration, action validation, and transient menu filtering are load/configuration/update-time work. Query and selection movement scores the bounded already-installed menu snapshot locally through the shared fuzzy subsequence matcher (`src/shell/fuzzy.rs`, shared with the file browser, input capped at 256 chars, candidate scan bounded) — one snapshot per menu open, no registry rebuild and no package JavaScript per keystroke. Command side effects run only through the server-owned execution path; `shell.client*` selections route through the narrow server-approved `ShellClientCommandRequest` frame and execute in the client shell driver. No package JavaScript, command handler, package validation, IPC round trip, filesystem, network, shell, AI, WASM, or full-document serialization work may run in Masonry paint/layout/pointer/scroll/key/text-event handlers.
+Package command registration, action validation, and transient menu filtering are load/configuration/update-time work. Query and selection movement scores the bounded already-installed menu snapshot locally through the shared fuzzy subsequence matcher (`src/shell/fuzzy.rs`, shared with the file browser, input capped at 256 chars, candidate scan bounded) — one snapshot per menu open, no registry rebuild and no package JavaScript per keystroke. Command side effects run only through the server-owned execution path; `shell.client*` selections route through the narrow server-approved `ShellClientCommandRequest` frame and execute in the client shell driver. No package JavaScript, command handler, package validation, IPC round trip, filesystem, network, shell, AI, WASM, or full-document serialization work may run on the client render/layout/input hot path.
 
 ### Security rule
 
 Packages may request transient UI and declare action intents, but they cannot:
 
 - execute client-side JavaScript in the Rust client to handle commands
-- create or mutate Masonry widgets directly
+- create or mutate client widgets directly
 - call raw `Deno.core.ops` or expose raw op names as user-facing API
 - bypass command permission/provenance validation
 - open, drive, or intercept a server menu session, or emit the `ShellClientCommandRequest` frame (client-only narrow bridge from the server-held catalogue; package code never sees the session ID or the frame)
@@ -2049,12 +2103,12 @@ Phase 18.12 makes the file browser the first real consumer of Clay shell slots a
 
 ### Slot ownership and UI composition
 
-Clay owns the working area, pane/split tree, fixed pane slots, component catalog, action routing, theme/style token mapping, and native Masonry widget implementation. For the file browser specifically:
+Clay owns the working area, pane/split tree, fixed pane slots, component catalog, action routing, theme/style token mapping, and the client implementation. For the file browser specifically:
 
 - The left file tree is a Clay-owned fixed panel composed from inert SDUI/component data (`Panel`, `Stack`, `Label`, `List`, and `EditorView`) and installed into the `left` shell region. It demonstrates the fixed-panel contract but does not make the workspace tree package-owned.
 - The fuzzy-open picker is a Clay-owned bottom transient menu session. It uses bounded installed listing metadata and local query filtering; it is not a fixed bottom panel and not a package `TransientOverlayContribution` that owns dynamic query state.
 - File entries emit inert command intents such as `workspace.openFile` and `workspace.revealInTree` with bounded primitive arguments. They never carry JavaScript callbacks, raw op names, native handles, or package-owned filesystem authority.
-- Native layout, focus, accessibility, theme token resolution, and Masonry rendering remain client/Rust implementation details hidden behind Clay primitives.
+- Native layout, focus, accessibility, theme token resolution, and rendering remain client implementation details hidden behind Clay primitives.
 
 Packages can still declare their own fixed panels and transient overlays through the documented `clay:ui` APIs, but those contributions compose around Clay-owned workspace chrome. A package may request `left`, `right`, `top`, or `bottom` slots for package UI; Clay validates slot conflicts, visibility, component IDs, actions, input policies, and theme tokens, and user configuration may override defaults where documented. Packages must tolerate Clay-owned panels such as the file browser occupying preferred slots.
 
@@ -2075,7 +2129,7 @@ Package UI may reference workspace-backed actions only through documented comman
 The file browser reinforces the shell hot-path rule:
 
 - Fixed-panel rendering and transient menu rendering read already-installed inert state.
-- Workspace discovery, directory listing, refresh, fuzzy snapshot creation, command validation, and file open/reveal handling happen at startup, explicit refresh, explicit command/action time, or server-side background work — never inside Masonry paint, layout, pointer, scroll, keypress, or text-event handlers.
+- Workspace discovery, directory listing, refresh, fuzzy snapshot creation, command validation, and file open/reveal handling happen at startup, explicit refresh, explicit command/action time, or server-side background work — never on the client render/input hot path.
 - Fuzzy-open query movement filters bounded installed metadata locally. If a package needs broader search, it needs a separate bounded/cancellable server primitive rather than ad hoc paint-time filesystem work.
 
 ### Package-facing guidance
@@ -2084,7 +2138,7 @@ Use the file browser as a model for **composition**, not authority:
 
 - Good: declare a package-prefixed preview/outline/diagnostics panel with inert components, registered action intents, documented theme tokens, and hidden-by-default layout defaults.
 - Good: declare a transient overlay for package quick actions whose items activate registered package commands.
-- Bad: declare a package file tree that scans paths directly, adds workspace roots/markers, claims the file browser's left slot by load order, passes raw paths in UI callbacks, or ships a custom Masonry widget.
+- Bad: declare a package file tree that scans paths directly, adds workspace roots/markers, claims the file browser's left slot by load order, passes raw paths in UI callbacks, or ships a custom client widget.
 - Bad: implement fuzzy search by running package JavaScript, filesystem scans, parse work, blocking IPC, or package command handlers in paint/layout/input hot paths.
 
 Testing for package UI that coexists with the file browser should assert slot conflict diagnostics, fixed-vs-transient behavior, inert command arguments, no raw-op/native-widget/CSS usage, and no workspace authority beyond documented root/grant APIs.
@@ -2137,7 +2191,7 @@ for (const document of documents) {
 Rules for those surfaces:
 
 - `serverListDocuments` / `serverGetDocumentStatus` report server open-registry metadata. They do not list or mutate the client-retained session map, caret/viewport/history stash, or recovery menu state.
-- `clientShowOpenDocuments` opens Clay's transient open-documents menu. Activation stays client-local (`clientActivateDocument` via menu arguments). Packages must not reimplement tabs as fixed panels, Masonry widgets, or SDUI trees that claim shell ownership of the active document.
+- `clientShowOpenDocuments` opens Clay's transient open-documents menu. Activation stays client-local (`clientActivateDocument` via menu arguments). Packages must not reimplement tabs as fixed panels, custom tab strips, or SDUI trees that claim shell ownership of the active document.
 - Dirty/save chrome is updated by Clay from local edits, `DocumentSaved`, `DocumentReloaded`, and conflict diagnostics. Packages must not create native save dialogs, arbitrary file writes, or a parallel dirty indicator that bypasses server save/reload.
 - Recovery menus are Clay `TransientMenuSession` instances. Package transient overlays remain separate: they cannot replace conflict/resync/disconnect recovery, inject callbacks into those menus, or escalate filesystem/network/shell authority from a recovery action.
 
@@ -2147,7 +2201,7 @@ Phase 20 adds **no** package paint-path requirements:
 
 - Document switch, dirty chrome, and recovery menu paint read already-installed client/server state.
 - Package JavaScript still runs only at load, configuration evaluation, explicit command handling, or explicit UI update time.
-- Masonry paint, layout, pointer, scroll, keypress, and text-event handlers must not run package JavaScript, scan the multi-document session map from package code, open dialogs, or perform save/reload IO.
+- Client render/layout/input handlers must not run package JavaScript, scan the multi-document session map from package code, open dialogs, or perform save/reload IO.
 
 ### Security and deferred authority
 
@@ -2164,11 +2218,11 @@ Broader package/config/AI authority over those surfaces remains deferred and mus
 
 - Good: bind Clay save / open-documents / resync command IDs from `init.js`; declare package-prefixed status items or preview panels that compose around Clay chrome.
 - Good: keep language/preview UI as inert `clay:ui` contributions that tolerate Clay-owned left file browser, bottom recovery menus, and status dirty markers.
-- Bad: ship a package tab strip, dirty badge overlay, or save button that writes files, opens OS save dialogs, or mutates Masonry widgets.
+- Bad: ship a package tab strip, dirty badge overlay, or save button that writes files, opens OS save dialogs, or mutates shell chrome.
 - Bad: replace disconnect/resync recovery with package reconnect sockets, background resync loops, or paint-time session scans.
 - Bad: treat `serverListDocuments` dirty flags as permission to overwrite disk or force-reload without Clay's conflict recovery path.
 
-See also [File Open, Save, and Reload Workflow](../../development/file-open-save-reload-workflow.md) for the user-facing open/save/conflict flow and [Masonry Editor](../../wiki/modules/masonry-editor.md) for client session/recovery implementation notes.
+See also [File Open, Save, and Reload Workflow](../../development/file-open-save-reload-workflow.md) for the user-facing open/save/conflict flow and [React CodeMirror Editor](../../wiki/modules/react-codemirror-editor.md) for client session/recovery implementation notes.
 
 ## Phase 18.9 authoring contract: generic text/code fallback modes and generic key behavior
 
@@ -2385,7 +2439,7 @@ Use the documented `clay:syntax` API for engine preference. Do not add hidden JS
 
 Phase 18.11 adds the `CompletionTriggerAndResult` primitive and server-side completion framework; Phase 18.18 extends its metadata-only package contract with bounded static text items. A package declares provider metadata, trigger/word-boundary parameters, and optional inert `items`, and Clay owns trigger classification, result computation scheduling, and the completion picker UI. Package authors do **not** ship an executable completion handler, raw callback, raw op, native handle, client JavaScript, snippet with executable transforms, command side effect on accept, CSS, or any completion-specific popup widget.
 
-Completion uses Clay's shared retained menu renderer with `TransientMenuOrigin::Completion`, a caret/IME-derived active-pane anchor, `TransientMenuFocusPolicy::Modeless`, and a bounded `scroll` component; it is not a package `TransientOverlayContribution`, a fixed bottom panel, or a package-specific Masonry widget tree. The host caps the projection at `COMPLETION_MAX_VISIBLE_ROWS` = 8 visible rows and `COMPLETION_MAX_WIDTH_PX` = 480 logical pixels. Accepting a completion commits a validated text replacement in the active document only — it never executes a command, raw op, or provider code. Stale document/version/behavior results and empty items dismiss the popup; timeout/provider-error states use sanitized Clay status diagnostics instead of a blocking empty panel.
+Completion uses Clay's shared retained menu renderer with `TransientMenuOrigin::Completion`, a caret/IME-derived active-pane anchor, `TransientMenuFocusPolicy::Modeless`, and a bounded `scroll` component; it is not a package `TransientOverlayContribution`, a fixed bottom panel, or a package-specific widget tree. The host caps the projection at `COMPLETION_MAX_VISIBLE_ROWS` = 8 visible rows and `COMPLETION_MAX_WIDTH_PX` = 480 logical pixels. Accepting a completion commits a validated text replacement in the active document only — it never executes a command, raw op, or provider code. Stale document/version/behavior results and empty items dismiss the popup; timeout/provider-error states use sanitized Clay status diagnostics instead of a blocking empty panel.
 
 Declare completion provider contributions under `clay.contributions.completionProviders` and register the metadata from the package load entry through `completion.serverRegisterCompletionProvider`:
 
@@ -2499,8 +2553,8 @@ core `WelcomeWidget` fallback.
 Declare one `empty-tab` winner in `clay.contributions.ui.paneContents` and
 register it from `loadEntry` with `ui.serverRegisterPaneContentContribution`.
 Use only catalog `ComponentKind` values. Action targets must be registered
-commands. No package JavaScript runs in Masonry paint, layout, pointer,
-scroll, keypress, or text-event handlers.
+commands. No package JavaScript runs on the client
+render/layout/input hot path.
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -2530,8 +2584,27 @@ modules. `chat.entrySurface` / `chat.chromeActions` extend the first-party
 package without replacing it. Rollback restores `@clay/chat`.
 
 Core/bootstrap and `clay-agent` are not package-replaceable. Packages cannot
-create Masonry widgets or replace Command Centre, the tab bar, or native
+create widgets or replace Command Centre, the tab bar, or native
 dialogs.
+
+### Agent surface (AG-UI streaming)
+
+Chat streaming is a core-owned presentation lane, not package JavaScript.
+The Clay server adapts its internal agent event union to standard AG-UI
+protocol events (`@ag-ui/core`) in Rust and delivers them to the desktop
+webview over one Tauri channel; the React client consumes them through a
+custom `@ag-ui/client` `AbstractAgent` transport. The Prism daemon protocol
+stays internal to the server.
+
+- Tool and permission variants cross only as inert display payloads
+  (`CUSTOM` events); no package or client code can execute tools or grant
+  permissions through the stream.
+- Credentials never appear as agent events: `CredentialAck` carries only
+  provider/name/stored, and secrets are set exclusively through the existing
+  credential API.
+- A package that replaces `@clay/chat` removes the Chat landing and profile;
+  it does not gain agent authority, daemon access, or Tauri APIs. The stream,
+  transcript bounds, and prompt validation stay core-owned.
 
 ## Phase 28 authoring contract: editor commands, folding, decoration intent, and inlay hints
 
@@ -2738,7 +2811,7 @@ it is not a command, URL, callback, or client-side JavaScript hook.
   virtual-text reflow. They are decorative/`aria-hidden`; the toggle is the
   Clay-owned `editor.toggleInlayHints` command.
 - Package UI, parse work, fold publication, link publication, and LSP refresh
-  run at load/configuration/background/update time. Masonry paint, layout,
+  run at load/configuration/background/update time. Rendering, layout,
   pointer, scroll, keypress, and text-event paths read cached inert state only;
   no package JavaScript runs there.
 - `render-folding` and `render-decorations` are narrow publication permissions,
@@ -2830,7 +2903,7 @@ Keep the `syntaxGrammars` block exactly as shipped in Phase 18.10. The same meta
 - **Completion providers**: register keyword/snippet providers with `completion.serverRegisterCompletionProvider`. Completion providers remain metadata-only and never ship executable handlers, raw callbacks, or client JavaScript. Derive `triggerCharacters` from the major-mode behavior manifest with `completion.completionTriggerCharactersFromEditorRules(editorRules)` so the editor's autocomplete triggers and the completion framework's provider selection stay aligned.
 - **Parse handlers**: register a mode-scoped parse handler with `parse.serverRegisterParseHandler` to derive decorations, folding ranges, diagnostics, or outline data. The handler runs as `Background`, cancellable, viewport-prioritized server work and never in paint/typing hot paths.
 - **Range diagnostics**: publish bounded `DiagnosticSet` data with `diagnostics.serverPublishDiagnostics` under `render-decorations`. Keep status failures on `RuntimeDiagnostic`; keep visual tints on `serverPublishDecorations`. See [Range Diagnostics](../primitives/diagnostics.md).
-- **UI contributions**: declare optional components, status items, transient overlays, panels, empty-tab pane contents, and theme tokens through the `clay:ui` contribution APIs. All UI contributions are inert declarations that Clay validates, composes, and renders through Clay-owned Masonry widgets. Packages never create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
+- **UI contributions**: declare optional components, status items, transient overlays, panels, empty-tab pane contents, and theme tokens through the `clay:ui` contribution APIs. All UI contributions are inert declarations that Clay validates, composes, and renders through Clay-owned components. Packages never create widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
 - **Configuration**: Phase 18.14 language packages keep indent size, comment token, delimiter pairs, and autocomplete triggers as package-defined defaults. They do not introduce new user-tunable configuration keys in this phase. When user customization is justified in a later phase, expose package-prefixed options through the documented `configuration.setPackageOption` API and layout defaults through `ui.serverSetLayoutOverride`. Do not invent hidden JSON/TOML keys or undocumented config paths in `init.js`.
 
 ### Configuration contract for language packages
@@ -2848,7 +2921,7 @@ Do not:
 
 - Add `if mode == "rust"` or `if extension == "ts"` branches in the Rust client or server core.
 - Implement language-specific native widgets, status bars, sidebars, or overlays.
-- Run package JavaScript in Masonry paint, layout, pointer, scroll, keypress, or text-event handlers.
+- Run package JavaScript on the client render/layout/input hot path.
 - Bypass `loadPackage` by pasting the package manifest into `init.js`.
 - Promote LSP, full language-server protocol integration, workspace-wide symbol indexes, AI completions, network-backed completions, or mutating package-manager/toolchain execution in Phase 18.14.
 
@@ -2866,7 +2939,7 @@ Allowed `clay:ui` surfaces for language packages in Phase 18.14:
 
 Packages must not:
 
-- Create or mutate Masonry widgets directly.
+- Create or mutate client widgets directly.
 - Provide raw CSS strings, HTML, renderer callbacks, native handles, or client-side JavaScript hooks.
 - Add fixed panels that consume permanent chrome by default.
 - Add file-browser roots, workspace markers, ignore rules, or raw directory listings.
@@ -2936,11 +3009,11 @@ packages/markdown/dist/sdui.js
   -> optional validated preview/status SduiSnapshot
 ```
 
-The default decoration path is Tier 1 native. `parser.js` is registered only as the Tier 3 JavaScript fallback and is selected only when native syntax is unavailable or the user explicitly selects `setSyntaxEnginePreference("markdown", "javascript")`. The package manifest has no default parser-backed `decorations` contribution. The preview remains package-JS SDUI, is optional, and does not create a fixed panel, Masonry widget, raw CSS, client-side JavaScript, or a native layout mutation. It may publish a bounded status/preview snapshot only through the documented SDUI contract.
+The default decoration path is Tier 1 native. `parser.js` is registered only as the Tier 3 JavaScript fallback and is selected only when native syntax is unavailable or the user explicitly selects `setSyntaxEnginePreference("markdown", "javascript")`. The package manifest has no default parser-backed `decorations` contribution. The preview remains package-JS SDUI, is optional, and does not create a fixed panel, raw CSS, client-side JavaScript, or a native layout mutation. It may publish a bounded status/preview snapshot only through the documented SDUI contract.
 
 ### UI/layout, performance, and authority rules
 
-Status items and optional SDUI preview are inert `clay:ui`/`clay:sdui` contributions. Fixed panels consume a declared slot; transient overlays do not. Clay owns slot composition, action routing, focus, user-over-package precedence, typed style tokens, and Masonry rendering. A package cannot win a slot by load order and cannot use a status item or SDUI preview to bypass fixed-versus-transient rules.
+Status items and optional SDUI preview are inert `clay:ui`/`clay:sdui` contributions. Fixed panels consume a declared slot; transient overlays do not. Clay owns slot composition, action routing, focus, user-over-package precedence, typed style tokens, and rendering. A package cannot win a slot by load order and cannot use a status item or SDUI preview to bypass fixed-versus-transient rules.
 
 All package JavaScript runs at load, explicit command, explicit SDUI update, or bounded server parse/completion work—not in client keypress, paint, layout, scroll, pointer, or text-event hot paths. Behavior manifests, parse windows, decoration payloads, SDUI snapshots, completion items, and syntax cache retention remain subject to their typed budgets. Contributions preserve package provenance and require declared permissions; `loadPackage` grants no capabilities. Packages receive no filesystem, network, shell, AI, raw-op, native-widget, client-runtime, arbitrary WASM, third-party grammar, or LSP authority from this contract.
 
@@ -3092,7 +3165,7 @@ Do not:
 - Claim `clay.*` package IDs.
 - Call raw `Deno.core.ops`.
 - Execute package JavaScript in the Rust client.
-- Create or mutate Masonry widgets directly from package code.
+- Create or mutate client widgets directly from package code.
 - Provide CSS, HTML, script, draw callbacks, or native handles.
 - Do filesystem/network/shell/AI/WASM work without an approved permissioned API.
 - Add Markdown-specific Rust UI/layout branches for package behavior.
@@ -3107,7 +3180,7 @@ Do not:
 - Request or declare the Clay-internal `centered` or `Completion` overlay anchors, caret-native bounds, or a completion-specific widget.
 - Treat package-authored accessibility labels as a path/HTML escape hatch; Clay sanitizes and bounds them before accessibility publication.
 - Treat the core `WelcomeWidget` fallback, native file/folder dialogs, tab bar, or Command Centre as package-owned UI or dialog authority. The loaded empty-tab landing is package-owned via `ui.paneContents`; replace `@clay/chat`, not those host surfaces.
-- Treat the Clay-owned file browser as a package-owned panel, package workspace-root provider, package marker/ignore-rule extension point, raw directory-listing API, or custom Masonry widget.
+- Treat the Clay-owned file browser as a package-owned panel, package workspace-root provider, package marker/ignore-rule extension point, raw directory-listing API, or custom client widget.
 - Treat multi-document sessions, dirty/save status chrome, conflict recovery menus, or pending-edit/disconnect/resync recovery as package-owned layout surfaces, native widgets, or clipboard/filesystem authority grants.
 - Open native save dialogs, write arbitrary files, invent package clipboard-contents APIs, or run reconnect/resync loops from package UI in place of Clay's documented command IDs and recovery menus.
 - Pass raw client-chosen filesystem paths through package UI actions instead of using documented workspace root/grant command APIs.

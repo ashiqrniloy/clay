@@ -1,7 +1,18 @@
 use crate::protocol::{DocumentId, DocumentVersion};
 
 /// Package or core provenance retained on every folding publication.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct FoldingProvenance {
     pub package_name: String,
     pub package_version: String,
@@ -20,7 +31,18 @@ impl FoldingProvenance {
 
 /// One collapsible byte range. Collapsed state is client-local.
 /// Sets are denied above `FOLDING_RANGE_PAYLOAD_BUDGET_BYTES`.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct FoldingRange {
     pub byte_start: u64,
     pub byte_end: u64,
@@ -29,7 +51,18 @@ pub struct FoldingRange {
 }
 
 /// Validated folding ranges for one document version and one provenance.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct FoldingRangeSet {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,

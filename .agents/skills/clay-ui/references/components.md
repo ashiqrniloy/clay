@@ -84,6 +84,40 @@ Plan 088 Tasks 3–7 consume the existing catalog; they add no `ComponentKind`, 
 
 The complete package-facing explanation and validation/test commands live in [Creating Clay Packages — Plan 088 UI modernization authoring contract](../../../../docs/reference/packages/creating-packages.md#plan-088-ui-modernization-authoring-contract). These are host-owned layout and accessibility guarantees, not new package APIs.
 
+## Plan 097 Phase 8 React renderer mapping
+
+The Tauri target now projects the unchanged catalog through
+`frontend/src/sdui/registry.tsx` and `frontend/src/packages/PackageWorkspace.tsx`.
+Every implemented kind maps to the React target recorded in
+`docs/development/react-ui-catalog-mapping.md`; `table` remains rejected.
+Stable SDUI node/component IDs are React keys, preserving local input,
+disclosure, dropdown, focus, and scroll state across unrelated updates.
+
+Rust still validates kind, tree bounds, styles, actions, package provenance,
+generation, and trust domain before Tauri parses component JSON into a typed
+DTO. React receives inert values only, resolves typed token names to
+host-owned `--clay-*` variables, and sends one versioned `SduiAction` for
+interaction. No package JSX, event callback, CSS, script, V8 object, raw op, or
+Tauri API enters the main webview. This is a renderer cutover only: no kind,
+style variable, token, permission, anchor, or package manifest shape changed.
+
+## Plan 097 Phase 9 React desktop workflow mapping
+
+`frontend/src/command-centre/CommandCentre.tsx` now projects all
+server-owned command/path/picker sessions through the cataloged internal
+Command Centre surface: React Aria `Modal`/`Dialog`, `TextField`, and `ListBox`,
+with server-controlled query/selection and typed opaque intents. The result
+collection remains capped at 256 and uses native scrolling; virtualization is
+deferred until profiling demonstrates a need that justifies its additional
+focus/accessibility machinery.
+
+`frontend/src/settings/SettingsPanel.tsx` is the compiled trusted presentation
+module for the exact bundled `@clay/settings` contribution. It composes existing
+`button`, `dropdown`, `collapse`, and `textInput` primitives only, consumes
+host-resolved tokens/typography, and emits versioned `settings.*` intents. No
+new package-facing kind, token, style variable, anchor, permission, or raw
+frontend module path was added; third-party packages remain declarative.
+
 ## Phase 28 editor-intelligence chrome
 
 Phase 28 adds no package-facing UI kind. Packages publish inert editor data;

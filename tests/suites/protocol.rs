@@ -6,6 +6,8 @@ mod clay_js_api_inventory;
 mod clay_js_doc_registry;
 #[path = "../clay_js_facade_layout.rs"]
 mod clay_js_facade_layout;
+#[path = "../documentation_coverage.rs"]
+mod documentation_coverage;
 #[path = "../editor_intelligence_protocol.rs"]
 mod editor_intelligence_protocol;
 #[path = "../manual_smoke_docs.rs"]
@@ -16,8 +18,6 @@ mod package_loading_docs;
 mod perf_fixtures;
 #[path = "../performance_budgets.rs"]
 mod performance_budgets;
-#[path = "../performance_protocol.rs"]
-mod performance_protocol;
 #[path = "../primitives_docs.rs"]
 mod primitives_docs;
 #[path = "../window_management_protocol.rs"]
@@ -38,7 +38,7 @@ fn integration_suite_inventory_assigns_every_source_once() {
                 .then(|| entry.file_name().to_string_lossy().into_owned())
         })
         .collect();
-    let suites = ["editor", "protocol", "runtime", "security"];
+    let suites = ["presentation", "protocol", "runtime", "security"];
     let mut assigned = Vec::new();
     for suite in suites {
         let source =

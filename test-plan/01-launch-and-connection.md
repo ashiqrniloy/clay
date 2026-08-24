@@ -84,8 +84,8 @@ Real Linux/GNOME Wayland execution used `cargo build`, the isolated mode-700 rev
 
 | # | Action | Expected |
 |---|--------|----------|
-| L20 | Run `CLAY_LIVE_WINDOW_SMOKE=1 cargo test --test security live_atspi_smoke::live_multi_window_scale_smoke -- --ignored --exact --test-threads=1` on a Wayland host with AT-SPI prereqs | Two real Clay client processes launch with large-typography init.js (ui 24/mono 20/proportional 21); AT-SPI exposes two distinct frames (PID-separated); both frames have positive physical bounds with scale factors between 0.5 and 4.0; both status bars contain `Clay —` |
-| L21 | Run `cargo test --lib masonry_shell::tests::rescale_event_recomputes_logical_bounds_from_physical_size` | Headless `WindowEvent::Rescale(2.0)` plus `Resize(1800x1200 physical)` yields logical size 900x600 with tab-bar and pane-host rects inside bounds |
+| L20 | Launch two real Clay desktop clients on a Wayland host with large-typography init.js (ui 24/mono 20/proportional 21) and dump AT-SPI per instance | Two distinct `clay-desktop` frames are exposed with positive physical bounds and scale factors between 0.5 and 4.0. (The automated `live_atspi_smoke::live_multi_window_scale_smoke` harness was removed with the native client; this step is now manual-only.) |
+| L21 | Resize the desktop window across scale changes (e.g. 1×→2× display scale) and confirm layout stays in bounds; cross-check the Plan 097 Phase 12 wide/narrow captures | Tab bar, panes, status bar, and dialogs stay inside window bounds after rescale; no clipped chrome. (The headless Masonry rescale unit test was removed with the native client; responsive coverage now comes from this manual check plus the retained fixture captures.) |
 | L22 | Inspect the `ui-review-large-typography` fixture capture (`scripts/capture-ui-review.sh --fixture ui-review-large-typography --output <dir>`) | Welcome state with large UI typography (size 24/20/21) renders in bounds; Open File/Open Folder buttons, status bar, and polite status remain legible and accessible; no absolute path leaks |
 
 ## Plan 089 task 9 Linux execution record (2026-08-17)
@@ -106,3 +106,16 @@ Real Linux/GNOME Wayland execution used `cargo build`, the isolated mode-700 rev
   unsupported-command error.
 - Observer cannot gain the editable lease until the editable client
   disconnects cleanly; lease handover timing is out of scope here.
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Launch/welcome shell | PASS real AT-SPI structure | `code-reviews/screenshots/2026-08-24-tauri-react-parity/default-welcome/accessibility.txt` exposes the Tauri frame, `Clay workspace`, `Window tabs`, `Workspace`, `Pane 1`, and named Open File/Open Folder actions |
+| Opened editor shell | PASS real AT-SPI structure | `editor-opened/accessibility.txt` exposes Save/Reload/Close, Open path, Open, `Editor notes.md`, and the Document editor entry |
+| Loading/empty/error/recovery | PASS static visual/a11y coverage | `states/fixture-{wide,narrow}.png` and paired AX snapshots |
+| Physical keyboard/reconnect re-run | UNRESOLVED host | `/dev/uinput` denied; no xdotool/ydotool; Wayland portal cannot target Clay. No interactive pass inferred |
+
+The retained screenshots are app-only CDP captures; full-desktop portal PNGs
+with unrelated windows were deleted. See the dated review log for all state
+results and cleanup policy.
