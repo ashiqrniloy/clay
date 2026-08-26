@@ -21,6 +21,9 @@ pub(crate) enum ClayCommand {
     Client {
         endpoint: IpcEndpoint,
     },
+    Restart {
+        endpoint: IpcEndpoint,
+    },
     Server {
         endpoint: IpcEndpoint,
         configuration_root: Option<PathBuf>,
@@ -92,7 +95,7 @@ impl std::fmt::Display for CliError {
 
 impl Error for CliError {}
 
-pub(crate) const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint] [--config-fixture <name>]\n  clay client [endpoint]\n  clay smoke-gui [--config-fixture <name>]\n  clay perf-fixture --kind <kind> --size-mib <n> [--output <path>] [--seed <n>]\n  clay package add <spec> [--allow-scripts]\n  clay package remove <name>\n  clay package list\n  clay package enable <name>\n  clay package disable <name>\n  clay package inspect <name>\n  clay package adopt <name>\n  clay package revoke <name>\n  clay package rollback <name>\n  clay <endpoint>\n\nModes:\n  clay                  Launch the Tauri desktop; it adopts or supervises the default local server.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Launch the Tauri desktop against the selected local endpoint.\n  clay smoke-gui        Start an isolated server, launch the Tauri desktop, then clean up.\n  clay perf-fixture     Generate deterministic large UTF-8 plain-text performance fixtures.\n  clay package         Manage Clay packages (install/enable/disable/list/inspect/adopt/revoke/rollback).\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n\nOptions:\n  --config-fixture <name>  Development smoke fixture under tests/fixtures/configuration/<name>.\n  --allow-scripts          Allow package lifecycle scripts during `clay package add` (dangerous).\n  --profile-perf          Enable internal developer performance metric snapshots for this process.\n\nEnvironment:\n  CLAY_ALLOW_LIFECYCLE_SCRIPTS=1  Same as --allow-scripts (dangerous).\n\nPerf fixture kinds:\n  long-lines, many-short-lines, mixed-unicode, newline-heavy\n";
+pub(crate) const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint] [--config-fixture <name>]\n  clay client [endpoint]\n  clay restart [endpoint]\n  clay smoke-gui [--config-fixture <name>]\n  clay perf-fixture --kind <kind> --size-mib <n> [--output <path>] [--seed <n>]\n  clay package add <spec> [--allow-scripts]\n  clay package remove <name>\n  clay package list\n  clay package enable <name>\n  clay package disable <name>\n  clay package inspect <name>\n  clay package adopt <name>\n  clay package revoke <name>\n  clay package rollback <name>\n  clay <endpoint>\n\nModes:\n  clay                  Stop leftover servers on the default endpoint, then launch the Tauri desktop.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Open another Tauri desktop against a running server (does not kill servers).\n  clay restart          Stop leftover servers on the endpoint, start a fresh background server, then exit.\n  clay smoke-gui        Start an isolated server, launch the Tauri desktop, then clean up.\n  clay perf-fixture     Generate deterministic large UTF-8 plain-text performance fixtures.\n  clay package         Manage Clay packages (install/enable/disable/list/inspect/adopt/revoke/rollback).\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n\nOptions:\n  --config-fixture <name>  Development smoke fixture under tests/fixtures/configuration/<name>.\n  --allow-scripts          Allow package lifecycle scripts during `clay package add` (dangerous).\n  --profile-perf          Enable internal developer performance metric snapshots for this process.\n\nEnvironment:\n  CLAY_ALLOW_LIFECYCLE_SCRIPTS=1  Same as --allow-scripts (dangerous).\n\nPerf fixture kinds:\n  long-lines, many-short-lines, mixed-unicode, newline-heavy\n";
 
 pub(crate) fn extract_profile_perf_flag(
     args: impl Iterator<Item = OsString>,
@@ -122,6 +125,8 @@ pub(crate) fn parse_command(args: Vec<OsString>) -> Result<ClayCommand, CliError
         "server" | "--server" => parse_server_subcommand(args),
         "client" | "--client" => parse_endpoint_subcommand("client", args)
             .map(|endpoint| ClayCommand::Client { endpoint }),
+        "restart" | "--restart" => parse_endpoint_subcommand("restart", args)
+            .map(|endpoint| ClayCommand::Restart { endpoint }),
         "smoke-gui" | "smoke" | "--smoke-gui" => parse_smoke_gui_subcommand(args),
         "perf-fixture" => parse_perf_fixture_subcommand(args),
         "package" => parse_package_subcommand(args),

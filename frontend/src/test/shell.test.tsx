@@ -9,13 +9,13 @@ const ready: ConnectionState = {
   phase: "ready",
   bootstrap: {
     clientId: 1,
-    protocolVersion: 26,
+    protocolVersion: 27,
     endpoint: "/tmp/x.sock",
     generation: 1,
     initialDocument: {
       documentId: 1 as never,
       version: 1,
-      text: "",
+      head: { totalBytes: 0, firstChunk: "" },
       access: {},
       workspaceRoot: "/tmp/ws",
     },

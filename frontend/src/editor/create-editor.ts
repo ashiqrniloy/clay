@@ -1,6 +1,7 @@
 import {
   EditorState,
   type Extension,
+  type Text,
   type Transaction,
 } from "@codemirror/state";
 import {
@@ -22,11 +23,12 @@ import { shouldEmitEdit } from "./transactions";
 import type { TextChange } from "./sync/operations";
 
 export interface CreateEditorOptions {
-  doc?: string;
+  doc?: string | Text;
   readOnly?: boolean;
   parent: HTMLElement;
   placeholder?: string;
-  onUserChanges?: (oldText: string, changes: TextChange[]) => void;
+  /** Receives the pre-change document (rope) — never a flattened string. */
+  onUserChanges?: (oldDoc: Text, changes: TextChange[]) => void;
   onSave?: () => void;
   extra?: Extension[];
 }
@@ -72,7 +74,9 @@ export function createEditor(options: CreateEditorOptions): EditorView {
     if (!emit) return;
     for (const transaction of update.transactions) {
       if (!shouldEmitEdit(transaction)) continue;
-      emit(transaction.startState.doc.toString(), collectChanges(transaction));
+      // Pass the rope itself; byte-offset conversion is indexed per document
+      // version. Flattening here cost O(document) on every keystroke.
+      emit(transaction.startState.doc, collectChanges(transaction));
     }
   });
 

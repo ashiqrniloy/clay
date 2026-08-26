@@ -66,6 +66,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "ashpd"
+version = "0.13.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb8421aaa9644a5faf26735f258b669b15f063313ef8f8e2bdb28912a1a6f111"
+dependencies = [
+ "enumflags2",
+ "futures-util",
+ "getrandom 0.4.2",
+ "serde",
+ "serde_repr",
+ "tokio",
+ "zbus",
+]
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -603,6 +618,7 @@ dependencies = [
 name = "clay-desktop"
 version = "0.1.0"
 dependencies = [
+ "ashpd",
  "clay",
  "serde",
  "serde_json",
@@ -610,6 +626,7 @@ dependencies = [
  "tauri-build",
  "tempfile",
  "tokio",
+ "url",
 ]
 
 [[package]]

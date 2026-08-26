@@ -329,27 +329,22 @@ pub const JS_RUNTIME_HEAP_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 pub const RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS: u64 = 25;
 pub const MODE_ACTIVATION_P95_BUDGET_MS: u64 = 100;
 pub const LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB: u64 = 256;
-
-// Hard size gate for opening a file from disk into a server document.
-//
-// Full-text protocol messages (`InitialDocument`, `ResyncSnapshot`,
-// `DocumentOpened`, `DocumentReloaded`) carry the entire document `String` in a
-// single rkyv frame, and the IPC codec caps a frame at
-// `DEFAULT_MAX_FRAME_SIZE` (1 MiB). A file at or near that limit would open
-// successfully only to fail at frame encode, and reading it into memory first
-// is a memory-exhaustion vector. Open/reload read through one opened handle
-// (`read_file_bounded` in the workspace): handle metadata is checked against
-// this gate before allocation and the read itself is capped at this value
-// plus one byte, so oversized files are rejected with a typed `FileTooLarge`
-// error even if the file grows between validation and read.
-//
-// The value sits below the 1 MiB frame limit to leave headroom for the message
-// envelope (variant tag + `DocumentMetadata` + rkyv overhead) so any file that
-// passes this gate also fits in a single full-text frame. Larger files require
-// the chunked/viewport-first loading path, which remains a documented follow-up
-// (see plan 030). `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB` is the future
-// resident-memory budget for that chunked path and is intentionally much larger.
-pub const MAX_OPENABLE_FILE_BYTES: usize = 768 * 1024;
+/// Server-owned resident-memory budget for open document ropes. This is a
+/// security budget, not a user configuration option.
+pub const DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES: u64 =
+    LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB * 1024 * 1024;
+/// Number of leading file bytes inspected for NUL characters before a file is
+/// accepted as text. Bytes after this boundary are intentionally not used for
+/// binary classification.
+pub const BINARY_SNIFF_BYTES: usize = 8 * 1024;
+/// Maximum UTF-8 text bytes returned by one document chunk response.
+/// Leaves ample room below the 1 MiB codec ceiling for archived message
+/// metadata and framing. Server request handling clamps untrusted values.
+pub const MAX_CHUNK_BYTES: usize = 256 * 1024;
+/// Maximum data-only native grammar context. This parse budget is independent
+/// from file-open capacity; large documents remain openable and parse through
+/// bounded windows.
+pub const NATIVE_GRAMMAR_MAX_WINDOW_BYTES: usize = 3 * MAX_CHUNK_BYTES;
 
 /// Hard size gate for small trusted-local auxiliary reads (e.g. a workspace
 /// root `.gitignore`). These files are read in full into memory, so a

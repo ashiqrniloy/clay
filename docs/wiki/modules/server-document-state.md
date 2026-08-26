@@ -101,7 +101,7 @@ let response = document.apply_edit(
 
 The response is an `EditAck` with confirmed version `2`, and the canonical rope contains `Hello Clay 🌎`.
 
-`WorkspaceState::save_document` reads `DocumentState::text()` and remembers `DocumentState::version()` before writing; it only clears dirty state with `mark_clean_if_version` if the same document version is still current after the file write. `WorkspaceState::reload_document` calls `replace_text_from_storage`, which replaces the rope, advances the version when disk text differs, and marks the document clean.
+`WorkspaceState::save_document` clones `DocumentState::clone_rope()` (Arc-root) and remembers `DocumentState::version()` before streaming chunks to disk; it only clears dirty state with `mark_clean_if_version` if the same document version is still current after the file write. `WorkspaceState::reload_document` calls `replace_rope_from_storage`, which replaces the rope, advances the version when disk text differs, and marks the document clean.
 
 ## Invariants and Constraints
 
@@ -114,7 +114,7 @@ The response is an `EditAck` with confirmed version `2`, and the canonical rope 
 - Region locks are in-memory server metadata. They block overlapping user edits after lease validation and before rope mutation.
 - Region lock ranges are non-empty, in-bounds, and UTF-8 boundary aligned.
 - Disconnecting the current lease holder releases the lease. Existing observers stay read-only until they reconnect or later explicit transfer UI exists.
-- Initial/resync snapshots, saves, and reloads extract or replace full text at explicit server-side boundaries; ordinary edit acknowledgements do not send full-document text.
+- Initial/resync heads and chunk fetches, streamed saves, and reloads stay at explicit server-side boundaries; ordinary edit acknowledgements do not send full-document text. Saves stream Crop chunks and do not materialize a whole-document `String`.
 - The server version is authoritative; clients cannot advance it by sending forged future base versions.
 - Version checks are constant-time metadata comparisons before any text mutation.
 - Each routed `DocumentState` is protected by a Tokio mutex, so connection tasks do not mutate that canonical rope concurrently; tab routing prevents another tab from reaching it.

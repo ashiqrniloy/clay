@@ -42,6 +42,8 @@ export function WorkspacePanes({
       onFocus={(paneId) => workspace.focus(paneId)}
       onRatio={(path, ratio) => workspace.setRatio(path, ratio)}
       onOpenPath={(path) => workspace.openPath(path)}
+      onOpenFile={() => workspace.openFileDialog()}
+      onOpenFolder={() => workspace.openFolderDialog()}
     />
   );
   const content =

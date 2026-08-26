@@ -1,4 +1,6 @@
-import { utf16ToUtf8, utf8Length } from "../position-map";
+import type { Text } from "@codemirror/state";
+
+import { textIndex, utf16ToUtf8Indexed, utf8Length } from "../position-map";
 
 export type EditOperation =
   | { insert: { byteOffset: number; text: string } }
@@ -16,14 +18,18 @@ export interface TextChange {
 /**
  * Convert CodeMirror start-state changes into sequential byte-range
  * operations. Changes are assumed non-overlapping and ordered by `from`.
+ *
+ * Byte offsets come from the memoized per-document index — O(log lines) each,
+ * never a full-document scan or flattened string.
  */
 export function changesToOperations(
-  oldText: string,
+  oldDoc: Text,
   changes: readonly TextChange[],
 ): EditOperation[] {
+  const index = textIndex(oldDoc);
   const originals = changes.map((change) => ({
-    start: utf16ToUtf8(oldText, change.from),
-    end: utf16ToUtf8(oldText, change.to),
+    start: utf16ToUtf8Indexed(index, change.from),
+    end: utf16ToUtf8Indexed(index, change.to),
     insert: change.insert,
   }));
   const operations: EditOperation[] = [];

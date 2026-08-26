@@ -92,3 +92,12 @@ UI review needed repeated temporary fixture directories and copied capture scrip
 ## 26-08-24 12:49 — tauri-react-visual-review
 
 UI review repeatedly hit same AT-SPI/tooling friction: whole desktop enumeration blocks on a blank child, and the existing capture harness still matched native `clay`/`Clay working area shell` identifiers after Tauri cutover; wrapper cleanup also left `clay-desktop` children until explicitly tracked. Workaround: per-index bounded probes, current app/landmark matching, and explicit child cleanup. Prevent recurrence with one bounded AT-SPI discovery API keyed to app PID/name plus process-group ownership in the harness.
+## 26-08-25 14:21 — edit-exact-duplicate-replacements
+
+functions.edit requires every oldText to be unique and cannot select occurrence or replace all exact matches. Protocol field migration produced repeated identical test-fixture blocks, forcing multiple large context replacements and one count-asserted Python replacement. Add occurrence selection or explicit replace-all/count support to prevent repetitive retries.
+## 26-08-26 01:43 — ui-review-hmr
+
+Plan 098 fixture review hit existing Vite HMR fragility again: after source/build updates, the lazy fixture route held an invalid promise element and browser capture timed out. Workaround was restarting Vite before recapturing. Prevent repeat by making the fixture harness force a clean dev-server/page reload or by adding a small health check that rejects stale HMR module graphs before capture.
+## 26-08-26 04:12 — Plan 098 real desktop manual test
+
+Plan 098 desktop manual run hit repeatable host tooling friction: GNOME/portal focus moved Clay and the GTK chooser off-screen, and AT-SPI exposed only the native frame; repeated move/resize/coordinate retries were needed before a synthetic file could be selected, then loaded-editor interaction still could not be verified. Prevent with deterministic Tauri window placement/targeting plus a stable WebKitGTK AT-SPI bridge or a committed automation path that does not depend on portal focus.

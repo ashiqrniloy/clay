@@ -68,7 +68,7 @@ Open commands accept either `{ workspaceRootId, relativePath }` or `{ absolutePa
 - In-root opens call `WorkspaceState::open_existing_file`.
 - Out-of-root explicit picks call `WorkspaceState::open_selected_file`, creating a single-file grant only after file/type/UTF-8 validation.
 
-The result is `WorkspaceActionResult::Opened(OpenDocumentSnapshot)`. The connection handler maps that to `ServerMessage::DocumentOpened { metadata, text }`, then runs the same `open_document_followup_messages` path as `OpenDocument` and selected-file opens so behavior manifests, mode activation, and decoration sets are consistent across open origins.
+The result is `WorkspaceActionResult::Opened(OpenDocumentHead)`. The connection handler maps that to `ServerMessage::DocumentOpened { metadata, head }`, then runs the same `open_document_followup_messages` path as `OpenDocument` and selected-file opens so behavior manifests, mode activation, and decoration sets are consistent across open origins.
 
 `workspace.revealInTree` validates a real open `documentId` through `WorkspaceState::document_metadata` before returning `WorkspaceActionResult::Revealed`. `workspace.toggleFileBrowser` returns `WorkspaceActionResult::Toggled`; the bound connection flips `TabServerState.workspace_pane_visible` and publishes the matching visible or editor-only `SduiSnapshot`. Visibility is per tab, hidden by default, and not a new configuration setting.
 

@@ -7,7 +7,11 @@ import {
 } from "@codemirror/autocomplete";
 import type { Extension } from "@codemirror/state";
 
-import { utf16ToUtf8, utf8ToUtf16 } from "../position-map";
+import {
+  textIndex,
+  utf16ToUtf8Indexed,
+  utf8ToUtf16Indexed,
+} from "../position-map";
 import type { CompletionItemDto, CompletionResultSet } from "./types";
 
 interface CompletionContextData {
@@ -75,7 +79,7 @@ export class CompletionProjection {
     if (!context.explicit && !word?.text && trigger === "manual") return null;
 
     const id = this.requestId++;
-    const text = context.state.doc.toString();
+    const index = textIndex(context.state.doc);
     const from = word?.from ?? context.pos;
     const resultPromise = new Promise<CompletionResultSet | null>((resolve) => {
       this.waiting.set(id, resolve);
@@ -100,10 +104,10 @@ export class CompletionProjection {
           documentId: meta.documentId,
           documentVersion: meta.documentVersion,
           behaviorVersion: meta.behaviorVersion,
-          cursorByteOffset: utf16ToUtf8(text, context.pos),
+          cursorByteOffset: utf16ToUtf8Indexed(index, context.pos),
           replacementRange: {
-            byteStart: utf16ToUtf8(text, from),
-            byteEnd: utf16ToUtf8(text, context.pos),
+            byteStart: utf16ToUtf8Indexed(index, from),
+            byteEnd: utf16ToUtf8Indexed(index, context.pos),
           },
           trigger,
           providerGeneration: 0,
@@ -124,12 +128,15 @@ export class CompletionProjection {
       result.behaviorVersion !== meta.behaviorVersion
     )
       return null;
-    const currentText = context.state.doc.toString();
-    const resultFrom = utf8ToUtf16(
-      currentText,
+    const currentIndex = textIndex(context.state.doc);
+    const resultFrom = utf8ToUtf16Indexed(
+      currentIndex,
       result.replacementRange.byteStart,
     );
-    const resultTo = utf8ToUtf16(currentText, result.replacementRange.byteEnd);
+    const resultTo = utf8ToUtf16Indexed(
+      currentIndex,
+      result.replacementRange.byteEnd,
+    );
     return {
       from: resultFrom,
       to: resultTo,

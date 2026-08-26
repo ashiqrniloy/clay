@@ -1,8 +1,8 @@
 import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
-import type { Extension } from "@codemirror/state";
+import type { Extension, TransactionSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 
-import { utf8ToUtf16 } from "../position-map";
+import { textIndex, utf8ToUtf16Indexed } from "../position-map";
 import type { DiagnosticSet, DiagnosticSpan } from "./types";
 
 export const diagnosticExtension: Extension = lintGutter();
@@ -15,7 +15,12 @@ export class DiagnosticProjection {
     if (view) view.dispatch(setDiagnostics(view.state, []));
   }
 
-  install(view: EditorView, set: DiagnosticSet): void {
+  /**
+   * Build the lint-state effect for a validated diagnostic set without
+   * dispatching, so callers can batch several feature updates into one
+   * editor transaction.
+   */
+  prepare(view: EditorView, set: DiagnosticSet): TransactionSpec | null {
     for (const [key, cached] of this.chunks) {
       if (cached.documentVersion !== set.documentVersion)
         this.chunks.delete(key);
@@ -24,7 +29,7 @@ export class DiagnosticProjection {
       `${set.source}:${set.provenance.packagePrefix}:${set.viewportByteStart}:${set.viewportByteEnd}`,
       set,
     );
-    const text = view.state.doc.toString();
+    const index = textIndex(view.state.doc);
     const spans = [...this.chunks.values()].flatMap((chunk) => chunk.spans);
     const suppressors = spans.filter(
       (span) => span.source !== "tree-sitter" && span.severity !== "info",
@@ -35,14 +40,19 @@ export class DiagnosticProjection {
         !suppressors.some((other) => overlaps(span, other)),
     );
     const diagnostics: Diagnostic[] = visible.map((span) => ({
-      from: utf8ToUtf16(text, span.byteStart),
-      to: utf8ToUtf16(text, span.byteEnd),
+      from: utf8ToUtf16Indexed(index, span.byteStart),
+      to: utf8ToUtf16Indexed(index, span.byteEnd),
       severity: span.severity,
       message: span.message,
       source: span.source,
       markClass: `cm-clay-diagnostic-${span.severity}`,
     }));
-    view.dispatch(setDiagnostics(view.state, diagnostics));
+    return setDiagnostics(view.state, diagnostics);
+  }
+
+  install(view: EditorView, set: DiagnosticSet): void {
+    const effect = this.prepare(view, set);
+    if (effect) view.dispatch(effect);
   }
 }
 

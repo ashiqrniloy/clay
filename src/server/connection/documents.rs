@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::{io::AsyncWrite, sync::Mutex};
 
 use crate::{
-    perf::budgets::INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+    perf::budgets::{DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES},
     protocol::{
         ClientId, DocumentId, DocumentMetadata, DocumentVersion, ParseByteRange, ParseInputEdit,
         ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic,
@@ -16,6 +16,11 @@ use crate::{
 };
 
 use crate::server::connection::{file_operation_failed, teardown_closed_document};
+
+/// Upper bound on parse windows scheduled per viewport request. A tall or
+/// zoomed-out viewport is covered by consecutive bounded windows instead of a
+/// single clamped one; anything past this waits for the next scroll request.
+const MAX_VIEWPORT_PARSE_WINDOWS: usize = 24;
 use crate::server::{
     RuntimeGenerationStore,
     behavior::{ActiveBehaviorManifest, BehaviorVersionDecision},
@@ -51,15 +56,18 @@ where
     S: AsyncWrite + Unpin,
 {
     codec.write_server_message(stream, &response).await?;
-    let ServerMessage::DocumentOpened { metadata, text } = &response else {
+    let ServerMessage::DocumentOpened { metadata, .. } = &response else {
         return Ok(());
     };
     parse_coordinator.subscribe_document(metadata.document_id, client_id);
     document_analysis.subscribe_document(metadata.document_id, client_id);
+    let Some(document) = workspace.lock().await.document_handle(metadata.document_id) else {
+        return Ok(());
+    };
     let runtime = runtime_generation.current().await;
     for message in open_document_followup_messages(
         metadata,
-        text,
+        &document,
         behavior,
         sdui,
         runtime.id,
@@ -76,7 +84,7 @@ where
         behavior,
         runtime.id,
         metadata,
-        text,
+        &document,
     )
     .await
     {
@@ -279,6 +287,47 @@ where
     Ok(())
 }
 
+pub(super) struct DocumentChunkRequestParams {
+    pub(super) client_id: ClientId,
+    pub(super) document_id: DocumentId,
+    pub(super) document_version: DocumentVersion,
+    pub(super) offset: u64,
+    pub(super) max_bytes: u32,
+}
+
+pub(super) async fn handle_document_chunk_request<S>(
+    codec: Codec,
+    stream: &mut S,
+    default_document: &Arc<Mutex<DocumentState>>,
+    workspace: &Arc<Mutex<WorkspaceState>>,
+    request: DocumentChunkRequestParams,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let message = match document_for_message(
+        request.document_id,
+        request.client_id,
+        default_document,
+        workspace,
+    )
+    .await
+    {
+        Some(document) => document.lock().await.document_chunk_message(
+            request.document_version,
+            request.offset,
+            request.max_bytes,
+        ),
+        None => ServerMessage::DocumentChunkRejected {
+            document_id: request.document_id,
+            document_version: request.document_version,
+            offset: request.offset,
+            reason: crate::protocol::DocumentChunkRejection::UnknownDocument,
+        },
+    };
+    codec.write_server_message(stream, &message).await
+}
+
 // Resolve only an explicitly authorized document. Unknown IDs must not fall
 // through to welcome text: globally unique IDs make that fallback an
 // information leak for completion, language, and edit requests.
@@ -315,13 +364,13 @@ pub(super) fn document_analysis_delta(
     }
 }
 
-pub(super) async fn start_document_analysis(
+pub(crate) async fn start_document_analysis(
     coordinator: &crate::server::document_analysis::DocumentAnalysisCoordinator,
     workspace: &Arc<Mutex<WorkspaceState>>,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
     generation: u64,
     metadata: &DocumentMetadata,
-    text: &str,
+    document: &Arc<Mutex<DocumentState>>,
 ) -> Vec<ServerMessage> {
     let canonical_root = workspace
         .lock()
@@ -332,6 +381,16 @@ pub(super) async fn start_document_analysis(
         .map(|root| root.canonical_path);
     let Some(canonical_root) = canonical_root else {
         return Vec::new();
+    };
+    let text = {
+        let document = document.lock().await;
+        if document.byte_len() > DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES {
+            return vec![ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                "analysis.document_too_large",
+                "Document exceeds the package analysis limit; baseline language support remains active.",
+            ))];
+        }
+        document.text()
     };
     let manifest_id = behavior
         .lock()
@@ -347,7 +406,7 @@ pub(super) async fn start_document_analysis(
             metadata,
             active_mode,
             canonical_root,
-            text.to_string(),
+            text,
         )
         .into_iter()
         .map(ServerMessage::RuntimeDiagnostic)
@@ -384,10 +443,8 @@ pub(super) async fn open_document_response(
         workspace_root_id,
         path: opened.file_state.display_path(),
     };
-    ServerMessage::DocumentOpened {
-        metadata,
-        text: document.text(),
-    }
+    let head = document.document_text_head();
+    ServerMessage::DocumentOpened { metadata, head }
 }
 
 /// Shared bound-tab workspace open (plan 083 task 10): validates and
@@ -422,20 +479,22 @@ pub(super) async fn reload_document_response(
     client_id: ClientId,
     force: bool,
 ) -> ServerMessage {
-    let outcome = match reload_document_unlocked(workspace, document_id, client_id, force).await {
-        Ok(outcome) => outcome,
-        Err(error) => return file_operation_failed(error, None, Some(document_id)),
-    };
-    match workspace
-        .lock()
-        .await
-        .document_metadata(document_id, client_id)
-        .await
-    {
-        Ok(metadata) => ServerMessage::DocumentReloaded {
-            metadata,
-            text: outcome.text,
-        },
+    if let Err(error) = reload_document_unlocked(workspace, document_id, client_id, force).await {
+        return file_operation_failed(error, None, Some(document_id));
+    }
+    let workspace = workspace.lock().await;
+    match workspace.document_metadata(document_id, client_id).await {
+        Ok(metadata) => {
+            let Some(document) = workspace.document_handle(document_id) else {
+                return file_operation_failed(
+                    WorkspaceError::UnknownDocument { document_id },
+                    None,
+                    Some(document_id),
+                );
+            };
+            let head = document.lock().await.document_text_head();
+            ServerMessage::DocumentReloaded { metadata, head }
+        }
         Err(error) => file_operation_failed(error, None, Some(document_id)),
     }
 }
@@ -472,19 +531,23 @@ pub(super) async fn document_list_response(
 )]
 pub(crate) async fn open_document_followup_messages(
     metadata: &DocumentMetadata,
-    text: &str,
+    document: &Arc<Mutex<DocumentState>>,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
     sdui: &Arc<Mutex<StaticSduiState>>,
     generation_id: u64,
     js_runtime: &ClayJsRuntimeService,
     parse_coordinator: &ParseCoordinator,
 ) -> Vec<ServerMessage> {
+    let probe_text = {
+        let document = document.lock().await;
+        document.bounded_prefix(crate::packages::modes::MAX_LEADING_CONTENT_BYTES)
+    };
     let Some(activation) = classify_open_document(
         generation_id,
         js_runtime,
         parse_coordinator,
         metadata,
-        text,
+        &probe_text,
         behavior,
         sdui,
     )
@@ -504,7 +567,18 @@ pub(crate) async fn open_document_followup_messages(
     }
     messages.push(behavior_guard.manifest_message());
     drop(behavior_guard);
-    match schedule_open_parse(parse_coordinator, metadata, text, behavior, &activation).await {
+    let parse_followup = {
+        let document = document.lock().await;
+        schedule_open_parse(
+            parse_coordinator,
+            metadata,
+            &document,
+            behavior,
+            &activation,
+        )
+        .await
+    };
+    match parse_followup {
         Ok(Some(set)) => messages.push(ServerMessage::DecorationSet(set)),
         Ok(None) => {}
         Err(diagnostic) => messages.push(ServerMessage::RuntimeDiagnostic(diagnostic)),
@@ -674,7 +748,7 @@ pub(super) async fn refresh_native_syntax_after_edit(
 pub(super) async fn schedule_open_parse(
     parse_coordinator: &ParseCoordinator,
     metadata: &DocumentMetadata,
-    text: &str,
+    document: &DocumentState,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
     activation: &OpenModeActivation,
 ) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
@@ -684,19 +758,46 @@ pub(super) async fn schedule_open_parse(
         30 * 1024 * 1024,
         5_000,
     ));
-    schedule_parse_window(
+    let output_budget = policy
+        .max_window_bytes
+        .min(INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES as u64);
+    let end = document.bounded_byte_end(output_budget as usize) as u64;
+    if end == 0 {
+        return Ok(None);
+    }
+    let window = document
+        .parse_window_snapshot(
+            &activation.package_prefix,
+            &activation.parse_handler_mode_id,
+            ParseByteRange::new(0, end),
+            policy.max_window_bytes,
+        )
+        .map_err(|message| {
+            RuntimeDiagnostic::error(
+                "parse.window_failed",
+                format!("Parse window failed: {message}"),
+            )
+        })?;
+    let viewport = window.byte_range();
+    schedule_parse_snapshot(
         parse_coordinator,
         metadata,
-        text,
         behavior.lock().await.version(),
-        &activation.package_prefix,
-        &activation.parse_handler_mode_id,
         policy,
-        ParseByteRange::new(0, text.len() as u64),
+        window,
+        viewport,
+        None,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "string-window helper remains for connection parse tests"
+    )
+)]
 pub(super) fn schedule_parse_window(
     parse_coordinator: &ParseCoordinator,
     metadata: &DocumentMetadata,
@@ -906,7 +1007,6 @@ where
     if metadata.version != document_version {
         return Ok(());
     }
-    let text = target_document.lock().await.text();
     let runtime = runtime_generation.current().await;
     let Some((meta, policy)) = runtime
         .service
@@ -914,19 +1014,53 @@ where
     else {
         return Ok(());
     };
-    if let Err(diagnostic) = schedule_parse_window(
-        parse_coordinator,
-        &metadata,
-        &text,
-        behavior.lock().await.version(),
-        &meta.package_prefix,
-        &meta.mode_id,
-        policy,
-        ParseByteRange::new(byte_start, byte_end),
-    ) {
-        codec
-            .write_server_message(stream, &ServerMessage::RuntimeDiagnostic(diagnostic))
-            .await?;
+    let behavior_version = behavior.lock().await.version();
+    // Rope-sliced windows covering the WHOLE requested viewport. The previous
+    // path cloned the full document text, rescanned the prefix for the base
+    // line, and clamped output to the first 4 KiB — so tall viewports stayed
+    // unhighlighted past their first window and every scroll tick stalled the
+    // connection loop behind document-lock + memcpy work.
+    let windows = {
+        let document = target_document.lock().await;
+        document.parse_windows_covering(
+            &meta.package_prefix,
+            &meta.mode_id,
+            ParseByteRange::new(byte_start, byte_end),
+            policy,
+            MAX_VIEWPORT_PARSE_WINDOWS,
+        )
+    };
+    let windows = match windows {
+        Ok(windows) => windows,
+        Err(reason) => {
+            codec
+                .write_server_message(
+                    stream,
+                    &ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
+                        "parse.viewport_activation_failed",
+                        reason,
+                    )),
+                )
+                .await?;
+            return Ok(());
+        }
+    };
+    for window in windows {
+        let piece_viewport = ParseByteRange::new(window.byte_start, window.byte_end);
+        if let Err(diagnostic) = schedule_parse_snapshot(
+            parse_coordinator,
+            &metadata,
+            behavior_version,
+            policy,
+            window,
+            piece_viewport,
+            None,
+        ) {
+            codec
+                .write_server_message(stream, &ServerMessage::RuntimeDiagnostic(diagnostic))
+                .await?;
+            break;
+        }
     }
     Ok(())
 }
@@ -1000,10 +1134,10 @@ where
 {
     let response = reload_document_response(workspace, document_id, client_id, force).await;
     codec.write_server_message(stream, &response).await?;
-    if let ServerMessage::DocumentReloaded { metadata, text } = response {
+    if let ServerMessage::DocumentReloaded { metadata, head } = response {
         completion.document_changed(document_id, metadata.version);
         language_intelligence.document_changed(document_id, metadata.version);
-        document_analysis.reset_document(document_id, metadata.version, text);
+        document_analysis.reset_document(document_id, metadata.version, head.first_chunk);
     }
     Ok(())
 }

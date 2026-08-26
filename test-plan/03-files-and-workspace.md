@@ -218,3 +218,30 @@ ln -s /tmp/clay-manual/a.txt /tmp/clay-manual/link.txt
 
 Retained evidence contains fixture paths only; unrelated full-desktop portal
 screenshots were removed.
+
+## Plan 098 chunked document loading steps
+
+Setup: run `scripts/large-document-smoke.sh`. Its synthetic workspace contains
+`large.md` (50 MiB UTF-8 text), `oversize.txt` (257 MiB sparse file), and
+`binary.dat` (a NUL-containing sample). The script uses a private socket and
+removes its fixtures on exit.
+
+| # | Action | Expected |
+|---|--------|----------|
+| F48 | Open `large.md` through Open File | `DocumentOpened` installs a bounded head; CodeMirror shows `Loading full document…`, the editor is read-only while chunks arrive, and the first content paints before the full 50 MiB document is ready |
+| F49 | After `large.md` reaches ready, insert text, Save, then Reload | Editing becomes enabled; Save clears dirty state; disk bytes and the reloaded chunk assembly equal the edited document; no diagnostic or hang appears |
+| F50 | Open `oversize.txt` | Open is refused with `DocumentBudgetExceeded`/resident-document-budget text in status and the empty pane; no document or grant is created and another Open File attempt remains possible |
+| F51 | Open `binary.dat` | Open is refused with `BinaryFileNotSupported`/binary text in status and the empty pane; no document or grant is created |
+| F52 | After F50/F51, cancel a picker and retry a valid open | Refusals do not leave a dialog lock or stale loading state; cancellation is a no-op and the workspace remains responsive |
+
+## Plan 098 Linux execution record (2026-08-26)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| F48–F52 | PASS protocol/server path; UNRESOLVED live editor interaction | `cargo test --test runtime large_document:: -- --nocapture` passed the 50 MiB open/chunk/edit/save/reload flow plus oversize and binary refusals. Fresh output is `code-reviews/screenshots/2026-08-26-plan098-manual/large-document-runtime.log`; the real Tauri launch and welcome state are captured in `real-app-welcome.png`, but portal/window targeting became unstable after synthetic file selection before a stable loaded-editor state could be inspected |
+| Negative path | PASS automated; NOT RUN visually | The runtime test asserts typed `DocumentBudgetExceeded` and `BinaryFileNotSupported` messages and no unexpected opens. No user files or host paths were retained |
+
+Live interaction is explicitly unresolved because AT-SPI exposed only the
+native Tauri frame and the Linux compositor moved the portal/client window
+partly off-screen. Do not count F48–F52 as manual GUI passes until a stable
+WebKitGTK target can be controlled.

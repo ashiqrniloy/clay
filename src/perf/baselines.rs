@@ -59,7 +59,10 @@ pub fn encode_decode_initial_document(size_bytes: usize) -> usize {
     let message = ServerMessage::InitialDocument {
         document_id: 7,
         version: 1,
-        text: fixture_text(FixtureKind::MixedUnicode, size_bytes),
+        head: crate::protocol::DocumentTextHead::complete(fixture_text(
+            FixtureKind::MixedUnicode,
+            size_bytes,
+        )),
         access: DocumentAccess::Editable { lease_id: 1 },
         lease_id: Some(1),
         workspace_root: "/tmp/root".to_string(),
@@ -71,7 +74,7 @@ pub fn encode_decode_initial_document(size_bytes: usize) -> usize {
         .decode_server_message(&frame)
         .expect("representative initial document should decode");
     match decoded {
-        ServerMessage::InitialDocument { text, .. } => text.len(),
+        ServerMessage::InitialDocument { head, .. } => head.first_chunk.len(),
         _ => 0,
     }
 }

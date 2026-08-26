@@ -52,6 +52,15 @@ export function FixtureRoute() {
   if (fixtureId === "editor") {
     return <EditorFixture />;
   }
+  if (fixtureId === "document-loading") {
+    return <DocumentLoadingFixture />;
+  }
+  if (fixtureId === "document-budget-error") {
+    return <DocumentErrorFixture kind="budget" />;
+  }
+  if (fixtureId === "document-binary-error") {
+    return <DocumentErrorFixture kind="binary" />;
+  }
   if (fixtureId === "splits") {
     return <SplitsFixture />;
   }
@@ -490,6 +499,87 @@ function EditorFixture() {
   );
 }
 
+function DocumentLoadingFixture() {
+  const session = useMemo(() => {
+    const created = createDocumentSession({
+      send: async () => undefined,
+    });
+    created.installInitial({
+      ...fixtureBootstrap,
+      initialDocument: {
+        ...fixtureBootstrap.initialDocument,
+        head: {
+          totalBytes: 1024 * 1024,
+          firstChunk:
+            "Large document head\n\nThe first viewport is ready while the remaining chunks load.\n",
+        },
+      },
+    } as unknown as BootstrapDto);
+    created.store.update({ workspaceRootId: 1, path: "large-document.txt" });
+    return created;
+  }, []);
+
+  return (
+    <div className={styles.documentFixture} data-fixture="document-loading">
+      <div className={styles.reviewStatus} role="status" aria-live="polite">
+        <ClayText variant="status">Loading document…</ClayText>
+      </div>
+      <div className={styles.documentSurface}>
+        <Suspense
+          fallback={<ClayText variant="status">Loading editor…</ClayText>}
+        >
+          <ClayEditor session={session} />
+        </Suspense>
+      </div>
+    </div>
+  );
+}
+
+type DocumentErrorKind = "budget" | "binary";
+
+const documentErrorMessages: Record<DocumentErrorKind, string> = {
+  budget:
+    "opening workspace file large-document.txt would exceed the 268435456 byte resident document budget",
+  binary:
+    "workspace file sample.bin appears to be binary and is not supported as a text document",
+};
+
+function DocumentErrorFixture({ kind }: { kind: DocumentErrorKind }) {
+  const message = documentErrorMessages[kind];
+  const workspace = useMemo(() => {
+    const created = createWorkspace({ send: async () => undefined });
+    created.installBootstrap({
+      ...fixtureBootstrap,
+      initialDocument: {
+        ...fixtureBootstrap.initialDocument,
+        head: { totalBytes: 0, firstChunk: "" },
+      },
+    } as unknown as BootstrapDto);
+    created.active()?.panes.get(1)?.session.store.update({
+      diagnostic: message,
+    });
+    return created;
+  }, [message]);
+
+  return (
+    <div
+      className={styles.documentFixture}
+      data-fixture={`document-${kind}-error`}
+    >
+      <div className={styles.reviewStatus} role="status" aria-live="polite">
+        <ClayText variant="status">{message}</ClayText>
+      </div>
+      <div className={styles.documentSurface}>
+        <Suspense
+          fallback={<ClayText variant="status">Loading workspace…</ClayText>}
+        >
+          <WorkspacePanes workspace={workspace} />
+        </Suspense>
+      </div>
+    </div>
+  );
+}
+
 const packageFixtureSnapshot: PackageUiSnapshot = {
   version: 4,
   emptyTab: null,
@@ -573,13 +663,13 @@ const packageFixtureSnapshot: PackageUiSnapshot = {
 
 const fixtureBootstrap = {
   clientId: 1,
-  protocolVersion: 26,
+  protocolVersion: 27,
   endpoint: "fixture",
   generation: 1,
   initialDocument: {
     documentId: 1,
     version: 1,
-    text: "fixture document\n",
+    head: { totalBytes: 17, firstChunk: "fixture document\n" },
     access: { editable: { leaseId: 1 } },
     workspaceRoot: "/tmp/ws",
   },

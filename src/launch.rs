@@ -273,6 +273,55 @@ pub(crate) fn run_desktop(endpoint: IpcEndpoint) -> Result<(), Box<dyn Error>> {
     }
 }
 
+/// Dev launch: stop leftover servers on this endpoint, then open the desktop.
+/// The desktop supervisor adopts a compatible listener or spawns `clay-server`.
+pub(crate) fn run_launch(endpoint: IpcEndpoint) -> Result<(), Box<dyn Error>> {
+    stop_servers_on_endpoint(&endpoint)?;
+    run_desktop(endpoint)
+}
+
+/// Replace the server on `endpoint` and exit. Does not open a GUI: an already
+/// open desktop reconnects, or `clay client` attaches a new one.
+pub(crate) fn run_restart(endpoint: IpcEndpoint) -> Result<(), Box<dyn Error>> {
+    #[cfg(not(unix))]
+    {
+        let _ = endpoint;
+        return Err("clay restart is only supported on Linux".into());
+    }
+    #[cfg(unix)]
+    {
+        stop_servers_on_endpoint(&endpoint)?;
+        let executable = std::env::current_exe()?.into_os_string();
+        let mut child = Command::new(executable);
+        child
+            .arg("server")
+            .arg(endpoint.as_child_arg())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit());
+        let mut child = child
+            .spawn()
+            .map_err(|error| format!("failed to start replacement Clay server: {error}"))?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(wait_for_server(&endpoint, || child.try_wait()))?;
+        Ok(())
+    }
+}
+
+fn stop_servers_on_endpoint(endpoint: &IpcEndpoint) -> Result<(), Box<dyn Error>> {
+    #[cfg(unix)]
+    {
+        stop_unix_servers(endpoint)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = endpoint;
+        Ok(())
+    }
+}
+
 pub(crate) fn run_smoke_gui(
     endpoint: IpcEndpoint,
     configuration_root: Option<PathBuf>,
@@ -367,6 +416,127 @@ impl Drop for ManagedServer {
     }
 }
 
+#[cfg(unix)]
+fn stop_unix_servers(endpoint: &IpcEndpoint) -> Result<(), Box<dyn Error>> {
+    let target = endpoint.as_unix_socket_path();
+    let default = clay::ipc::default_socket_path();
+    let mut pids = unix_server_pids(target, &default)?;
+    for pid in &pids {
+        let _ = unsafe { libc::kill(*pid, libc::SIGTERM) };
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while std::time::Instant::now() < deadline {
+        pids.retain(|pid| unix_pid_alive(*pid));
+        if pids.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    for pid in &pids {
+        let _ = unsafe { libc::kill(*pid, libc::SIGKILL) };
+    }
+    if !pids.is_empty() {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if let Err(error) = std::fs::remove_file(target)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(format!(
+            "failed to remove leftover Clay socket {}: {error}",
+            endpoint
+        )
+        .into());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn unix_server_pids(endpoint: &Path, default_endpoint: &Path) -> std::io::Result<Vec<i32>> {
+    let self_pid = std::process::id();
+    let mut pids = Vec::new();
+    for entry in std::fs::read_dir("/proc")? {
+        let entry = entry?;
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid == self_pid {
+            continue;
+        }
+        let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else {
+            continue;
+        };
+        if cmdline_targets_server(&cmdline, endpoint, default_endpoint) {
+            pids.push(pid as i32);
+        }
+    }
+    Ok(pids)
+}
+
+#[cfg(unix)]
+fn unix_pid_alive(pid: i32) -> bool {
+    std::path::Path::new("/proc").join(pid.to_string()).exists()
+}
+
+/// True when `/proc/<pid>/cmdline` is a Clay server bound to `endpoint`.
+/// `clay-desktop` and `clay client` never match.
+#[cfg(unix)]
+fn cmdline_targets_server(cmdline: &[u8], endpoint: &Path, default_endpoint: &Path) -> bool {
+    let args: Vec<&[u8]> = cmdline
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .collect();
+    let Some(argv0) = args.first() else {
+        return false;
+    };
+    let base = argv0.rsplit(|byte| *byte == b'/').next().unwrap_or(argv0);
+    if base == b"clay-server" || base == b"clay-server.exe" {
+        return match args.get(1) {
+            None => endpoint == default_endpoint,
+            Some(arg) => arg_is_path(arg, endpoint),
+        };
+    }
+    if base == b"clay" || base == b"clay.exe" {
+        return args.get(1).copied() == Some(b"server".as_slice())
+            && clay_server_args_target(&args[2..], endpoint, default_endpoint);
+    }
+    false
+}
+
+#[cfg(unix)]
+fn clay_server_args_target(rest: &[&[u8]], endpoint: &Path, default_endpoint: &Path) -> bool {
+    let mut found = None;
+    let mut skip_value = false;
+    for arg in rest {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if *arg == b"--config-fixture" {
+            skip_value = true;
+            continue;
+        }
+        if arg.starts_with(b"-") {
+            continue;
+        }
+        found = Some(*arg);
+        break;
+    }
+    match found {
+        None => endpoint == default_endpoint,
+        Some(arg) => arg_is_path(arg, endpoint),
+    }
+}
+
+#[cfg(unix)]
+fn arg_is_path(arg: &[u8], endpoint: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    Path::new(std::ffi::OsStr::from_bytes(arg)) == endpoint
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,5 +554,40 @@ mod tests {
         assert!(command.get_envs().any(|(name, value)| {
             name == "CLAY_ENDPOINT" && value == Some(endpoint.as_child_arg().as_os_str())
         }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cmdline_matcher_kills_servers_not_clients() {
+        let endpoint = Path::new("/run/user/1000/clay.sock");
+        let default = Path::new("/run/user/1000/clay.sock");
+        let other = Path::new("/tmp/clay-smoke.sock");
+        let cases: &[(&[u8], bool)] = &[
+            (
+                b"/home/arn/target/debug/clay-server\0/run/user/1000/clay.sock\0",
+                true,
+            ),
+            (b"clay-server\0", true),
+            (b"/home/arn/target/debug/clay\0server\0", true),
+            (
+                b"/home/arn/target/debug/clay\0server\0/run/user/1000/clay.sock\0",
+                true,
+            ),
+            (b"clay\0server\0--config-fixture\0runtime-sdui\0", true),
+            (b"clay-server\0/tmp/clay-smoke.sock\0", false),
+            (b"clay\0server\0/tmp/clay-smoke.sock\0", false),
+            (b"/home/arn/target/debug/clay-desktop\0", false),
+            (b"clay\0client\0", false),
+            (b"clay\0restart\0", false),
+        ];
+        for (cmdline, expected) in cases {
+            assert_eq!(
+                cmdline_targets_server(cmdline, endpoint, default),
+                *expected,
+                "cmdline: {:?}",
+                String::from_utf8_lossy(cmdline)
+            );
+        }
+        assert!(!cmdline_targets_server(b"clay-server\0", other, default));
     }
 }

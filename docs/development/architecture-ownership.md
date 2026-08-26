@@ -56,7 +56,7 @@ no new trait unless multiple current implementations already require one.
 | Edit ack / scroll-layout-render | `EDIT_ACK_P95_BUDGET_MS` = 40 ms, `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS` = 16 ms |
 | Command centre open / filter | `COMMAND_CENTRE_OPEN_P95_BUDGET_MS` = 50 ms, `FILTER_UPDATE_P95_BUDGET_MS` = 4 ms; listing payload 64 KiB, `TRANSIENT_MENU_MAX_ITEMS` = 256 |
 | Runtime eval / config / mode activation | `JS_RUNTIME_EVALUATION_TIMEOUT_MS` = 5 s, heap 128 MiB; `RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS` = 25 ms, `MODE_ACTIVATION_P95_BUDGET_MS` = 100 ms |
-| IPC frame / edit doc | `DEFAULT_MAX_FRAME_SIZE` = 1 MiB, `MAX_OPENABLE_FILE_BYTES` = 768 KiB, no full-doc IPC on ordinary edits (deltas only) |
+| IPC frame / document load | `DEFAULT_MAX_FRAME_SIZE` = 1 MiB; heads/chunks use `MAX_CHUNK_BYTES` = 256 KiB; server-owned resident rope budget = 256 MiB; no full-doc IPC on ordinary edits (deltas only) |
 | Frontend bundle budgets | Startup shell ≤ 180 kB gzip, total application ≤ 400 kB gzip; enforced by `frontend/scripts/bundle-budget.mjs` in CI |
 | Tests pinning these | `src/perf/budgets.rs` constants, `benches/protocol_server_baselines.rs`, `tests/performance_budgets.rs`, `tests/package_loading.rs`, codec/malformed-archive suites, frontend Vitest editor/SDUI/agent suites |
 

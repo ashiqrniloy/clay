@@ -1,4 +1,9 @@
-import { StateEffect, StateField, type Extension } from "@codemirror/state";
+import {
+  StateEffect,
+  StateField,
+  type Extension,
+  type Text,
+} from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -6,7 +11,7 @@ import {
   type DecorationSet as CmDecorationSet,
 } from "@codemirror/view";
 
-import { utf8ToUtf16 } from "../position-map";
+import { textIndex, utf8ToUtf16Indexed } from "../position-map";
 import type { DecorationSet, DecorationTarget, TokenType } from "./types";
 
 const replaceDecorationChunk = StateEffect.define<DecorationSet>();
@@ -62,9 +67,14 @@ class InlayWidget extends WidgetType {
 
 function project(
   chunks: Iterable<DecorationSet>,
-  text: string,
+  doc: Text,
   inlaysVisible: boolean,
 ): Pick<DecorationState, "ranges" | "links"> {
+  // One index per document version; each span conversion is a binary search
+  // plus intra-line scan. The previous per-span full-document scans made
+  // every decoration arrival a multi-second freeze on large files.
+  const index = textIndex(doc);
+  const convert = (utf8: number) => utf8ToUtf16Indexed(index, utf8);
   const marks: Array<{
     from: number;
     to: number;
@@ -75,9 +85,9 @@ function project(
     [];
   for (const set of chunks) {
     for (const span of set.spans) {
-      const from = utf8ToUtf16(text, span.byteStart);
-      const to = utf8ToUtf16(text, span.byteEnd);
-      if (from > to || to > text.length) continue;
+      const from = convert(span.byteStart);
+      const to = convert(span.byteEnd);
+      if (from > to || to > index.totalUtf16) continue;
       if (span.kind === "inlayHint" && span.inlay) {
         if (!inlaysVisible) continue;
         const side = span.inlay.placement === "before" ? -1 : 1;
@@ -175,7 +185,7 @@ const decorationField = StateField.define<DecorationState>({
     if (replaced) {
       const projected = project(
         chunks.values(),
-        transaction.state.doc.toString(),
+        transaction.state.doc,
         inlaysVisible,
       );
       return { chunks, inlaysVisible, documentVersion, ...projected };

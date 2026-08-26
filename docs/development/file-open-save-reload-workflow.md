@@ -21,7 +21,7 @@ No default Rust-level shortcuts are hardcoded. Every key binding above is config
 
 ### Selected-file dialog (`clientOpenFileDialog`)
 
-Opens the native OS file picker. After the user selects a file, the client sends the path to the server with a single-use capability token. The server canonicalizes and validates the path, creates a single-file grant (not a workspace root), and sends back a full-text `DocumentOpened` snapshot.
+Opens the native OS file picker. After the user selects a file, the client sends the path to the server with a single-use capability token. The server canonicalizes and validates the path, creates a single-file grant (not a workspace root), streams the UTF-8 file into its canonical rope under the resident-memory budget, and sends back a bounded `DocumentOpened` head; remaining bytes use versioned chunk requests.
 
 ```js
 // ~/.config/clay/init.js
@@ -80,7 +80,7 @@ Opening the same document again replaces the active buffer without creating a du
 
 ### Server-first save (`serverSaveDocument`)
 
-Save is a server file IO operation, never client-local. The client sends `ClientMessage::SaveDocument` with the document ID and known version; the server writes the canonical text to the authorized file path atomically (exclusive unpredictable temp file + `fsync` + permission restore + target-identity revalidation + rename).
+Save is a server file IO operation, never client-local. The client sends `ClientMessage::SaveDocument` with the document ID and known version; the server clones the canonical Crop rope (Arc-root), releases the document mutex, and streams rope chunks to the authorized file path atomically (exclusive unpredictable temp file + `fsync` + permission restore + target-identity revalidation + rename). The write never materializes a whole-document `String`.
 
 ```js
 bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
@@ -131,7 +131,7 @@ Dirty persists on:
 
 Reload replaces the editor text with the current on-disk version. Clean documents reload without friction; dirty documents require explicit force.
 
-Open and reload read through one opened handle: the server validates the handle's type and size against the openable-file budget, then reads with a hard ceiling of the budget plus one byte, so a file that grows or is swapped between validation and read stays bounded and is rejected with `FileTooLarge` instead of exhausting memory. The workspace mutex is never held across the disk read.
+Open and reload read through one opened handle while the workspace mutex is released. The server reserves the 256 MiB session resident-rope budget, sniffs NUL bytes in the first 8 KiB, and streams UTF-8 through a bounded `RopeBuilder` with a three-byte carry, so a file that grows between validation and EOF is rejected with `DocumentBudgetExceeded` without a document-sized transient `String`. The workspace mutex is never held across the disk read; successful open/reload responses carry a bounded head and the client fetches remaining chunks.
 
 ```js
 // Not typically bound to a direct key; reachable via Control Center or recovery menus.

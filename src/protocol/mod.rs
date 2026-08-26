@@ -73,7 +73,9 @@ pub use textobjects::*;
 /// generic pane-content contribution.
 /// Version 26 carries complete validated package panels, overlays, components,
 /// input routes, and host-stamped provenance/trust labels.
-pub const PROTOCOL_VERSION: u32 = 26;
+/// Version 27 replaces whole-document snapshot text with bounded document
+/// heads and adds pull-based, versioned document chunk messages.
+pub const PROTOCOL_VERSION: u32 = 27;
 
 pub type ClientId = u64;
 pub type DocumentId = u64;
@@ -188,6 +190,70 @@ impl FontRole {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+pub struct DocumentTextHead {
+    pub total_bytes: u64,
+    pub first_chunk: String,
+}
+
+impl DocumentTextHead {
+    pub fn complete(text: String) -> Self {
+        Self {
+            total_bytes: text.len() as u64,
+            first_chunk: text,
+        }
+    }
+}
+
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum DocumentChunkRejection {
+    InvalidRequestSize {
+        requested_bytes: u32,
+        minimum_bytes: u32,
+        maximum_bytes: u32,
+    },
+    InvalidOffset,
+    StaleVersion {
+        current_version: DocumentVersion,
+    },
+    UnknownDocument,
+}
+
+/// Validates and clamps an untrusted chunk-size request before rope access.
+pub fn bounded_document_chunk_bytes(max_bytes: u32) -> Result<usize, DocumentChunkRejection> {
+    const MINIMUM_BYTES: u32 = 4;
+    if max_bytes < MINIMUM_BYTES {
+        return Err(DocumentChunkRejection::InvalidRequestSize {
+            requested_bytes: max_bytes,
+            minimum_bytes: MINIMUM_BYTES,
+            maximum_bytes: crate::perf::budgets::MAX_CHUNK_BYTES as u32,
+        });
+    }
+    Ok((max_bytes as usize).min(crate::perf::budgets::MAX_CHUNK_BYTES))
+}
+
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentMetadata {
     pub document_id: DocumentId,
     pub version: DocumentVersion,
@@ -222,7 +288,8 @@ pub enum FileErrorCode {
     DirectoryOpen,
     DirtyDocument,
     StaleFileMetadata,
-    FileTooLarge,
+    DocumentBudgetExceeded,
+    BinaryFileNotSupported,
     WorkspaceLimitExceeded,
     InternalError,
 }
@@ -1837,6 +1904,13 @@ pub enum ClientMessage {
         client_id: ClientId,
         known_version: DocumentVersion,
     },
+    DocumentChunkRequest {
+        client_id: ClientId,
+        document_id: DocumentId,
+        document_version: DocumentVersion,
+        offset: u64,
+        max_bytes: u32,
+    },
     DecorationViewportRequest {
         client_id: ClientId,
         document_id: DocumentId,
@@ -2718,7 +2792,7 @@ pub enum ServerMessage {
     InitialDocument {
         document_id: DocumentId,
         version: DocumentVersion,
-        text: String,
+        head: DocumentTextHead,
         access: DocumentAccess,
         lease_id: Option<LeaseId>,
         /// The workspace root path the initial document belongs to (server
@@ -2771,13 +2845,25 @@ pub enum ServerMessage {
     ResyncSnapshot {
         document_id: DocumentId,
         version: DocumentVersion,
-        text: String,
+        head: DocumentTextHead,
         access: DocumentAccess,
         lease_id: Option<LeaseId>,
     },
+    DocumentChunk {
+        document_id: DocumentId,
+        document_version: DocumentVersion,
+        offset: u64,
+        text: String,
+    },
+    DocumentChunkRejected {
+        document_id: DocumentId,
+        document_version: DocumentVersion,
+        offset: u64,
+        reason: DocumentChunkRejection,
+    },
     DocumentOpened {
         metadata: DocumentMetadata,
-        text: String,
+        head: DocumentTextHead,
     },
     DocumentSaved {
         document_id: DocumentId,
@@ -2786,7 +2872,7 @@ pub enum ServerMessage {
     },
     DocumentReloaded {
         metadata: DocumentMetadata,
-        text: String,
+        head: DocumentTextHead,
     },
     DocumentStatus {
         metadata: DocumentMetadata,

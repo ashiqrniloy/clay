@@ -25,8 +25,13 @@ providers, LSP bridges, validation, provenance, and versions remain authority.
 - Apply user transactions locally, then enqueue UTF-8 byte-range deltas.
 - Project ack / reject / resync / open / save / reload / close onto metadata
   and, when required, replace the CodeMirror document.
-- Convert UTF-16 editor offsets to UTF-8 protocol offsets at one reviewed
-  map (`position-map.ts` ↔ `src/editor/position_map.rs`).
+- Convert UTF-16 editor offsets to UTF-8 protocol offsets through the
+  memoized per-document line index (`textIndex` in `position-map.ts`):
+  O(log lines + line length) per conversion, never a full-document scan or
+  flattened string. The index is keyed on the immutable CodeMirror `Text`, so
+  it rebuilds once per document version and is shared by edit emission,
+  viewport requests, decoration/diagnostic/fold projection, completion, and
+  intelligence.
 
 Non-responsibility: language parsing/provider execution, LSP transport, package
 JavaScript, package SDUI/Markdown preview panels (Phase 8), panes, and tabs.
@@ -34,9 +39,15 @@ Behavior manifests and intelligence results remain server-issued inert data.
 
 ## How It Works
 
-1. Bootstrap `installInitial` records the snapshot text and metadata, then
-   asks `GetDocumentStatus` so `workspaceRootId` / path can land.
-2. `ClayEditor` creates the view once per `documentId`. Theme, keymap,
+1. Bootstrap `installInitial` paints the bounded head (first ≤ 256 KiB) and
+   records metadata, then asks `GetDocumentStatus` so `workspaceRootId` /
+   path can land. Heads smaller than `totalBytes` enter progressive chunk
+   assembly: one outstanding versioned `documentChunkRequest` at a time,
+   each continuing from the received end, appended as annotated
+   transactions; editing stays read-only with a visible loading status until
+   the document is complete (Plan 098).
+2. `ClayEditor` creates the view once per `documentId` directly from the
+   rope-backed snapshot (`Text`, never a flattened string). Theme, keymap,
    language, behavior, decorations, and read-only live in `Compartment`s.
 3. `EditorView.updateListener` emits only `user` / `undo` transactions.
    `resync` / `programmatic` / `remote` / `correction` annotations are silent.
@@ -51,8 +62,16 @@ Behavior manifests and intelligence results remain server-issued inert data.
    - source-keyed lint diagnostics and provenance-keyed fold services;
    - async completion and intelligence requests with cancellation/timeouts;
    - server textobject/smart-select ranges applied to multi-selections.
-8. Visible-range changes emit one deduplicated UTF-8
-   `DecorationViewportRequest`; no document snapshot crosses for scrolling.
+8. Visible-range changes use inflight pacing: the first request for a new
+   viewport sends immediately (highlight latency ≈ one round trip); while one
+   is on the wire, newer viewports collapse latest-wins and fire the moment a
+   decoration/diagnostic/fold reply lands (400 ms safety valve covers lost
+   replies; detach/clear cancels pending work). No document snapshot crosses
+   for scrolling. Server-side, one request schedules rope-sliced windows
+   covering the WHOLE requested viewport (`Document::parse_windows_covering`,
+   capped at 24 windows) — no full-text clone, no prefix rescan, and tall or
+   zoomed-out viewports are fully highlighted instead of clamped to the first
+   parse window.
 9. Rust resolves all 37 editor vocabulary/layer styles into the theme snapshot.
    CSS variables carry color/background/attributes/scale; package CSS does not.
 10. Inactive pane sessions retain at most 256 validated feature events for lazy
@@ -75,6 +94,11 @@ view.dispatch({
 ## Invariants and Constraints
 
 - No React state holds document text. Chrome rerenders on metadata only.
+- CodeMirror mounts its base/theme CSS through runtime `<style>` elements. The
+  desktop CSP therefore permits `'unsafe-inline'` for `style-src` only;
+  `script-src` remains `'self'` with inline/eval execution forbidden. Without
+  this scoped exception, WebKitGTK rejects CodeMirror's sheets and stacks the
+  gutter above the content, leaving loaded text outside the clipped viewport.
 - No await on the keystroke path. `send` is fire-and-forget.
 - Ordinary edits are deltas. Full text only on initial/open/reload/resync.
 - Frontend cannot mint leases or skip server version checks. Tauri overwrites
@@ -108,6 +132,8 @@ view.dispatch({
   `decoration_transport`, `syntax_grammar`, and editor hot-path suites remain
   the provider/validation authority.
 - `src-tauri/src/bridge/editor.rs`: camelCase document event shape.
+- `src-tauri/tests/config_security.rs`: CodeMirror-compatible style CSP while
+  keeping script inline/eval and remote origins forbidden.
 
 ```bash
 cargo test -p clay --lib editor::position_map

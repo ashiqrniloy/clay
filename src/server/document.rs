@@ -3,13 +3,14 @@ use std::{collections::HashMap, ops::Range};
 use crop::Rope;
 
 use crate::perf::{
-    budgets::SYNTAX_CACHE_BUDGET_BYTES,
+    budgets::{MAX_CHUNK_BYTES, SYNTAX_CACHE_BUDGET_BYTES},
     metrics::{MetricMetadata, global_recorder},
 };
 use crate::protocol::{
-    ClientId, DocumentAccess, DocumentId, DocumentVersion, EditOperation, EditRejection, LeaseId,
-    LockOwner, ParseByteRange, ParseInputEdit, ParsePoint, ParsePolicy, ParseWindowSnapshot,
-    ProtocolErrorCode, RegionLockConflict, RegionLockId, ServerMessage, TransactionId,
+    ClientId, DocumentAccess, DocumentChunkRejection, DocumentId, DocumentTextHead,
+    DocumentVersion, EditOperation, EditRejection, LeaseId, LockOwner, ParseByteRange,
+    ParseInputEdit, ParsePoint, ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode,
+    RegionLockConflict, RegionLockId, ServerMessage, TransactionId, bounded_document_chunk_bytes,
 };
 use crate::server::locks::ranges_overlap;
 
@@ -62,11 +63,15 @@ pub(crate) struct DocumentState {
 }
 
 impl DocumentState {
-    pub(crate) fn new(document_id: DocumentId, text: String, _access: DocumentAccess) -> Self {
+    pub(crate) fn new(document_id: DocumentId, text: String, access: DocumentAccess) -> Self {
+        Self::from_rope(document_id, Rope::from(text), access)
+    }
+
+    pub(crate) fn from_rope(document_id: DocumentId, text: Rope, _access: DocumentAccess) -> Self {
         Self {
             document_id,
             version: 1,
-            text: Rope::from(text),
+            text,
             active_lease: None,
             next_lease_id: 1,
             last_transaction_id: None,
@@ -151,11 +156,11 @@ impl DocumentState {
         access: DocumentAccess,
         workspace_root: String,
     ) -> ServerMessage {
-        let (document_id, version, text, lease_id) = self.snapshot_parts(&access);
+        let (document_id, version, lease_id) = self.snapshot_parts(&access);
         ServerMessage::InitialDocument {
             document_id,
             version,
-            text,
+            head: self.document_text_head(),
             access,
             lease_id,
             workspace_root,
@@ -175,13 +180,85 @@ impl DocumentState {
         }
 
         let access = self.access_for_client(client_id);
-        let (document_id, version, text, lease_id) = self.snapshot_parts(&access);
+        let (document_id, version, lease_id) = self.snapshot_parts(&access);
         ServerMessage::ResyncSnapshot {
             document_id,
             version,
-            text,
+            head: self.document_text_head(),
             access,
             lease_id,
+        }
+    }
+
+    pub(crate) fn document_text_head(&self) -> DocumentTextHead {
+        let total_bytes = self.text.byte_len();
+        let mut first_chunk_end = total_bytes.min(MAX_CHUNK_BYTES);
+        while first_chunk_end > 0 && !self.text.is_char_boundary(first_chunk_end) {
+            first_chunk_end -= 1;
+        }
+        DocumentTextHead {
+            total_bytes: total_bytes as u64,
+            first_chunk: self.text.byte_slice(..first_chunk_end).to_string(),
+        }
+    }
+
+    pub(crate) fn byte_len(&self) -> usize {
+        self.text.byte_len()
+    }
+
+    pub(crate) fn bounded_byte_end(&self, max_bytes: usize) -> usize {
+        let mut end = self.text.byte_len().min(max_bytes);
+        while end > 0 && !self.text.is_char_boundary(end) {
+            end -= 1;
+        }
+        end
+    }
+
+    pub(crate) fn bounded_prefix(&self, max_bytes: usize) -> String {
+        let end = self.bounded_byte_end(max_bytes);
+        self.text.byte_slice(..end).to_string()
+    }
+
+    pub(crate) fn document_chunk_message(
+        &self,
+        document_version: DocumentVersion,
+        offset: u64,
+        max_bytes: u32,
+    ) -> ServerMessage {
+        let reject = |reason| ServerMessage::DocumentChunkRejected {
+            document_id: self.document_id,
+            document_version,
+            offset,
+            reason,
+        };
+        if document_version != self.version {
+            return reject(DocumentChunkRejection::StaleVersion {
+                current_version: self.version,
+            });
+        }
+        let max_bytes = match bounded_document_chunk_bytes(max_bytes) {
+            Ok(max_bytes) => max_bytes,
+            Err(reason) => return reject(reason),
+        };
+        let Ok(start) = usize::try_from(offset) else {
+            return reject(DocumentChunkRejection::InvalidOffset);
+        };
+        let total_bytes = self.text.byte_len();
+        if start >= total_bytes || !self.text.is_char_boundary(start) {
+            return reject(DocumentChunkRejection::InvalidOffset);
+        }
+        let mut end = start.saturating_add(max_bytes).min(total_bytes);
+        while end > start && !self.text.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end == start {
+            return reject(DocumentChunkRejection::InvalidOffset);
+        }
+        ServerMessage::DocumentChunk {
+            document_id: self.document_id,
+            document_version,
+            offset,
+            text: self.text.byte_slice(start..end).to_string(),
         }
     }
 
@@ -347,6 +424,10 @@ impl DocumentState {
 
     pub(crate) fn text(&self) -> String {
         self.text.to_string()
+    }
+
+    pub(crate) fn clone_rope(&self) -> Rope {
+        self.text.clone()
     }
 
     pub(crate) fn parse_window_snapshot(
@@ -520,6 +601,41 @@ impl DocumentState {
         Ok(snapshots)
     }
 
+    /// Bounded parse windows covering `range` in consecutive pieces.
+    /// Rope-sliced throughout: never materializes the whole document. Each
+    /// piece carries guard context and stays within `policy.max_window_bytes`.
+    pub(crate) fn parse_windows_covering(
+        &self,
+        package_prefix: &str,
+        mode_id: &str,
+        range: ParseByteRange,
+        policy: ParsePolicy,
+        max_windows: usize,
+    ) -> Result<Vec<ParseWindowSnapshot>, String> {
+        let text_len = self.text.byte_len() as u64;
+        let start = self.floor_char_boundary(range.start.min(text_len))?;
+        let end = self.floor_char_boundary(range.end.min(text_len).max(start))?;
+        let piece = policy
+            .max_window_bytes
+            .saturating_sub(policy.guard_bytes)
+            .max(1);
+        let mut windows = Vec::new();
+        let mut cursor = start;
+        while cursor < end && windows.len() < max_windows {
+            let piece_end = self.floor_char_boundary(cursor.saturating_add(piece).min(end))?;
+            let window_range =
+                self.expand_parse_window(ParseByteRange::new(cursor, piece_end), policy)?;
+            windows.push(self.parse_window_snapshot(
+                package_prefix,
+                mode_id,
+                window_range,
+                policy.max_window_bytes,
+            )?);
+            cursor = piece_end;
+        }
+        Ok(windows)
+    }
+
     pub(crate) fn mark_clean_if_version(&mut self, version: DocumentVersion) -> bool {
         if self.version == version {
             self.dirty = false;
@@ -529,9 +645,20 @@ impl DocumentState {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "string replacement remains a test helper while disk reload uses rope transfer"
+        )
+    )]
     pub(crate) fn replace_text_from_storage(&mut self, text: String) {
+        self.replace_rope_from_storage(Rope::from(text));
+    }
+
+    pub(crate) fn replace_rope_from_storage(&mut self, text: Rope) {
         if self.text != text {
-            self.text = Rope::from(text);
+            self.text = text;
             self.version = self.version.saturating_add(1);
             self.retained_parse_windows.clear();
         }
@@ -671,13 +798,8 @@ impl DocumentState {
     fn snapshot_parts(
         &self,
         access: &DocumentAccess,
-    ) -> (DocumentId, DocumentVersion, String, Option<u64>) {
-        (
-            self.document_id,
-            self.version,
-            self.text.to_string(),
-            access.lease_id(),
-        )
+    ) -> (DocumentId, DocumentVersion, Option<u64>) {
+        (self.document_id, self.version, access.lease_id())
     }
 
     fn validate_range(&self, start: u64, end: u64) -> Result<Range<usize>, String> {
@@ -828,8 +950,8 @@ impl Default for DocumentState {
 mod tests {
     use super::DocumentState;
     use crate::protocol::{
-        DocumentAccess, EditOperation, EditRejection, LockOwner, ParseByteRange, ParseInputEdit,
-        ParsePoint, ParsePolicy, RegionLockConflict, ServerMessage,
+        DocumentAccess, DocumentTextHead, EditOperation, EditRejection, LockOwner, ParseByteRange,
+        ParseInputEdit, ParsePoint, ParsePolicy, RegionLockConflict, ServerMessage,
     };
 
     #[test]
@@ -1103,12 +1225,113 @@ mod tests {
             ServerMessage::InitialDocument {
                 document_id: 7,
                 version: 1,
-                text: "Hi 🪐\n再見".to_string(),
+                head: DocumentTextHead::complete("Hi 🪐\n再見".to_string()),
                 access: DocumentAccess::Editable { lease_id: 1 },
                 lease_id: Some(1),
                 workspace_root: "/tmp/root".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn document_chunk_clamps_untrusted_size_and_preserves_utf8() {
+        let text = format!(
+            "{}🦀tail",
+            "a".repeat(crate::perf::budgets::MAX_CHUNK_BYTES - 1)
+        );
+        let document = DocumentState::new(7, text, DocumentAccess::ReadOnly);
+
+        let ServerMessage::DocumentChunk { text, .. } =
+            document.document_chunk_message(1, 0, u32::MAX)
+        else {
+            panic!("expected document chunk");
+        };
+
+        assert_eq!(text.len(), crate::perf::budgets::MAX_CHUNK_BYTES - 1);
+    }
+
+    #[test]
+    fn document_chunk_rejects_non_boundary_offset() {
+        let document = DocumentState::new(7, "a🦀b".to_string(), DocumentAccess::ReadOnly);
+
+        assert!(matches!(
+            document.document_chunk_message(1, 2, 256),
+            ServerMessage::DocumentChunkRejected {
+                reason: crate::protocol::DocumentChunkRejection::InvalidOffset,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn document_chunk_rejects_stale_version() {
+        let document = DocumentState::new(7, "hello".to_string(), DocumentAccess::ReadOnly);
+
+        assert!(matches!(
+            document.document_chunk_message(0, 0, 256),
+            ServerMessage::DocumentChunkRejected {
+                reason: crate::protocol::DocumentChunkRejection::StaleVersion {
+                    current_version: 1
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn document_chunks_concatenate_to_original_text() {
+        let original = "ab🦀cdé終";
+        let document = DocumentState::new(7, original.to_string(), DocumentAccess::ReadOnly);
+        let mut offset = 0;
+        let mut assembled = String::new();
+
+        while offset < original.len() as u64 {
+            let ServerMessage::DocumentChunk { text, .. } =
+                document.document_chunk_message(1, offset, 4)
+            else {
+                panic!("expected document chunk at {offset}");
+            };
+            offset += text.len() as u64;
+            assembled.push_str(&text);
+        }
+
+        assert_eq!(assembled, original);
+    }
+
+    #[test]
+    fn resync_head_plus_chunks_equals_canonical_multibyte_text() {
+        let original = format!(
+            "{}🦀{}",
+            "a".repeat(crate::perf::budgets::MAX_CHUNK_BYTES + 64),
+            "終é"
+        );
+        let document = DocumentState::new(7, original.clone(), DocumentAccess::ReadOnly);
+        let ServerMessage::ResyncSnapshot { head, version, .. } =
+            document.resync_snapshot_message_for_client(7, 1)
+        else {
+            panic!("expected resync snapshot");
+        };
+        assert!(head.first_chunk.len() <= crate::perf::budgets::MAX_CHUNK_BYTES);
+        let mut assembled = head.first_chunk;
+        let mut offset = assembled.len() as u64;
+        while offset < head.total_bytes {
+            let ServerMessage::DocumentChunk { text, .. } =
+                document.document_chunk_message(version, offset, u32::MAX)
+            else {
+                panic!("expected chunk at {offset}");
+            };
+            assembled.push_str(&text);
+            offset = assembled.len() as u64;
+        }
+        assert_eq!(assembled, original);
+    }
+
+    #[test]
+    fn bounded_prefix_floors_to_utf8_boundary() {
+        let document = DocumentState::new(7, "a🦀b".to_string(), DocumentAccess::ReadOnly);
+        assert_eq!(document.bounded_prefix(2), "a");
+        assert_eq!(document.bounded_prefix(5), "a🦀");
+        assert_eq!(document.bounded_prefix(6), "a🦀b");
     }
 
     #[test]
@@ -1587,5 +1810,69 @@ mod tests {
                 },
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod covering_tests {
+    use super::*;
+    use crate::protocol::ParsePolicy;
+
+    #[test]
+    fn parse_windows_covering_splits_large_ranges_into_bounded_pieces() {
+        let mut document = DocumentState::new(
+            1,
+            "x".repeat(64_000),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        document.acquire_access(0);
+        let policy = ParsePolicy::new(4_096, 512, 30 * 1024 * 1024, 5_000);
+        let windows = document
+            .parse_windows_covering(
+                "core",
+                "core.code",
+                ParseByteRange::new(0, 64_000),
+                policy,
+                24,
+            )
+            .expect("windows");
+        assert!(!windows.is_empty());
+        // Every window stays inside the max-window budget; piece cursors
+        // advance monotonically so window starts never move backwards (guard
+        // context may overlap between neighbours).
+        let mut previous_start = 0u64;
+        for window in &windows {
+            assert!(window.byte_start >= previous_start);
+            assert!(window.byte_range().len() <= 4_096);
+            previous_start = window.byte_start;
+        }
+        // Coverage reaches the end of the requested range (guard context may
+        // extend past it, but the final piece must include the tail).
+        assert!(
+            windows
+                .last()
+                .is_some_and(|window| window.byte_end >= 64_000)
+        );
+    }
+
+    #[test]
+    fn parse_windows_covering_respects_the_window_cap() {
+        let mut document = DocumentState::new(
+            1,
+            "y".repeat(200_000),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        document.acquire_access(0);
+        let policy = ParsePolicy::new(4_096, 512, 30 * 1024 * 1024, 5_000);
+        let windows = document
+            .parse_windows_covering(
+                "core",
+                "core.code",
+                ParseByteRange::new(0, 200_000),
+                policy,
+                4,
+            )
+            .expect("windows");
+        assert_eq!(windows.len(), 4);
     }
 }

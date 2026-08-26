@@ -25,9 +25,10 @@ stamping.
 - **Reconnect** aborts the old pump *before* the new handshake, so stale
   stream data from a dead connection structurally cannot reach the webview.
   Generation increments per session and is echoed in the bootstrap.
-- **Adoption**: if a server already listens on the endpoint, the supervisor
-  reports `Connected` without spawning (`pid: null`) and the bridge talks to
-  that instance.
+- **Adoption**: if a protocol-compatible server already listens on the
+  endpoint (handshake probe), the supervisor reports `Connected` without
+  spawning (`pid: null`) and the bridge talks to that instance; incompatible
+  listeners are refused with a typed reason instead of being adopted.
 - **Tab reclaim**: the pump records our `(tab_id, workspace_root)` from
   `TabRegistry` events; reconnect uses `connect_for_reclaim_or_new`.
 
@@ -41,7 +42,9 @@ Frontend sends raw JSON text of a protocol `ClientMessage`. The bridge:
 4. routes `Edit` through `ClientEditQueue::enqueue_edit_event` so optimistic
    version bookkeeping runs;
 5. stamps every other variant's `client_id` over whatever the caller supplied
-   (`stamp_client_id`, exhaustive — new variants fail compilation).
+   (`stamp_client_id`, exhaustive - new variants fail compilation).
+
+Protocol v27 document loading uses the same path: `DocumentChunkRequest` is identity-stamped before enqueue, while `DocumentChunk` and `DocumentChunkRejected` return as typed `ClientConnectionEvent` values. The bridge never interprets rope offsets or completion; it only projects validated camelCase DTOs.
 
 Responses arrive asynchronously as envelope events; slow provider lanes
 self-stale-drop server-side.
@@ -54,8 +57,8 @@ forwarding: Rust validates the generation, resolves theme data, parses bounded
 package component JSON into inert values, and preserves client/tab routing.
 Raw theme overrides and raw component strings never enter the webview.
 Envelope enums are adjacently tagged
-(`{"family":…,"payload":…}` / `{"kind":…,"data":…}`) with camelCase names;
-unit enums serialize as plain strings. Menu session ids cross as strings via
+(`{"family":...,"payload":...}` / `{"kind":...,"data":...}`) with camelCase names;
+unit enums serialize as plain strings. `DocumentTextHead` projects as `{ totalBytes, firstChunk }`; chunk and typed rejection fields preserve document ID, document version, and UTF-8 byte offset. Menu session ids cross as strings via
 `menu_session_id_serde` because they carry the server high bit (`1 << 63`)
 and exceed JavaScript's safe integers; other ids are sequential counters.
 

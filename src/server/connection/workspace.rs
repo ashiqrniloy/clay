@@ -69,7 +69,7 @@ pub(super) async fn workspace_command_result_message(
         CommandExecutionStatus::Workspace(WorkspaceActionResult::Opened(snapshot)) => {
             Some(ServerMessage::DocumentOpened {
                 metadata: snapshot.metadata,
-                text: snapshot.text,
+                head: snapshot.head,
             })
         }
         CommandExecutionStatus::Workspace(WorkspaceActionResult::Navigated {
@@ -293,10 +293,8 @@ pub(super) async fn open_selected_file_response(
         workspace_root_id: opened.file_state.workspace_root_id(),
         path: opened.file_state.display_path(),
     };
-    ServerMessage::DocumentOpened {
-        metadata,
-        text: document.text(),
-    }
+    let head = document.document_text_head();
+    ServerMessage::DocumentOpened { metadata, head }
 }
 
 // ---------- coordinator loop handlers (Plan 090 task 2 extraction) ----------

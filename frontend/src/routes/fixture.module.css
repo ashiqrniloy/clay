@@ -15,6 +15,29 @@
   min-height: 0;
 }
 
+.documentFixture {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  min-height: 0;
+  background: var(--clay-surface-main);
+}
+
+.documentSurface {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.reviewStatus {
+  display: flex;
+  align-items: center;
+  padding: var(--clay-spacing-xxs, 4px) var(--clay-spacing-sm, 12px);
+  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+  background: var(--clay-surface-panel);
+  color: var(--clay-text-primary);
+}
+
 .row {
   display: flex;
   gap: var(--clay-spacing-sm, 12px);

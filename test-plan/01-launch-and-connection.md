@@ -119,3 +119,23 @@ Real Linux/GNOME Wayland execution used `cargo build`, the isolated mode-700 rev
 The retained screenshots are app-only CDP captures; full-desktop portal PNGs
 with unrelated windows were deleted. See the dated review log for all state
 results and cleanup policy.
+
+## Plan 098 chunked document transfer steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| L23 | Start `scripts/large-document-smoke.sh` and inspect its private `clay server <socket>` plus Tauri client launch | Current Linux build completes a protocol-v27 handshake on the workspace-private socket; status reaches Connected; no default-endpoint server is adopted |
+| L24 | If a v26 server binary is available, connect the current client to it; otherwise run `cargo test --lib protocol_v26_client_is_rejected_by_v27_server` | Mixed protocol versions fail closed with `UnsupportedProtocolVersion`; no document/workspace state is installed and the current client remains recoverable |
+
+## Plan 098 Linux execution record (2026-08-26)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| L23 | PASS launch / UNRESOLVED interactive close | `scripts/large-document-smoke.sh` built `target/debug/clay`, started a server on a private temporary socket, and launched the Tauri desktop. The welcome screenshot is `code-reviews/screenshots/2026-08-26-plan098-manual/real-app-welcome.png`; no default socket was used. Portal/window targeting became unstable before a stable document state, so no live editor interaction pass is claimed |
+| L24 | PASS automated; NOT RUN against a separate live v26 binary | `cargo test --lib protocol_v26_client_is_rejected_by_v27_server` passed; no v26 server executable was available for a second live process |
+
+Known ceiling for this record: AT-SPI exposed the native Tauri frame but not
+WebKitGTK document nodes, and the host's compositor moved the test window
+partly off-screen during portal focus. These conditions leave live L23
+editor interaction unresolved rather than converting protocol evidence into a
+GUI pass.

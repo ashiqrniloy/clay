@@ -591,6 +591,19 @@ fn stamp_client_id(
             document_id,
             known_version,
         },
+        ClientMessage::DocumentChunkRequest {
+            document_id,
+            document_version,
+            offset,
+            max_bytes,
+            ..
+        } => ClientMessage::DocumentChunkRequest {
+            client_id,
+            document_id,
+            document_version,
+            offset,
+            max_bytes,
+        },
         ClientMessage::DecorationViewportRequest {
             document_id,
             document_version,

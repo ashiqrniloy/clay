@@ -18,7 +18,7 @@ use crate::{
     perf::{
         budgets::{
             DECORATION_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
-            MAX_OPENABLE_FILE_BYTES,
+            NATIVE_GRAMMAR_MAX_WINDOW_BYTES,
         },
         metrics::{
             MetricMetadata, MetricValue, PerfRecorder, SYNTAX_PARSE_FULL, SYNTAX_PARSE_INCREMENTAL,
@@ -303,7 +303,7 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         // closing quote re-read as a string opener). Parse bounded full-file
         // context while query and decoration output remain viewport-limited,
         // same as the markdown grammar below.
-        max_window_bytes: MAX_OPENABLE_FILE_BYTES,
+        max_window_bytes: NATIVE_GRAMMAR_MAX_WINDOW_BYTES,
         injections_query_path: None,
         injections_query: None,
         textobjects_query_path: Some("packages/rust/queries/textobjects.scm"),
@@ -323,7 +323,7 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         // See rust.rust: full-file context, viewport-limited output.
-        max_window_bytes: MAX_OPENABLE_FILE_BYTES,
+        max_window_bytes: NATIVE_GRAMMAR_MAX_WINDOW_BYTES,
         injections_query_path: None,
         injections_query: None,
         textobjects_query_path: Some("packages/typescript/queries/textobjects.scm"),
@@ -345,7 +345,7 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
         // See rust.rust: full-file context, viewport-limited output.
-        max_window_bytes: MAX_OPENABLE_FILE_BYTES,
+        max_window_bytes: NATIVE_GRAMMAR_MAX_WINDOW_BYTES,
         injections_query_path: None,
         injections_query: None,
         textobjects_query_path: Some("packages/typescript/queries/textobjects.scm"),
@@ -367,7 +367,7 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         style_map: DEFAULT_NATIVE_STYLE_MAP,
         language: || tree_sitter_javascript::LANGUAGE.into(),
         // See rust.rust: full-file context, viewport-limited output.
-        max_window_bytes: MAX_OPENABLE_FILE_BYTES,
+        max_window_bytes: NATIVE_GRAMMAR_MAX_WINDOW_BYTES,
         injections_query_path: None,
         injections_query: None,
         textobjects_query_path: Some("packages/javascript/queries/textobjects.scm"),
@@ -391,7 +391,7 @@ const FIRST_PARTY_NATIVE_GRAMMARS: &[NativeGrammarDescriptor] = &[
         // Markdown block meaning (notably fenced-code state) can begin before
         // the visible viewport. Parse bounded full-file context while query
         // and decoration output remain viewport-limited.
-        max_window_bytes: MAX_OPENABLE_FILE_BYTES,
+        max_window_bytes: NATIVE_GRAMMAR_MAX_WINDOW_BYTES,
         injections_query_path: Some("packages/markdown/queries/injections.scm"),
         injections_query: Some(include_str!(
             "../../packages/markdown/queries/injections.scm"
@@ -2428,7 +2428,7 @@ mod tests {
     fn code_grammars_parse_full_file_context_for_viewport_output() {
         for descriptor in FIRST_PARTY_NATIVE_GRAMMARS {
             assert_eq!(
-                descriptor.max_window_bytes, MAX_OPENABLE_FILE_BYTES,
+                descriptor.max_window_bytes, NATIVE_GRAMMAR_MAX_WINDOW_BYTES,
                 "{}",
                 descriptor.id
             );

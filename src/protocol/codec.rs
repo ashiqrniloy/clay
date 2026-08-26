@@ -272,21 +272,22 @@ mod tests {
     use super::{Codec, CodecError, DEFAULT_MAX_FRAME_SIZE, LENGTH_PREFIX_BYTES};
     use crate::{
         perf::budgets::{
-            COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
-            MAX_OPENABLE_FILE_BYTES, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
-            SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+            COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES, MAX_CHUNK_BYTES,
+            SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
         },
         protocol::{
             ActiveTheme, ActiveTypography, BehaviorManifest, ClientMessage, CompletionItem,
             CompletionProvenance, CompletionRejection, CompletionReplacementRange,
             CompletionRequest, CompletionResultSet, CompletionStatus, CompletionTrigger,
-            DocumentAccess, DocumentMetadata, DocumentRuntimeRenderState, EditOperation,
-            EditRejection, FileErrorCode, LanguageIntelligenceFeature, LanguageIntelligencePayload,
+            DocumentAccess, DocumentChunkRejection, DocumentMetadata, DocumentRuntimeRenderState,
+            DocumentTextHead, EditOperation, EditRejection, FileErrorCode,
+            LanguageIntelligenceFeature, LanguageIntelligencePayload,
             LanguageIntelligenceRejection, LanguageIntelligenceRequest, LanguageIntelligenceResult,
             LanguageIntelligenceStatus, LockOwner, PROTOCOL_VERSION, PackageUiSnapshot,
             RegionLockConflict, RuntimeDiagnostic, RuntimeStateSnapshot, SduiActionIntent,
             SduiActionSource, SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
-            SduiTreeUpdate, ServerMessage, representative_panel_update, representative_sdui_tree,
+            SduiTreeUpdate, ServerMessage, bounded_document_chunk_bytes,
+            representative_panel_update, representative_sdui_tree,
         },
     };
 
@@ -310,7 +311,7 @@ mod tests {
         let message = ServerMessage::InitialDocument {
             document_id: 7,
             version: 42,
-            text: "Hello, Clay 🦀\nSecond line".to_string(),
+            head: DocumentTextHead::complete("Hello, Clay 🦀\nSecond line".to_string()),
             access: DocumentAccess::Editable { lease_id: 1 },
             lease_id: Some(1),
             workspace_root: "/tmp/root".to_string(),
@@ -412,7 +413,7 @@ mod tests {
         let message = ServerMessage::ResyncSnapshot {
             document_id: 7,
             version: 42,
-            text: "Hello 🦀 é".to_string(),
+            head: DocumentTextHead::complete("Hello 🦀 é".to_string()),
             access: DocumentAccess::Editable { lease_id: 5 },
             lease_id: Some(5),
         };
@@ -620,7 +621,7 @@ mod tests {
         let messages = [
             ServerMessage::DocumentOpened {
                 metadata: metadata.clone(),
-                text: "fn main() {}\n".to_string(),
+                head: DocumentTextHead::complete("fn main() {}\n".to_string()),
             },
             ServerMessage::DocumentSaved {
                 document_id: 7,
@@ -629,7 +630,7 @@ mod tests {
             },
             ServerMessage::DocumentReloaded {
                 metadata: metadata.clone(),
-                text: "reloaded\n".to_string(),
+                head: DocumentTextHead::complete("reloaded\n".to_string()),
             },
             ServerMessage::DocumentStatus {
                 metadata: metadata.clone(),
@@ -1070,35 +1071,88 @@ mod tests {
         assert!(snapshot.validate().is_err());
     }
 
-    /// A full-text protocol message (`InitialDocument`) carrying more text than
-    /// the codec frame limit is rejected at encode. This is the transport-side
-    /// guard paired with the workspace-side `MAX_OPENABLE_FILE_BYTES` gate: any
-    /// file that passes the open gate must also fit in a single full-text frame.
     #[test]
-    fn full_text_snapshot_exceeding_frame_limit_is_rejected_at_encode() {
-        // The openable-file budget must sit below the frame limit so a file that
-        // passes the workspace gate always fits in a full-text frame.
+    fn maximum_document_chunk_fits_below_frame_limit() {
         const {
             assert!(
-                MAX_OPENABLE_FILE_BYTES < DEFAULT_MAX_FRAME_SIZE,
-                "openable-file budget must be below the IPC frame limit"
+                MAX_CHUNK_BYTES + 1024 < DEFAULT_MAX_FRAME_SIZE,
+                "document chunk plus envelope must fit below the IPC frame limit"
             );
         }
 
-        // A payload larger than the default frame limit is rejected at encode.
         let codec = Codec::default();
-        let oversized_text = "x".repeat(DEFAULT_MAX_FRAME_SIZE + 1);
-        let message = ServerMessage::InitialDocument {
+        let message = ServerMessage::DocumentChunk {
+            document_id: 1,
+            document_version: 1,
+            offset: 0,
+            text: "x".repeat(MAX_CHUNK_BYTES),
+        };
+        let frame = codec.encode_server_message(&message).unwrap();
+        assert!(frame.len() < DEFAULT_MAX_FRAME_SIZE);
+
+        let head = ServerMessage::InitialDocument {
             document_id: 1,
             version: 1,
-            text: oversized_text,
+            head: DocumentTextHead {
+                total_bytes: 1 << 30,
+                first_chunk: "x".repeat(MAX_CHUNK_BYTES),
+            },
             access: DocumentAccess::Editable { lease_id: 1 },
             lease_id: Some(1),
             workspace_root: "/tmp/root".to_string(),
         };
+        let head_frame = codec.encode_server_message(&head).unwrap();
+        assert!(head_frame.len() < DEFAULT_MAX_FRAME_SIZE);
+    }
 
-        let error = codec.encode_server_message(&message).unwrap_err();
-        assert!(matches!(error, CodecError::FrameTooLarge { .. }));
+    #[test]
+    fn document_chunk_request_round_trips_and_clamps_size() {
+        let codec = Codec::default();
+        let request = ClientMessage::DocumentChunkRequest {
+            client_id: 9,
+            document_id: 7,
+            document_version: 42,
+            offset: 4,
+            max_bytes: u32::MAX,
+        };
+        let frame = codec.encode_client_message(&request).unwrap();
+
+        assert_eq!(codec.decode_client_message(&frame).unwrap(), request);
+        assert_eq!(bounded_document_chunk_bytes(u32::MAX), Ok(MAX_CHUNK_BYTES));
+    }
+
+    #[test]
+    fn too_small_document_chunk_request_is_rejected() {
+        assert!(matches!(
+            bounded_document_chunk_bytes(3),
+            Err(DocumentChunkRejection::InvalidRequestSize { .. })
+        ));
+    }
+
+    #[test]
+    fn document_chunk_messages_round_trip() {
+        let codec = Codec::default();
+        let messages = [
+            ServerMessage::DocumentChunk {
+                document_id: 7,
+                document_version: 42,
+                offset: 4,
+                text: "🦀".to_string(),
+            },
+            ServerMessage::DocumentChunkRejected {
+                document_id: 7,
+                document_version: 41,
+                offset: 4,
+                reason: DocumentChunkRejection::StaleVersion {
+                    current_version: 42,
+                },
+            },
+        ];
+
+        for message in messages {
+            let frame = codec.encode_server_message(&message).unwrap();
+            assert_eq!(codec.decode_server_message(&frame).unwrap(), message);
+        }
     }
 
     /// Deterministic split-mix LCG for the mutation corpus — no `rand`

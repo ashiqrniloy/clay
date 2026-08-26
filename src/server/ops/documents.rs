@@ -114,7 +114,7 @@ pub(super) async fn op_clay_documents_reload_document(
         .unwrap_or(false);
     let workspace = state.borrow().borrow::<Arc<ClayOpState>>().workspace();
     let (metadata, text) = {
-        let outcome = crate::server::workspace::reload_document_unlocked(
+        crate::server::workspace::reload_document_unlocked(
             &workspace,
             document_id,
             RUNTIME_CLIENT_ID,
@@ -122,13 +122,18 @@ pub(super) async fn op_clay_documents_reload_document(
         )
         .await
         .map_err(workspace_error("documents.reload_failed"))?;
+        let workspace = workspace.lock().await;
         let metadata = workspace
-            .lock()
-            .await
             .document_metadata(document_id, RUNTIME_CLIENT_ID)
             .await
             .map_err(workspace_error("documents.reload_failed"))?;
-        (metadata, outcome.text)
+        let document = workspace.document_handle(document_id).ok_or_else(|| {
+            workspace_error("documents.reload_failed")(WorkspaceError::UnknownDocument {
+                document_id,
+            })
+        })?;
+        let text = document.lock().await.text();
+        (metadata, text)
     };
     serialize_result(
         json!({

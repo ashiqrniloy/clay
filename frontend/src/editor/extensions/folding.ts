@@ -1,8 +1,13 @@
-import { StateEffect, StateField, type Extension } from "@codemirror/state";
+import {
+  StateEffect,
+  StateField,
+  type Extension,
+  type Text,
+} from "@codemirror/state";
 import { foldGutter, foldKeymap, foldService } from "@codemirror/language";
 import { keymap } from "@codemirror/view";
 
-import { utf8ToUtf16 } from "../position-map";
+import { utf8ToUtf16Indexed, textIndex, type TextIndex } from "../position-map";
 import type { FoldingRangeSet } from "./types";
 
 interface FoldRange {
@@ -62,18 +67,26 @@ export const foldingExtension: Extension = [
   keymap.of(foldKeymap),
 ];
 
-export function installFolds(text: string, set: FoldingRangeSet) {
+export function installFolds(
+  docOrIndex: Text | TextIndex,
+  set: FoldingRangeSet,
+) {
+  const index = isIndex(docOrIndex) ? docOrIndex : textIndex(docOrIndex);
   return replaceFolds.of({
     key: set.packagePrefix,
     version: set.documentVersion,
     ranges: set.ranges
       .map((range) => ({
-        from: utf8ToUtf16(text, range.byteStart),
-        to: utf8ToUtf16(text, range.byteEnd),
+        from: utf8ToUtf16Indexed(index, range.byteStart),
+        to: utf8ToUtf16Indexed(index, range.byteEnd),
         label: range.label,
       }))
       .filter((range) => range.from < range.to),
   });
+}
+
+function isIndex(value: Text | TextIndex): value is TextIndex {
+  return "utf16Starts" in value;
 }
 
 export const resetFolds = () => clearFolds.of(null);

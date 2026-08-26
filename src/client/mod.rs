@@ -21,13 +21,13 @@ use crate::perf::{
 use crate::protocol::{
     ActiveTypography, BehaviorManifest, BehaviorScope, BehaviorVersion, CaretStyle, ClientId,
     ClientMessage, CompletionRejection, CompletionRequest, CompletionRequestId,
-    CompletionResultSet, DecorationSet, DiagnosticSet, DocumentAccess, DocumentId,
-    DocumentMetadata, DocumentVersion, EditOperation, EditRejection, EditorCommandRequest,
-    FileErrorCode, LanguageIntelligenceRejection, LanguageIntelligenceRequest,
-    LanguageIntelligenceRequestId, LanguageIntelligenceResult, PROTOCOL_VERSION, ProtocolErrorCode,
-    RuntimeDiagnostic, SduiActionIntent, SduiTree, SduiTreeUpdate, SelectionQueryRequest,
-    SelectionQueryResult, ServerMessage, ShellPreferences, TabCommand, TabId, TabRegistrySnapshot,
-    TransactionId, WorkspaceRootId,
+    CompletionResultSet, DecorationSet, DiagnosticSet, DocumentAccess, DocumentChunkRejection,
+    DocumentId, DocumentMetadata, DocumentTextHead, DocumentVersion, EditOperation, EditRejection,
+    EditorCommandRequest, FileErrorCode, LanguageIntelligenceRejection,
+    LanguageIntelligenceRequest, LanguageIntelligenceRequestId, LanguageIntelligenceResult,
+    PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent, SduiTree,
+    SduiTreeUpdate, SelectionQueryRequest, SelectionQueryResult, ServerMessage, ShellPreferences,
+    TabCommand, TabId, TabRegistrySnapshot, TransactionId, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
@@ -96,7 +96,7 @@ pub struct ClientInitialState {
     pub client_id: ClientId,
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
-    pub text: String,
+    pub head: DocumentTextHead,
     pub access: DocumentAccess,
     pub behavior_manifest: BehaviorManifest,
     pub active_theme: crate::protocol::ActiveTheme,
@@ -119,7 +119,7 @@ pub struct PendingEdit {
 pub struct ClientResyncSnapshot {
     pub document_id: DocumentId,
     pub version: DocumentVersion,
-    pub text: String,
+    pub head: DocumentTextHead,
     pub access: DocumentAccess,
     pub lease_id: Option<crate::protocol::LeaseId>,
 }
@@ -903,7 +903,19 @@ pub enum ClientConnectionEvent {
     ResyncSnapshot(ClientResyncSnapshot),
     DocumentOpened {
         metadata: DocumentMetadata,
+        head: DocumentTextHead,
+    },
+    DocumentChunk {
+        document_id: DocumentId,
+        document_version: DocumentVersion,
+        offset: u64,
         text: String,
+    },
+    DocumentChunkRejected {
+        document_id: DocumentId,
+        document_version: DocumentVersion,
+        offset: u64,
+        reason: DocumentChunkRejection,
     },
     DocumentSaved {
         document_id: DocumentId,
@@ -922,7 +934,7 @@ pub enum ClientConnectionEvent {
     },
     DocumentReloaded {
         metadata: DocumentMetadata,
-        text: String,
+        head: DocumentTextHead,
     },
     FileOperationFailed {
         code: FileErrorCode,
@@ -1002,7 +1014,11 @@ impl ClientConnectionEvent {
             ClientConnectionEvent::EditAck { document_id, .. }
             | ClientConnectionEvent::EditRejected { document_id, .. }
             | ClientConnectionEvent::DocumentSaved { document_id, .. }
-            | ClientConnectionEvent::DocumentClosed { document_id, .. } => Some(*document_id),
+            | ClientConnectionEvent::DocumentClosed { document_id, .. }
+            | ClientConnectionEvent::DocumentChunk { document_id, .. }
+            | ClientConnectionEvent::DocumentChunkRejected { document_id, .. } => {
+                Some(*document_id)
+            }
             ClientConnectionEvent::ResyncSnapshot(snapshot) => Some(snapshot.document_id),
             ClientConnectionEvent::DocumentOpened { metadata, .. }
             | ClientConnectionEvent::DocumentReloaded { metadata, .. }
@@ -1096,6 +1112,51 @@ impl std::error::Error for ClientBootstrapError {
             Self::Codec(error) => Some(error),
             _ => None,
         }
+    }
+}
+
+/// Desktop-side adoption probe: is the listener on this endpoint a Clay
+/// server speaking the current protocol version?
+///
+/// The desktop supervisor must not adopt (or trust) an endpoint it has not
+/// handshaken with: an old server from a previous build otherwise answers
+/// every later handshake with `UnsupportedProtocolVersion` and reconnect can
+/// never recover. The probe sends one `Hello` and reads exactly one reply;
+/// dropping the stream afterwards ends the probe connection cleanly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtocolProbe {
+    /// Listener completed Hello/Welcome at [`PROTOCOL_VERSION`].
+    Compatible,
+    /// Something answered but refused (or could not speak) the current
+    /// protocol version; the endpoint is occupied by an incompatible server.
+    Incompatible,
+    /// Nothing accepted the transport connection.
+    NotListening,
+}
+
+pub async fn probe_protocol(endpoint: &IpcEndpoint) -> ProtocolProbe {
+    let Ok(mut stream) = connect_transport(endpoint).await else {
+        return ProtocolProbe::NotListening;
+    };
+    let codec = Codec::default();
+    let hello = codec
+        .write_client_message(
+            &mut stream,
+            &ClientMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                client_name: "clay-probe".to_string(),
+            },
+        )
+        .await;
+    if hello.is_err() {
+        // Listener vanished between connect and write: treat as empty.
+        return ProtocolProbe::NotListening;
+    }
+    match timeout(SNAPSHOT_TIMEOUT, codec.read_server_message(&mut stream)).await {
+        Ok(Ok(ServerMessage::Welcome {
+            protocol_version, ..
+        })) if protocol_version == PROTOCOL_VERSION => ProtocolProbe::Compatible,
+        _ => ProtocolProbe::Incompatible,
     }
 }
 
@@ -1328,7 +1389,7 @@ where
     if let ServerMessage::InitialDocument {
         document_id,
         version,
-        text,
+        head,
         access,
         workspace_root,
         ..
@@ -1362,7 +1423,7 @@ where
                 client_id,
                 document_id,
                 document_version: version,
-                text,
+                head,
                 access,
                 behavior_manifest,
                 active_theme,
@@ -1413,16 +1474,16 @@ where
 
     let mut pending_messages = Vec::new();
     let mut file_open_capability = None;
-    let (document_id, document_version, text, access, workspace_root) = loop {
+    let (document_id, document_version, head, access, workspace_root) = loop {
         match codec.read_server_message(&mut *stream).await? {
             ServerMessage::InitialDocument {
                 document_id,
                 version,
-                text,
+                head,
                 access,
                 workspace_root,
                 ..
-            } => break (document_id, version, text, access, workspace_root),
+            } => break (document_id, version, head, access, workspace_root),
             ServerMessage::FileOpenCapabilityIssued { token } => {
                 file_open_capability = Some(token);
             }
@@ -1447,7 +1508,7 @@ where
             client_id,
             document_id,
             document_version,
-            text,
+            head,
             access,
             behavior_manifest,
             active_theme,
@@ -1654,19 +1715,25 @@ async fn run_connection<S>(
                             }
                         }
                     }
-                    Ok(ServerMessage::ResyncSnapshot { document_id, version, text, access, lease_id }) => {
-                        let snapshot = ClientResyncSnapshot { document_id, version, text, access, lease_id };
+                    Ok(ServerMessage::ResyncSnapshot { document_id, version, head, access, lease_id }) => {
+                        let snapshot = ClientResyncSnapshot { document_id, version, head, access, lease_id };
                         sync_state
                             .lock()
                             .expect("client sync state poisoned")
                             .apply_resync_snapshot(snapshot.clone());
                         let _ = events.send(ClientConnectionEvent::ResyncSnapshot(snapshot)).await;
                     }
-                    Ok(ServerMessage::DocumentOpened { metadata, text }) => {
+                    Ok(ServerMessage::DocumentOpened { metadata, head }) => {
                         // Multi-document: do not wipe live sync state here. The
                         // editor widget retains the prior session and then
                         // installs authority for the newly active document.
-                        let _ = events.send(ClientConnectionEvent::DocumentOpened { metadata, text }).await;
+                        let _ = events.send(ClientConnectionEvent::DocumentOpened { metadata, head }).await;
+                    }
+                    Ok(ServerMessage::DocumentChunk { document_id, document_version, offset, text }) => {
+                        let _ = events.send(ClientConnectionEvent::DocumentChunk { document_id, document_version, offset, text }).await;
+                    }
+                    Ok(ServerMessage::DocumentChunkRejected { document_id, document_version, offset, reason }) => {
+                        let _ = events.send(ClientConnectionEvent::DocumentChunkRejected { document_id, document_version, offset, reason }).await;
                     }
                     Ok(ServerMessage::DocumentSaved {
                         document_id,
@@ -1691,7 +1758,7 @@ async fn run_connection<S>(
                             .send(ClientConnectionEvent::DocumentStatus { metadata })
                             .await;
                     }
-                    Ok(ServerMessage::DocumentReloaded { metadata, text }) => {
+                    Ok(ServerMessage::DocumentReloaded { metadata, head }) => {
                         // Phase 22.2: each document owns its tracking state, so
                         // reloads rewrite only the reloaded document's state
                         // regardless of which pane is active.
@@ -1702,13 +1769,13 @@ async fn run_connection<S>(
                             state.apply_resync_snapshot(ClientResyncSnapshot {
                                 document_id: metadata.document_id,
                                 version: metadata.version,
-                                text: text.clone(),
+                                head: head.clone(),
                                 access: metadata.access.clone(),
                                 lease_id: metadata.lease_id,
                             });
                         }
                         let _ = events
-                            .send(ClientConnectionEvent::DocumentReloaded { metadata, text })
+                            .send(ClientConnectionEvent::DocumentReloaded { metadata, head })
                             .await;
                     }
                     Ok(ServerMessage::FileOperationFailed { code, message, workspace_root_id, document_id }) => {
@@ -1896,10 +1963,10 @@ mod tests {
     use crate::protocol::EditRejection;
     use crate::protocol::{
         ActiveTypography, BehaviorManifest, ClientMessage, CommandDeclaration,
-        CompletionReplacementRange, CompletionTrigger, DocumentAccess, EditOperation,
-        FileErrorCode, PROTOCOL_VERSION, RuntimeDiagnostic, SduiActionIntent, SduiActionSource,
-        SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree, ServerMessage,
-        codec::Codec,
+        CompletionReplacementRange, CompletionTrigger, DocumentAccess, DocumentTextHead,
+        EditOperation, FileErrorCode, PROTOCOL_VERSION, RuntimeDiagnostic, SduiActionIntent,
+        SduiActionSource, SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
+        ServerMessage, codec::Codec,
     };
     #[cfg(any(unix, windows))]
     use crate::server::{IpcServer, ServerConfig};
@@ -2023,7 +2090,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 7,
                         version: 3,
-                        text: "Loaded from server 🦀".to_string(),
+                        head: DocumentTextHead::complete("Loaded from server 🦀".to_string()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),
@@ -2065,7 +2132,7 @@ mod tests {
         assert_eq!(state.client_id, 11);
         assert_eq!(state.document_id, 7);
         assert_eq!(state.document_version, 3);
-        assert_eq!(state.text, "Loaded from server 🦀");
+        assert_eq!(state.head.first_chunk, "Loaded from server 🦀");
         assert_eq!(state.access, DocumentAccess::Editable { lease_id: 1 });
         assert_eq!(state.active_typography, ActiveTypography::default());
         assert_eq!(
@@ -2759,7 +2826,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 7,
                         version: 10,
-                        text: String::new(),
+                        head: DocumentTextHead::complete(String::new()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),
@@ -2862,7 +2929,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 7,
                         version: 10,
-                        text: "local".to_string(),
+                        head: DocumentTextHead::complete("local".to_string()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),
@@ -2972,7 +3039,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 7,
                         version: 10,
-                        text: "local".to_string(),
+                        head: DocumentTextHead::complete("local".to_string()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),
@@ -3029,7 +3096,7 @@ mod tests {
                     &ServerMessage::ResyncSnapshot {
                         document_id: 7,
                         version: 12,
-                        text: "server 🦀".to_string(),
+                        head: DocumentTextHead::complete("server 🦀".to_string()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                     },
@@ -3061,7 +3128,7 @@ mod tests {
             ClientConnectionEvent::ResyncSnapshot(super::ClientResyncSnapshot {
                 document_id: 7,
                 version: 12,
-                text: "server 🦀".to_string(),
+                head: DocumentTextHead::complete("server 🦀".to_string()),
                 access: DocumentAccess::Editable { lease_id: 1 },
                 lease_id: Some(1),
             })
@@ -3070,7 +3137,7 @@ mod tests {
         assert_eq!(snapshot.confirmed_version, 12);
         assert_eq!(snapshot.optimistic_version, 12);
         assert!(snapshot.pending.is_empty());
-        assert_eq!(snapshot.last_resync.unwrap().text, "server 🦀");
+        assert_eq!(snapshot.last_resync.unwrap().head.first_chunk, "server 🦀");
         server_task.await.unwrap();
     }
 
@@ -3096,7 +3163,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 2,
                         version: 1,
-                        text: String::new(),
+                        head: DocumentTextHead::complete(String::new()),
                         access: DocumentAccess::ReadOnly,
                         lease_id: None,
                         workspace_root: String::new(),
@@ -3162,7 +3229,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 22,
                         version: 23,
-                        text: "snapshot".to_string(),
+                        head: DocumentTextHead::complete("snapshot".to_string()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),
@@ -3203,7 +3270,7 @@ mod tests {
 
         assert_eq!(session.initial_state.document_id, 22);
         assert_eq!(session.initial_state.document_version, 23);
-        assert_eq!(session.initial_state.text, "snapshot");
+        assert_eq!(session.initial_state.head.first_chunk, "snapshot");
         server_task.await.unwrap();
     }
 
@@ -3229,7 +3296,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 2,
                         version: 3,
-                        text: String::new(),
+                        head: DocumentTextHead::complete(String::new()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),
@@ -3308,7 +3375,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 7,
                         version: 10,
-                        text: String::new(),
+                        head: DocumentTextHead::complete(String::new()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),
@@ -3396,7 +3463,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 2,
                         version: 3,
-                        text: "scratch".to_string(),
+                        head: DocumentTextHead::complete("scratch".to_string()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),
@@ -3436,7 +3503,7 @@ mod tests {
                     &mut server,
                     &ServerMessage::DocumentOpened {
                         metadata,
-                        text: "# opened\n".to_string(),
+                        head: DocumentTextHead::complete("# opened\n".to_string()),
                     },
                 )
                 .await
@@ -3449,7 +3516,7 @@ mod tests {
             session.events.recv().await.unwrap(),
             ClientConnectionEvent::DocumentOpened {
                 metadata: expected_metadata,
-                text: "# opened\n".to_string(),
+                head: DocumentTextHead::complete("# opened\n".to_string()),
             }
         );
         // Multi-document: connection layer forwards DocumentOpened only. The
@@ -3485,7 +3552,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 2,
                         version: 3,
-                        text: String::new(),
+                        head: DocumentTextHead::complete(String::new()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),
@@ -3583,7 +3650,7 @@ mod tests {
                         &ServerMessage::InitialDocument {
                             document_id: 2,
                             version: 3,
-                            text: String::new(),
+                            head: DocumentTextHead::complete(String::new()),
                             access: DocumentAccess::Editable { lease_id: 1 },
                             lease_id: Some(1),
                             workspace_root: String::new(),
@@ -3667,7 +3734,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 2,
                         version: 3,
-                        text: String::new(),
+                        head: DocumentTextHead::complete(String::new()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),
@@ -3800,7 +3867,7 @@ mod tests {
                 &ServerMessage::InitialDocument {
                     document_id: 2,
                     version: 3,
-                    text: String::new(),
+                    head: DocumentTextHead::complete(String::new()),
                     access: DocumentAccess::Editable { lease_id: 1 },
                     lease_id: Some(1),
                     workspace_root: String::new(),
@@ -3942,7 +4009,7 @@ mod tests {
                     &ServerMessage::InitialDocument {
                         document_id: 2,
                         version: 3,
-                        text: String::new(),
+                        head: DocumentTextHead::complete(String::new()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),
@@ -4072,7 +4139,7 @@ mod tests {
                     base_version: session.initial_state.document_version,
                     behavior_version: session.initial_state.behavior_manifest.behavior_version,
                     operation: EditOperation::Insert {
-                        byte_offset: session.initial_state.text.len() as u64,
+                        byte_offset: session.initial_state.head.first_chunk.len() as u64,
                         text: "manual".to_string(),
                     },
                 },
@@ -4253,7 +4320,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 
         let session = connect_with_retry(&endpoint).await;
 
-        assert_eq!(session.initial_state.text, "");
+        assert_eq!(session.initial_state.head.first_chunk, "");
         assert!(matches!(
             session.initial_state.access,
             DocumentAccess::Editable { lease_id: 1 }
@@ -4285,7 +4352,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                     base_version: session.initial_state.document_version,
                     behavior_version: session.initial_state.behavior_manifest.behavior_version,
                     operation: EditOperation::Insert {
-                        byte_offset: session.initial_state.text.len() as u64,
+                        byte_offset: session.initial_state.head.first_chunk.len() as u64,
                         text: "pipe".to_string(),
                     },
                 },
@@ -4428,13 +4495,13 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 ServerMessage::InitialDocument {
                     document_id,
                     version,
-                    text,
+                    head,
                     access: DocumentAccess::Editable { lease_id },
                     lease_id: Some(snapshot_lease_id),
                     workspace_root: _,
                 } => {
                     assert_eq!(lease_id, snapshot_lease_id);
-                    break (document_id, version, text, lease_id);
+                    break (document_id, version, head.first_chunk, lease_id);
                 }
                 ServerMessage::BehaviorManifest(_)
                 | ServerMessage::ActiveTheme(_)
@@ -4522,7 +4589,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 ServerMessage::ResyncSnapshot {
                     document_id: resynced_document_id,
                     version: resynced_version,
-                    text: resynced_text,
+                    head: resynced_head,
                     access:
                         DocumentAccess::Editable {
                             lease_id: resynced_lease_id,
@@ -4531,7 +4598,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 } => {
                     assert_eq!(resynced_document_id, document_id);
                     assert_eq!(resynced_version, version);
-                    assert_eq!(resynced_text, text);
+                    assert_eq!(resynced_head.first_chunk, text);
                     assert_eq!(resynced_lease_id, lease_id);
                     assert_eq!(resynced_snapshot_lease_id, lease_id);
                     break;
@@ -5352,13 +5419,13 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 ServerMessage::InitialDocument {
                     document_id,
                     version,
-                    text,
+                    head,
                     access: DocumentAccess::Editable { lease_id },
                     lease_id: Some(snapshot_lease_id),
                     workspace_root: _,
                 } => {
                     assert_eq!(lease_id, snapshot_lease_id);
-                    break (document_id, version, text, lease_id);
+                    break (document_id, version, head.first_chunk, lease_id);
                 }
                 ServerMessage::BehaviorManifest(_)
                 | ServerMessage::ActiveTheme(_)
@@ -5446,7 +5513,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 ServerMessage::ResyncSnapshot {
                     document_id: resynced_document_id,
                     version: resynced_version,
-                    text: resynced_text,
+                    head: resynced_head,
                     access:
                         DocumentAccess::Editable {
                             lease_id: resynced_lease_id,
@@ -5455,7 +5522,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                 } => {
                     assert_eq!(resynced_document_id, document_id);
                     assert_eq!(resynced_version, version);
-                    assert_eq!(resynced_text, text);
+                    assert_eq!(resynced_head.first_chunk, text);
                     assert_eq!(resynced_lease_id, lease_id);
                     assert_eq!(resynced_snapshot_lease_id, lease_id);
                     break;
@@ -5505,7 +5572,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
                     &ServerMessage::InitialDocument {
                         document_id: 7,
                         version: 1,
-                        text: "Hi".to_string(),
+                        head: DocumentTextHead::complete("Hi".to_string()),
                         access: DocumentAccess::Editable { lease_id: 1 },
                         lease_id: Some(1),
                         workspace_root: String::new(),

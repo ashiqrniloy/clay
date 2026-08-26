@@ -132,7 +132,7 @@ fn folding_set() -> FoldingRangeSet {
 
 #[test]
 fn phase28_protocol_version_is_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 26);
+    assert_eq!(PROTOCOL_VERSION, 27);
 }
 
 #[test]

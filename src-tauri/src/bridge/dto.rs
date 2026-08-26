@@ -185,7 +185,7 @@ impl From<&ActiveTypography> for TypographySnapshotDto {
 pub struct InitialDocumentDto {
     pub document_id: DocumentId,
     pub version: DocumentVersion,
-    pub text: String,
+    pub head: clay::protocol::DocumentTextHead,
     pub access: DocumentAccess,
     pub workspace_root: String,
 }
@@ -195,7 +195,7 @@ impl InitialDocumentDto {
         Self {
             document_id: state.document_id,
             version: state.document_version,
-            text: state.text.clone(),
+            head: state.head.clone(),
             access: state.access.clone(),
             workspace_root: state.workspace_root.clone(),
         }

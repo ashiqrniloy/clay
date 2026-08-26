@@ -31,10 +31,41 @@ export type {
   TypographyHierarchy,
 } from "../theme/types";
 
+export interface DocumentTextHeadDto {
+  totalBytes: number;
+  firstChunk: string;
+}
+
+export type DocumentChunkRejectionDto =
+  | {
+      invalidRequestSize: {
+        requestedBytes: number;
+        minimumBytes: number;
+        maximumBytes: number;
+      };
+    }
+  | "invalidOffset"
+  | { staleVersion: { currentVersion: number } }
+  | "unknownDocument";
+
+export interface DocumentChunkDto {
+  documentId: DocumentId;
+  documentVersion: number;
+  offset: number;
+  text: string;
+}
+
+export interface DocumentChunkRejectedDto {
+  documentId: DocumentId;
+  documentVersion: number;
+  offset: number;
+  reason: DocumentChunkRejectionDto;
+}
+
 export interface InitialDocumentDto {
   documentId: DocumentId;
   version: number;
-  text: string;
+  head: DocumentTextHeadDto;
   access: { readOnly?: null; editable?: { leaseId: number | null } };
   workspaceRoot: string;
 }

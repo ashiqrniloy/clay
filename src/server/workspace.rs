@@ -22,6 +22,7 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+use crop::{Rope, RopeBuilder};
 use tokio::{
     fs as tokio_fs,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -29,12 +30,13 @@ use tokio::{
 };
 
 use crate::perf::budgets::{
-    MAX_AUXILIARY_READ_BYTES, MAX_DOCUMENTS_PER_CLIENT, MAX_GITIGNORE_LINES,
-    MAX_GITIGNORE_PATTERN_CHARS, MAX_GITIGNORE_PATTERNS, MAX_OPENABLE_FILE_BYTES,
-    MAX_SERVER_DOCUMENTS, TRANSIENT_MENU_MAX_ITEMS,
+    BINARY_SNIFF_BYTES, DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES, MAX_AUXILIARY_READ_BYTES,
+    MAX_DOCUMENTS_PER_CLIENT, MAX_GITIGNORE_LINES, MAX_GITIGNORE_PATTERN_CHARS,
+    MAX_GITIGNORE_PATTERNS, MAX_SERVER_DOCUMENTS, TRANSIENT_MENU_MAX_ITEMS,
 };
 use crate::protocol::{
-    ClientId, DocumentAccess, DocumentId, DocumentMetadata, DocumentVersion, FileErrorCode,
+    ClientId, DocumentAccess, DocumentId, DocumentMetadata, DocumentTextHead, DocumentVersion,
+    FileErrorCode,
 };
 
 use super::document::DocumentState;
@@ -135,7 +137,6 @@ pub(crate) struct SaveDocumentOutcome {
 pub(crate) struct ReloadDocumentOutcome {
     pub(crate) document_id: DocumentId,
     pub(crate) version: DocumentVersion,
-    pub(crate) text: String,
     pub(crate) dirty: bool,
 }
 
@@ -329,7 +330,7 @@ pub(crate) struct OpenDocumentLease {
 }
 
 impl OpenDocumentLease {
-    pub(crate) async fn snapshot(&self, _client_id: ClientId) -> OpenDocumentSnapshot {
+    pub(crate) async fn snapshot(&self, _client_id: ClientId) -> OpenDocumentHead {
         let document = self.document.lock().await;
         let metadata = DocumentMetadata {
             document_id: self.document_id,
@@ -344,15 +345,20 @@ impl OpenDocumentLease {
                 .to_string_lossy()
                 .to_string(),
         };
-        let text = document.text();
-        OpenDocumentSnapshot { metadata, text }
+        let head = document.document_text_head();
+        OpenDocumentHead { metadata, head }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenDocumentSnapshot {
+pub struct OpenDocumentHead {
     pub(crate) metadata: DocumentMetadata,
-    pub(crate) text: String,
+    pub(crate) head: DocumentTextHead,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenDocumentRefresh {
+    pub(crate) metadata: DocumentMetadata,
 }
 
 /// Prepare/commit split for workspace file I/O.
@@ -373,9 +379,43 @@ pub struct OpenDocumentSnapshot {
 /// registry state on reacquire (e.g. an open may find the file was registered by
 /// a concurrent open, a reload re-checks dirtiness, a save tolerates a closed
 /// document) instead of assuming the registry is unchanged.
+#[derive(Debug)]
+struct DocumentReservation {
+    pending: Arc<AtomicU64>,
+    bytes: u64,
+    current_bytes: u64,
+    committed: bool,
+}
+
+impl DocumentReservation {
+    fn bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    fn current_bytes(&self) -> u64 {
+        self.current_bytes
+    }
+
+    fn commit(&mut self) {
+        if !self.committed {
+            self.pending.fetch_sub(self.bytes, Ordering::AcqRel);
+            self.committed = true;
+        }
+    }
+}
+
+impl Drop for DocumentReservation {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.pending.fetch_sub(self.bytes, Ordering::AcqRel);
+        }
+    }
+}
+
 struct OpenPlan {
     file_state: FileDocumentState,
     client_id: ClientId,
+    reservation: DocumentReservation,
 }
 
 enum OpenPrepare {
@@ -390,6 +430,7 @@ struct SelectedOpenPlan {
     canonical_path: PathBuf,
     display_path: PathBuf,
     client_id: ClientId,
+    reservation: DocumentReservation,
 }
 
 enum SelectedOpenPrepare {
@@ -419,10 +460,11 @@ struct ReloadPlan {
     relative_path: PathBuf,
     document: Arc<Mutex<DocumentState>>,
     force: bool,
+    reservation: DocumentReservation,
 }
 
 struct ReloadIoOutcome {
-    text: String,
+    text: Rope,
     reloaded_metadata: FileMetadata,
 }
 
@@ -431,6 +473,11 @@ pub(crate) struct WorkspaceState {
     roots: HashMap<WorkspaceRootId, WorkspaceRoot>,
     documents: HashMap<DocumentId, OpenDocument>,
     path_to_document: HashMap<PathBuf, DocumentId>,
+    /// Resident bytes held by canonical file-backed document ropes. The
+    /// separate atomic reservation counter closes the race between concurrent
+    /// unlocked file reads while keeping cancellation cleanup synchronous.
+    resident_document_bytes: u64,
+    reserved_document_bytes: Arc<AtomicU64>,
     next_root_id: WorkspaceRootId,
     next_document_id: DocumentId,
     /// Server-created tab workspaces share this allocator so document IDs
@@ -445,6 +492,8 @@ impl WorkspaceState {
             roots: HashMap::new(),
             documents: HashMap::new(),
             path_to_document: HashMap::new(),
+            resident_document_bytes: 0,
+            reserved_document_bytes: Arc::new(AtomicU64::new(0)),
             next_root_id: 1,
             next_document_id: 1,
             document_id_allocator: None,
@@ -1091,11 +1140,13 @@ impl WorkspaceState {
                 let (text, observed_metadata) = open_io(
                     &plan.file_state.canonical_path,
                     plan.file_state.workspace_relative_path.clone(),
+                    plan.reservation.bytes(),
+                    plan.reservation.current_bytes(),
                 )
                 .await?;
                 let mut file_state = plan.file_state;
                 file_state.last_known_metadata = observed_metadata;
-                self.register_canonical_file(file_state, text, plan.client_id)
+                self.register_canonical_file(file_state, text, plan.client_id, plan.reservation)
                     .await
             }
         }
@@ -1112,8 +1163,13 @@ impl WorkspaceState {
         {
             SelectedOpenPrepare::Existing(lease) => Ok(lease),
             SelectedOpenPrepare::New(plan) => {
-                let (text, observed_metadata) =
-                    open_io(&plan.canonical_path, plan.display_path.clone()).await?;
+                let (text, observed_metadata) = open_io(
+                    &plan.canonical_path,
+                    plan.display_path.clone(),
+                    plan.reservation.bytes(),
+                    plan.reservation.current_bytes(),
+                )
+                .await?;
                 self.register_selected_file(plan, text, observed_metadata)
                     .await
             }
@@ -1130,10 +1186,12 @@ impl WorkspaceState {
         if let Some(existing) = self.existing_document_lease(&file_state, client_id).await {
             return existing.map(OpenPrepare::Existing);
         }
-        check_openable_size(&file_state.last_known_metadata, file_path)?;
+        let reservation =
+            self.reserve_document_bytes(file_state.last_known_metadata.len(), file_path)?;
         Ok(OpenPrepare::New(OpenPlan {
             file_state,
             client_id,
+            reservation,
         }))
     }
 
@@ -1149,18 +1207,19 @@ impl WorkspaceState {
         {
             return existing.map(SelectedOpenPrepare::Existing);
         }
-        check_openable_size(&metadata, selected_path)?;
+        let reservation = self.reserve_document_bytes(metadata.len(), &display_path)?;
         Ok(SelectedOpenPrepare::New(SelectedOpenPlan {
             canonical_path,
             display_path,
             client_id,
+            reservation,
         }))
     }
 
     async fn register_selected_file(
         &mut self,
         plan: SelectedOpenPlan,
-        text: String,
+        text: Rope,
         observed_metadata: FileMetadata,
     ) -> Result<OpenDocumentLease, WorkspaceError> {
         // The selected file may have been opened by a concurrent selected/open
@@ -1181,7 +1240,7 @@ impl WorkspaceState {
             workspace_relative_path: plan.display_path,
             last_known_metadata: observed_metadata,
         };
-        self.register_canonical_file(file_state, text, plan.client_id)
+        self.register_canonical_file(file_state, text, plan.client_id, plan.reservation)
             .await
     }
 
@@ -1196,7 +1255,9 @@ impl WorkspaceState {
         if let Some(existing) = self.existing_document_lease(&file_state, client_id).await {
             return existing;
         }
-        self.register_canonical_file(file_state, text, client_id)
+        let reservation =
+            self.reserve_document_bytes(text.len() as u64, &file_state.workspace_relative_path)?;
+        self.register_canonical_file(file_state, Rope::from(text), client_id, reservation)
             .await
     }
 
@@ -1251,18 +1312,17 @@ impl WorkspaceState {
         Ok(entries)
     }
 
-    pub(crate) async fn open_document_snapshots(
+    pub(crate) async fn open_document_refreshes(
         &self,
         client_id: ClientId,
-    ) -> Result<Vec<OpenDocumentSnapshot>, WorkspaceError> {
+    ) -> Result<Vec<OpenDocumentRefresh>, WorkspaceError> {
         let mut entries = Vec::with_capacity(self.documents.len());
         for (&document_id, open_document) in &self.documents {
             let metadata =
                 metadata_for_open_document(document_id, open_document, client_id).await?;
-            let text = open_document.document.lock().await.text();
-            entries.push(OpenDocumentSnapshot { metadata, text });
+            entries.push(OpenDocumentRefresh { metadata });
         }
-        entries.sort_by_key(|snapshot| snapshot.metadata.document_id);
+        entries.sort_by_key(|refresh| refresh.metadata.document_id);
         Ok(entries)
     }
 
@@ -1283,6 +1343,8 @@ impl WorkspaceState {
         }
         for &(document_id, _) in &finalized {
             if let Some(open_document) = self.documents.remove(&document_id) {
+                let bytes = open_document.document.lock().await.byte_len() as u64;
+                self.release_document_bytes(bytes);
                 self.path_to_document
                     .remove(&open_document.file_state.canonical_path);
             }
@@ -1322,6 +1384,8 @@ impl WorkspaceState {
                 .documents
                 .remove(&document_id)
                 .expect("document checked above");
+            let bytes = open_document.document.lock().await.byte_len() as u64;
+            self.release_document_bytes(bytes);
             self.path_to_document
                 .remove(&open_document.file_state.canonical_path);
         }
@@ -1330,6 +1394,57 @@ impl WorkspaceState {
             version,
             closed,
         })
+    }
+
+    fn reserve_document_bytes(
+        &self,
+        requested_bytes: u64,
+        path: &Path,
+    ) -> Result<DocumentReservation, WorkspaceError> {
+        let pending = self.reserved_document_bytes.load(Ordering::Acquire);
+        let current_bytes = self.resident_document_bytes.saturating_add(pending);
+        if requested_bytes > DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES.saturating_sub(current_bytes) {
+            return Err(WorkspaceError::DocumentBudgetExceeded {
+                path: path.to_path_buf(),
+                budget_bytes: DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES,
+                current_bytes,
+                requested_bytes,
+            });
+        }
+        self.reserved_document_bytes
+            .fetch_add(requested_bytes, Ordering::AcqRel);
+        Ok(DocumentReservation {
+            pending: Arc::clone(&self.reserved_document_bytes),
+            bytes: requested_bytes,
+            current_bytes: current_bytes.saturating_add(requested_bytes),
+            committed: false,
+        })
+    }
+
+    fn commit_document_bytes(
+        &mut self,
+        reservation: &mut DocumentReservation,
+        actual_bytes: u64,
+        path: &Path,
+    ) -> Result<(), WorkspaceError> {
+        if actual_bytes > reservation.bytes()
+            || actual_bytes
+                > DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES.saturating_sub(self.resident_document_bytes)
+        {
+            return Err(WorkspaceError::DocumentBudgetExceeded {
+                path: path.to_path_buf(),
+                budget_bytes: DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES,
+                current_bytes: self.resident_document_bytes,
+                requested_bytes: actual_bytes,
+            });
+        }
+        reservation.commit();
+        self.resident_document_bytes = self.resident_document_bytes.saturating_add(actual_bytes);
+        Ok(())
+    }
+
+    fn release_document_bytes(&mut self, bytes: u64) {
+        self.resident_document_bytes = self.resident_document_bytes.saturating_sub(bytes);
     }
 
     /// Per-client and server-wide open-document ceilings, checked before a
@@ -1442,7 +1557,7 @@ impl WorkspaceState {
     /// Gather the owned state needed to write `document_id` to disk: canonical
     /// path, registry-relative path, the document handle, and a staleness
     /// reauthorization against the current on-disk metadata. Runs under the
-    /// workspace mutex; the heavy `tokio::fs::write` happens in [`save_io`]
+    /// workspace mutex; the heavy chunked `tokio::fs` write happens in [`save_io`]
     /// after the mutex is released.
     fn prepare_save(&self, document_id: DocumentId) -> Result<SavePlan, WorkspaceError> {
         let open_document = self
@@ -1493,9 +1608,9 @@ impl WorkspaceState {
 
     /// Gather the owned state needed to reload `document_id` from disk: a
     /// dirty pre-check (unless `force`), a reauthorization against the current
-    /// on-disk metadata, and the openable-size gate. Runs under the workspace
-    /// mutex; the `tokio::fs::read` happens in [`reload_io`] after the mutex is
-    /// released.
+    /// on-disk metadata, and a resident-budget reservation. Runs under the
+    /// workspace mutex; streamed UTF-8 IO happens in [`reload_io`] after the
+    /// mutex is released.
     async fn prepare_reload(
         &self,
         document_id: DocumentId,
@@ -1512,21 +1627,33 @@ impl WorkspaceState {
             return Err(WorkspaceError::DirtyDocument { document_id });
         }
         let pre_read_identity = self.reauthorize_open_file(document_id)?;
-        check_openable_size(&pre_read_identity.metadata(), &relative_path)?;
+        let reservation =
+            self.reserve_document_bytes(pre_read_identity.metadata().len(), &relative_path)?;
         Ok(ReloadPlan {
             document_id,
             canonical_path,
             relative_path,
             document,
             force,
+            reservation,
         })
     }
 
     async fn commit_reload(
         &mut self,
-        plan: ReloadPlan,
+        mut plan: ReloadPlan,
         io: ReloadIoOutcome,
     ) -> Result<ReloadDocumentOutcome, WorkspaceError> {
+        let Some(open_document) = self.documents.get(&plan.document_id) else {
+            return Err(WorkspaceError::UnknownDocument {
+                document_id: plan.document_id,
+            });
+        };
+        if !Arc::ptr_eq(&open_document.document, &plan.document) {
+            return Err(WorkspaceError::UnknownDocument {
+                document_id: plan.document_id,
+            });
+        }
         // Re-check dirtiness on reacquire: the document may have been edited by
         // another connection during the unlocked read. Don't clobber unsaved
         // edits unless the caller asked to force the reload.
@@ -1535,18 +1662,24 @@ impl WorkspaceState {
                 document_id: plan.document_id,
             });
         }
-        let version = {
+        let (version, previous_bytes, actual_bytes) = {
             let mut document = plan.document.lock().await;
-            document.replace_text_from_storage(io.text.clone());
-            document.version()
+            let previous_bytes = document.byte_len() as u64;
+            document.replace_rope_from_storage(io.text);
+            (
+                document.version(),
+                previous_bytes,
+                document.byte_len() as u64,
+            )
         };
+        self.commit_document_bytes(&mut plan.reservation, actual_bytes, &plan.relative_path)?;
+        self.release_document_bytes(previous_bytes);
         if let Some(open_document) = self.documents.get_mut(&plan.document_id) {
             open_document.file_state.last_known_metadata = io.reloaded_metadata;
         }
         Ok(ReloadDocumentOutcome {
             document_id: plan.document_id,
             version,
-            text: io.text,
             dirty: false,
         })
     }
@@ -1610,8 +1743,9 @@ impl WorkspaceState {
     async fn register_canonical_file(
         &mut self,
         file_state: FileDocumentState,
-        text: String,
+        text: Rope,
         client_id: ClientId,
+        mut reservation: DocumentReservation,
     ) -> Result<OpenDocumentLease, WorkspaceError> {
         // The unlock-across-IO orchestration can let two callers finish reading
         // the same canonical path before either commits. Re-check under the
@@ -1624,6 +1758,11 @@ impl WorkspaceState {
             return existing;
         }
         self.enforce_document_ceilings(client_id).await?;
+        self.commit_document_bytes(
+            &mut reservation,
+            text.byte_len() as u64,
+            &file_state.workspace_relative_path,
+        )?;
         let document_id = if let Some(allocator) = &self.document_id_allocator {
             allocator.fetch_add(1, Ordering::Relaxed)
         } else {
@@ -1631,7 +1770,7 @@ impl WorkspaceState {
             self.next_document_id = self.next_document_id.saturating_add(1);
             document_id
         };
-        let document = Arc::new(Mutex::new(DocumentState::new(
+        let document = Arc::new(Mutex::new(DocumentState::from_rope(
             document_id,
             text,
             DocumentAccess::ReadOnly,
@@ -1862,46 +2001,38 @@ fn validate_regular_file_metadata(metadata: &fs::Metadata) -> Result<(), Workspa
     Ok(())
 }
 
-/// Reject a file whose observed size exceeds the openable-file budget *before*
-/// the bounded read allocates. Returns a typed
-/// [`WorkspaceError::FileTooLarge`] so oversized files cannot be used as a
-/// memory-exhaustion vector or silently fail later at frame encode.
-fn check_openable_size(metadata: &FileMetadata, path: &Path) -> Result<(), WorkspaceError> {
-    let len = metadata.len();
-    if len as usize > MAX_OPENABLE_FILE_BYTES {
-        return Err(WorkspaceError::FileTooLarge {
-            path: path.to_path_buf(),
-            len,
-            max: MAX_OPENABLE_FILE_BYTES,
-        });
-    }
-    Ok(())
-}
+const FILE_READ_BUFFER_BYTES: usize = 64 * 1024;
 
-/// Bounded read of one file through a single opened handle, performed with the
-/// workspace mutex released. Handle-based metadata closes the
-/// swap-between-validation-and-read window (the type/size checks describe the
-/// exact file being read, not a path that could be replaced in between), and
-/// the `take` ceiling caps allocation at `max_bytes + 1` even if the file
-/// grows after the metadata check. `error_path` is the registry-relative path
-/// used in diagnostics so callers can pass either the workspace-relative path
-/// (root-scoped open) or the selected-file display path.
-async fn read_file_bounded(
+/// Stream one authorized file into a Crop rope without materializing a
+/// document-sized `String`. The reservation is established while the
+/// workspace mutex is held; this read enforces it again against the opened
+/// handle so growth between prepare and EOF cannot exceed the session budget.
+/// UTF-8 is validated incrementally with a maximum three-byte carry, and NUL
+/// sniffing is limited to the first `BINARY_SNIFF_BYTES` bytes.
+async fn read_file_streamed(
     canonical_path: &Path,
     error_path: &Path,
-    max_bytes: usize,
-) -> Result<(String, FileMetadata), WorkspaceError> {
+    max_bytes: u64,
+    budget_current_bytes: u64,
+) -> Result<(Rope, FileMetadata), WorkspaceError> {
     let unavailable = |source: io::Error| WorkspaceError::FileUnavailable {
         path: error_path.to_path_buf(),
         source,
     };
-    let file = tokio_fs::File::open(canonical_path)
+    let mut file = tokio_fs::File::open(canonical_path)
         .await
         .map_err(unavailable)?;
     let metadata = file.metadata().await.map_err(unavailable)?;
     validate_regular_file_metadata(&metadata)?;
     let observed = FileMetadata::from_fs_metadata(&metadata);
-    check_openable_size(&observed, error_path)?;
+    if observed.len() > max_bytes {
+        return Err(WorkspaceError::DocumentBudgetExceeded {
+            path: error_path.to_path_buf(),
+            budget_bytes: DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES,
+            current_bytes: budget_current_bytes,
+            requested_bytes: observed.len(),
+        });
+    }
     #[cfg(test)]
     {
         let mut hooks = BETWEEN_METADATA_AND_READ_HOOKS
@@ -1913,31 +2044,90 @@ async fn read_file_bounded(
             hook();
         }
     }
-    let mut bytes = Vec::new();
-    file.take((max_bytes as u64) + 1)
-        .read_to_end(&mut bytes)
-        .await
-        .map_err(unavailable)?;
-    if bytes.len() > max_bytes {
-        return Err(WorkspaceError::FileTooLarge {
+
+    let mut builder = RopeBuilder::new();
+    let mut buffer = Box::new([0u8; FILE_READ_BUFFER_BYTES]);
+    let mut carry = Vec::with_capacity(3);
+    let mut total_read = 0u64;
+    let mut sniffed = 0usize;
+
+    loop {
+        let read = file.read(&mut buffer[..]).await.map_err(unavailable)?;
+        if read == 0 {
+            break;
+        }
+        let sniff_len = BINARY_SNIFF_BYTES.saturating_sub(sniffed).min(read);
+        if buffer[..sniff_len].contains(&0) {
+            return Err(WorkspaceError::BinaryFileNotSupported {
+                path: error_path.to_path_buf(),
+            });
+        }
+        sniffed = sniffed.saturating_add(sniff_len);
+
+        let next_total = total_read.checked_add(read as u64).ok_or_else(|| {
+            WorkspaceError::DocumentBudgetExceeded {
+                path: error_path.to_path_buf(),
+                budget_bytes: DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES,
+                current_bytes: budget_current_bytes,
+                requested_bytes: u64::MAX,
+            }
+        })?;
+        if next_total > max_bytes {
+            return Err(WorkspaceError::DocumentBudgetExceeded {
+                path: error_path.to_path_buf(),
+                budget_bytes: DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES,
+                current_bytes: budget_current_bytes,
+                requested_bytes: next_total,
+            });
+        }
+        total_read = next_total;
+
+        let mut combined = Vec::with_capacity(carry.len().saturating_add(read));
+        combined.extend_from_slice(&carry);
+        combined.extend_from_slice(&buffer[..read]);
+        carry.clear();
+        match std::str::from_utf8(&combined) {
+            Ok(text) => {
+                builder.append(text);
+            }
+            Err(error) if error.error_len().is_none() => {
+                let valid_up_to = error.valid_up_to();
+                builder.append(
+                    std::str::from_utf8(&combined[..valid_up_to])
+                        .expect("UTF-8 prefix before an incomplete scalar is valid"),
+                );
+                carry.extend_from_slice(&combined[valid_up_to..]);
+            }
+            Err(_) => {
+                return Err(WorkspaceError::InvalidUtf8 {
+                    path: error_path.to_path_buf(),
+                    source: String::from_utf8(combined).expect_err("invalid UTF-8 was detected"),
+                });
+            }
+        }
+    }
+
+    if !carry.is_empty() {
+        return Err(WorkspaceError::InvalidUtf8 {
             path: error_path.to_path_buf(),
-            len: bytes.len() as u64,
-            max: max_bytes,
+            source: String::from_utf8(carry).expect_err("incomplete UTF-8 was detected"),
         });
     }
-    let text = String::from_utf8(bytes).map_err(|source| WorkspaceError::InvalidUtf8 {
-        path: error_path.to_path_buf(),
-        source,
-    })?;
-    Ok((text, observed))
+
+    let observed = FileMetadata::from_fs_metadata(&file.metadata().await.map_err(unavailable)?);
+    Ok((builder.build(), observed))
 }
 
-/// Heavy disk read for file open, performed with the workspace mutex released.
+/// Heavy disk read for file open/reload, performed with the workspace mutex
+/// released. `max_bytes` is a reserved session-budget slice, not a per-file
+/// size ceiling.
 async fn open_io(
     canonical_path: &Path,
     error_path: PathBuf,
-) -> Result<(String, FileMetadata), WorkspaceError> {
-    read_file_bounded(canonical_path, &error_path, MAX_OPENABLE_FILE_BYTES).await
+    max_bytes: u64,
+    budget_current_bytes: u64,
+) -> Result<(Rope, FileMetadata), WorkspaceError> {
+    read_file_streamed(canonical_path, &error_path, max_bytes, budget_current_bytes).await
 }
 
 /// Stable on-disk identity of the save target captured when the save was
@@ -2024,6 +2214,39 @@ type TestHook = (PathBuf, Box<dyn FnOnce() + Send>);
 #[cfg(test)]
 static BEFORE_REVALIDATE_HOOKS: std::sync::Mutex<Vec<TestHook>> = std::sync::Mutex::new(Vec::new());
 
+/// Test-only gate that pauses an atomic write after chunks are on the temp
+/// file and before `fsync`, so a concurrent edit can run while disk IO is
+/// blocked without holding the document mutex.
+#[cfg(test)]
+struct AtomicWritePause {
+    path: PathBuf,
+    entered: Option<tokio::sync::oneshot::Sender<()>>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+static ATOMIC_WRITE_PAUSES: std::sync::Mutex<Vec<AtomicWritePause>> =
+    std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+async fn pause_atomic_write(target: &Path) {
+    let pause = {
+        let mut pauses = ATOMIC_WRITE_PAUSES
+            .lock()
+            .expect("atomic-write pause lock poisoned");
+        pauses
+            .iter()
+            .rposition(|pause| pause.path == target)
+            .map(|index| pauses.remove(index))
+    };
+    if let Some(pause) = pause {
+        if let Some(entered) = pause.entered {
+            let _ = entered.send(());
+        }
+        pause.release.notified().await;
+    }
+}
+
 /// Test-only hooks invoked inside the bounded read of a specific path after
 /// the handle metadata is validated but before the contents are read, so
 /// tests can stage external growth/replacement in that exact window.
@@ -2105,9 +2328,9 @@ async fn create_exclusive_temp(target: &Path) -> io::Result<(PathBuf, tokio_fs::
     }
 }
 
-/// Atomically write `bytes` to `target` via a temp file + rename, returning the
-/// metadata of the saved file. Steps: create an exclusive unpredictable temp
-/// file in `target`'s directory, write all bytes, `fsync` (durability),
+/// Atomically write `chunks` to `target` via a temp file + rename, returning
+/// the metadata of the saved file. Steps: create an exclusive unpredictable
+/// temp file in `target`'s directory, write each chunk, `fsync` (durability),
 /// restore the original file's permissions (fail closed on Unix when that
 /// fails), revalidate the target's stable identity against `expected`
 /// immediately before the replace, then `rename` over the target. Every
@@ -2115,6 +2338,14 @@ async fn create_exclusive_temp(target: &Path) -> io::Result<(PathBuf, tokio_fs::
 async fn atomic_write_file(
     target: &Path,
     bytes: &[u8],
+    expected: Option<&TargetIdentity>,
+) -> Result<FileMetadata, AtomicSaveError> {
+    atomic_write_chunks(target, std::iter::once(bytes), expected).await
+}
+
+async fn atomic_write_chunks(
+    target: &Path,
+    chunks: impl IntoIterator<Item = impl AsRef<[u8]>>,
     expected: Option<&TargetIdentity>,
 ) -> Result<FileMetadata, AtomicSaveError> {
     #[cfg(unix)]
@@ -2136,7 +2367,11 @@ async fn atomic_write_file(
 
     let (temp_path, mut file) = create_exclusive_temp(target).await?;
     let write_result = async {
-        file.write_all(bytes).await?;
+        for chunk in chunks {
+            file.write_all(chunk.as_ref()).await?;
+        }
+        #[cfg(test)]
+        pause_atomic_write(target).await;
         // Flush the kernel buffer and fsync so the new content is on disk
         // before the atomic rename; this is what makes the post-rename file
         // durable.
@@ -2204,22 +2439,24 @@ async fn atomic_write_file(
 
 /// Heavy disk write + post-write metadata read for `save_document`, performed
 /// with the workspace mutex released. Captures the in-memory document version
-/// and text (via the per-document mutex, not the workspace mutex) so the commit
-/// phase can detect a concurrent edit through `mark_clean_if_version`.
+/// and an Arc-root Crop rope clone (via the per-document mutex, not the
+/// workspace mutex) so the commit phase can detect a concurrent edit through
+/// `mark_clean_if_version` without holding the document lock across IO.
 async fn save_io(plan: &SavePlan) -> Result<SaveIoOutcome, WorkspaceError> {
-    let (prepared_version, text) = {
+    let (prepared_version, rope) = {
         let document = plan.document.lock().await;
-        (document.version(), document.text())
+        (document.version(), document.clone_rope())
     };
     // Atomic save: write an exclusive unpredictable temp file in the target's
     // directory, fsync it, restore the original file's permissions, revalidate
     // the target's stable identity, then `rename` over the target. A crash or
     // power loss during the write leaves the original file intact (only the
     // temp is partial); the rename is atomic so the target is either the old
-    // or the new content, never a torn write.
-    let saved_metadata = atomic_write_file(
+    // or the new content, never a torn write. Chunks are streamed from the
+    // captured rope so a large document never becomes a transient `String`.
+    let saved_metadata = atomic_write_chunks(
         &plan.canonical_path,
-        text.as_bytes(),
+        rope.chunks(),
         Some(&plan.expected_identity),
     )
     .await
@@ -2243,10 +2480,11 @@ async fn save_io(plan: &SavePlan) -> Result<SaveIoOutcome, WorkspaceError> {
 /// from the same handle that produced the text, so the registry records
 /// exactly what was read.
 async fn reload_io(plan: &ReloadPlan) -> Result<ReloadIoOutcome, WorkspaceError> {
-    let (text, reloaded_metadata) = read_file_bounded(
+    let (text, reloaded_metadata) = open_io(
         &plan.canonical_path,
-        &plan.relative_path,
-        MAX_OPENABLE_FILE_BYTES,
+        plan.relative_path.clone(),
+        plan.reservation.bytes(),
+        plan.reservation.current_bytes(),
     )
     .await?;
     Ok(ReloadIoOutcome {
@@ -2281,6 +2519,8 @@ pub(crate) async fn open_existing_file_unlocked(
             let (text, observed_metadata) = open_io(
                 &plan.file_state.canonical_path,
                 plan.file_state.workspace_relative_path.clone(),
+                plan.reservation.bytes(),
+                plan.reservation.current_bytes(),
             )
             .await?;
             let mut file_state = plan.file_state;
@@ -2290,7 +2530,7 @@ pub(crate) async fn open_existing_file_unlocked(
             file_state.last_known_metadata = observed_metadata;
             let mut workspace = workspace.lock().await;
             workspace
-                .register_canonical_file(file_state, text, plan.client_id)
+                .register_canonical_file(file_state, text, plan.client_id, plan.reservation)
                 .await
         }
     }
@@ -2310,8 +2550,13 @@ pub(crate) async fn open_selected_file_unlocked(
     match plan {
         SelectedOpenPrepare::Existing(lease) => Ok(lease),
         SelectedOpenPrepare::New(plan) => {
-            let (text, observed_metadata) =
-                open_io(&plan.canonical_path, plan.display_path.clone()).await?;
+            let (text, observed_metadata) = open_io(
+                &plan.canonical_path,
+                plan.display_path.clone(),
+                plan.reservation.bytes(),
+                plan.reservation.current_bytes(),
+            )
+            .await?;
             let mut workspace = workspace.lock().await;
             workspace
                 .register_selected_file(plan, text, observed_metadata)
@@ -2443,10 +2688,14 @@ pub(crate) enum WorkspaceError {
     StaleFileMetadata {
         path: PathBuf,
     },
-    FileTooLarge {
+    DocumentBudgetExceeded {
         path: PathBuf,
-        len: u64,
-        max: usize,
+        budget_bytes: u64,
+        current_bytes: u64,
+        requested_bytes: u64,
+    },
+    BinaryFileNotSupported {
+        path: PathBuf,
     },
     RootLimitExceeded,
 }
@@ -2582,16 +2831,30 @@ impl WorkspaceError {
                 format!("workspace file {} changed on disk since it was loaded", display_workspace_path(path)),
                 Some("Reload or resolve the external change before saving to avoid overwriting data.".to_string()),
             ),
-            Self::FileTooLarge { path, len, max } => WorkspaceDiagnostic::new(
-                FileErrorCode::FileTooLarge,
+            Self::DocumentBudgetExceeded {
+                path,
+                budget_bytes,
+                current_bytes,
+                requested_bytes,
+            } => WorkspaceDiagnostic::new(
+                FileErrorCode::DocumentBudgetExceeded,
                 format!(
-                    "workspace file {} is {} bytes which exceeds the {} byte openable-file limit",
+                    "opening workspace file {} would exceed the {} byte resident document budget ({} bytes resident, {} requested)",
                     display_workspace_path(path),
-                    len,
-                    max
+                    budget_bytes,
+                    current_bytes,
+                    requested_bytes,
+                ),
+                Some("Close other documents before opening this file; the resident-memory budget is server-owned and not configurable from init.js.".to_string()),
+            ),
+            Self::BinaryFileNotSupported { path } => WorkspaceDiagnostic::new(
+                FileErrorCode::BinaryFileNotSupported,
+                format!(
+                    "workspace file {} appears to be binary and is not supported as a text document",
+                    display_workspace_path(path)
                 ),
                 Some(format!(
-                    "Open files smaller than {max} bytes. Chunked/viewport-first loading for larger files is planned but not yet available."
+                    "Clay checks for NUL bytes in the first {BINARY_SNIFF_BYTES} bytes; open a UTF-8 text file instead."
                 )),
             ),
             Self::RootLimitExceeded => WorkspaceDiagnostic::new(
@@ -2925,7 +3188,8 @@ impl Error for WorkspaceError {
             | Self::DocumentLimitExceeded { .. }
             | Self::StaleSaveVersion { .. }
             | Self::StaleFileMetadata { .. }
-            | Self::FileTooLarge { .. }
+            | Self::DocumentBudgetExceeded { .. }
+            | Self::BinaryFileNotSupported { .. }
             | Self::RootLimitExceeded => None,
         }
     }
@@ -2946,10 +3210,10 @@ mod tests {
 
     use super::super::super::perf::budgets::MAX_DOCUMENTS_PER_CLIENT;
     use super::{
-        AtomicSaveError, BEFORE_REVALIDATE_HOOKS, BETWEEN_METADATA_AND_READ_HOOKS,
-        FileListEntryKind, FileListRequest, FileMetadata, SaveIoOutcome, TEST_TEMP_NAMES,
-        TargetIdentity, UserBrowseEntryKind, UserBrowseError, UserBrowseListingPlan,
-        WorkspaceError, WorkspaceState, atomic_write_file, build_ignore_set,
+        ATOMIC_WRITE_PAUSES, AtomicSaveError, AtomicWritePause, BEFORE_REVALIDATE_HOOKS,
+        BETWEEN_METADATA_AND_READ_HOOKS, FileListEntryKind, FileListRequest, FileMetadata,
+        SaveIoOutcome, TEST_TEMP_NAMES, TargetIdentity, UserBrowseEntryKind, UserBrowseError,
+        UserBrowseListingPlan, WorkspaceError, WorkspaceState, atomic_write_file, build_ignore_set,
         execute_user_browse_listing, open_existing_file_unlocked, open_selected_file_unlocked,
         resolve_user_browse_seed, save_document_unlocked, traverse_user_browse_directory,
     };
@@ -3021,7 +3285,7 @@ mod tests {
             ServerMessage::InitialDocument {
                 document_id: 1,
                 version: 1,
-                text: "hello 🌎\n".to_string(),
+                head: crate::protocol::DocumentTextHead::complete("hello 🌎\n".to_string()),
                 access: DocumentAccess::Editable { lease_id: 1 },
                 lease_id: Some(1),
                 workspace_root: "/tmp/root".to_string(),
@@ -3064,7 +3328,7 @@ mod tests {
             ServerMessage::InitialDocument {
                 document_id: first.document_id,
                 version: 1,
-                text: "fn main() {}\n".to_string(),
+                head: crate::protocol::DocumentTextHead::complete("fn main() {}\n".to_string()),
                 access: DocumentAccess::ReadOnly,
                 lease_id: None,
                 workspace_root: "/tmp/root".to_string(),
@@ -3444,8 +3708,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(reloaded.text, "changed on disk");
-        assert!(!opened.document.lock().await.is_dirty());
+        assert_eq!(opened.document.lock().await.text(), "changed on disk");
+        assert!(!reloaded.dirty);
 
         let _ = fs::remove_file(file);
         let _ = fs::remove_dir(root);
@@ -3470,8 +3734,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(reloaded.document_id, opened.document_id);
-        assert_eq!(reloaded.text, "new text");
         assert_eq!(opened.document.lock().await.text(), "new text");
+        assert!(!reloaded.dirty);
         assert!(!opened.document.lock().await.is_dirty());
 
         let _ = fs::remove_file(file);
@@ -3660,60 +3924,106 @@ mod tests {
         let _ = fs::remove_dir(root);
     }
 
-    /// A file larger than `MAX_OPENABLE_FILE_BYTES` is rejected with a typed
-    /// `FileTooLarge` error before the bounded read allocates.
     #[tokio::test]
-    async fn open_existing_file_rejects_oversized_file() {
-        let root = temp_workspace("oversized-open");
+    async fn open_existing_file_streams_large_utf8_text_and_bounds_head() {
+        let root = temp_workspace("large-open");
         let file = root.join("big.txt");
-        // One byte over the limit. Use a repeated ASCII byte so the size in
-        // bytes equals the length, regardless of UTF-8.
-        let oversized = "!".repeat(crate::perf::budgets::MAX_OPENABLE_FILE_BYTES + 1);
-        fs::write(&file, &oversized).unwrap();
+        let text = format!(
+            "{}é{}",
+            "a".repeat(crate::perf::budgets::MAX_CHUNK_BYTES * 4),
+            "b".repeat(32)
+        );
+        fs::write(&file, &text).unwrap();
         let mut workspace = WorkspaceState::new();
         let root_id = workspace.add_root(&root).unwrap();
 
-        let error = workspace
+        let opened = workspace
             .open_existing_file(root_id, "big.txt", 1)
             .await
-            .unwrap_err();
-        let diagnostic = error.diagnostic();
+            .unwrap();
+        let document = opened.document.lock().await;
+        let head = document.document_text_head();
 
-        assert_eq!(diagnostic.code, FileErrorCode::FileTooLarge);
-        assert!(diagnostic.message.contains("exceeds the"));
-        assert!(diagnostic.message.contains("openable-file limit"));
-        // No document was registered for the rejected file.
-        assert!(workspace.document_handle(1).is_none());
+        assert_eq!(document.text(), text);
+        assert_eq!(head.total_bytes, text.len() as u64);
+        assert!(head.first_chunk.len() <= crate::perf::budgets::MAX_CHUNK_BYTES);
+        assert!(head.first_chunk.is_char_boundary(head.first_chunk.len()));
+        assert_eq!(workspace.resident_document_bytes, text.len() as u64);
 
+        drop(document);
         let _ = fs::remove_file(file);
         let _ = fs::remove_dir(root);
     }
 
-    /// The selected-file open path also enforces the openable-file size gate
-    /// before reading the picked file from disk.
     #[tokio::test]
-    async fn open_selected_file_rejects_oversized_file() {
-        let root = temp_workspace("oversized-selected");
+    async fn opening_three_documents_including_ten_megabytes_keeps_bounded_heads() {
+        use std::io::Write;
+
+        let root = temp_workspace("restore-three");
+        fs::write(root.join("a.txt"), "alpha").unwrap();
+        fs::write(root.join("b.txt"), "beta").unwrap();
+        let large_path = root.join("large.txt");
+        {
+            let mut file = fs::File::create(&large_path).unwrap();
+            let chunk = vec![b'x'; 1024 * 1024];
+            for _ in 0..10 {
+                file.write_all(&chunk).unwrap();
+            }
+        }
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let first = workspace
+            .open_existing_file(root_id, "a.txt", 1)
+            .await
+            .unwrap();
+        let second = workspace
+            .open_existing_file(root_id, "b.txt", 1)
+            .await
+            .unwrap();
+        let large = workspace
+            .open_existing_file(root_id, "large.txt", 1)
+            .await
+            .unwrap();
+
+        for opened in [&first, &second, &large] {
+            let head = opened.document.lock().await.document_text_head();
+            assert!(head.first_chunk.len() <= crate::perf::budgets::MAX_CHUNK_BYTES);
+        }
+        assert_eq!(large.document.lock().await.byte_len(), 10 * 1024 * 1024);
+
+        let refreshes = workspace.open_document_refreshes(0).await.unwrap();
+        assert_eq!(refreshes.len(), 3);
+        assert!(
+            refreshes
+                .windows(2)
+                .all(|pair| { pair[0].metadata.document_id < pair[1].metadata.document_id })
+        );
+
+        let _ = fs::remove_file(root.join("a.txt"));
+        let _ = fs::remove_file(root.join("b.txt"));
+        let _ = fs::remove_file(large_path);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn selected_open_streams_large_text_without_file_size_ceiling() {
+        let root = temp_workspace("large-selected");
         let file = root.join("picked.md");
-        let oversized = "!".repeat(crate::perf::budgets::MAX_OPENABLE_FILE_BYTES + 1);
-        fs::write(&file, &oversized).unwrap();
+        let text = "🦀".repeat(crate::perf::budgets::MAX_CHUNK_BYTES + 32);
+        fs::write(&file, &text).unwrap();
         let mut workspace = WorkspaceState::new();
 
-        let error = workspace.open_selected_file(&file, 1).await.unwrap_err();
-        let diagnostic = error.diagnostic();
-
-        assert_eq!(diagnostic.code, FileErrorCode::FileTooLarge);
-        assert!(workspace.document_handle(1).is_none());
+        let opened = workspace.open_selected_file(&file, 1).await.unwrap();
+        assert_eq!(opened.document.lock().await.text(), text);
 
         let _ = fs::remove_file(file);
         let _ = fs::remove_dir(root);
     }
 
-    /// Reloading a document whose file grew past the limit fails with
-    /// `FileTooLarge` before re-reading the full contents.
     #[tokio::test]
-    async fn reload_document_rejects_oversized_file() {
-        let root = temp_workspace("oversized-reload");
+    async fn reload_streams_new_text_and_replaces_resident_bytes() {
+        let root = temp_workspace("large-reload");
         let file = root.join("note.txt");
         fs::write(&file, "small").unwrap();
         let mut workspace = WorkspaceState::new();
@@ -3723,35 +4033,109 @@ mod tests {
             .await
             .unwrap();
 
-        // Grow the file past the limit on disk after it was opened.
-        let oversized = "!".repeat(crate::perf::budgets::MAX_OPENABLE_FILE_BYTES + 1);
-        fs::write(&file, &oversized).unwrap();
-
-        let error = workspace
+        let text = "reload 🪐 ".repeat(crate::perf::budgets::MAX_CHUNK_BYTES / 2);
+        fs::write(&file, &text).unwrap();
+        let reloaded = workspace
             .reload_document(opened.document_id, 1, true)
             .await
-            .unwrap_err();
-        let diagnostic = error.diagnostic();
-        assert_eq!(diagnostic.code, FileErrorCode::FileTooLarge);
+            .unwrap();
+
+        assert!(!reloaded.dirty);
+        assert_eq!(opened.document.lock().await.text(), text);
+        assert_eq!(workspace.resident_document_bytes, text.len() as u64);
 
         let _ = fs::remove_file(file);
         let _ = fs::remove_dir(root);
     }
 
-    /// A file exactly at the limit opens successfully (boundary is inclusive).
     #[tokio::test]
-    async fn open_file_at_limit_boundary_succeeds() {
-        let root = temp_workspace("limit-boundary");
-        let file = root.join("at_limit.txt");
-        let at_limit = "a".repeat(crate::perf::budgets::MAX_OPENABLE_FILE_BYTES);
-        fs::write(&file, &at_limit).unwrap();
+    async fn document_budget_rejects_open_and_close_releases_resident_bytes() {
+        let root = temp_workspace("document-budget");
+        let file = root.join("note.txt");
+        fs::write(&file, "1234").unwrap();
+        let mut workspace = WorkspaceState::new();
+        workspace.resident_document_bytes =
+            crate::perf::budgets::DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES - 3;
+        let root_id = workspace.add_root(&root).unwrap();
+
+        let error = workspace
+            .open_existing_file(root_id, "note.txt", 1)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.diagnostic().code,
+            FileErrorCode::DocumentBudgetExceeded
+        );
+        assert_eq!(
+            workspace.resident_document_bytes,
+            crate::perf::budgets::DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES - 3
+        );
+
+        workspace.resident_document_bytes = 0;
+        let opened = workspace
+            .open_existing_file(root_id, "note.txt", 1)
+            .await
+            .unwrap();
+        assert!(workspace.resident_document_bytes > 0);
+        workspace
+            .close_document(opened.document_id, 1, true)
+            .await
+            .unwrap();
+        assert_eq!(workspace.resident_document_bytes, 0);
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn binary_sniff_rejects_nul_in_leading_bytes_but_not_after_boundary() {
+        let root = temp_workspace("binary-sniff");
+        let binary = root.join("binary.dat");
+        let mut bytes = b"text".to_vec();
+        bytes.push(0);
+        bytes.extend_from_slice(b"tail");
+        fs::write(&binary, bytes).unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        let error = workspace
+            .open_existing_file(root_id, "binary.dat", 1)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.diagnostic().code,
+            FileErrorCode::BinaryFileNotSupported
+        );
+
+        let text_file = root.join("late-nul.txt");
+        let mut text = b"a".repeat(crate::perf::budgets::BINARY_SNIFF_BYTES);
+        text.push(0);
+        text.extend_from_slice(b"tail");
+        fs::write(&text_file, &text).unwrap();
+        let opened = workspace
+            .open_existing_file(root_id, "late-nul.txt", 1)
+            .await
+            .unwrap();
+        assert_eq!(opened.document.lock().await.byte_len(), text.len());
+
+        let _ = fs::remove_file(binary);
+        let _ = fs::remove_file(text_file);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn utf8_scalar_split_across_file_read_buffers_remains_valid() {
+        let root = temp_workspace("utf8-boundary");
+        let file = root.join("boundary.txt");
+        let text = format!("{}éafter", "a".repeat(64 * 1024 - 1));
+        fs::write(&file, &text).unwrap();
         let mut workspace = WorkspaceState::new();
         let root_id = workspace.add_root(&root).unwrap();
 
         let opened = workspace
-            .open_existing_file(root_id, "at_limit.txt", 1)
-            .await;
-        assert!(opened.is_ok(), "file exactly at the limit must open");
+            .open_existing_file(root_id, "boundary.txt", 1)
+            .await
+            .unwrap();
+        assert_eq!(opened.document.lock().await.text(), text);
 
         let _ = fs::remove_file(file);
         let _ = fs::remove_dir(root);
@@ -3865,6 +4249,132 @@ mod tests {
             outcome.dirty,
             "a concurrent edit during save must not be falsely marked clean"
         );
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn streamed_save_equals_rope_across_crop_chunks() {
+        let root = temp_workspace("streamed-save-chunks");
+        let file = root.join("note.txt");
+        let mut text = String::new();
+        while text.len() < 5000 {
+            text.push_str("ascii-pad-");
+            text.push('é');
+            text.push('\u{1F30E}');
+        }
+        fs::write(&file, &text).unwrap();
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        let opened = workspace
+            .open_existing_file(root_id, "note.txt", 1)
+            .await
+            .unwrap();
+        {
+            let document = opened.document.lock().await;
+            let rope = document.clone_rope();
+            assert!(
+                rope.chunks().count() > 1,
+                "fixture must span more than one Crop chunk"
+            );
+            assert_eq!(rope.to_string(), text);
+        }
+
+        let saved = workspace
+            .save_document(opened.document_id, 1, 1)
+            .await
+            .unwrap();
+        assert!(!saved.dirty);
+        assert_eq!(fs::read(&file).unwrap(), text.as_bytes());
+
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn edit_during_blocked_save_does_not_wait_on_document_mutex() {
+        let root = temp_workspace("save-blocked-edit");
+        let file = root.join("note.txt");
+        fs::write(&file, "hello").unwrap();
+        let workspace = Arc::new(Mutex::new(WorkspaceState::new()));
+        let root_id = workspace.lock().await.add_root(&root).unwrap();
+        let opened = open_existing_file_unlocked(&workspace, root_id, "note.txt", 1)
+            .await
+            .unwrap();
+        {
+            let mut document = opened.document.lock().await;
+            assert_eq!(
+                document.apply_edit(
+                    opened.document_id,
+                    1,
+                    Some(1),
+                    1,
+                    90,
+                    EditOperation::Insert {
+                        byte_offset: 5,
+                        text: " world".to_string(),
+                    },
+                ),
+                ServerMessage::EditAck {
+                    document_id: opened.document_id,
+                    confirmed_version: 2,
+                    transaction_id: 90,
+                }
+            );
+        }
+
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let release = Arc::new(tokio::sync::Notify::new());
+        ATOMIC_WRITE_PAUSES
+            .lock()
+            .expect("pause lock")
+            .push(AtomicWritePause {
+                path: file.clone(),
+                entered: Some(entered_tx),
+                release: Arc::clone(&release),
+            });
+
+        let ws_save = Arc::clone(&workspace);
+        let document_id = opened.document_id;
+        let save =
+            tokio::spawn(async move { save_document_unlocked(&ws_save, document_id, 1, 2).await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), entered_rx)
+            .await
+            .expect("save must pause after releasing the document mutex")
+            .expect("pause sender dropped");
+
+        {
+            let mut document = opened.document.lock().await;
+            assert_eq!(
+                document.apply_edit(
+                    opened.document_id,
+                    1,
+                    Some(1),
+                    2,
+                    91,
+                    EditOperation::Insert {
+                        byte_offset: 11,
+                        text: "!".to_string(),
+                    },
+                ),
+                ServerMessage::EditAck {
+                    document_id: opened.document_id,
+                    confirmed_version: 3,
+                    transaction_id: 91,
+                }
+            );
+        }
+
+        release.notify_one();
+        let outcome = save.await.unwrap().unwrap();
+        assert!(
+            outcome.dirty,
+            "older snapshot commit must leave a newer edit dirty"
+        );
+        assert!(opened.document.lock().await.is_dirty());
+        assert_eq!(fs::read_to_string(&file).unwrap(), "hello world");
+        assert_eq!(opened.document.lock().await.text(), "hello world!");
 
         let _ = fs::remove_file(file);
         let _ = fs::remove_dir(root);
@@ -4040,16 +4550,15 @@ mod tests {
         let _ = fs::remove_dir(root);
     }
 
-    /// A file that passes the prepare-time and handle-metadata size checks but
-    /// grows before the contents are read must still be bounded: the read
-    /// allocates at most the ceiling plus one byte and rejects with
-    /// `FileTooLarge` instead of opening the oversized file (Plan 060 T5).
+    /// A file that passes prepare-time metadata validation but grows before
+    /// EOF stays within its reserved session-budget slice and is rejected
+    /// rather than allowing an unbounded read (Plan 060 T5).
     #[tokio::test]
-    async fn bounded_read_rejects_file_that_grows_between_validation_and_read() {
+    async fn streamed_read_rejects_file_that_grows_past_reservation() {
         let root = temp_workspace("grow-during-read");
         let file = root.join("grow.txt");
-        let at_limit = "a".repeat(crate::perf::budgets::MAX_OPENABLE_FILE_BYTES);
-        fs::write(&file, &at_limit).unwrap();
+        let initial = "a".repeat(64 * 1024);
+        fs::write(&file, &initial).unwrap();
         let mut workspace = WorkspaceState::new();
         let root_id = workspace.add_root(&root).unwrap();
 
@@ -4060,7 +4569,7 @@ mod tests {
             .push((
                 grow_path.clone(),
                 Box::new(move || {
-                    fs::write(&grow_path, format!("{at_limit}b")).unwrap();
+                    fs::write(&grow_path, format!("{initial}b")).unwrap();
                 }),
             ));
 
@@ -4068,7 +4577,10 @@ mod tests {
             .open_existing_file(root_id, "grow.txt", 1)
             .await
             .unwrap_err();
-        assert_eq!(error.diagnostic().code, FileErrorCode::FileTooLarge);
+        assert_eq!(
+            error.diagnostic().code,
+            FileErrorCode::DocumentBudgetExceeded
+        );
         assert!(workspace.document_handle(1).is_none());
 
         let _ = fs::remove_file(file);

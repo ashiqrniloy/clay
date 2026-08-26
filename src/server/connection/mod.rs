@@ -39,7 +39,7 @@ mod runtime;
 mod tabs;
 mod workspace;
 
-pub(crate) use self::documents::open_document_followup_messages;
+pub(crate) use self::documents::{open_document_followup_messages, start_document_analysis};
 // Family re-exports keep the module's `mod tests` on the pre-split namespace:
 // tests reference moved helpers unqualified. Test-only: the coordinator itself
 // calls family handlers through module paths.
@@ -128,6 +128,7 @@ fn client_message_identity(message: &ClientMessage) -> Option<ClientId> {
         ClientMessage::Edit { client_id, .. }
         | ClientMessage::EditorIntent { client_id, .. }
         | ClientMessage::RequestResync { client_id, .. }
+        | ClientMessage::DocumentChunkRequest { client_id, .. }
         | ClientMessage::DecorationViewportRequest { client_id, .. }
         | ClientMessage::OpenDocument { client_id, .. }
         | ClientMessage::OpenSelectedFile { client_id, .. }
@@ -990,6 +991,28 @@ where
                     &workspace,
                     client_id,
                     document_id,
+                )
+                .await?;
+            }
+            ClientMessage::DocumentChunkRequest {
+                client_id,
+                document_id,
+                document_version,
+                offset,
+                max_bytes,
+            } => {
+                documents::handle_document_chunk_request(
+                    codec,
+                    &mut stream,
+                    &document,
+                    &workspace,
+                    documents::DocumentChunkRequestParams {
+                        client_id,
+                        document_id,
+                        document_version,
+                        offset,
+                        max_bytes,
+                    },
                 )
                 .await?;
             }
@@ -2280,9 +2303,14 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
             path: "note.md".to_string(),
         };
 
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            2,
+            "# note\n".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
         let messages = super::open_document_followup_messages(
             &metadata,
-            "# note\n",
+            &document,
             &behavior,
             &sdui,
             1,
@@ -2353,7 +2381,7 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
             ServerMessage::InitialDocument {
                 document_id: 7,
                 version: 1,
-                text: "Hello from server".to_string(),
+                head: crate::protocol::DocumentTextHead::complete("Hello from server".to_string(),),
                 access: DocumentAccess::Editable { lease_id: 1 },
                 lease_id: Some(1),
                 workspace_root: String::new(),
@@ -3033,8 +3061,8 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
         let beta_resync = connection_b.receive_response().await;
         assert!(matches!(
             beta_resync,
-            ServerMessage::ResyncSnapshot { ref text, document_id, .. }
-                if document_id == beta_metadata.document_id && text == "beta"
+            ServerMessage::ResyncSnapshot { ref head, document_id, .. }
+                if document_id == beta_metadata.document_id && head.first_chunk == "beta"
         ));
         connection_b
             .send(&ClientMessage::GetDocumentStatus {
@@ -3667,8 +3695,8 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
         assert_eq!(session_id, path_id, "menu closes before the open response");
         let (opened_root_id, opened_document_id) =
             match timeout(Duration::from_secs(2), connection.receive()).await {
-                Ok(ServerMessage::DocumentOpened { metadata, text }) => {
-                    assert_eq!(text, "hello");
+                Ok(ServerMessage::DocumentOpened { metadata, head }) => {
+                    assert_eq!(head.first_chunk, "hello");
                     assert_eq!(metadata.path, "a.txt");
                     (metadata.workspace_root_id, metadata.document_id)
                 }
@@ -6189,7 +6217,7 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
     }
 
     #[tokio::test]
-    async fn stale_client_is_rejected_after_native_decoration_semantics_change() {
+    async fn protocol_v26_client_is_rejected_by_v27_server() {
         let (client, server) = duplex(65536);
         let codec = Codec::default();
         let server_task = tokio::spawn(handle_connection(
@@ -6212,8 +6240,8 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
             .write_client_message(
                 &mut client,
                 &ClientMessage::Hello {
-                    protocol_version: 2,
-                    client_name: "stale-client".to_string(),
+                    protocol_version: 26,
+                    client_name: "v26-client".to_string(),
                 },
             )
             .await
@@ -6982,11 +7010,138 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
             ServerMessage::ResyncSnapshot {
                 document_id: 7,
                 version: 1,
-                text: "server 🦀".to_string(),
+                head: crate::protocol::DocumentTextHead::complete("server 🦀".to_string()),
                 access: DocumentAccess::Editable { lease_id: 1 },
                 lease_id: Some(1),
             }
         );
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn stale_chunk_request_after_edit_rejects_then_resync_completes() {
+        let (client, server) = duplex(65536);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "server 🦀".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            behavior,
+            workspace_state(),
+            sdui_state(),
+            active_theme_state(),
+            runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
+            language_intelligence_coordinator(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let _welcome = codec.read_server_message(&mut client).await.unwrap();
+        let _snapshot = codec.read_server_message(&mut client).await.unwrap();
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        let _active_theme = codec.read_server_message(&mut client).await.unwrap();
+        let _active_typography = codec.read_server_message(&mut client).await.unwrap();
+        let _shell_prefs = codec.read_server_message(&mut client).await.unwrap();
+        let _sdui = codec.read_server_message(&mut client).await.unwrap();
+        let _tab_registry = codec.read_server_message(&mut client).await.unwrap();
+        let _capability = codec.read_server_message(&mut client).await.unwrap();
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Edit {
+                    document_id: 7,
+                    client_id: 99,
+                    lease_id: Some(1),
+                    base_version: 1,
+                    behavior_version: 1,
+                    transaction_id: 124,
+                    operation: EditOperation::Insert {
+                        byte_offset: 2,
+                        text: " ok".to_string(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::EditAck {
+                document_id: 7,
+                confirmed_version: 2,
+                transaction_id: 124,
+            }
+        );
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::DocumentChunkRequest {
+                    client_id: 99,
+                    document_id: 7,
+                    document_version: 1,
+                    offset: 0,
+                    max_bytes: 16,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            codec.read_server_message(&mut client).await.unwrap(),
+            ServerMessage::DocumentChunkRejected {
+                document_id: 7,
+                document_version: 1,
+                offset: 0,
+                reason: crate::protocol::DocumentChunkRejection::StaleVersion {
+                    current_version: 2
+                },
+            }
+        ));
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::RequestResync {
+                    document_id: 7,
+                    client_id: 99,
+                    known_version: 1,
+                },
+            )
+            .await
+            .unwrap();
+        let ServerMessage::ResyncSnapshot {
+            document_id,
+            version,
+            head,
+            ..
+        } = codec.read_server_message(&mut client).await.unwrap()
+        else {
+            panic!("expected resync snapshot");
+        };
+        assert_eq!(document_id, 7);
+        assert_eq!(version, 2);
+        assert_eq!(head.first_chunk, "se okrver 🦀");
+        assert_eq!(head.total_bytes, head.first_chunk.len() as u64);
 
         drop(client);
         server_task.await.unwrap().unwrap();
@@ -7070,7 +7225,7 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
                     workspace_root_id: root_id,
                     path: "main.rs".to_string(),
                 },
-                text: "fn main() {}\n".to_string(),
+                head: crate::protocol::DocumentTextHead::complete("fn main() {}\n".to_string()),
             }
         );
         let behavior_version = match codec.read_server_message(&mut client).await.unwrap() {
@@ -7276,11 +7431,11 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
 
         let (opened_version, opened_lease_id) =
             match codec.read_server_message(&mut client).await.unwrap() {
-                ServerMessage::DocumentOpened { metadata, text } => {
+                ServerMessage::DocumentOpened { metadata, head } => {
                     assert_eq!(metadata.document_id, 2);
                     assert_eq!(metadata.workspace_root_id, root_id);
                     assert_eq!(metadata.path, "note.md");
-                    assert_eq!(text, "# Browser note\n\n- item\n");
+                    assert_eq!(head.first_chunk, "# Browser note\n\n- item\n");
                     let DocumentAccess::Editable { lease_id } = metadata.access else {
                         panic!("file-browser opener must receive editable access");
                     };
@@ -7607,11 +7762,11 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
             .unwrap();
 
         match codec.read_server_message(&mut client).await.unwrap() {
-            ServerMessage::DocumentOpened { metadata, text } => {
+            ServerMessage::DocumentOpened { metadata, head } => {
                 assert_eq!(metadata.document_id, 2);
                 assert_eq!(metadata.path, "note.md");
                 assert_eq!(
-                    text,
+                    head.first_chunk,
                     "# Opened note\n\n- item with `code`\n\n**strong** and *emphasis*\n"
                 );
             }
@@ -7692,9 +7847,14 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
             workspace_root_id: 1,
             path: "note.md".to_string(),
         };
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            2,
+            "# Loaded from init.js\n".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
         let messages = super::open_document_followup_messages(
             &metadata,
-            "# Loaded from init.js\n",
+            &document,
             &behavior,
             &sdui,
             1,
@@ -7976,8 +8136,9 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
         .await
         .expect("loaded package should classify markdown path");
 
+        let document = DocumentState::new(2, text, DocumentAccess::Editable { lease_id: 1 });
         let immediate =
-            super::schedule_open_parse(&coordinator, &metadata, &text, &behavior, &activation)
+            super::schedule_open_parse(&coordinator, &metadata, &document, &behavior, &activation)
                 .await
                 .expect("open parse should schedule");
         assert!(
@@ -8071,12 +8232,12 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
             .unwrap();
 
         let selected_root_id = match codec.read_server_message(&mut client).await.unwrap() {
-            ServerMessage::DocumentOpened { metadata, text } => {
+            ServerMessage::DocumentOpened { metadata, head } => {
                 assert_eq!(metadata.document_id, 1);
                 assert_eq!(metadata.version, 1);
                 assert_eq!(metadata.access, DocumentAccess::Editable { lease_id: 1 });
                 assert_eq!(metadata.path, "note.md");
-                assert_eq!(text, "# selected\n");
+                assert_eq!(head.first_chunk, "# selected\n");
                 metadata.workspace_root_id
             }
             message => panic!("expected selected DocumentOpened, got {message:?}"),

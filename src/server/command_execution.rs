@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-pub use crate::server::workspace::OpenDocumentSnapshot;
+pub use crate::server::workspace::OpenDocumentHead;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandExecutionRequest {
@@ -80,7 +80,7 @@ pub enum GitCommandResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceActionResult {
     /// A file was opened under a known root or via a selected-file grant.
-    Opened(OpenDocumentSnapshot),
+    Opened(OpenDocumentHead),
     /// A directory navigation request was accepted; the connection handler
     /// will publish a refreshed file-browser SDUI snapshot.
     Navigated {
@@ -1262,7 +1262,7 @@ mod tests {
                 snapshot.metadata.access,
                 crate::protocol::DocumentAccess::Editable { lease_id: 1 }
             );
-            assert_eq!(snapshot.text, "fn main() {}");
+            assert_eq!(snapshot.head.first_chunk, "fn main() {}");
 
             let _ = fs::remove_dir_all(root);
         }
@@ -1295,7 +1295,7 @@ mod tests {
                 panic!("expected Opened workspace result, got {:?}", result.status);
             };
             assert!(snapshot.metadata.path.contains("external.txt"));
-            assert_eq!(snapshot.text, "external content");
+            assert_eq!(snapshot.head.first_chunk, "external content");
 
             let _ = fs::remove_dir_all(outside);
         }

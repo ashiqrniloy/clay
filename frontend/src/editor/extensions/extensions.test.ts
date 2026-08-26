@@ -113,7 +113,7 @@ describe("editor parity adapters", () => {
       ranges: [{ byteStart: 0, byteEnd: 23, label: "function", provenance }],
     };
     editor.dispatch({
-      effects: installFolds(editor.state.doc.toString(), set),
+      effects: installFolds(editor.state.doc, set),
     });
     const line = editor.state.doc.line(1);
     expect(foldable(editor.state, line.from, line.to)).toEqual({

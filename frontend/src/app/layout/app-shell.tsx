@@ -41,9 +41,19 @@ export function AppShell({
     workspace.subscribe,
     workspace.getSnapshot,
   );
-  const activeDiagnostic = workspace.active()?.diagnostic;
+  const activeRuntime = workspace.active();
+  const activeDiagnostic = activeRuntime?.diagnostic;
+  // Progressive chunk load in flight: a transient, server-backed phase.
+  const documentLoading = [...(activeRuntime?.panes.values() ?? [])].some(
+    (pane) => pane.session.store.get()?.loading,
+  );
+  // Transient shell diagnostics (dialog/file failures) outrank the steady
+  // connection phase: a silent failure reads exactly like a dead button.
   const resolvedStatus =
-    status ?? activeDiagnostic?.message ?? statusFromPhase(live.phase);
+    activeDiagnostic?.message ??
+    (documentLoading
+      ? "Loading document…"
+      : (status ?? statusFromPhase(live.phase)));
 
   const liveTabs: ShellTab[] = snapshot.tabs.map((tab) => ({
     id: String(tab.clientId),

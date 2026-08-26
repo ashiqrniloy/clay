@@ -263,10 +263,36 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       "shell.clientMovePanePrev": () =>
         setTree(runtime, movePane(runtime.tree, "first")),
       "documents.clientOpenFileDialog": () => {
-        void adapters.openFileDialog?.(runtime.tabId ?? undefined);
+        adapters
+          .openFileDialog?.(runtime.tabId ?? undefined)
+          ?.catch((error: unknown) => {
+            // Dialog failures must be visible: a busy portal lock or a failed
+            // native dialog otherwise looks like a dead button.
+            runtime.diagnostic = {
+              severity: "error",
+              code: "dialog.failed",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "File dialog could not open",
+            };
+            notify();
+          });
       },
       "workspace.clientOpenFolderDialog": () => {
-        void adapters.openFolderDialog?.(runtime.tabId ?? undefined);
+        adapters
+          .openFolderDialog?.(runtime.tabId ?? undefined)
+          ?.catch((error: unknown) => {
+            runtime.diagnostic = {
+              severity: "error",
+              code: "dialog.failed",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Folder dialog could not open",
+            };
+            notify();
+          });
       },
       "settings.open": () => {
         runtime.settingsOpen = true;
@@ -573,6 +599,29 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
           notify();
           continue;
         }
+        if (event.kind === "fileOperationFailed") {
+          // Server-rejected file operations (too large, unauthorized, missing)
+          // must surface in shell status; the pane session store alone renders
+          // nothing for an empty pane.
+          runtime.diagnostic = {
+            severity: "error",
+            code: String(event.data?.code ?? "file.error"),
+            message: String(event.data?.message ?? "File operation failed"),
+          };
+          notify();
+          continue;
+        }
+        if (event.kind === "documentOpened") {
+          // A successful open clears stale dialog/file errors, then falls
+          // through to the normal pane routing below.
+          if (
+            runtime.diagnostic?.code.startsWith("dialog.") ||
+            runtime.diagnostic?.code.startsWith("file")
+          ) {
+            runtime.diagnostic = null;
+          }
+          notify();
+        }
         if (event.kind === "serverError") {
           runtime.diagnostic = {
             severity: "error",
@@ -798,6 +847,16 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
         return;
       }
       ensurePane(runtime, runtime.tree.activePaneId).session.open(path);
+    },
+    openFileDialog() {
+      const runtime = activeRuntime();
+      if (runtime)
+        dispatchClientCommand(runtime, "documents.clientOpenFileDialog");
+    },
+    openFolderDialog() {
+      const runtime = activeRuntime();
+      if (runtime)
+        dispatchClientCommand(runtime, "workspace.clientOpenFolderDialog");
     },
     serialize,
     emptyLayout,

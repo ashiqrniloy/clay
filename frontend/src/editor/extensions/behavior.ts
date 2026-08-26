@@ -297,7 +297,11 @@ function fontAndWrap(manifest: BehaviorManifestDto): Extension {
       ".cm-content": { fontFamily: "inherit" },
     }),
   ];
-  if (wrap !== "none") extensions.push(EditorView.lineWrapping);
+  // Default by font role: prose (proportional) wraps, code (monospace) does
+  // not — matching every code editor and avoiding per-block re-measure on
+  // WebKitGTK. Explicit manifest values always win.
+  const wraps = wrap === undefined ? role === "proportional" : wrap !== "none";
+  if (wraps) extensions.push(EditorView.lineWrapping);
   if (wrap && typeof wrap === "object" && "column" in wrap) {
     const column = Math.max(
       16,

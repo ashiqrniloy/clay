@@ -9,7 +9,7 @@ For detailed platform matrices, capability tokens, conflict recovery menus, and 
 From the repository root:
 
 ```bash
-# Start or reuse the default local server, then open the GUI client.
+# Stop leftover default-endpoint servers, then open the GUI.
 cargo run
 
 # App-managed GUI smoke run with an isolated endpoint and managed child server.
@@ -30,16 +30,13 @@ cargo run -- smoke-gui --config-fixture windows-markdown-open
 # open-documents switcher commands.
 cargo run -- smoke-gui --config-fixture file-browser-workflow
 
-# Stop and replace the default Linux server, wait for readiness, then exit.
+# Stop leftover servers, start a fresh background server, wait, then exit (no GUI).
 cargo run -- restart
 
 # Foreground default server, useful for watching server diagnostics.
 cargo run -- server
 
-# First default client: should receive the editable lease when available.
-cargo run -- client
-
-# Second default client: should attach as a read-only observer.
+# Extra GUI against a running server. Does not kill servers.
 cargo run -- client
 ```
 
@@ -168,6 +165,17 @@ private socket, process cleanup, and an interaction checkpoint while the
 window remains open. Both paths use the existing `WINDOW_WIDTH`/`WINDOW_HEIGHT`
 logical-size constants (`900×600`).
 
+Plan 098's document-transfer review adds dev-only Vite fixture routes in
+`frontend/src/routes/fixture.tsx`: `/fixture/document-loading`,
+`/fixture/document-budget-error`, `/fixture/document-binary-error`, and the
+ready `/fixture/editor` comparison. These routes are captured at wide and
+narrow viewport sizes through the browser fixture/CDP workflow because they
+exercise deterministic React state without opening ambient files. They are
+supplemental to real Tauri AT-SPI evidence; a browser capture is not recorded
+as a real WebKitGTK accessibility pass when that application state cannot be
+attached. Captures use synthetic text only and must not be retained if a
+full-desktop screenshot includes unrelated user content.
+
 These PNGs are review artifacts, not GPU goldens or CI pixel assertions.
 Structural SDUI/accessibility tests remain the blocking automated layer; inspect
 both the image and the AT-SPI dump before recording a visual result.
@@ -224,11 +232,15 @@ SDUI payload costs are validated by unit tests rather than default GUI smoke out
 
 ### Bare `cargo run`
 
-Bare `cargo run` tries the platform default local endpoint. If no server is reachable, Clay starts the current executable directly as a background `clay server <endpoint>` process, retries the client handshake for a bounded readiness window, and opens the GUI when connected. The Markdown package still publishes no default preview/status panel; Clay-owned Workspace file-browser chrome is controlled by workspace state and documented workspace commands, not by Markdown package loading.
+Bare `cargo run` is the development launch: it stops leftover Clay servers on the default local endpoint (`clay-server` and `clay server`, including stale protocol versions), then launches the Tauri desktop. The desktop supervisor adopts a compatible listener or spawns `clay-server`. Rebuild `clay-desktop` after frontend changes (`cargo build -p clay -p clay-desktop`). The Markdown package still publishes no default preview/status panel; Clay-owned Workspace file-browser chrome is controlled by workspace state and documented workspace commands, not by Markdown package loading.
 
 ### `cargo run -- restart`
 
-On Linux, `restart` finds only server processes running the current Clay executable against the default endpoint, sends `SIGTERM`, escalates to `SIGKILL` after a two-second bound, starts a fresh background server through the existing shell-free child command, waits for the normal client handshake, then exits without opening another GUI. It does not stop Clay clients or isolated `smoke-gui` servers. Other platforms currently return an unsupported-command error.
+On Linux, `restart` finds every `clay-server` / `clay server` process on the selected endpoint (not only the current executable — a stale protocol version must die), sends `SIGTERM`, escalates to `SIGKILL` after a two-second bound, unlinks the leftover socket, starts a fresh background `clay server`, waits for the client handshake, then exits without opening another GUI. It does not stop Clay clients or isolated `smoke-gui` servers (those use different endpoints). Other platforms currently return an unsupported-command error.
+
+### `cargo run -- client`
+
+Opens another Tauri desktop against the selected endpoint without killing servers. Use this to attach a second window after `cargo run -- restart` or `cargo run -- server`.
 
 ### `cargo run -- smoke-gui`
 

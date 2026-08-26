@@ -72,7 +72,9 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns a promise for refreshed metadata and text snapshot.
+Returns a promise for refreshed metadata and the complete document text as a JSON `text` field.
+
+**Chunking note**: This trusted-runtime facade returns the full document text in a single JSON string, not the protocol's `DocumentTextHead`/chunk transfer path. The trusted JS runtime heap (128 MiB) is the effective bound; external packages never receive this full-text JSON. The protocol chunked path (`DocumentTextHead` + `DocumentChunkRequest`/`DocumentChunk`) is a separate Tauri/client bridge concern.
 
 Current Phase 13 facade/runtime status is runtime-backed for server-side configuration and extension execution through explicit `deno_core` ops, while the API remains documented with the Phase 9 public contract.
 

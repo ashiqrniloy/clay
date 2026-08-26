@@ -9,13 +9,13 @@ function bootstrap(
   over: Partial<BootstrapDto> & { clientId: number },
 ): BootstrapDto {
   return {
-    protocolVersion: 26,
+    protocolVersion: 27,
     endpoint: "test",
     generation: 1,
     initialDocument: {
       documentId: over.clientId as never,
       version: 1,
-      text: "seed",
+      head: { totalBytes: 4, firstChunk: "seed" },
       access: { editable: { leaseId: 1 } },
       workspaceRoot: `/tmp/ws${over.clientId}`,
     },
@@ -155,6 +155,82 @@ describe("workspace controller", () => {
     ).toBe(true);
   });
 
+  it("restore opens each persisted pane through OpenDocument, not a bootstrap snapshot", async () => {
+    const sent: string[] = [];
+    const ws = createWorkspace({
+      send: async (payload) => {
+        sent.push(payload);
+      },
+      loadLayout: async () => ({
+        version: 2,
+        activeTab: 0,
+        tabs: [
+          {
+            workspaceRoot: "/tmp/ws1",
+            activePane: 1,
+            splitTree: {
+              split: {
+                orientation: "horizontal",
+                ratio: 0.5,
+                first: { leaf: { paneId: 1 } },
+                second: {
+                  split: {
+                    orientation: "vertical",
+                    ratio: 0.5,
+                    first: { leaf: { paneId: 2 } },
+                    second: { leaf: { paneId: 3 } },
+                  },
+                },
+              },
+            },
+            slots: [],
+            panes: {
+              "1": "a.txt",
+              "2": "b.txt",
+              "3": "large.txt",
+            },
+          },
+        ],
+      }),
+    });
+    ws.installBootstrap(bootstrap({ clientId: 1 }));
+    await ws.restore();
+    ws.handleEnvelope({
+      kind: "event",
+      data: {
+        kind: "tabRegistry",
+        data: {
+          tabs: [
+            {
+              tabId: 1,
+              clientId: 1,
+              workspaceRoot: "/tmp/ws1",
+              workspaceRootId: 3,
+            },
+          ],
+          active: 1,
+          revision: 1,
+        },
+      },
+    });
+    const opens = sent.filter((payload) =>
+      payload.includes('"family":"openDocument"'),
+    );
+    expect(opens).toHaveLength(3);
+    expect(opens.some((payload) => payload.includes('"path":"a.txt"'))).toBe(
+      true,
+    );
+    expect(opens.some((payload) => payload.includes('"path":"b.txt"'))).toBe(
+      true,
+    );
+    expect(
+      opens.some((payload) => payload.includes('"path":"large.txt"')),
+    ).toBe(true);
+    expect(sent.some((payload) => payload.includes("bootstrapSnapshot"))).toBe(
+      false,
+    );
+  });
+
   it("keeps split trees and documents isolated per tab", () => {
     const sent: Array<{ payload: string; tabId?: number }> = [];
     const ws = createWorkspace({
@@ -185,7 +261,7 @@ describe("workspace controller", () => {
               path: "a.md",
               workspaceRootId: 1,
             },
-            text: "aaa",
+            head: { totalBytes: 3, firstChunk: "aaa" },
           },
         },
       },
@@ -327,6 +403,25 @@ describe("workspace controller", () => {
     command("documents.clientOpenFileDialog.evil");
     await Promise.resolve();
     expect(dialogs).toEqual(["file"]);
+
+    const documentId = ws
+      .active()
+      ?.panes.get(1)
+      ?.session.store.get()?.documentId;
+    ws.handleEnvelope({
+      kind: "routed",
+      data: {
+        clientId: 1,
+        tabId: 10,
+        event: {
+          kind: "documentClosed",
+          data: { documentId, closed: true },
+        },
+      },
+    });
+    ws.openFileDialog();
+    await Promise.resolve();
+    expect(dialogs).toEqual(["file", "file"]);
   });
 
   it("focuses the existing pane on a duplicate open", () => {

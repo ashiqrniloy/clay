@@ -26,6 +26,8 @@ export interface PaneTreeProps {
   onFocus: (paneId: number) => void;
   onRatio: (path: Array<"first" | "second">, ratio: number) => void;
   onOpenPath: (path: string) => void;
+  onOpenFile: () => void;
+  onOpenFolder: () => void;
   packageUi: PackageUiSnapshot | null;
   uiVersion: number;
 }
@@ -35,17 +37,21 @@ function PaneContent({
   packageUi,
   uiVersion,
   onOpenPath,
+  onOpenFile,
+  onOpenFolder,
 }: {
   pane: PaneRecord;
   packageUi: PackageUiSnapshot | null;
   uiVersion: number;
   onOpenPath: (path: string) => void;
+  onOpenFile: () => void;
+  onOpenFolder: () => void;
 }) {
   const meta = useSyncExternalStore(
     pane.session.store.subscribe,
     pane.session.store.get,
   );
-  const empty = !meta?.path && pane.session.snapshotText().length === 0;
+  const empty = !meta?.path && pane.session.snapshotDoc().length === 0;
   if (empty && packageUi?.emptyTab) {
     // Provenance-exact host rendering for the bundled chat landing
     // (Phase 10). Every other package keeps the inert SDUI renderer.
@@ -76,33 +82,20 @@ function PaneContent({
     );
   }
   if (empty) {
-    const command = (commandId: string) => {
-      if (!meta) return;
-      void pane.session.request(
-        JSON.stringify({
-          family: "commandIntent",
-          payload: {
-            clientId: 0,
-            documentId: meta.documentId,
-            behaviorVersion: meta.behaviorVersion,
-            commandId,
-          },
-        }),
-      );
-    };
     return (
       <div className={styles.empty} role="group" aria-label="Empty tab">
         <ClayText variant="title">Start with a file or folder</ClayText>
         <div className={styles.emptyActions}>
-          <ClayButton onPress={() => command("documents.clientOpenFileDialog")}>
-            Open file
-          </ClayButton>
-          <ClayButton
-            onPress={() => command("workspace.clientOpenFolderDialog")}
-          >
-            Open folder
-          </ClayButton>
+          <ClayButton onPress={onOpenFile}>Open file</ClayButton>
+          <ClayButton onPress={onOpenFolder}>Open folder</ClayButton>
         </div>
+        {meta?.diagnostic ? (
+          <div role="alert">
+            <ClayText variant="body" muted>
+              {meta.diagnostic}
+            </ClayText>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -116,6 +109,8 @@ export function PaneTree({
   onFocus,
   onRatio,
   onOpenPath,
+  onOpenFile,
+  onOpenFolder,
   packageUi,
   uiVersion,
 }: PaneTreeProps) {
@@ -135,6 +130,8 @@ export function PaneTree({
             packageUi={packageUi}
             uiVersion={uiVersion}
             onOpenPath={onOpenPath}
+            onOpenFile={onOpenFile}
+            onOpenFolder={onOpenFolder}
           />
         ) : (
           <div className={styles.empty}>
@@ -165,6 +162,8 @@ export function PaneTree({
           onFocus={onFocus}
           onRatio={onRatio}
           onOpenPath={onOpenPath}
+          onOpenFile={onOpenFile}
+          onOpenFolder={onOpenFolder}
           packageUi={packageUi}
           uiVersion={uiVersion}
         />
@@ -189,6 +188,8 @@ export function PaneTree({
           onFocus={onFocus}
           onRatio={onRatio}
           onOpenPath={onOpenPath}
+          onOpenFile={onOpenFile}
+          onOpenFolder={onOpenFolder}
           packageUi={packageUi}
           uiVersion={uiVersion}
         />

@@ -138,23 +138,48 @@ pub async fn tab_activate(bridge: Bridged<'_>, tab_id: u64) -> Result<(), Bridge
     bridge.activate_tab(tab_id).await
 }
 
+/// Native open dialog via the XDG file-chooser portal (ashpd). Runs on the
+/// Tauri tokio runtime; ashpd owns the portal request/response handshake, so
+/// a selection can never be lost to a signal race and the caller's per-dialog
+/// lock is always released.
 async fn pick_path(folder: bool) -> Result<Option<PathBuf>, BridgeError> {
-    let result = tokio::task::spawn_blocking(move || {
-        if folder {
-            clay::client::open_folder_dialog()
-        } else {
-            clay::client::open_markdown_file_dialog()
-        }
-    })
-    .await
-    .map_err(BridgeError::invalid_request)?;
-    match result {
-        clay::client::FileDialogResult::Selected(path) => Ok(Some(path)),
-        clay::client::FileDialogResult::Cancelled => Ok(None),
-        clay::client::FileDialogResult::Unsupported { message }
-        | clay::client::FileDialogResult::Failed { message } => {
-            Err(BridgeError::invalid_request(message))
-        }
+    use ashpd::Error as PortalError;
+    use ashpd::desktop::ResponseError;
+    use ashpd::desktop::file_chooser::{FileFilter, OpenFileRequest};
+
+    let request = if folder {
+        OpenFileRequest::default()
+            .title("Open Folder")
+            .modal(false)
+            .directory(true)
+    } else {
+        OpenFileRequest::default()
+            .title("Open File")
+            .modal(false)
+            .filters(vec![
+                FileFilter::new("Markdown files")
+                    .glob("*.md")
+                    .glob("*.markdown")
+                    .glob("*.mdown"),
+                FileFilter::new("All files").glob("*"),
+            ])
+    };
+    match request.send().await {
+        Ok(response) => match response.response() {
+            Ok(files) => Ok(files.uris().first().and_then(|uri| {
+                url::Url::parse(uri.as_str())
+                    .ok()
+                    .and_then(|parsed| parsed.to_file_path().ok())
+            })),
+            Err(PortalError::Response(ResponseError::Cancelled)) => Ok(None),
+            Err(error) => Err(BridgeError::invalid_request(format!(
+                "file dialog failed: {error}"
+            ))),
+        },
+        Err(PortalError::Response(ResponseError::Cancelled)) => Ok(None),
+        Err(error) => Err(BridgeError::invalid_request(format!(
+            "file dialog failed: {error}"
+        ))),
     }
 }
 

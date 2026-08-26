@@ -70,6 +70,21 @@ export function getStatusPayload(documentId: number): string {
   });
 }
 
+/** Client-side mirror of `MAX_CHUNK_BYTES`; the server clamps anyway. */
+export const DOCUMENT_CHUNK_BYTES = 256 * 1024;
+
+export function documentChunkRequestPayload(
+  documentId: number,
+  documentVersion: number,
+  offset: number,
+  maxBytes: number,
+): string {
+  return JSON.stringify({
+    family: "documentChunkRequest",
+    payload: { clientId: 0, documentId, documentVersion, offset, maxBytes },
+  });
+}
+
 export type EditRejection =
   | "leaseRequired"
   | "readOnlyDocument"

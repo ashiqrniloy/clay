@@ -33,6 +33,11 @@ cargo run -- smoke-gui
 
 Current `smoke-gui` opens the managed smoke document. File-backed large-document opening remains server-authoritative through workspace APIs/configuration fixtures; do not grant the native client direct filesystem authority for performance testing.
 
+Plan 098 adds an automated and a scripted path for large-document verification:
+
+- `cargo test --test runtime large_document::` drives a real server with a generated 50 MiB fixture through open (head+chunks) / edit / save / reload, asserting chunk wire bounds, timing budgets, and the oversize/binary refusal paths.
+- `scripts/large-document-smoke.sh` generates the fixtures, starts a workspace-scoped server plus the Tauri/React desktop, and prints the manual checklist.
+
 ## Criterion Baseline Benchmarks
 
 Phase 14 uses Criterion for repeatable, local, statistics-backed baseline measurements. Criterion is installed as a development dependency and each benchmark target is configured with `harness = false` as required by the Criterion runner.
@@ -283,7 +288,7 @@ Phase 18.18 adds deterministic payload/open-order guards and an optimized Criter
 
 Hard guards:
 
-- `first_party_decoration_payloads_stay_within_budget_per_language` runs each compiled grammar/query and serializes its real `DecorationSet` and `IncrementalParseUpdate`. It locks 4096-byte native parse windows for code grammars, Markdown's bounded full-document context ceiling (`MAX_OPENABLE_FILE_BYTES` = 768 KiB), the independent 4096-byte ordinary parse envelope, and the derived `INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES` envelope when folding is attached (`4096 + 2048 = 6144`), plus the 5000 ms timeout and 30 MiB syntax-cache ceiling. Same-version Markdown scroll requests reuse the cached full tree, so the larger context ceiling does not mean a full reparse per viewport.
+- `first_party_decoration_payloads_stay_within_budget_per_language` runs each compiled grammar/query and serializes its real `DecorationSet` and `IncrementalParseUpdate`. It locks 4096-byte native parse windows for code grammars, Markdown's bounded data-only context ceiling (`NATIVE_GRAMMAR_MAX_WINDOW_BYTES` = 768 KiB), the independent 4096-byte ordinary parse envelope, and the derived `INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES` envelope when folding is attached (`4096 + 2048 = 6144`), plus the 5000 ms timeout and 30 MiB syntax-cache ceiling. Same-version Markdown scroll requests reuse the cached full tree, so the larger context ceiling does not mean a full reparse per viewport. File loading is separate: open/reload stream into ropes under the 256 MiB server-owned resident budget and publish bounded heads/chunks.
 - `first_party_open_parse_does_not_block_initial_render_per_language` installs a deliberately delayed handler for each package, enqueues parse work, and proves the editor snapshot is visible before background parse completion.
 - Existing `editor_performance_invariants` guards keep parser/package JavaScript/IPC/file IO out of paint, input, layout, and scroll paths.
 
@@ -921,8 +926,57 @@ gzip gate (`frontend/scripts/bundle-budget.mjs`, wired into CI).
 | Startup shell | <= 180 kB gzip (startup shell) | `frontend/scripts/bundle-budget.mjs` |
 | Total frontend | <= 400 kB gzip (total frontend) | `frontend/scripts/bundle-budget.mjs` |
 
-Latest measured production build (2026-08-24): shell 160.6 kB gzip,
-total 343.2 kB gzip — within budget, none raised. Lazy workflow/chat/package
+Latest measured production build (2026-08-24): shell 161.0 kB gzip,
+total 343.7 kB gzip — within budget, none raised.
+
+### Editor offset conversion and viewport requests
+
+The keystroke-to-paint rule (no full-document work per edit) is enforced in
+the client by construction:
+
+- `frontend/src/editor/position-map.ts` builds a memoized per-document line
+  index (`textIndex`, keyed on the immutable CodeMirror `Text`). Every
+  UTF-16 ↔ UTF-8 conversion is a binary search plus one-line scan — measured
+  ~3000× faster than the previous linear scans near the end of a 1 MiB
+  document (500 conversions: 2888.7 ms linear vs 0.922 ms indexed).
+  `tests/performance_budgets.rs` and `frontend/src/editor/extensions/
+  performance.test.ts` pin the advisory budgets; the indexed equivalence
+  tests in `position-map.test.ts` pin correctness against the linear
+  reference.
+- Viewport-driven `DecorationViewportRequest`s use inflight pacing in
+  `EditorProjection`: immediate first send, latest-wins follow-up the moment
+  a reply lands, 400 ms safety valve. Scroll storms cost at most one request
+  per round trip instead of one per input event.
+- Feature replies batch into ONE editor transaction per envelope
+  (`EditorProjection.handleEnvelope` buffers decoration/diagnostic/fold
+  effects), so a multi-window reply costs one update cycle, not N reflows.
+- Server-side, `handle_decoration_viewport_request` builds rope-sliced parse
+  windows covering the whole requested viewport via
+  `Document::parse_windows_covering` — it no longer clones the full document
+  text, rescans the prefix for the base line, or clamps coverage to the first
+  4 KiB of tall viewports.
+
+### Linux compositing path (verified 2026-08-24)
+
+The real desktop (`clay client` → `clay-desktop` → wry → WebKitGTK 2.52.5)
+was probed on the reference Linux host (Wayland session, Mesa AMD iGPU,
+1920x1200@60 scale 1.0) to rule the shell's compositor path out as a jitter
+source:
+
+- GTK runs native Wayland (`GDK_BACKEND=wayland`, `WAYLAND_DISPLAY=wayland-0`).
+- The GPU DMA-BUF renderer is active: the UI process holds
+  `/dev/dri/renderD129` and `/dmabuf:` file descriptors; no EGL/GBM fallback
+  warnings appear with `WEBKIT_DEBUG=GLContext,Compositing,Layers`.
+- Zero idle CPU: both `clay-desktop` and `WebKitWebProcess` consumed no CPU
+  ticks over a 5 s idle sample, so there is no software-repaint storm.
+- Integer display scale (1.0), non-VRR current mode — neither fractional-
+  scaling repaint amplification nor VRR judder applies on this host.
+
+Clay sets no WEBKIT_* environment overrides; the defaults are correct here.
+If a user's machine falls off the accelerated path (commonly NVIDIA + DMABuf
+renderer artifacts), the escape hatches are `WEBKIT_DISABLE_DMABUF_RENDERER=1`
+or `WEBKIT_DISABLE_COMPOSITING_MODE=1` — both force slower software paths,
+so treat them as user-side diagnostics, not shipped configuration. Lazy workflow/chat/package
 chunks are classified separately from the shell so async features never
 inflate the startup path. Keystroke-to-local-paint stays owned by CodeMirror
 with bounded ordered deltas queued asynchronously; server work, package

@@ -118,6 +118,7 @@ references) were replaced with current equivalents in modules 01, 04, 07, 10,
 | Plan 097 Phase 10 AG-UI chat over Tauri channels | 09 (@clay/chat surface), 10 (chat intents), 11 (stream feel) |
 | Plan 097 Phase 11 release hardening/packaging/updates/security | 01 (launch identity), 11 (budgets), 12 (platform policy) |
 | Plan 097 Phase 12 parity certification/cutover/native removal | 01, 13, 14 + full regression pass of modules above |
+| Plan 098 chunked document loading | 01 (L23–L24), 03 (F48–F52), 11 (Q34–Q37) |
 
 ## Plan 097 Phase 9 Linux execution record (2026-08-23)
 
@@ -270,3 +271,29 @@ keyboard backend. Full evidence:
 
 No step was deleted or weakened. Static states are refreshed; unresolved live
 rows remain explicit and linked to module records and Plan 094 evidence.
+
+## Plan 098 manual-test-plan execution record (2026-08-26)
+
+The current Linux build was exercised through the workspace-private
+`scripts/large-document-smoke.sh` path. It built `target/debug/clay`, started
+`clay server <private-socket>`, launched the Tauri client, opened the native
+file chooser, and selected a synthetic 52.4 MB Markdown fixture. The chooser
+and window target became unstable before a repeatable loaded-editor state, so
+live F48–F52/Q34–Q36 interaction remains UNRESOLVED. No GUI pass is inferred
+from server tests.
+
+The real server/protocol flow passed `cargo test --test runtime
+large_document:: -- --nocapture` (2 tests) with fresh measurements: open→head
+297.339689 ms, open→full 589.273483 ms, save→ack 423.454128 ms for 52,428,815
+bytes. The run asserted 256 KiB chunk bounds, UTF-8 equality, edit/save/reload,
+257 MiB resident-budget refusal, and binary refusal. One host-scheduled
+combined run reached 538.188757 ms for open→head and tripped the existing
+500 ms guard; isolated reruns and the final combined run passed, so this is
+recorded as host variance rather than hidden. The v27 mixed-version negative
+check `protocol_v26_client_is_rejected_by_v27_server` also passes.
+
+Sanitized evidence: `code-reviews/screenshots/2026-08-26-plan098-manual/`.
+It contains the app-only welcome screenshot, runtime output, status markers,
+and this execution note. No user content, host paths, or secrets were
+retained. Existing steps were preserved; only L23/L24, F48–F52, and Q34–Q37
+were added.

@@ -14,13 +14,21 @@ import {
   selectNextOccurrence,
   selectSelectionMatches,
 } from "@codemirror/search";
-import { EditorSelection, type Extension } from "@codemirror/state";
+import {
+  EditorSelection,
+  type Extension,
+  type TransactionSpec,
+} from "@codemirror/state";
 import { EditorView, hoverTooltip, keymap } from "@codemirror/view";
 
 import type { BridgeEnvelope } from "../../bridge/types";
 import type { DocumentMeta } from "../../state/document-store";
 import { behaviorCompartment } from "../compartments";
-import { utf16ToUtf8, utf8ToUtf16 } from "../position-map";
+import {
+  textIndex,
+  utf16ToUtf8Indexed,
+  utf8ToUtf16Indexed,
+} from "../position-map";
 import { accessibilityExtension } from "./accessibility";
 import { behaviorExtensions } from "./behavior";
 import { CompletionProjection } from "./completion";
@@ -54,6 +62,9 @@ interface Options {
   report(message: string): void;
 }
 
+/** Trailing coalescing gap for viewport-driven decoration requests. */
+const VIEWPORT_SAFETY_MS = 400;
+
 export class EditorProjection {
   private view: EditorView | null = null;
   private manifest: BehaviorManifestDto = { behaviorVersion: 0 };
@@ -68,6 +79,12 @@ export class EditorProjection {
   private nextSelectionRequest = 1;
   private pendingSelectionRequest: number | null = null;
   private pendingSelections: readonly { anchor: number; head: number }[] = [];
+  /** A viewport request is on the wire; new viewports queue behind it. */
+  private viewportInflight = false;
+  /** Newest viewport changed while one was inflight; sent on arrival. */
+  private viewportPending = false;
+  /** Safety valve so lost replies cannot wedge highlighting. */
+  private viewportSafety: number | null = null;
 
   constructor(private readonly options: Options) {
     const current = () => {
@@ -169,12 +186,14 @@ export class EditorProjection {
     for (const set of this.diagnosticSets.values())
       this.diagnostics.install(view, set);
     for (const set of this.foldSets.values())
-      view.dispatch({ effects: installFolds(view.state.doc.toString(), set) });
+      view.dispatch({ effects: installFolds(view.state.doc, set) });
     this.requestViewport(view);
   }
 
   detach(view: EditorView): void {
     if (this.view === view) this.view = null;
+    this.clearViewportTimers();
+    this.viewportInflight = false;
   }
 
   clear(): void {
@@ -184,17 +203,27 @@ export class EditorProjection {
     this.completion.clear();
     this.intelligence.clear();
     this.lastViewport = "";
+    this.clearViewportTimers();
+    this.viewportInflight = false;
     if (this.view) {
       this.view.dispatch({ effects: [resetDecorations(), resetFolds()] });
       this.diagnostics.clear(this.view);
     }
   }
 
+  /**
+   * One editor transaction per envelope: decoration/diagnostic/fold arrivals
+   * buffer their state effects and dispatch together. Each dispatch costs a
+   * full update cycle (transaction → decorations → DOM), so N frames per
+   * batch meant N reflows on every server reply.
+   */
   handleEnvelope(envelope: BridgeEnvelope): void {
     if (envelope.kind !== "event") return;
     const event = envelope.data as { kind: string; data: unknown };
     const meta = this.options.meta();
     const currentVersion = meta ? meta.version + meta.pending : -1;
+    const effects: TransactionSpec[] = [];
+    let viewportReply = false;
     switch (event.kind) {
       case "behaviorManifestInstalled": {
         const data = event.data as { manifest: BehaviorManifestDto };
@@ -209,19 +238,41 @@ export class EditorProjection {
           });
         break;
       }
-      case "decorationSet":
-        this.installDecoration(event.data as DecorationSet, currentVersion);
+      case "decorationSet": {
+        viewportReply = true;
+        const effect = this.prepareDecoration(
+          event.data as DecorationSet,
+          currentVersion,
+        );
+        if (effect) effects.push(effect);
         break;
+      }
       case "decorationBatch":
-        for (const set of event.data as DecorationSet[])
-          this.installDecoration(set, currentVersion);
+        viewportReply = true;
+        for (const set of event.data as DecorationSet[]) {
+          const effect = this.prepareDecoration(set, currentVersion);
+          if (effect) effects.push(effect);
+        }
         break;
-      case "diagnosticSet":
-        this.installDiagnostic(event.data as DiagnosticSet, currentVersion);
+      case "diagnosticSet": {
+        viewportReply = true;
+        if (!this.view) break;
+        const effect = this.prepareDiagnostic(
+          event.data as DiagnosticSet,
+          currentVersion,
+        );
+        if (effect) effects.push(effect);
         break;
-      case "foldingRangeSet":
-        this.installFold(event.data as FoldingRangeSet, currentVersion);
+      }
+      case "foldingRangeSet": {
+        viewportReply = true;
+        const effect = this.prepareFold(
+          event.data as FoldingRangeSet,
+          currentVersion,
+        );
+        if (effect) effects.push(effect);
         break;
+      }
       case "completionResult":
         this.completion.install(event.data as CompletionResultSet);
         break;
@@ -265,6 +316,11 @@ export class EditorProjection {
         this.applyLayout(event.data);
         break;
     }
+    // Multiple specs join into one transaction — one update cycle total.
+    if (effects.length && this.view) this.view.dispatch(...effects);
+    // Decoration/diagnostic/fold traffic doubles as the viewport-request
+    // acknowledgement for pacing.
+    if (viewportReply) this.viewportArrived();
   }
 
   toggleInlays(): void {
@@ -274,8 +330,12 @@ export class EditorProjection {
     view.dispatch({ effects: showInlays(!hidden) });
   }
 
-  private installDecoration(set: DecorationSet, version: number): void {
-    if (!this.accepts(set.documentId, set.documentVersion, version)) return;
+  private prepareDecoration(
+    set: DecorationSet,
+    version: number,
+  ): TransactionSpec | null {
+    if (!this.accepts(set.documentId, set.documentVersion, version))
+      return null;
     for (const [key, cached] of this.decorationSets) {
       if (cached.documentVersion !== set.documentVersion)
         this.decorationSets.delete(key);
@@ -284,11 +344,15 @@ export class EditorProjection {
       `${set.packagePrefix}:${set.kind}:${set.viewportByteStart}:${set.viewportByteEnd}`,
       set,
     );
-    if (this.view) this.view.dispatch({ effects: replaceDecorations(set) });
+    return { effects: replaceDecorations(set) };
   }
 
-  private installDiagnostic(set: DiagnosticSet, version: number): void {
-    if (!this.accepts(set.documentId, set.documentVersion, version)) return;
+  private prepareDiagnostic(
+    set: DiagnosticSet,
+    version: number,
+  ): TransactionSpec | null {
+    if (!this.accepts(set.documentId, set.documentVersion, version))
+      return null;
     for (const [key, cached] of this.diagnosticSets) {
       if (cached.documentVersion !== set.documentVersion)
         this.diagnosticSets.delete(key);
@@ -297,20 +361,23 @@ export class EditorProjection {
       `${set.source}:${set.provenance.packagePrefix}:${set.viewportByteStart}:${set.viewportByteEnd}`,
       set,
     );
-    if (this.view) this.diagnostics.install(this.view, set);
+    if (!this.view) return null;
+    return this.diagnostics.prepare(this.view, set);
   }
 
-  private installFold(set: FoldingRangeSet, version: number): void {
-    if (!this.accepts(set.documentId, set.documentVersion, version)) return;
+  private prepareFold(
+    set: FoldingRangeSet,
+    version: number,
+  ): TransactionSpec | null {
+    if (!this.accepts(set.documentId, set.documentVersion, version))
+      return null;
     for (const [key, cached] of this.foldSets) {
       if (cached.documentVersion !== set.documentVersion)
         this.foldSets.delete(key);
     }
     this.foldSets.set(set.packagePrefix, set);
-    if (this.view)
-      this.view.dispatch({
-        effects: installFolds(this.view.state.doc.toString(), set),
-      });
+    if (!this.view) return null;
+    return { effects: installFolds(this.view.state.doc, set) };
   }
 
   private accepts(
@@ -326,15 +393,33 @@ export class EditorProjection {
 
   private requestViewport(view: EditorView): void {
     const meta = this.options.meta();
-    if (!meta || !view.inView) return;
-    const text = view.state.doc.toString();
+    if (!meta || meta.loading || !view.inView) return;
     const from = Math.min(...view.visibleRanges.map((range) => range.from));
     const to = Math.max(...view.visibleRanges.map((range) => range.to));
-    const byteStart = utf16ToUtf8(text, from);
-    const byteEnd = utf16ToUtf8(text, to);
+    // Indexed conversion: O(log lines). The previous implementation
+    // flattened the whole document and linearly scanned it on every scroll
+    // tick and keystroke, which froze large files.
+    const index = textIndex(view.state.doc);
+    const byteStart = utf16ToUtf8Indexed(index, from);
+    const byteEnd = utf16ToUtf8Indexed(index, to);
     const key = `${meta.documentId}:${meta.version + meta.pending}:${byteStart}:${byteEnd}`;
     if (key === this.lastViewport || byteStart === byteEnd) return;
+    // Inflight pacing instead of a fixed debounce: the first request for a
+    // new viewport goes out immediately (highlight latency ≈ round trip),
+    // scroll storms collapse into latest-wins follow-ups that fire the moment
+    // the previous reply lands.
+    if (this.viewportInflight) {
+      this.viewportPending = true;
+      return;
+    }
     this.lastViewport = key;
+    this.viewportInflight = true;
+    if (this.viewportSafety !== null) clearTimeout(this.viewportSafety);
+    this.viewportSafety = window.setTimeout(() => {
+      this.viewportSafety = null;
+      this.viewportInflight = false;
+      this.pumpViewport();
+    }, VIEWPORT_SAFETY_MS);
     void this.options.send(
       JSON.stringify({
         family: "decorationViewportRequest",
@@ -349,10 +434,34 @@ export class EditorProjection {
     );
   }
 
+  /** A reply (or the safety timer) freed the pipe; send the newest viewport. */
+  private viewportArrived(): void {
+    this.viewportInflight = false;
+    if (this.viewportSafety !== null) {
+      clearTimeout(this.viewportSafety);
+      this.viewportSafety = null;
+    }
+    this.pumpViewport();
+  }
+
+  private pumpViewport(): void {
+    if (!this.viewportPending) return;
+    this.viewportPending = false;
+    if (this.view && this.view.inView) this.requestViewport(this.view);
+  }
+
+  private clearViewportTimers(): void {
+    if (this.viewportSafety !== null) {
+      clearTimeout(this.viewportSafety);
+      this.viewportSafety = null;
+    }
+    this.viewportPending = false;
+  }
+
   private activateLink(view: EditorView, target: DecorationTarget): boolean {
     if ("documentRange" in target) {
-      const at = utf8ToUtf16(
-        view.state.doc.toString(),
+      const at = utf8ToUtf16Indexed(
+        textIndex(view.state.doc),
         target.documentRange.range.byteStart,
       );
       view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
@@ -505,7 +614,7 @@ export class EditorProjection {
       anchor: range.anchor,
       head: range.head,
     }));
-    const text = view.state.doc.toString();
+    const index = textIndex(view.state.doc);
     void this.options.send(
       JSON.stringify({
         family: "selectionQueryRequest",
@@ -518,8 +627,8 @@ export class EditorProjection {
             behaviorVersion: meta.behaviorVersion,
             query,
             selections: this.pendingSelections.map((range) => ({
-              anchor: utf16ToUtf8(text, range.anchor),
-              focus: utf16ToUtf8(text, range.head),
+              anchor: utf16ToUtf8Indexed(index, range.anchor),
+              focus: utf16ToUtf8Indexed(index, range.head),
             })),
           },
         },
@@ -541,17 +650,17 @@ export class EditorProjection {
     )
       return;
     this.pendingSelectionRequest = null;
-    const text = view.state.doc.toString();
-    const ranges = this.pendingSelections.map((original, index) => {
-      const resultRange = result.ranges[index];
+    const index = textIndex(view.state.doc);
+    const ranges = this.pendingSelections.map((original, index_) => {
+      const resultRange = result.ranges[index_];
       if (!resultRange)
         return EditorSelection.range(original.anchor, original.head);
-      const start = utf8ToUtf16(
-        text,
+      const start = utf8ToUtf16Indexed(
+        index,
         Math.min(resultRange.start, resultRange.end),
       );
-      const end = utf8ToUtf16(
-        text,
+      const end = utf8ToUtf16Indexed(
+        index,
         Math.max(resultRange.start, resultRange.end),
       );
       return original.anchor > original.head

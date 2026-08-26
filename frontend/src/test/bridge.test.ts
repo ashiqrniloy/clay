@@ -48,13 +48,13 @@ const typographySnapshot: TypographySnapshot = {
 
 const bootstrap: BootstrapDto = {
   clientId: 1,
-  protocolVersion: 26,
+  protocolVersion: 27,
   endpoint: "/tmp/x.sock",
   generation: 1,
   initialDocument: {
     documentId: asDocumentId(1),
     version: 1,
-    text: "",
+    head: { totalBytes: 0, firstChunk: "" },
     access: {},
     workspaceRoot: "/tmp/ws",
   },

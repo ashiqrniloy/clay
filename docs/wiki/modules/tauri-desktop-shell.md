@@ -21,9 +21,14 @@ talks to a running server lives next door in
 
 ## Supervisor semantics
 
-- **Adopt first.** Before spawning, the supervisor probes the endpoint
-  (`endpoint_accepts`). An already-running server is adopted: status becomes
-  `Connected` with `pid: null` and no child process exists.
+- **Adopt only compatible servers.** Before spawning, the supervisor runs a
+  real handshake probe (`clay::client::probe_protocol`: one `Hello` at the
+  current protocol version, one reply). A current-version listener is
+  adopted: status becomes `Connected` with `pid: null` and no child process.
+  A listener that refuses the handshake (e.g. a stale server from an older
+  build) is refused with a typed `Disconnected` reason — spawning would only
+  fail with `EndpointInUse`, and adopting it made every session fail with
+  `UnsupportedProtocolVersion` that reconnect could never fix.
 - **Spawn with probe thread.** On spawn it starts `clay-server <endpoint>`,
   then a generation-tagged probe thread polls until the endpoint accepts.
   Stale probes from an old generation exit without touching state.
@@ -50,8 +55,10 @@ Clay server accepts it, exactly as with any other grant flow.
 Server authority plus a dumb shell keeps one trust boundary: the webview is a
 renderer for typed projections, packages never touch Tauri APIs, and a
 compromised webview cannot reach files or processes beyond what a user
-explicitly granted through dialogs. Adoption makes `clay server` +
-`clay client` against one daemon work naturally.
+explicitly granted through dialogs. Adoption makes `clay server` + `clay client` against one daemon work naturally.
+Development launch is `clay` / `cargo run` (stops leftover servers on the
+endpoint, then opens the desktop); `clay restart` replaces the server without
+a GUI; `clay client` attaches another window without killing servers.
 
 ## Tests
 

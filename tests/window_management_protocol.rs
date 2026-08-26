@@ -93,7 +93,7 @@ fn multi_stroke_key_binding_rules_round_trip_the_archive_identically() {
 
 #[test]
 fn protocol_version_is_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 26);
+    assert_eq!(PROTOCOL_VERSION, 27);
 }
 
 /// The handshake itself round-trips: `Hello` carries the pinned version to

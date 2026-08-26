@@ -2,6 +2,8 @@
 mod command_execution;
 #[path = "../completion_provider.rs"]
 mod completion_provider;
+#[path = "../large_document.rs"]
+mod large_document;
 #[path = "../lsp_bridge.rs"]
 mod lsp_bridge;
 #[path = "../lsp_real_servers.rs"]

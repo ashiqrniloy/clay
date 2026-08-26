@@ -15,7 +15,7 @@
 pub mod bridge;
 mod commands;
 pub mod release;
-mod server;
+pub mod server;
 
 use std::sync::Arc;
 

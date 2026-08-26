@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BridgeEnvelope } from "../../bridge/types";
 import type { DocumentMeta } from "../../state/document-store";
@@ -18,6 +18,7 @@ const meta: DocumentMeta = {
   workspaceRootId: 1,
   workspaceRoot: "/tmp/ws",
   pending: 0,
+  loading: false,
   behaviorVersion: 2,
   diagnostic: null,
 };
@@ -157,6 +158,96 @@ describe("editor projection boundary", () => {
       },
     });
     expect(view.state.selection.main).toMatchObject({ from: 0, to: 12 });
+    projection.detach(view);
+    view.destroy();
+  });
+});
+
+describe("viewport request pacing", () => {
+  afterEach(() => vi.useRealTimers());
+
+  function projectionWith(
+    sent: string[],
+    metaOverride?: () => DocumentMeta,
+  ): EditorProjection {
+    return new EditorProjection({
+      send: async (payload) => {
+        sent.push(payload);
+      },
+      meta: metaOverride ?? (() => meta),
+      clientId: () => 9,
+      openPath: () => undefined,
+      report: () => undefined,
+    });
+  }
+
+  function mounted(projection: EditorProjection, doc: string): EditorView {
+    return new EditorView({
+      parent: document.body,
+      state: EditorState.create({
+        doc,
+        extensions: [behaviorCompartment.of([]), projection.extensions],
+      }),
+    });
+  }
+
+  it("collapses a scroll storm into one latest-wins follow-up on reply", () => {
+    vi.useFakeTimers();
+    const sent: string[] = [];
+    const projection = projectionWith(sent);
+    projection.installInitial({ behaviorVersion: 2 });
+    const view = mounted(projection, "line\n".repeat(400));
+    projection.attach(view);
+    const initial = sent.length;
+    expect(initial).toBeGreaterThan(0);
+    // Scroll/edit storm while the first request is on the wire: edits shift
+    // every byte offset, so each tick wants a different viewport.
+    for (let i = 0; i < 20; i += 1)
+      view.dispatch({ changes: { from: 0, insert: "x" } });
+    expect(sent.length).toBe(initial);
+    // The reply frees the pipe; exactly one follow-up carries the newest
+    // viewport — no fixed-delay wait, no per-tick requests.
+    projection.handleEnvelope(envelope(set(7)));
+    expect(sent.length).toBe(initial + 1);
+    const lastPayload = sent.at(-1);
+    expect(lastPayload).toBeDefined();
+    const last = JSON.parse(lastPayload as string);
+    expect(last.family).toBe("decorationViewportRequest");
+    projection.detach(view);
+    view.destroy();
+  });
+
+  it("detaching cancels pending viewport work", () => {
+    vi.useFakeTimers();
+    const sent: string[] = [];
+    const projection = projectionWith(sent);
+    projection.installInitial({ behaviorVersion: 2 });
+    const view = mounted(projection, "x");
+    projection.attach(view);
+    const before = sent.length;
+    view.dispatch({ selection: { anchor: 0 } });
+    projection.detach(view);
+    vi.advanceTimersByTime(1_000);
+    expect(sent.length).toBe(before);
+    view.destroy();
+  });
+
+  it("suppresses viewport requests while a chunk load is in flight", () => {
+    const loadingMeta: DocumentMeta = { ...meta, loading: true };
+    let current = loadingMeta;
+    const sent: string[] = [];
+    const projection = projectionWith(sent, () => current);
+    projection.installInitial({ behaviorVersion: 2 });
+    const view = mounted(projection, "partial");
+    projection.attach(view);
+    expect(sent).toHaveLength(0);
+
+    // Ready: the same viewport now goes out on the next doc/viewport update.
+    current = { ...meta, loading: false };
+    view.dispatch({ changes: { from: 0, insert: "x" } });
+    expect(
+      sent.some((payload) => payload.includes("decorationViewportRequest")),
+    ).toBe(true);
     projection.detach(view);
     view.destroy();
   });

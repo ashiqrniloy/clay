@@ -7,7 +7,11 @@ import {
   type Tooltip,
 } from "@codemirror/view";
 
-import { utf16ToUtf8, utf8ToUtf16 } from "../position-map";
+import {
+  textIndex,
+  utf16ToUtf8Indexed,
+  utf8ToUtf16Indexed,
+} from "../position-map";
 import type { LanguageFeature, LanguageResult, TextLocation } from "./types";
 
 interface Current {
@@ -36,12 +40,14 @@ export class IntelligenceProjection {
         const hover =
           result && "hover" in result.payload ? result.payload.hover : null;
         if (!hover?.markdown) return null;
-        const text = view.state.doc.toString();
+        const index = textIndex(view.state.doc);
         return {
           pos: hover.range
-            ? utf8ToUtf16(text, hover.range.byteStart)
+            ? utf8ToUtf16Indexed(index, hover.range.byteStart)
             : position,
-          end: hover.range ? utf8ToUtf16(text, hover.range.byteEnd) : undefined,
+          end: hover.range
+            ? utf8ToUtf16Indexed(index, hover.range.byteEnd)
+            : undefined,
           create: () => {
             const dom = document.createElement("div");
             dom.className = "cm-clay-hover";
@@ -158,8 +164,10 @@ export class IntelligenceProjection {
         });
         return;
       }
-      const text = view.state.doc.toString();
-      const at = utf8ToUtf16(text, location.openDocument.range.byteStart);
+      const at = utf8ToUtf16Indexed(
+        textIndex(view.state.doc),
+        location.openDocument.range.byteStart,
+      );
       view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
       return;
     }
@@ -190,7 +198,10 @@ export class IntelligenceProjection {
           documentId: meta.documentId,
           documentVersion: meta.documentVersion,
           behaviorVersion: meta.behaviorVersion,
-          cursorByteOffset: utf16ToUtf8(view.state.doc.toString(), position),
+          cursorByteOffset: utf16ToUtf8Indexed(
+            textIndex(view.state.doc),
+            position,
+          ),
           feature,
           providerGeneration: 0,
         },

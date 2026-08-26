@@ -181,6 +181,44 @@ fn primitive_registry_matrix_has_one_complete_row_per_primitive() {
 }
 
 #[test]
+fn document_chunk_transfer_primitive_is_bounded_and_documented() {
+    let registry = read("docs/reference/primitives/registry.md");
+    let index = read("docs/reference/primitives/index.md");
+    let protocol_wiki = read("docs/wiki/modules/protocol-codec.md");
+    let bridge_wiki = read("docs/wiki/modules/desktop-typed-bridge.md");
+    let flow = read("docs/wiki/flows/document-chunked-loading.md");
+    let budgets = read("src/perf/budgets.rs");
+
+    for marker in [
+        "DocumentChunkTransfer",
+        "MAX_CHUNK_BYTES",
+        "DEFAULT_MAX_FRAME_SIZE",
+        "UTF-8",
+    ] {
+        assert!(
+            registry.contains(marker),
+            "primitive registry missing {marker}"
+        );
+    }
+    assert!(index.contains("DocumentChunkTransfer"));
+    assert!(protocol_wiki.contains("DocumentChunkRejected"));
+    assert!(bridge_wiki.contains("DocumentChunkRequest"));
+    assert!(
+        flow.contains("DocumentTextHead"),
+        "flow page missing DocumentTextHead"
+    );
+    assert!(
+        flow.contains("MAX_CHUNK_BYTES"),
+        "flow page missing MAX_CHUNK_BYTES"
+    );
+    assert!(
+        flow.contains("one outstanding"),
+        "flow page missing in-flight window"
+    );
+    assert!(budgets.contains("pub const MAX_CHUNK_BYTES: usize = 256 * 1024;"));
+}
+
+#[test]
 fn narrow_security_markers_are_present_with_actionable_paths() {
     let contracts = documentation_contracts();
     for entry in contract_entries(&contracts, "security_contracts") {

@@ -30,7 +30,7 @@ page is the current client path.
    diff to operations, assigns the next optimistic base version and a
    monotonic `transactionId`, records it in the `inflight` set, and builds
    the protocol `Edit` payload via `editPayload`. The local shadow text
-   (`authoritativeText` baseline) is updated optimistically.
+   (rope-backed authoritative snapshot) is updated optimistically.
 4. **Send without blocking.** The payload goes through `bridge/client.ts`
    `request()` (fire-and-forget promise; failures land in the document store
    as a diagnostic). No synchronous round trip before render.
@@ -42,6 +42,19 @@ page is the current client path.
    invalidated; the UI surfaces the typed rejection and can
    `requestResync()`, which replaces the document via an annotated
    transaction (step 2's filter keeps this from re-emitting).
+
+## Progressive initial load (Plan 098)
+
+Opens, reloads, resyncs, and bootstrap deliver a bounded `DocumentTextHead`
+(first ≤ 256 KiB plus total byte length). The session paints the head
+immediately, then fetches the remainder with one outstanding
+`documentChunkRequest` at a time — server replies are clamped to UTF-8 char
+boundaries, so each request continues from the previously received end.
+Chunks append into the rope-backed snapshot and the editor as annotated
+transactions; editing stays gated read-only (plus a visible loading status
+in the pane and shell status bar) until all bytes arrive. Stale-version
+chunk rejections trigger a resync; other rejections surface as diagnostics
+with the gate closed.
 
 ## Invariants
 
@@ -55,8 +68,12 @@ page is the current client path.
 
 ## Tests
 
-- `frontend/src/test/editor.test.tsx` — host wiring, label sanitization.
+- `frontend/src/editor/sync/session.test.ts` — ack ordering, resync,
+  progressive chunk assembly/gating.
+- `frontend/src/test/editor.test.tsx` — host wiring, label sanitization,
+  loading status lifecycle.
 - Position mapping: `frontend/src/editor/position-map.test.ts`.
+- End-to-end large-document roundtrip and refusals: `tests/large_document.rs`.
 - Rust-side queue/staleness semantics: `tests/suites/protocol.rs`
   (see [Desktop Typed Bridge](../modules/desktop-typed-bridge.md)).
 

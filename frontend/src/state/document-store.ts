@@ -19,6 +19,8 @@ export interface DocumentMeta {
   workspaceRootId: number | null;
   workspaceRoot: string;
   pending: number;
+  /** Progressive chunk load in flight; editing is gated until false. */
+  loading: boolean;
   behaviorVersion: number;
   diagnostic: string | null;
 }
@@ -75,6 +77,7 @@ export function metaFromInitial(input: {
     workspaceRootId: null,
     workspaceRoot: input.workspaceRoot,
     pending: 0,
+    loading: false,
     behaviorVersion: input.behaviorVersion,
     diagnostic: null,
   };

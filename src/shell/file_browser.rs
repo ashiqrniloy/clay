@@ -804,7 +804,7 @@ mod tests {
         else {
             panic!("expected Opened workspace result, got {:?}", result.status);
         };
-        assert_eq!(snapshot.text, "fn main() {}");
+        assert_eq!(snapshot.head.first_chunk, "fn main() {}");
         assert!(snapshot.metadata.path.contains("main.rs"));
 
         let _ = fs::remove_dir_all(root);

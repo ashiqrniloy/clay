@@ -77,6 +77,24 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
+    /// Integration-test constructor: fixed binary and probe budgets.
+    #[doc(hidden)]
+    pub fn with_test_config(
+        endpoint: IpcEndpoint,
+        server_binary: Option<PathBuf>,
+        probe_interval: Duration,
+        probe_deadline: Duration,
+    ) -> Self {
+        Self {
+            endpoint,
+            probe_interval,
+            probe_deadline,
+            generation: AtomicU64::new(0),
+            server_binary,
+            inner: Mutex::new(None),
+        }
+    }
+
     pub fn new(endpoint: IpcEndpoint) -> Self {
         Self {
             endpoint,
@@ -101,19 +119,39 @@ impl Supervisor {
             return;
         }
 
-        // Adopt an already-running server: `clay server` stays independently
-        // runnable, and a second spawn would just fail with EndpointInUse.
-        if endpoint_accepts(&self.endpoint) {
-            *guard = Some(Inner {
-                status: ServerStatus::Connected {
-                    endpoint: self.endpoint.to_string(),
-                    pid: None,
-                },
-                child: None,
-            });
-            return;
+        // Adopt an already-running server only after a real handshake: a
+        // stale server from an older build otherwise gets adopted and every
+        // later session fails with UnsupportedProtocolVersion.
+        match tauri::async_runtime::block_on(clay::client::probe_protocol(&self.endpoint)) {
+            clay::client::ProtocolProbe::Compatible => {
+                *guard = Some(Inner {
+                    status: ServerStatus::Connected {
+                        endpoint: self.endpoint.to_string(),
+                        pid: None,
+                    },
+                    child: None,
+                });
+            }
+            clay::client::ProtocolProbe::Incompatible => {
+                // Occupied by something that cannot serve this client;
+                // spawning would just fail with EndpointInUse.
+                *guard = Some(Inner {
+                    status: ServerStatus::Disconnected {
+                        reason: "endpoint is served by an incompatible Clay server \
+                                 (protocol version mismatch); stop that server or \
+                                 choose another endpoint via CLAY_ENDPOINT"
+                            .to_string(),
+                    },
+                    child: None,
+                });
+            }
+            clay::client::ProtocolProbe::NotListening => self.spawn_locked(guard),
         }
+    }
 
+    /// Spawns the configured binary for the supervised endpoint. Takes the
+    /// state lock so it can be released before readiness probing starts.
+    fn spawn_locked(self: &Arc<Self>, mut guard: MutexGuard<'_, Option<Inner>>) {
         let binary = self
             .server_binary
             .clone()
@@ -256,16 +294,38 @@ impl Supervisor {
                         }
                     }
                 }
-                if endpoint_accepts(&self.endpoint) {
-                    if let Some(inner) = guard.as_mut()
-                        && let Some(child) = inner.child.as_ref()
-                    {
-                        inner.status = ServerStatus::Connected {
-                            endpoint: self.endpoint.to_string(),
-                            pid: Some(child.id()),
-                        };
+                match tauri::async_runtime::block_on(clay::client::probe_protocol(&self.endpoint)) {
+                    clay::client::ProtocolProbe::Compatible => {
+                        if let Some(inner) = guard.as_mut()
+                            && let Some(child) = inner.child.as_ref()
+                        {
+                            inner.status = ServerStatus::Connected {
+                                endpoint: self.endpoint.to_string(),
+                                pid: Some(child.id()),
+                            };
+                        }
+                        return;
                     }
-                    return;
+                    clay::client::ProtocolProbe::Incompatible => {
+                        // The spawned (or adopted-by-mistake) server cannot
+                        // serve this client; waiting out the deadline would
+                        // only hide the real cause.
+                        if let Some(inner) = guard.as_mut() {
+                            if let Some(child) = inner.child.as_mut() {
+                                let _ = child.kill();
+                                let _ = child.wait();
+                            }
+                            inner.child = None;
+                            inner.status = ServerStatus::Disconnected {
+                                reason: "clay-server answered with an incompatible \
+                                         protocol version; install the matching sidecar \
+                                         or set CLAY_SERVER_BIN"
+                                    .to_string(),
+                            };
+                        }
+                        return;
+                    }
+                    clay::client::ProtocolProbe::NotListening => {}
                 }
             }
             if Instant::now() >= deadline {
@@ -299,36 +359,6 @@ impl Supervisor {
 impl Drop for Supervisor {
     fn drop(&mut self) {
         self.shutdown();
-    }
-}
-
-/// Best-effort transport-level readiness check. This never performs protocol
-/// work; the Clay client driver owns handshakes.
-fn endpoint_accepts(endpoint: &IpcEndpoint) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::net::UnixStream;
-        // UnixSocket is the only variant compiled on unix targets.
-        match endpoint {
-            IpcEndpoint::UnixSocket(path) => UnixStream::connect(path).is_ok(),
-        }
-    }
-    #[cfg(windows)]
-    {
-        // WindowsNamedPipe is the only variant compiled on windows targets.
-        match endpoint {
-            IpcEndpoint::WindowsNamedPipe(name) => {
-                // Endpoint names already carry the \\.\pipe\ prefix. Opening
-                // the pipe client-side succeeds once the server is listening;
-                // no protocol bytes are exchanged here.
-                std::fs::File::open(name).is_ok()
-            }
-        }
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = endpoint;
-        false
     }
 }
 
@@ -499,15 +529,103 @@ mod tests {
     /// alongside the workspace, waits for a typed Connected transition, then
     /// verifies clean teardown. Skips (rather than fails) when the binary has
     /// not been built, so targeted suite runs stay usable.
+    /// A listener that accepts but cannot speak the current protocol must be
+    /// refused with a typed reason, never adopted and never spawned past.
+    #[test]
+    #[cfg(unix)]
+    fn incompatible_listener_is_refused_with_typed_reason() {
+        use std::io::{Read, Write as _};
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("stale.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        let server_thread = std::thread::spawn(move || {
+            // Answer one probe, then keep accepting-and-stalling so any
+            // mistaken spawn attempt would still not "become ready".
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buffer = [0u8; 512];
+                let _ = stream.read(&mut buffer);
+                let _ = stream.write_all(b"not-a-clay-handshake");
+                let _ = stream.flush();
+            }
+            std::thread::sleep(Duration::from_secs(5));
+        });
+
+        let supervisor = Supervisor::with_test_config(
+            IpcEndpoint::UnixSocket(socket),
+            Some(PathBuf::from("/bin/false")),
+            Duration::from_millis(10),
+            Duration::from_millis(300),
+        );
+        let supervisor = Arc::new(supervisor);
+        supervisor.start();
+        match supervisor.status() {
+            ServerStatus::Disconnected { reason } => {
+                assert!(reason.contains("incompatible"), "{reason}");
+            }
+            other => panic!("expected typed refusal, got {other:?}"),
+        }
+        assert_eq!(supervisor.child_pid(), None);
+        let _ = server_thread.join();
+    }
+
+    /// Adoption now requires a real protocol-v27 handshake: a scripted
+    /// current-version Welcome is adoptable without spawning.
     #[test]
     #[cfg(unix)]
     fn adopted_server_reports_connected_without_spawn() {
-        use std::os::unix::net::UnixListener;
+        use clay::protocol::{ServerMessage, codec::Codec};
+        use tokio::io::AsyncWriteExt;
         let dir = tempfile::tempdir().expect("tempdir");
-        let endpoint = IpcEndpoint::UnixSocket(dir.path().join("adopt.sock"));
-        let _listener = UnixListener::bind(dir.path().join("adopt.sock")).expect("bind");
+        let socket = dir.path().join("adopt.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
+        let server_thread = std::thread::spawn(move || {
+            // Accept in nonblocking mode and hand tokio a nonblocking fd.
+            let stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => return,
+                }
+            };
+            // Answer through the real protocol codec so the probe sees a
+            // genuine current-version Welcome.
+            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+            // std accept() re-enables blocking mode on the child socket.
+            if stream.set_nonblocking(true).is_err() {
+                return;
+            }
+            runtime.block_on(async move {
+                let Ok(mut stream) = tokio::net::UnixStream::from_std(stream) else {
+                    return;
+                };
+                let codec = Codec::default();
+                if codec.read_client_message(&mut stream).await.is_err() {
+                    return;
+                }
+                let _ = codec
+                    .write_server_message(
+                        &mut stream,
+                        &ServerMessage::Welcome {
+                            client_id: 1,
+                            protocol_version: clay::protocol::PROTOCOL_VERSION,
+                        },
+                    )
+                    .await;
+                let _ = stream.shutdown().await;
+            });
+        });
 
-        let mut supervisor = Supervisor::new(endpoint);
+        let mut supervisor = Supervisor::new(IpcEndpoint::UnixSocket(socket));
         // Would poison the test if the spawn path ran instead of adoption.
         supervisor.server_binary = Some(PathBuf::from("/bin/false"));
         let supervisor = Arc::new(supervisor);
@@ -521,6 +639,7 @@ mod tests {
         }
         assert_eq!(supervisor.child_pid(), None);
         supervisor.shutdown();
+        let _ = server_thread.join();
     }
 
     #[test]

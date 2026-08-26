@@ -4,6 +4,7 @@
 
 - `scripts/capture-ui-review.sh`
 - `tests/fixtures/configuration/ui-review-*` (eight deterministic fixtures)
+- `frontend/src/routes/fixture.tsx` (Plan 098 document-transfer fixture routes)
 - `tests/manual_smoke_docs.rs` — command/fixture documentation drift guard
 - `docs/development/launch-and-gui-smoke.md` — harness documentation
 - `docs/development/ui-observability.md` — observability entry point
@@ -44,6 +45,28 @@ Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reaso
 | `ui-review-rust` | language-server authorization + `editor.toggleInlayHints` binding | Rust analyzer/inlay states (interactive) |
 
 The probe first locates the `clay` application index by scanning desktop children (`app INDEX` with per-call timeouts — whole-desktop enumeration hangs on some hosts), then dumps only that subtree. Hosts without `python3` + `gi.repository.Atspi` are reported as a prerequisite skip, never a pass.
+
+### Plan 098 document-transfer fixtures
+
+The Vite development client also exposes deterministic fixture routes for the
+chunked document-loading review. These routes render the real React editor and
+empty-pane surfaces with fixture-only data; they do not add production routes
+or call the Tauri bridge:
+
+| Route | State captured |
+|---|---|
+| `/fixture/document-loading` | First document head visible, remaining chunks pending, editor read-only, loading status live regions, and disabled Save action. |
+| `/fixture/document-budget-error` | Server-style resident document budget refusal in the shell status and empty-pane alert. |
+| `/fixture/document-binary-error` | Server-style binary-content refusal in the shell status and empty-pane alert. |
+| `/fixture/editor` | Ready editor baseline used to compare loaded small-file controls and focus target. |
+
+Capture wide and narrow viewport evidence with the browser fixture/CDP
+harness when available. Pair it with a real Tauri AT-SPI dump; if the browser
+fixture is reachable but the real WebKitGTK application state cannot be
+attached, record the browser result as supplemental and mark real-app AT-SPI
+`UNRESOLVED` with the exact blocker. Fixture screenshots and semantic dumps
+must contain only synthetic document names and text, never ambient workspace
+content or host paths.
 
 ### Window backend note
 

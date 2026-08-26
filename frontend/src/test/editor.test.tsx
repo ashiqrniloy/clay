@@ -1,6 +1,6 @@
 import { EditorState } from "@codemirror/state";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, act } from "@testing-library/react";
 
 import type { BootstrapDto } from "../bridge/types";
 import { ClayEditor } from "../editor/ClayEditor";
@@ -16,13 +16,13 @@ afterEach(cleanup);
 
 const bootstrap = {
   clientId: 1,
-  protocolVersion: 26,
+  protocolVersion: 27,
   endpoint: "test",
   generation: 1,
   initialDocument: {
     documentId: 1,
     version: 1,
-    text: "seed",
+    head: { totalBytes: 4, firstChunk: "seed" },
     access: { editable: { leaseId: 1 } },
     workspaceRoot: "/tmp/ws",
   },
@@ -84,5 +84,41 @@ describe("editor lifecycle", () => {
     release?.();
     view.destroy();
     host.remove();
+  });
+
+  it("shows a loading status during chunk assembly that clears at ready", () => {
+    const sent: string[] = [];
+    const session = createDocumentSession({
+      send: async (payload) => {
+        sent.push(payload);
+      },
+    });
+    const loadingBootstrap = {
+      ...bootstrap,
+      initialDocument: {
+        ...bootstrap.initialDocument,
+        head: { totalBytes: 8, firstChunk: "seed" },
+      },
+    } as unknown as BootstrapDto;
+    session.installInitial(loadingBootstrap);
+    render(<ClayEditor session={session} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading full document…",
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    act(() => {
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "documentChunk",
+          data: { documentId: 1, documentVersion: 1, offset: 4, text: "-full" },
+        },
+      });
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(screen.getByText(/seed-full/)).toBeInTheDocument();
   });
 });

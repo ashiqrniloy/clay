@@ -56,12 +56,12 @@ export function ClayEditor({
     const parent = parentRef.current;
     if (!parent || !meta) return;
     const view = createEditor({
-      doc: session.snapshotText(),
-      readOnly: !accessIsEditable(meta.access),
+      doc: session.snapshotDoc(),
+      readOnly: !accessIsEditable(meta.access) || !!meta.loading,
       parent,
       placeholder: "Start typing",
-      onUserChanges: (oldText, changes) => {
-        session.emitUserChanges(oldText, changes);
+      onUserChanges: (oldDoc, changes) => {
+        session.emitUserChanges(oldDoc, changes);
       },
       onSave: () => session.save(),
       extra: projection.extensions,
@@ -95,7 +95,8 @@ export function ClayEditor({
   useEffect(() => {
     const view = viewRef.current;
     if (!view || !meta) return;
-    setReadOnly(view, !accessIsEditable(meta.access));
+    // Progressive chunk loads gate editing until the document is complete.
+    setReadOnly(view, !accessIsEditable(meta.access) || !!meta.loading);
   }, [meta]);
 
   if (!meta) {
@@ -109,7 +110,7 @@ export function ClayEditor({
     );
   }
 
-  const editable = accessIsEditable(meta.access);
+  const editable = accessIsEditable(meta.access) && !meta.loading;
   const path = meta.path.trim();
   const label = path
     ? /^(?:[\\/]|[A-Za-z]:[\\/])/.test(path)
@@ -157,6 +158,11 @@ export function ClayEditor({
             Open
           </ClayButton>
         </div>
+        {meta.loading && (
+          <div className={styles.alert} role="status">
+            <ClayText variant="status">Loading full document…</ClayText>
+          </div>
+        )}
         {meta.diagnostic && (
           <div className={styles.alert} role="alert">
             <ClayText variant="status">{meta.diagnostic}</ClayText>

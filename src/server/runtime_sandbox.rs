@@ -1,4 +1,4 @@
-use std::{error::Error, fmt, path::Path, process::Stdio, time::Duration};
+use std::{error::Error, fmt, io, path::Path, process::Stdio, time::Duration};
 
 use serde_json::{Value, json};
 use tokio::{
@@ -28,13 +28,26 @@ impl RuntimeSandboxSupervisor {
         executable: impl AsRef<Path>,
         max_payload_bytes: usize,
     ) -> Result<Self, RuntimeSandboxError> {
-        let mut child = Command::new(executable.as_ref())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(RuntimeSandboxError::spawn)?;
+        // Under full parallel test loads a freshly written fixture script can
+        // still be open for write elsewhere when we exec it (ETXTBSY). Retry
+        // briefly instead of failing the whole suite on that race.
+        let mut attempt = 0;
+        let mut child = loop {
+            match Command::new(executable.as_ref())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+            {
+                Ok(child) => break child,
+                Err(error) if error.kind() == io::ErrorKind::ExecutableFileBusy && attempt < 50 => {
+                    attempt += 1;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => return Err(RuntimeSandboxError::spawn(error)),
+            }
+        };
         let stdin = child.stdin.take().ok_or(RuntimeSandboxError::MissingPipe)?;
         let stdout = child
             .stdout

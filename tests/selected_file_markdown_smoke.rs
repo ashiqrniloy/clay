@@ -134,9 +134,9 @@ async fn run_smoke(endpoint: &IpcEndpoint, selected: &Path) {
         .unwrap();
 
     let opened_document_id = match read_message(&codec, &mut stream).await {
-        ServerMessage::DocumentOpened { metadata, text } => {
+        ServerMessage::DocumentOpened { metadata, head } => {
             assert_eq!(metadata.path, "note.md");
-            assert_eq!(text, "# Smoke note\n\n- item with `code`\n");
+            assert_eq!(head.first_chunk, "# Smoke note\n\n- item with `code`\n");
             metadata.document_id
         }
         message => panic!("expected DocumentOpened, got {message:?}"),

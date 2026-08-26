@@ -10,13 +10,13 @@ use clay::protocol::{
     AgentClientCommand, AgentPickerKind, AgentServerMessage, ClientMessage,
     CompletionReplacementRange, CompletionRequest, CompletionTrigger, DecorationKind,
     DecorationProvenance, DecorationSet, DiagnosticSet, DiagnosticSeverity, DiagnosticSpan,
-    DocumentMetadata, FontProfile, LanguageIntelligenceFeature, LanguageIntelligenceRequest,
-    ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent, SduiActionSource, SduiNode,
-    SduiNodeKind, SduiTree, SduiTreeUpdate, SelectionQuery, SelectionQueryCursor,
-    SelectionQueryRequest, ServerMessage, TabCommand, TabEntry, TabRegistrySnapshot,
-    TextThemeOverride, TextobjectDirection, TextobjectKind, TransientMenuActivationData,
-    TransientMenuFocusPolicyData, TransientMenuOriginData, TransientMenuSnapshotData,
-    TransientMenuStatusData, WrapPolicy,
+    DocumentChunkRejection, DocumentMetadata, DocumentTextHead, FontProfile,
+    LanguageIntelligenceFeature, LanguageIntelligenceRequest, ProtocolErrorCode, RuntimeDiagnostic,
+    SduiActionIntent, SduiActionSource, SduiNode, SduiNodeKind, SduiTree, SduiTreeUpdate,
+    SelectionQuery, SelectionQueryCursor, SelectionQueryRequest, ServerMessage, TabCommand,
+    TabEntry, TabRegistrySnapshot, TextThemeOverride, TextobjectDirection, TextobjectKind,
+    TransientMenuActivationData, TransientMenuFocusPolicyData, TransientMenuOriginData,
+    TransientMenuSnapshotData, TransientMenuStatusData, WrapPolicy,
 };
 
 fn provenance() -> DecorationProvenance {
@@ -68,6 +68,13 @@ fn client_samples() -> Vec<ClientMessage> {
             client_id: 2,
             document_id: 1,
             known_version: 4,
+        },
+        ClientMessage::DocumentChunkRequest {
+            client_id: 2,
+            document_id: 1,
+            document_version: 4,
+            offset: 8,
+            max_bytes: 262_144,
         },
         ClientMessage::DecorationViewportRequest {
             client_id: 2,
@@ -228,6 +235,7 @@ fn client_family(message: &ClientMessage) -> &'static str {
         ClientMessage::Edit { .. } => "edit",
         ClientMessage::EditorIntent { .. } => "editorIntent",
         ClientMessage::RequestResync { .. } => "requestResync",
+        ClientMessage::DocumentChunkRequest { .. } => "documentChunkRequest",
         ClientMessage::DecorationViewportRequest { .. } => "decorationViewportRequest",
         ClientMessage::OpenDocument { .. } => "openDocument",
         ClientMessage::OpenSelectedFile { .. } => "openSelectedFile",
@@ -280,7 +288,7 @@ fn server_samples() -> Vec<ServerMessage> {
         ServerMessage::InitialDocument {
             document_id: 1,
             version: 4,
-            text: "# hello".into(),
+            head: DocumentTextHead::complete("# hello".into()),
             access: clay::protocol::DocumentAccess::ReadOnly,
             lease_id: Some(3),
             workspace_root: "/tmp/ws".into(),
@@ -354,13 +362,25 @@ fn server_samples() -> Vec<ServerMessage> {
         ServerMessage::ResyncSnapshot {
             document_id: 1,
             version: 5,
-            text: "state".into(),
+            head: DocumentTextHead::complete("state".into()),
             access: clay::protocol::DocumentAccess::ReadOnly,
             lease_id: Some(3),
         },
+        ServerMessage::DocumentChunk {
+            document_id: 1,
+            document_version: 5,
+            offset: 0,
+            text: "body".into(),
+        },
+        ServerMessage::DocumentChunkRejected {
+            document_id: 1,
+            document_version: 4,
+            offset: 0,
+            reason: DocumentChunkRejection::StaleVersion { current_version: 5 },
+        },
         ServerMessage::DocumentOpened {
             metadata: metadata(),
-            text: "body".into(),
+            head: DocumentTextHead::complete("body".into()),
         },
         ServerMessage::DocumentSaved {
             document_id: 1,
@@ -369,7 +389,7 @@ fn server_samples() -> Vec<ServerMessage> {
         },
         ServerMessage::DocumentReloaded {
             metadata: metadata(),
-            text: "body".into(),
+            head: DocumentTextHead::complete("body".into()),
         },
         ServerMessage::DocumentStatus {
             metadata: metadata(),
@@ -432,6 +452,8 @@ fn server_family(message: &ServerMessage) -> &'static str {
         ServerMessage::EditRejected { .. } => "editRejected",
         ServerMessage::EditTransaction { .. } => "editTransaction",
         ServerMessage::ResyncSnapshot { .. } => "resyncSnapshot",
+        ServerMessage::DocumentChunk { .. } => "documentChunk",
+        ServerMessage::DocumentChunkRejected { .. } => "documentChunkRejected",
         ServerMessage::DocumentOpened { .. } => "documentOpened",
         ServerMessage::DocumentSaved { .. } => "documentSaved",
         ServerMessage::DocumentReloaded { .. } => "documentReloaded",
@@ -519,6 +541,22 @@ fn large_menu_session_ids_cross_json_as_strings() {
         payload["sessionId"],
         serde_json::Value::String((1u64 << 63 | 7).to_string())
     );
+}
+
+#[test]
+fn document_chunk_json_is_camel_case_without_redundant_final_flag() {
+    let json = serde_json::to_value(ServerMessage::DocumentChunk {
+        document_id: 1,
+        document_version: 5,
+        offset: 8,
+        text: "chunk".into(),
+    })
+    .unwrap();
+    let payload = &json["payload"];
+
+    assert_eq!(payload["documentVersion"], 5);
+    assert!(payload.get("final").is_none());
+    assert!(payload.get("finalChunk").is_none());
 }
 
 #[test]

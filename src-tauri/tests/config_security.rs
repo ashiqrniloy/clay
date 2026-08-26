@@ -18,16 +18,20 @@ fn csp_is_deny_by_default_with_no_remote_origins() {
     let csp = value["app"]["security"]["csp"]
         .as_str()
         .expect("production CSP configured");
-    for directive in ["default-src 'none'", "script-src 'self'"] {
+    for directive in [
+        "default-src 'none'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+    ] {
         assert!(csp.contains(directive), "CSP missing `{directive}`: {csp}");
     }
-    for forbidden in [
-        "unsafe-eval",
-        "unsafe-inline",
-        "http://",
-        "https://",
-        "ws://",
-    ] {
+    let script_src = csp
+        .split(';')
+        .map(str::trim)
+        .find(|directive| directive.starts_with("script-src"))
+        .expect("script-src directive");
+    assert!(!script_src.contains("unsafe-inline"));
+    for forbidden in ["unsafe-eval", "http://", "https://", "ws://"] {
         // connect-src's http://ipc.localhost is Tauri v2's IPC origin shim on
         // Linux/Windows and is the single sanctioned exception.
         if forbidden == "http://" && csp.contains("connect-src ipc: http://ipc.localhost") {

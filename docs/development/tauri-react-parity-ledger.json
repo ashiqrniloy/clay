@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-08-23T18:55:00Z",
+  "updated": "2026-08-26T04:15:00Z",
   "native_client_frozen": true,
   "status_vocabulary": [
     "pending",
@@ -55,7 +55,9 @@
             "L19",
             "L20",
             "L21",
-            "L22"
+            "L22",
+            "L23",
+            "L24"
           ]
         }
       ],
@@ -221,7 +223,12 @@
             "F44",
             "F45",
             "F46",
-            "F47"
+            "F47",
+            "F48",
+            "F49",
+            "F50",
+            "F51",
+            "F52"
           ]
         }
       ],
@@ -254,12 +261,15 @@
           "GetDocumentStatus",
           "ListDocuments",
           "RequestResync",
+          "DocumentChunkRequest",
           "CloseDocument"
         ],
         "server": [
           "InitialDocument",
           "FileOpenCapabilityIssued",
           "DocumentOpened",
+          "DocumentChunk",
+          "DocumentChunkRejected",
           "DocumentSaved",
           "DocumentReloaded",
           "DocumentStatus",
@@ -1026,7 +1036,11 @@
             "Q30",
             "Q31",
             "Q32",
-            "Q33"
+            "Q33",
+            "Q34",
+            "Q35",
+            "Q36",
+            "Q37"
           ]
         }
       ],

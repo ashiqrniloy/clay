@@ -1,10 +1,11 @@
 use clay::perf::budgets::{
     AGENT_DAEMON_SPAWN_P95_BUDGET_MS, AGENT_DELTA_IPC_P95_BUDGET_MS,
     AGENT_PROMPT_TO_FIRST_DELTA_P95_BUDGET_MS, BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES,
-    CLIENT_EDIT_PAYLOAD_BUDGET_BYTES, COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS,
-    COMMAND_CENTRE_OPEN_P95_BUDGET_MS, COMPLETION_MAX_VISIBLE_ROWS, COMPLETION_MAX_WIDTH_PX,
-    COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
-    DECORATION_PAYLOAD_BUDGET_BYTES, EDIT_ACK_P95_BUDGET_MS, EDIT_ACK_PAYLOAD_BUDGET_BYTES,
+    BINARY_SNIFF_BYTES, CLIENT_EDIT_PAYLOAD_BUDGET_BYTES,
+    COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS, COMMAND_CENTRE_OPEN_P95_BUDGET_MS,
+    COMPLETION_MAX_VISIBLE_ROWS, COMPLETION_MAX_WIDTH_PX, COMPLETION_RESULT_MAX_ITEMS,
+    COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES, DECORATION_PAYLOAD_BUDGET_BYTES,
+    DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES, EDIT_ACK_P95_BUDGET_MS, EDIT_ACK_PAYLOAD_BUDGET_BYTES,
     FOLDING_RANGE_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
     INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES, KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS,
     LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS, LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB,
@@ -28,6 +29,60 @@ fn ui_observability_doc() -> String {
         "/docs/development/ui-observability.md"
     ))
     .expect("read docs/development/ui-observability.md")
+}
+
+#[test]
+fn workspace_open_path_stays_streamed_and_head_bounded() {
+    let source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/server/workspace.rs"
+    ))
+    .expect("read src/server/workspace.rs");
+    let start = source
+        .find("async fn read_file_streamed")
+        .expect("streaming open helper must remain present");
+    let end = source[start..]
+        .find("/// Heavy disk read for file open/reload")
+        .map(|offset| start + offset)
+        .expect("streaming helper must have a bounded wrapper");
+    let helper = &source[start..end];
+    assert!(helper.contains("RopeBuilder"));
+    assert!(!helper.contains("read_to_end"));
+    assert!(!helper.contains("String::from_utf8(bytes)"));
+
+    let document_source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/server/document.rs"
+    ))
+    .expect("read src/server/document.rs");
+    assert!(document_source.contains("pub(crate) fn document_text_head"));
+
+    let connection_source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/server/connection/documents.rs"
+    ))
+    .expect("read src/server/connection/documents.rs");
+    assert!(!connection_source.contains("DocumentTextHead::complete(document.text())"));
+    assert!(connection_source.contains("parse_window_snapshot"));
+    assert!(connection_source.contains("DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES"));
+
+    assert!(!source.contains("open_document_snapshots"));
+    assert!(!source.contains("struct OpenDocumentSnapshot"));
+    assert!(source.contains("open_document_refreshes"));
+    assert!(source.contains("struct OpenDocumentRefresh"));
+
+    let save_start = source
+        .find("async fn save_io")
+        .expect("save_io must remain present");
+    let save_end = source[save_start..]
+        .find("async fn reload_io")
+        .map(|offset| save_start + offset)
+        .expect("save_io must be followed by reload_io");
+    let save_io = &source[save_start..save_end];
+    assert!(save_io.contains("clone_rope"));
+    assert!(save_io.contains("chunks("));
+    assert!(!save_io.contains("document.text()"));
+    assert!(!save_io.contains("as_bytes()"));
 }
 
 fn phase18_plan_doc() -> String {
@@ -78,6 +133,12 @@ fn performance_docs_list_all_supported_benchmark_commands() {
             "performance guide must document benchmark/profiling command: {command}"
         );
     }
+}
+
+#[test]
+fn chunked_document_security_budgets_are_pinned() {
+    assert_eq!(DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES, 256 * 1024 * 1024);
+    assert_eq!(BINARY_SNIFF_BYTES, 8 * 1024);
 }
 
 #[test]

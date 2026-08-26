@@ -12,7 +12,10 @@ mod cli;
 mod launch;
 
 use cli::{CLI_USAGE, ClayCommand, extract_profile_perf_flag, parse_command};
-use launch::{run_desktop, run_package_subcommand, run_perf_fixture, run_server, run_smoke_gui};
+use launch::{
+    run_desktop, run_launch, run_package_subcommand, run_perf_fixture, run_restart, run_server,
+    run_smoke_gui,
+};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let (args, profile_perf) = extract_profile_perf_flag(std::env::args_os().skip(1));
@@ -23,7 +26,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             endpoint,
             configuration_root,
         } => run_server(endpoint, configuration_root),
-        ClayCommand::Client { endpoint } | ClayCommand::Auto { endpoint } => run_desktop(endpoint),
+        ClayCommand::Auto { endpoint } => run_launch(endpoint),
+        ClayCommand::Client { endpoint } => run_desktop(endpoint),
+        ClayCommand::Restart { endpoint } => run_restart(endpoint),
         ClayCommand::SmokeGui {
             endpoint,
             configuration_root,
@@ -69,6 +74,14 @@ mod tests {
         assert!(matches!(
             parse_command(vec!["smoke-gui".into()]).unwrap(),
             ClayCommand::SmokeGui { .. }
+        ));
+    }
+
+    #[test]
+    fn restart_is_a_command_not_an_endpoint() {
+        assert!(matches!(
+            parse_command(vec!["restart".into()]).unwrap(),
+            ClayCommand::Restart { .. }
         ));
     }
 

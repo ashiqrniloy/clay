@@ -1,3 +1,4 @@
+import { Text } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 
 import type { BootstrapDto, BridgeEnvelope } from "../../bridge/types";
@@ -11,6 +12,8 @@ import {
 import { clayOrigin } from "../transactions";
 import {
   closePayload,
+  DOCUMENT_CHUNK_BYTES,
+  documentChunkRequestPayload,
   editPayload,
   getStatusPayload,
   openPayload,
@@ -42,8 +45,8 @@ const FEATURE_EVENT_KINDS = new Set([
 
 export interface DocumentSession {
   store: DocumentStore;
-  /** Last authoritative snapshot (initial / open / resync). Not live typing. */
-  snapshotText(): string;
+  /** Last authoritative snapshot (initial / open / resync / chunks). */
+  snapshotDoc(): Text;
   installInitial(bootstrap: BootstrapDto): void;
   clientId(): number;
   behaviorManifest(): BootstrapDto["behaviorManifest"];
@@ -57,7 +60,7 @@ export interface DocumentSession {
   ): void;
   runClientCommand(commandId: string): boolean;
   handleEnvelope(envelope: BridgeEnvelope): void;
-  emitUserChanges(oldText: string, changes: readonly TextChange[]): void;
+  emitUserChanges(oldDoc: Text, changes: readonly TextChange[]): void;
   save(): void;
   reload(force?: boolean): void;
   close(force?: boolean): void;
@@ -76,7 +79,7 @@ export function createDocumentSession(options: Options): DocumentSession {
   let clientCommandHandler: ((commandId: string) => boolean) | null = null;
   let nextTransactionId = 1;
   const inflight = new Set<number>();
-  let authoritativeText = "";
+  let authoritativeDoc: Text = Text.empty;
   let clientId = 0;
   let behaviorManifest: BootstrapDto["behaviorManifest"] = {
     manifestId: "default.text",
@@ -117,28 +120,131 @@ export function createDocumentSession(options: Options): DocumentSession {
     });
   };
 
-  const replaceText = (
-    text: string,
-    origin: "resync" | "correction" | "remote" | "programmatic",
-  ) => {
+  /** UTF-8 byte length of a JS string (wire offsets are byte-based). */
+  const utf8Length = (text: string): number => {
+    let bytes = 0;
+    for (let i = 0; i < text.length; i += 1) {
+      const code = text.charCodeAt(i);
+      if (code < 0x80) bytes += 1;
+      else if (code < 0x800) bytes += 2;
+      else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+        bytes += 4;
+        i += 1;
+      } else bytes += 3;
+    }
+    return bytes;
+  };
+
+  /** Rope-backed Text from an arbitrary string without a flat copy.
+   * `Text.of` takes lines, so split and let it rejoin them. */
+  const textOf = (value: string): Text =>
+    value ? Text.of(value.split("\n")) : Text.empty;
+
+  interface DocumentLoad {
+    totalBytes: number;
+    /** Wire bytes appended into the snapshot/editor so far. */
+    nextAppend: number;
+    /** One outstanding request at a time: server responses are clamped to
+     * UTF-8 char boundaries, so region starts are only known after the
+     * previous reply lands. A fixed stride would strand on short chunks. */
+    inflight: Set<number>;
+    done: boolean;
+  }
+
+  let load: DocumentLoad | null = null;
+
+  /** Repaints the attached editor from the authoritative snapshot.
+   * Length comparison is enough here: both sides derive from the same
+   * authoritative stream, so equal lengths mean equal content. */
+  const paintAuthoritative = () => {
     if (!view) return;
-    const current = view.state.doc.toString();
-    if (current === text) return;
+    const current = view.state.doc;
+    if (current.length === authoritativeDoc.length) return;
     view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: text },
-      annotations: clayOrigin.of(origin),
+      changes: { from: 0, to: current.length, insert: authoritativeDoc },
+      annotations: clayOrigin.of("programmatic"),
     });
+  };
+
+  const finishLoad = () => {
+    if (!load || load.done) return;
+    load.done = true;
+    load.inflight.clear();
+    store.update({ loading: false });
+  };
+
+  const abortLoad = (message: string) => {
+    if (!load || load.done) return;
+    // Gate stays closed: editing a half-assembled document would desync
+    // version/ack semantics. Reload/resync restarts the load cleanly.
+    load.done = true;
+    load.inflight.clear();
+    store.update({ diagnostic: message });
+  };
+
+  const pumpLoad = () => {
+    const meta = store.get();
+    if (!load || load.done || !meta || meta.documentId === 0) return;
+    if (load.inflight.size > 0 || load.nextAppend >= load.totalBytes) return;
+    const offset = load.nextAppend;
+    load.inflight.add(offset);
+    send(
+      documentChunkRequestPayload(
+        meta.documentId,
+        meta.version,
+        offset,
+        DOCUMENT_CHUNK_BYTES,
+      ),
+    );
+  };
+
+  const appendLoaded = (text: string) => {
+    if (!load) return;
+    load.nextAppend += utf8Length(text);
+    if (!text) return;
+    authoritativeDoc = authoritativeDoc.append(textOf(text));
+    if (view) {
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: text },
+        annotations: clayOrigin.of("programmatic"),
+      });
+    }
+  };
+
+  /** Starts (or restarts) progressive assembly from an authoritative head:
+   * paint the first chunk immediately, then fetch the remainder in order. */
+  const startLoad = (head: unknown) => {
+    const data = (head ?? {}) as Record<string, unknown>;
+    const headText = String(data.firstChunk ?? "");
+    authoritativeDoc = textOf(headText);
+    paintAuthoritative();
+    const totalBytes = Math.max(
+      0,
+      Number(data.totalBytes ?? utf8Length(headText)),
+    );
+    const headBytes = utf8Length(headText);
+    load = {
+      totalBytes,
+      nextAppend: headBytes,
+      inflight: new Set(),
+      done: false,
+    };
+    if (totalBytes <= headBytes) {
+      finishLoad();
+      return;
+    }
+    store.update({ loading: true });
+    pumpLoad();
   };
 
   const session: DocumentSession = {
     store,
-    snapshotText: () => authoritativeText,
+    snapshotDoc: () => authoritativeDoc,
     installInitial(bootstrap) {
       inflight.clear();
       clientId = bootstrap.clientId;
       featureEvents.length = 0;
       behaviorManifest = bootstrap.behaviorManifest;
-      authoritativeText = bootstrap.initialDocument.text;
       store.set(
         metaFromInitial({
           documentId: bootstrap.initialDocument.documentId,
@@ -148,7 +254,7 @@ export function createDocumentSession(options: Options): DocumentSession {
           behaviorVersion: bootstrap.behaviorManifest.behaviorVersion,
         }),
       );
-      replaceText(bootstrap.initialDocument.text, "programmatic");
+      startLoad(bootstrap.initialDocument.head);
       send(getStatusPayload(bootstrap.initialDocument.documentId));
     },
     clientId: () => clientId,
@@ -161,12 +267,7 @@ export function createDocumentSession(options: Options): DocumentSession {
     },
     attachView(next) {
       view = next;
-      if (
-        authoritativeText &&
-        next.state.doc.toString() !== authoritativeText
-      ) {
-        replaceText(authoritativeText, "programmatic");
-      }
+      paintAuthoritative();
     },
     detachView(current) {
       if (view === current) view = null;
@@ -177,10 +278,13 @@ export function createDocumentSession(options: Options): DocumentSession {
     runClientCommand(commandId) {
       return clientCommandHandler?.(commandId) ?? false;
     },
-    emitUserChanges(oldText, changes) {
+    emitUserChanges(oldDoc, changes) {
       const meta = store.get();
       if (!meta || !accessIsEditable(meta.access)) return;
-      const operations = changesToOperations(oldText, changes);
+      // Progressive load in flight: the document is gated read-only; never
+      // queue edits against a partially assembled snapshot.
+      if (load && !load.done) return;
+      const operations = changesToOperations(oldDoc, changes);
       if (operations.length === 0) return;
       let pending = meta.pending;
       for (const operation of operations) {
@@ -243,6 +347,12 @@ export function createDocumentSession(options: Options): DocumentSession {
         case "documentStatus":
           onStatus(data);
           return;
+        case "documentChunk":
+          onDocumentChunk(data);
+          return;
+        case "documentChunkRejected":
+          onDocumentChunkRejected(data);
+          return;
         case "fileOperationFailed":
           store.update({
             diagnostic: String(data.message ?? "file operation failed"),
@@ -280,6 +390,8 @@ export function createDocumentSession(options: Options): DocumentSession {
     requestResync() {
       const meta = store.get();
       if (!meta) return;
+      // A resync replaces the assembled prefix; stop consuming old chunks.
+      if (load && !load.done) load.done = true;
       send(requestResyncPayload(meta.documentId, meta.version));
     },
   };
@@ -307,9 +419,44 @@ export function createDocumentSession(options: Options): DocumentSession {
     if (shouldRequestResync(reason)) session.requestResync();
   }
 
+  function onDocumentChunk(data: Record<string, unknown>) {
+    if (!load || load.done) return;
+    const meta = store.get();
+    if (!meta || Number(data.documentId) !== meta.documentId) return;
+    if (Number(data.documentVersion) !== meta.version) return;
+    // Only chunks this load actually requested are consumed; duplicates and
+    // unsolicited offsets drop here.
+    const offset = Number(data.offset);
+    if (!load.inflight.delete(offset)) return;
+    const text = String(data.text ?? "");
+    appendLoaded(text);
+    if (load.nextAppend >= load.totalBytes) {
+      finishLoad();
+      return;
+    }
+    pumpLoad();
+  }
+
+  function onDocumentChunkRejected(data: Record<string, unknown>) {
+    if (!load || load.done) return;
+    const meta = store.get();
+    if (!meta || Number(data.documentId) !== meta.documentId) return;
+    const reason = data.reason as EditRejection;
+    const key =
+      typeof reason === "string"
+        ? reason
+        : (Object.keys(reason)[0] ?? "unknown");
+    if (key === "staleVersion") {
+      // The assembled prefix belongs to an older generation. Resync restarts
+      // the whole load against the current version.
+      session.requestResync();
+      return;
+    }
+    abortLoad(`document chunk rejected: ${key}`);
+  }
+
   function onResync(data: Record<string, unknown>) {
     inflight.clear();
-    const text = String(data.text ?? "");
     const access = (data.access ?? {}) as DocumentMeta["access"];
     store.update({
       documentId: Number(data.documentId ?? store.get()?.documentId ?? 0),
@@ -319,13 +466,12 @@ export function createDocumentSession(options: Options): DocumentSession {
       dirty: false,
       diagnostic: null,
     });
-    authoritativeText = text;
-    replaceText(text, "resync");
+    startLoad(data.head);
   }
 
   function applyMetadata(
     metadata: Record<string, unknown>,
-    options: { text?: string; resetPending: boolean },
+    options: { resetPending: boolean },
   ) {
     if (options.resetPending) inflight.clear();
     if (!store.get()) {
@@ -340,6 +486,7 @@ export function createDocumentSession(options: Options): DocumentSession {
         workspaceRootId: null,
         workspaceRoot: "",
         pending: 0,
+        loading: false,
         behaviorVersion: behaviorManifest.behaviorVersion,
         diagnostic: null,
       });
@@ -368,10 +515,6 @@ export function createDocumentSession(options: Options): DocumentSession {
         ? null
         : (store.get()?.diagnostic ?? null),
     });
-    if (typeof options.text === "string") {
-      authoritativeText = options.text;
-      replaceText(options.text, "resync");
-    }
     const rootId = store.get()?.workspaceRootId;
     if (pendingOpenPath && rootId != null) {
       const path = pendingOpenPath;
@@ -382,10 +525,12 @@ export function createDocumentSession(options: Options): DocumentSession {
 
   function onOpened(data: Record<string, unknown>) {
     const metadata = (data.metadata ?? {}) as Record<string, unknown>;
-    applyMetadata(metadata, {
-      text: String(data.text ?? ""),
-      resetPending: true,
-    });
+    applyMetadata(metadata, { resetPending: true });
+    if (data.head != null) {
+      startLoad(data.head);
+    } else {
+      store.update({ loading: false });
+    }
   }
 
   function onSaved(data: Record<string, unknown>) {
@@ -402,7 +547,14 @@ export function createDocumentSession(options: Options): DocumentSession {
     if (Number(data.documentId) !== current.documentId) return;
     if (data.closed) {
       store.set(null);
-      replaceText("", "programmatic");
+      authoritativeDoc = Text.empty;
+      load = null;
+      if (view) {
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: "" },
+          annotations: clayOrigin.of("programmatic"),
+        });
+      }
     }
   }
 

@@ -490,7 +490,7 @@ struct RuntimeGenerationCandidate {
     active_theme: Option<crate::protocol::ActiveTheme>,
     expected_typography: crate::protocol::ActiveTypography,
     active_typography: crate::protocol::ActiveTypography,
-    open_documents: Vec<workspace::OpenDocumentSnapshot>,
+    open_documents: Vec<workspace::OpenDocumentRefresh>,
     runtime_snapshot: RuntimeStateSnapshot,
 }
 
@@ -1230,7 +1230,7 @@ impl IpcServer {
             .workspace
             .lock()
             .await
-            .open_document_snapshots(0)
+            .open_document_refreshes(0)
             .await
             .map_err(|_| {
                 runtime_candidate_error(
@@ -1497,19 +1497,24 @@ impl IpcServer {
         &self,
         generation_id: u64,
         service: &ClayJsRuntimeService,
-        snapshots: Vec<workspace::OpenDocumentSnapshot>,
+        snapshots: Vec<workspace::OpenDocumentRefresh>,
     ) -> Vec<ReloadedDocumentRefresh> {
-        let roots = self
-            .bootstrap_state
-            .workspace
-            .lock()
-            .await
-            .directory_roots();
-        let mut refreshed = Vec::with_capacity(snapshots.len());
-        for snapshot in snapshots {
+        let documents = {
+            let workspace = self.bootstrap_state.workspace.lock().await;
+            let mut documents = Vec::with_capacity(snapshots.len());
+            for snapshot in snapshots {
+                let Some(handle) = workspace.document_handle(snapshot.metadata.document_id) else {
+                    continue;
+                };
+                documents.push((snapshot.metadata, handle));
+            }
+            documents
+        };
+        let mut refreshed = Vec::with_capacity(documents.len());
+        for (metadata, handle) in documents {
             let mut messages = connection::open_document_followup_messages(
-                &snapshot.metadata,
-                &snapshot.text,
+                &metadata,
+                &handle,
                 &self.behavior,
                 &self.sdui,
                 generation_id,
@@ -1517,28 +1522,19 @@ impl IpcServer {
                 &self.parse_coordinator,
             )
             .await;
-            if let Some(root) = roots
-                .iter()
-                .find(|root| root.workspace_root_id == snapshot.metadata.workspace_root_id)
-            {
-                let manifest_id = self.behavior.lock().await.manifest().manifest_id.clone();
-                let active_mode = manifest_id.rsplit('.').next().unwrap_or(&manifest_id);
-                messages.extend(
-                    self.document_analysis
-                        .open_document(
-                            Arc::clone(&self.bootstrap_state.workspace),
-                            generation_id,
-                            &snapshot.metadata,
-                            active_mode,
-                            root.canonical_path.clone(),
-                            snapshot.text.clone(),
-                        )
-                        .into_iter()
-                        .map(ServerMessage::RuntimeDiagnostic),
-                );
-            }
+            messages.extend(
+                connection::start_document_analysis(
+                    &self.document_analysis,
+                    &self.bootstrap_state.workspace,
+                    &self.behavior,
+                    generation_id,
+                    &metadata,
+                    &handle,
+                )
+                .await,
+            );
             refreshed.push(ReloadedDocumentRefresh {
-                document_id: snapshot.metadata.document_id,
+                document_id: metadata.document_id,
                 messages,
             });
         }
@@ -1808,7 +1804,7 @@ fn build_runtime_state_snapshot(
     active_theme: crate::protocol::ActiveTheme,
     active_typography: crate::protocol::ActiveTypography,
     sdui_tree: crate::protocol::SduiTree,
-    open_documents: &[workspace::OpenDocumentSnapshot],
+    open_documents: &[workspace::OpenDocumentRefresh],
     published_decorations: Option<crate::protocol::DecorationSet>,
     published_diagnostics: Option<crate::protocol::DiagnosticSet>,
     diagnostics: Vec<RuntimeDiagnostic>,
@@ -2646,9 +2642,16 @@ await loadPackage("@clay/typescript");"#,
         };
         let generation_id = server.runtime_generation.generation_id().await;
         let service = server.runtime_generation.current_service().await;
+        let document = std::sync::Arc::new(tokio::sync::Mutex::new(
+            crate::server::document::DocumentState::new(
+                2,
+                "# Hi\n".to_string(),
+                crate::protocol::DocumentAccess::Editable { lease_id: 1 },
+            ),
+        ));
         crate::server::connection::open_document_followup_messages(
             &metadata,
-            "# Hi\n",
+            &document,
             &server.behavior,
             &server.sdui,
             generation_id,
@@ -3830,6 +3833,67 @@ await loadPackage("@clay/markdown");"#,
                 .iter()
                 .all(|message| !matches!(message, ServerMessage::DecorationSet(_)))
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_reload_refreshes_large_document_without_full_text() {
+        use std::io::Write;
+
+        let root = temp_config_root(
+            "large-refresh",
+            r#"import { loadPackage } from "clay:packages";
+await loadPackage("@clay/markdown");"#,
+        );
+        let server = server_with_config(root);
+        let file_root = temp_config_root("large-refresh-docs", "");
+        let large_path = file_root.join("large.md");
+        {
+            let mut file = fs::File::create(&large_path).unwrap();
+            file.write_all(b"# Large\n").unwrap();
+            let chunk = vec![b'x'; 1024 * 1024];
+            for _ in 0..50 {
+                file.write_all(&chunk).unwrap();
+            }
+        }
+        let opened = {
+            let mut workspace = server.workspace.lock().await;
+            let root_id = workspace.add_root(&file_root).unwrap();
+            workspace
+                .open_existing_file(root_id, "large.md", 77)
+                .await
+                .unwrap()
+        };
+        assert_eq!(
+            opened.document.lock().await.byte_len(),
+            8 + 50 * 1024 * 1024
+        );
+
+        let outcome = server.reload_runtime_generation().await;
+        assert!(outcome.reloaded);
+        let refresh = outcome
+            .refreshed_documents
+            .iter()
+            .find(|refresh| refresh.document_id == opened.document_id)
+            .expect("large document is refreshed");
+        assert!(refresh.messages.iter().all(|message| !matches!(
+            message,
+            ServerMessage::DocumentOpened { .. } | ServerMessage::DocumentReloaded { .. }
+        )));
+        assert!(refresh.messages.iter().any(|message| matches!(
+            message,
+            ServerMessage::RuntimeDiagnostic(diagnostic)
+                if diagnostic.code == "analysis.document_too_large"
+        )));
+        assert!(
+            refresh
+                .messages
+                .iter()
+                .all(|message| format!("{message:?}").len() < 64 * 1024),
+            "refresh must not carry a full 50 MiB string"
+        );
+
+        let _ = fs::remove_file(large_path);
+        let _ = fs::remove_dir_all(file_root);
     }
 
     #[tokio::test]

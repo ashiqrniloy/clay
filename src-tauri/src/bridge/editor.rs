@@ -52,12 +52,12 @@ mod tests {
                 workspace_root_id: 7,
                 path: "notes.md".into(),
             },
-            text: "hi".into(),
+            head: clay::protocol::DocumentTextHead::complete("hi".into()),
         };
         let json = serde_json::to_value(&opened).unwrap();
         assert_eq!(json["kind"], "documentOpened");
         assert_eq!(json["data"]["metadata"]["workspaceRootId"], 7);
         assert_eq!(json["data"]["metadata"]["leaseId"], 3);
-        assert_eq!(json["data"]["text"], "hi");
+        assert_eq!(json["data"]["head"]["firstChunk"], "hi");
     }
 }

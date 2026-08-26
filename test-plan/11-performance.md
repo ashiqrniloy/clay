@@ -96,8 +96,10 @@ The current advisory benchmark completed, but several Criterion comparisons repo
 
 ## Known ceilings
 
-- Very large files beyond documented open limits are rejected by design
-  (MAX_OPENABLE_FILE_BYTES) — that rejection IS the correct behavior.
+- File loading is chunked and accepts UTF-8 text while the server-owned resident
+  rope budget (256 MiB) permits it. Files exceeding that session budget are
+  rejected with `DocumentBudgetExceeded`; NUL content in the first 8 KiB is
+  rejected as binary. `MAX_CHUNK_BYTES` remains 256 KiB per transfer frame.
 
 ## Plan 089 task 9 Linux execution record (2026-08-17)
 
@@ -231,3 +233,26 @@ No performance budget was changed.
 | Bundle budgets (fresh production build) | PASS | `npm run build` + `check:budget`: shell 160.6/180 kB gzip, total 343.2/400 kB gzip — no budget raised |
 | Rust gate timing | PASS | `cargo test --all-targets` suites complete in seconds each (protocol ≈0.2 s, security ≈0.15–0.45 s, runtime ≈0.3 s, presentation ≈0.05 s); no stalled suite |
 | Agent host | PASS structural | clay-agent unit tests pass (8 tests); daemon spawn/stream behavior unchanged by migration; live provider latency not claimable without credentials on this host |
+
+## Plan 098 chunked document performance steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| Q34 | Open the synthetic 50 MiB UTF-8 `large.md` through the real desktop smoke path | First head/first paint stays under 500 ms, full chunk assembly under 5 s, and each head/chunk stays at or below `MAX_CHUNK_BYTES` (256 KiB); no full-document IPC frame is emitted |
+| Q35 | Edit the ready 50 MiB document, Save, and Reload | Save acknowledgement remains bounded and responsive; disk/reloaded bytes equal the edited document; ordinary editor input does not wait on chunk or save IO |
+| Q36 | Attempt `oversize.txt` (257 MiB sparse) and `binary.dat` | Resident-budget and binary-sniff refusals return promptly with typed diagnostics; no large content allocation, stale loading loop, or unbounded memory growth occurs |
+| Q37 | Inspect the protocol-v27 runtime run and frame assertions | `DocumentChunk` payloads remain ≤256 KiB and below the 1 MiB codec frame ceiling; v27 handshake and mixed-version rejection remain deterministic |
+
+## Plan 098 Linux execution record (2026-08-26)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| Q34 | PASS automated real-server measurement; UNRESOLVED desktop feel | `cargo test --test runtime large_document:: -- --nocapture`: open→head 297.339689 ms; open→full 589.273483 ms; head 262,142 bytes / total 52,428,800. Three isolated reruns stayed at 287.225620–301.800012 ms; one host-scheduled outlier reached 538.188757 ms and tripped the existing 500 ms guard before the next combined run passed. GUI screenshot/interaction evidence is `code-reviews/screenshots/2026-08-26-plan098-manual/real-app-welcome.png`; the large loaded editor could not be stably targeted |
+| Q35 | PASS automated real-server measurement; UNRESOLVED desktop feel | Same final run: save→ack 423.454128 ms for 52,428,815 bytes; streamed save and reload equality assertions passed |
+| Q36 | PASS automated; UNRESOLVED desktop error presentation | Same runtime suite passed typed resident-budget and binary-sniff refusal assertions; no live status/pane error screenshot was claimed |
+| Q37 | PASS | Protocol/runtime assertions passed; `large-document-runtime.log` records chunk-bound and v27 path results. `cargo test --lib protocol_v26_client_is_rejected_by_v27_server` is the mixed-version guard |
+
+Known ceiling for this record: live WebKitGTK/portal interaction was not
+repeatable because the window moved off-screen and AT-SPI exposed only the
+native frame. Automated bounds and server timing do not substitute for GUI
+feel; repeat Q34–Q36 with a stable target before marking live interaction PASS.

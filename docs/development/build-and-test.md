@@ -85,9 +85,13 @@ Without the WebKit/GTK/dbus headers, workspace-wide Cargo commands fail inside
 ```bash
 cd frontend && npm ci && npm run build   # renderer → frontend/dist
 cd .. && cargo build -p clay -p clay-desktop
-target/debug/clay-desktop                # window opens; supervises or adopts clay-server
+cargo run                  # kill leftover default-endpoint servers, then open GUI
+cargo run -- restart       # replace the server, no GUI
+cargo run -- client        # extra GUI against a running server
 CLAY_SERVER_BIN=/path/to/clay-server target/debug/clay-desktop   # explicit override
 ```
+
+Debug `clay-desktop` embeds `frontend/dist` (`custom-protocol` is the default feature). Rebuild the desktop crate after `npm run build` so the bundle is current. Hot-reload uses Vite instead: `cd frontend && npm run dev` in one terminal and `cargo tauri dev` in another (`tauri dev` disables `custom-protocol` and loads `http://localhost:1420`).
 
 The desktop shell resolves `clay-server` as `$CLAY_SERVER_BIN` → sibling of
 its own executable → `PATH`. If an endpoint already has a live listener
