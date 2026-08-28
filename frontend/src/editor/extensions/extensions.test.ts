@@ -48,6 +48,7 @@ describe("editor parity adapters", () => {
     const editor = view("const value = 1", [decorationExtension]);
     editor.dispatch({
       effects: replaceDecorations(
+        editor.state,
         decorations([
           {
             byteStart: 0,
@@ -112,9 +113,7 @@ describe("editor parity adapters", () => {
       packagePrefix: "core",
       ranges: [{ byteStart: 0, byteEnd: 23, label: "function", provenance }],
     };
-    editor.dispatch({
-      effects: installFolds(editor.state.doc, set),
-    });
+    editor.dispatch({ effects: installFolds(editor.state, set) });
     const line = editor.state.doc.line(1);
     expect(foldable(editor.state, line.from, line.to)).toEqual({
       from: line.to,

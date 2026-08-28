@@ -9,7 +9,13 @@ import {
   type DocumentMeta,
   type DocumentStore,
 } from "../../state/document-store";
-import { clayOrigin } from "../transactions";
+import type { BytePositionIndex } from "../position-index";
+import { programmaticAnnotations } from "../transactions";
+import {
+  editorPerformance,
+  PERFORMANCE_STAGE,
+  type PerformanceSpan,
+} from "../performance";
 import {
   closePayload,
   DOCUMENT_CHUNK_BYTES,
@@ -31,6 +37,7 @@ const FEATURE_EVENT_KINDS = new Set([
   "behaviorManifestInstalled",
   "decorationSet",
   "decorationBatch",
+  "viewportRenderPatch",
   "diagnosticSet",
   "foldingRangeSet",
   "completionResult",
@@ -60,11 +67,18 @@ export interface DocumentSession {
   ): void;
   runClientCommand(commandId: string): boolean;
   handleEnvelope(envelope: BridgeEnvelope): void;
-  emitUserChanges(oldDoc: Text, changes: readonly TextChange[]): void;
+  emitUserChanges(
+    oldDoc: Text,
+    changes: readonly TextChange[],
+    traceId?: number,
+    index?: BytePositionIndex,
+  ): void;
   save(): void;
   reload(force?: boolean): void;
   close(force?: boolean): void;
   open(path: string): void;
+  /** Path of an open request awaiting its server reply, if any. */
+  inFlightOpenPath(): string | null;
   requestResync(): void;
 }
 
@@ -79,7 +93,10 @@ export function createDocumentSession(options: Options): DocumentSession {
   let clientCommandHandler: ((commandId: string) => boolean) | null = null;
   let nextTransactionId = 1;
   const inflight = new Set<number>();
-  let authoritativeDoc: Text = Text.empty;
+  const typingSpans = new Map<number, PerformanceSpan>();
+  /** Detached text snapshot — the single current `Text` only while no view
+   * is attached. When a view exists, `view.state.doc` owns the document. */
+  let detachedDoc: Text = Text.empty;
   let clientId = 0;
   let behaviorManifest: BootstrapDto["behaviorManifest"] = {
     manifestId: "default.text",
@@ -91,14 +108,29 @@ export function createDocumentSession(options: Options): DocumentSession {
   const featureListeners = new Set<(envelope: BridgeEnvelope) => void>();
   /** Open requested before the handshake metadata delivered a root id. */
   let pendingOpenPath: string | null = null;
+  /** Path whose OpenDocument is in flight; lets open replies find their pane. */
+  let inFlightOpenPath: string | null = null;
+  let pendingOpenTrace: { traceId: number; span: PerformanceSpan } | null =
+    null;
   const sendOpen = (rootId: number, path: string) => {
+    inFlightOpenPath = path;
     void options.send(openPayload(rootId, path)).catch((error: unknown) => {
+      pendingOpenTrace?.span.end();
+      pendingOpenTrace = null;
+      inFlightOpenPath = null;
       store.update({
         diagnostic: error instanceof Error ? error.message : "request failed",
       });
     });
   };
   const openDocument = (path: string) => {
+    const traceId = editorPerformance.trace();
+    pendingOpenTrace = {
+      traceId,
+      span: editorPerformance.span(PERFORMANCE_STAGE.editorOpen, traceId, {
+        feature: "documentOpen",
+      }),
+    };
     const rootId = store.get()?.workspaceRootId;
     if (rootId == null) {
       // Restore and early opens can race the handshake metadata event; queue
@@ -142,6 +174,8 @@ export function createDocumentSession(options: Options): DocumentSession {
 
   interface DocumentLoad {
     totalBytes: number;
+    traceId: number;
+    readySpan: PerformanceSpan;
     /** Wire bytes appended into the snapshot/editor so far. */
     nextAppend: number;
     /** One outstanding request at a time: server responses are clamped to
@@ -153,23 +187,35 @@ export function createDocumentSession(options: Options): DocumentSession {
 
   let load: DocumentLoad | null = null;
 
-  /** Repaints the attached editor from the authoritative snapshot.
-   * Length comparison is enough here: both sides derive from the same
-   * authoritative stream, so equal lengths mean equal content. */
-  const paintAuthoritative = () => {
-    if (!view) return;
-    const current = view.state.doc;
-    if (current.length === authoritativeDoc.length) return;
-    view.dispatch({
-      changes: { from: 0, to: current.length, insert: authoritativeDoc },
-      annotations: clayOrigin.of("programmatic"),
-    });
+  /** The one current document: the live view's rope, or the detached snapshot. */
+  const currentDoc = (): Text => (view ? view.state.doc : detachedDoc);
+
+  /** Installs an authoritative snapshot as the whole current text.
+   * Content equality (not length): a same-length reload still installs. */
+  const installAuthoritative = (next: Text) => {
+    if (view) {
+      const current = view.state.doc;
+      if (current.eq(next)) return;
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: next },
+        annotations: programmaticAnnotations(),
+      });
+    } else {
+      if (detachedDoc.eq(next)) return;
+      detachedDoc = next;
+    }
   };
 
   const finishLoad = () => {
     if (!load || load.done) return;
     load.done = true;
     load.inflight.clear();
+    load.readySpan.end({ byteCount: load.totalBytes });
+    editorPerformance.mark(PERFORMANCE_STAGE.editorReady, load.traceId, {
+      documentId: store.get()?.documentId,
+      version: store.get()?.version,
+      byteCount: load.totalBytes,
+    });
     store.update({ loading: false });
   };
 
@@ -202,29 +248,57 @@ export function createDocumentSession(options: Options): DocumentSession {
     if (!load) return;
     load.nextAppend += utf8Length(text);
     if (!text) return;
-    authoritativeDoc = authoritativeDoc.append(textOf(text));
     if (view) {
       view.dispatch({
         changes: { from: view.state.doc.length, insert: text },
-        annotations: clayOrigin.of("programmatic"),
+        annotations: programmaticAnnotations(),
       });
+      editorPerformance.mark(PERFORMANCE_STAGE.patchApply, load.traceId, {
+        documentId: store.get()?.documentId,
+        version: store.get()?.version,
+        byteCount: utf8Length(text),
+        feature: "documentChunk",
+      });
+    } else {
+      detachedDoc = detachedDoc.append(textOf(text));
     }
   };
 
   /** Starts (or restarts) progressive assembly from an authoritative head:
    * paint the first chunk immediately, then fetch the remainder in order. */
-  const startLoad = (head: unknown) => {
+  const startLoad = (
+    head: unknown,
+    openTrace: {
+      traceId: number;
+      span: PerformanceSpan;
+    } | null = pendingOpenTrace,
+  ) => {
+    pendingOpenTrace = null;
     const data = (head ?? {}) as Record<string, unknown>;
     const headText = String(data.firstChunk ?? "");
-    authoritativeDoc = textOf(headText);
-    paintAuthoritative();
+    installAuthoritative(textOf(headText));
     const totalBytes = Math.max(
       0,
       Number(data.totalBytes ?? utf8Length(headText)),
     );
     const headBytes = utf8Length(headText);
+    const traceId = openTrace?.traceId ?? editorPerformance.trace();
+    const meta = store.get();
+    if (!openTrace)
+      editorPerformance.mark(PERFORMANCE_STAGE.editorOpen, traceId, {
+        documentId: meta?.documentId,
+        version: meta?.version,
+        byteCount: totalBytes,
+      });
     load = {
       totalBytes,
+      traceId,
+      readySpan:
+        openTrace?.span ??
+        editorPerformance.span(PERFORMANCE_STAGE.editorOpen, traceId, {
+          documentId: meta?.documentId,
+          version: meta?.version,
+        }),
       nextAppend: headBytes,
       inflight: new Set(),
       done: false,
@@ -239,9 +313,10 @@ export function createDocumentSession(options: Options): DocumentSession {
 
   const session: DocumentSession = {
     store,
-    snapshotDoc: () => authoritativeDoc,
+    snapshotDoc: () => currentDoc(),
     installInitial(bootstrap) {
       inflight.clear();
+      typingSpans.clear();
       clientId = bootstrap.clientId;
       featureEvents.length = 0;
       behaviorManifest = bootstrap.behaviorManifest;
@@ -267,10 +342,14 @@ export function createDocumentSession(options: Options): DocumentSession {
     },
     attachView(next) {
       view = next;
-      paintAuthoritative();
+      installAuthoritative(detachedDoc);
     },
     detachView(current) {
-      if (view === current) view = null;
+      if (view === current) {
+        // Latest user text (acked or not) becomes the detached snapshot.
+        detachedDoc = current.state.doc;
+        view = null;
+      }
     },
     setClientCommandHandler(handler) {
       clientCommandHandler = handler;
@@ -278,18 +357,19 @@ export function createDocumentSession(options: Options): DocumentSession {
     runClientCommand(commandId) {
       return clientCommandHandler?.(commandId) ?? false;
     },
-    emitUserChanges(oldDoc, changes) {
+    emitUserChanges(oldDoc, changes, traceId, index) {
       const meta = store.get();
       if (!meta || !accessIsEditable(meta.access)) return;
       // Progressive load in flight: the document is gated read-only; never
       // queue edits against a partially assembled snapshot.
       if (load && !load.done) return;
-      const operations = changesToOperations(oldDoc, changes);
+      const operations = changesToOperations(oldDoc, changes, index);
       if (operations.length === 0) return;
       let pending = meta.pending;
-      for (const operation of operations) {
-        const transactionId = nextTransactionId;
-        nextTransactionId += 1;
+      for (const [index, operation] of operations.entries()) {
+        const transactionId =
+          index === 0 && traceId && traceId > 0 ? traceId : nextTransactionId;
+        nextTransactionId = Math.max(nextTransactionId + 1, transactionId + 1);
         inflight.add(transactionId);
         pending += 1;
         send(
@@ -300,7 +380,20 @@ export function createDocumentSession(options: Options): DocumentSession {
             operation,
           ),
         );
+        if (index === 0 && traceId && traceId > 0 && typingSpans.size < 256)
+          typingSpans.set(
+            transactionId,
+            editorPerformance.span(PERFORMANCE_STAGE.editorTyping, traceId, {
+              documentId: meta.documentId,
+              version: meta.version,
+            }),
+          );
       }
+      if (traceId && traceId > 0)
+        editorPerformance.mark(PERFORMANCE_STAGE.editorTyping, traceId, {
+          documentId: meta.documentId,
+          version: meta.version,
+        });
       store.update({
         pending,
         dirty: true,
@@ -315,6 +408,21 @@ export function createDocumentSession(options: Options): DocumentSession {
       };
       const kind = event.kind;
       const data = event.data ?? {};
+      const transactionId = Number(data.transactionId);
+      if (
+        (kind === "editAck" || kind === "editRejected") &&
+        transactionId > 0
+      ) {
+        editorPerformance.mark(
+          PERFORMANCE_STAGE.bridgeServerDelivery,
+          transactionId,
+          {
+            documentId: Number(data.documentId),
+            version: Number(data.version),
+            transactionId,
+          },
+        );
+      }
       if (kind && FEATURE_EVENT_KINDS.has(kind)) {
         // ponytail: bounded inactive-pane replay; replace with chunk-keyed LRU
         // only if 256 validated events per pane proves insufficient.
@@ -387,6 +495,9 @@ export function createDocumentSession(options: Options): DocumentSession {
       send(closePayload(meta.documentId, force));
     },
     open: openDocument,
+    inFlightOpenPath() {
+      return inFlightOpenPath;
+    },
     requestResync() {
       const meta = store.get();
       if (!meta) return;
@@ -398,6 +509,8 @@ export function createDocumentSession(options: Options): DocumentSession {
 
   function onAck(data: Record<string, unknown>) {
     const transactionId = Number(data.transactionId);
+    typingSpans.get(transactionId)?.end();
+    typingSpans.delete(transactionId);
     inflight.delete(transactionId);
     const pending = Math.max(0, (store.get()?.pending ?? 1) - 1);
     store.update({
@@ -409,6 +522,8 @@ export function createDocumentSession(options: Options): DocumentSession {
 
   function onRejected(data: Record<string, unknown>) {
     const transactionId = Number(data.transactionId);
+    typingSpans.get(transactionId)?.end();
+    typingSpans.delete(transactionId);
     inflight.delete(transactionId);
     const reason = data.reason as EditRejection;
     const pending = Math.max(0, (store.get()?.pending ?? 1) - 1);
@@ -429,6 +544,16 @@ export function createDocumentSession(options: Options): DocumentSession {
     const offset = Number(data.offset);
     if (!load.inflight.delete(offset)) return;
     const text = String(data.text ?? "");
+    editorPerformance.mark(
+      PERFORMANCE_STAGE.bridgeServerDelivery,
+      load.traceId,
+      {
+        documentId: meta.documentId,
+        version: meta.version,
+        byteCount: utf8Length(text),
+        feature: "documentChunk",
+      },
+    );
     appendLoaded(text);
     if (load.nextAppend >= load.totalBytes) {
       finishLoad();
@@ -524,10 +649,11 @@ export function createDocumentSession(options: Options): DocumentSession {
   }
 
   function onOpened(data: Record<string, unknown>) {
+    inFlightOpenPath = null;
     const metadata = (data.metadata ?? {}) as Record<string, unknown>;
     applyMetadata(metadata, { resetPending: true });
     if (data.head != null) {
-      startLoad(data.head);
+      startLoad(data.head, pendingOpenTrace);
     } else {
       store.update({ loading: false });
     }
@@ -547,14 +673,9 @@ export function createDocumentSession(options: Options): DocumentSession {
     if (Number(data.documentId) !== current.documentId) return;
     if (data.closed) {
       store.set(null);
-      authoritativeDoc = Text.empty;
+      installAuthoritative(Text.empty);
       load = null;
-      if (view) {
-        view.dispatch({
-          changes: { from: 0, to: view.state.doc.length, insert: "" },
-          annotations: clayOrigin.of("programmatic"),
-        });
-      }
+      typingSpans.clear();
     }
   }
 

@@ -1,6 +1,7 @@
 import type { Text } from "@codemirror/state";
 
-import { textIndex, utf16ToUtf8Indexed, utf8Length } from "../position-map";
+import { buildPositionIndex, type BytePositionIndex } from "../position-index";
+import { utf16ToUtf8Indexed, utf8Length } from "../position-map";
 
 export type EditOperation =
   | { insert: { byteOffset: number; text: string } }
@@ -19,17 +20,20 @@ export interface TextChange {
  * Convert CodeMirror start-state changes into sequential byte-range
  * operations. Changes are assumed non-overlapping and ordered by `from`.
  *
- * Byte offsets come from the memoized per-document index — O(log lines) each,
- * never a full-document scan or flattened string.
+ * Byte offsets come from the shared incremental position index — one tree
+ * descent each, never a full-document scan or flattened string. Callers on
+ * the live edit path pass the transaction start state's index; the document
+ * fallback rebuilds one pass (tests and detached callers).
  */
 export function changesToOperations(
   oldDoc: Text,
   changes: readonly TextChange[],
+  index?: BytePositionIndex,
 ): EditOperation[] {
-  const index = textIndex(oldDoc);
+  const resolved = index ?? buildPositionIndex(oldDoc);
   const originals = changes.map((change) => ({
-    start: utf16ToUtf8Indexed(index, change.from),
-    end: utf16ToUtf8Indexed(index, change.to),
+    start: utf16ToUtf8Indexed(resolved, change.from),
+    end: utf16ToUtf8Indexed(resolved, change.to),
     insert: change.insert,
   }));
   const operations: EditOperation[] = [];

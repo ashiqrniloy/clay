@@ -2,19 +2,19 @@
 //!
 //! Two lanes:
 //! - **Live** (strict FIFO, capacity-bounded): every family except
-//!   viewport-resynthesizable decoration/folding sets. When the live lane is
-//!   full, `push` awaits — natural backpressure flows back through the
-//!   client's socket read loop to the server instead of dropping edits.
-//! - **Latest-wins** (one slot per coalesce key): `DecorationSet`,
-//!   `DecorationBatch`, and `FoldingRangeSet` are full replacements for one
-//!   (document, provenance, kind) scope at a stated version; when a newer set
-//!   arrives before the older was delivered, the older is discarded and the
-//!   `coalesced` counter ticks. The frontend re-requests via
-//!   `DecorationViewportRequest` whenever it lacks spans for its viewport, so
-//!   coalescing here can never strand state.
+//!   viewport-resynthesizable whole patches. When the live lane is full,
+//!   `push` awaits — natural backpressure flows back through the client's
+//!   socket read loop to the server instead of dropping edits.
+//! - **Latest-wins** (one slot per document): protocol v29
+//!   `ViewportRenderPatch` values are complete atomic answers to one request
+//!   id. A newer patch for the same document supersedes any undelivered older
+//!   patch wholesale (the client drops stale request ids anyway); members
+//!   inside one patch never coalesce against each other, so sibling
+//!   ranges/packages/features cannot overwrite one another in Tauri.
 
 use super::dto::BridgeEnvelope;
 use clay::client::ClientConnectionEvent;
+use clay::perf::metrics::{BRIDGE_FORWARDER_DELIVERY, MetricMetadata, global_recorder};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -29,17 +29,8 @@ pub trait EventSink: Send + Sync + 'static {
 /// Stable identity of one replaceable stream slot.
 pub fn coalesce_key(event: &ClientConnectionEvent) -> Option<String> {
     match event {
-        ClientConnectionEvent::DecorationSet(set) => Some(format!(
-            "deco|{}|{}|{:?}",
-            set.document_id, set.package_prefix, set.kind
-        )),
-        ClientConnectionEvent::DecorationBatch(sets) => {
-            // One batch shares a single parse update; collapse per batch.
-            let first = sets.first()?;
-            Some(format!("batch|{}", first.document_id))
-        }
-        ClientConnectionEvent::FoldingRangeSet(set) => {
-            Some(format!("fold|{}|{}", set.document_id, set.package_prefix))
+        ClientConnectionEvent::ViewportRenderPatch(patch) => {
+            Some(format!("vrpatch|{}", patch.document_id))
         }
         _ => None,
     }
@@ -243,8 +234,39 @@ impl SinkRegistry {
     }
 
     fn deliver_all(&self, envelope: BridgeEnvelope) {
+        let trace_id = envelope_trace_id(&envelope);
+        let recorder = global_recorder();
+        let delivery = recorder
+            .is_enabled()
+            .then(|| trace_id)
+            .flatten()
+            .map(|trace_id| {
+                recorder.scope_with_metadata(
+                    BRIDGE_FORWARDER_DELIVERY,
+                    MetricMetadata::default().with_trace_id(Some(trace_id)),
+                )
+            });
         let mut sinks = self.sinks.lock().expect("sink registry poisoned");
         sinks.retain(|sink| sink.deliver(envelope.clone()).is_ok());
+        if let Some(delivery) = delivery {
+            delivery.finish();
+        }
+    }
+}
+
+fn envelope_trace_id(envelope: &BridgeEnvelope) -> Option<clay::protocol::PerformanceTraceId> {
+    let event = match envelope {
+        BridgeEnvelope::Event(event) => event.as_ref(),
+        BridgeEnvelope::Routed { event, .. } => event.as_ref(),
+        _ => return None,
+    };
+    match event {
+        ClientConnectionEvent::EditAck { transaction_id, .. }
+        | ClientConnectionEvent::EditRejected { transaction_id, .. } => Some(*transaction_id),
+        ClientConnectionEvent::DecorationSet(set) => set.trace_id,
+        ClientConnectionEvent::DecorationBatch(sets) => sets.first().and_then(|set| set.trace_id),
+        ClientConnectionEvent::ViewportRenderPatch(patch) => patch.trace_id,
+        _ => None,
     }
 }
 
@@ -252,7 +274,9 @@ impl SinkRegistry {
 mod tests {
     use super::*;
     use clay::protocol::DocumentId;
-    use clay::protocol::{DecorationKind, DecorationSet};
+    use clay::protocol::{
+        DecorationKind, DecorationSet, ViewportRenderPatch, ViewportRenderStatus,
+    };
 
     #[derive(Default)]
     struct Collector(Arc<Mutex<Vec<BridgeEnvelope>>>);
@@ -264,15 +288,33 @@ mod tests {
         }
     }
 
-    fn decoration(document_id: DocumentId, version: u64) -> ClientConnectionEvent {
-        ClientConnectionEvent::DecorationSet(DecorationSet {
+    fn patch(document_id: DocumentId, request_id: u64, members: usize) -> ClientConnectionEvent {
+        ClientConnectionEvent::ViewportRenderPatch(ViewportRenderPatch {
+            request_id,
             document_id,
-            document_version: version,
-            package_prefix: "clay".into(),
-            kind: DecorationKind::Syntax,
-            viewport_byte_start: 0,
-            viewport_byte_end: 128,
-            spans: Vec::new(),
+            document_version: 2,
+            status: ViewportRenderStatus::Complete,
+            reason: None,
+            covered_ranges: Vec::new(),
+            decorations: (0..members)
+                .map(|index| DecorationSet {
+                    document_id,
+                    document_version: 2,
+                    package_prefix: "clay".into(),
+                    kind: if index % 2 == 0 {
+                        DecorationKind::Syntax
+                    } else {
+                        DecorationKind::Semantic
+                    },
+                    viewport_byte_start: index as u64 * 128,
+                    viewport_byte_end: (index as u64 + 1) * 128,
+                    spans: Vec::new(),
+                    trace_id: None,
+                })
+                .collect(),
+            diagnostics: Vec::new(),
+            folds: Vec::new(),
+            trace_id: None,
         })
     }
 
@@ -284,60 +326,78 @@ mod tests {
         }
     }
 
-    fn kinds(collected: &[BridgeEnvelope]) -> Vec<&'static str> {
+    fn delivered_patches(collected: &[BridgeEnvelope]) -> Vec<(u64, usize)> {
         collected
             .iter()
-            .map(|envelope| match envelope {
+            .filter_map(|envelope| match envelope {
                 BridgeEnvelope::Event(event) | BridgeEnvelope::Routed { event, .. } => {
                     match event.as_ref() {
-                        ClientConnectionEvent::DecorationSet(_) => "deco",
-                        ClientConnectionEvent::EditAck { .. } => "ack",
-                        _ => "other",
+                        ClientConnectionEvent::ViewportRenderPatch(patch) => {
+                            Some((patch.request_id, patch.decorations.len()))
+                        }
+                        _ => None,
                     }
                 }
-                BridgeEnvelope::ThemeSnapshot(_) => "theme",
-                BridgeEnvelope::RuntimeSnapshot { .. } => "runtime",
-                BridgeEnvelope::Disconnected { .. } => "disconnected",
+                _ => None,
             })
             .collect()
     }
 
-    /// Latest-wins per key: an older decoration set is replaced, live-lane
-    /// events keep strict FIFO order, and lifecycle notices bypass both.
+    async fn drain() {
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }
+
+    /// Obsolete whole patches coalesce per document; live-lane events keep
+    /// strict FIFO order; lifecycle notices bypass both lanes.
     #[tokio::test]
-    async fn coalescing_keeps_latest_decoration_and_live_order() {
+    async fn coalescing_keeps_latest_whole_patch_and_live_order() {
         let sinks = Arc::new(SinkRegistry::new());
         let collector = Collector::default();
         sinks.add(Arc::new(Collector(Arc::clone(&collector.0))) as Arc<dyn EventSink>);
         let forwarder = Forwarder::spawn(Arc::clone(&sinks));
 
-        forwarder.push(decoration(1, 1)).await;
+        forwarder.push(patch(1, 1, 24)).await;
         forwarder.push(ack(2)).await;
-        forwarder.push(decoration(1, 2)).await;
+        forwarder.push(patch(1, 2, 24)).await;
         forwarder.push_disconnected("bye".into());
 
-        // Drain deterministically: notify + yield until quiescent.
-        for _ in 0..50 {
-            tokio::task::yield_now().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        drain().await;
         let got = collector.0.lock().expect("collector").clone();
-        let sequence = kinds(&got);
         // Disconnected bypasses both lanes, so it lands immediately.
-        assert_eq!(sequence[0], "disconnected", "got {sequence:?}");
-        assert_eq!(
-            sequence.iter().filter(|k| **k == "deco").count(),
-            1,
-            "at most one decoration set survives coalescing, got {sequence:?}"
-        );
+        assert!(matches!(
+            got.first(),
+            Some(BridgeEnvelope::Disconnected { .. })
+        ));
+        // The latest whole patch survives with all 24 sibling members intact.
+        assert_eq!(delivered_patches(&got), vec![(2, 24)]);
         assert_eq!(
             forwarder.coalesced_count(),
             1,
-            "the older set was folded into the newer"
+            "the obsolete whole patch was folded into the newer one"
         );
         forwarder.stop();
     }
 
+    /// Sibling ranges/packages/features inside one patch never overwrite one
+    /// another: 24 mixed syntax/semantic members stay one complete patch.
+    #[tokio::test]
+    async fn sibling_members_stay_one_complete_patch() {
+        let sinks = Arc::new(SinkRegistry::new());
+        let collector = Collector::default();
+        sinks.add(Arc::new(Collector(Arc::clone(&collector.0))) as Arc<dyn EventSink>);
+        let forwarder = Forwarder::spawn(Arc::clone(&sinks));
+
+        forwarder.push(patch(1, 5, 24)).await;
+        drain().await;
+        let got = collector.0.lock().expect("collector").clone();
+        assert_eq!(delivered_patches(&got), vec![(5, 24)]);
+        forwarder.stop();
+    }
+
+    /// Distinct documents never coalesce against each other.
     #[tokio::test]
     async fn distinct_documents_do_not_coalesce_against_each_other() {
         let sinks = Arc::new(SinkRegistry::new());
@@ -345,11 +405,42 @@ mod tests {
         sinks.add(Arc::new(Collector(Arc::clone(&collector.0))) as Arc<dyn EventSink>);
         let forwarder = Forwarder::spawn(Arc::clone(&sinks));
 
-        forwarder.push(decoration(1, 1)).await;
-        forwarder.push(decoration(2, 1)).await;
-        forwarder.stop(); // abort drain; flush manually below is not needed —
-        // instead verify slots hold two distinct keys.
-        let count = forwarder.coalesced_count();
-        assert_eq!(count, 0);
+        forwarder.push(patch(1, 1, 2)).await;
+        forwarder.push(patch(2, 1, 2)).await;
+        drain().await;
+        let got = collector.0.lock().expect("collector").clone();
+        assert_eq!(
+            delivered_patches(&got).len(),
+            2,
+            "both documents deliver their patch"
+        );
+        assert_eq!(forwarder.coalesced_count(), 0);
+        forwarder.stop();
+    }
+
+    /// Edit-driven member frames travel the live lane in strict FIFO order.
+    #[tokio::test]
+    async fn edit_driven_members_keep_fifo_order() {
+        let sinks = Arc::new(SinkRegistry::new());
+        let collector = Collector::default();
+        sinks.add(Arc::new(Collector(Arc::clone(&collector.0))) as Arc<dyn EventSink>);
+        let forwarder = Forwarder::spawn(Arc::clone(&sinks));
+
+        forwarder.push(ack(1)).await;
+        forwarder.push(ack(2)).await;
+        drain().await;
+        let got = collector.0.lock().expect("collector").clone();
+        let acks: Vec<u64> = got
+            .iter()
+            .filter_map(|envelope| match envelope {
+                BridgeEnvelope::Event(event) => match event.as_ref() {
+                    ClientConnectionEvent::EditAck { version, .. } => Some(*version),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(acks, vec![1, 2]);
+        forwarder.stop();
     }
 }

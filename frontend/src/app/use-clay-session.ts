@@ -17,15 +17,24 @@ import {
   unsubscribeFromEvents,
 } from "../bridge/client";
 import type { BridgeEnvelope } from "../bridge/types";
+import { editorPerformance } from "../editor/performance";
 import {
   createConnectionStore,
   type ConnectionState,
 } from "../state/connection-store";
-import { documentSession } from "../editor/session-singleton";
 import { workspace } from "../shell/workspace-singleton";
 import { themeStore } from "../state/stores";
 
 const connectionStore = createConnectionStore();
+
+function configurePerformance(enabled: boolean): void {
+  editorPerformance.configure(enabled);
+  const target = globalThis as typeof globalThis & {
+    __clayPerfSnapshot?: () => ReturnType<typeof editorPerformance.snapshot>;
+  };
+  if (enabled) target.__clayPerfSnapshot = () => editorPerformance.snapshot();
+  else delete target.__clayPerfSnapshot;
+}
 
 export interface SessionHandle {
   connection: ConnectionState;
@@ -79,19 +88,16 @@ export function useClaySession(): SessionHandle {
             }
             return;
           }
+          // Document/tab events route through the workspace controller to
+          // the owning pane session; there is no app-wide document session.
           workspace.handleEnvelope(envelope);
-          documentSession.handleEnvelope(
-            envelope.kind === "routed"
-              ? { kind: "event", data: envelope.data.event }
-              : envelope,
-          );
         });
         const bootstrap = await bootstrapSession();
         if (!cancelled) {
+          configurePerformance(bootstrap.performanceProfile === true);
           themeStore.setTheme(bootstrap.activeTheme);
           themeStore.setTypography(bootstrap.activeTypography);
           workspace.installBootstrap(bootstrap);
-          documentSession.installInitial(bootstrap);
           connectionStore.set({ phase: "ready", bootstrap });
           void workspace.restore();
         }
@@ -118,11 +124,11 @@ export function useClaySession(): SessionHandle {
     void (async () => {
       try {
         const bootstrap = await reconnectSession();
+        configurePerformance(bootstrap.performanceProfile === true);
         themeStore.setTheme(bootstrap.activeTheme);
         themeStore.setTypography(bootstrap.activeTypography);
         workspace.reset();
         workspace.installBootstrap(bootstrap);
-        documentSession.installInitial(bootstrap);
         connectionStore.set({ phase: "ready", bootstrap });
         void workspace.restore();
         generationRef.current += 1;

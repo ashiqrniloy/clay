@@ -15,6 +15,7 @@ use clay::client::{
     ClientConnectionEvent, ClientEditQueue, ClientInitialState, EditorEditEvent,
     connect_for_reclaim_or_new, connect_with_workspace_root,
 };
+use clay::perf::metrics::{BRIDGE_ENQUEUE, MetricMetadata, global_recorder};
 use clay::protocol::{ClientId, ClientMessage, TabCommand, TabId};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -362,6 +363,7 @@ impl BridgeState {
             protocol_version: clay::protocol::PROTOCOL_VERSION,
             endpoint: self.inner.endpoint.to_string(),
             generation,
+            performance_profile: clay::perf::metrics::global_recorder().is_enabled(),
             active_theme: ThemeSnapshotDto::resolve(
                 &initial_state.active_theme.specifier,
                 &initial_state.active_theme,
@@ -482,6 +484,18 @@ impl BridgeState {
         }
         let message: ClientMessage =
             serde_json::from_str(payload).map_err(BridgeError::invalid_request)?;
+        let trace_id = request_trace_id(&message);
+        let recorder = global_recorder();
+        let enqueue_scope = recorder
+            .is_enabled()
+            .then(|| trace_id)
+            .flatten()
+            .map(|trace_id| {
+                recorder.scope_with_metadata(
+                    BRIDGE_ENQUEUE,
+                    MetricMetadata::default().with_trace_id(Some(trace_id)),
+                )
+            });
 
         let (client_id, edit_queue) = {
             let resolved = if let Some(tab_id) = tab_id {
@@ -499,7 +513,7 @@ impl BridgeState {
             (live.client_id, live.edit_queue.clone())
         };
 
-        match message {
+        let result = match message {
             ClientMessage::Hello { .. } => Err(BridgeError::forbidden(
                 "handshake is bridge-owned; use session_bootstrap",
             )),
@@ -536,7 +550,19 @@ impl BridgeState {
                         other => BridgeError::invalid_request(other),
                     })
             }
+        };
+        if let Some(scope) = enqueue_scope {
+            scope.finish();
         }
+        result
+    }
+}
+
+fn request_trace_id(message: &ClientMessage) -> Option<clay::protocol::PerformanceTraceId> {
+    match message {
+        ClientMessage::Edit { transaction_id, .. } => Some(*transaction_id),
+        ClientMessage::ViewportRenderRequest { trace_id, .. } => *trace_id,
+        _ => None,
     }
 }
 
@@ -604,18 +630,22 @@ fn stamp_client_id(
             offset,
             max_bytes,
         },
-        ClientMessage::DecorationViewportRequest {
+        ClientMessage::ViewportRenderRequest {
             document_id,
             document_version,
+            request_id,
             byte_start,
             byte_end,
+            trace_id,
             ..
-        } => ClientMessage::DecorationViewportRequest {
+        } => ClientMessage::ViewportRenderRequest {
             client_id,
             document_id,
             document_version,
+            request_id,
             byte_start,
             byte_end,
+            trace_id,
         },
         ClientMessage::OpenDocument {
             workspace_root_id,

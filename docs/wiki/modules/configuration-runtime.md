@@ -65,6 +65,36 @@ Hidden JSON/TOML/ad hoc package UI configuration keys remain rejected; in lowerc
 
 Phase 18.5 (plan `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md`) replans Markdown end-user loading on top of these generic primitives. Its task-8 configuration audit confirms every Markdown-relevant behavior-changing surface is either a runtime-backed Clay JS API or an explicitly planned/unavailable API: Markdown package options and theme-token/layout overrides go through the same `setPackageOption`, `serverSetLayoutOverride`, `serverRegisterThemeToken`, `serverRegisterPanelContribution`, `serverRegisterInputContribution`, and `serverRegisterUiStateScope` APIs already promoted in Phase 18.3/18.4; `setModePreference`, `setDecorationTheme`, and `setParsePolicy` remain planned, while `loadPackage` is runtime-backed and consumes installed/authorized/adopted package state. The Markdown preview defaults to `defaultVisibility: "hidden"` through `serverRegisterPanelContribution` rather than a hard-coded side panel or hidden key. No Markdown-specific configuration validator, hidden-key system, or package-specific Rust configuration branch was added.
 
+## Plan 099 configuration closure
+
+Plan 099 adds no new user-facing configuration surface. The incremental
+`BytePositionIndex`, atomic `ViewportRenderPatch`, per-document syntax
+sessions, bounded native executor, mode-activation cache, and source-free
+performance recorder remain host-owned implementation details. Existing user
+choices continue through `packages.loadPackage`,
+`syntax.setSyntaxEnginePreference`, `theme.setTheme`/`setTypography`/
+`setAppearance`, `keybindings.bindKey`, and the closed package-owned
+`configuration.setPackageOption` schema.
+
+The hard performance/security values stay compiled: four blocking syntax
+permits, 64 per-document syntax-tree states, 64 mode activations per
+generation, 30 MiB syntax cache, 256 MiB resident-memory envelope, 256 KiB
+chunk / 768 KiB native context limits, 4096-position render overscan, and
+4096 metadata-only trace events. `CLAY_PERF_PROFILE=1`,
+`VITE_CLAY_PERF_PROFILE=1`, and `--profile-perf` are developer measurement
+paths, not configuration options. No parser executor, cache eviction,
+viewport pacing/acknowledgement, full-text retention, trace capacity, or device
+budget can be supplied through hidden JSON/TOML keys or package options.
+
+The canonical `examples/init.js` now distinguishes the runtime-backed
+`setPackageOption` example from the planned/unavailable
+`setModePreference`/`setDecorationTheme`/`setParsePolicy` stubs. The closure is
+covered by `src/server/configuration.rs` hidden-key tests,
+`tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, and
+`tests/performance_budgets.rs`; generated API registry contents remain
+unchanged. The authoritative configuration reference is
+[`docs/reference/clay-js-api/configuration.md`](../../reference/clay-js-api/configuration.md#plan-099-editor-performance-configuration-review).
+
 ## Code Examples
 
 ```js

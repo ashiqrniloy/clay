@@ -9,7 +9,7 @@ const ready: ConnectionState = {
   phase: "ready",
   bootstrap: {
     clientId: 1,
-    protocolVersion: 27,
+    protocolVersion: 28,
     endpoint: "/tmp/x.sock",
     generation: 1,
     initialDocument: {

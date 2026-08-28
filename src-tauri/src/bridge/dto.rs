@@ -34,6 +34,9 @@ pub struct BootstrapDto {
     /// pump is aborted before the new handshake starts), but the number lets
     /// the frontend discard in-flight UI work keyed to a dead session.
     pub generation: u64,
+    /// Developer-only switch; it is inherited from `--profile-perf` and never
+    /// comes from package or webview input.
+    pub performance_profile: bool,
     pub initial_document: InitialDocumentDto,
     pub behavior_manifest: BehaviorManifest,
     /// Fully resolved core-token surface (overrides + legacy base palette

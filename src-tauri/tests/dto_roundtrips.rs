@@ -76,12 +76,14 @@ fn client_samples() -> Vec<ClientMessage> {
             offset: 8,
             max_bytes: 262_144,
         },
-        ClientMessage::DecorationViewportRequest {
+        ClientMessage::ViewportRenderRequest {
             client_id: 2,
             document_id: 1,
             document_version: 4,
+            request_id: 9,
             byte_start: 0,
             byte_end: 64,
+            trace_id: None,
         },
         ClientMessage::OpenDocument {
             client_id: 2,
@@ -236,7 +238,7 @@ fn client_family(message: &ClientMessage) -> &'static str {
         ClientMessage::EditorIntent { .. } => "editorIntent",
         ClientMessage::RequestResync { .. } => "requestResync",
         ClientMessage::DocumentChunkRequest { .. } => "documentChunkRequest",
-        ClientMessage::DecorationViewportRequest { .. } => "decorationViewportRequest",
+        ClientMessage::ViewportRenderRequest { .. } => "viewportRenderRequest",
         ClientMessage::OpenDocument { .. } => "openDocument",
         ClientMessage::OpenSelectedFile { .. } => "openSelectedFile",
         ClientMessage::AddSelectedWorkspaceRoot { .. } => "addSelectedWorkspaceRoot",
@@ -279,6 +281,7 @@ fn server_samples() -> Vec<ServerMessage> {
         viewport_byte_start: 0,
         viewport_byte_end: 64,
         spans: Vec::new(),
+        trace_id: None,
     };
     vec![
         ServerMessage::Welcome {
@@ -432,6 +435,18 @@ fn server_samples() -> Vec<ServerMessage> {
             kind: AgentPickerKind::Model,
             items: Vec::new(),
         })),
+        ServerMessage::ViewportRenderPatch(clay::protocol::ViewportRenderPatch {
+            request_id: 9,
+            document_id: 1,
+            document_version: 4,
+            status: clay::protocol::ViewportRenderStatus::Complete,
+            reason: None,
+            covered_ranges: vec![clay::protocol::TextByteRange::new(0, 64)],
+            decorations: Vec::new(),
+            diagnostics: Vec::new(),
+            folds: Vec::new(),
+            trace_id: None,
+        }),
     ]
 }
 
@@ -448,6 +463,7 @@ fn server_family(message: &ServerMessage) -> &'static str {
         ServerMessage::FoldingRangeSet(_) => "foldingRangeSet",
         ServerMessage::DecorationBatch(_) => "decorationBatch",
         ServerMessage::DiagnosticSet(_) => "diagnosticSet",
+        ServerMessage::ViewportRenderPatch(_) => "viewportRenderPatch",
         ServerMessage::EditAck { .. } => "editAck",
         ServerMessage::EditRejected { .. } => "editRejected",
         ServerMessage::EditTransaction { .. } => "editTransaction",

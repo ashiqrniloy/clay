@@ -139,6 +139,19 @@ pub const INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES: usize = 4096;
 // 18.5 uses this as the 30 MiB Markdown-specific overhead target while keeping
 // the primitive language-neutral for future modes.
 pub const SYNTAX_CACHE_BUDGET_BYTES: usize = 30 * 1024 * 1024;
+// Plan 099: maximum concurrent blocking Tree-sitter jobs across all
+// per-document syntax sessions. Each job owns its document's parser and tree,
+// so the bound also caps worst-case concurrent syntax memory amplification.
+pub const SYNTAX_EXECUTOR_MAX_JOBS: usize = 4;
+// Plan 099: maximum per-document syntax states (tree + parser) a grammar
+// handler retains. Eviction is arbitrary beyond the bound; the working set of
+// open documents per server is MAX_SERVER_DOCUMENTS, but cold grammars from
+// closed documents must not accumulate unbounded.
+pub const SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES: usize = 64;
+// Plan 099: maximum cached per-generation document mode activations. A repeat
+// open with the same classification inputs republishes the cached behavior
+// manifest from Rust instead of evaluating a generated module in V8.
+pub const MODE_ACTIVATION_CACHE_ENTRIES: usize = 64;
 // Phase 18.11 completion result payload budget. A completion result reuses the
 // `TransientMenuSession` picker, which caps display at `TRANSIENT_MENU_MAX_ITEMS`
 // (256), so the wire budget must accommodate a full 256-item result with short

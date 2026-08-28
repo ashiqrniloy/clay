@@ -6,11 +6,11 @@
 Tauri-specific lives here; the rest of the frontend sees only the typed
 bootstrap DTO, an envelope stream, and a request function.
 
-| File | Responsibility |
-| --- | --- |
-| `bridge/types.ts` | `BootstrapDto` (session identity, workspace roots, resolved theme/typography, package UI, documents, diagnostics) and `BridgeEnvelope` (`event` / `routed` / `disconnected` / `themeSnapshot` / `runtimeSnapshot`). Mirrors the Rust `dto.rs` shapes with camelCase fields and string-encoded ids where the wire uses strings. |
-| `bridge/client.ts` | The only module importing `@tauri-apps/api/core`. Exposes `bootstrapSession`, `reconnectSession`, `subscribeToEvents` (Tauri `Channel`), `unsubscribeFromEvents`, and `request(payload)` — raw JSON text of one protocol `ClientMessage`. |
-| `bridge/errors.ts` | `normalizeBridgeError`: maps bridge/IPC failures to a bounded `{ code, message }`; never surfaces raw process or path details. |
+| File               | Responsibility                                                                                                                                                                                                                                                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bridge/types.ts`  | `BootstrapDto` (session identity, workspace roots, resolved theme/typography, package UI, documents, diagnostics) and `BridgeEnvelope` (`event` / `routed` / `disconnected` / `themeSnapshot` / `runtimeSnapshot`). Mirrors the Rust `dto.rs` shapes with camelCase fields and string-encoded ids where the wire uses strings. |
+| `bridge/client.ts` | The only module importing `@tauri-apps/api/core`. Exposes `bootstrapSession`, `reconnectSession`, `subscribeToEvents` (Tauri `Channel`), `unsubscribeFromEvents`, and `request(payload)` — raw JSON text of one protocol `ClientMessage`.                                                                                      |
+| `bridge/errors.ts` | `normalizeBridgeError`: maps bridge/IPC failures to a bounded `{ code, message }`; never surfaces raw process or path details.                                                                                                                                                                                                 |
 
 ## App wiring
 
@@ -21,8 +21,10 @@ bootstrap DTO, an envelope stream, and a request function.
   then bootstrap once on mount; reconnect is explicit. Ordering matters —
   events emitted during bootstrap must not be dropped.
 - `shell/workspace-controller.ts` is the envelope router: runtime snapshots,
-  document events, transient menus, diagnostics, and routed client-command
-  requests each have one handler and update pane/tab state.
+  document events, transient menus, diagnostics, viewport patches, and routed
+  client-command requests all reach the owning pane session — there is no
+  app-wide document session mirror (`session-singleton.ts` was deleted in Plan
+  099). Requests each have one handler and update pane/tab state.
 
 ## Single-flight bootstrap
 
@@ -39,13 +41,21 @@ bootstrap.
 - Requests are JSON text of protocol messages; `Hello` is bridge-owned and
   rejected server-side if sent by the webview.
 - Envelope handling is total: unknown envelopes are ignored, not thrown.
+- `ViewportRenderPatch` is included in the document session's bounded feature
+  event stream and handled as one complete event; stale request IDs are dropped
+  by the owning editor projection, and its terminal status—not member arrival—
+  releases viewport pacing.
 - No browser storage (`localStorage` et al) anywhere — configuration
   authority stays server-side (guard-tested).
 
 ## Tests
 
+- `frontend/src/editor/sync/session.test.ts`: document-session forwarding keeps
+  atomic viewport patches available to mounted and remounted editor projections.
 - `frontend/src/test/*`: store transitions, dispatcher routing, error
-  normalization.
+  normalization, and editor integration.
+- `frontend/src/shell/workspace-controller.test.ts`: restore/open path routing,
+  shell status snapshots, and persistence isolation.
 - `cargo test -p clay-desktop` covers the Rust side of the same contract
   (see [Desktop Typed Bridge](desktop-typed-bridge.md)).
 
@@ -53,3 +63,4 @@ bootstrap.
 
 - [Tauri Desktop Shell](tauri-desktop-shell.md) — process/command surface.
 - [Frontend Edit Synchronization](../flows/frontend-edit-synchronization.md).
+- [Editor Viewport Render Patch](../flows/editor-viewport-render-patch.md).

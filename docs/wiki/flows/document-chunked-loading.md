@@ -2,202 +2,167 @@
 
 ## Source
 
-- `src/protocol/mod.rs` — `DocumentTextHead`, `DocumentChunk`, `DocumentChunkRequest`, `DocumentChunkRejected`
-- `src/protocol/codec.rs` — frame-size guard against oversized chunks
-- `src/perf/budgets.rs` — `MAX_CHUNK_BYTES`, `DEFAULT_MAX_FRAME_SIZE`
-- `src/server/workspace.rs` — `open_existing_file`, `open_selected_file`, `reload_document`, `read_file_streamed`
-- `src/server/document.rs` — rope read, `parse_windows_covering`
-- `src/server/connection/mod.rs` — `handle_document_chunk_request`
-- `src-tauri/src/bridge/dto.rs`, `forwarder.rs`, `session.rs` — Tauri bridge projection
-- `src-tauri/src/bridge/session.rs` — `DocumentChunkRequest` identity-stamped before enqueue
-- `frontend/src/bridge/types.ts` — `DocumentTextHeadDto`, `DocumentChunkDto`, `DocumentChunkRejectedDto`
-- `frontend/src/editor/create-editor.ts` — `installInitial` head paint + progressive chunk assembly
-- `frontend/src/editor/sync/session.ts` — chunk request state machine (one outstanding, versioned, append-til-complete)
-- `frontend/src/editor/ClayEditor.tsx` — read-only guard during assembly, loading status
-- `tests/large_document.rs` — 50 MiB open/edit/save/reload roundtrip, budget/binary refusal assertions
-- `tests/protocol/codec.rs` — chunk frame-size and round-trip tests
-- `tests/server/workspace.rs` — large-file streaming, head bound, budget accounting, binary sniff tests
-- `scripts/large-document-smoke.sh` — private-socket large-file manual smoke path
+- `src/protocol/mod.rs` — `DocumentTextHead`, `DocumentChunk`, request, and rejection shapes.
+- `src/protocol/codec.rs` — frame and request-size guards.
+- `src/perf/budgets.rs` — `MAX_CHUNK_BYTES`, resident-memory, and frame budgets.
+- `src/server/workspace.rs` — streamed open/reload/read and atomic save.
+- `src/server/document.rs` — rope head/chunk reads and parse-window slicing.
+- `src/server/connection/documents.rs` — routed chunk request handling.
+- `src/server/connection/mod.rs` — connection dispatch.
+- `src-tauri/src/bridge/dto.rs` — typed bridge projection.
+- `src-tauri/src/bridge/forwarder.rs` — bounded delivery.
+- `src-tauri/src/bridge/session.rs` — identity stamping.
+- `frontend/src/bridge/types.ts` — head/chunk DTOs.
+- `frontend/src/editor/sync/session.ts` — one-owner load state machine.
+- `frontend/src/editor/ClayEditor.tsx` — read-only/loading projection.
+- `frontend/src/editor/create-editor.ts` — CodeMirror view setup.
+- Tests: `src/server/workspace.rs`, `src/server/document.rs`, `src/protocol/codec.rs`, `frontend/src/editor/sync/session.test.ts`, `tests/editor_performance.rs`.
 
 ## Overview
 
-Plan 098 replaces the pre-v27 full-text-in-one-IPC-frame transfer with a
-bounded head-plus-pull-chunks protocol. Every initial document transfer (open,
-reload, resync, bootstrap layout restore) sends a `DocumentTextHead` carrying
-the first ≤ 256 KiB and total byte count. The client requests remaining text
-through versioned `DocumentChunkRequest` messages, each receiving at most
-`MAX_CHUNK_BYTES` (256 KiB). This removes the previous 768 KiB per-file open
-ceiling and prevents 1 MiB+ IPC frames without adding protocol complexity.
+Plan 098 uses a bounded head-plus-pull-chunks protocol for open, reload, and
+resync. The server reads file content into its canonical rope, sends a bounded
+`DocumentTextHead`, and serves versioned chunk requests. The frontend paints the
+head immediately, appends chunks in order, and enables editing only after the
+reported byte length is assembled.
+
+The frontend does not build a second full string buffer. A pane's
+`DocumentSession` keeps one current CodeMirror `Text`: `view.state.doc` while a
+view is attached, or `detachedDoc` only while detached. Chunk writes are
+programmatic, no-history transactions.
 
 ## Flow
 
-```
-Client                                  Server
-  |                                       |
-  |-- ClientMessage::OpenDocument ------->|
-  |                                       |-- stream UTF-8 from disk
-  |                                       |   (budget check, binary sniff)
-  |                                       |-- reserve resident memory
-  |                                       |-- create DocumentState
-  |<-- ServerMessage::DocumentOpened -----|
-  |    { head: DocumentTextHead            |
-  |      { totalBytes, firstChunk } }     |
-  |                                       |
-  |-- paint firstChunk into CodeMirror    |
-  |-- set read-only, show loading status  |
-  |                                       |
-  |-- ClientMessage::DocumentChunkRequest->|
-  |    { documentId, version, offset }    |
-  |                                       |-- validate access, version, offset
-  |                                       |-- slice rope at offset, clamp to 256 KiB
-  |<-- ServerMessage::DocumentChunk ------|
-  |    { documentId, version,             |
-  |      offset, bytes, isComplete }      |
-  |                                       |
-  |-- append bytes as annotated tx        |
-  |-- if !isComplete, request next chunk  |
-  |-- once totalBytes assembled:          |
-  |     clear loading status              |
-  |     enable editing                    |
-  |                                       |
-  |   ... normal edit flow ...            |
-  |                                       |
-  |-- ClientMessage::SaveDocument ------->|
-  |                                       |-- clone rope (Arc, O(1))
-  |                                       |-- stream chunks through atomic write
-  |<-- ServerMessage::DocumentSaved ------|
-  |                                       |
-  |-- ClientMessage::ReloadDocument ----->|
-  |                                       |-- stream from disk (budget, binary)
-  |<-- ServerMessage::DocumentReloaded ---|
-  |    { head: DocumentTextHead           |
-  |      { totalBytes, firstChunk } }     |
-  |                                       |
-  |-- progressive assembly same as open   |
+```text
+Open/Reload/Resync
+  -> server validates file, UTF-8, binary sniff, resident budget
+  -> DocumentTextHead { totalBytes, firstChunk }
+  -> session installs head into the one current Text
+  -> loading/read-only edit gate + visible-head syntax viewport request
+  -> one DocumentChunkRequest
+  -> DocumentChunk at the requested UTF-8 offset
+  -> append as no-history transaction
+  -> request next offset after response
+  -> totalBytes reached: clear loading, enable editing
 ```
 
-### Consumers
+1. `DocumentState::document_text_head` returns the first chunk at or below
+   `MAX_CHUNK_BYTES` (256 KiB), adjusted to a UTF-8 boundary, plus total bytes.
+2. `createDocumentSession.startLoad` installs `firstChunk` immediately, records
+   the wire-byte offset, sets `loading`, and sends at most one
+   `documentChunkRequest` at a time. Loading blocks edits but not
+   `viewportRenderRequest`: the authoritative loaded prefix asks for visible
+   syntax immediately. The next chunk offset is learned from the actual
+   returned UTF-8 byte length; fixed chunk strides are not assumed.
+3. `handle_document_chunk_request` routes by client/document identity, checks
+   access/version/offset/size, slices the canonical rope, clamps the response,
+   and returns `DocumentChunk` or typed `DocumentChunkRejected`.
+4. `appendLoaded` appends to the attached CodeMirror document or the detached
+   `Text` snapshot using `programmaticAnnotations()`. It never emits an edit or
+   creates an undo entry. Duplicate, unsolicited, stale, or rejected chunks do
+   not advance assembly.
+5. When `nextAppend >= totalBytes`, `finishLoad` clears the gate and marks the
+   editor ready. During loading, `ClayEditor` derives read-only from metadata
+   and reconfigures the compartment only when the boolean changes.
+6. Reload/resync marks the old load complete, clears pending edit state, and
+   starts a fresh head/serialization. Content equality is used for snapshot
+   installation, so equal-length changed text is not mistaken for unchanged
+   text.
+7. Save clones the server rope root and streams chunks through the existing
+   atomic write path; neither save nor open requires a whole-document frontend
+   `String`.
 
-Every server→client document-text transfer uses `DocumentTextHead`:
+## Code Example
 
-1. **Initial open** (`DocumentOpened`): first open of a file-backed document.
-2. **Reload** (`DocumentReloaded`): disk refresh of an existing document.
-3. **Resync** (`ResyncSnapshot`): after connection loss or stale-edit rejection.
-4. **Bootstrap layout restore**: persisted tab state reads document text via
-   the same `open_existing_file` / head path.
-5. **Open selected file** (`OpenSelectedFile`): server-issued capability token
-   + explicit user picker path → same head+chunks path as 1.
+```typescript
+// The session owns this state, not React or a second string buffer.
+if (view) {
+  view.dispatch({
+    changes: { from: view.state.doc.length, insert: chunkText },
+    annotations: programmaticAnnotations(),
+  });
+} else {
+  detachedDoc = detachedDoc.append(textOf(chunkText));
+}
+```
 
-### Rejections
+`programmaticAnnotations()` combines the programmatic origin with
+`Transaction.addToHistory.of(false)`.
 
-`DocumentChunkRejected` carries a typed reason:
+## Consumers
 
-- `InvalidSize` — requested byte range exceeds `MAX_CHUNK_BYTES`.
-- `OutOfRange` — offset past total bytes or negative.
-- `StaleVersion` — client version does not match current document version.
-- `AccessDenied` — requesting client holds no lease or the document was closed.
-- `DocumentClosed` — document was closed concurrently.
+The same head/chunk path serves:
 
-The client clears pending chunk state on any rejection and does not retry
-automatically. The server keeps no per-chunk-request state beyond validation;
-a rejected request leaves no server-side artifact.
+- `DocumentOpened` for an existing workspace file;
+- `DocumentReloaded`;
+- `ResyncSnapshot` after stale edits or reconnect;
+- layout restore opens after tab/root binding; and
+- explicit selected-file opens after server-side grant validation.
+
+## Rejections and fallback
+
+- `InvalidRequestSize` — requested chunk size is below the minimum or exceeds
+  the accepted request shape.
+- `OutOfRange` — offset is outside canonical rope bytes.
+- `StaleVersion` — the document changed between head and chunk request; the
+  session requests a fresh resync.
+- `AccessDenied`, `UnknownDocument`, or `DocumentClosed` — route/access no
+  longer exists; assembly stops and the pane shows a sanitized diagnostic.
+- Binary, invalid UTF-8, resident-memory, or workspace failures happen before
+  document installation and surface as typed file-operation errors.
+
+The client does not retry arbitrary chunk failures, and it never edits a
+partially assembled document. A new head/reload/resync is the recovery boundary.
 
 ## Invariants and Constraints
 
-- **No full-document IPC frame**: every wire message stays at or below
-  `MAX_CHUNK_BYTES` (256 KiB) and falls within `DEFAULT_MAX_FRAME_SIZE`
-  (1 MiB). Even a 50 MiB document produces a series of ≤ 256 KiB frames.
-- **Server-owned security budgets**: `DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES`
-  (256 MiB) and `BINARY_SNIFF_BYTES` (8 KiB) are checked during the
-  streaming read phase, before any head or chunk is sent. A budget or binary
-  failure returns `FileOperationFailed` with no document state installed.
-- **Chunk clamp**: each chunk request returns at most `MAX_CHUNK_BYTES`.
-  The server validates offset and length against both the bound and the
-  actual rope length. Clients must not assume chunk count equals byte count
-  divided by chunk size (the final chunk may be smaller).
-- **In-flight window**: at most one outstanding chunk request per document.
-  The client sends the next request only after the previous chunk arrives.
-  This bounds bridge/frontend memory without explicit window tracking.
-- **Assembly outside hot paths**: chunk assembly happens via CodeMirror
-  transactions annotated as `programmatic` (visible in the change history
-  but not emitted as user edits). The assembly never blocks React render,
-  paint, layout, input handlers, or keypress-to-local-paint paths.
-- **Atomic saves stream rope chunks**: saves clone the rope (Arc, O(1)) and
-  stream its internal chunks through `atomic_write_chunks`. No full-document
-  `String` is materialized for either open or save.
-- **Versioned requests**: chunk requests include the document version the
-  client believes is current. If the document was edited or reloaded between
-  head and chunk, the server rejects with `StaleVersion` and the client
-  re-requests a fresh head (via reconnect/resync/status).
-- **Read-only during assembly**: CodeMirror is set read-only and shows
-  "Loading full document…" until `totalBytes` is reached. Undo/redo history
-  is not polluted by the assembly transactions.
+- Every chunk is at most `MAX_CHUNK_BYTES` (256 KiB) and below the 1 MiB frame
+  limit; offsets are UTF-8 byte boundaries.
+- One outstanding chunk request exists per pane/document. Request state is
+  bounded and no server chunk queue is retained. The in-flight rule is:
 
-## Code Examples
+  ```text
+  one outstanding request
+  ```
 
-```typescript
-// Frontend chunk assembly (simplified)
-async function assembleChunks(
-  session: Session,
-  docId: string,
-  version: number,
-  totalBytes: number,
-  head: string
-) {
-  let buffer = head;
-  let offset = head.length;
-  while (offset < totalBytes) {
-    const chunk = await session.requestChunk(docId, version, offset);
-    buffer += chunk.bytes;
-    offset += chunk.bytes.length;
-  }
-  return buffer;
-}
-```
+  It is not a buffered chunk window.
 
-```rust
-// Server chunk response
-pub fn document_chunk_message(
-    document: &Mutex<DocumentState>,
-    client_id: ClientId,
-    request: &DocumentChunkRequest,
-) -> Result<ServerMessage, ()> {
-    let doc = document.lock().unwrap();
-    doc.check_access(client_id)?;
-    doc.ensure_version(request.document_version)?;
-    let offset = request.offset as usize;
-    if offset > doc.rope.len() {
-        return Err(()); // OutOfRange
-    }
-    let available = doc.rope.len() - offset;
-    let chunk_size = available.min(MAX_CHUNK_BYTES);
-    let bytes = doc.rope.slice(offset..offset + chunk_size).to_string();
-    let is_complete = offset + chunk_size >= doc.rope.len();
-    Ok(ServerMessage::DocumentChunk(DocumentChunk {
-        document_id: request.document_id,
-        document_version: doc.version(),
-        offset: request.offset,
-        bytes,
-        is_complete,
-    }))
-}
-```
+- The server owns canonical text, versions, leases, filesystem access, binary
+  sniffing, and resident-memory accounting.
+- The frontend owns one current `Text`; there is no app-wide document-session
+  singleton and no React-held source string.
+- Head/chunk/reload/resync transactions are annotated and excluded from undo and
+  edit emission. Ordinary user edits remain compact deltas.
+- Read-only/loading status is metadata; shell notification/persistence selectors
+  ignore per-ack version/pending churn.
+- Trace metadata may record numeric document/version/byte counts only; fixture
+  content, paths, credentials, and source text do not enter reports.
 
 ## Tests
 
-- `tests/large_document.rs::large_document_open_edit_save_reload_roundtrip_is_chunked`:
-  50 MiB open through head+chunks (256 KiB each), edit, streamed save via
-  `atomic_write_chunks`, reload equality. Asserts chunk bounds, UTF-8
-  equality, no oversized frames.
-- `tests/large_document.rs::oversize_and_binary_files_refuse_with_visible_errors`:
-  resident-budget refusal at 257 MiB (exceeds 256 MiB budget) and binary
-  sniff refusal for NUL in first 8 KiB. Both return typed `FileOperationFailed`
-  diagnostics.
-- `src/server/workspace.rs`: large-file streaming, head bounds, budget
-  accounting, binary sniff, cross-read UTF-8 carry tests.
-- `tests/protocol/codec.rs`: chunk frame-size upper-bound round trips.
-- `tests/documentation_coverage.rs`: wiki navigation guard covers all linked
-  pages including this flow page.
-- `tests/primitives_docs.rs::document_chunk_transfer_primitive_is_bounded_and_documented`:
-  verifies registry, index, protocol-codec wiki, bridge wiki, and budget
-  constant names.
+- `src/server/workspace.rs` — large-file stream, UTF-8 head boundary, binary
+  sniff, resident budget, save/reload, and cross-read behavior.
+- `src/server/document.rs` — rope head/chunk bounds and canonical version checks.
+- `src/protocol/codec.rs` — chunk round trips, frame bound, and invalid request
+  size rejection.
+- `frontend/src/editor/sync/session.test.ts` — one request per offset,
+  duplicate-chunk dedupe, same-length reload, no-history assembly, and
+  detach/remount restoration.
+- `tests/editor_performance.rs` — 50 MiB protocol open/edit/save/reload/resync
+  matrix and close retirement.
+
+Run focused coverage with:
+
+```bash
+cargo test --lib server::workspace::tests::open_existing_file_streams_large_utf8_text_and_bounds_head
+cd frontend && npm test -- --run src/editor/sync/session.test.ts
+```
+
+## Related
+
+- [Frontend Edit Synchronization](frontend-edit-synchronization.md)
+- [React CodeMirror Editor](../modules/react-codemirror-editor.md)
+- [Server Document State](../modules/server-document-state.md)
+- [React Client Bridge](../modules/react-client-bridge.md)
+- [Editor Viewport Render Patch](editor-viewport-render-patch.md)
+- `docs/reference/primitives/registry.md#documentchunktransfer`

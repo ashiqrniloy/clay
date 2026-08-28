@@ -198,3 +198,20 @@ explicit rather than inferred from static screenshots.
 | Diagnostics/completion/intelligence rest state | PASS static | `intelligence/fixture-*` shows syntax, diagnostic, fold, and inlay projections; AX snapshot remains bounded |
 | Physical typing, undo, completion trigger | UNRESOLVED live; PASS structural | Host has no safe keyboard backend. Existing local-edit, CodeMirror, completion, editable-text, and hot-path tests pass |
 | Absolute path safety | PASS | Editor fallback now uses sanitized workspace basename; `frontend/src/test/editor.test.tsx` prevents `/tmp/ws` from reaching chrome/region labels |
+
+## Plan 099 delayed-syntax editing steps
+
+| # | Action | Expected |
+|---|---|---|
+| E37 | Open a large generated code/Markdown fixture, start a delayed parse, and type a burst at the top | Text and caret update locally before syntax completes; no input waits for IPC/parser work; no `editor.long_task` exceeds 50 ms and local paint stays within the 16 ms hard envelope. |
+| E38 | After progressive load, undo/redo, detach/remount, and resync the pane | Programmatic head/chunk/resync installs add no history entries; user text/caret remain coherent and no partial document can be restored by undo. |
+
+## Plan 099 Linux execution record (2026-08-28)
+
+| Check | Result | Evidence |
+|---|---|---|
+| E37 | UNRESOLVED live; PASS structural companion | The real client launched, but keyboard input and a loaded WebKit editor were unavailable. Frontend hot-path, delayed-session, and long-task invariant suites remain green. |
+| E38 | UNRESOLVED live; PASS automated companion | No document could be edited or remounted in this run; single-Text/no-history/remount tests remain the evidence. |
+
+The harness recorded zero long tasks only for its bootstrap trace; this is not
+a typing-flow claim.

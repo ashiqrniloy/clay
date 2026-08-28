@@ -663,7 +663,7 @@ const packageFixtureSnapshot: PackageUiSnapshot = {
 
 const fixtureBootstrap = {
   clientId: 1,
-  protocolVersion: 27,
+  protocolVersion: 28,
   endpoint: "fixture",
   generation: 1,
   initialDocument: {

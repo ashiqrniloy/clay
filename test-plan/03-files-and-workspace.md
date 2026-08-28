@@ -245,3 +245,20 @@ Live interaction is explicitly unresolved because AT-SPI exposed only the
 native Tauri frame and the Linux compositor moved the portal/client window
 partly off-screen. Do not count F48–F52 as manual GUI passes until a stable
 WebKitGTK target can be controlled.
+
+## Plan 099 progressive document/session steps
+
+| # | Action | Expected |
+|---|---|---|
+| F53 | Open each generated `perf-<size>mib-<kind>.<ext>` fixture through the workspace file browser | First text paints before ready; one pane session owns one current document and one request stream per chunk offset; ready clears loading without a blank editor; mode follows the extension. The 50 MiB ready target is ≤2 s on the reference host and ≤5 s on the designated device. |
+| F54 | While syntax is delayed, type, save, reload, and resync the active fixture | Local edits remain responsive; save/reload/resync preserves authoritative text and does not create partial-chunk undo history; edit acknowledgement target remains ≤40 ms p95. |
+
+## Plan 099 Linux execution record (2026-08-28)
+
+| Check | Result | Evidence |
+|---|---|---|
+| F53 | UNRESOLVED live; retained PASS evidence | The full harness generated all 72 synthetic files and launched the real client, but no file-browser input reached the WebKit view. Final-build progressive-loading captures remain under `code-reviews/screenshots/2026-08-28-plan099-editor-performance/editor-large-loading/`. |
+| F54 | UNRESOLVED live; PASS automated companion | No keyboard-capable backend or opened document was available. Server matrix save/reload/resync and single-session/no-history invariants remain the automated companion. |
+
+Do not convert harness `editor.open`/`editor.ready` bootstrap values into F53
+latency evidence; the run recorded no `bridge.patch_delivery` or parser stage.

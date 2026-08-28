@@ -83,6 +83,8 @@ export interface BootstrapDto {
   protocolVersion: number;
   endpoint: string;
   generation: number;
+  /** Developer-only profiling flag inherited from `--profile-perf`. */
+  performanceProfile?: boolean;
   initialDocument: InitialDocumentDto;
   behaviorManifest: {
     manifestId: string;

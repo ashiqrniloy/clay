@@ -6,7 +6,10 @@ use std::sync::Arc;
 use tokio::{io::AsyncWrite, sync::Mutex};
 
 use crate::{
-    perf::budgets::{DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES},
+    perf::{
+        budgets::{DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES},
+        metrics::{MetricMetadata, SERVER_EDIT_ACK, global_recorder},
+    },
     protocol::{
         ClientId, DocumentId, DocumentMetadata, DocumentVersion, ParseByteRange, ParseInputEdit,
         ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode, RuntimeDiagnostic,
@@ -20,7 +23,11 @@ use crate::server::connection::{file_operation_failed, teardown_closed_document}
 /// Upper bound on parse windows scheduled per viewport request. A tall or
 /// zoomed-out viewport is covered by consecutive bounded windows instead of a
 /// single clamped one; anything past this waits for the next scroll request.
-const MAX_VIEWPORT_PARSE_WINDOWS: usize = 24;
+// One job per request: the native handler parses a single window, and the
+// per-document session dedups later windows that share the same request id.
+// Asking for 24 windows used to increment `remaining` without scheduling 24
+// jobs, so the atomic patch never left the server.
+const MAX_VIEWPORT_PARSE_WINDOWS: usize = 1;
 use crate::server::{
     RuntimeGenerationStore,
     behavior::{ActiveBehaviorManifest, BehaviorVersionDecision},
@@ -119,6 +126,10 @@ pub(super) async fn dispatch_edit_operation<S>(
 where
     S: AsyncWrite + Unpin,
 {
+    let ack_scope = global_recorder().scope_with_metadata(
+        SERVER_EDIT_ACK,
+        MetricMetadata::transaction(document_id, client_id, transaction_id, base_version),
+    );
     let Some(target_document) =
         document_for_message(document_id, client_id, document, workspace).await
     else {
@@ -132,6 +143,7 @@ where
                 },
             )
             .await?;
+        ack_scope.finish();
         return Ok(());
     };
 
@@ -155,6 +167,7 @@ where
                 response,
             )
             .await?;
+            ack_scope.finish();
             return Ok(());
         }
     };
@@ -171,6 +184,7 @@ where
         )
     };
     codec.write_server_message(stream, &response).await?;
+    ack_scope.finish();
     if let (
         ServerMessage::EditAck {
             confirmed_version, ..
@@ -209,6 +223,7 @@ where
             client_id,
             document_id,
             parse_input,
+            global_recorder().is_enabled().then_some(transaction_id),
         )
         .await
         {
@@ -587,12 +602,62 @@ pub(crate) async fn open_document_followup_messages(
     messages
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct OpenModeActivation {
-    package_prefix: String,
-    mode_id: String,
-    parse_handler_mode_id: String,
-    native_parse_policy: Option<ParsePolicy>,
+    pub(crate) package_prefix: String,
+    pub(crate) mode_id: String,
+    pub(crate) parse_handler_mode_id: String,
+    pub(crate) native_parse_policy: Option<ParsePolicy>,
+}
+
+/// Cache key for a completed document mode activation (Plan 099). Captures
+/// every classification input a mode can observe: runtime generation, path
+/// identity (extension or full file name), shebang line, and a hash of the
+/// bounded leading-content probe. Two opens with equal keys classify and
+/// activate identically, so the cached manifest may be republished from
+/// Rust without a generated module evaluation.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ModeActivationKey {
+    generation_id: u64,
+    path_key: String,
+    shebang: Option<String>,
+    leading_content_hash: u64,
+}
+
+/// A cached activation: the classification identity plus the behavior
+/// manifest the V8 activation published. The manifest is inert validated
+/// protocol data (rules/commands/keymaps), never executable content.
+#[derive(Debug, Clone)]
+pub(crate) struct CachedModeActivation {
+    activation: OpenModeActivation,
+    behavior_manifest: Option<crate::protocol::BehaviorManifest>,
+}
+
+/// Classification-observable identity of a path: the extension when present,
+/// otherwise the full file name (Makefile-style probes match by name).
+fn path_classification_key(path: &str) -> String {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    match file_name.rsplit_once('.') {
+        Some((_, extension)) if !extension.is_empty() => extension.to_ascii_lowercase(),
+        _ => file_name.to_string(),
+    }
+}
+
+fn mode_activation_key(
+    generation_id: u64,
+    path: &str,
+    shebang: &Option<String>,
+    leading_content: &str,
+) -> ModeActivationKey {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bounded_utf8_prefix(leading_content, 64).0.hash(&mut hasher);
+    ModeActivationKey {
+        generation_id,
+        path_key: path_classification_key(path),
+        shebang: shebang.clone(),
+        leading_content_hash: hasher.finish(),
+    }
 }
 
 pub(super) async fn classify_open_document(
@@ -619,6 +684,34 @@ pub(super) async fn classify_open_document(
         bounded_utf8_prefix(text, crate::packages::modes::MAX_LEADING_CONTENT_BYTES)
             .0
             .to_string();
+
+    // Plan 099 registry fast path: a repeat open whose classification inputs
+    // match a cached activation and whose native grammar is still registered
+    // republishes the cached manifest from Rust — no generated module runs.
+    let activation_key =
+        mode_activation_key(generation_id, &metadata.path, &shebang, &leading_content);
+    if let Some(cached) = js_runtime.cached_mode_activation(&activation_key)
+        && js_runtime
+            .registered_native_syntax_handler(generation_id, &metadata.path)
+            .is_some()
+    {
+        // Re-scope the cached manifest to THIS document: the cached copy is
+        // scoped to the document that produced it, and the behavior store
+        // keys per-document layers by that scope.
+        if let Some(mut manifest) = cached.behavior_manifest {
+            manifest.scope = crate::protocol::BehaviorScope::Document {
+                document_id: metadata.document_id,
+            };
+            behavior
+                .lock()
+                .await
+                .publish_replacement(manifest)
+                .map_err(|_| ())
+                .ok()?;
+        }
+        return Some(cached.activation);
+    }
+
     let shebang_json = serde_json::to_string(&shebang).unwrap_or_else(|_| "null".to_string());
     let leading_json =
         serde_json::to_string(&leading_content).unwrap_or_else(|_| "null".to_string());
@@ -658,6 +751,9 @@ Deno.core.ops.op_clay_runtime_record(JSON.stringify(classification));
         shebang_json,
         leading_json,
     );
+    js_runtime
+        .open_activation_evaluations
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let evaluation = js_runtime
         .evaluate_controlled_module_for_document(source, metadata.document_id)
         .await
@@ -689,9 +785,20 @@ Deno.core.ops.op_clay_runtime_record(JSON.stringify(classification));
     // Tier 1 registers first. A same-generation JS handler remains available
     // only when no selected native handler owns this package/mode key.
     let _ = js_runtime.register_parse_handlers(parse_coordinator, generation_id, &evaluation);
+    js_runtime.cache_mode_activation(
+        activation_key,
+        crate::server::connection::CachedModeActivation {
+            activation: activation.clone(),
+            behavior_manifest: evaluation.behavior_manifest.clone(),
+        },
+    );
     Some(activation)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "syntax refresh keeps server-owned document and runtime handles explicit"
+)]
 pub(super) async fn refresh_native_syntax_after_edit(
     workspace: &Arc<Mutex<WorkspaceState>>,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
@@ -700,6 +807,7 @@ pub(super) async fn refresh_native_syntax_after_edit(
     client_id: ClientId,
     document_id: DocumentId,
     accepted_edit: ParseInputEdit,
+    trace_id: Option<crate::protocol::PerformanceTraceId>,
 ) -> Result<(), RuntimeDiagnostic> {
     let (metadata, document) = {
         let workspace = workspace.lock().await;
@@ -731,7 +839,11 @@ pub(super) async fn refresh_native_syntax_after_edit(
     let Some(window) = window else {
         return Ok(());
     };
-    parse_coordinator.record_native_edit_accepted(metadata.document_id, metadata.version);
+    parse_coordinator.record_native_edit_accepted_with_trace(
+        metadata.document_id,
+        metadata.version,
+        trace_id,
+    );
     let viewport = window.byte_range();
     schedule_parse_snapshot(
         parse_coordinator,
@@ -741,6 +853,9 @@ pub(super) async fn refresh_native_syntax_after_edit(
         window,
         viewport,
         Some(accepted_edit),
+        trace_id,
+        None,
+        None,
     )?;
     Ok(())
 }
@@ -786,6 +901,9 @@ pub(super) async fn schedule_open_parse(
         policy,
         window,
         viewport,
+        None,
+        None,
+        None,
         None,
     )
 }
@@ -870,9 +988,16 @@ pub(super) fn schedule_parse_window(
         window,
         viewport,
         None,
+        None,
+        None,
+        None,
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "parse scheduling keeps validated document, policy, window, and trace context explicit"
+)]
 pub(super) fn schedule_parse_snapshot(
     parse_coordinator: &ParseCoordinator,
     metadata: &DocumentMetadata,
@@ -881,6 +1006,9 @@ pub(super) fn schedule_parse_snapshot(
     window: ParseWindowSnapshot,
     viewport: ParseByteRange,
     accepted_edit: Option<ParseInputEdit>,
+    trace_id: Option<crate::protocol::PerformanceTraceId>,
+    request_id: Option<crate::protocol::ViewportRequestId>,
+    client_id: Option<ClientId>,
 ) -> Result<Option<crate::protocol::DecorationSet>, RuntimeDiagnostic> {
     let invalidated_ranges =
         accepted_edit.map_or_else(|| vec![viewport], |edit| vec![edited_range(edit, viewport)]);
@@ -893,6 +1021,9 @@ pub(super) fn schedule_parse_snapshot(
         viewport,
         invalidated_ranges,
         accepted_edit,
+        trace_id,
+        request_id,
+        client_id,
     };
     match parse_coordinator.schedule_parse_with_windows(request, vec![window], Some(policy)) {
         Ok(_) | Err(ParseCoordinatorError::HandlerNotRegistered { .. }) => Ok(None),
@@ -975,7 +1106,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
-pub(super) async fn handle_decoration_viewport_request<S>(
+pub(super) async fn handle_viewport_render_request<S>(
     codec: Codec,
     stream: &mut S,
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
@@ -985,47 +1116,107 @@ pub(super) async fn handle_decoration_viewport_request<S>(
     client_id: ClientId,
     document_id: DocumentId,
     document_version: DocumentVersion,
+    request_id: crate::protocol::ViewportRequestId,
     byte_start: u64,
     byte_end: u64,
-) -> Result<(), CodecError>
+    trace_id: Option<crate::protocol::PerformanceTraceId>,
+) -> Result<usize, CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    use crate::protocol::{ViewportRenderPatch, ViewportRenderStatus};
+
     if byte_start > byte_end {
-        return Ok(());
+        write_viewport_rejection(
+            &codec,
+            stream,
+            request_id,
+            document_id,
+            document_version,
+            "invalidRange",
+        )
+        .await?;
+        return Ok(0);
     }
     let (metadata, target_document) = {
         let workspace = workspace.lock().await;
         let Ok(metadata) = workspace.document_metadata(document_id, client_id).await else {
-            return Ok(());
+            write_viewport_rejection(
+                &codec,
+                stream,
+                request_id,
+                document_id,
+                document_version,
+                "unknownDocument",
+            )
+            .await?;
+            return Ok(0);
         };
         let Some(target_document) = workspace.document_handle(document_id) else {
-            return Ok(());
+            write_viewport_rejection(
+                &codec,
+                stream,
+                request_id,
+                document_id,
+                document_version,
+                "unknownDocument",
+            )
+            .await?;
+            return Ok(0);
         };
         (metadata, target_document)
     };
     if metadata.version != document_version {
-        return Ok(());
+        write_viewport_rejection(
+            &codec,
+            stream,
+            request_id,
+            document_id,
+            document_version,
+            "staleVersion",
+        )
+        .await?;
+        return Ok(0);
     }
     let runtime = runtime_generation.current().await;
     let Some((meta, policy)) = runtime
         .service
         .registered_native_syntax_handler(runtime.id, &metadata.path)
     else {
-        return Ok(());
+        // Valid request with no renderable output: explicit empty completion
+        // frees the client's request slot without a heuristic timer.
+        codec
+            .write_server_message(
+                stream,
+                &ServerMessage::ViewportRenderPatch(ViewportRenderPatch {
+                    request_id,
+                    document_id,
+                    document_version,
+                    status: ViewportRenderStatus::Empty,
+                    reason: None,
+                    covered_ranges: Vec::new(),
+                    decorations: Vec::new(),
+                    diagnostics: Vec::new(),
+                    folds: Vec::new(),
+                    trace_id,
+                }),
+            )
+            .await?;
+        return Ok(0);
     };
     let behavior_version = behavior.lock().await.version();
-    // Rope-sliced windows covering the WHOLE requested viewport. The previous
-    // path cloned the full document text, rescanned the prefix for the base
-    // line, and clamped output to the first 4 KiB — so tall viewports stayed
-    // unhighlighted past their first window and every scroll tick stalled the
-    // connection loop behind document-lock + memcpy work.
+    // Rope-sliced windows covering the WHOLE requested viewport, clamped to
+    // the document's total bytes before any window snapshot is allocated.
+    // The parse context range (windows, possibly wider for grammar context)
+    // stays separate from the authoritative output coverage claimed by the
+    // eventual patch members.
     let windows = {
         let document = target_document.lock().await;
+        let total_bytes = document.byte_len() as u64;
         document.parse_windows_covering(
             &meta.package_prefix,
             &meta.mode_id,
-            ParseByteRange::new(byte_start, byte_end),
+            ParseByteRange::new(byte_start.min(total_bytes), byte_end.min(total_bytes)),
             policy,
             MAX_VIEWPORT_PARSE_WINDOWS,
         )
@@ -1033,36 +1224,93 @@ where
     let windows = match windows {
         Ok(windows) => windows,
         Err(reason) => {
-            codec
-                .write_server_message(
-                    stream,
-                    &ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
-                        "parse.viewport_activation_failed",
-                        reason,
-                    )),
-                )
-                .await?;
-            return Ok(());
+            write_viewport_rejection(
+                &codec,
+                stream,
+                request_id,
+                document_id,
+                document_version,
+                "activationFailed",
+            )
+            .await?;
+            let _ = reason;
+            return Ok(0);
         }
     };
-    for window in windows {
-        let piece_viewport = ParseByteRange::new(window.byte_start, window.byte_end);
-        if let Err(diagnostic) = schedule_parse_snapshot(
-            parse_coordinator,
-            &metadata,
-            behavior_version,
-            policy,
-            window,
-            piece_viewport,
-            None,
-        ) {
-            codec
-                .write_server_message(stream, &ServerMessage::RuntimeDiagnostic(diagnostic))
-                .await?;
-            break;
-        }
+    let Some(window) = windows.into_iter().next() else {
+        codec
+            .write_server_message(
+                stream,
+                &ServerMessage::ViewportRenderPatch(ViewportRenderPatch {
+                    request_id,
+                    document_id,
+                    document_version,
+                    status: ViewportRenderStatus::Empty,
+                    reason: None,
+                    covered_ranges: Vec::new(),
+                    decorations: Vec::new(),
+                    diagnostics: Vec::new(),
+                    folds: Vec::new(),
+                    trace_id,
+                }),
+            )
+            .await?;
+        return Ok(0);
+    };
+    let piece_viewport = ParseByteRange::new(window.byte_start, window.byte_end);
+    if let Err(diagnostic) = schedule_parse_snapshot(
+        parse_coordinator,
+        &metadata,
+        behavior_version,
+        policy,
+        window,
+        piece_viewport,
+        None,
+        trace_id,
+        Some(request_id),
+        Some(client_id),
+    ) {
+        codec
+            .write_server_message(stream, &ServerMessage::RuntimeDiagnostic(diagnostic))
+            .await?;
+        write_viewport_rejection(
+            &codec,
+            stream,
+            request_id,
+            document_id,
+            document_version,
+            "activationFailed",
+        )
+        .await?;
+        return Ok(0);
     }
-    Ok(())
+    Ok(1)
+}
+
+async fn write_viewport_rejection<S>(
+    codec: &Codec,
+    stream: &mut S,
+    request_id: crate::protocol::ViewportRequestId,
+    document_id: DocumentId,
+    document_version: DocumentVersion,
+    reason: &str,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    use crate::protocol::ViewportRenderPatch;
+
+    codec
+        .write_server_message(
+            stream,
+            &ServerMessage::ViewportRenderPatch(ViewportRenderPatch::rejected(
+                request_id,
+                document_id,
+                document_version,
+                reason,
+            )),
+        )
+        .await
 }
 
 #[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles

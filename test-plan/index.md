@@ -119,6 +119,7 @@ references) were replaced with current equivalents in modules 01, 04, 07, 10,
 | Plan 097 Phase 11 release hardening/packaging/updates/security | 01 (launch identity), 11 (budgets), 12 (platform policy) |
 | Plan 097 Phase 12 parity certification/cutover/native removal | 01, 13, 14 + full regression pass of modules above |
 | Plan 098 chunked document loading | 01 (L23–L24), 03 (F48–F52), 11 (Q34–Q37) |
+| Plan 099 server-authoritative editor performance and manual matrix | 01 (L25–L26), 03 (F53–F54), 04 (E37–E38), 08 (S33–S34), 11 (M1–M7), 13 (D20–D21), 14 (T77–T78); deep reference: `docs/development/performance.md` |
 
 ## Plan 097 Phase 9 Linux execution record (2026-08-23)
 
@@ -297,3 +298,35 @@ It contains the app-only welcome screenshot, runtime output, status markers,
 and this execution note. No user content, host paths, or secrets were
 retained. Existing steps were preserved; only L23/L24, F48–F52, and Q34–Q37
 were added.
+
+## Plan 099 manual-test-plan execution record (2026-08-28)
+
+Evidence: [`manual-test-plan.md`](../code-reviews/screenshots/2026-08-28-plan099-manual/manual-test-plan.md) and source-free reports under `target/perf/editor-performance/plan099-manual-20260828-181828/`.
+
+The current build generated 72 synthetic variants across 1/10/50 MiB, four
+line shapes, and six language extensions, then launched the real profiled
+Tauri/WebKit client against a private server socket. AT-SPI/window focus and a
+Clay welcome screenshot worked; the WebKit document tree was not exposed and
+no keyboard-capable input backend was available. The `--enforce` harness
+passed with zero long tasks over 50 ms, 18 frontend retained events/0 drops,
+and the only warning was absent `bridge.patch_delivery` because no fixture was
+opened. Bootstrap-only p95s were frontend open/ready 0/0 ms, desktop
+codec decode/encode 0.151/0.043 ms, server codec decode/encode 0.035/0.233 ms,
+and configuration load 14.056 ms. Parser queue count was 0 because no parse
+flow ran. An idle supplemental run observed 283,952 KiB tracked RSS across
+server/client/desktop; no document was installed, so this is not a document
+resident-budget measurement.
+
+| Module | Result | Evidence |
+|---|---|---|
+| 01 launch/recovery | PASS private launch; UNRESOLVED recovery interaction | Private socket, real Tauri launch, Connected welcome, and AT-SPI frame; keyboard/server-resync flow not driven |
+| 03 files/progressive loading | UNRESOLVED live; retained PASS evidence | Current file-open path not drivable; final-build large-loading and four-pane artifacts remain linked in the execution note |
+| 04 editing/delayed syntax | UNRESOLVED live | No keyboard backend |
+| 08 syntax/viewport/empty patch | UNRESOLVED live | No keyboard/scroll backend; structural tests remain green |
+| 11 performance M1–M7 | M1 PARTIAL; M2–M7 UNRESOLVED | Harness and reports above; no false editor-flow pass |
+| 13 splits/routing | UNRESOLVED live; retained PASS evidence | Four-pane routing artifact and automated isolation coverage remain available |
+| 14 tabs/reconnect | UNRESOLVED live; retained PASS evidence | Prior final-build tab/recovery artifacts and automated isolation coverage remain available |
+
+No existing step was deleted or weakened. Synthetic roots were removed and
+retained reports contain no user files, source text, credentials, or ambient
+paths.

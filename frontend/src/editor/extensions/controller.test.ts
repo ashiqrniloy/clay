@@ -7,7 +7,7 @@ import type { BridgeEnvelope } from "../../bridge/types";
 import type { DocumentMeta } from "../../state/document-store";
 import { behaviorCompartment } from "../compartments";
 import { EditorProjection } from "./controller";
-import type { DecorationSet } from "./types";
+import type { DecorationSet, ViewportRenderPatchDto } from "./types";
 
 const meta: DocumentMeta = {
   documentId: 4,
@@ -30,6 +30,29 @@ const provenance = {
 
 function envelope(set: DecorationSet): BridgeEnvelope {
   return { kind: "event", data: { kind: "decorationSet", data: set } };
+}
+
+function patchEnvelope(
+  patch: Partial<ViewportRenderPatchDto> & { requestId: number },
+): BridgeEnvelope {
+  return {
+    kind: "event",
+    data: {
+      kind: "viewportRenderPatch",
+      data: {
+        documentId: 4,
+        documentVersion: 7,
+        status: "complete",
+        reason: null,
+        coveredRanges: [],
+        decorations: [],
+        diagnostics: [],
+        folds: [],
+        traceId: null,
+        ...patch,
+      },
+    },
+  };
 }
 
 function set(version: number): DecorationSet {
@@ -83,15 +106,15 @@ describe("editor projection boundary", () => {
     });
     projection.attach(view);
     projection.handleEnvelope(envelope(set(6)));
-    expect(view.dom.querySelector("[style*='editor-keyword']")).toBeNull();
+    expect(view.dom.querySelector(".cm-clay-t-keyword")).toBeNull();
     projection.handleEnvelope(envelope(set(7)));
-    expect(
-      view.dom.querySelector("[style*='editor-keyword']")?.textContent,
-    ).toBe("const");
+    expect(view.dom.querySelector(".cm-clay-t-keyword")?.textContent).toBe(
+      "const",
+    );
     await Promise.resolve();
     const request = sent
       .map((payload) => JSON.parse(payload))
-      .find((value) => value.family === "decorationViewportRequest");
+      .find((value) => value.family === "viewportRenderRequest");
     expect(request.payload).toMatchObject({
       clientId: 9,
       documentId: 4,
@@ -205,14 +228,15 @@ describe("viewport request pacing", () => {
     for (let i = 0; i < 20; i += 1)
       view.dispatch({ changes: { from: 0, insert: "x" } });
     expect(sent.length).toBe(initial);
-    // The reply frees the pipe; exactly one follow-up carries the newest
-    // viewport — no fixed-delay wait, no per-tick requests.
-    projection.handleEnvelope(envelope(set(7)));
+    // The atomic patch reply frees the pipe; exactly one follow-up carries
+    // the newest viewport — no timer, no per-tick requests.
+    projection.handleEnvelope(patchEnvelope({ requestId: 1 }));
     expect(sent.length).toBe(initial + 1);
     const lastPayload = sent.at(-1);
     expect(lastPayload).toBeDefined();
     const last = JSON.parse(lastPayload as string);
-    expect(last.family).toBe("decorationViewportRequest");
+    expect(last.family).toBe("viewportRenderRequest");
+    expect(last.payload.requestId).toBe(2);
     projection.detach(view);
     view.destroy();
   });
@@ -232,22 +256,95 @@ describe("viewport request pacing", () => {
     view.destroy();
   });
 
-  it("suppresses viewport requests while a chunk load is in flight", () => {
-    const loadingMeta: DocumentMeta = { ...meta, loading: true };
-    let current = loadingMeta;
+  it("drops stale patch ids and applies the newest patch members", () => {
     const sent: string[] = [];
-    const projection = projectionWith(sent, () => current);
+    const projection = projectionWith(sent);
     projection.installInitial({ behaviorVersion: 2 });
-    const view = mounted(projection, "partial");
+    const view = mounted(projection, "const value = 1\n".repeat(30));
     projection.attach(view);
-    expect(sent).toHaveLength(0);
-
-    // Ready: the same viewport now goes out on the next doc/viewport update.
-    current = { ...meta, loading: false };
+    expect(sent.length).toBeGreaterThan(0);
+    // A pending viewport change queues behind the inflight request.
     view.dispatch({ changes: { from: 0, insert: "x" } });
+    // The newest request goes out only after the first reply frees the pipe.
+    projection.handleEnvelope(patchEnvelope({ requestId: 1 }));
+    expect(sent.length).toBe(2);
+    // A stale patch (request 1 after 2 went out) is dropped entirely —
+    // its members never reach the editor and it does not free the pipe.
+    projection.handleEnvelope(patchEnvelope({ requestId: 1 }));
+    expect(sent.length).toBe(2);
+    expect(view.dom.querySelector(".cm-clay-t-keyword")).toBeNull();
+    // The current request's patch applies its decoration members and frees
+    // the pipe for the next request.
+    projection.handleEnvelope(
+      patchEnvelope({ requestId: 2, decorations: [set(7)] }),
+    );
+    expect(view.dom.querySelector(".cm-clay-t-keyword")).not.toBeNull();
+    projection.detach(view);
+    view.destroy();
+  });
+
+  it("an explicit empty completion immediately frees the latest request", () => {
+    const sent: string[] = [];
+    const projection = projectionWith(sent);
+    projection.installInitial({ behaviorVersion: 2 });
+    const view = mounted(projection, "line\n".repeat(400));
+    projection.attach(view);
+    const initial = sent.length;
+    expect(initial).toBeGreaterThan(0);
+    view.dispatch({ changes: { from: 0, insert: "x" } });
+    // Empty terminal answer (e.g. no registered handler): no members, but
+    // the pipe frees without any timer.
+    projection.handleEnvelope(patchEnvelope({ requestId: 1, status: "empty" }));
+    expect(sent.length).toBe(initial + 1);
+    view.dispatch({ changes: { from: 0, insert: "y" } });
+    // Rejected answers free the pipe identically.
+    projection.handleEnvelope(
+      patchEnvelope({
+        requestId: 2,
+        status: "rejected",
+        reason: "staleVersion",
+      }),
+    );
+    expect(sent.length).toBe(initial + 2);
+    projection.detach(view);
+    view.destroy();
+  });
+
+  it("clamps a huge visible span to one parse window", () => {
+    const sent: string[] = [];
+    const projection = projectionWith(sent);
+    projection.installInitial({ behaviorVersion: 2 });
+    const view = mounted(projection, "fn item() {}\n".repeat(20_000));
+    projection.attach(view);
+    const request = sent
+      .map((payload) => JSON.parse(payload))
+      .find((value) => value.family === "viewportRenderRequest");
+    expect(request).toBeDefined();
     expect(
-      sent.some((payload) => payload.includes("decorationViewportRequest")),
-    ).toBe(true);
+      request.payload.byteEnd - request.payload.byteStart,
+    ).toBeLessThanOrEqual(64 * 1024);
+    expect(request.payload.byteEnd).toBeGreaterThan(request.payload.byteStart);
+    projection.detach(view);
+    view.destroy();
+  });
+
+  it("requests syntax for the loaded head while later chunks are in flight", () => {
+    const sent: string[] = [];
+    const projection = projectionWith(sent, () => ({ ...meta, loading: true }));
+    projection.installInitial({ behaviorVersion: 2 });
+    const view = mounted(projection, "const loadedHead = true;\n");
+    projection.attach(view);
+
+    const requests = sent
+      .map((payload) => JSON.parse(payload))
+      .filter((value) => value.family === "viewportRenderRequest");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.payload).toMatchObject({
+      documentId: 4,
+      documentVersion: 7,
+      byteStart: 0,
+    });
+    expect(requests[0]?.payload.byteEnd).toBeGreaterThan(0);
     projection.detach(view);
     view.destroy();
   });

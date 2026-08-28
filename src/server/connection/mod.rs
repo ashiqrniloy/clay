@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::Arc,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -10,11 +10,15 @@ use tokio::{
     sync::Mutex,
 };
 
+use crate::perf::metrics::{
+    BRIDGE_PATCH_DELIVERY, MetricMetadata, MetricValue, SERVER_RECEIVE, global_recorder,
+};
 use crate::protocol::{
     AgentServerMessage, ClientId, ClientMessage, DocumentId, PROTOCOL_VERSION, ProtocolErrorCode,
     RuntimeDiagnostic, ServerMessage, TabCommand, TabId, TabRegistrySnapshot, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
+use crate::protocol::{ViewportRenderPatch, ViewportRenderStatus};
 
 use super::{
     RuntimeGenerationStore, TabServerState,
@@ -39,6 +43,8 @@ mod runtime;
 mod tabs;
 mod workspace;
 
+#[allow(unused_imports)]
+pub(crate) use self::documents::{CachedModeActivation, ModeActivationKey};
 pub(crate) use self::documents::{open_document_followup_messages, start_document_analysis};
 // Family re-exports keep the module's `mod tests` on the pre-split namespace:
 // tests reference moved helpers unqualified. Test-only: the coordinator itself
@@ -118,6 +124,49 @@ impl Drop for ConnectionOutputSubscriptions {
     }
 }
 
+/// Connection-local aggregation state for one atomic viewport request.
+struct PendingViewportPatch {
+    /// Scheduled parse windows still owed a terminal update.
+    remaining: usize,
+    patch: ViewportRenderPatch,
+}
+
+/// Derive authoritative output coverage from the patch's own members — the
+/// union of every member's viewport range, sorted and deduplicated. The
+/// requested (parse-context) range is intentionally not claimed.
+fn finalize_viewport_covered_ranges(patch: &mut ViewportRenderPatch) {
+    let mut ranges: Vec<(u64, u64)> = patch
+        .decorations
+        .iter()
+        .map(|set| (set.viewport_byte_start, set.viewport_byte_end))
+        .chain(
+            patch
+                .diagnostics
+                .iter()
+                .map(|set| (set.viewport_byte_start, set.viewport_byte_end)),
+        )
+        .chain(patch.folds.iter().filter_map(|set| {
+            let first = set.ranges.first()?;
+            let last = set.ranges.last()?;
+            Some((first.byte_start, last.byte_end))
+        }))
+        .collect();
+    ranges.sort_unstable();
+    ranges.dedup();
+    patch.covered_ranges = ranges
+        .into_iter()
+        .map(|(byte_start, byte_end)| crate::protocol::TextByteRange::new(byte_start, byte_end))
+        .collect();
+}
+
+fn client_message_trace_id(message: &ClientMessage) -> Option<crate::protocol::PerformanceTraceId> {
+    match message {
+        ClientMessage::Edit { transaction_id, .. } => Some(*transaction_id),
+        ClientMessage::ViewportRenderRequest { trace_id, .. } => *trace_id,
+        _ => None,
+    }
+}
+
 /// Extract the legacy caller-supplied identity from any post-`Hello` message.
 /// The dispatch loop compares this against the connection's handshake-assigned
 /// `client_id` exactly once; downstream arms only ever see the canonical
@@ -129,7 +178,7 @@ fn client_message_identity(message: &ClientMessage) -> Option<ClientId> {
         | ClientMessage::EditorIntent { client_id, .. }
         | ClientMessage::RequestResync { client_id, .. }
         | ClientMessage::DocumentChunkRequest { client_id, .. }
-        | ClientMessage::DecorationViewportRequest { client_id, .. }
+        | ClientMessage::ViewportRenderRequest { client_id, .. }
         | ClientMessage::OpenDocument { client_id, .. }
         | ClientMessage::OpenSelectedFile { client_id, .. }
         | ClientMessage::AddSelectedWorkspaceRoot { client_id, .. }
@@ -201,7 +250,7 @@ fn message_requires_tab_state(message: &ClientMessage) -> bool {
         ClientMessage::Edit { .. }
             | ClientMessage::EditorIntent { .. }
             | ClientMessage::RequestResync { .. }
-            | ClientMessage::DecorationViewportRequest { .. }
+            | ClientMessage::ViewportRenderRequest { .. }
             | ClientMessage::OpenDocument { .. }
             | ClientMessage::OpenSelectedFile { .. }
             | ClientMessage::AddSelectedWorkspaceRoot { .. }
@@ -488,6 +537,13 @@ where
     // guard withdraws every subscription on any exit path.
     let (mut parse_updates_rx, mut parse_diagnostics_rx) =
         parse_coordinator.subscribe_client(client_id);
+    // Protocol v29 atomic viewport aggregation: one pending entry per
+    // (document, request id); the newest request for a document supersedes
+    // every older pending entry.
+    let mut pending_viewport_patches: HashMap<
+        (DocumentId, crate::protocol::ViewportRequestId),
+        PendingViewportPatch,
+    > = HashMap::new();
     let mut analysis_rx = document_analysis.subscribe_client(client_id);
     let runtime_diagnostic_router = runtime_diagnostics.lock().await.live_router();
     let mut runtime_diagnostics_rx = runtime_diagnostic_router
@@ -756,6 +812,50 @@ where
             // connection opened, over this connection's bounded subscription.
             update = parse_updates_rx.recv() => {
                 if let Some(update) = update {
+                    // Request-scoped updates aggregate into their pending patch;
+                    // edit-driven updates keep the per-update frames.
+                    if let Some(request_id) = update.request_id
+                        && update.client_id == Some(client_id)
+                        && let Some(pending) =
+                            pending_viewport_patches.get_mut(&(update.document_id, request_id))
+                    {
+                        if pending.remaining > 0 {
+                            pending.remaining -= 1;
+                        }
+                        pending.patch.decorations.extend(update.decoration_updates);
+                        if let Some(set) = update.diagnostic_update {
+                            pending.patch.diagnostics.push(set);
+                        }
+                        if let Some(set) = update.folding_update {
+                            pending.patch.folds.push(set);
+                        }
+                        pending.patch.trace_id = update.trace_id;
+                        if pending.remaining == 0 {
+                            let mut patch = pending_viewport_patches
+                                .remove(&(update.document_id, request_id))
+                                .expect("pending entry checked")
+                                .patch;
+                            finalize_viewport_covered_ranges(&mut patch);
+                            let patch_delivery = global_recorder().scope_with_metadata(
+                                BRIDGE_PATCH_DELIVERY,
+                                MetricMetadata::document(patch.document_id, patch.document_version)
+                                    .with_trace_id(patch.trace_id),
+                            );
+                            codec
+                                .write_server_message(
+                                    &mut stream,
+                                    &ServerMessage::ViewportRenderPatch(patch),
+                                )
+                                .await?;
+                            patch_delivery.finish();
+                        }
+                        continue;
+                    }
+                    let patch_delivery = global_recorder().scope_with_metadata(
+                        BRIDGE_PATCH_DELIVERY,
+                        MetricMetadata::document(update.document_id, update.document_version)
+                            .with_trace_id(update.trace_id),
+                    );
                     // One parse update's chunks ship in a single frame;
                     // single-chunk updates keep the plain DecorationSet wire.
                     let mut chunks = update.decoration_updates;
@@ -787,6 +887,7 @@ where
                             )
                             .await?;
                     }
+                    patch_delivery.finish();
                 }
                 continue;
             }
@@ -870,6 +971,34 @@ where
             }
             Some(Err(error)) => return Err(error),
         };
+
+        let recorder = global_recorder();
+        let trace_id = client_message_trace_id(&message);
+        if recorder.is_enabled()
+            && let Some(trace_id) = trace_id
+        {
+            let metadata = match &message {
+                ClientMessage::Edit {
+                    document_id,
+                    base_version,
+                    ..
+                } => MetricMetadata::document(*document_id, *base_version),
+                ClientMessage::ViewportRenderRequest {
+                    document_id,
+                    document_version,
+                    byte_start,
+                    byte_end,
+                    ..
+                } => MetricMetadata::document(*document_id, *document_version)
+                    .with_byte_count(byte_end.saturating_sub(*byte_start)),
+                _ => MetricMetadata::default(),
+            };
+            recorder.record_with_metadata(
+                SERVER_RECEIVE,
+                MetricValue::Counter { amount: 1 },
+                metadata.with_trace_id(Some(trace_id)),
+            );
+        }
 
         // Plan 060 T4 (P0-2): one pre-dispatch identity boundary. Every legacy
         // message that still carries a `client_id` must present the connection's
@@ -1016,14 +1145,16 @@ where
                 )
                 .await?;
             }
-            ClientMessage::DecorationViewportRequest {
+            ClientMessage::ViewportRenderRequest {
                 document_id,
                 document_version,
+                request_id,
                 byte_start,
                 byte_end,
+                trace_id,
                 ..
             } => {
-                documents::handle_decoration_viewport_request(
+                let scheduled = documents::handle_viewport_render_request(
                     codec,
                     &mut stream,
                     &behavior,
@@ -1033,10 +1164,37 @@ where
                     client_id,
                     document_id,
                     document_version,
+                    request_id,
                     byte_start,
                     byte_end,
+                    trace_id,
                 )
                 .await?;
+                // Latest request wins: a newer request for the same document
+                // supersedes any still-pending older patch before its remaining
+                // windows are even counted.
+                pending_viewport_patches
+                    .retain(|(pending_document, _), _| *pending_document != document_id);
+                if scheduled > 0 {
+                    pending_viewport_patches.insert(
+                        (document_id, request_id),
+                        PendingViewportPatch {
+                            remaining: scheduled,
+                            patch: ViewportRenderPatch {
+                                request_id,
+                                document_id,
+                                document_version,
+                                status: ViewportRenderStatus::Complete,
+                                reason: None,
+                                covered_ranges: Vec::new(),
+                                decorations: Vec::new(),
+                                diagnostics: Vec::new(),
+                                folds: Vec::new(),
+                                trace_id,
+                            },
+                        },
+                    );
+                }
             }
             ClientMessage::OpenDocument {
                 client_id,
@@ -1629,6 +1787,7 @@ mod tests {
     use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc, time::SystemTime};
 
     use crate::packages::commands::CommandRegistry;
+    use crate::protocol::ViewportRenderStatus;
     use crate::protocol::{KeyBindingContext, KeyCode};
 
     use tokio::{
@@ -5758,13 +5917,15 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
                 },
             ),
             (
-                "DecorationViewportRequest",
-                ClientMessage::DecorationViewportRequest {
+                "ViewportRenderRequest",
+                ClientMessage::ViewportRenderRequest {
                     client_id: 1,
                     document_id: 7,
                     document_version: 1,
+                    request_id: 1,
                     byte_start: 0,
                     byte_end: 1,
+                    trace_id: None,
                 },
             ),
             (
@@ -6217,7 +6378,7 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
     }
 
     #[tokio::test]
-    async fn protocol_v26_client_is_rejected_by_v27_server() {
+    async fn protocol_v27_client_is_rejected_by_v28_server() {
         let (client, server) = duplex(65536);
         let codec = Codec::default();
         let server_task = tokio::spawn(handle_connection(
@@ -6241,7 +6402,7 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
                 &mut client,
                 &ClientMessage::Hello {
                     protocol_version: 26,
-                    client_name: "v26-client".to_string(),
+                    client_name: "v27-client".to_string(),
                 },
             )
             .await
@@ -7345,6 +7506,222 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
     }
 
     #[tokio::test]
+    async fn viewport_render_requests_answer_one_patch_per_request_id() {
+        let root = temp_workspace("viewport-patch-protocol");
+        let file = root.join("main.rs");
+        fs::write(&file, "fn main() {} // tail\n").unwrap();
+        let mut workspace_state_value = WorkspaceState::new();
+        let root_id = workspace_state_value.add_root(&root).unwrap();
+        let workspace = Arc::new(Mutex::new(workspace_state_value));
+
+        let (client, server) = duplex(65536);
+        let codec = Codec::default();
+        let document = Arc::new(Mutex::new(DocumentState::new(
+            7,
+            "scratch".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )));
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let server_task = tokio::spawn(handle_connection(
+            server,
+            99,
+            document,
+            behavior,
+            Arc::clone(&workspace),
+            sdui_state(),
+            active_theme_state(),
+            runtime_diagnostics(),
+            runtime_generation(),
+            parse_coordinator(),
+            language_intelligence_coordinator(),
+            codec,
+        ));
+        let mut client = client;
+
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    client_name: "test-client".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        for _ in 0..9 {
+            let _ = codec.read_server_message(&mut client).await.unwrap();
+        }
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::OpenDocument {
+                    client_id: 99,
+                    workspace_root_id: root_id,
+                    path: "main.rs".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let opened_version = match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::DocumentOpened { metadata, .. } => metadata.version,
+            message => panic!("expected DocumentOpened, got {message:?}"),
+        };
+        let _manifest = codec.read_server_message(&mut client).await.unwrap();
+        // Trailing connection-wide manifest follows the document's mode layer.
+        let _global_manifest = codec.read_server_message(&mut client).await.unwrap();
+        // Drain the open-driven parse output (edit-driven frames) so the
+        // later request-scoped assertions see a quiet connection.
+        loop {
+            let message = timeout(
+                Duration::from_secs(2),
+                codec.read_server_message(&mut client),
+            )
+            .await
+            .expect("open parse output timed out")
+            .unwrap();
+            if matches!(
+                message,
+                ServerMessage::DecorationSet(_)
+                    | ServerMessage::DecorationBatch(_)
+                    | ServerMessage::DiagnosticSet(_)
+                    | ServerMessage::FoldingRangeSet(_)
+            ) {
+                break;
+            }
+        }
+
+        // Stale version: one rejection patch, nothing else scheduled.
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::ViewportRenderRequest {
+                    client_id: 99,
+                    document_id: 1,
+                    document_version: opened_version + 5,
+                    request_id: 1,
+                    byte_start: 0,
+                    byte_end: 16,
+                    trace_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let stale_patch = loop {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::ViewportRenderPatch(patch) => break patch,
+                ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_)
+                | ServerMessage::BehaviorManifest(_) => {}
+                message => panic!("expected stale-version rejection patch, got {message:?}"),
+            }
+        };
+        assert_eq!(stale_patch.request_id, 1);
+        assert_eq!(stale_patch.status, ViewportRenderStatus::Rejected);
+        assert_eq!(stale_patch.reason.as_deref(), Some("staleVersion"));
+        assert!(stale_patch.decorations.is_empty());
+
+        // Invalid range: rejected before any allocation.
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::ViewportRenderRequest {
+                    client_id: 99,
+                    document_id: 1,
+                    document_version: opened_version,
+                    request_id: 2,
+                    byte_start: 32,
+                    byte_end: 16,
+                    trace_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let range_patch = loop {
+            match codec.read_server_message(&mut client).await.unwrap() {
+                ServerMessage::ViewportRenderPatch(patch) => break patch,
+                ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_)
+                | ServerMessage::BehaviorManifest(_) => {}
+                message => panic!("expected invalid-range rejection patch, got {message:?}"),
+            }
+        };
+        assert_eq!(range_patch.request_id, 2);
+        assert_eq!(range_patch.status, ViewportRenderStatus::Rejected);
+        assert_eq!(range_patch.reason.as_deref(), Some("invalidRange"));
+
+        // Valid request (clamped past the document end): exactly one complete
+        // patch aggregates every scheduled window member, in viewport-key
+        // order, with no per-member frames after the request.
+        codec
+            .write_client_message(
+                &mut client,
+                &ClientMessage::ViewportRenderRequest {
+                    client_id: 99,
+                    document_id: 1,
+                    document_version: opened_version,
+                    request_id: 3,
+                    byte_start: 0,
+                    byte_end: 1 << 20,
+                    trace_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let mut member_frames = 0usize;
+        let patch = loop {
+            let message = timeout(
+                Duration::from_secs(2),
+                codec.read_server_message(&mut client),
+            )
+            .await
+            .expect("viewport patch timed out")
+            .unwrap();
+            match message {
+                ServerMessage::ViewportRenderPatch(patch) if patch.request_id == 3 => break patch,
+                ServerMessage::ViewportRenderPatch(_) => {
+                    panic!("no second patch may answer one request id")
+                }
+                ServerMessage::DecorationSet(_)
+                | ServerMessage::DecorationBatch(_)
+                | ServerMessage::DiagnosticSet(_)
+                | ServerMessage::FoldingRangeSet(_) => member_frames += 1,
+                _ => {}
+            }
+        };
+        assert_eq!(patch.status, ViewportRenderStatus::Complete);
+        assert!(patch.reason.is_none());
+        assert!(!patch.decorations.is_empty());
+        assert!(
+            patch
+                .decorations
+                .windows(2)
+                .all(|pair| pair[0].viewport_byte_start <= pair[1].viewport_byte_start),
+            "patch members arrive in viewport-key order"
+        );
+        assert!(
+            patch
+                .covered_ranges
+                .iter()
+                .all(|range| range.byte_end <= 21),
+            "covered ranges stay clamped to the document, got {:?}",
+            patch.covered_ranges
+        );
+        assert_eq!(
+            member_frames, 0,
+            "viewport replies must not fan out per-member frames"
+        );
+
+        drop(client);
+        server_task.await.unwrap().unwrap();
+        let _ = fs::remove_file(file);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
     async fn file_browser_open_uses_generic_open_document_followups() {
         let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
         let root = temp_workspace("file-browser-open-followups");
@@ -7599,20 +7976,24 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
         let mut confirmed_version = None;
         let mut edit_update_seen = false;
         let mut viewport_requested = false;
-        let mut single_set_frames = 0usize;
+        let mut viewport_patches = 0usize;
+        let mut member_frames_after_request = 0usize;
         let batch = loop {
             let message = timeout(
                 Duration::from_secs(2),
                 codec.read_server_message(&mut client),
             )
             .await
-            .expect("decoration batch timed out")
+            .expect("viewport patch timed out")
             .unwrap();
             match message {
-                ServerMessage::DecorationBatch(chunks)
-                    if viewport_requested && chunks[0].document_version == 2 =>
+                ServerMessage::ViewportRenderPatch(patch)
+                    if viewport_requested && patch.request_id == 1 =>
                 {
-                    break chunks;
+                    assert_eq!(patch.document_id, 1);
+                    assert_eq!(patch.document_version, 2);
+                    viewport_patches += 1;
+                    break patch.decorations;
                 }
                 ServerMessage::DecorationBatch(chunks)
                     if !viewport_requested && chunks[0].document_version == 2 =>
@@ -7627,7 +8008,7 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
                     if set.document_id == 1 && set.document_version == 2 =>
                 {
                     if viewport_requested {
-                        single_set_frames += 1;
+                        member_frames_after_request += 1;
                     } else {
                         edit_update_seen = true;
                     }
@@ -7637,7 +8018,7 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
                 | ServerMessage::DiagnosticSet(_)
                 | ServerMessage::FoldingRangeSet(_)
                 | ServerMessage::RuntimeDiagnostic(_) => {}
-                message => panic!("expected decoration batch, got {message:?}"),
+                message => panic!("expected viewport render patch, got {message:?}"),
             }
             if !viewport_requested
                 && edit_update_seen
@@ -7646,12 +8027,14 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
                 codec
                     .write_client_message(
                         &mut client,
-                        &ClientMessage::DecorationViewportRequest {
+                        &ClientMessage::ViewportRenderRequest {
                             client_id: 99,
                             document_id: 1,
                             document_version,
+                            request_id: 1,
                             byte_start: 0,
                             byte_end: (source.len() + "// batch\n".len()) as u64,
+                            trace_id: None,
                         },
                     )
                     .await
@@ -7662,7 +8045,7 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
 
         assert!(
             batch.len() > 1,
-            "multi-chunk window must batch, got {} chunks",
+            "multi-chunk window must arrive as one patch with ordered members, got {} members",
             batch.len()
         );
         assert!(batch.iter().all(|set| set.document_id == 1));
@@ -7670,12 +8053,13 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
             batch
                 .windows(2)
                 .all(|pair| pair[0].viewport_byte_start <= pair[1].viewport_byte_start),
-            "batch chunks arrive in viewport-key order"
+            "patch members arrive in viewport-key order"
         );
         assert!(batch.iter().all(|set| !set.spans.is_empty()));
+        assert_eq!(viewport_patches, 1, "exactly one patch per request id");
         assert_eq!(
-            single_set_frames, 0,
-            "batched parse update must not fan out per-chunk frames"
+            member_frames_after_request, 0,
+            "viewport replies must not fan out per-chunk frames after the request"
         );
 
         drop(client);
@@ -8080,6 +8464,35 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
                                 && span.byte_end > prose))
                 );
             }
+
+            // Returning to the head after a distant viewport must reparse and
+            // republish the head; one cached window may never make an older
+            // viewport permanently blank.
+            super::schedule_parse_window(
+                &coordinator,
+                &metadata,
+                &text,
+                1,
+                &meta.package_prefix,
+                &meta.mode_id,
+                policy,
+                ParseByteRange::new(0, opening_end),
+            )
+            .expect("return-to-head viewport schedules");
+            let returned = tokio::select! {
+                update = coordinator.next_update() => update.expect("return-to-head native update"),
+                diagnostic = coordinator.next_diagnostic() => {
+                    panic!("return-to-head viewport parse failed: {:?}", diagnostic)
+                }
+            };
+            assert_eq!(returned.viewport.start, 0, "{path}");
+            assert!(
+                returned
+                    .decoration_updates
+                    .iter()
+                    .any(|set| !set.spans.is_empty()),
+                "returning to the head must restore syntax for {path}"
+            );
         }
 
         let _ = fs::remove_file(config_root.join("init.js"));
@@ -8102,6 +8515,112 @@ serverActivateClassifiedMode(classification, { path: "README.md" });"#,
                 "connection.rs must not contain removed mode-specific helper `{removed}`"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn classify_large_markdown_document_uses_markdown_mode() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let text = format!("{}\n", "word ".repeat(1024 * 1024 / 5));
+        let metadata = DocumentMetadata {
+            document_id: 9,
+            version: 1,
+            access: DocumentAccess::Editable { lease_id: 1 },
+            lease_id: Some(1),
+            dirty: false,
+            workspace_root_id: 1,
+            path: "big.md".to_string(),
+        };
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let sdui = empty_sdui_state();
+        let runtime = js_runtime();
+        let coordinator = parse_coordinator();
+        load_markdown_runtime(&runtime, &coordinator, &behavior, &sdui).await;
+        let activation = super::classify_open_document(
+            1,
+            &runtime,
+            &coordinator,
+            &metadata,
+            &text,
+            &behavior,
+            &sdui,
+        )
+        .await
+        .expect("large markdown open classifies");
+        assert_eq!(activation.mode_id, "markdown");
+    }
+
+    /// Plan 099: a repeat open whose classification inputs and native grammar
+    /// registration match a cached activation republishes the cached manifest
+    /// from Rust instead of evaluating the generated classification module in
+    /// V8. Also measures the generated V8 open activation for the record.
+    #[tokio::test]
+    async fn mode_activation_cache_hit_skips_generated_module_evaluation() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let text = "# Title\n\nSome prose.\n";
+        let make_metadata = |document_id| DocumentMetadata {
+            document_id,
+            version: 1,
+            access: DocumentAccess::Editable { lease_id: 1 },
+            lease_id: Some(1),
+            dirty: false,
+            workspace_root_id: 1,
+            path: "notes.md".to_string(),
+        };
+        let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+        let sdui = empty_sdui_state();
+        let runtime = js_runtime();
+        let coordinator = parse_coordinator();
+        load_markdown_runtime(&runtime, &coordinator, &behavior, &sdui).await;
+
+        let started = std::time::Instant::now();
+        let first = super::classify_open_document(
+            1,
+            &runtime,
+            &coordinator,
+            &make_metadata(2),
+            text,
+            &behavior,
+            &sdui,
+        )
+        .await
+        .expect("first open classifies through the generated module");
+        let v8_elapsed = started.elapsed();
+        let evaluations_after_first = runtime.open_activation_evaluation_count();
+        assert_eq!(evaluations_after_first, 1);
+        let manifest_after_first = behavior.lock().await.manifest().clone();
+
+        let second = super::classify_open_document(
+            1,
+            &runtime,
+            &coordinator,
+            &make_metadata(3),
+            text,
+            &behavior,
+            &sdui,
+        )
+        .await
+        .expect("repeat open classifies through the registry fast path");
+
+        assert_eq!(second.package_prefix, first.package_prefix);
+        assert_eq!(second.mode_id, first.mode_id);
+        assert_eq!(second.parse_handler_mode_id, first.parse_handler_mode_id);
+        assert_eq!(second.native_parse_policy, first.native_parse_policy);
+        // publish_replacement bumps behavior_version; content must be identical.
+        let republished = behavior.lock().await.manifest().clone();
+        let mut expected = manifest_after_first;
+        expected.behavior_version = republished.behavior_version;
+        assert_eq!(
+            republished, expected,
+            "fast path republishes the identical behavior manifest"
+        );
+        assert_eq!(
+            runtime.open_activation_evaluation_count(),
+            evaluations_after_first,
+            "repeat open must not evaluate a generated module in V8"
+        );
+        eprintln!(
+            "Plan 099 measurement: generated V8 open activation took {v8_elapsed:?};              registry fast path reuses the cached manifest without V8"
+        );
     }
 
     #[tokio::test]

@@ -19,7 +19,13 @@ import {
   readOnlyCompartment,
   themeCompartment,
 } from "./compartments";
+import { bytePositionField, type BytePositionIndex } from "./position-index";
 import { shouldEmitEdit } from "./transactions";
+import {
+  editorPerformance,
+  PERFORMANCE_STAGE,
+  type PerformanceSpan,
+} from "./performance";
 import type { TextChange } from "./sync/operations";
 
 export interface CreateEditorOptions {
@@ -27,8 +33,16 @@ export interface CreateEditorOptions {
   readOnly?: boolean;
   parent: HTMLElement;
   placeholder?: string;
+  documentId?: number;
+  version?: number;
   /** Receives the pre-change document (rope) — never a flattened string. */
-  onUserChanges?: (oldDoc: Text, changes: TextChange[]) => void;
+  onUserChanges?: (
+    oldDoc: Text,
+    changes: TextChange[],
+    traceId?: number,
+    /** Position index of the pre-change state (shared hot-path field). */
+    index?: BytePositionIndex,
+  ) => void;
   onSave?: () => void;
   extra?: Extension[];
 }
@@ -68,15 +82,52 @@ export function createEditor(options: CreateEditorOptions): EditorView {
     },
   ]);
 
+  let pendingInput: { traceId: number; span: PerformanceSpan } | null = null;
+  const inputEvents = EditorView.domEventHandlers({
+    beforeinput: () => {
+      const traceId = editorPerformance.trace();
+      pendingInput = {
+        traceId,
+        span: editorPerformance.span(PERFORMANCE_STAGE.browserInput, traceId, {
+          documentId: options.documentId,
+          version: options.version,
+        }),
+      };
+      return false;
+    },
+  });
   const listener = EditorView.updateListener.of((update) => {
     if (!update.docChanged) return;
+    const input = pendingInput;
+    pendingInput = null;
+    const traceId = input?.traceId || editorPerformance.trace();
+    if (!input) {
+      editorPerformance.mark(PERFORMANCE_STAGE.browserInput, traceId, {
+        documentId: options.documentId,
+        version: options.version,
+      });
+    }
+    input?.span.end();
+    editorPerformance.mark(PERFORMANCE_STAGE.codemirrorUpdate, traceId, {
+      documentId: options.documentId,
+      version: options.version,
+    });
+    editorPerformance.frame(traceId, {
+      documentId: options.documentId,
+      version: options.version,
+    });
     const emit = options.onUserChanges;
     if (!emit) return;
     for (const transaction of update.transactions) {
       if (!shouldEmitEdit(transaction)) continue;
       // Pass the rope itself; byte-offset conversion is indexed per document
       // version. Flattening here cost O(document) on every keystroke.
-      emit(transaction.startState.doc, collectChanges(transaction));
+      emit(
+        transaction.startState.doc,
+        collectChanges(transaction),
+        traceId,
+        transaction.startState.field(bytePositionField, false) ?? undefined,
+      );
     }
   });
 
@@ -86,6 +137,8 @@ export function createEditor(options: CreateEditorOptions): EditorView {
       doc: options.doc ?? "",
       extensions: [
         history(),
+        // First so every consumer reads one shared incremental index.
+        bytePositionField,
         keymapCompartment.of(keymap.of([...defaultKeymap, ...historyKeymap])),
         saveKey,
         readOnlyCompartment.of(EditorState.readOnly.of(!!options.readOnly)),
@@ -94,6 +147,7 @@ export function createEditor(options: CreateEditorOptions): EditorView {
         behaviorCompartment.of([]),
         decorationCompartment.of([]),
         placeholderExt(options.placeholder ?? ""),
+        inputEvents,
         listener,
         EditorView.lineWrapping,
         ...(options.extra ?? []),
@@ -111,12 +165,18 @@ export function collectChanges(transaction: Transaction): TextChange[] {
 }
 
 export function setReadOnly(view: EditorView, readOnly: boolean): void {
+  editorPerformance.count(PERFORMANCE_STAGE.compartmentReconfigure, 0, {
+    feature: "readOnly",
+  });
   view.dispatch({
     effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(readOnly)),
   });
 }
 
 export function setTheme(view: EditorView, extension: Extension): void {
+  editorPerformance.count(PERFORMANCE_STAGE.compartmentReconfigure, 0, {
+    feature: "theme",
+  });
   view.dispatch({
     effects: themeCompartment.reconfigure(extension),
   });

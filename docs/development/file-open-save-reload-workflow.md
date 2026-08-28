@@ -67,14 +67,28 @@ Phase 24.3 adds a built-in dired-style path browser over the transient-menu roun
 
 ### Document state after open
 
-Both selected-file and workspace opens produce a `DocumentOpened` client event. The editor widget:
+Both selected-file and workspace opens produce a `DocumentOpened` client event.
+The workspace controller owns one `DocumentSession` per pane and routes the
+reply by its in-flight path before falling back to document identity. There is
+no app-wide document-session singleton.
 
-1. Stashes the previously active document session (text, caret, viewport, undo/redo history, dirty state, pending edits) into a `DocumentSessionStore` bound at 64 sessions.
-2. Loads the new document snapshot (text, version, access lease, metadata).
-3. Installs the server-provided behavior manifest (if any) and shared theme/typography.
-4. Updates the edit queue authority for the new document.
+The owning session:
 
-Opening the same document again replaces the active buffer without creating a duplicate session.
+1. Installs the bounded `DocumentTextHead` and paints its first chunk immediately.
+2. Keeps one current CodeMirror `Text`: `view.state.doc` while attached, or a
+   detached snapshot only while no view exists.
+3. Installs server behavior/theme/typography metadata and updates edit
+   authority without duplicating document text.
+4. Requests remaining bytes one offset at a time through `DocumentChunkRequest`;
+   each response is deduplicated, appended programmatically with history
+   disabled, and bounded by `MAX_CHUNK_BYTES`.
+5. Marks the session ready only after all bytes arrive. A rejected/stale chunk
+   stops the load or restarts it through resync; it never exposes a partial
+   editable document.
+
+Opening another file in a pane replaces that pane's current document. Other
+panes and tabs retain their own sessions; opening the same document elsewhere
+is routed by the server's document/lease authority rather than a client mirror.
 
 ## Saving Documents
 
@@ -180,16 +194,29 @@ When `reload_document` is called without `force` on a dirty document, the server
 
 Recovery menus are server-owned menu snapshots rendered by the React client as accessible listbox/menu surfaces; item labels include the action description and selected state.
 
-## Multi-Document Sessions
+## Multi-Document and Multi-Pane Sessions
 
-Clay retains up to 64 document sessions locally. Opening a second file stashes the first session; switching documents restores the stashed text, caret, viewport, undo/redo history, and dirty state.
+The server caps open documents per client at 64, but frontend ownership is
+pane-scoped rather than a global document mirror. Each pane has one session and
+one current `Text`; detached text exists only while that pane has no attached
+view. A four-pane layout therefore has four independent session/document
+routes, and tabs have separate runtimes/connections.
 
-**Switch active document:**
-- `clientShowOpenDocuments` opens a transient menu listing all open documents with dirty markers.
-- Selecting a document calls `clientActivateDocument` with the `DocumentId`.
-- Switching is client-local: no server round trip, no re-download.
+**Switch or restore a document:**
 
-Dirty state and pending edits are per-document. Confirmed server version is per-document.
+- The shell persists pane paths/layout, then `workspace-controller.ts` creates
+  or reuses the owning pane session during restore.
+- `DocumentOpened` replies match the session's in-flight path before document
+  ID/active-pane fallback, so simultaneous pane opens cannot cross-wire.
+- A newly attached view installs the pane's detached snapshot; it does not
+  replay a second document copy or a cached feature stream into another pane.
+- Switching panes/tabs is client-local presentation work; save, reload,
+  resync, leases, versions, and file authority remain server-first.
+
+Dirty state, pending edits, confirmed version, progressive loading, and feature
+layers are per pane/document session. Programmatic head/chunk/reload/resync
+installs use no-history transactions, so undo cannot restore partial transfer
+chunks.
 
 ```js
 bindKey("Ctrl+Tab", "editor.clientShowOpenDocuments", { scope: "editor" });

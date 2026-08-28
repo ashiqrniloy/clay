@@ -9,6 +9,10 @@ import type {
   TransientMenuSnapshotDto,
 } from "../bridge/types";
 import {
+  persistenceKeyProjection,
+  shellStatusProjection,
+} from "../state/document-store";
+import {
   applySduiUpdate,
   emptyUiProjection,
   installSduiTree,
@@ -98,10 +102,18 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
   const tabs: TabStore = createTabStore();
   const runtimes = new Map<number, TabRuntime>();
   let pendingClose: PendingClose | null = null;
+  // The server broadcasts the tab registry during handshake, before the
+  // bootstrap command creates the runtime, so a fresh-boot restore would
+  // otherwise queue document opens forever waiting for a root id that
+  // already arrived. Remember the latest roots per client.
+  const registryRootsByClient = new Map<number, number>();
   const persistListeners = new Set<() => void>();
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   const notify = () => {
+    // useSyncExternalStore compares snapshots by identity; transient pane
+    // status changes need a fresh shell snapshot without changing tab data.
+    tabs.set({ ...tabs.get() });
     for (const listener of [...persistListeners]) listener();
   };
 
@@ -115,20 +127,30 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
     }, 250);
   };
 
-  const bindSession = (
-    runtime: TabRuntime,
-    paneId: number,
-  ): DocumentSession => {
+  const bindSession = (runtime: TabRuntime): DocumentSession => {
     const session = createDocumentSession({
       send: sendFor(adapters, runtime.tabId),
     });
+    let persistKey: string | null = null;
+    let statusKey = "";
     session.store.subscribe(() => {
+      const meta = session.store.get();
+      // Loading/diagnostic changes are shell-visible, but version/pending
+      // churn stays pane-local and does not rerender the shell.
+      const nextStatusKey = shellStatusProjection(meta);
+      if (nextStatusKey !== statusKey) {
+        statusKey = nextStatusKey;
+        notify();
+      }
+      // Only document identity/path/dirty transitions schedule persistence;
+      // per-keystroke acks stay pane-local.
+      const key = persistenceKeyProjection(meta);
+      if (key === persistKey) return;
+      persistKey = key;
       const dirty = [...runtime.panes.values()].some(
         (pane) => pane.session.store.get()?.dirty,
       );
       tabs.set(markDirty(tabs.get(), runtime.clientId, dirty));
-      const path = session.store.get()?.path;
-      if (path) runtimeDocuments(runtime).set(paneId, path);
       schedulePersist();
     });
     return session;
@@ -156,7 +178,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
   const ensurePane = (runtime: TabRuntime, paneId: number): PaneRecord => {
     const existing = runtime.panes.get(paneId);
     if (existing) return existing;
-    const record = { paneId, session: bindSession(runtime, paneId) };
+    const record = { paneId, session: bindSession(runtime) };
     runtime.panes.set(paneId, record);
     return record;
   };
@@ -379,6 +401,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       runtimes.clear();
       tabs.set(emptyTabs());
       pendingClose = null;
+      registryRootsByClient.clear();
       notify();
     },
     installBootstrap(bootstrap: BootstrapDto) {
@@ -398,7 +421,15 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
           if (path) first.panes.get(paneId)?.session.open(path);
         }
         // The registry may have delivered the root id before these panes
-        // existed; deliver it now so queued opens flush.
+        // existed (fresh boot: the handshake broadcast races the bootstrap
+        // command); deliver the remembered root so queued opens flush.
+        if (first.workspaceRootId == null) {
+          const remembered = registryRootsByClient.get(first.clientId);
+          if (remembered != null) {
+            first.workspaceRootId = remembered;
+            deliverRootId(first, remembered);
+          }
+        }
         if (first.workspaceRootId != null)
           deliverRootId(first, first.workspaceRootId);
       }
@@ -410,6 +441,13 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
           for (const id of paneIds(extra.tree.root)) ensurePane(runtime, id);
           for (const [paneId, path] of extra.documents) {
             if (path) runtime.panes.get(paneId)?.session.open(path);
+          }
+          if (runtime.workspaceRootId == null) {
+            const remembered = registryRootsByClient.get(runtime.clientId);
+            if (remembered != null) {
+              runtime.workspaceRootId = remembered;
+              deliverRootId(runtime, remembered);
+            }
           }
           if (runtime.workspaceRootId != null) {
             deliverRootId(runtime, runtime.workspaceRootId);
@@ -539,6 +577,9 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
             }>
           ).map((entry) => [entry.clientId, entry.workspaceRootId]),
         );
+        for (const [clientId, rootId] of registryRoots) {
+          if (rootId != null) registryRootsByClient.set(clientId, rootId);
+        }
         for (const tab of tabs.get().tabs) {
           const runtime = runtimes.get(tab.clientId);
           if (runtime) {
@@ -612,12 +653,12 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
           continue;
         }
         if (event.kind === "documentOpened") {
-          // A successful open clears stale dialog/file errors, then falls
-          // through to the normal pane routing below.
-          if (
-            runtime.diagnostic?.code.startsWith("dialog.") ||
-            runtime.diagnostic?.code.startsWith("file")
-          ) {
+          // A successful open clears stale file-operation errors (the
+          // bootstrap placeholder's "unknown workspace document" status
+          // lookup and any failed open attempt), then falls through to the
+          // normal pane routing below. dialog./server. errors stay.
+          const code = runtime.diagnostic?.code ?? "";
+          if (!code.startsWith("dialog.") && !code.startsWith("server.")) {
             runtime.diagnostic = null;
           }
           notify();
@@ -644,9 +685,30 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
             : [...runtime.panes.values()].filter(
                 (pane) => pane.session.store.get()?.documentId === documentId,
               );
+        // An unclaimed open reply belongs to whichever pane's OpenDocument is
+        // still in flight (restores open several panes at once, and restored
+        // placeholders can share a document id with early real ids); the
+        // documentId match is next, then the active pane fallback.
+        const openReplyPath =
+          event.kind === "documentOpened"
+            ? String(
+                (event.data as { metadata?: { path?: unknown } } | undefined)
+                  ?.metadata?.path ?? "",
+              )
+            : null;
+        const awaiting =
+          openReplyPath == null || openReplyPath === ""
+            ? undefined
+            : [...runtime.panes.values()].find(
+                (pane) => pane.session.inFlightOpenPath() === openReplyPath,
+              );
         const targets =
-          event.kind === "documentOpened" && matching.length === 0
-            ? [ensurePane(runtime, runtime.tree.activePaneId)]
+          event.kind === "documentOpened"
+            ? [
+                awaiting ??
+                  matching[0] ??
+                  ensurePane(runtime, runtime.tree.activePaneId),
+              ]
             : matching.length > 0
               ? matching
               : [...runtime.panes.values()];

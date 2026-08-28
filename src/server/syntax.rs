@@ -1371,14 +1371,13 @@ impl fmt::Display for TreeSitterSyntaxError {
 pub struct TreeSitterSyntaxHandler {
     contribution: SyntaxGrammarContribution,
     language: Language,
-    parser: Arc<Mutex<Parser>>,
     highlights_query: Arc<Query>,
     /// Optional compiled text-object query (Plan 071 task 10). Absent for
     /// grammars without a `textobjects.scm`; selection queries then return no
     /// ranges and smart select keeps working off the parsed tree.
     textobjects_query: Option<Arc<Query>>,
     injections: Option<Arc<InjectionState>>,
-    trees: Arc<Mutex<HashMap<DocumentId, CachedSyntaxTree>>>,
+    trees: Arc<Mutex<HashMap<DocumentId, CachedSyntaxState>>>,
     decoration_cache: Arc<Mutex<SyntaxChunkCache>>,
     perf: PerfRecorder,
 }
@@ -1420,11 +1419,24 @@ impl fmt::Debug for TreeSitterSyntaxHandler {
     }
 }
 
-#[derive(Debug, Clone)]
-struct CachedSyntaxTree {
+/// Plan 099: per-document syntax state. Each document owns its parser (so
+/// same-language documents parse concurrently without a grammar-global lock)
+/// plus its latest tree for incremental reuse. Only the tree is ever cloned
+/// out of the map; the parser stays with the document's state.
+struct CachedSyntaxState {
     document_version: u64,
     window_id: u64,
     tree: Tree,
+    parser: Parser,
+}
+
+impl fmt::Debug for CachedSyntaxState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CachedSyntaxState")
+            .field("document_version", &self.document_version)
+            .field("window_id", &self.window_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl TreeSitterSyntaxHandler {
@@ -1438,16 +1450,9 @@ impl TreeSitterSyntaxHandler {
                 message: error.to_string(),
             }
         })?;
-        let mut parser = Parser::new();
-        parser.set_language(&language).map_err(|error| {
-            TreeSitterSyntaxError::QueryCompileFailed {
-                message: error.to_string(),
-            }
-        })?;
         Ok(Self {
             contribution,
             language,
-            parser: Arc::new(Mutex::new(parser)),
             highlights_query: Arc::new(query),
             textobjects_query: None,
             injections: None,
@@ -1536,6 +1541,27 @@ impl TreeSitterSyntaxHandler {
         })
     }
 
+    /// Build a fresh parser for this handler's language (per-document parser
+    /// construction; Plan 099 removed the grammar-global parser mutex).
+    fn build_parser(&self) -> Parser {
+        let mut parser = Parser::new();
+        // The language was validated at construction; a failure here would
+        // have already failed `TreeSitterSyntaxHandler::new`.
+        let _ = parser.set_language(&self.language);
+        parser
+    }
+
+    /// Evict arbitrary entries beyond the bounded per-document cache so cold
+    /// grammars from closed documents cannot accumulate unbounded tree state.
+    fn bound_tree_cache(&self, trees: &mut HashMap<DocumentId, CachedSyntaxState>) {
+        while trees.len() > crate::perf::budgets::SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES {
+            let Some(victim) = trees.keys().next().copied() else {
+                break;
+            };
+            trees.remove(&victim);
+        }
+    }
+
     fn tree_for_selection_query(
         &self,
         document_id: DocumentId,
@@ -1555,12 +1581,30 @@ impl TreeSitterSyntaxHandler {
         if let Some(tree) = cached {
             return Ok(tree);
         }
-        let mut parser = self.parser.lock().expect("syntax parser lock poisoned");
+        // One-shot parse with a parser taken out of the document's state (or
+        // a fresh one); same-language documents never contend on a shared
+        // parser (Plan 099).
+        let mut parser = self
+            .trees
+            .lock()
+            .expect("syntax tree cache lock poisoned")
+            .get_mut(&document_id)
+            .map(|state| std::mem::replace(&mut state.parser, self.build_parser()))
+            .unwrap_or_else(|| self.build_parser());
         #[allow(deprecated)]
         parser.set_timeout_micros(self.contribution.timeout_micros());
-        parser
+        let tree = parser
             .parse(text, None)
-            .ok_or(TreeSitterSyntaxError::ParseTimedOut)
+            .ok_or(TreeSitterSyntaxError::ParseTimedOut)?;
+        if let Some(state) = self
+            .trees
+            .lock()
+            .expect("syntax tree cache lock poisoned")
+            .get_mut(&document_id)
+        {
+            state.parser = parser;
+        }
+        Ok(tree)
     }
 
     fn textobject_ranges(
@@ -1683,11 +1727,16 @@ impl TreeSitterSyntaxHandler {
                     && cached.tree.root_node().end_byte() == window.text.len()
             })
             .map(|cached| cached.tree.clone());
+        // The freshly parsed tree plus the document parser it was produced
+        // with (returned to the cache below). A cache hit keeps the existing
+        // state untouched.
+        let mut reparsed: Option<(Tree, &'static str, Parser)> = None;
         let (tree, parse_kind) = if let Some(tree) = cached_tree {
             (tree, "cached")
         } else {
             let metadata =
-                MetricMetadata::document(notification.document_id, notification.document_version);
+                MetricMetadata::document(notification.document_id, notification.document_version)
+                    .with_trace_id(notification.trace_id);
             self.perf.record_with_metadata(
                 SYNTAX_PARSE_INVOCATIONS,
                 MetricValue::Counter { amount: 1 },
@@ -1703,20 +1752,39 @@ impl TreeSitterSyntaxHandler {
                 metadata,
             );
 
-            let mut parser = self.parser.lock().expect("syntax parser lock poisoned");
+            // Plan 099: parse with the document's own parser. Only one
+            // session job per document runs at a time, so the parser cannot
+            // contend with itself, and same-language documents each own a
+            // parser (no grammar-global mutex).
+            let mut parser = self
+                .trees
+                .lock()
+                .expect("syntax tree cache lock poisoned")
+                .get_mut(&notification.document_id)
+                .map(|state| std::mem::replace(&mut state.parser, self.build_parser()))
+                .unwrap_or_else(|| self.build_parser());
             #[allow(deprecated)]
             parser.set_timeout_micros(self.contribution.timeout_micros());
+            let parse_kind = if old_tree.is_some() {
+                "incremental"
+            } else {
+                "full"
+            };
             let Some(tree) = parser.parse(&window.text, old_tree.as_ref()) else {
+                // Give the parser back before failing so the document keeps
+                // its reusable state.
+                if let Some(state) = self
+                    .trees
+                    .lock()
+                    .expect("syntax tree cache lock poisoned")
+                    .get_mut(&notification.document_id)
+                {
+                    state.parser = parser;
+                }
                 return Err(TreeSitterSyntaxError::ParseTimedOut);
             };
-            (
-                tree,
-                if old_tree.is_some() {
-                    "incremental"
-                } else {
-                    "full"
-                },
-            )
+            reparsed = Some((tree.clone(), parse_kind, parser));
+            (tree, parse_kind)
         };
 
         let affected_ranges = query_ranges(&notification, window, old_tree.as_ref(), &tree);
@@ -1736,17 +1804,20 @@ impl TreeSitterSyntaxHandler {
             notification.document_id,
             notification.document_version,
         ));
-        self.trees
-            .lock()
-            .expect("syntax tree cache lock poisoned")
-            .insert(
+        if let Some((tree, parse_kind, parser)) = reparsed {
+            let _ = parse_kind;
+            let mut trees = self.trees.lock().expect("syntax tree cache lock poisoned");
+            trees.insert(
                 notification.document_id,
-                CachedSyntaxTree {
+                CachedSyntaxState {
                     document_version: notification.document_version,
                     window_id: window.window_id,
                     tree,
+                    parser,
                 },
             );
+            self.bound_tree_cache(&mut trees);
+        }
 
         Ok(IncrementalParseUpdate {
             document_id: notification.document_id,
@@ -1757,6 +1828,9 @@ impl TreeSitterSyntaxHandler {
             parse_unit: ParseUnit::Region,
             viewport: update_viewport,
             invalidated_ranges: vec![update_viewport],
+            trace_id: notification.trace_id,
+            request_id: notification.request_id,
+            client_id: None,
             syntax_tree_delta: Some(format!(
                 "tree-sitter:{}:{parse_kind}",
                 self.contribution.language_id,
@@ -1778,10 +1852,6 @@ impl TreeSitterSyntaxHandler {
             .map(|cached| cached.document_version)
     }
 
-    pub fn parser_cache_id(&self) -> usize {
-        Arc::as_ptr(&self.parser) as usize
-    }
-
     fn decorations_for_window(
         &self,
         notification: &ParseEditNotification,
@@ -1794,7 +1864,8 @@ impl TreeSitterSyntaxHandler {
             .map(|first| first.start..replacement_ranges.last().map_or(first.end, |last| last.end))
             .unwrap_or(0..0);
         let metadata =
-            MetricMetadata::document(notification.document_id, notification.document_version);
+            MetricMetadata::document(notification.document_id, notification.document_version)
+                .with_trace_id(notification.trace_id);
         self.perf.record_with_metadata(
             SYNTAX_QUERY_RANGES,
             MetricValue::Counter {
@@ -2291,6 +2362,7 @@ fn decoration_sets_for_ranges(
                 viewport_byte_start: chunk_start,
                 viewport_byte_end: chunk_end,
                 spans: chunk_spans,
+                trace_id: notification.trace_id,
             }
         })
         .collect()
@@ -2314,18 +2386,39 @@ fn decoration_set_fits_update_budget(
         .unwrap_or(false)
 }
 
+fn tighten_viewport_to_spans(set: &mut DecorationSet) {
+    let Some(first) = set.spans.first() else {
+        return;
+    };
+    let mut start = first.byte_start;
+    let mut end = first.byte_end;
+    for span in &set.spans {
+        start = start.min(span.byte_start);
+        end = end.max(span.byte_end);
+    }
+    set.viewport_byte_start = start;
+    set.viewport_byte_end = end;
+}
+
 fn split_decoration_set_to_update_budget(
     notification: &ParseEditNotification,
-    set: DecorationSet,
+    mut set: DecorationSet,
 ) -> Vec<DecorationSet> {
     if set.spans.len() <= 1 || decoration_set_fits_update_budget(notification, &set) {
         return vec![set];
     }
+    // Halves must claim only their own span range. Cloning the parent
+    // viewport made every fragment a full-window replaceCovered, so the
+    // last 4 KiB payload wiped syntax at the top of large files.
+    set.spans
+        .sort_by_key(|span| (span.byte_start, span.byte_end));
     let mid = set.spans.len() / 2;
     let mut left = set.clone();
     let mut right = set;
     left.spans.truncate(mid);
     right.spans.drain(..mid);
+    tighten_viewport_to_spans(&mut left);
+    tighten_viewport_to_spans(&mut right);
     let mut out = split_decoration_set_to_update_budget(notification, left);
     out.extend(split_decoration_set_to_update_budget(notification, right));
     out
@@ -2339,6 +2432,20 @@ impl crate::server::parse_coordinator::ParseHandler for TreeSitterSyntaxHandler 
                 .parse_sync(notification)
                 .map_err(|error| ParseCoordinatorError::HandlerFailed(error.to_string()))
         })
+    }
+
+    fn parse_blocking(
+        &self,
+        notification: ParseEditNotification,
+    ) -> Option<Result<IncrementalParseUpdate, ParseCoordinatorError>> {
+        Some(
+            self.parse_sync(notification)
+                .map_err(|error| ParseCoordinatorError::HandlerFailed(error.to_string())),
+        )
+    }
+
+    fn runs_on_blocking_executor(&self) -> bool {
+        true
     }
 
     fn selection_query_ranges(
@@ -2366,6 +2473,9 @@ fn empty_update(notification: ParseEditNotification) -> IncrementalParseUpdate {
         parse_unit: ParseUnit::Region,
         viewport: notification.viewport,
         invalidated_ranges: notification.invalidated_ranges,
+        trace_id: notification.trace_id,
+        request_id: notification.request_id,
+        client_id: None,
         syntax_tree_delta: None,
         decoration_updates: Vec::new(),
         diagnostic_update: None,
@@ -2418,6 +2528,66 @@ mod tests {
                 text: text.to_string(),
             }],
             memory_budget: None,
+            trace_id: None,
+            request_id: None,
+        }
+    }
+
+    #[test]
+    fn split_decoration_payloads_claim_only_their_span_range() {
+        let text = "fn item() {}\n".repeat(400);
+        let notification = notification(1, &text);
+        let provenance = crate::protocol::DecorationProvenance {
+            package_name: "@clay/rust".to_string(),
+            package_version: "0.1.0".to_string(),
+            package_prefix: "rust".to_string(),
+        };
+        let spans = (0..200)
+            .map(|index| crate::protocol::DecorationSpan {
+                byte_start: (index * 12) as u64,
+                byte_end: (index * 12 + 2) as u64,
+                kind: DecorationKind::Syntax,
+                token_type: TokenType::Keyword,
+                modifiers: crate::protocol::Modifiers::NONE,
+                scope: None,
+                font_role: None,
+                priority: 70,
+                provenance: provenance.clone(),
+                target: None,
+                inlay: None,
+            })
+            .collect();
+        let set = DecorationSet {
+            document_id: 7,
+            document_version: 1,
+            package_prefix: "rust".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: 0,
+            viewport_byte_end: text.len() as u64,
+            spans,
+            trace_id: None,
+        };
+        let parts = split_decoration_set_to_update_budget(&notification, set);
+        assert!(
+            parts.len() > 1,
+            "dense set must split under the update budget"
+        );
+        for part in &parts {
+            let start = part
+                .spans
+                .iter()
+                .map(|span| span.byte_start)
+                .min()
+                .expect("split keeps spans");
+            let end = part
+                .spans
+                .iter()
+                .map(|span| span.byte_end)
+                .max()
+                .expect("split keeps spans");
+            assert_eq!(part.viewport_byte_start, start);
+            assert_eq!(part.viewport_byte_end, end);
+            assert!(end <= text.len() as u64);
         }
     }
 
@@ -2474,6 +2644,8 @@ mod tests {
                 text: text.clone(),
             }],
             memory_budget: None,
+            trace_id: None,
+            request_id: None,
         };
 
         let update = handler
@@ -2536,6 +2708,60 @@ mod tests {
             .expect("native handler builds")
             .expect("rust descriptor resolves");
         assert!(handler.injections.is_none());
+    }
+
+    /// Plan 099: the per-document tree/parser cache is bounded — cold
+    /// documents are evicted beyond `SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES`
+    /// entries, and oversize windows still fail before parsing.
+    #[test]
+    fn document_tree_cache_is_bounded_and_windows_respect_byte_budget() {
+        let descriptor = FIRST_PARTY_NATIVE_GRAMMARS
+            .iter()
+            .find(|descriptor| descriptor.id == "markdown.markdown")
+            .unwrap();
+        let handler = native_handler(&contribution_from_native_descriptor(descriptor))
+            .unwrap()
+            .unwrap();
+        let text = "# Heading\n\nProse.\n";
+
+        // Oversize window fails closed before any parse state is built.
+        let mut oversize = notification(1, text);
+        oversize.package_prefix = "markdown".to_string();
+        oversize.mode_id = "markdown.markdown".to_string();
+        let huge_window_bytes = handler.contribution.max_window_bytes() + 1;
+        oversize.parse_windows[0].text = "x".repeat(huge_window_bytes);
+        assert!(matches!(
+            handler.parse_sync(oversize),
+            Err(TreeSitterSyntaxError::WindowTooLarge { .. })
+        ));
+
+        // Fill the cache beyond its bound with distinct documents.
+        let documents = crate::perf::budgets::SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES + 8;
+        for document_id in 1..=documents as u64 {
+            let mut doc_notification = notification(1, text);
+            doc_notification.package_prefix = "markdown".to_string();
+            doc_notification.mode_id = "markdown.markdown".to_string();
+            doc_notification.document_id = document_id;
+            doc_notification.parse_windows[0].document_id = document_id;
+            handler.parse_sync(doc_notification).unwrap();
+        }
+        let trees = handler
+            .trees
+            .lock()
+            .expect("syntax tree cache lock poisoned");
+        assert!(
+            trees.len() <= crate::perf::budgets::SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES,
+            "bounded tree cache must not retain every cold document, got {}",
+            trees.len()
+        );
+        // The most recent document survives; eviction is arbitrary beyond
+        // the bound (documented ceiling).
+        assert_eq!(
+            trees
+                .get(&(documents as u64))
+                .map(|state| state.document_version),
+            Some(1)
+        );
     }
 
     #[test]

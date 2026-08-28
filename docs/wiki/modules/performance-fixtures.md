@@ -1,161 +1,247 @@
-# Performance Fixture Generation
+# Performance Fixtures and Traces
 
-## Scope
+## Source
 
-Covers `src/perf/mod.rs`, `src/perf/fixtures.rs`, `src/perf/baselines.rs`, `src/perf/metrics.rs`, the `clay perf-fixture` and `--profile-perf` CLI paths in `src/cli.rs`, profiling hooks in editor/layout/SDUI/client/server/protocol/runtime modules, `benches/editor_baselines.rs`, `benches/protocol_server_baselines.rs`, `benches/runtime_sdui_baselines.rs`, `benches/markdown_baselines.rs`, `benches/first_party_language_baselines.rs`, `benches/window_baselines.rs`, the conformance/performance suites under `tests/`, and the developer guide at `docs/development/performance.md`.
+- `src/perf/fixtures.rs` — deterministic fixture generation and output-path validation.
+- `src/perf/baselines.rs` — reusable protocol/server benchmark inputs.
+- `src/perf/budgets.rs` — shared payload, latency, memory, parser, and render bounds.
+- `src/perf/metrics.rs` — opt-in recorder, summaries, sanitization, and atomic report files.
+- `src/cli.rs` — `perf-fixture` and profiling flag wiring.
+- `frontend/src/editor/{performance,position-index}.ts` — browser trace recorder and indexed editor work.
+- `frontend/src/editor/{performance.test.ts,position-map.test.ts}` and `frontend/src/editor/extensions/performance.test.ts` — deterministic frontend invariants.
+- `src/server/{parse_coordinator,syntax_session}.rs` and `src-tauri/src/bridge/forwarder.rs` — Plan 099 scheduler/bridge stages.
+- `scripts/editor-performance-smoke.sh` — real Tauri/WebKit report harness.
+- `tests/{perf_fixtures,performance_budgets,editor_performance}.rs` — fixture, budget, and protocol matrix tests.
+- `benches/protocol_server_baselines.rs` — current Criterion protocol/server baseline target.
+- `tools/bench/markdown-parser.mjs` — separate Markdown parser/adapter benchmark harness.
+- `docs/development/performance.md` — authoritative commands, budgets, and recorded evidence.
+
+## Overview
+
+This module supplies production-shaped, reproducible inputs for editor and
+protocol performance work without reading user documents. Fixtures are valid
+UTF-8 and exact-sized. Metrics are disabled by default; when explicitly enabled
+they retain bounded numeric snapshots and write sanitized per-process summaries
+for the Plan 099 desktop harness.
+
+The code wiki distinguishes deterministic invariants from machine-dependent
+latency. CI blocks work counts, ownership, bounds, protocol correctness, and
+report integrity. p95 device timing remains advisory until the documented
+three-run designated-device rule is satisfied.
 
 ## Responsibilities
 
-The performance fixture module generates deterministic large UTF-8 plain-text files for Phase 14 benchmarks, targeted tests, and manual smoke preparation. It provides reusable Rust helpers plus a developer-only CLI command so large files can be reproduced locally instead of committed to the repository.
+- Generate large plain-text fixtures with controlled line shapes and Unicode.
+- Refuse fixture output outside approved repository roots.
+- Provide reusable in-memory protocol/document benchmark helpers.
+- Record browser, CodeMirror, bridge, server, and syntax stages only when
+  profiling is enabled.
+- Keep reports source-free, path-sanitized, bounded, and atomically written.
+- Provide the Plan 099 automated matrix and real-device harness without adding
+  runtime work to normal editing.
 
-The baseline module exposes internal, non-user-facing helpers for Criterion targets. These helpers assemble deterministic editor surfaces, protocol messages, server documents, behavior manifests, and SDUI trees so benchmark files measure production paths without duplicating fixture or protocol construction logic. Plan 088 adds `responsive_layout_work`, which drives the production SDUI sidebar/editor slot decision across pane widths and UI typography without exposing document text or user paths.
+## Fixture generation
 
-The metrics module provides Clay-owned, low-overhead profiling primitives for Phase 14. `PerfConfig` centralizes activation from `CLAY_PERF_PROFILE=1`, the developer-only `--profile-perf` flag, or test helpers. `PerfRecorder` is no-op by default, and enabled recorders collect typed `MetricSnapshot` values for durations, counters, gauges, and byte counts.
+`FixtureSpec` combines `FixtureKind`, exact `size_bytes`, and a deterministic
+seed. `generate_fixture` streams through a 64 KiB buffer; the CLI writes only
+under `target/perf-fixtures/` or the committed test-fixture root
+`tests/fixtures/perf/`. Parent traversal and unrelated paths are rejected.
 
-## How It Works
+Supported shapes:
 
-`FixtureSpec` selects a `FixtureKind`, exact byte size, and deterministic seed. `generate_fixture` writes to any `Write` sink using a bounded in-memory string buffer, so tests can generate bytes in memory while the CLI streams chunks to a file through `generate_fixture_file`.
+- `long-lines` — long lines for layout and intra-line conversion ceilings;
+- `many-short-lines` — line-count, viewport, and scrolling pressure;
+- `mixed-unicode` — multi-byte scalars, emoji, and combining-width cases; and
+- `newline-heavy` — blank-line and line-boundary pressure.
 
-Fixture shapes are intentionally simple and reproducible:
+If a generated line would exceed the requested size, ASCII fill reaches the
+exact byte count without splitting UTF-8. `default_fixture_path` and
+`FixtureKind::parse` keep CLI naming deterministic.
 
-- `long-lines` emits very long lines for layout measurement stress.
-- `many-short-lines` emits many compact lines for viewport and scrolling scenarios.
-- `mixed-unicode` emits multi-byte Unicode scalar content and emoji for cursor/layout edge cases.
-- `newline-heavy` emits dense blank lines for line-boundary behavior.
-
-If a generated line would exceed the requested byte size, the generator fills the remainder with ASCII text. This keeps output exactly sized and always valid UTF-8 without slicing a multi-byte scalar.
-
-## Profiling Hooks and Metric Snapshots
-
-`src/perf/metrics.rs` keeps profiling internal and typed. Disabled recorders have no backing metric buffer, so hot-path hooks can create no-op scopes without collecting snapshots. Enabled recorders store snapshots behind a mutex for developer/test inspection; this is intentionally opt-in and not part of the public Clay JS API.
-
-Current hooks cover:
-
-- Editor visible extraction and local edit counters through `EditorSurface` test/bench recorder helpers.
-- Layout paint/rebuild/cache-hit/cache-miss timing in `src/editor/layout.rs`.
-- Masonry paint preparation in `src/masonry_editor.rs` without GPU synchronization.
-- Native SDUI snapshot/update application duration plus node/operation counts in `src/masonry_sdui.rs`.
-- Client edit queue enqueue duration, pending depth, enqueue failures, and acknowledgement application metadata in `src/client/mod.rs`.
-- Protocol encode/decode duration, payload byte counts, and oversized-frame counters in `src/protocol/codec.rs`.
-- Server document edit acknowledgement duration/counters in `src/server/document.rs`.
-- Server-side JavaScript runtime/configuration evaluation duration in `src/server/js_runtime/mod.rs`.
-
-Metric metadata is numeric and sanitized: document/client/version/transaction IDs are allowed, while document text, file contents, JavaScript source bodies, secrets, and absolute user paths are not recorded. Path metadata uses `sanitize_path`, which redacts parent directories and keeps only a basename marker for diagnostics.
-
-## Criterion Baseline Scaffolding
-
-`Cargo.toml` installs Criterion as a development dependency and declares each bench target with `harness = false`. The initial groups intentionally stay non-interactive:
-
-- `editor_visible_extraction`, `editor_editing`, and `editor_scroll_viewport` use `EditorSurface` and generated fixtures for buffer, visible extraction, edit, and scroll-adjacent measurements.
-- `editor_typography_viewport_bounds` runs the same small/large fixtures with 10 px and 40 px document profiles, preserving a local regression check that configured typography changes only the bounded viewport window rather than triggering full-document work. Deterministic verification also exercises 500 mixed-role visible spans/1,000 normalized boundaries and statically excludes JavaScript, IPC, filesystem, network, shell, and font-discovery work from editor/SDUI hot paths.
-- `responsive_layout_baselines` measures the production SDUI sidebar/editor slot decision at narrow, normal, wide, and large-UI-typography inputs. Its returned flags are sanitized layout facts; timings remain local/advisory while the typed bounds matrix is blocking.
-- `protocol_codec_payloads` and `server_document_acknowledgements` use the production `Codec` and in-process `DocumentState` acknowledgement logic for deterministic IPC/server baselines.
-- `runtime_configuration_baselines` and `sdui_application_baselines` cover deterministic behavior-manifest creation plus native SDUI snapshot/update and codec paths.
-- `markdown_activation_baselines`, `markdown_parse_and_decoration_baselines`, and `markdown_decorated_editor_baselines` cover first-party Markdown package activation, representative parse/decorations validation, and native decorated-editor render-adjacent work.
-- `markdown_large_file_windowed_baselines` and `markdown_large_file_visible_render_baselines` cover bounded parse-window metadata, syntax-memory accounting, visible decoration chunk validation at 64 KiB/256 KiB/1 MiB/5 MiB/16 MiB sizes, and 16 MiB render-adjacent editor work after applying a windowed Markdown chunk.
-- `tools/bench/markdown-parser.mjs` covers actual parser cost outside Criterion. It builds exact 64 KiB, 256 KiB, 1 MiB, 5 MiB, and 16 MiB Markdown corpora by repeating the largest committed repository `.md` files, then times the active `markdown-it` parser, full-document adapter advisory path, and `windowed-adapter` visible path with Node.js. Historical mdast measurements are retained only as parser replacement rationale.
-
-Benchmarks report bytes or element throughput for large-data cases where practical and use Criterion batched setup so fixture/surface construction stays separate from the timed operation when needed. `cargo bench --no-run` is the CI-friendly validation command; full timing and `--save-baseline`/`--baseline` comparisons are local advisory workflows. Markdown benchmark timings are advisory evidence for parser/adapter decisions; hard gates remain deterministic payload, cache-budget, benchmark-script, and no-hot-path tests.
-
-The Markdown parser harness intentionally uses existing repository Markdown rather than dummy generated prose. Local Phase 18 measurements showed historical `mdast-util-from-markdown` taking about 1.28 s for 1 MiB, 16.24 s for 5 MiB, and not completing a 16 MiB parse within a 120 s guard window, while `markdown-it` completed the same sizes in about 66.5 ms, 397.6 ms, and 849.7 ms. The removed mdast adapter's full-document path took about 49.3 s at 1 MiB because byte-offset conversion repeatedly scanned from the start of the document. After the rewrite, the active `markdown-it` plus package-adapter harness completed local 1.01 MiB, 5.02 MiB, and 16.01 MiB repository-Markdown corpora in about 127.2/190.2 ms, 428.6/608.7 ms, and 1007.4/1577.8 ms respectively for parser/adapter paths. Large-file Markdown support therefore must stay background/viewport-bounded and optimize the active markdown-it adapter before being considered durable.
-
-Phase 18.5 uses an editor-parity memory contract instead of treating total RSS as the 30 MiB target. Total RSS remains reported for triage, but the large-file Markdown pass/fail budget is `markdown_overhead <= 30 MiB`, where `markdown_overhead = markdown_parser_temporary_allocations + retained_decoration_cache_memory`. Benchmark JSON for future large-file Markdown runs must separate `total_rss`, `baseline_rss`, `document_memory`, `markdown_parser_temporary_allocations`, `retained_decoration_cache_memory`, and `markdown_overhead` so a 16 MiB document is not confused with parser/cache overhead. The Phase 18.5 Node harness now emits these categories plus `parserInputBytes`, `hotPathAllowed`, parser/adapter category names, and `markdown_overhead_budget_met`; the Criterion harness covers transport/render-adjacent categories. A bare server-side JavaScript runtime can exceed 30 MiB RSS before any document is opened, so the achievable goal is bounded viewport/window syntax work rather than a whole-process 30 MiB cap.
-
-For editor comparison, small Markdown files (`<= 1 MiB`) may still use full-document parse/decorate on open or explicit resync when advisory timings remain low; medium files (`> 1 MiB` and `<= 5 MiB`) should default to viewport-first/windowed parsing for ordinary edits and scroll; large files (`> 5 MiB`) must not use full-document parse/decorate on ordinary open, edit, or scroll paths. The benchmark suite measures typing/local paint, scroll/render-adjacent work, visible decoration refresh, parser cancellation, parser/decorator CPU by file size, parser, adapter, transport, render-adjacent, status/fallback, and memory categories separately.
-
-Phase 18.5 verification ran:
-
-```text
-node --expose-gc tools/bench/markdown-parser.mjs --sizes 64KiB,256KiB,1MiB,5MiB,16MiB --parser markdown-it,adapter,windowed-adapter --iterations 1 --warmup 0 --json
+```bash
+cargo run --bin clay -- perf-fixture \
+  --kind mixed-unicode --size-mib 10 --seed 9001 \
+  --output target/perf-fixtures/perf-10mib-mixed-unicode.txt
 ```
 
-Local results showed `windowed-adapter` parsing exactly a 64 KiB window for medium/large corpora and keeping `markdown_overhead` under budget: 3.64 MiB at 5 MiB and 3.64 MiB at 16 MiB. The same run marked full-document `markdown-it` and `adapter` rows as `hotPathAllowed=false` for 5 MiB and 16 MiB; the 16 MiB full adapter advisory row reported 2356.308 ms and 750.48 MiB Markdown overhead, while the status/fallback check took 0.260 ms, confirming that full-document adapter work must not return to ordinary open/edit/scroll paths.
+## Recorder and report format
+
+`PerfConfig` enables profiling from `CLAY_PERF_PROFILE=1` or the developer
+`--profile-perf` path. A disabled `PerfRecorder` has no backing buffer, so hooks
+remain no-ops. An enabled recorder stores at most
+`PERF_SNAPSHOT_CAPACITY = 4,096` events and counts dropped events instead of
+growing. `PerfSummary` reports schema version, enabled state, retained/dropped
+counts, and per-stage count/p50/p95/max duration summaries.
+
+Allowed metadata is numeric document/client/transaction/version/trace IDs,
+byte counts, and sanitized feature/path markers. `sanitize_path` retains only a
+basename marker. Reports are written only when `CLAY_PERF_REPORT_DIR` is set;
+labels are reduced to ASCII alphanumeric/hyphen characters and the file is
+replaced through a temporary file plus rename.
+
+Plan 099 stages include:
+
+- browser input, CodeMirror update, editor typing, viewport, scroll, syntax
+  freshness, React commit, compartment reconfiguration, long task, and
+  paint-adjacent frame completion;
+- bridge enqueue/client delivery/forwarder delivery/patch delivery;
+- server receive/edit acknowledgement; and
+- syntax queue/start/end plus logical parse/query counters.
+
+`PerformanceTraceId` links related stages without storing source text, query
+text, credentials, package code, or absolute paths. Frontend snapshots expose
+the developer-only `globalThis.__clayPerfSnapshot()` hook; Tauri commands and
+process reports remain harness plumbing, not package APIs.
 
 ## Plan 088 window and responsive baselines
 
-`benches/window_baselines.rs` keeps ten fixed-input Criterion groups advisory: pane paint, tab switch, responsive layout, centered overlay, completion open/filter/layout/selection, Command Centre open, and retained accessibility-tree update. The pure helpers in `src/perf/baselines.rs` measure bounded geometry/projection work rather than launching UI, serializing documents, or invoking package code. `responsive_layout_work(width, ui_size)` is the blocking layout fact: it records whether the sidebar, editor, and usable-main-width constraints hold at representative 320/900/1200 logical widths and 12/24/96 UI sizes. `AccessibilityTreeBench` constructs the retained shell once, then times label updates that reuse owner/client-derived virtual IDs.
+The Plan 088 responsive baseline remains a historical documentation contract,
+not a current native-editor implementation. Its `responsive_layout_work`
+marker and structural bounds are maintained in
+`docs/development/performance.md` and guarded by
+`tests/primitives_docs.rs`/`tests/performance_budgets.rs`; current Plan 099
+measurement uses the React/Tauri paths documented below.
 
-The promotion boundary is deliberate. `tests/editor_performance_invariants.rs::responsive_layout_work_preserves_sidebar_and_editor_bounds`, `accessibility_updates_reuse_stable_virtual_ids_without_allocator_churn`, and `retained_accessibility_update_fixture_stays_bounded` plus the source hot-path guards are blocking; Criterion medians and regression comparisons are machine-local advisory evidence. A benchmark comparison warning does not turn into a CI failure or justify weakening a layout invariant. All benchmark helpers remain `doc(hidden)`/internal and are not Clay JS APIs.
+## Plan 099 deterministic matrix
 
-### Plan 089 cost guards
+`tests/editor_performance.rs::editor_performance_matrix_holds_deterministic_invariants`
+uses one real IPC server and 30 generated-fixture cells. It drives the typed
+protocol and asserts mode classification, one atomic patch per request ID,
+exact edit/version accounting, save/reload/resync behavior, and close
+retirement across sizes, line shapes, and first-party extensions.
 
-The existing `editor_baselines` `editor_render_adjacent` group remains the
-local typing/paint proxy; `protocol_server_baselines` retains edit queue and
-acknowledgement groups, and `runtime_sdui_baselines` retains configuration and
-SDUI groups. The new `window_baselines` groups are:
+`frontend/src/editor/extensions/performance.test.ts` drives the real
+`createEditor` path and asserts:
 
-- `command_centre_open_baselines`: bounded 16/60/256 catalogue projection;
-- `completion_selection_baselines`: selected-row projection at 1/8/60/256
-  items;
-- `accessibility_tree_update_baselines`: retained shell label updates at
-  2/4/8/16 tabs after initial tree construction.
+- the shared `bytePositionField` follows every repeated 1 MiB edit without a
+  rebuild;
+- 100 sliding patches retain constant-size render data;
+- a 50 MiB document remains one current `Text` with no programmatic history;
+- four-pane patch work is linear and pane-isolated; and
+- decoration application does not lose text.
 
-`completion_filter_baselines` is the shared fuzzy-filter measurement for both
-completion and Command Centre queries. Run the fixed-input set with:
+Neither suite uses wall-clock thresholds as CI invariants. The source-free
+reference/designated-device harness is separate:
 
-```text
-cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2
+```bash
+CLAY_PERF_PROFILE=1 scripts/editor-performance-smoke.sh \
+  --sizes 1,10,50 \
+  --kinds mixed-unicode,many-short-lines,long-lines,newline-heavy \
+  --label local-run --enforce
 ```
 
-`AccessibilityTreeBench::update` mutates labels while preserving virtual IDs
-based on retained owner/client slots. The deterministic editor invariants
-reject `WidgetId::next()` in virtual-ID construction and cap the retained
-update fixture; existing `accesskit_consumer` shell tests validate reachable
-incremental trees. Criterion timing remains advisory; no budget is raised from
-the broad local after-run shifts recorded in `docs/development/performance.md`.
+The harness builds an instrumented frontend and binaries, generates fixtures,
+launches a private profiled server and desktop, and writes:
 
-## Security and Authority Boundaries
+```text
+target/perf/editor-performance/<label>/
+  frontend-frontend-perf-snapshot.json
+  clay-desktop-perf-summary.json
+  clay-server-perf-summary.json
+  summary.json
+```
 
-The generator does not read workspace files, configuration, user documents, secrets, or shell commands. `validate_output_path` resolves relative paths from the repository root, rejects `..` traversal, and only allows writes under `target/perf-fixtures/` or `tests/fixtures/perf/`. The native client receives no new filesystem authority; file-backed performance smoke remains server-authoritative.
+The analyzer always fails missing frontend reports or retention above 4,096;
+`--enforce` additionally fails long tasks over 50 ms. Missing interactive
+stages are warnings, not timing passes. The reference host cannot claim
+keyboard typing/scrolling when no input backend or WebKit document accessibility
+is available; those p95s remain pending a designated device.
 
-Benchmark helpers use in-memory generated fixtures, local data structures, and protocol frames only. They do not open IPC listeners, read user configuration by default, grant workspace permissions, or expose document contents outside local Criterion output.
+## Large-file Markdown editor-parity contract (Phase 18.5)
 
-Profiling hooks are also developer-only. They do not grant filesystem, network, shell, JavaScript, or client-side document authority, and metric snapshots must not include document content or unsanitized paths.
+The large-file Markdown target is overhead, not a whole-process 30 MiB cap:
+`markdown_overhead <= 30 MiB`. Benchmark JSON for future large-file Markdown
+runs must separate `total_rss`, `baseline_rss`, `document_memory`,
+`markdown_parser_temporary_allocations`, `retained_decoration_cache_memory`,
+and `markdown_overhead`. This keeps document memory from being mistaken for
+parser/cache overhead.
 
-## Extending
+The stable policy markers are kept verbatim for documentation tests:
 
-Add a new fixture kind by updating `FixtureKind`, `FixtureGenerator::next_line`, CLI documentation in `CLI_USAGE`, and `docs/development/performance.md`. Add shape-specific tests in `tests/perf_fixtures.rs` so future benchmark inputs remain deterministic and UTF-8 valid.
+```text
+large files (`> 5 MiB`) must not use full-document parse/decorate on ordinary open, edit, or scroll paths
+Benchmark JSON for future large-file Markdown runs must separate
+typing/local paint
+visible decoration refresh
+parser cancellation
+```
 
-## Phase 14 Performance Budgets and Guardrails
+The comparison policy is explicit: small files may use full-document work when
+advisory cost is low; medium files use viewport/windowed parsing; large files
+(`> 5 MiB`) must not use full-document parse/decorate on ordinary open, edit, or
+scroll paths. The measured categories remain `typing/local paint`, `visible
+decoration refresh`, `parser cancellation`, transport, status/fallback, and
+memory. Markdown parser delay may affect decoration freshness, never local text
+or edit acknowledgement.
 
-Phase 14 adds `src/perf/budgets.rs` which centralises all typed budget constants shared between tests, the documentation, and future enforcement points.
+## Plan 089 editor, menu, tab, completion, and accessibility cost guards
 
-### Hard-guard constants (compile-time)
+The existing `editor_baselines` `editor_render_adjacent` group remains the local
+editor proxy. Plan 089's `command_centre_open_baselines`,
+`completion_selection_baselines`, and `accessibility_tree_update_baselines`
+remain bounded structural/advisory coverage; Criterion's saved-target
+comparisons remain advisory. Stable IDs and retained-update bounds are blocking
+invariants, while machine timing does not become a CI threshold by itself.
 
-| Constant | Value | Checked by |
-|---|---|---|
-| `CLIENT_EDIT_PAYLOAD_BUDGET_BYTES` | 512 B | `cargo test --test protocol performance_protocol::` |
-| `EDIT_ACK_PAYLOAD_BUDGET_BYTES` | 128 B | `cargo test --test protocol performance_protocol::` |
-| `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` | 2 048 B | `cargo test --test protocol performance_protocol::` |
-| `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES` | 4 096 B | `cargo test --test protocol performance_protocol::` |
-| `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` | 1 024 B | `cargo test --test protocol performance_protocol::` |
+## Bounds and policy
 
-### Advisory latency/memory budgets
+- `PERF_SNAPSHOT_CAPACITY = 4,096` retained events per recorder;
+- `SYNTAX_EXECUTOR_MAX_JOBS = 4` native syntax permits;
+- `SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES = 64` per-document parser states;
+- `MODE_ACTIVATION_CACHE_ENTRIES = 64` activations per runtime generation;
+- `SYNTAX_CACHE_BUDGET_BYTES = 30 MiB` retained syntax-window budget;
+- `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB = 256 MiB` document envelope;
+- `MAX_CHUNK_BYTES = 256 KiB` document transfer chunk;
+- `VIEWPORT_OVERSCAN = 4,096` UTF-16 positions in the frontend render guard.
 
-| Constant | Value | Observed with |
-|---|---|---|
-| `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` | 16 ms | `cargo bench --bench editor_baselines editor_render_adjacent` |
-| `EDIT_ACK_P95_BUDGET_MS` | 40 ms | `cargo bench --bench protocol_server_baselines server_document_acknowledgements` |
-| `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS` | 16 ms | `cargo bench --bench editor_baselines editor_scroll_viewport` |
-| `RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS` | 25 ms | `cargo bench --bench runtime_sdui_baselines runtime_configuration_baselines` |
-| `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB` | 256 MiB | local profiler during `smoke-gui` fixture workflow |
-
-Advisory values are local-machine comparison targets only; they must not become hard CI thresholds until proven stable across platforms. For Phase 18.7 protocol comparisons, use target-specific Criterion commands (`cargo bench --bench protocol_server_baselines -- --baseline phase14-baseline` or `--baseline-lenient phase14-baseline`) rather than `cargo bench --benches -- --baseline-lenient ...`, which can route flags to non-Criterion harnesses.
-
-Security guardrails: profiling/benchmark workflows must not expose document contents, secrets, open network listeners, grant shell authority, or execute arbitrary JavaScript in the client.
+These are host safety/performance controls, not package configuration keys.
+Profiling remains opt-in and has no production document/parser authority.
 
 ## Tests
 
-- `cargo test --test protocol performance_budgets::`: verifies benchmark command discoverability, budget constant/doc alignment, constant values (compile-time guard), developer-only profiling policy, active Markdown benchmark documentation, Phase 18 markdown-it rewrite decision/performance evidence in the plan/docs, structural UI observability documentation, and Plan 088 responsive layout coverage.
-- `cargo test --test protocol performance_protocol::`: deterministic payload-size budgets, client-first typing invariants, queue depth/responsiveness, and oversized-frame rejection.
-- `cargo test --test editor editor_performance_invariants::`: viewport-bounded extraction, scroll layout stability, responsive sidebar/editor bounds, layout cache invalidation, hot-path boundaries, and Unicode safety.
-- `cargo test --test editor package_ui_conformance::` and `cargo test --test editor ui_primitive_conformance::`: blocking theme, catalog/token drift, state, primitive, and package-chrome conformance checks.
-- `cargo bench --bench window_baselines responsive_layout_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2`: local responsive layout timing signal.
-- `cargo bench --no-run`: compiles all Criterion targets, including `window_baselines`, without machine-variant timing.
+- `tests/perf_fixtures.rs` — deterministic bytes, UTF-8 validity, shape
+  coverage, and approved output roots.
+- `src/perf/metrics.rs` — disabled/no-op behavior, report label/path
+  sanitization, percentile summaries, source-safe metadata, and capacity drop.
+- `tests/performance_budgets.rs` — named budget values, document streaming,
+  Markdown benchmark contracts, and hot-path/security documentation.
+- `frontend/src/editor/performance.test.ts` — recorder capacity, source safety,
+  stage ordering, and disabled behavior.
+- `frontend/src/editor/position-map.test.ts` — indexed conversion/work bounds.
+- `frontend/src/editor/extensions/performance.test.ts` — editor ownership,
+  render retention, pane isolation, and no-history invariants.
+- `tests/editor_performance.rs` — real-protocol matrix and patch/edit counts.
+
+Run focused coverage with:
+
+```bash
+cargo test --test protocol perf_fixtures:: performance_budgets::
+cargo test --test runtime editor_performance_matrix_holds_deterministic_invariants -- --exact
+cd frontend && npm test -- --run src/editor/performance.test.ts src/editor/extensions/performance.test.ts
+```
+
+## Security and extension
+
+Fixture generation never reads workspace files, user configuration, secrets, or
+shell output. `validate_output_path` rejects parent traversal and writes only
+to approved roots. Reports are content-free and path-sanitized. No performance
+hook exposes filesystem, network, shell, package, parser, executor, or client
+JavaScript authority.
+
+To add a fixture shape, update `FixtureKind`, its generator branch, CLI help,
+and `tests/perf_fixtures.rs`; keep exact-size valid UTF-8 output and document
+whether the shape changes any performance ceiling. Add a new trace stage only
+when it identifies a real boundary; keep metadata numeric and update the
+performance documentation rather than adding always-on collection.
 
 ## Related
 
-- Developer guide: `docs/development/performance.md`
-- Budget constants: `src/perf/budgets.rs`
-- Plan: `plans/015-Phase14-Performance-Profiling-and-Benchmark-Foundation.md`
-- Pattern: `.agents/skills/project-patterns/references/protocol-and-performance.md`
+- [Editor Viewport Render Patch](../flows/editor-viewport-render-patch.md)
+- [Frontend Edit Synchronization](../flows/frontend-edit-synchronization.md)
+- [Syntax Sessions](syntax-sessions.md)
+- [React CodeMirror Editor](react-codemirror-editor.md)
+- [Desktop Typed Bridge](desktop-typed-bridge.md)
+- [Protocol Codec](protocol-codec.md)
+- [Maintenance Validation](maintenance-validation.md)
+- `docs/development/performance.md`
+- `src/perf/budgets.rs`

@@ -1217,3 +1217,60 @@ The following are not configuration APIs: `editor.commentPrefix`,
 `editor.fold.enabled`, `editor.inlayHints.enabled`, `editor.headingPrefixes`,
 `editor.chrome`, and `editor.wrapPolicy`. Use the documented command helpers,
 `clientSetEditorLayout`, or package-owned `editorRules` manifest fields instead.
+
+## Plan 099 editor-performance configuration review
+
+Plan 099 adds no new user-facing configuration API or option. Its incremental
+position index, atomic viewport patches, latest-wins syntax sessions, per-document
+parser state, mode-activation cache, trace recorder, and large-file transfer path
+are implementation details. Existing user choices remain the documented
+`packages.loadPackage`, `syntax.setSyntaxEnginePreference`, `theme.setTheme`,
+`theme.setTypography`, `theme.setAppearance`, `keybindings.bindKey`, and
+`configuration.setPackageOption` surfaces. `setPackageOption` remains limited to
+its closed package-owned option schema; it does not expose parser scheduling,
+cache, viewport, trace, or document-memory controls.
+
+### Host-owned performance and security controls
+
+The following Plan 099 values stay compiled/server-owned and are not `init.js`
+keys, package options, environment-backed user preferences, or public Clay JS
+APIs:
+
+| Control | Owner/value |
+|---|---|
+| Native syntax concurrency | `SYNTAX_EXECUTOR_MAX_JOBS = 4` blocking permits |
+| Per-document syntax tree cache | `SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES = 64` states |
+| Mode-activation cache | `MODE_ACTIVATION_CACHE_ENTRIES = 64` entries per generation |
+| Retained syntax/decorator cache | `SYNTAX_CACHE_BUDGET_BYTES = 30 MiB` |
+| Open-document resident memory | `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB = 256 MiB` |
+| Chunk/parse-window bounds | `MAX_CHUNK_BYTES = 256 KiB`; native context max `768 KiB` |
+| Retained render overscan | `VIEWPORT_OVERSCAN = 4096` positions per side, widened only by covered range |
+| Developer trace retention | `PERF_SNAPSHOT_CAPACITY = 4096` metadata-only events |
+
+`CLAY_PERF_PROFILE=1`, `VITE_CLAY_PERF_PROFILE=1`, and `--profile-perf` are
+developer measurement paths, not user configuration. They are opt-in,
+bounded, source-free, and do not become `init.js` settings.
+
+### Rejected hidden configuration keys
+
+No hidden or parallel key system is valid for this work. Examples rejected by
+the closed configuration boundary include `syntax.executorMaxJobs`,
+`syntax.cacheEntries`, `syntax.cacheBytes`, `syntax.parseWindowBytes`,
+`syntax.requestPacingMs`, `editor.viewportOverscan`,
+`editor.decorationCacheBytes`, `editor.positionIndex`, `performance.traceCapacity`,
+`performance.longTaskBudget`, `performance.deviceBudget`, and
+`document.residentMemoryBudget`. Users cannot configure patch acknowledgement,
+syntax queue policy, parser executor selection, mode-cache eviction, full-text
+retention, or trace collection through arbitrary JSON/TOML keys or package
+options.
+
+Configuration evaluation remains startup, package-load, reload, or explicit
+setting-change work. Typing, edit acknowledgement, viewport scrolling, parser
+publication, patch application, layout, paint, and ordinary React updates do
+not execute user configuration JavaScript or recompute these controls. No new
+API docs, `docs/index.md` links, inventory rows, or generated registry entries
+are required for Plan 099; the closed API/registry tests and performance-budget
+tests verify that result. The security boundary remains unchanged: no
+filesystem, network, shell, extension-loading, package-control, AI, workspace,
+parser-artifact, raw-op, native-widget, or client-side JavaScript authority is
+introduced.

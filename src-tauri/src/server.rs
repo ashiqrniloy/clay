@@ -568,7 +568,7 @@ mod tests {
         let _ = server_thread.join();
     }
 
-    /// Adoption now requires a real protocol-v27 handshake: a scripted
+    /// Adoption now requires a real protocol-v28 handshake: a scripted
     /// current-version Welcome is adoptable without spawning.
     #[test]
     #[cfg(unix)]

@@ -747,6 +747,76 @@ fn current_state_docs_reject_removed_native_architecture_terms() {
     }
 }
 
+#[test]
+fn plan099_reference_docs_are_cross_linked_and_current() {
+    let docs_index = read("docs/index.md");
+    for link in [
+        "[Clay Primitives Reference](reference/primitives/index.md)",
+        "[Primitive Registry Schema](reference/primitives/registry.md)",
+        "[Incremental Parse and Background Parse Update Strategy](reference/primitives/parse-update-strategy.md)",
+        "[Creating Clay Packages](reference/packages/creating-packages.md)",
+        "[Performance Fixtures and Baseline Workflow](development/performance.md)",
+    ] {
+        assert!(
+            docs_index.contains(link),
+            "docs/index.md must retain current Plan 099 reference link {link:?}"
+        );
+    }
+
+    let primitive_index = read("docs/reference/primitives/index.md");
+    for link in [
+        "registry.md",
+        "parse-update-strategy.md",
+        "rendering-strategy.md",
+        "../../development/performance.md",
+    ] {
+        assert!(
+            primitive_index.contains(link),
+            "primitive index must link current Plan 099 reference {link:?}"
+        );
+    }
+
+    let package_guide = read("docs/reference/packages/creating-packages.md");
+    for marker in [
+        "parse.serverRegisterParseHandler",
+        "syntax.serverRegisterSyntaxGrammar",
+        "decorations.serverPublishDecorations",
+        "diagnostics.serverPublishDiagnostics",
+        "folding.serverPublishFoldingRanges",
+        "no package-facing",
+        "synchronous IPC",
+    ] {
+        assert!(
+            package_guide.contains(marker),
+            "creating-packages.md must preserve Plan 099 package boundary marker {marker:?}"
+        );
+    }
+
+    for (path, stale) in [
+        (
+            "docs/reference/primitives/parse-update-strategy.md",
+            "A future `src/server/parse_coordinator.rs`",
+        ),
+        (
+            "docs/reference/primitives/parse-update-strategy.md",
+            "no-decoration-update",
+        ),
+        (
+            "docs/reference/primitives/rendering-strategy.md",
+            "Proposed documentation-only shape",
+        ),
+        (
+            "docs/development/performance.md",
+            "memoized per-document line",
+        ),
+    ] {
+        assert!(
+            !read(path).contains(stale),
+            "{path} retains stale current-state documentation {stale:?}"
+        );
+    }
+}
+
 /// Wiki navigation contract: every wiki page is linked from the master
 /// index, every intra-wiki link resolves, and current-state wiki pages name
 /// only source/test paths that exist.
@@ -807,6 +877,8 @@ fn wiki_navigation_is_complete_and_current_page_paths_resolve() {
         "docs/wiki/modules/react-client-bridge.md",
         "docs/wiki/modules/frontend-theme-runtime.md",
         "docs/wiki/flows/frontend-edit-synchronization.md",
+        "docs/wiki/flows/document-chunked-loading.md",
+        "docs/wiki/flows/editor-viewport-render-patch.md",
         "docs/wiki/flows/ag-ui-tauri-stream.md",
     ];
     for page in current_pages {

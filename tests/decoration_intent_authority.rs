@@ -53,6 +53,7 @@ fn link_set(package_name: &str, prefix: &str, target: DecorationTarget) -> Decor
         viewport_byte_start: 0,
         viewport_byte_end: 8,
         spans: vec![span],
+        trace_id: None,
     }
 }
 
@@ -118,6 +119,7 @@ fn link_publish_does_not_grant_filesystem_or_network() {
         viewport_byte_start: 0,
         viewport_byte_end: 8,
         spans: vec![inlay],
+        trace_id: None,
     };
     validate_decoration_publication(&package, 3, inlay_set)
         .expect("render-decorations is sufficient to publish inert inlays");

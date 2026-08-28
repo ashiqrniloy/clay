@@ -580,12 +580,14 @@ mod tests {
             capability: "folder-token".to_string(),
             selected_path: "C:/Users/test/project".to_string(),
         };
-        let viewport = ClientMessage::DecorationViewportRequest {
+        let viewport = ClientMessage::ViewportRenderRequest {
             client_id: 9,
             document_id: 7,
             document_version: 3,
+            request_id: 12,
             byte_start: 4_096,
             byte_end: 8_192,
+            trace_id: Some(41),
         };
         let save = ClientMessage::SaveDocument {
             client_id: 9,
@@ -602,6 +604,109 @@ mod tests {
         for message in [open, selected, selected_folder, viewport, save, reload] {
             let frame = codec.encode_client_message(&message).unwrap();
             let decoded = codec.decode_client_message(&frame).unwrap();
+            assert_eq!(decoded, message);
+        }
+    }
+
+    #[test]
+    fn protocol_round_trips_viewport_render_patches() {
+        use crate::protocol::{
+            DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DiagnosticSet,
+            FoldingRange, FoldingRangeSet, Modifiers, ViewportRenderPatch, ViewportRenderStatus,
+        };
+        let codec = Codec::default();
+        let provenance = DecorationProvenance {
+            package_name: "@clay/rust".to_string(),
+            package_version: "1.0.0".to_string(),
+            package_prefix: "clay".to_string(),
+        };
+        let member = |index: u64| DecorationSet {
+            document_id: 7,
+            document_version: 3,
+            package_prefix: "clay".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: index * 128,
+            viewport_byte_end: (index + 1) * 128,
+            spans: vec![DecorationSpan {
+                byte_start: index * 128,
+                byte_end: index * 128 + 8,
+                kind: DecorationKind::Syntax,
+                token_type: crate::protocol::TokenType::Keyword,
+                modifiers: Modifiers::NONE,
+                scope: None,
+                font_role: None,
+                priority: 1,
+                provenance: provenance.clone(),
+                target: None,
+                inlay: None,
+            }],
+            trace_id: Some(41),
+        };
+        let diagnostics = DiagnosticSet {
+            document_id: 7,
+            document_version: 3,
+            source: "analyzer".to_string(),
+            viewport_byte_start: 0,
+            viewport_byte_end: 256,
+            spans: Vec::new(),
+            provenance: provenance.clone(),
+        };
+        let folds = FoldingRangeSet {
+            document_id: 7,
+            document_version: 3,
+            package_prefix: "clay".to_string(),
+            ranges: vec![FoldingRange {
+                byte_start: 0,
+                byte_end: 64,
+                label: None,
+                provenance: crate::protocol::FoldingProvenance {
+                    package_name: "@clay/rust".to_string(),
+                    package_version: "1.0.0".to_string(),
+                    package_prefix: "clay".to_string(),
+                },
+            }],
+        };
+        let messages = [
+            // Complete with ordered split members (oversized dense output).
+            ServerMessage::ViewportRenderPatch(ViewportRenderPatch {
+                request_id: 12,
+                document_id: 7,
+                document_version: 3,
+                status: ViewportRenderStatus::Complete,
+                reason: None,
+                covered_ranges: vec![
+                    crate::protocol::TextByteRange::new(0, 128),
+                    crate::protocol::TextByteRange::new(128, 256),
+                ],
+                decorations: vec![member(0), member(1)],
+                diagnostics: vec![diagnostics],
+                folds: vec![folds],
+                trace_id: Some(41),
+            }),
+            // Empty completion.
+            ServerMessage::ViewportRenderPatch(ViewportRenderPatch {
+                request_id: 13,
+                document_id: 7,
+                document_version: 3,
+                status: ViewportRenderStatus::Empty,
+                reason: None,
+                covered_ranges: Vec::new(),
+                decorations: Vec::new(),
+                diagnostics: Vec::new(),
+                folds: Vec::new(),
+                trace_id: None,
+            }),
+            // Rejection with bounded reason.
+            ServerMessage::ViewportRenderPatch(ViewportRenderPatch::rejected(
+                14,
+                7,
+                3,
+                "staleVersion",
+            )),
+        ];
+        for message in messages {
+            let frame = codec.encode_server_message(&message).unwrap();
+            let decoded = codec.decode_server_message(&frame).unwrap();
             assert_eq!(decoded, message);
         }
     }

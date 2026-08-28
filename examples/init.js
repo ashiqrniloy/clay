@@ -62,7 +62,7 @@
 // getConfigurationState() is a read-only inspection API for app/help surfaces:
 // const state = getConfigurationState();
 
-import { loadConfigurationModule, getConfigurationState } from "clay:configuration";
+import { loadConfigurationModule, getConfigurationState, setPackageOption } from "clay:configuration";
 
 // ----------------------------------------------------------------------------
 // 2. Theme + appearance — clay:theme
@@ -525,12 +525,22 @@ import { clientExecuteEditorCommand } from "clay:editor";
 //   clientRemoveSelection() clientUndoCursorMove()
 
 // ----------------------------------------------------------------------------
-// 10. Planned — NOT callable yet (documented placeholders)
+// 10. Package-owned options — clay:configuration
 // ----------------------------------------------------------------------------
-// These clay:configuration exports exist as facade stubs and inventory
-// entries but have no server-side validators yet. Calling them throws.
-// They will become user-facing configuration in later phases:
-//   - setPackageOption      behavior-changing package options
+// setPackageOption is runtime-backed for validated package-prefixed options.
+// Supported suffixes:
+//   layout.defaultVisibility | layout.defaultSlot | layout.splitRatio
+//   input.default | action.default | themeTokenRemap | fallback
+// The option name must use packagePrefix, and values are bounded server-side.
+// Keep this example commented so copy-safe config leaves package defaults alone.
+// setPackageOption({
+//   packagePrefix: "markdown",
+//   option: "markdown.layout.defaultVisibility",
+//   value: "hidden",
+//   source: "init-js",
+// });
+//
+// Planned — NOT callable yet:
 //   - setModePreference     per-mode user preferences
 //   - setDecorationTheme    decoration palette overrides
 //   - setParsePolicy        concrete parse-policy validators

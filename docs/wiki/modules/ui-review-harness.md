@@ -3,6 +3,7 @@
 ## Source
 
 - `scripts/capture-ui-review.sh`
+- `scripts/capture-editor-performance-review.sh` (Plan 099 real Tauri editor states)
 - `tests/fixtures/configuration/ui-review-*` (eight deterministic fixtures)
 - `frontend/src/routes/fixture.tsx` (Plan 098 document-transfer fixture routes)
 - `tests/manual_smoke_docs.rs` — command/fixture documentation drift guard
@@ -33,18 +34,43 @@ Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reaso
 
 ### Fixtures
 
-| Fixture | init.js content | State captured |
-|---|---|---|
-| `ui-review-default` | empty comment | welcome entry state (empty-tab bootstrap) |
-| `ui-review-loading` | static SDUI `Loading workspace…` panel | published loading panel via watcher reload |
-| `ui-review-error` | `setTheme('@clay/does-not-exist')` | sanitized `Runtime packages.not_installed` diagnostic, usable shell |
-| `ui-review-recovery` | empty comment | disconnected/reconnect-guidance state |
-| `ui-review-large-typography` | `setTypography` with UI 24 and document 20/21 | bounded large-type shell |
-| `ui-review-completion` | `loadPackage('@clay/rust')` + `completion.trigger` on `Ctrl+Space` | completion popup (interactive) |
-| `ui-review-command-centre` | `controlCenter.open` on `Ctrl+Alt+P` (single-stroke fixture override; not the shipped `Ctrl+X Ctrl+P` default) | centered Command Centre (interactive) |
-| `ui-review-rust` | language-server authorization + `editor.toggleInlayHints` binding | Rust analyzer/inlay states (interactive) |
+| Fixture                      | init.js content                                                                                                | State captured                                                      |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `ui-review-default`          | empty comment                                                                                                  | welcome entry state (empty-tab bootstrap)                           |
+| `ui-review-loading`          | static SDUI `Loading workspace…` panel                                                                         | published loading panel via watcher reload                          |
+| `ui-review-error`            | `setTheme('@clay/does-not-exist')`                                                                             | sanitized `Runtime packages.not_installed` diagnostic, usable shell |
+| `ui-review-recovery`         | empty comment                                                                                                  | disconnected/reconnect-guidance state                               |
+| `ui-review-large-typography` | `setTypography` with UI 24 and document 20/21                                                                  | bounded large-type shell                                            |
+| `ui-review-completion`       | `loadPackage('@clay/rust')` + `completion.trigger` on `Ctrl+Space`                                             | completion popup (interactive)                                      |
+| `ui-review-command-centre`   | `controlCenter.open` on `Ctrl+Alt+P` (single-stroke fixture override; not the shipped `Ctrl+X Ctrl+P` default) | centered Command Centre (interactive)                               |
+| `ui-review-rust`             | language-server authorization + `editor.toggleInlayHints` binding                                              | Rust analyzer/inlay states (interactive)                            |
 
 The probe first locates the `clay` application index by scanning desktop children (`app INDEX` with per-call timeouts — whole-desktop enumeration hangs on some hosts), then dumps only that subtree. Hosts without `python3` + `gi.repository.Atspi` are reported as a prerequisite skip, never a pass.
+
+### Plan 099 Tauri/React editor review
+
+`scripts/capture-editor-performance-review.sh` launches an isolated profiled
+Tauri/WebKit client against synthetic files and writes frontend, desktop, and
+server traces under
+`code-reviews/screenshots/<date>-plan099-editor-performance/<state>/`. The
+review states cover light and dark four-pane documents, progressive 50 MiB
+loading, large typography, Markdown analyzer diagnostics, binary rejection,
+and the 256 MiB resident-document rejection. Multi-pane restore replies are
+matched to each session's in-flight path, not the bootstrap placeholder id.
+The large-file ready capture must show the typed package-analysis-limit status,
+not stale `Loading document…`; `shellStatusProjection` and fresh workspace
+snapshot identity keep that live status synchronized without making every ack
+rerender the shell. The diagnostics fixture uses an unresolved synthetic wiki
+link (`[[missing-doc]]`) and records the host's absence of a visible Marksman
+marker if it remains absent after confirmation.
+
+Current evidence is under
+`code-reviews/screenshots/2026-08-28-plan099-editor-performance/`; all real
+Tauri runs use synthetic content and sanitized metadata. `get_app_state`
+exposes the Clay frame and named Minimise/Maximise/Close controls. This host's
+keyboard backend remains unavailable, so keyboard-only focus and interactive
+scroll claims stay unresolved; native deterministic fixture results are recorded
+with PASS/UNRESOLVED rather than inferred from screenshots.
 
 ### Plan 098 document-transfer fixtures
 
@@ -53,12 +79,12 @@ chunked document-loading review. These routes render the real React editor and
 empty-pane surfaces with fixture-only data; they do not add production routes
 or call the Tauri bridge:
 
-| Route | State captured |
-|---|---|
-| `/fixture/document-loading` | First document head visible, remaining chunks pending, editor read-only, loading status live regions, and disabled Save action. |
-| `/fixture/document-budget-error` | Server-style resident document budget refusal in the shell status and empty-pane alert. |
-| `/fixture/document-binary-error` | Server-style binary-content refusal in the shell status and empty-pane alert. |
-| `/fixture/editor` | Ready editor baseline used to compare loaded small-file controls and focus target. |
+| Route                            | State captured                                                                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `/fixture/document-loading`      | First document head visible, remaining chunks pending, editor read-only, loading status live regions, and disabled Save action. |
+| `/fixture/document-budget-error` | Server-style resident document budget refusal in the shell status and empty-pane alert.                                         |
+| `/fixture/document-binary-error` | Server-style binary-content refusal in the shell status and empty-pane alert.                                                   |
+| `/fixture/editor`                | Ready editor baseline used to compare loaded small-file controls and focus target.                                              |
 
 Capture wide and narrow viewport evidence with the browser fixture/CDP
 harness when available. Pair it with a real Tauri AT-SPI dump; if the browser
@@ -188,7 +214,7 @@ Masonry render tree. Evidence is retained under
   label `workspace`; the editor fixture no longer falls back to `/tmp/ws`.
   `scripts/capture-ui-review.sh` recognizes both legacy `clay` and current
   `clay-desktop` AT-SPI application names, waits for the current `Clay
-  workspace` landmark, and tracks the Tauri child during cleanup.
+workspace` landmark, and tracks the Tauri child during cleanup.
 
 Review findings and resolutions:
 

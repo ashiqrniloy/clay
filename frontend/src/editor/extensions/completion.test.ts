@@ -71,7 +71,9 @@ describe("completion projection", () => {
     expect(currentCompletions(view.state)[0]?.label).toBe("function");
     view.dispatch({ effects: setSelectedCompletion(0) });
     await vi.waitFor(() => expect(selectedCompletionIndex(view.state)).toBe(0));
-    expect(acceptCompletion(view)).toBe(true);
+    // Under suite load the autocomplete state settles a frame later;
+    // retry the accept instead of racing it.
+    await vi.waitFor(() => expect(acceptCompletion(view)).toBe(true));
     expect(view.state.doc.toString()).toBe("fn name() {\n  \n}");
     expect(view.state.selection.main.from).toBe(3);
     expect(view.state.selection.main.to).toBe(7);

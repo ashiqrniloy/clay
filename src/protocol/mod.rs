@@ -75,8 +75,18 @@ pub use textobjects::*;
 /// input routes, and host-stamped provenance/trust labels.
 /// Version 27 replaces whole-document snapshot text with bounded document
 /// heads and adds pull-based, versioned document chunk messages.
-pub const PROTOCOL_VERSION: u32 = 27;
+/// Version 28 adds optional content-free performance trace IDs to viewport,
+/// parse, and decoration messages.
+/// Version 29 replaces the heuristic `DecorationViewportRequest` with the
+/// atomic `ViewportRenderRequest`/`ViewportRenderPatch` pair: one bounded
+/// patch envelope (with covered ranges, ordered decoration/diagnostic/fold
+/// members, and a complete/empty/rejected status) answers each request id.
+pub const PROTOCOL_VERSION: u32 = 29;
 
+pub type PerformanceTraceId = u64;
+
+/// Monotonic request identity for the atomic viewport render protocol.
+pub type ViewportRequestId = u64;
 pub type ClientId = u64;
 pub type DocumentId = u64;
 pub type DocumentVersion = u64;
@@ -1911,12 +1921,18 @@ pub enum ClientMessage {
         offset: u64,
         max_bytes: u32,
     },
-    DecorationViewportRequest {
+    ViewportRenderRequest {
         client_id: ClientId,
         document_id: DocumentId,
         document_version: DocumentVersion,
+        /// Monotonic per-connection request identity; the server answers with
+        /// exactly one `ViewportRenderPatch` (complete, empty, or rejected)
+        /// carrying this id. Stale ids are dropped by the client.
+        request_id: ViewportRequestId,
         byte_start: u64,
         byte_end: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<PerformanceTraceId>,
     },
     OpenDocument {
         client_id: ClientId,
@@ -2826,6 +2842,10 @@ pub enum ServerMessage {
     /// validation and staleness semantics per chunk.
     DecorationBatch(Vec<DecorationSet>),
     DiagnosticSet(DiagnosticSet),
+    /// Protocol v29 atomic viewport answer: exactly one per
+    /// `ViewportRenderRequest` id, carrying ordered members and a terminal
+    /// complete/empty/rejected status.
+    ViewportRenderPatch(ViewportRenderPatch),
     EditAck {
         document_id: DocumentId,
         confirmed_version: DocumentVersion,

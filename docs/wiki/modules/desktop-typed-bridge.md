@@ -1,84 +1,142 @@
 # Desktop Typed Bridge (Tauri v2)
 
-## What it is
+## Source
 
-`src-tauri/src/bridge/` connects the React webview to the Clay server through
-one live client session. It reuses `clay::client` (handshake, optimistic edit
-queue, staleness validation) instead of reimplementing the protocol; the
-bridge adds serde typing, bounded delivery, session lifecycle, and identity
-stamping.
+- `src-tauri/src/bridge/dto.rs` — typed bootstrap, runtime/theme DTOs, and envelope projection.
+- `src-tauri/src/bridge/errors.rs` — bounded sanitized bridge errors.
+- `src-tauri/src/bridge/session.rs` — bootstrap/reconnect lifecycle, request validation, identity stamping, and event pump.
+- `src-tauri/src/bridge/forwarder.rs` — bounded FIFO/latest-wins delivery lanes.
+- `src-tauri/src/bridge/editor.rs` — renderer-neutral editor DTO helpers.
+- `src/client/mod.rs` — typed client queue and connection events.
+- `src/protocol/{mod,parse,decorations}.rs` — v29 viewport patch and trace-bearing protocol shapes.
+- `frontend/src/bridge/{client,types,errors}.ts` — the only frontend Tauri boundary.
+- Tests: `src-tauri/src/bridge/forwarder.rs`, `src-tauri/tests/{bridge_session,dto_roundtrips}.rs`, `tests/editor_performance.rs`, `frontend/src/test/bridge.test.ts`.
 
-## Modules
+## Overview
 
-| File | Responsibility |
-| --- | --- |
-| `dto.rs` | `BootstrapDto`, resolved theme/typography DTOs, Rust-parsed package component DTOs, and `BridgeEnvelope` (`event` / `routed` / `disconnected` / `themeSnapshot` / `runtimeSnapshot`) |
-| `errors.rs` | `BridgeError { code, message }`; sanitized, length-capped; hard request cap `MAX_REQUEST_BYTES = 512 KiB` |
-| `forwarder.rs` | Bounded ordered delivery: FIFO live lane (512) for everything except viewport-resynthesizable decoration/folding sets, which take latest-wins slots keyed by `(document, provenance, kind)` and are folded with a coalesced counter. Lifecycle notices bypass both lanes. Sinks that fail delivery are removed (window closed). |
-| `session.rs` | `BridgeState`: bootstrap/reconnect state machine, event pump, request validation/stamping/routing |
-| `editor.rs` | UTF-16↔UTF-8 map re-export and camelCase document-event JSON pins (Phase 5) |
+The bridge connects one React webview session to the Clay server without
+reimplementing protocol or document authority. Rust owns the Tauri invoke
+surface, bootstrap/reconnect lifecycle, identity stamping, bounded delivery,
+and process supervision. The webview sees typed camelCase DTOs, envelope events,
+and a request function carrying one protocol message as JSON.
 
-## Session semantics
+Plan 099 keeps viewport rendering on this same boundary: protocol-v29
+`ViewportRenderPatch` values are complete request-scoped answers. The bridge
+may replace an obsolete whole patch for one document, but never coalesces the
+patch's decoration/diagnostic/fold members independently.
 
-- **One live session.** `bootstrap()` is idempotent while connected (cached
-  snapshot). A concurrent bootstrap returns `busy`.
-- **Reconnect** aborts the old pump *before* the new handshake, so stale
-  stream data from a dead connection structurally cannot reach the webview.
-  Generation increments per session and is echoed in the bootstrap.
-- **Adoption**: if a protocol-compatible server already listens on the
-  endpoint (handshake probe), the supervisor reports `Connected` without
-  spawning (`pid: null`) and the bridge talks to that instance; incompatible
-  listeners are refused with a typed reason instead of being adopted.
-- **Tab reclaim**: the pump records our `(tab_id, workspace_root)` from
-  `TabRegistry` events; reconnect uses `connect_for_reclaim_or_new`.
+## Responsibilities
 
-## Request path
+| Module         | Responsibility                                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `dto.rs`       | `BootstrapDto`, runtime/theme/typography snapshots, and `BridgeEnvelope`.                                            |
+| `errors.rs`    | Sanitized `{ code, message }` errors with `MAX_REQUEST_BYTES = 512 KiB` request protection.                          |
+| `session.rs`   | Single live client session, handshake/reconnect generations, request parsing, client-id stamping, and event pumping. |
+| `forwarder.rs` | Live FIFO lane (capacity 512), whole viewport-patch latest-wins slots, lifecycle bypass, and delivery metrics.       |
+| `editor.rs`    | Renderer-neutral editor conversion helpers and camelCase shape pins.                                                 |
 
-Frontend sends raw JSON text of a protocol `ClientMessage`. The bridge:
+The bridge does not own document text, parser state, syntax executors, render
+fields, request completion, package execution, or filesystem authority.
 
-1. rejects bodies over `MAX_REQUEST_BYTES`;
-2. parses strictly (serde errors → sanitized `invalidRequest`);
-3. rejects `Hello` (handshake is bridge-owned);
-4. routes `Edit` through `ClientEditQueue::enqueue_edit_event` so optimistic
-   version bookkeeping runs;
-5. stamps every other variant's `client_id` over whatever the caller supplied
-   (`stamp_client_id`, exhaustive - new variants fail compilation).
+## Session and request flow
 
-Protocol v27 document loading uses the same path: `DocumentChunkRequest` is identity-stamped before enqueue, while `DocumentChunk` and `DocumentChunkRejected` return as typed `ClientConnectionEvent` values. The bridge never interprets rope offsets or completion; it only projects validated camelCase DTOs.
+1. `bootstrapSession` subscribes the webview before bootstrap so events emitted
+   during handshake cannot be lost. The bridge keeps one connected session and
+   rejects webview-supplied `Hello` messages.
+2. Rust probes/adopts a compatible local server or starts one under the desktop
+   supervisor. Reconnect aborts the old event pump before starting a new
+   generation, preventing stale stream data from reaching React.
+3. `request_on` rejects bodies above `MAX_REQUEST_BYTES`, parses a strict
+   `ClientMessage`, including `DocumentChunkRequest` for progressive loading,
+   resolves the target tab/client, stamps post-Hello identity,
+   and queues it through the existing typed client queue. `Edit` uses the queue's
+   optimistic bookkeeping; other messages use exhaustive identity stamping.
+4. Server events become `ClientConnectionEvent` values, then `BridgeEnvelope`
+   values. The bridge forwards validated DTOs without interpreting rope offsets,
+   parser output, or patch completion.
+5. `workspace-controller.ts` routes each document/tab envelope to its owning
+   pane session. There is no global frontend document-session mirror.
 
-Responses arrive asynchronously as envelope events; slow provider lanes
-self-stale-drop server-side.
+## Viewport patch delivery
 
-## JSON surface
+`ViewportRenderPatch` is placed in the latest-wins map under
+`vrpatch|<documentId>`. A newer undelivered patch for that document replaces the
+older complete answer wholesale; the client already drops stale request IDs.
+All other events, including edit acknowledgements, standalone decoration/
+diagnostic/fold events, behavior/runtime updates, and document chunks, use the
+bounded live FIFO lane. A disconnected event is delivered immediately outside
+both lanes so recovery status is not trapped behind render traffic.
 
-Every protocol type carries blanket serde derives (added alongside rkyv,
-single semantic source). Runtime-generation snapshots are intercepted before
-forwarding: Rust validates the generation, resolves theme data, parses bounded
-package component JSON into inert values, and preserves client/tab routing.
-Raw theme overrides and raw component strings never enter the webview.
-Envelope enums are adjacently tagged
-(`{"family":...,"payload":...}` / `{"kind":...,"data":...}`) with camelCase names;
-unit enums serialize as plain strings. `DocumentTextHead` projects as `{ totalBytes, firstChunk }`; chunk and typed rejection fields preserve document ID, document version, and UTF-8 byte offset. Menu session ids cross as strings via
-`menu_session_id_serde` because they carry the server high bit (`1 << 63`)
-and exceed JavaScript's safe integers; other ids are sequential counters.
+The forwarder records only numeric trace metadata when profiling is enabled.
+`BridgeEnvelope` is cloned for each sink; failed sinks are removed, which makes
+window teardown stop delivery without leaving a subscriber behind.
+
+```text
+server ClientConnectionEvent
+  -> session identity / DTO projection
+  -> Forwarder
+       live FIFO: edits, chunks, status, members, runtime events
+       latest slot: one whole ViewportRenderPatch per document
+  -> Tauri Channel
+  -> workspace controller / owning pane session
+```
+
+## JSON and identity boundaries
+
+Protocol types use serde-derived adjacent envelopes and camelCase names. The
+bridge preserves bounded heads/chunks, document/version metadata, and typed
+rejections. Menu session IDs cross as strings because they can use the server
+high bit; ordinary sequential editor/request IDs remain JSON numbers.
+
+Tauri overwrites forged nested `clientId` values. The server still validates
+access, lease, document, version, request range, provenance, and completion
+identity; bridge stamping is correlation protection, not a grant.
+
+## Performance and security constraints
+
+- The bridge uses bounded queues and natural backpressure; it never grows an
+  unbounded event list or waits on a parser to answer an edit.
+- Viewport patch coalescing is whole-message/document-scoped only. Sibling
+  ranges, package layers, diagnostics, and folds remain intact.
+- Document chunks are size-capped and identity-stamped. The bridge never holds a
+  second full document buffer.
+- Profiling is opt-in. Reports retain bounded numeric stage data and no source,
+  path, credential, package code, or raw diagnostic content.
+- The webview cannot access sockets, archive bytes, frame codecs, process spawn,
+  raw Tauri commands, leases, parser handles, or package runtime authority.
+- `script-src` remains strict; the scoped CodeMirror style allowance is
+  documented with the React editor because it does not grant script execution.
 
 ## Tests
 
-- `tests/dto_roundtrips.rs`: JSON round trip for every `ClientMessage`
-  variant and constructible `ServerMessage` families; exhaustive family
-  matchers make adding a variant a compile error until samples are updated;
-  menu-id string assertion; theme/typography/tab-registry round trips.
-- `tests/bridge_session.rs`: real-server end-to-end — bootstrap fields,
-  TabRegistry delivery, typed `TabCommand::New` round trip (registry revision
-  bump), disconnect notice on server death, reconnect with generation 2 and a
-  fresh identity. Multi-thread tokio flavor (the pump starves on the
-  single-thread one).
-- `forwarder.rs` unit tests: latest-wins coalescing, live-lane ordering,
-  disconnected bypass, distinct keys never fold together.
+- `src-tauri/tests/bridge_session.rs` — real server bootstrap, tab registry,
+  disconnect, reconnect generation, and identity lifecycle.
+- `src-tauri/tests/dto_roundtrips.rs` — typed JSON round trips and exhaustive
+  event/message shape coverage.
+- `src-tauri/src/bridge/forwarder.rs::coalescing_keeps_latest_whole_patch_and_live_order` —
+  latest whole-patch replacement, FIFO ordering, and disconnect bypass.
+- `src-tauri/src/bridge/forwarder.rs::sibling_members_stay_one_complete_patch` —
+  24 mixed members remain one complete patch.
+- `frontend/src/test/bridge.test.ts` — frontend bridge stores, dispatcher, and
+  normalized errors.
+- `tests/editor_performance.rs` — protocol matrix verifies one patch per
+  request ID, exact edit/version accounting, and close retirement.
 
-## Authority boundaries
+Run focused coverage with:
 
-The webview never sees archive bytes, frame codecs, sockets, or protocol
-versions, cannot spawn processes (server spawn is desktop-Rust authority only),
-and cannot forge its identity or protocol version — both are stamped or
-rejected in Rust before anything reaches the server.
+```bash
+cargo test -p clay-desktop --all-targets
+cargo test --test runtime editor_performance_matrix_holds_deterministic_invariants -- --exact
+cd frontend && npm test -- --run src/test/bridge.test.ts
+```
+
+## Related
+
+- [React Client Bridge](react-client-bridge.md)
+- [Editor Viewport Render Patch](../flows/editor-viewport-render-patch.md)
+- [React CodeMirror Editor](react-codemirror-editor.md)
+- [Protocol Codec](protocol-codec.md)
+- [Syntax Sessions](syntax-sessions.md)
+- [Tauri Desktop Shell](tauri-desktop-shell.md)
+- `src-tauri/src/bridge/forwarder.rs`
+- `src-tauri/src/bridge/session.rs`

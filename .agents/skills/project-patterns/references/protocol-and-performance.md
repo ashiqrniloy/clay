@@ -42,6 +42,7 @@ Phase 3 may not fully enforce these fields, but plans should avoid message shape
 - Run advisory syntax through one bounded latest-wins session per document/grammar. Connection dispatch returns after canonical work and required responses; native parser work runs on a bounded blocking executor, never directly on Tokio workers.
 - Viewport syntax uses explicit request IDs and complete success/empty/rejected atomic patches. Tauri may coalesce obsolete whole patches only; it must never coalesce required sibling patch members independently.
 - Keep package-selected syntax authority and executable syntax-management behavior server-side. CodeMirror owns local text/viewport and inert render projection, not arbitrary package parser execution. A client-local parser is a separate metric-gated decision, not the default performance fix.
+- Fail fast before expanding any client-local parser spike: check current-language grammar freshness, real WebKitGTK edit/long-task latency, distant 10-50 MiB viewport freshness, the 256 MiB envelope, and same-document four-pane scaling in that order; stop on the first hard failure. Reopen frontend-worker parsing only after the completed server-session path still misses approved metrics and traces attribute the remaining delay to server/bridge placement.
 - Incremental syntax highlighting parses once per accepted document version/grammar stream over a stable bounded window, using exact edit metadata and changed-range queries; decoration transport/cache chunking must not multiply parser jobs over the same window.
 - Newer syntax versions cancel or coalesce superseded work, but the latest edit remains eligible immediately; do not use whitespace-only or idle-only parse scheduling.
 - Client decoration state may interpolate inert spans through optimistic edits for visual continuity, while server-issued current-version syntax remains authoritative. Existing narrow syntax may inherit appended Unicode alphanumeric/underscore suffixes; whitespace, newline, punctuation, and structural edits end narrow-token inheritance.
@@ -50,7 +51,10 @@ Phase 3 may not fully enforce these fields, but plans should avoid message shape
 - Keep syntax beneath slower semantic layers, reject stale decoration versions, and add no client parser unless measured optimized server latency justifies a separate decision.
 - Syntax continuity decision sources: `decision-logs/2026-07-19-0351-low-latency-incremental-syntax-decoration.md`, superseding `decision-logs/2026-07-19-1912-syntax-decoration-continuity-and-complete-authoritative-replacement.md`, and `decision-logs/2026-07-19-2238-exact-range-provisional-decoration-replacement.md`.
 - Syntax session/viewport patch decision source: `decision-logs/2026-08-26-1838-server-syntax-sessions-and-atomic-viewport-patches.md`.
+- Client-local fail-fast and worker-reopen decision source: `decision-logs/2026-08-26-2137-lezer-fail-fast-before-server-syntax-overhaul.md`.
+- Server-authoritative parser resume after Lezer rejection: `decision-logs/2026-08-27-0159-resume-server-authoritative-editor-performance.md`.
 - Keep background AI/indexing/file work from delaying input confirmations or UI-reactive work.
+- Internal editor performance traces are schema-versioned, disabled by default, bounded per process, and source-free; reuse existing transaction IDs for profiled edits, carry optional numeric IDs on viewport/parse/decorations, and report p50/p95/max only from local developer snapshots.
 
 ## Testing Guidance
 

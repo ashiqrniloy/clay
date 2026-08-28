@@ -11,14 +11,14 @@ import { accessIsEditable } from "../state/document-store";
 import { tabLabel } from "../shell/tab-store";
 import { createEditor, setReadOnly } from "./create-editor";
 import { EditorProjection } from "./extensions/controller";
+import { editorPerformance, PERFORMANCE_STAGE } from "./performance";
 import type { BehaviorManifestDto } from "./extensions/types";
-import { documentSession } from "./session-singleton";
 import type { DocumentSession } from "./sync/session";
 
 import styles from "./editor.module.css";
 
 export interface ClayEditorProps {
-  session?: DocumentSession;
+  session: DocumentSession;
   /** Host intercepts open so the workspace can focus a duplicate pane. */
   onOpenPath?: (path: string) => void;
 }
@@ -26,10 +26,7 @@ export interface ClayEditorProps {
 /**
  * One EditorView per mount. React owns chrome only; text stays in CodeMirror.
  */
-export function ClayEditor({
-  session = documentSession,
-  onOpenPath,
-}: ClayEditorProps) {
+export function ClayEditor({ session, onOpenPath }: ClayEditorProps) {
   const meta = useSyncExternalStore(
     (listener) => session.store.subscribe(listener),
     () => session.store.get(),
@@ -51,6 +48,16 @@ export function ClayEditor({
     [session],
   );
   const [openPath, setOpenPath] = useState("");
+  const editable = !!meta && accessIsEditable(meta.access) && !meta.loading;
+  const lastReadOnly = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    editorPerformance.count(PERFORMANCE_STAGE.reactCommit, 0, {
+      documentId: meta?.documentId,
+      version: meta?.version,
+      feature: "clayEditor",
+    });
+  });
 
   useEffect(() => {
     const parent = parentRef.current;
@@ -60,13 +67,16 @@ export function ClayEditor({
       readOnly: !accessIsEditable(meta.access) || !!meta.loading,
       parent,
       placeholder: "Start typing",
-      onUserChanges: (oldDoc, changes) => {
-        session.emitUserChanges(oldDoc, changes);
+      documentId: meta.documentId,
+      version: meta.version,
+      onUserChanges: (oldDoc, changes, traceId, index) => {
+        session.emitUserChanges(oldDoc, changes, traceId, index);
       },
       onSave: () => session.save(),
       extra: projection.extensions,
     });
     viewRef.current = view;
+    lastReadOnly.current = !accessIsEditable(meta.access) || !!meta.loading;
     session.attachView(view);
     projection.installInitial(
       session.behaviorManifest() as BehaviorManifestDto,
@@ -92,12 +102,17 @@ export function ClayEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, projection, meta?.documentId]);
 
+  // Reconfigure the read-only compartment only when the derived state
+  // actually flips; per-keystroke metadata updates are inert here.
   useEffect(() => {
     const view = viewRef.current;
-    if (!view || !meta) return;
+    if (!view) return;
+    const readOnly = !editable;
+    if (lastReadOnly.current === readOnly) return;
+    lastReadOnly.current = readOnly;
     // Progressive chunk loads gate editing until the document is complete.
-    setReadOnly(view, !accessIsEditable(meta.access) || !!meta.loading);
-  }, [meta]);
+    setReadOnly(view, readOnly);
+  }, [editable]);
 
   if (!meta) {
     return (
@@ -110,7 +125,6 @@ export function ClayEditor({
     );
   }
 
-  const editable = accessIsEditable(meta.access) && !meta.loading;
   const path = meta.path.trim();
   const label = path
     ? /^(?:[\\/]|[A-Za-z]:[\\/])/.test(path)

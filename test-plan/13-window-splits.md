@@ -352,3 +352,17 @@ not SDUI — packages contribute chrome only as inert manifest data.
 | Real split/tab tree | PASS AT-SPI structure | `tabs-splits/accessibility.txt` exposes Pane 1 editor, separator, Pane 2 Empty tab and named actions |
 | Split resize/focus keyboard flow | UNRESOLVED live; PASS structural | Host cannot safely target the Tauri window or deliver chords; split-tree and workspace-controller tests pass |
 | Path-label safety | PASS | Split fixture now shows sanitized `ws` basename rather than `/tmp/ws`; editor regression test covers the root cause |
+
+## Plan 099 four-pane routing steps
+
+| # | Action | Expected |
+|---|---|---|
+| D20 | Split a 1 MiB fixture to four panes and repeat a short type/scroll pass in each | Each pane applies only its own current viewport patch; aggregate work is linear in visible panes, no duplicate document owner appears, and no long task exceeds 50 ms. |
+| D21 | Open different generated files from each focused pane, then repeat a duplicate-open and cross-pane switch | Open replies, text, decorations, and dirty state route to the requesting/owning pane only; duplicate opens focus the existing owner instead of creating a second session. |
+
+## Plan 099 Linux execution record (2026-08-28)
+
+| Check | Result | Evidence |
+|---|---|---|
+| D20 | UNRESOLVED live; retained PASS evidence | No keyboard input reached the WebKit view. Final-build four-pane screenshot is under `code-reviews/screenshots/2026-08-28-plan099-editor-performance/editor-dark-four-pane/`; linear per-pane invariants remain automated. |
+| D21 | UNRESOLVED live; PASS automated companion | No pane/file interaction was drivable; workspace-controller routing and per-pane isolation tests remain green. |

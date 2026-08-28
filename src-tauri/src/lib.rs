@@ -57,6 +57,8 @@ fn run_with(supervisor: Arc<Supervisor>, endpoint: clay::ipc::IpcEndpoint) {
             commands::session_reconnect,
             commands::session_request,
             commands::session_stats,
+            commands::session_perf_snapshot,
+            commands::write_frontend_perf_report,
             commands::tab_open,
             commands::tab_close,
             commands::tab_activate,
@@ -73,6 +75,11 @@ fn run_with(supervisor: Arc<Supervisor>, endpoint: clay::ipc::IpcEndpoint) {
                 // Clean shutdown: kill + reap the supervised server so the
                 // desktop app can never orphan it.
                 app_handle.state::<Arc<Supervisor>>().shutdown();
+                // Editor performance harness: dump the sanitized desktop
+                // summary before exit. No-op without CLAY_PERF_REPORT_DIR.
+                if let Some(path) = clay::perf::metrics::write_perf_report("clay-desktop") {
+                    eprintln!("clay perf report written to {}", path.display());
+                }
             }
         });
 }

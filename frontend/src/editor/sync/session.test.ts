@@ -1,14 +1,15 @@
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { describe, expect, it } from "vitest";
+import { undo } from "@codemirror/commands";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { BootstrapDto } from "../../bridge/types";
-import { clayEditorTheme } from "../create-editor";
+import { clayEditorTheme, createEditor } from "../create-editor";
 import { createDocumentSession } from "./session";
 
 const bootstrap = {
   clientId: 1,
-  protocolVersion: 27,
+  protocolVersion: 28,
   endpoint: "test",
   generation: 1,
   initialDocument: {
@@ -33,6 +34,40 @@ function viewWith(doc: string): EditorView {
 }
 
 describe("document session", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("forwards atomic viewport patches to the editor projection", () => {
+    const session = createDocumentSession({ send: async () => undefined });
+    session.installInitial(bootstrap);
+    const received: string[] = [];
+    const unsubscribe = session.subscribeFeatures((envelope) => {
+      if (envelope.kind === "event") received.push(envelope.data.kind);
+    });
+
+    session.handleEnvelope({
+      kind: "event",
+      data: {
+        kind: "viewportRenderPatch",
+        data: {
+          requestId: 1,
+          documentId: 7,
+          documentVersion: 3,
+          status: "complete",
+          coveredRanges: [{ byteStart: 0, byteEnd: 5 }],
+          decorations: [],
+          diagnostics: [],
+          folds: [],
+        },
+      },
+    });
+
+    expect(received).toEqual(["viewportRenderPatch"]);
+    expect(session.featureSnapshot()).toHaveLength(1);
+    unsubscribe();
+  });
+
   it("acks in order and tracks pending/version", async () => {
     const sent: string[] = [];
     const session = createDocumentSession({
@@ -375,6 +410,28 @@ describe("document session", () => {
       expect(session.store.get()?.loading).toBe(false);
     });
 
+    it("requests each 50 MiB-head offset exactly once", () => {
+      const sent: string[] = [];
+      const session = createDocumentSession({
+        send: async (payload) => {
+          sent.push(payload);
+        },
+      });
+      session.installInitial(bootstrapWithHead("head", 50 * 1024 * 1024));
+      const requestOffsets = () =>
+        sent
+          .filter((payload) =>
+            payload.includes('"family":"documentChunkRequest"'),
+          )
+          .map((payload) => Number(payload.match(/"offset":(\d+)/)?.[1]));
+      expect(requestOffsets()).toEqual([4]);
+      session.handleEnvelope(chunkEvent(4, "1234567890") as never);
+      expect(requestOffsets()).toEqual([4, 14]);
+      // Duplicate delivery of an already-consumed offset must not re-request.
+      session.handleEnvelope(chunkEvent(4, "1234567890") as never);
+      expect(requestOffsets()).toEqual([4, 14]);
+    });
+
     it("keeps small files on the single-frame path with no loading state", () => {
       const sent: string[] = [];
       const session = createDocumentSession({
@@ -389,6 +446,114 @@ describe("document session", () => {
           payload.includes('"family":"documentChunkRequest"'),
         ),
       ).toBe(false);
+    });
+  });
+
+  describe("single-owner document text", () => {
+    it("installs a same-length reload with changed content", () => {
+      const session = createDocumentSession({ send: async () => undefined });
+      session.installInitial(bootstrap); // "hello"
+      const view = viewWith("hello");
+      session.attachView(view);
+
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "documentReloaded",
+          data: {
+            metadata: {
+              documentId: 7,
+              version: 4,
+              dirty: false,
+              access: { editable: { leaseId: 9 } },
+              path: "",
+            },
+            head: { totalBytes: 5, firstChunk: "helpo" },
+          },
+        },
+      });
+      expect(view.state.doc.toString()).toBe("helpo");
+      expect(session.snapshotDoc().toString()).toBe("helpo");
+      view.destroy();
+    });
+
+    it("replaces same-length content while detached too", () => {
+      const session = createDocumentSession({ send: async () => undefined });
+      session.installInitial(bootstrap);
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "resyncSnapshot",
+          data: {
+            documentId: 7,
+            version: 9,
+            head: { totalBytes: 5, firstChunk: "helpo" },
+            access: { editable: { leaseId: 9 } },
+          },
+        },
+      });
+      expect(session.snapshotDoc().toString()).toBe("helpo");
+    });
+
+    it("keeps programmatic installs out of undo history", () => {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const session = createDocumentSession({ send: async () => undefined });
+      session.installInitial({
+        ...bootstrap,
+        initialDocument: {
+          ...bootstrap.initialDocument,
+          head: { totalBytes: 8, firstChunk: "hel" },
+        },
+      } as unknown as BootstrapDto);
+      const view = createEditor({
+        parent: host,
+        doc: session.snapshotDoc(),
+        onUserChanges: (oldDoc, changes) =>
+          session.emitUserChanges(oldDoc, changes),
+      });
+      session.attachView(view);
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "documentChunk",
+          data: { documentId: 7, documentVersion: 3, offset: 3, text: "lo!" },
+        },
+      });
+      expect(view.state.doc.toString()).toBe("hello!");
+      expect(
+        undo({ state: view.state, dispatch: (tr) => view.dispatch(tr) }),
+      ).toBe(false);
+      expect(view.state.doc.toString()).toBe("hello!");
+      view.destroy();
+    });
+
+    it("restores the latest user text on remount without a live copy", () => {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const session = createDocumentSession({ send: async () => undefined });
+      session.installInitial(bootstrap); // "hello", complete
+      const first = createEditor({
+        parent: host,
+        doc: session.snapshotDoc(),
+        onUserChanges: (oldDoc, changes) =>
+          session.emitUserChanges(oldDoc, changes),
+      });
+      session.attachView(first);
+      first.dispatch({ changes: { from: 5, insert: "!" } });
+      expect(session.store.get()?.pending).toBe(1);
+
+      session.detachView(first);
+      first.destroy();
+      expect(session.snapshotDoc().toString()).toBe("hello!");
+
+      const second = createEditor({
+        parent: host,
+        doc: session.snapshotDoc(),
+      });
+      session.attachView(second);
+      expect(second.state.doc.toString()).toBe("hello!");
+      second.destroy();
     });
   });
 });

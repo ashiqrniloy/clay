@@ -10,6 +10,23 @@ export function accessIsEditable(access: DocumentAccess | undefined): boolean {
   return "editable" in access && access.editable != null;
 }
 
+/** Stable boolean projection: gates read-only compartment reconfigures. */
+export function readOnlyProjection(meta: DocumentMeta | null): boolean {
+  return !meta || !accessIsEditable(meta.access) || !!meta.loading;
+}
+
+/** Stable projection for shell status; excludes version/pending churn. */
+export function shellStatusProjection(meta: DocumentMeta | null): string {
+  return meta ? `${meta.loading}\u0000${meta.diagnostic ?? ""}` : "";
+}
+
+/** Stable primitive projection of persistence-relevant metadata: identity,
+ * path, dirty. Anything else (version/pending/diagnostic) must not key
+ * layout persistence. */
+export function persistenceKeyProjection(meta: DocumentMeta | null): string {
+  return meta ? `${meta.documentId}\u0000${meta.path}\u0000${meta.dirty}` : "";
+}
+
 export interface DocumentMeta {
   documentId: number;
   version: number;

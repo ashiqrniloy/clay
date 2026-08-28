@@ -12,7 +12,7 @@ function bootstrap(): BootstrapDto {
   return {
     clientId: 1,
     tabId: 10,
-    protocolVersion: 27,
+    protocolVersion: 28,
     endpoint: "test",
     generation: 1,
     initialDocument: {

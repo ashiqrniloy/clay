@@ -1,8 +1,6 @@
 # Incremental Parse and Background Parse Update Strategy
 
-Phase 16 defines parsing as **server-side, cancellable background work**. Package parsers may analyze document text and return inert syntax/decorator data, but they never run in the Rust client and never block local typing or paint.
-
-This document is architecture-only. It introduces no runtime code in Phase 16.
+Clay parsing is **server-side, cancellable background work**. Package parsers may analyze document text and return inert syntax/decorator data, but they never run in the Rust client and never block local typing or paint. Plan 099 implements the generic scheduler as per-document `SyntaxSession` workers and publishes request-scoped viewport output through the protocol v29 atomic patch.
 
 ## Goals
 
@@ -35,7 +33,7 @@ The baseline Phase 18 Markdown POC should prefer **line-group-level** for inline
 
 ## Edit Notification Shape
 
-A future parse coordinator should enqueue compact edit notifications after the server accepts an edit and increments the canonical version. The notification is intentionally not a full-document snapshot.
+The parse coordinator enqueues compact edit notifications after the server accepts an edit and increments the canonical version. The notification is intentionally not a full-document snapshot.
 
 ```text
 ParseEditNotification {
@@ -71,26 +69,26 @@ Rules:
 Parse task lifecycle is server-side and cancellable:
 
 1. `src/server/document.rs::DocumentState::apply_edit` accepts an edit, updates the canonical rope, and increments `DocumentVersion`.
-2. The connection derives one canonical `ParseInputEdit`, retains a stable bounded window when possible, and submits one `ParseEditNotification` to `ParseCoordinator`.
-3. The coordinator spawns one start-gated task for a new version/window, coalesces duplicate same-version/window requests, and supersedes older work for the same document/package/mode stream while preserving concurrency across unrelated documents.
-4. The native handler reuses a matching cached tree with `Tree::edit`, parses once, unions `Tree::changed_ranges` with explicit invalidations, converts affected ranges into a shared 128-byte UTF-8-safe replacement-chunk grid via `replacement_ranges`, and queries the full envelope covering every touched chunk — so query coverage and replacement coverage are identical.
-5. The handler maps complete captures into `IncrementalParseUpdate::decoration_updates`, splitting them into stable 128-byte sets in changed/visible-first order. Output chunk count does not multiply parse/query invocations.
-6. If a newer document version arrives before completion, the coordinator cancels or marks the older task stale; matching-version active-task state is checked again before publication.
-7. The server validates every decoration member atomically against document/version/provenance/range and payload budgets, then publishes ordinary inert `DecorationSet` messages outside paint/text-event handlers.
+2. The connection prepares a bounded canonical `ParseEditNotification` with an exact `ParseInputEdit` when applicable, then returns the required edit/open response without waiting for parser work.
+3. `ParseCoordinator` keys one persistent `SyntaxSession` by runtime generation, document, and grammar. The session mailbox keeps only the latest compatible job; queued request jobs that are superseded still publish completion accounting.
+4. A session worker acquires one `SYNTAX_EXECUTOR_MAX_JOBS` permit for native work and calls the handler on `spawn_blocking`; package-JavaScript handlers continue through the server runtime worker. Each document owns its parser and cached tree state.
+5. The handler reuses a matching cached tree with `Tree::edit`, parses once, unions `Tree::changed_ranges` with explicit invalidations, queries the complete UTF-8-safe replacement envelope, and maps captures into bounded `IncrementalParseUpdate::decoration_updates` members. Output chunk count never multiplies parser jobs.
+6. If a newer version, viewport, generation, or close supersedes the job, a running parse may finish but `finish_task` discards stale output. Request-scoped jobs still produce one empty terminal update when needed so the connection can finalize its patch.
+7. The server validates every decoration, diagnostic, and fold member atomically against document/version/provenance/range and payload budgets. Edit/open/resync output keeps the existing per-update frames; a viewport request aggregates its members into exactly one `ViewportRenderPatch`.
 
-A task result is publishable only when its `document_version` matches the current server version or an explicitly accepted compatible version window. Older results are discarded before client delivery.
+A task result is publishable only when its `document_version` and handler generation match current server state or an explicitly accepted compatible window. Older results are discarded before client delivery.
 
 ## Spawn, Cancel, Timeout, and Priority Model
 
-A future `src/server/parse_coordinator.rs` is the preferred attachment point because it can keep parse policy separate from document mutation and JavaScript runtime concerns.
+`src/server/parse_coordinator.rs` is the implementation attachment point. It keeps parse policy separate from document mutation and JavaScript runtime concerns while delegating per-document scheduling to `src/server/syntax_session.rs`.
 
-- **Spawn:** The coordinator observes accepted edits from `src/server/document.rs` and enqueues per-document work after the edit is committed.
-- **Cancel:** Each document/mode/package parse stream keeps a cancellation token or generation counter. Newer edits supersede older tasks for overlapping regions.
-- **Timeout:** Package parse handlers run with a bounded timeout. Timeout values are load-time validated package/configuration metadata, not per-keypress dynamic decisions.
-- **Priority:** Visible viewport ranges are processed first, adjacent ranges second, and off-viewport/cache refresh work last.
-- **Backpressure:** Queues are bounded per document and per package. When the queue is full, older stale work is dropped before newer viewport-relevant work.
+- **Spawn:** The coordinator observes accepted edits/open/reload/viewport requests and enqueues work after required canonical responses are prepared.
+- **Cancel and stale publication:** Each `(generation, document, grammar)` session has one latest-wins mailbox. Newer versions/viewports replace queued work; a running job is never aborted mid-parse, but stale output is rejected.
+- **Execution:** Native handlers acquire one of four shared blocking permits and run off Tokio workers. Package-JavaScript handlers use the persistent runtime worker and its timeout/heap policy.
+- **Priority:** Request-scoped viewport jobs are selected for current output; edit/open jobs preserve document freshness; off-viewport retained data remains bounded by parse/cache budgets.
+- **Backpressure:** The mailbox has one pending latest job per session, and the syntax tree/cache state is bounded. Session close returns undelivered request jobs for completion and lets the current worker exit.
 
-`src/server/js_runtime/mod.rs` is the runtime boundary for executing package JavaScript through `deno_core`; it should remain the place where controlled server-side module execution, facade import allowlists, diagnostics, and raw-op restrictions are enforced. The parse coordinator should call into this runtime boundary instead of embedding parser JavaScript execution in `DocumentState`.
+`src/server/js_runtime/mod.rs` remains the runtime boundary for executing package JavaScript through `deno_core`; it owns controlled module execution, facade import allowlists, diagnostics, and raw-op restrictions. `ParseCoordinator` invokes that boundary rather than embedding package execution in `DocumentState`.
 
 ## Parse Result Shape
 
@@ -135,36 +133,40 @@ Validation failures produce runtime diagnostics or package errors. They must not
 
 ## Viewport-Prioritized Result Delivery
 
-The client viewport is the primary publication filter.
+The client viewport is the primary publication filter and uses an explicit request/response state machine.
 
-- The server tracks the latest `viewport_byte_start` and `viewport_byte_end` received from each client.
-- Results overlapping the visible viewport are published first.
-- Results adjacent to the viewport may be cached and published opportunistically to improve scroll smoothness.
-- Off-viewport full-document results are not sent as ordinary edit follow-up IPC.
-- When multiple clients watch the same document, each client receives viewport-specific filtered updates while the server cache may retain shared parse state.
-- Scroll-triggered delivery is separate from edit-triggered delivery and still bounded by the same payload budgets.
+- `ViewportRenderRequest` carries client/document/version identity, a monotonic `request_id`, an optional numeric `trace_id`, and visible UTF-8 byte bounds; it never carries document text.
+- The server clamps and validates the requested range, schedules the selected handler through the document's `SyntaxSession`, and answers exactly once with `ViewportRenderPatch` status `Complete`, `Empty`, or `Rejected`.
+- A complete patch carries ordered decoration, diagnostic, and fold members plus `covered_ranges` derived from output. Parser context may be wider and is never claimed as authoritative coverage.
+- The Tauri forwarder may coalesce an obsolete whole patch per document, but never coalesces sibling members. The client drops stale request IDs and applies all current members in one CodeMirror transaction.
+- Edit/open/resync-driven parse updates remain separate `DecorationSet`/`DecorationBatch`/`DiagnosticSet`/`FoldingRangeSet` events; they are not substituted for a request completion.
+- Multiple clients retain independent viewport requests while the server shares validated grammar/cache state. All output remains bounded by parse, decoration, diagnostic, fold, syntax-cache, and frame budgets.
 
 ## Fallback Behavior When Parsing Lags
 
 Lagging package work must be visually safe and predictable:
 
-- If a parse result is not ready within two edit cycles, the server sends a `no-decoration-update` acknowledgement for the newer document version so the client knows decorations are intentionally unchanged.
-- The client retains the last validated decoration set for unaffected ranges.
-- The client may clear stale decorations inside the edited range after a stale-version notice or `no-decoration-update` acknowledgement.
-- Diagnostics and semantic decorations are allowed to become temporarily stale; they must be replaced or cleared once a current result arrives.
-- Syntax highlighting may fall back to mode-level default styling or plain text for changed regions.
-- No fallback path runs package JavaScript in the client.
+- A viewport request always receives a terminal `Complete`, `Empty`, or `Rejected` `ViewportRenderPatch`; there is no timer-based acknowledgement.
+- The client retains validated data outside the covered range and prunes only the bounded visible/overscan guard. A current patch replaces the exact same-authority covered range; an empty patch clears only that range.
+- Diagnostics, semantic decorations, and folds may be temporarily stale while a newer session job runs, then are replaced or cleared by their current source/authority update.
+- Syntax highlighting may fall back to the active `core.code`/`core.text` behavior styling or plain text when no grammar output is available. A failed package grammar publishes a sanitized runtime diagnostic and does not remove editability.
+- No fallback path runs package JavaScript in the client, blocks typing, or fabricates a request completion.
 
-## Attachment Points in Existing Architecture
+## Attachment Points in Current Architecture
 
-No code is added in Phase 16, but later phases should attach parsing at these boundaries:
+The implemented split keeps canonical mutation, controlled JavaScript, scheduling,
+and client rendering separate:
 
-- `src/server/document.rs`: after accepted edits in `DocumentState::apply_edit`, expose compact accepted-edit metadata to the coordinator. Do not run JavaScript here.
-- `src/server/js_runtime/mod.rs`: extend the controlled `deno_core` runtime/facade allowlist with future `clay:parse` APIs such as `parse.serverRegisterParseHandler`; preserve server-side execution and sanitized diagnostics.
-- `src/server/parse_coordinator.rs`: new module recommended for per-document parse queues, cancellation tokens/generations, timeout policy, viewport priority, cache management, and result validation/publication.
-- Future protocol modules: define `ParseEditNotification`, `ParseResult`, and `DecorationUpdate`/folding/diagnostic publication messages as bounded protocol shapes.
+- `src/server/document.rs`: accepts edits and supplies bounded canonical rope windows; it does not run package JavaScript or native parser work.
+- `src/server/js_runtime/mod.rs`: executes package handlers through the controlled `deno_core` runtime, facade allowlist, timeout, heap, and sanitized diagnostics.
+- `src/server/parse_coordinator.rs` + `src/server/syntax_session.rs`: own handler generations, per-document mailboxes, blocking-executor permits, stale-result checks, request completion, and publication validation.
+- `src/protocol/parse.rs` + `src/protocol/mod.rs`: define bounded parse metadata, `ViewportRenderRequest`, `ViewportRenderPatch`, and protocol v29 identity/status fields.
+- `frontend/src/editor/position-index.ts`: converts editor UTF-16 positions to protocol UTF-8 offsets through the shared incremental state field.
+- `frontend/src/editor/extensions/{render-patch,decorations,diagnostics,folding}.ts`: apply validated output as one atomic local render update without package code in paint/input paths.
 
-This split keeps `DocumentState` focused on canonical document mutation, `ClayJsRuntimeService` focused on constrained JavaScript execution, and a new coordinator focused on scheduling and parse-result policy.
+`DocumentState` remains canonical document mutation, `ClayJsRuntimeService`
+remains constrained package execution, `ParseCoordinator` remains parse policy,
+and the Tauri/React client remains an inert rendering projection.
 
 ## Phase 18.16/Plan 056 Tiered Syntax Grammar Parse/Highlight Path
 
@@ -180,7 +182,7 @@ Open scheduling is enqueue-only: text and the initial mode state return before p
 
 ## Security Rules
 
-- Background parse tasks run server-side through the constrained `deno_core` runtime, not in the Rust client.
+- Package parse tasks run server-side through the constrained `deno_core` runtime; native grammar tasks run in `SyntaxSession` on the bounded blocking executor, never in the Rust client or Tokio connection workers.
 - Parse results are validated and stripped of arbitrary code before becoming `DecorationUpdate`, folding, diagnostic, or cache payloads.
 - Package parsers cannot access filesystem outside already-open document content, network, shell, AI mutation, WASM execution, remote listeners, raw `Deno.core.ops`, native widget mutation, or client-side JavaScript by default.
 - Future exceptions require explicit permission declaration, server validation, documentation, and a decision log before implementation.
@@ -188,7 +190,7 @@ Open scheduling is enqueue-only: text and the initial mode state return before p
 
 ## Phase 18.5 Large-File Parse-Window Primitives
 
-The Phase 18.5 [large-file Markdown primitive review](../../wiki/modules/phase18-large-file-markdown-primitive-review.md) identified bounded parse input as a reusable primitive gap. Clay now defines generic parse-window and memory-budget shapes in `src/protocol/parse.rs` and validates them through `src/server/parse_coordinator.rs`; the names and validation rules are intentionally mode-neutral.
+The Phase 18.5 [large-file Markdown primitive review](../../wiki/modules/phase18-large-file-markdown-primitive-review.md) identified bounded parse input as a reusable primitive gap. Clay now defines generic parse-window and memory-budget shapes in `src/protocol/parse.rs`, validates them through `src/server/parse_coordinator.rs`, and schedules them through `SyntaxSession`; the names and validation rules are intentionally mode-neutral.
 
 Implemented reusable primitives:
 
@@ -207,10 +209,10 @@ Security and performance rules:
 - The parse coordinator preserves stale-version rejection, cancellation/generation semantics, timeout bounds, payload budgets, package provenance, and no client-side package JavaScript.
 - Rust primitive names and branches remain language-neutral; rejected examples include `MarkdownParser`, `MarkdownItToken`, `MarkdownHeading`, `MarkdownFence`, `heading_open`, `list_item_open`, and `if mode == "markdown"` parser paths.
 
-## Phase 17/18 Follow-Up
+## Current Implementation References
 
-- Add the `clay:parse` facade and `parse.serverRegisterParseHandler` planned API stub.
-- Implement `src/server/parse_coordinator.rs` with bounded queues, cancellation, timeout, viewport priority, and stale-result discard tests.
-- Add protocol structs and payload-bound tests for parse notifications/results and decoration publication.
-- Implement Markdown mode parser behavior with line-group-level incremental updates and region-level fenced-code invalidation.
-- Add tests proving parse delays do not block `ClientFirstPredictable` typing or violate `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS`.
+- `src/server/syntax_session.rs` implements the latest-wins mailbox and shared blocking executor; `src/server/parse_coordinator.rs` owns generation/document/grammar session lifecycle and validated publication.
+- `src/protocol/parse.rs` carries exact edit metadata, bounded windows, optional trace IDs, request IDs, and atomic viewport patch status.
+- `frontend/src/editor/position-index.ts` and `frontend/src/editor/extensions/render-patch.ts` are the client primitives for offset conversion and covered-range application.
+- `tests/suites/runtime.rs` covers session starvation/latest-wins/cache/mode-activation behavior; `tests/suites/protocol.rs` covers protocol/documentation budgets; frontend performance tests cover shared-index, retention, ownership, and four-pane invariants.
+- New package-facing parsing behavior must reuse the existing documented registration/publication APIs. It must not add parser execution, raw ops, callbacks, or synchronous IPC to client input/render paths.

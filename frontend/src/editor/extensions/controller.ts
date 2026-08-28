@@ -24,23 +24,30 @@ import { EditorView, hoverTooltip, keymap } from "@codemirror/view";
 import type { BridgeEnvelope } from "../../bridge/types";
 import type { DocumentMeta } from "../../state/document-store";
 import { behaviorCompartment } from "../compartments";
+import { positionIndex } from "../position-index";
+import { utf16ToUtf8Indexed, utf8ToUtf16Indexed } from "../position-map";
 import {
-  textIndex,
-  utf16ToUtf8Indexed,
-  utf8ToUtf16Indexed,
-} from "../position-map";
+  editorPerformance,
+  PERFORMANCE_STAGE,
+  type PerformanceSpan,
+} from "../performance";
+import { viewportRenderRequestPayload } from "../sync/messages";
 import { accessibilityExtension } from "./accessibility";
 import { behaviorExtensions } from "./behavior";
 import { CompletionProjection } from "./completion";
-import { DiagnosticProjection, diagnosticExtension } from "./diagnostics";
 import {
   decorationExtension,
+  decorationPatch,
   linkAt,
-  replaceDecorations,
-  resetDecorations,
+  retainDecorations,
   showInlays,
 } from "./decorations";
-import { foldingExtension, installFolds, resetFolds } from "./folding";
+import {
+  diagnosticExtension,
+  diagnosticPatch,
+  resetDiagnostics,
+} from "./diagnostics";
+import { foldingExtension, foldPatch } from "./folding";
 import { IntelligenceProjection } from "./intelligence";
 import { interactionKeymaps } from "./keymaps";
 import type {
@@ -50,6 +57,7 @@ import type {
   DecorationTarget,
   DiagnosticSet,
   FoldingRangeSet,
+  ViewportRenderPatchDto,
   LanguageResult,
   SelectionQueryResult,
 } from "./types";
@@ -62,16 +70,36 @@ interface Options {
   report(message: string): void;
 }
 
-/** Trailing coalescing gap for viewport-driven decoration requests. */
-const VIEWPORT_SAFETY_MS = 400;
+/**
+ * Viewport pacing is explicit: every request carries a monotonic id and the
+ * server answers with exactly one atomic `ViewportRenderPatch` (complete,
+ * empty, or rejected). The reply — not a timer — frees the pipe.
+ */
+
+/** One screen of monospace text is a few KiB; keep the request inside one parse window. */
+const VIEWPORT_REQUEST_MAX_CHARS = 64 * 1024;
+
+function visibleViewportRange(view: EditorView): { from: number; to: number } {
+  const docLen = view.state.doc.length;
+  const first = view.visibleRanges[0];
+  let from = first?.from ?? 0;
+  let to = first?.to ?? 0;
+  if (from > to) {
+    const swap = from;
+    from = to;
+    to = swap;
+  }
+  from = Math.max(0, Math.min(from, docLen));
+  to = Math.max(from, Math.min(to, docLen));
+  if (from === to) to = Math.min(docLen, from + VIEWPORT_REQUEST_MAX_CHARS);
+  else if (to - from > VIEWPORT_REQUEST_MAX_CHARS)
+    to = from + VIEWPORT_REQUEST_MAX_CHARS;
+  return { from, to };
+}
 
 export class EditorProjection {
   private view: EditorView | null = null;
   private manifest: BehaviorManifestDto = { behaviorVersion: 0 };
-  private decorationSets = new Map<string, DecorationSet>();
-  private diagnosticSets = new Map<string, DiagnosticSet>();
-  private foldSets = new Map<string, FoldingRangeSet>();
-  private readonly diagnostics = new DiagnosticProjection();
   private readonly completion: CompletionProjection;
   private readonly intelligence: IntelligenceProjection;
   readonly extensions: Extension[];
@@ -81,10 +109,13 @@ export class EditorProjection {
   private pendingSelections: readonly { anchor: number; head: number }[] = [];
   /** A viewport request is on the wire; new viewports queue behind it. */
   private viewportInflight = false;
+  private viewportTraceId = 0;
+  private readonly viewportSpans = new Map<number, PerformanceSpan>();
   /** Newest viewport changed while one was inflight; sent on arrival. */
   private viewportPending = false;
-  /** Safety valve so lost replies cannot wedge highlighting. */
-  private viewportSafety: number | null = null;
+  /** Monotonic viewport request identity; stale patch ids drop on arrival. */
+  private nextViewportRequestId = 1;
+  private latestViewportRequestId = 0;
 
   constructor(private readonly options: Options) {
     const current = () => {
@@ -181,12 +212,8 @@ export class EditorProjection {
       this.manifest.editorRules?.chrome?.inlayHints ??
       this.manifest.documentFontRole === "monospace";
     view.dispatch({ effects: showInlays(codeInlays) });
-    for (const set of this.decorationSets.values())
-      view.dispatch({ effects: replaceDecorations(set) });
-    for (const set of this.diagnosticSets.values())
-      this.diagnostics.install(view, set);
-    for (const set of this.foldSets.values())
-      view.dispatch({ effects: installFolds(view.state.doc, set) });
+    // No retained-set replay: fields own render data; the fresh viewport
+    // request below repopulates them from the server.
     this.requestViewport(view);
   }
 
@@ -194,21 +221,17 @@ export class EditorProjection {
     if (this.view === view) this.view = null;
     this.clearViewportTimers();
     this.viewportInflight = false;
+    this.viewportSpans.clear();
   }
 
   clear(): void {
-    this.decorationSets.clear();
-    this.diagnosticSets.clear();
-    this.foldSets.clear();
     this.completion.clear();
     this.intelligence.clear();
     this.lastViewport = "";
     this.clearViewportTimers();
     this.viewportInflight = false;
-    if (this.view) {
-      this.view.dispatch({ effects: [resetDecorations(), resetFolds()] });
-      this.diagnostics.clear(this.view);
-    }
+    this.viewportSpans.clear();
+    if (this.view) this.view.dispatch(resetDiagnostics(this.view.state));
   }
 
   /**
@@ -223,7 +246,7 @@ export class EditorProjection {
     const meta = this.options.meta();
     const currentVersion = meta ? meta.version + meta.pending : -1;
     const effects: TransactionSpec[] = [];
-    let viewportReply = false;
+    let patchTraceId = 0;
     switch (event.kind) {
       case "behaviorManifestInstalled": {
         const data = event.data as { manifest: BehaviorManifestDto };
@@ -238,24 +261,93 @@ export class EditorProjection {
           });
         break;
       }
+      case "viewportRenderPatch": {
+        const patch = event.data as ViewportRenderPatchDto;
+        // Stale request: a newer viewport already superseded this one.
+        if (patch.requestId < this.latestViewportRequestId) break;
+        patchTraceId = patch.traceId ?? this.viewportTraceId;
+        if (patch.status === "rejected" || patch.status === "empty") {
+          // Explicit terminal answer: nothing to apply, pipe freed now.
+          this.viewportArrived(patchTraceId);
+          break;
+        }
+        if (patch.traceId)
+          editorPerformance.mark(
+            PERFORMANCE_STAGE.patchDelivery,
+            patch.traceId,
+            {
+              documentId: patch.documentId,
+              version: patch.documentVersion,
+              byteCount: patch.coveredRanges.reduce(
+                (total, range) => total + (range.byteEnd - range.byteStart),
+                0,
+              ),
+              feature: "viewportPatch",
+            },
+          );
+        for (const set of patch.decorations) {
+          const effect = this.prepareDecoration(set, currentVersion);
+          if (effect) effects.push(effect);
+        }
+        for (const set of patch.diagnostics) {
+          const effect = this.prepareDiagnostic(set, currentVersion);
+          if (effect) effects.push(effect);
+        }
+        for (const set of patch.folds) {
+          const effect = this.prepareFold(set, currentVersion);
+          if (effect) effects.push(effect);
+        }
+        if (this.view) {
+          const { from, to } = visibleViewportRange(this.view);
+          if (from !== to)
+            effects.push({ effects: retainDecorations({ from, to }) });
+        }
+        this.viewportArrived(patchTraceId);
+        break;
+      }
       case "decorationSet": {
-        viewportReply = true;
-        const effect = this.prepareDecoration(
-          event.data as DecorationSet,
-          currentVersion,
-        );
+        const set = event.data as DecorationSet;
+        patchTraceId = set.traceId ?? this.viewportTraceId;
+        editorPerformance.mark(PERFORMANCE_STAGE.patchDelivery, patchTraceId, {
+          documentId: set.documentId,
+          version: set.documentVersion,
+          byteCount: Math.max(0, set.viewportByteEnd - set.viewportByteStart),
+          feature: set.kind,
+        });
+        const effect = this.prepareDecoration(set, currentVersion);
         if (effect) effects.push(effect);
         break;
       }
-      case "decorationBatch":
-        viewportReply = true;
-        for (const set of event.data as DecorationSet[]) {
+      case "decorationBatch": {
+        const sets = event.data as DecorationSet[];
+        patchTraceId = sets[0]?.traceId ?? this.viewportTraceId;
+        const first = sets[0];
+        if (first)
+          editorPerformance.mark(
+            PERFORMANCE_STAGE.patchDelivery,
+            patchTraceId,
+            {
+              documentId: first.documentId,
+              version: first.documentVersion,
+              byteCount: Math.max(
+                0,
+                sets.reduce(
+                  (total, set) =>
+                    total + set.viewportByteEnd - set.viewportByteStart,
+                  0,
+                ),
+              ),
+              feature: first.kind,
+            },
+          );
+        for (const set of sets) {
           const effect = this.prepareDecoration(set, currentVersion);
           if (effect) effects.push(effect);
         }
         break;
+      }
       case "diagnosticSet": {
-        viewportReply = true;
+        patchTraceId = this.viewportTraceId;
         if (!this.view) break;
         const effect = this.prepareDiagnostic(
           event.data as DiagnosticSet,
@@ -265,7 +357,7 @@ export class EditorProjection {
         break;
       }
       case "foldingRangeSet": {
-        viewportReply = true;
+        patchTraceId = this.viewportTraceId;
         const effect = this.prepareFold(
           event.data as FoldingRangeSet,
           currentVersion,
@@ -317,10 +409,24 @@ export class EditorProjection {
         break;
     }
     // Multiple specs join into one transaction — one update cycle total.
-    if (effects.length && this.view) this.view.dispatch(...effects);
-    // Decoration/diagnostic/fold traffic doubles as the viewport-request
-    // acknowledgement for pacing.
-    if (viewportReply) this.viewportArrived();
+    if (effects.length && this.view) {
+      const apply = editorPerformance.span(
+        PERFORMANCE_STAGE.patchApply,
+        patchTraceId,
+        {
+          documentId: meta?.documentId,
+          version: meta?.version,
+        },
+      );
+      this.view.dispatch(...effects);
+      apply.end();
+      editorPerformance.frame(patchTraceId, {
+        documentId: meta?.documentId,
+        version: meta?.version,
+      });
+    }
+    // Edit-driven member traffic no longer paces the viewport pipe; only
+    // the atomic patch reply does (see the viewportRenderPatch arm).
   }
 
   toggleInlays(): void {
@@ -334,50 +440,38 @@ export class EditorProjection {
     set: DecorationSet,
     version: number,
   ): TransactionSpec | null {
-    if (!this.accepts(set.documentId, set.documentVersion, version))
+    if (
+      !this.view ||
+      !this.accepts(set.documentId, set.documentVersion, version)
+    )
       return null;
-    for (const [key, cached] of this.decorationSets) {
-      if (cached.documentVersion !== set.documentVersion)
-        this.decorationSets.delete(key);
-    }
-    this.decorationSets.set(
-      `${set.packagePrefix}:${set.kind}:${set.viewportByteStart}:${set.viewportByteEnd}`,
-      set,
-    );
-    return { effects: replaceDecorations(set) };
+    // Split payloads share one parse window; pruning each fragment would
+    // drop syntax at the top of large files. Viewport retain handles bounds.
+    return { effects: decorationPatch(this.view.state, set, false) };
   }
 
   private prepareDiagnostic(
     set: DiagnosticSet,
     version: number,
   ): TransactionSpec | null {
-    if (!this.accepts(set.documentId, set.documentVersion, version))
+    if (
+      !this.view ||
+      !this.accepts(set.documentId, set.documentVersion, version)
+    )
       return null;
-    for (const [key, cached] of this.diagnosticSets) {
-      if (cached.documentVersion !== set.documentVersion)
-        this.diagnosticSets.delete(key);
-    }
-    this.diagnosticSets.set(
-      `${set.source}:${set.provenance.packagePrefix}:${set.viewportByteStart}:${set.viewportByteEnd}`,
-      set,
-    );
-    if (!this.view) return null;
-    return this.diagnostics.prepare(this.view, set);
+    return diagnosticPatch(this.view.state, set);
   }
 
   private prepareFold(
     set: FoldingRangeSet,
     version: number,
   ): TransactionSpec | null {
-    if (!this.accepts(set.documentId, set.documentVersion, version))
+    if (
+      !this.view ||
+      !this.accepts(set.documentId, set.documentVersion, version)
+    )
       return null;
-    for (const [key, cached] of this.foldSets) {
-      if (cached.documentVersion !== set.documentVersion)
-        this.foldSets.delete(key);
-    }
-    this.foldSets.set(set.packagePrefix, set);
-    if (!this.view) return null;
-    return { effects: installFolds(this.view.state.doc, set) };
+    return { effects: foldPatch(this.view.state, set) };
   }
 
   private accepts(
@@ -393,13 +487,20 @@ export class EditorProjection {
 
   private requestViewport(view: EditorView): void {
     const meta = this.options.meta();
-    if (!meta || meta.loading || !view.inView) return;
-    const from = Math.min(...view.visibleRanges.map((range) => range.from));
-    const to = Math.max(...view.visibleRanges.map((range) => range.to));
+    if (!meta) return;
+    // Progressive loading gates edits, not syntax. The loaded prefix is
+    // authoritative at this version, so its visible viewport can be parsed
+    // while later chunks continue appending.
+    // First on-screen fragment only: min/max across line-gap fragments of a
+    // long line is 0..doc.length, which used to schedule 24 parse windows,
+    // stall the atomic remaining counter, and show no syntax until scroll.
+    // Skip view.inView — WebKitGTK's first measure often has a 0-height
+    // pixel viewport, which would drop the open request entirely.
+    const { from, to } = visibleViewportRange(view);
     // Indexed conversion: O(log lines). The previous implementation
     // flattened the whole document and linearly scanned it on every scroll
     // tick and keystroke, which froze large files.
-    const index = textIndex(view.state.doc);
+    const index = positionIndex(view.state);
     const byteStart = utf16ToUtf8Indexed(index, from);
     const byteEnd = utf16ToUtf8Indexed(index, to);
     const key = `${meta.documentId}:${meta.version + meta.pending}:${byteStart}:${byteEnd}`;
@@ -414,54 +515,84 @@ export class EditorProjection {
     }
     this.lastViewport = key;
     this.viewportInflight = true;
-    if (this.viewportSafety !== null) clearTimeout(this.viewportSafety);
-    this.viewportSafety = window.setTimeout(() => {
-      this.viewportSafety = null;
-      this.viewportInflight = false;
-      this.pumpViewport();
-    }, VIEWPORT_SAFETY_MS);
-    void this.options.send(
-      JSON.stringify({
-        family: "decorationViewportRequest",
-        payload: {
-          clientId: this.options.clientId(),
-          documentId: meta.documentId,
-          documentVersion: meta.version + meta.pending,
+    const requestId = this.nextViewportRequestId;
+    this.nextViewportRequestId += 1;
+    this.latestViewportRequestId = requestId;
+    const traceId = editorPerformance.trace();
+    this.viewportTraceId = traceId;
+    const metadata = {
+      documentId: meta.documentId,
+      version: meta.version + meta.pending,
+      byteCount: Math.max(0, byteEnd - byteStart),
+    };
+    editorPerformance.mark(
+      PERFORMANCE_STAGE.browserViewport,
+      traceId,
+      metadata,
+    );
+    const scroll = editorPerformance.span(
+      PERFORMANCE_STAGE.editorScroll,
+      traceId,
+      metadata,
+    );
+    scroll.end();
+    this.viewportSpans.set(
+      traceId,
+      editorPerformance.span(
+        PERFORMANCE_STAGE.editorSyntaxFresh,
+        traceId,
+        metadata,
+      ),
+    );
+    const enqueue = editorPerformance.span(
+      PERFORMANCE_STAGE.bridgeEnqueue,
+      traceId,
+      metadata,
+    );
+    void this.options
+      .send(
+        viewportRenderRequestPayload(
+          meta.documentId,
+          meta.version + meta.pending,
+          requestId,
           byteStart,
           byteEnd,
-        },
-      }),
-    );
+          traceId,
+          this.options.clientId(),
+        ),
+      )
+      .then(() => enqueue.end())
+      .catch(() => enqueue.end());
   }
 
-  /** A reply (or the safety timer) freed the pipe; send the newest viewport. */
-  private viewportArrived(): void {
+  /** The atomic patch reply freed the pipe; send the newest viewport. */
+  private viewportArrived(traceId = this.viewportTraceId): void {
+    this.finishViewportTrace(traceId);
     this.viewportInflight = false;
-    if (this.viewportSafety !== null) {
-      clearTimeout(this.viewportSafety);
-      this.viewportSafety = null;
-    }
     this.pumpViewport();
+  }
+
+  private finishViewportTrace(traceId: number): void {
+    if (traceId <= 0) return;
+    this.viewportSpans.get(traceId)?.end();
+    this.viewportSpans.delete(traceId);
+    if (traceId === this.viewportTraceId) this.viewportTraceId = 0;
   }
 
   private pumpViewport(): void {
     if (!this.viewportPending) return;
     this.viewportPending = false;
-    if (this.view && this.view.inView) this.requestViewport(this.view);
+    if (this.view) this.requestViewport(this.view);
   }
 
   private clearViewportTimers(): void {
-    if (this.viewportSafety !== null) {
-      clearTimeout(this.viewportSafety);
-      this.viewportSafety = null;
-    }
     this.viewportPending = false;
   }
 
   private activateLink(view: EditorView, target: DecorationTarget): boolean {
     if ("documentRange" in target) {
       const at = utf8ToUtf16Indexed(
-        textIndex(view.state.doc),
+        positionIndex(view.state),
         target.documentRange.range.byteStart,
       );
       view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
@@ -614,7 +745,7 @@ export class EditorProjection {
       anchor: range.anchor,
       head: range.head,
     }));
-    const index = textIndex(view.state.doc);
+    const index = positionIndex(view.state);
     void this.options.send(
       JSON.stringify({
         family: "selectionQueryRequest",
@@ -650,7 +781,7 @@ export class EditorProjection {
     )
       return;
     this.pendingSelectionRequest = null;
-    const index = textIndex(view.state.doc);
+    const index = positionIndex(view.state);
     const ranges = this.pendingSelections.map((original, index_) => {
       const resultRange = result.ranges[index_];
       if (!resultRange)

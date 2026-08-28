@@ -68,6 +68,7 @@ pub(super) fn op_clay_decorations_publish_decorations(
         viewport_byte_start,
         viewport_byte_end,
         spans,
+        trace_id: None,
     };
     let set = validate_decoration_publication(&package, current_document_version, set)
         .map_err(decoration_error)?;

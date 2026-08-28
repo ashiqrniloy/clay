@@ -124,8 +124,8 @@ results and cleanup policy.
 
 | # | Action | Expected |
 |---|--------|----------|
-| L23 | Start `scripts/large-document-smoke.sh` and inspect its private `clay server <socket>` plus Tauri client launch | Current Linux build completes a protocol-v27 handshake on the workspace-private socket; status reaches Connected; no default-endpoint server is adopted |
-| L24 | If a v26 server binary is available, connect the current client to it; otherwise run `cargo test --lib protocol_v26_client_is_rejected_by_v27_server` | Mixed protocol versions fail closed with `UnsupportedProtocolVersion`; no document/workspace state is installed and the current client remains recoverable |
+| L23 | Start `scripts/large-document-smoke.sh` and inspect its private `clay server <socket>` plus Tauri client launch | Current Linux build completes a protocol-v28 handshake on the workspace-private socket; status reaches Connected; no default-endpoint server is adopted |
+| L24 | If a v27 server binary is available, connect the current client to it; otherwise run `cargo test --lib protocol_v27_client_is_rejected_by_v28_server` | Mixed protocol versions fail closed with `UnsupportedProtocolVersion`; no document/workspace state is installed and the current client remains recoverable |
 
 ## Plan 098 Linux execution record (2026-08-26)
 
@@ -139,3 +139,21 @@ WebKitGTK document nodes, and the host's compositor moved the test window
 partly off-screen during portal focus. These conditions leave live L23
 editor interaction unresolved rather than converting protocol evidence into a
 GUI pass.
+
+## Plan 099 performance launch and recovery steps
+
+| # | Action | Expected |
+|---|---|---|
+| L25 | Launch `scripts/editor-performance-smoke.sh --sizes 1,10,50 --enforce` and inspect the private server/client window | Real Tauri/WebKit client reaches Connected on the private socket; synthetic fixture roots stay isolated; no host path or source text enters reports |
+| L26 | Stop and restart the private server, then reload the active fixture | Client reports bounded Disconnected/recovery state, reconnects to the authoritative snapshot, and keeps the pane/document; no stale patch or lost text |
+
+## Plan 099 Linux execution record (2026-08-28)
+
+| Check | Result | Evidence |
+|---|---|---|
+| L25 | PASS launch; PARTIAL state inspection | Full 1/10/50 MiB × four-shape × six-extension fixture generation and private profiled launch passed. The targeted screenshot showed the Clay welcome/Connected shell and AT-SPI exposed the real frame/window controls; the WebKit document tree was unavailable. Reports: [`manual-test-plan.md`](../code-reviews/screenshots/2026-08-28-plan099-manual/manual-test-plan.md). |
+| L26 | UNRESOLVED | No document session was established and no keyboard-capable input backend is available (`uinput` denied; no `xdotool`, `ydotool`, or portal input device), so server-stop/restart/resync interaction was not claimed. |
+
+The full run passed `--enforce` with zero long tasks over 50 ms and bounded
+retention. Do not treat the bootstrap-only p95 table or zero parser queue as
+proof of L26; repeat on an input-capable designated device.

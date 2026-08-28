@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         Arc,
@@ -49,6 +50,22 @@ struct DomainRuntime {
 #[derive(Clone)]
 pub(crate) struct ClayJsRuntimeService {
     evaluations: Arc<AtomicU64>,
+    /// Plan 099: per-generation cache of completed document mode activations
+    /// (classification identity + published behavior manifest). A repeat open
+    /// whose classification inputs and native grammar registration match a
+    /// cached activation skips the per-open generated module evaluation
+    /// entirely: the cached manifest is republished from Rust.
+    mode_activation_cache: Arc<
+        std::sync::Mutex<
+            HashMap<
+                crate::server::connection::ModeActivationKey,
+                crate::server::connection::CachedModeActivation,
+            >,
+        >,
+    >,
+    /// Count of generated module evaluations served by the V8 open path, for
+    /// the registry fast-path parity/measurement tests.
+    pub(crate) open_activation_evaluations: Arc<AtomicU64>,
     timeout: Duration,
     heap_limit_bytes: usize,
     completion_providers:
@@ -170,6 +187,10 @@ impl ClayJsRuntimeService {
             );
         Self {
             evaluations: Arc::new(AtomicU64::new(0)),
+            // A reload rebuilds the trusted worker and its registries; the
+            // per-generation activation cache must not survive it.
+            mode_activation_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            open_activation_evaluations: Arc::new(AtomicU64::new(0)),
             timeout: current.timeout,
             heap_limit_bytes: current.heap_limit_bytes,
             completion_providers: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -334,6 +355,8 @@ impl ClayJsRuntimeService {
             );
         Self {
             evaluations: Arc::new(AtomicU64::new(0)),
+            mode_activation_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            open_activation_evaluations: Arc::new(AtomicU64::new(0)),
             timeout,
             heap_limit_bytes,
             completion_providers: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -919,6 +942,40 @@ impl ClayJsRuntimeService {
             ) => Ok(None),
             Err(error) => Err(error),
         }
+    }
+
+    /// Record a completed V8 open activation in the per-generation cache.
+    pub(crate) fn cache_mode_activation(
+        &self,
+        key: crate::server::connection::ModeActivationKey,
+        cached: crate::server::connection::CachedModeActivation,
+    ) {
+        let mut cache = self
+            .mode_activation_cache
+            .lock()
+            .expect("mode activation cache lock poisoned");
+        if cache.len() >= crate::perf::budgets::MODE_ACTIVATION_CACHE_ENTRIES {
+            cache.clear();
+        }
+        cache.insert(key, cached);
+    }
+
+    /// Look up a cached activation for a repeat open (registry fast path).
+    pub(crate) fn cached_mode_activation(
+        &self,
+        key: &crate::server::connection::ModeActivationKey,
+    ) -> Option<crate::server::connection::CachedModeActivation> {
+        self.mode_activation_cache
+            .lock()
+            .expect("mode activation cache lock poisoned")
+            .get(key)
+            .cloned()
+    }
+
+    /// Number of generated module evaluations the open path served from V8.
+    pub(crate) fn open_activation_evaluation_count(&self) -> u64 {
+        self.open_activation_evaluations
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub(crate) fn registered_native_syntax_handler(

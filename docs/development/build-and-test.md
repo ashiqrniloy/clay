@@ -111,6 +111,41 @@ npm run build   # tsc -b && vite build → dist/
 npm run check:budget  # shell gzip ≤ 180 kB; total (incl. editor) ≤ 400 kB
 ```
 
+### Plan 099 editor performance verification
+
+Run Cargo gates serially. The deterministic matrix uses the real server and
+protocol; the frontend suite uses the real `createEditor` path and never makes
+machine-variant wall-clock timing a CI assertion:
+
+```bash
+cargo test --test runtime editor_performance::editor_performance_matrix_holds_deterministic_invariants -- --exact
+cargo test --test protocol performance_budgets
+cargo test --test protocol primitives_docs::plan099_editor_documentation_matches_current_implementation
+cargo test --test protocol documentation_coverage::plan099_reference_docs_are_cross_linked_and_current
+```
+
+Run the profiled desktop harness only on a Linux GUI host:
+
+```bash
+CLAY_PERF_PROFILE=1 scripts/editor-performance-smoke.sh \
+  --sizes 1,10,50 \
+  --kinds mixed-unicode,many-short-lines,long-lines,newline-heavy \
+  --enforce
+```
+
+The harness writes source-free frontend, desktop, and server summaries under
+`target/perf/editor-performance/<label>/`. It fails on a missing frontend
+snapshot or retained frontend events above 4,096; `--enforce` additionally
+fails on long tasks over 50 ms. Absent flow stages are warnings and keep the
+timing table non-promotable. Promote p95 timing only after three stable runs on
+the designated minimum device. This host's bootstrap-only run cannot prove
+typing, scrolling, parser freshness, or document resident memory when keyboard
+input or WebKit document accessibility is unavailable.
+
+`ViewportRenderPatch` and `SyntaxSession` are internal implementation
+contracts. `BytePositionIndex` is a frontend state field. None is configured
+through `init.js` or exposed as a package API.
+
 ### Running the desktop shell
 
 See "Local build and run" above. The desktop binary resolves `clay-server`

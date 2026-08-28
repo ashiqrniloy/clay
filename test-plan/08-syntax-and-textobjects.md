@@ -174,3 +174,20 @@ No existing step was deleted or weakened.
 | Syntax, diagnostic, folding, and inlay rest state | PASS static | `code-reviews/screenshots/2026-08-24-tauri-react-parity/intelligence/fixture-*` shows the bounded CodeMirror projection and diagnostic/inlay/fold styling |
 | Link/inlay/fold interaction | UNRESOLVED live; PASS structural/security | Host keyboard/pointer targeting is unavailable; decoration, target-denial, folding, inlay, and no-network tests pass |
 | Accessibility semantics | PASS rest state / known link ceiling | AX snapshot contains editor region/document entry; decorative inlays/folds are not controls. Custom editor still has no separate AT-SPI Link node, as previously documented |
+
+## Plan 099 viewport continuity steps
+
+| # | Action | Expected |
+|---|---|---|
+| S33 | Fling/jump-scroll a 1–50 MiB Rust, TypeScript, JavaScript, and Markdown fixture from top to bottom and back | Each viewport request receives one current request-id patch; stale patches are dropped, authoritative coverage advances, and no scroll path blocks on parser work or produces a stuck overlay. No long task exceeds 50 ms. |
+| S34 | Reach a viewport with no syntax/decorations and inspect the explicit empty response | An explicit empty completion patch clears only its covered range in one render transaction; sibling package/feature ranges remain intact and the request pipe is immediately reusable. |
+
+## Plan 099 Linux execution record (2026-08-28)
+
+| Check | Result | Evidence |
+|---|---|---|
+| S33 | UNRESOLVED live; PASS structural companion | No keyboard/scroll backend was available. Atomic patch ordering, stale-id rejection, and bounded syntax-session tests remain green; the harness warning confirms no viewport patch was driven. |
+| S34 | UNRESOLVED live; PASS structural companion | No empty viewport was reachable. Explicit empty/rejected patch tests cover scoped clearing and immediate completion. |
+
+The zero parser queue in the manual harness means no syntax flow ran; it is
+not evidence that fling/jump scrolling had no parser work.

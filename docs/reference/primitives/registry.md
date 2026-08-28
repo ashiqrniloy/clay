@@ -2,7 +2,7 @@
 
 Version: `phase16-primitives-v1`
 
-This registry defines the first exhaustive-but-iterative taxonomy for primitives that Clay packages may contribute. It is an architecture document only: entries marked `New` or `Planned` describe the public Clay JS API shape and validation contract that later phases must implement.
+This registry defines the exhaustive-but-iterative taxonomy for primitives that Clay packages may contribute or consume. It records both implemented current contracts and planned public Clay JS API shapes; entries marked `New` or `Deferred` still require a later implementation decision, while `Exists` and `Extend` rows describe the current runtime boundary.
 
 ## Registry Schema
 
@@ -21,7 +21,7 @@ Every primitive category entry uses the same vocabulary as `docs/reference/clay-
 | `user_facing_name` | Search/help label for docs, command palette, and AI-agent lookup. |
 | `permissions` | Required permission scope or `none` for inert declarations. |
 | `budget_ref` | Budget constant from `src/perf/budgets.rs`, or `no-hot-path` with rationale. |
-| `primitive_kind` | One of `manifest-data`, `server-first-command`, `SDUI-state`, `SDUI/component-state`, `layout-state`, `renderer/decorator-data`, `configuration-data`, or `package-ui/state-data`. |
+| `primitive_kind` | One of `manifest-data`, `server-first-command`, `SDUI-state`, `SDUI/component-state`, `layout-state`, `renderer/decorator-data`, `configuration-data`, `package-ui/state-data`, `editor-state`, `protocol-data`, or `server-session`. |
 | `documentation_metadata` | Required docs/registry metadata for later implementation phases. |
 | `test_expectations` | Minimum coverage gate expected when implemented. |
 | `status` | `Exists`, `Extend`, `New`, or `Deferred`. |
@@ -34,11 +34,14 @@ All entries inherit the Phase 16 security baseline documented in `docs/reference
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | DocumentClassification | Match open documents to modes by extension, filename, shebang, MIME hint, or package-declared predicate metadata. | server | Server validates package-declared patterns and selects one classification result per document. | no-hot-path: evaluated on open/reload or explicit reclassification, not per keypress. | `clay:modes` | `serverRegisterModePattern` | `modes.serverRegisterModePattern` | Register Mode Pattern | `mode-registration` | `MODE_ACTIVATION_P95_BUDGET_MS` | configuration-data | API inventory entry, mode docs page, package provenance, supported pattern syntax. | Pattern validation, duplicate/conflict handling, extension/MIME matching, no filesystem scan beyond open document metadata. | New |
 | DocumentChunkTransfer | Internal protocol v27 head plus pull-based chunk transfer for initial, open, reload, resync, and persisted-document restore opens. | server->client | Server access-holder and version checks authorize each request; Tauri transports typed inert DTOs; client assembles presentation state only. | no-hot-path: bounded asynchronous transfer; no chunk request, rope slice, bridge wait, or assembly in typing, React render, CodeMirror transaction, paint, or layout handlers. | none (internal protocol) | none | none | Document Chunk Transfer | none; existing document access required | `MAX_CHUNK_BYTES`, `DEFAULT_MAX_FRAME_SIZE` | server-first-command | Protocol v27 message shapes, typed rejection reasons, source/test paths, bridge projection, and chunked-loading decision. | rkyv and serde round trips, pre-allocation frame bound, size clamp, UTF-8 boundary/range/version rejection, concatenation equality, exhaustive bridge family guards. | Exists |
+| BytePositionIndex | Incremental UTF-16 to UTF-8 position index shared by CodeMirror editor consumers. | client | The CodeMirror state field owns the current index; the server receives only validated byte offsets. | `ClientFirstPredictable`; update work is incremental and never rebuilds a document-sized line table per edit. | none | none | none | Incremental Editor Position Index | none | `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS`; no full-document per-edit rebuild | editor-state | `frontend/src/editor/position-index.ts`, position-map golden vectors, state-field installation, and shared-consumer documentation. | Differential Unicode/edit tests, bounded node work, shared-field ownership, long-line ceiling, no duplicate line-string cache. | Exists |
+| ViewportRenderPatch | Atomic request-scoped viewport render response containing ordered decoration, diagnostic, and fold members plus exact authoritative coverage. | server->client | The server validates request identity/version/range; Tauri forwards complete patches and the client applies inert members. | viewport/background update path; one request gets one complete, empty, or rejected answer and no patch assembly runs in input or paint. | none | none | none | Atomic Viewport Render Patch | none; internal transport only | `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, `DEFAULT_MAX_FRAME_SIZE` | protocol-data | Protocol v29 shapes, request/response status, covered-range distinction, ordered members, trace metadata, and bridge coalescing rules. | Codec/serde round trips, stale-id drop, explicit empty/rejected completion, member-order/isolation, oversized rejection, whole-patch-only coalescing. | Exists |
+| SyntaxSession | Per-document latest-wins syntax mailbox and worker boundary for native or package parser work. | server | `ParseCoordinator` owns session identity, generation/provenance checks, cancellation, publication, and the shared blocking executor. | `Background`; native CPU work uses four bounded blocking permits, JS handlers remain on the server runtime worker, and parsing never delays edit acknowledgement. | none | none | none | Per-document Syntax Session | `parse-document` for package handlers; native descriptors remain host-owned | `SYNTAX_EXECUTOR_MAX_JOBS`, `SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES`, `SYNTAX_CACHE_BUDGET_BYTES`, `MODE_ACTIVATION_CACHE_ENTRIES` | server-session | `src/server/syntax_session.rs`, `ParseCoordinator` session lifecycle, latest-wins mailbox, per-document parser state, and mode-cache handoff. | Tokio-starvation guard, latest-wins/close completion, independent-document progress, blocking permit bound, tree-cache bound, generation-stale rejection. | Exists |
 | MajorModeActivation | Activate exactly one major mode for a document and publish the selected behavior/rendering primitive set. | server->client | Server owns active mode selection; client installs only validated manifest/render declarations. | Server-first activation followed by atomic manifest install; no typing hot path work after activation. | `clay:modes` | `serverActivateMajorMode` | `modes.serverActivateMajorMode` | Activate Major Mode | `mode-activation` | `MODE_ACTIVATION_P95_BUDGET_MS`, `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` | server-first-command | API inventory entry, mode lifecycle docs, behavior version metadata. | Single-active-major invariant, stale activation rejection, manifest version update, activation latency budget compile/reference test. | New |
 | MinorModeActivation | Enable optional mode overlays compatible with the active major mode. | server->client | Server validates compatibility and conflict policy before composing manifests/declarations. | Activation/configuration path only; composed result must keep client-first behavior deterministic. | `clay:modes` | `serverActivateMinorMode` | `modes.serverActivateMinorMode` | Activate Minor Mode | `mode-activation` | `MODE_ACTIVATION_P95_BUDGET_MS`, `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` | server-first-command | API inventory entry, compatibility metadata, conflict docs. | Compatibility matrix tests, deterministic conflict order, no silent override of major-mode bindings. | Deferred |
 | KeyRoutingOverride | Package-declared key bindings and command routing overrides. | server->client | Server/configuration compiles inert keybinding rules; client routes installed rules only. | `ClientFirstPredictable` only for built-in deterministic edits; otherwise `ServerFirst`, `UiReactivePriority`, or `Background`. | `clay:keybindings` | `bindKey` | `keybindings.bindKey` | Bind Key | none for declarations; target command permission applies at execution | `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`, `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` | manifest-data | Existing keybinding docs plus package provenance/conflict metadata. | Existing bind/list/unbind tests plus package prefix conflict tests in Phase 17. | Exists/Extend |
 | TextTransform | Declarative auto-indent, pair insertion, list continuation, comment continuation, and transform rules. | server->client | Server publishes inert rules in behavior manifests; client executes only known transform engines. | `ClientFirstPredictable`; no JavaScript and no IPC before local paint. | `clay:behavior` | `getActiveBehaviorManifest` | `behavior.getActiveBehaviorManifest` | Get Active Behavior Manifest | none | `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES`, `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS`, `CLIENT_EDIT_PAYLOAD_BUDGET_BYTES` | manifest-data | Behavior manifest docs, rule kind docs, examples for Enter/Tab/pair/list continuation. | Manifest validation, local edit latency invariant, Markdown list/code-block fixtures when added. | Exists/Extend |
-| IncrementalParseUpdate | Background parser registration, bounded parse-window snapshots, and parse result publication for document versions. | server | Server schedules package parse work through server-side JavaScript runtime and validates results/window snapshots before publication. | `Background`; cancellable and viewport-prioritized, never blocks `ClientFirstPredictable` input. | `clay:parse` | `serverRegisterParseHandler` | `parse.serverRegisterParseHandler` | Register Parse Handler | `parse-document` | `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES`, `SYNTAX_CACHE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` | renderer/decorator-data | API inventory entry, parse lifecycle docs, parse-window schema, result schema, timeout/cancel metadata. | Cancellation, stale version discard, parse-window bounds, memory-budget validation, payload bound, viewport filtering, no client JavaScript. | New |
+| IncrementalParseUpdate | Background parser registration, bounded parse-window snapshots, and parse result publication for document versions. | server | Server schedules native and package parse work through per-document `SyntaxSession` workers and validates results/window snapshots before publication. | `Background`; cancellable and viewport-prioritized, never blocks `ClientFirstPredictable` input. | `clay:parse` | `serverRegisterParseHandler` | `parse.serverRegisterParseHandler` | Register Parse Handler | `parse-document` | `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES`, `SYNTAX_CACHE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` | renderer/decorator-data | API inventory entry, parse lifecycle docs, parse-window schema, result schema, timeout/cancel metadata. | Cancellation, stale version discard, parse-window bounds, memory-budget validation, payload bound, viewport filtering, no client JavaScript. | New |
 | DecorationRange | Syntax, semantic, diagnostic, search, link, and inlay spans over byte ranges. Link targets and inlay labels are optional inert payloads. | server->client | Server accepts package-produced spans only after schema, version, range, target/payload, and decoration-budget validation; client renders and activates only through Clay-owned paths. | `Background`/viewport update path; client render and visible-span hit-test use inert data in paint/pointer without package code. | `clay:decorations` | `serverPublishDecorations` | `decorations.serverPublishDecorations` | Publish Decorations | `render-decorations` | `DECORATION_PAYLOAD_BUDGET_BYTES`, `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS` | renderer/decorator-data | API inventory entry, closed kind/style vocabulary, Link target and InlayHint payload docs, priority/provenance metadata, typed decoration-intent ownership. | Payload/label/target ceilings, stale document version rejection, viewport-only update tests, display-only/external link denial, no client-JS or callback path. | Exists/Extend |
 | DiagnosticSpan | Versioned, viewport-bounded, source-keyed range diagnostics with severity, code, message, and provenance; rendered as theme-owned inline squiggles without overloading `RuntimeDiagnostic` or `DecorationSpan`. | server->client | Server validates explicit analyzer diagnostic sets; client retains near-viewport chunks and paints severity styles from `StyleRegistry`. | `Background`/viewport update path; rendering uses cached inert spans and shaped line geometry with no package code. | `clay:diagnostics` | `serverPublishDiagnostics` | `diagnostics.serverPublishDiagnostics` | Publish Diagnostics | `render-decorations` | `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_MAX_SPANS_PER_SET`, `DIAGNOSTIC_CACHE_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS` | renderer/decorator-data | `diagnostics.md`, diagnostics API docs/inventory, analyzer authority separation, source replacement, additive squiggle paint. | Payload/count/field bounds, stale/version/viewport rejection, empty-source clear, analyzer-only publication, no-hot-path and no-language-branch guards. | Exists |
 | SemanticTypographyRole | Select user-owned monospace, proportional, or UI typography profiles for mode defaults, eligible syntax/semantic ranges, and text-bearing package components without exposing concrete fonts. | server->client | Users own complete concrete profiles through `theme.setTypography`; server validates package semantic role declarations and client resolves installed stacks/metrics. | Load/activation/background publication installs bounded inert roles; paint/input/layout use cached `TypographyRegistry` state with no package JavaScript, IPC, filesystem/network access, or font discovery. | `clay:modes`, `clay:decorations`, `clay:syntax`, `clay:ui` | existing registration/publication APIs | existing stable IDs; no separate package typography setter | Semantic Typography Role | none for inert roles; enclosing primitive permission applies | `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS` | manifest-data/renderer/decorator-data/SDUI/component-state | `typography.md`, package guide, mode/range/component role schemas, user configuration API link, fallback/invalidation/security rules. | Role/default propagation, layer authorization, UTF-8/range failure closure, component-kind gate, named-family fallback, cache invalidation, UI paint/hit/accessibility scaling, no-hot-path guards. | Exists |
@@ -107,7 +110,46 @@ Phase 18.9 reuses these existing kinds for `core.text`/`core.code` fallback beha
 
 ### IncrementalParseUpdate
 
-Package parsers run server-side in the constrained JavaScript runtime as cancellable background work. Results carry document versions and are discarded if stale. Large-file handlers receive only validated `ParseWindowSnapshot` text slices selected from viewport/invalidated ranges, bounded by `ParsePolicy` and `SYNTAX_CACHE_BUDGET_BYTES`. For consecutive versions, `ParseInputEdit` preserves exact old/new byte and point coordinates against a stable window; incompatible cache state falls back to one bounded full parse. A native handler performs one parse/capture pass per accepted version/window and returns `IncrementalParseUpdate::decoration_updates`, whose independently bounded members are validated atomically. The client keeps the last validated decoration/fold state and interpolates inert decoration spans when parsing lags behind edits.
+Registered package parsers run server-side in the constrained JavaScript runtime as cancellable background work; native Tree-sitter handlers use the same validated notification/update contract through per-document `SyntaxSession` workers. Results carry document versions and are discarded if stale. Large-file handlers receive only validated `ParseWindowSnapshot` text slices selected from viewport/invalidated ranges, bounded by `ParsePolicy` and `SYNTAX_CACHE_BUDGET_BYTES`. For consecutive versions, `ParseInputEdit` preserves exact old/new byte and point coordinates against a stable window; incompatible cache state falls back to one bounded full parse. One selected handler performs one parse/capture pass per accepted version/window and returns `IncrementalParseUpdate::decoration_updates`, whose independently bounded members are validated atomically. The client keeps the last validated decoration/fold state and applies current output through the atomic viewport patch path when parsing lags behind edits.
+
+### BytePositionIndex
+
+`BytePositionIndex` is an internal client editor primitive, not a package API.
+`bytePositionField` builds numeric UTF-16/UTF-8 line widths once for the
+current CodeMirror `Text` and path-copies only changed whole-line chunks on
+subsequent transactions. A 64-line leaf chunk stores `Uint32Array` widths and
+phantom-newline weights; no line text is retained in the index. Edit emission,
+viewport conversion, decoration/diagnostic/fold projection, completion,
+intelligence, and selection conversion read the same field. A long single line
+still has an O(line) intra-line scan ceiling, documented separately from the
+bounded document-sized update work.
+
+### ViewportRenderPatch
+
+`ViewportRenderPatch` is the protocol v29 internal response to
+`ViewportRenderRequest`. The request carries client/document/version identity,
+visible UTF-8 byte bounds, a monotonic request ID, and an optional numeric
+trace ID; it never carries document text. The server clamps and validates the
+range, then returns exactly one `Complete`, `Empty`, or `Rejected` patch. A
+complete patch contains ordered validated decoration, diagnostic, and fold
+members plus `covered_ranges` derived from output, not from wider parser
+context. The Tauri forwarder coalesces only obsolete whole patches per document;
+client state applies all members in one transaction. No package can forge a
+request completion or inspect this internal transport.
+
+### SyntaxSession
+
+`SyntaxSession` is the server-side scheduler boundary implemented in
+`src/server/syntax_session.rs` and owned by `ParseCoordinator`. Each
+(generation, document, grammar) session has one latest-wins mailbox and one
+worker. Superseded queued jobs are returned for request completion; a running
+job is allowed to finish but its stale output is discarded. Native handlers
+acquire a shared `SYNTAX_EXECUTOR_MAX_JOBS = 4` permit and run on
+`spawn_blocking`; each document's parser/tree state is independent. The
+Tree-sitter state cache retains at most 64 document states, while completed
+mode activations retain at most 64 entries per runtime generation. Closing,
+reloading, or replacing a generation closes sessions and prevents stale
+publication.
 
 ### DecorationRange
 
@@ -236,9 +278,11 @@ Rejected shapes for these rows: per-package Rust APIs or per-language branches (
 - Runtime parse, completion, and command work executes server-side and asynchronously; the client receives validated data or server-routed intents only.
 - Shell/layout primitives must reject raw `Deno.core.ops`, native widget handles, direct renderer mutation, raw CSS, client-side JavaScript, renderer callbacks, duplicate slot/component/action IDs, unregistered action targets, unknown theme tokens, unsupported state scopes, hidden layout configuration keys, and oversize layout/component/state payloads with deterministic diagnostics.
 
-## Budget Constants Proposed by This Registry
+## Budget Constants and current implementation bounds
 
-The following advisory constants are added to `src/perf/budgets.rs` so later implementation phases can compile against stable names before hard CI thresholds are enabled:
+The registry names the following bounds. They are implemented in
+`src/perf/budgets.rs` or `src/protocol/codec.rs`; machine-variant timings remain
+advisory, while payload, queue, ownership, and stale-result checks are blocking:
 
 ```rust
 pub const DECORATION_PAYLOAD_BUDGET_BYTES: usize = 8192;
@@ -248,13 +292,25 @@ pub const MODE_ACTIVATION_P95_BUDGET_MS: u64 = 100;
 pub const COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES: usize = 16 * 1024;
 pub const FOLDING_RANGE_PAYLOAD_BUDGET_BYTES: usize = 2048;
 pub const PRIMITIVES_REGISTRY_VERSION: &str = "phase16-primitives-v1";
+pub const SYNTAX_EXECUTOR_MAX_JOBS: usize = 4;
+pub const SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES: usize = 64;
+pub const MODE_ACTIVATION_CACHE_ENTRIES: usize = 64;
+pub const MAX_CHUNK_BYTES: usize = 256 * 1024;
+pub const NATIVE_GRAMMAR_MAX_WINDOW_BYTES: usize = 3 * MAX_CHUNK_BYTES;
+pub const DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 ```
 
-These constants are advisory in Phase 16. Later phases may promote representative payload and latency checks to hard failures after concrete protocol messages exist.
+`PERF_SNAPSHOT_CAPACITY = 4096` is the separate content-free developer trace
+bound in `src/perf/metrics.rs`; it is disabled by default. The current
+protocol ceiling is `DEFAULT_MAX_FRAME_SIZE = 1 MiB`. Timing targets such as
+`KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS = 16`,
+`EDIT_ACK_P95_BUDGET_MS = 40`, and
+`SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS = 16` remain machine/device
+measurement gates rather than user configuration knobs.
 
-## Required Implementation Follow-Up
+## Current Implementation Follow-Up
 
-- Add planned Clay JS API inventory stubs for new Phase 17/18 APIs after the backlog task chooses priority; Phase 18.1/18.2 shell/layout stubs live in `docs/reference/clay-js-api/api-inventory.toml` with `status = "planned"`, `registry_public = false`, and `documentation_path = "docs/reference/primitives/shell-layout-strategy.md"` until public `clay:ui` facade/op/reference-doc/registry APIs are implemented.
-- Add `docs/reference/clay-js-api/` Markdown pages only when the APIs move from planned stubs to implementation-ready public surfaces.
-- Add protocol messages for decoration/folding/parse updates only in implementation phases; this registry intentionally does not change runtime behavior.
-- Keep this document linked from `docs/index.md` and the future `docs/reference/primitives/index.md` navigation page.
+- Keep `BytePositionIndex`, `ViewportRenderPatch`, and `SyntaxSession` internal; none is a Clay JS API or a package authority grant.
+- Keep public package behavior on the documented `parse`, `syntax`, `decorations`, `diagnostics`, and `folding` facades. Do not add scheduler, parser-handle, trace-content, or patch-completion APIs without a separate extensibility decision.
+- Update the relevant registry row, source/test path, and deterministic documentation guard whenever a bound or ownership rule changes.
+- Keep this document linked from `docs/index.md` and `docs/reference/primitives/index.md`.

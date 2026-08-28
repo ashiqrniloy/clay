@@ -422,6 +422,7 @@ mod tests {
                     package_prefix: "markdown".to_string(),
                 },
             )],
+            trace_id: None,
         }
     }
 

@@ -7,7 +7,7 @@ use std::{
     time::Instant,
 };
 
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::sync::mpsc;
 
 use crate::{
     packages::{permissions::PackagePermission, record::PackageRecord},
@@ -18,8 +18,8 @@ use crate::{
         },
         metrics::{
             MetricMetadata, MetricValue, PerfRecorder, SYNTAX_CANCELLED_SUPERSEDED,
-            SYNTAX_DECORATION_CHUNKS, SYNTAX_EDIT_TO_PUBLISH, SYNTAX_LOGICAL_WORK_ITEMS,
-            global_recorder,
+            SYNTAX_DECORATION_CHUNKS, SYNTAX_EDIT_TO_PUBLISH, SYNTAX_END,
+            SYNTAX_LOGICAL_WORK_ITEMS, SYNTAX_QUEUE, SYNTAX_START, global_recorder,
         },
     },
     protocol::{
@@ -27,7 +27,11 @@ use crate::{
         ParseByteRange, ParseEditNotification, ParseInputEdit, ParsePoint, ParsePolicy, ParseUnit,
         ParseWindowSnapshot, RuntimeDiagnostic, SyntaxMemoryBudget,
     },
-    server::{decorations::validate_decoration_set, diagnostics::validate_diagnostic_set},
+    server::{
+        decorations::validate_decoration_set,
+        diagnostics::validate_diagnostic_set,
+        syntax_session::{self, SyntaxExecutor},
+    },
 };
 
 pub type ParseHandlerFuture =
@@ -39,6 +43,24 @@ pub type ParseHandlerFuture =
 /// client never receives or executes parser code.
 pub trait ParseHandler: Send + Sync + 'static {
     fn parse(&self, notification: ParseEditNotification) -> ParseHandlerFuture;
+
+    /// Plan 099: synchronous CPU-bound parse for handlers that must run on
+    /// the bounded blocking executor instead of a Tokio worker thread. Return
+    /// `None` when the handler is async-only (package JavaScript); the
+    /// session worker then awaits [`ParseHandler::parse`] normally.
+    fn parse_blocking(
+        &self,
+        _notification: ParseEditNotification,
+    ) -> Option<Result<IncrementalParseUpdate, ParseCoordinatorError>> {
+        None
+    }
+
+    /// Whether this handler's CPU-bound work must stay off the async runtime.
+    /// Blocking handlers run inside per-document syntax sessions on the
+    /// shared bounded blocking executor.
+    fn runs_on_blocking_executor(&self) -> bool {
+        false
+    }
 
     /// Plan 071 task 10: read-only tree-sitter text-object/smart-select byte
     /// ranges for one selection query. Default `None` = this handler cannot
@@ -153,6 +175,12 @@ pub struct ParseScheduleRequest {
     pub viewport: ParseByteRange,
     pub invalidated_ranges: Vec<ParseByteRange>,
     pub accepted_edit: Option<ParseInputEdit>,
+    pub trace_id: Option<crate::protocol::PerformanceTraceId>,
+    /// Viewport-render request identity for atomic patch aggregation.
+    pub request_id: Option<crate::protocol::ViewportRequestId>,
+    /// Owning client for request-scoped parses (see
+    /// `IncrementalParseUpdate::client_id`).
+    pub client_id: Option<crate::protocol::ClientId>,
 }
 
 impl ParseScheduleRequest {
@@ -178,6 +206,8 @@ impl ParseScheduleRequest {
             accepted_edit: self.accepted_edit,
             parse_windows: Vec::new(),
             memory_budget: None,
+            trace_id: self.trace_id,
+            request_id: self.request_id,
         }
     }
 }
@@ -195,6 +225,8 @@ pub struct ParseCoordinatorStats {
 pub struct ParseCoordinator {
     inner: Arc<Mutex<ParseCoordinatorInner>>,
     perf: PerfRecorder,
+    /// Bounded blocking executor shared by every per-document syntax session.
+    syntax_executor: syntax_session::SyntaxExecutor,
     updates_tx: mpsc::Sender<IncrementalParseUpdate>,
     updates_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<IncrementalParseUpdate>>>,
     diagnostics_tx: mpsc::Sender<RuntimeDiagnostic>,
@@ -205,7 +237,15 @@ struct ParseCoordinatorInner {
     handlers: HashMap<HandlerKey, RegisteredParseHandler>,
     active_tasks: HashMap<TaskKey, ActiveParseTask>,
     current_versions: HashMap<DocumentId, DocumentVersion>,
-    accepted_native_edits: HashMap<DocumentId, (DocumentVersion, Instant, bool)>,
+    accepted_native_edits: HashMap<
+        DocumentId,
+        (
+            DocumentVersion,
+            Instant,
+            bool,
+            Option<crate::protocol::PerformanceTraceId>,
+        ),
+    >,
     stats: ParseCoordinatorStats,
     /// Plan 060 T4 (P0-3): per-connection authorized subscriptions. Document
     /// updates route only to connections that opened the document; sanitized
@@ -214,10 +254,21 @@ struct ParseCoordinatorInner {
     diagnostics_router: crate::server::output_router::OutputRouter<RuntimeDiagnostic>,
 }
 
+/// Plan 099: one persistent per-document syntax session. Unlike the old
+/// per-task spawn, the entry (mailbox + worker) survives job completion until
+/// the document closes, the grammar generation changes, or the package is
+/// revoked; every schedule enqueues into the mailbox latest-wins.
 struct ActiveParseTask {
-    handle: JoinHandle<()>,
+    mailbox: Arc<syntax_session::SessionMailbox>,
+    /// Latest scheduled version (the version a finishing job is compared
+    /// against to detect supersession).
     document_version: DocumentVersion,
     native_edit: bool,
+    /// Latest scheduled viewport-render request identity, plus its owning
+    /// client, so a superseded pending job can publish an empty completion
+    /// and keep the connection's pending-patch counter exact.
+    request_id: Option<crate::protocol::ViewportRequestId>,
+    request_client_id: Option<crate::protocol::ClientId>,
 }
 
 struct RegisteredParseHandler {
@@ -260,6 +311,7 @@ impl ParseCoordinator {
                 diagnostics_router: crate::server::output_router::OutputRouter::default(),
             })),
             perf: global_recorder(),
+            syntax_executor: SyntaxExecutor::new(),
             updates_tx,
             updates_rx: Arc::new(tokio::sync::Mutex::new(updates_rx)),
             diagnostics_tx,
@@ -396,7 +448,7 @@ impl ParseCoordinator {
             })
             .cloned()
             .collect();
-        abort_tasks(&mut inner, stale_task_keys, &self.perf);
+        close_sessions(&mut inner, stale_task_keys, &self.perf, &self.updates_tx);
         inner.handlers.insert(
             key,
             RegisteredParseHandler {
@@ -438,7 +490,7 @@ impl ParseCoordinator {
             .filter(|task_key| task_key.generation_id == generation_id)
             .cloned()
             .collect();
-        abort_tasks(&mut inner, task_keys, &self.perf);
+        close_sessions(&mut inner, task_keys, &self.perf, &self.updates_tx);
     }
 
     /// After a successful runtime-generation commit, remove every handler and
@@ -455,7 +507,7 @@ impl ParseCoordinator {
             .filter(|task_key| task_key.generation_id < active_generation)
             .cloned()
             .collect();
-        abort_tasks(&mut inner, task_keys, &self.perf);
+        close_sessions(&mut inner, task_keys, &self.perf, &self.updates_tx);
         drop(inner);
         self.drain_pending_outputs();
     }
@@ -473,7 +525,7 @@ impl ParseCoordinator {
             .filter(|task_key| task_key.document_id == document_id)
             .cloned()
             .collect();
-        abort_tasks(&mut inner, task_keys, &self.perf);
+        close_sessions(&mut inner, task_keys, &self.perf, &self.updates_tx);
     }
 
     /// Cancel parse handlers and active work owned by one package prefix. This
@@ -490,7 +542,7 @@ impl ParseCoordinator {
             .filter(|task_key| task_key.package_prefix == package_prefix)
             .cloned()
             .collect();
-        abort_tasks(&mut inner, task_keys, &self.perf);
+        close_sessions(&mut inner, task_keys, &self.perf, &self.updates_tx);
     }
 
     /// Drop already-queued parse updates/diagnostics without waiting. Used by
@@ -526,10 +578,11 @@ impl ParseCoordinator {
         generations
     }
 
-    pub(crate) fn record_native_edit_accepted(
+    pub(crate) fn record_native_edit_accepted_with_trace(
         &self,
         document_id: DocumentId,
         document_version: DocumentVersion,
+        trace_id: Option<crate::protocol::PerformanceTraceId>,
     ) {
         if !self.perf.is_enabled() {
             return;
@@ -538,11 +591,14 @@ impl ParseCoordinator {
             .lock()
             .expect("parse coordinator lock poisoned")
             .accepted_native_edits
-            .insert(document_id, (document_version, Instant::now(), false));
+            .insert(
+                document_id,
+                (document_version, Instant::now(), false, trace_id),
+            );
         self.perf.record_with_metadata(
             SYNTAX_LOGICAL_WORK_ITEMS,
             MetricValue::Counter { amount: 1 },
-            MetricMetadata::document(document_id, document_version),
+            MetricMetadata::document(document_id, document_version).with_trace_id(trace_id),
         );
     }
 
@@ -554,7 +610,8 @@ impl ParseCoordinator {
         {
             return;
         }
-        let metadata = MetricMetadata::document(update.document_id, update.document_version);
+        let metadata = MetricMetadata::document(update.document_id, update.document_version)
+            .with_trace_id(update.trace_id);
         if !update.decoration_updates.is_empty() {
             self.perf.record_with_metadata(
                 SYNTAX_DECORATION_CHUNKS,
@@ -569,7 +626,7 @@ impl ParseCoordinator {
             inner
                 .accepted_native_edits
                 .get_mut(&update.document_id)
-                .and_then(|(version, started, published)| {
+                .and_then(|(version, started, published, _trace_id)| {
                     if *version == update.document_version && !*published {
                         *published = true;
                         Some(*started)
@@ -618,15 +675,20 @@ impl ParseCoordinator {
             package_prefix: request.package_prefix.clone(),
             mode_id: request.mode_id.clone(),
         };
-        let window_id = parse_windows.first().map(|window| window.window_id);
+        // Plan 099: one session per document/grammar — the window identity
+        // rides on the job, not the session, so every viewport change coalesces
+        // into the same mailbox.
         let task_key = TaskKey {
             generation_id: 0,
             document_id: request.document_id,
             package_prefix: request.package_prefix.clone(),
             mode_id: request.mode_id.clone(),
-            window_id: window_id.or(Some(request.viewport.start)),
+            window_id: None,
         };
+        let request_client_id = request.client_id;
         let mut notification = request.into_notification();
+        let request_id = notification.request_id;
+        let queued_at = Instant::now();
         if let Some(policy) = policy {
             notification.memory_budget =
                 Some(SyntaxMemoryBudget::new(policy.memory_budget_bytes, 0));
@@ -648,55 +710,69 @@ impl ParseCoordinator {
                 ..task_key
             };
 
-            if inner
-                .active_tasks
-                .get(&task_key)
-                .is_some_and(|task| task.document_version == notification.document_version)
-            {
+            if let Some(session) = inner.active_tasks.get_mut(&task_key) {
+                // Request-scoped schedules are idempotent per request id;
+                // edit/viewport schedules without a request id always
+                // enqueue (two same-version viewports are distinct jobs).
+                if session.document_version == notification.document_version
+                    && notification.request_id.is_some()
+                    && session.request_id == notification.request_id
+                {
+                    return Ok(());
+                }
+                if session.document_version > notification.document_version {
+                    return Err(ParseCoordinatorError::StaleDocumentVersion {
+                        result_version: notification.document_version,
+                        current_version: session.document_version,
+                    });
+                }
+                // Plan 099: the session stays alive; the newer job replaces
+                // the pending one latest-wins and the worker picks it up when
+                // its current job finishes. A superseded pending viewport
+                // request must still receive its empty completion so the
+                // requesting connection's pending-patch counter reaches zero.
+                let superseded =
+                    session
+                        .mailbox
+                        .push(notification.clone(), request_client_id, Instant::now());
+                if let Some(pending) = superseded {
+                    publish_request_completion(&self.updates_tx, &task_key, &pending);
+                }
+                if session.native_edit {
+                    record_superseded_cancellation(
+                        &self.perf,
+                        task_key.document_id,
+                        session.document_version,
+                    );
+                }
+                session.document_version = notification.document_version;
+                session.request_id = notification.request_id;
+                session.request_client_id = request_client_id;
+                inner.stats.scheduled_tasks += 1;
                 return Ok(());
             }
-            if let Some(current_version) = inner.current_versions.get(&notification.document_id)
-                && *current_version > notification.document_version
-            {
-                return Err(ParseCoordinatorError::StaleDocumentVersion {
-                    result_version: notification.document_version,
-                    current_version: *current_version,
-                });
-            }
-            inner
-                .current_versions
-                .insert(notification.document_id, notification.document_version);
-            let superseded = inner
-                .active_tasks
-                .iter()
-                .filter(|(key, task)| {
-                    key.generation_id == task_key.generation_id
-                        && key.document_id == task_key.document_id
-                        && key.package_prefix == task_key.package_prefix
-                        && key.mode_id == task_key.mode_id
-                        && (*key == &task_key
-                            || task.document_version < notification.document_version)
-                })
-                .map(|(key, _)| key.clone())
-                .collect();
-            abort_tasks(&mut inner, superseded, &self.perf);
             let native_edit = inner
                 .accepted_native_edits
                 .get(&notification.document_id)
-                .is_some_and(|(version, _, _)| *version == notification.document_version);
+                .is_some_and(|(version, _, _, _)| *version == notification.document_version);
             inner.stats.scheduled_tasks += 1;
             (handler, task_key, native_edit)
         };
 
+        // Plan 099: one persistent per-document session instead of a spawned
+        // task per parse. The worker drains the latest-wins mailbox, runs
+        // blocking handlers on the bounded executor, and publishes exactly
+        // one validated update per job through `finish_task`.
+        let mailbox = Arc::new(syntax_session::SessionMailbox::new());
+        mailbox.push(notification.clone(), request_client_id, queued_at);
         let coordinator = self.clone();
-        let spawned_task_key = task_key.clone();
-        let (start_tx, start_rx) = tokio::sync::oneshot::channel();
-        let task = tokio::spawn(async move {
-            if start_rx.await.is_err() {
-                return;
-            }
-            let result = handler.parse(notification).await;
-            coordinator.finish_task(spawned_task_key, notification_document_version, result);
+        let executor = self.syntax_executor.clone();
+        let session_task_key = task_key.clone();
+        let worker_mailbox = Arc::clone(&mailbox);
+        tokio::spawn(async move {
+            coordinator
+                .run_session(session_task_key, handler, worker_mailbox, executor)
+                .await;
         });
 
         self.inner
@@ -706,54 +782,161 @@ impl ParseCoordinator {
             .insert(
                 task_key,
                 ActiveParseTask {
-                    handle: task,
+                    mailbox,
                     document_version: notification_document_version,
                     native_edit,
+                    request_id,
+                    request_client_id,
                 },
             );
-        let _ = start_tx.send(());
         Ok(())
+    }
+
+    /// Session worker body: drain the latest-wins mailbox job by job. Native
+    /// CPU-bound handlers run on the bounded blocking executor; package
+    /// JavaScript handlers await on the normal runtime. The worker exits when
+    /// its mailbox is closed (document close, package revoke, generation
+    /// reload) and publishes each job's terminal state through `finish_task`.
+    async fn run_session(
+        self,
+        task_key: TaskKey,
+        handler: Arc<dyn ParseHandler>,
+        mailbox: Arc<syntax_session::SessionMailbox>,
+        executor: syntax_session::SyntaxExecutor,
+    ) {
+        let mut receiver = mailbox.receiver();
+        while let Some(job) = receiver.recv().await {
+            let notification = job.notification;
+            let job_version = notification.document_version;
+            let trace_id = notification.trace_id;
+            let request_id = notification.request_id;
+            let client_id = job.client_id;
+            let metadata = MetricMetadata::document(notification.document_id, job_version)
+                .with_trace_id(trace_id);
+            self.perf.record_with_metadata(
+                SYNTAX_QUEUE,
+                MetricValue::Duration {
+                    nanos: job.queued_at.elapsed().as_nanos(),
+                },
+                metadata.clone(),
+            );
+            self.perf.record_with_metadata(
+                SYNTAX_START,
+                MetricValue::Counter { amount: 1 },
+                metadata.clone(),
+            );
+            let parse_scope = self.perf.scope_with_metadata(SYNTAX_END, metadata);
+            let mut result = if handler.runs_on_blocking_executor() {
+                let permit = executor.acquire().await;
+                let handler = Arc::clone(&handler);
+                match tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    handler
+                        .parse_blocking(notification)
+                        .expect("blocking handlers must implement parse_blocking")
+                })
+                .await
+                {
+                    Ok(result) => result,
+                    Err(join_error) => Err(ParseCoordinatorError::HandlerFailed(format!(
+                        "syntax session worker join: {join_error}"
+                    ))),
+                }
+            } else {
+                handler.parse(notification).await
+            };
+            if let Ok(update) = &mut result {
+                update.trace_id = trace_id;
+                update.request_id = request_id;
+                update.client_id = client_id;
+                for set in &mut update.decoration_updates {
+                    set.trace_id = trace_id;
+                }
+            }
+            parse_scope.finish();
+            self.finish_task(task_key.clone(), job_version, request_id, client_id, result);
+        }
     }
 
     fn finish_task(
         &self,
         task_key: TaskKey,
         task_version: DocumentVersion,
+        request_id: Option<crate::protocol::ViewportRequestId>,
+        request_client_id: Option<crate::protocol::ClientId>,
         result: Result<IncrementalParseUpdate, ParseCoordinatorError>,
     ) {
-        if self
-            .inner
-            .lock()
-            .expect("parse coordinator lock poisoned")
-            .active_tasks
-            .get(&task_key)
-            .is_none_or(|task| task.document_version != task_version)
-        {
+        // Plan 099: the session entry persists across jobs, so a version
+        // mismatch here means this job was superseded (or its session was
+        // closed) — the job's output is stale and must not publish, but a
+        // request-scoped job still owes the connection its empty completion.
+        let superseded_or_closed = {
+            let inner = self.inner.lock().expect("parse coordinator lock poisoned");
+            match inner.active_tasks.get(&task_key) {
+                None => true,
+                Some(task) => task.document_version != task_version,
+            }
+        };
+        if superseded_or_closed {
+            self.publish_completion_if_requested(
+                &task_key,
+                task_version,
+                request_id,
+                request_client_id,
+            );
+            self.inner
+                .lock()
+                .expect("parse coordinator lock poisoned")
+                .stats
+                .stale_results_rejected += 1;
             return;
         }
+        // Every terminal path of a request-scoped task must publish exactly
+        // one update carrying the request id (empty on failure) so the
+        // connection's pending-patch counter always reaches zero.
+        let completion = |coordinator: &Self| {
+            let Some(request_id) = request_id else { return };
+            let _ = coordinator.updates_tx.try_send(IncrementalParseUpdate {
+                document_id: task_key.document_id,
+                document_version: task_version,
+                behavior_version: 0,
+                package_prefix: task_key.package_prefix.clone(),
+                mode_id: task_key.mode_id.clone(),
+                parse_unit: ParseUnit::Region,
+                viewport: ParseByteRange::new(0, 0),
+                invalidated_ranges: Vec::new(),
+                syntax_tree_delta: None,
+                decoration_updates: Vec::new(),
+                diagnostic_update: None,
+                folding_update: None,
+                trace_id: None,
+                request_id: Some(request_id),
+                client_id: request_client_id,
+            });
+        };
         let Ok(update) = result else {
             let error = result.expect_err("parse result error present");
             let diagnostic = parse_failure_diagnostic(&task_key, &error);
             let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
-            inner.active_tasks.remove(&task_key);
             inner.stats.failed_tasks += 1;
             inner.diagnostics_router.broadcast(&diagnostic);
             drop(inner);
             let _ = self.diagnostics_tx.try_send(diagnostic);
+            completion(self);
             return;
         };
 
         if self.validate_task_generation(&task_key).is_err() {
             let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
-            inner.active_tasks.remove(&task_key);
             inner.stats.stale_results_rejected += 1;
+            drop(inner);
+            completion(self);
             return;
         }
 
         match self.validate_update(&update) {
             Ok(()) => {
                 let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
-                inner.active_tasks.remove(&task_key);
                 inner.stats.published_updates += 1;
                 inner
                     .updates_router
@@ -764,19 +947,41 @@ impl ParseCoordinator {
             }
             Err(ParseCoordinatorError::StaleDocumentVersion { .. }) => {
                 let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
-                inner.active_tasks.remove(&task_key);
                 inner.stats.stale_results_rejected += 1;
+                drop(inner);
+                completion(self);
             }
             Err(error) => {
                 let diagnostic = parse_failure_diagnostic(&task_key, &error);
                 let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
-                inner.active_tasks.remove(&task_key);
                 inner.stats.failed_tasks += 1;
                 inner.diagnostics_router.broadcast(&diagnostic);
                 drop(inner);
                 let _ = self.diagnostics_tx.try_send(diagnostic);
+                completion(self);
             }
         }
+    }
+
+    /// Publish the empty completion update a request-scoped job owes the
+    /// connection whenever its output cannot publish (superseded, session
+    /// closed, failed, stale) so the pending-patch counter reaches zero.
+    fn publish_completion_if_requested(
+        &self,
+        task_key: &TaskKey,
+        task_version: DocumentVersion,
+        request_id: Option<crate::protocol::ViewportRequestId>,
+        request_client_id: Option<crate::protocol::ClientId>,
+    ) {
+        let Some(request_id) = request_id else {
+            return;
+        };
+        let _ = self.updates_tx.try_send(empty_request_completion(
+            task_key,
+            task_version,
+            request_id,
+            request_client_id,
+        ));
     }
 
     fn validate_task_generation(&self, task_key: &TaskKey) -> Result<(), ParseCoordinatorError> {
@@ -935,16 +1140,73 @@ fn parse_failure_diagnostic(
     )
 }
 
-fn abort_tasks(inner: &mut ParseCoordinatorInner, task_keys: Vec<TaskKey>, perf: &PerfRecorder) {
+/// Plan 099: close sessions instead of aborting parse work. The mailbox is
+/// closed (pending job dropped with its request completion) and the worker
+/// exits gracefully after its current job; that job's output is discarded by
+/// `finish_task` because the session entry is gone, and its request-scoped
+/// completion still publishes. Stale output can never publish after close.
+fn close_sessions(
+    inner: &mut ParseCoordinatorInner,
+    task_keys: Vec<TaskKey>,
+    perf: &PerfRecorder,
+    updates_tx: &mpsc::Sender<IncrementalParseUpdate>,
+) {
     for task_key in task_keys {
         if let Some(task) = inner.active_tasks.remove(&task_key) {
-            task.handle.abort();
+            if let Some(pending) = task.mailbox.close() {
+                publish_request_completion(updates_tx, &task_key, &pending);
+            }
             if task.native_edit {
                 record_superseded_cancellation(perf, task_key.document_id, task.document_version);
             }
             inner.stats.cancelled_superseded_tasks += 1;
         }
     }
+}
+
+/// The one empty terminal update a request-scoped job publishes when it can
+/// never deliver real members.
+#[allow(clippy::too_many_arguments)]
+fn empty_request_completion(
+    task_key: &TaskKey,
+    task_version: DocumentVersion,
+    request_id: crate::protocol::ViewportRequestId,
+    client_id: Option<crate::protocol::ClientId>,
+) -> IncrementalParseUpdate {
+    IncrementalParseUpdate {
+        document_id: task_key.document_id,
+        document_version: task_version,
+        behavior_version: 0,
+        package_prefix: task_key.package_prefix.clone(),
+        mode_id: task_key.mode_id.clone(),
+        parse_unit: ParseUnit::Region,
+        viewport: ParseByteRange::new(0, 0),
+        invalidated_ranges: Vec::new(),
+        syntax_tree_delta: None,
+        decoration_updates: Vec::new(),
+        diagnostic_update: None,
+        folding_update: None,
+        trace_id: None,
+        request_id: Some(request_id),
+        client_id,
+    }
+}
+
+/// Complete a superseded pending request-scoped job at schedule time.
+fn publish_request_completion(
+    updates_tx: &mpsc::Sender<IncrementalParseUpdate>,
+    task_key: &TaskKey,
+    pending: &syntax_session::SessionJob,
+) {
+    let Some(request_id) = pending.notification.request_id else {
+        return;
+    };
+    let _ = updates_tx.try_send(empty_request_completion(
+        task_key,
+        pending.notification.document_version,
+        request_id,
+        pending.client_id,
+    ));
 }
 
 fn record_superseded_cancellation(
@@ -1121,13 +1383,14 @@ mod tests {
         perf::metrics::PerfRecorder,
         protocol::{DecorationSet, FoldingRangeSet, ParseUnit},
     };
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn accepted_native_edit_records_one_logical_item_and_one_latency_sample() {
         let perf = PerfRecorder::for_test(true);
         let mut coordinator = ParseCoordinator::new();
         coordinator.perf = perf.clone();
-        coordinator.record_native_edit_accepted(7, 2);
+        coordinator.record_native_edit_accepted_with_trace(7, 2, Some(41));
         let update = IncrementalParseUpdate {
             document_id: 7,
             document_version: 2,
@@ -1146,9 +1409,13 @@ mod tests {
                 viewport_byte_start: 0,
                 viewport_byte_end: 1,
                 spans: Vec::new(),
+                trace_id: Some(41),
             }],
             diagnostic_update: None,
             folding_update: None,
+            trace_id: Some(41),
+            request_id: None,
+            client_id: None,
         };
 
         coordinator.record_native_publication(&update);
@@ -1165,6 +1432,13 @@ mod tests {
         assert_eq!(
             snapshots
                 .iter()
+                .find(|snapshot| snapshot.name == SYNTAX_LOGICAL_WORK_ITEMS)
+                .and_then(|snapshot| snapshot.metadata.trace_id),
+            Some(41)
+        );
+        assert_eq!(
+            snapshots
+                .iter()
                 .filter(|snapshot| snapshot.name == SYNTAX_DECORATION_CHUNKS)
                 .count(),
             2
@@ -1175,6 +1449,295 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(edit_to_publish.len(), 1);
         eprintln!("edit_to_publish={:?}", edit_to_publish[0].value);
+    }
+
+    // ── Plan 099 bounded per-document syntax session tests ──────────────────
+
+    /// Test handler whose "parse" blocks on a std channel until released, so
+    /// tests can hold the session worker mid-job deterministically.
+    #[derive(Clone)]
+    struct GateHandler {
+        release: Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>,
+        started: Arc<AtomicUsize>,
+        blocking: bool,
+    }
+
+    struct GateControl {
+        release: std::sync::mpsc::Sender<()>,
+        started: Arc<AtomicUsize>,
+    }
+
+    impl GateControl {
+        /// Async wait so the current-thread test runtime keeps polling the
+        /// session worker while the job has not started yet.
+        async fn wait_until_started(&self) {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+            while self.started.load(Ordering::SeqCst) == 0 {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "syntax session never started the gated job"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            }
+        }
+    }
+
+    impl GateHandler {
+        /// (handler, control). Release sends one token; every `started` count
+        /// means one job parked mid-parse.
+        fn gated(blocking: bool) -> (Self, GateControl) {
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            let started = Arc::new(AtomicUsize::new(0));
+            (
+                Self {
+                    release: Arc::new(std::sync::Mutex::new(rx)),
+                    started: Arc::clone(&started),
+                    blocking,
+                },
+                GateControl {
+                    release: tx,
+                    started,
+                },
+            )
+        }
+    }
+
+    impl ParseHandler for GateHandler {
+        fn parse(&self, notification: ParseEditNotification) -> ParseHandlerFuture {
+            let result = self
+                .parse_blocking(notification)
+                .expect("gate handler implements parse_blocking");
+            Box::pin(async move { result })
+        }
+
+        fn parse_blocking(
+            &self,
+            notification: ParseEditNotification,
+        ) -> Option<Result<IncrementalParseUpdate, ParseCoordinatorError>> {
+            self.started.fetch_add(1, Ordering::SeqCst);
+            // Deterministic park: a std channel recv blocks the worker (or
+            // the blocking thread) until the test releases the job.
+            let _ = self
+                .release
+                .lock()
+                .expect("gate release mutex poisoned")
+                .recv();
+            Some(Ok(IncrementalParseUpdate {
+                document_id: notification.document_id,
+                document_version: notification.document_version,
+                behavior_version: notification.behavior_version,
+                package_prefix: notification.package_prefix,
+                mode_id: notification.mode_id,
+                parse_unit: ParseUnit::Region,
+                viewport: notification.viewport,
+                invalidated_ranges: notification.invalidated_ranges,
+                syntax_tree_delta: Some("gate".to_string()),
+                decoration_updates: Vec::new(),
+                diagnostic_update: None,
+                folding_update: None,
+                trace_id: notification.trace_id,
+                request_id: notification.request_id,
+                client_id: None,
+            }))
+        }
+
+        fn runs_on_blocking_executor(&self) -> bool {
+            self.blocking
+        }
+    }
+
+    fn gate_request(
+        document_id: u64,
+        version: u64,
+        request_id: Option<u64>,
+    ) -> ParseScheduleRequest {
+        ParseScheduleRequest {
+            document_id,
+            document_version: version,
+            behavior_version: 1,
+            package_prefix: "rust".to_string(),
+            mode_id: "rust.rust".to_string(),
+            viewport: ParseByteRange::new(0, 64),
+            invalidated_ranges: vec![ParseByteRange::new(0, 64)],
+            accepted_edit: None,
+            trace_id: None,
+            request_id,
+            client_id: request_id.map(|_| 9),
+        }
+    }
+
+    /// Plan 099: one CPU-bound native job parked on the blocking executor
+    /// must not delay an unrelated timer task on the async runtime.
+    #[tokio::test]
+    async fn blocking_syntax_job_does_not_starve_tokio_timer() {
+        let coordinator = ParseCoordinator::new();
+        let (handler, gate) = GateHandler::gated(true);
+        coordinator
+            .register_handler_meta_for_generation(
+                1,
+                ParseHandlerMeta {
+                    package_prefix: "rust".to_string(),
+                    mode_id: "rust.rust".to_string(),
+                },
+                handler,
+            )
+            .unwrap();
+        coordinator
+            .schedule_parse(gate_request(7, 1, None))
+            .unwrap();
+        gate.wait_until_started().await;
+
+        // The runtime stays responsive while the parse thread is parked.
+        tokio::time::timeout(std::time::Duration::from_millis(200), async {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        })
+        .await
+        .expect("tokio timer must fire while syntax job blocks");
+
+        gate.release.send(()).unwrap();
+        let update = coordinator.next_update().await.unwrap();
+        assert_eq!(update.document_version, 1);
+    }
+
+    /// Plan 099: 100 same-document updates coalesce latest-wins into one
+    /// published patch (the running job's stale output is dropped).
+    #[tokio::test]
+    async fn session_mailbox_coalesces_hundred_updates_to_latest() {
+        let coordinator = ParseCoordinator::new();
+        let (handler, gate) = GateHandler::gated(true);
+        coordinator
+            .register_handler_meta_for_generation(
+                1,
+                ParseHandlerMeta {
+                    package_prefix: "rust".to_string(),
+                    mode_id: "rust.rust".to_string(),
+                },
+                handler,
+            )
+            .unwrap();
+        coordinator
+            .schedule_parse(gate_request(7, 1, None))
+            .unwrap();
+        gate.wait_until_started().await;
+        for version in 2..=100u64 {
+            coordinator
+                .schedule_parse(gate_request(7, version, None))
+                .unwrap();
+        }
+        // One token releases the parked first job; the second token releases
+        // the coalesced latest job (v100).
+        gate.release.send(()).unwrap();
+        gate.release.send(()).unwrap();
+        let update =
+            tokio::time::timeout(std::time::Duration::from_secs(2), coordinator.next_update())
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            update.document_version, 100,
+            "only the latest coalesced job publishes"
+        );
+        assert_eq!(coordinator.stats().published_updates, 1);
+        assert_eq!(coordinator.stats().stale_results_rejected, 1);
+    }
+
+    /// Plan 099: same-language documents progress independently — each
+    /// document owns a session, and both jobs publish within the executor
+    /// bound.
+    #[tokio::test]
+    async fn same_language_two_documents_progress_independently() {
+        let coordinator = ParseCoordinator::new();
+        let (handler, gate) = GateHandler::gated(false);
+        coordinator
+            .register_handler_meta_for_generation(
+                1,
+                ParseHandlerMeta {
+                    package_prefix: "rust".to_string(),
+                    mode_id: "rust.rust".to_string(),
+                },
+                handler,
+            )
+            .unwrap();
+        coordinator
+            .schedule_parse(gate_request(7, 1, None))
+            .unwrap();
+        coordinator
+            .schedule_parse(gate_request(8, 1, None))
+            .unwrap();
+        // One release token per running job; both sessions run to completion.
+        gate.release.send(()).unwrap();
+        gate.release.send(()).unwrap();
+        let mut documents = Vec::new();
+        for _ in 0..2 {
+            let update =
+                tokio::time::timeout(std::time::Duration::from_secs(2), coordinator.next_update())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            documents.push(update.document_id);
+        }
+        documents.sort();
+        assert_eq!(documents, vec![7, 8]);
+    }
+
+    /// Plan 099: a superseded running request-scoped job publishes its empty
+    /// completion (the pending-patch counter must reach zero), and a closed
+    /// document's pending request-scoped job completes at close time.
+    #[tokio::test]
+    async fn superseded_and_closed_request_jobs_publish_completions() {
+        let coordinator = ParseCoordinator::new();
+        let (handler, gate) = GateHandler::gated(true);
+        coordinator
+            .register_handler_meta_for_generation(
+                1,
+                ParseHandlerMeta {
+                    package_prefix: "rust".to_string(),
+                    mode_id: "rust.rust".to_string(),
+                },
+                handler,
+            )
+            .unwrap();
+        // Request 11 (v1) runs and gets parked; a newer schedule supersedes
+        // the session.
+        coordinator
+            .schedule_parse(gate_request(7, 1, Some(11)))
+            .unwrap();
+        gate.wait_until_started().await;
+        coordinator
+            .schedule_parse(gate_request(7, 2, None))
+            .unwrap();
+        gate.release.send(()).unwrap();
+
+        let completion = coordinator.next_update().await.unwrap();
+        assert_eq!(completion.request_id, Some(11));
+        assert!(completion.decoration_updates.is_empty());
+        assert_eq!(
+            coordinator.stats().stale_results_rejected,
+            1,
+            "superseded running job output is discarded"
+        );
+
+        // v2 runs unblocked; release and let it publish.
+        gate.release.send(()).unwrap();
+        let update = coordinator.next_update().await.unwrap();
+        assert_eq!(update.document_version, 2);
+
+        // Close the document with a pending request-scoped job: the close
+        // path owes that request its empty completion.
+        coordinator
+            .schedule_parse(gate_request(7, 3, Some(12)))
+            .unwrap();
+        gate.release.send(()).unwrap();
+        let running = coordinator.next_update().await.unwrap();
+        assert_eq!(running.document_version, 3);
+        coordinator
+            .schedule_parse(gate_request(7, 4, Some(13)))
+            .unwrap();
+        coordinator.remove_document(7);
+        let closed = coordinator.next_update().await.unwrap();
+        assert_eq!(closed.request_id, Some(13));
+        assert!(closed.decoration_updates.is_empty());
+        assert_eq!(coordinator.stats().published_updates, 2);
     }
 
     #[tokio::test]
@@ -1195,12 +1758,14 @@ mod tests {
         inner.active_tasks.insert(
             task_key.clone(),
             ActiveParseTask {
-                handle: tokio::spawn(std::future::pending()),
+                mailbox: Arc::new(syntax_session::SessionMailbox::new()),
                 document_version: 3,
                 native_edit: true,
+                request_id: None,
+                request_client_id: None,
             },
         );
-        abort_tasks(&mut inner, vec![task_key], &perf);
+        close_sessions(&mut inner, vec![task_key], &perf, &coordinator.updates_tx);
         drop(inner);
 
         let snapshot = perf.snapshots().pop().expect("cancellation metric");
@@ -1223,6 +1788,9 @@ mod tests {
             decoration_updates: Vec::new(),
             diagnostic_update: None,
             folding_update: None,
+            trace_id: None,
+            request_id: None,
+            client_id: None,
         };
         assert!(matches!(
             validate_update_payload(&ordinary),

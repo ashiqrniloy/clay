@@ -108,6 +108,38 @@ pub async fn session_stats(
     Ok(bridge.stats())
 }
 
+/// Returns numeric-only bridge/client performance summaries when profiling is enabled.
+#[tauri::command]
+pub fn session_perf_snapshot() -> clay::perf::metrics::PerfSummary {
+    clay::perf::metrics::global_recorder().summary()
+}
+
+/// Editor performance harness only: persists a source-free frontend perf
+/// snapshot under `CLAY_PERF_REPORT_DIR`. No-op (returns `None`) when the
+/// harness environment is unset, which is the production default. Payload is
+/// size-capped because it crosses the trust boundary from the web content.
+#[tauri::command]
+pub fn write_frontend_perf_report(
+    label: Option<String>,
+    snapshot: serde_json::Value,
+) -> Option<String> {
+    const MAX_FRONTEND_REPORT_BYTES: usize = 256 * 1024;
+    let dir = std::path::PathBuf::from(std::env::var_os(clay::perf::metrics::PERF_REPORT_DIR_ENV)?);
+    let slug = clay::perf::metrics::sanitize_report_label(
+        &label.unwrap_or_else(|| "frontend".to_string()),
+    )?;
+    let bytes = serde_json::to_vec(&snapshot).ok()?;
+    if bytes.len() > MAX_FRONTEND_REPORT_BYTES {
+        return None;
+    }
+    let file_name = format!("frontend-{slug}-perf-snapshot.json");
+    let tmp = dir.join(format!("{file_name}.tmp"));
+    std::fs::write(&tmp, bytes).ok()?;
+    let path = dir.join(&file_name);
+    std::fs::rename(&tmp, &path).ok()?;
+    Some(path.to_string_lossy().into_owned())
+}
+
 /// Forwards one validated frontend request to the server. `payload` is JSON
 /// matching the typed `ClientMessage` shape; size-capped and sanitized before
 /// anything is parsed or sent.

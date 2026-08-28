@@ -706,6 +706,9 @@ pub(super) fn parse_update_json(
         parse_unit: registration.parse_unit,
         viewport,
         invalidated_ranges: fallback.invalidated_ranges,
+        trace_id: fallback.trace_id,
+        request_id: fallback.request_id,
+        client_id: None,
         syntax_tree_delta: object
             .get("syntaxTreeDelta")
             .and_then(serde_json::Value::as_str)
@@ -721,6 +724,7 @@ pub(super) fn parse_update_json(
                 viewport_byte_start: viewport.start,
                 viewport_byte_end: viewport.end,
                 spans,
+                trace_id: fallback.trace_id,
             })
             .into_iter()
             .collect(),

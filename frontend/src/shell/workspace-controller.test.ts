@@ -1,3 +1,4 @@
+import { EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 
 import type { BootstrapDto } from "../bridge/types";
@@ -9,7 +10,7 @@ function bootstrap(
   over: Partial<BootstrapDto> & { clientId: number },
 ): BootstrapDto {
   return {
-    protocolVersion: 27,
+    protocolVersion: 28,
     endpoint: "test",
     generation: 1,
     initialDocument: {
@@ -54,6 +55,57 @@ function bootstrap(
 }
 
 describe("workspace controller", () => {
+  it("restore flushes a queued open when the handshake registry raced the bootstrap", async () => {
+    const sent: string[] = [];
+    const ws = createWorkspace({
+      send: async (payload) => {
+        sent.push(payload);
+      },
+      loadLayout: async () => ({
+        version: 2,
+        activeTab: 0,
+        tabs: [
+          {
+            workspaceRoot: "/tmp/ws1",
+            activePane: 1,
+            splitTree: { leaf: { paneId: 1 } },
+            slots: [],
+            panes: { "1": "notes.md" },
+          },
+        ],
+      }),
+    });
+    // Fresh boot: the server broadcasts the tab registry during the
+    // handshake, before the bootstrap command installs the runtime.
+    ws.handleEnvelope({
+      kind: "event",
+      data: {
+        kind: "tabRegistry",
+        data: {
+          tabs: [
+            {
+              tabId: 1,
+              clientId: 1,
+              workspaceRoot: "/tmp/ws1",
+              workspaceRootId: 3,
+            },
+          ],
+          active: 1,
+          revision: 1,
+        },
+      },
+    });
+    ws.installBootstrap(bootstrap({ clientId: 1 }));
+    await ws.restore();
+    expect(
+      sent.some(
+        (payload) =>
+          payload.includes('"family":"openDocument"') &&
+          payload.includes('"workspaceRootId":3'),
+      ),
+    ).toBe(true);
+  });
+
   it("restore opens persisted documents once the root id arrives", async () => {
     const sent: string[] = [];
     const ws = createWorkspace({
@@ -229,6 +281,88 @@ describe("workspace controller", () => {
     expect(sent.some((payload) => payload.includes("bootstrapSnapshot"))).toBe(
       false,
     );
+  });
+
+  it("routes each restored pane's open reply to the pane that requested it", async () => {
+    const sent: string[] = [];
+    const ws = createWorkspace({
+      send: async (payload) => {
+        sent.push(payload);
+      },
+      loadLayout: async () => ({
+        version: 2,
+        activeTab: 0,
+        tabs: [
+          {
+            workspaceRoot: "/tmp/ws1",
+            activePane: 1,
+            splitTree: {
+              split: {
+                orientation: "horizontal",
+                ratio: 0.5,
+                first: { leaf: { paneId: 1 } },
+                second: { leaf: { paneId: 2 } },
+              },
+            },
+            slots: [],
+            panes: { "1": "notes.md", "2": "review.rs" },
+          },
+        ],
+      }),
+    });
+    ws.installBootstrap(bootstrap({ clientId: 1 }));
+    await ws.restore();
+    ws.handleEnvelope({
+      kind: "event",
+      data: {
+        kind: "tabRegistry",
+        data: {
+          tabs: [
+            {
+              tabId: 1,
+              clientId: 1,
+              workspaceRoot: "/tmp/ws1",
+              workspaceRootId: 3,
+            },
+          ],
+          active: 1,
+          revision: 1,
+        },
+      },
+    });
+
+    const documentOpened = (path: string, documentId: number) => ({
+      kind: "event" as const,
+      data: {
+        kind: "documentOpened",
+        data: {
+          metadata: {
+            documentId,
+            version: 1,
+            dirty: false,
+            access: { editable: { leaseId: documentId } },
+            workspaceRootId: 3,
+            path,
+          },
+          head: { totalBytes: 4, firstChunk: `seed of ${path}` },
+        },
+      },
+    });
+
+    // Replies arrive out of order; each pane must receive its own document.
+    ws.handleEnvelope(documentOpened("review.rs", 7));
+    ws.handleEnvelope(documentOpened("notes.md", 6));
+
+    const runtime = ws.runtime(1);
+    expect(runtime).not.toBeNull();
+    const paths = new Map(
+      [...(runtime?.panes ?? [])].map(([paneId, pane]) => {
+        const meta = pane.session.store.get();
+        return [paneId, { path: meta?.path, documentId: meta?.documentId }];
+      }),
+    );
+    expect(paths.get(1)).toEqual({ path: "notes.md", documentId: 6 });
+    expect(paths.get(2)).toEqual({ path: "review.rs", documentId: 7 });
   });
 
   it("keeps split trees and documents isolated per tab", () => {
@@ -422,6 +556,71 @@ describe("workspace controller", () => {
     ws.openFileDialog();
     await Promise.resolve();
     expect(dialogs).toEqual(["file", "file"]);
+  });
+
+  it("keeps per-keystroke acks from rerendering the shell or persisting", () => {
+    const ws = createWorkspace({ send: async () => undefined });
+    ws.installBootstrap(bootstrap({ clientId: 1 }));
+    let notifies = 0;
+    ws.subscribe(() => {
+      notifies += 1;
+    });
+    const runtime = ws.runtime(1);
+    const pane =
+      runtime && runtime.panes.get(runtime.tree.activePaneId)
+        ? runtime.panes.get(runtime.tree.activePaneId)
+        : null;
+    if (!runtime || !pane) throw new Error("active pane missing");
+    const baseline = notifies;
+
+    // One user edit flips dirty: exactly one shell notification.
+    pane.session.emitUserChanges(EditorState.create({ doc: "seed" }).doc, [
+      { from: 4, to: 4, insert: "!" },
+    ]);
+    expect(notifies).toBe(baseline + 1);
+
+    // A second edit while already dirty: no further notification.
+    pane.session.emitUserChanges(EditorState.create({ doc: "seed!" }).doc, [
+      { from: 5, to: 5, insert: "?" },
+    ]);
+    expect(notifies).toBe(baseline + 1);
+
+    // The ack (version/pending only) must not notify the shell.
+    ws.handleEnvelope({
+      kind: "event",
+      data: {
+        kind: "editAck",
+        data: { documentId: 1, version: 2, transactionId: 1 },
+      },
+    });
+    expect(notifies).toBe(baseline + 1);
+    expect(pane.session.store.get()?.version).toBe(2);
+    expect(pane.session.store.get()?.pending).toBe(1);
+  });
+
+  it("notifies shell status for loading and diagnostics without ack churn", () => {
+    const ws = createWorkspace({ send: async () => undefined });
+    ws.installBootstrap(bootstrap({ clientId: 1 }));
+    let notifies = 0;
+    ws.subscribe(() => {
+      notifies += 1;
+    });
+    const pane = ws.runtime(1)?.panes.get(1);
+    expect(pane).toBeTruthy();
+    const baseline = notifies;
+    const snapshotBeforeLoading = ws.getSnapshot();
+
+    pane?.session.store.update({ loading: true });
+    expect(ws.getSnapshot()).not.toBe(snapshotBeforeLoading);
+    expect(notifies).toBe(baseline + 1);
+    pane?.session.store.update({ loading: true, pending: 1 });
+    expect(notifies).toBe(baseline + 1);
+    pane?.session.store.update({ loading: false });
+    expect(notifies).toBe(baseline + 2);
+    pane?.session.store.update({ diagnostic: "file failed" });
+    expect(notifies).toBe(baseline + 3);
+    pane?.session.store.update({ diagnostic: "file failed", version: 2 });
+    expect(notifies).toBe(baseline + 3);
   });
 
   it("focuses the existing pane on a duplicate open", () => {

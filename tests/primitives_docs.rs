@@ -219,6 +219,141 @@ fn document_chunk_transfer_primitive_is_bounded_and_documented() {
 }
 
 #[test]
+fn plan099_editor_documentation_matches_current_implementation() {
+    let checks: &[(&str, &[&str])] = &[
+        (
+            "docs/reference/primitives/index.md",
+            &[
+                "## Plan 099 editor performance primitives",
+                "BytePositionIndex",
+                "ViewportRenderPatch",
+                "SyntaxSession",
+            ],
+        ),
+        (
+            "docs/reference/primitives/registry.md",
+            &[
+                "| BytePositionIndex |",
+                "| ViewportRenderPatch |",
+                "| SyntaxSession |",
+                "server-session",
+                "SYNTAX_EXECUTOR_MAX_JOBS",
+            ],
+        ),
+        (
+            "docs/reference/primitives/parse-update-strategy.md",
+            &[
+                "src/server/syntax_session.rs",
+                "ViewportRenderPatch",
+                "exactly one",
+                "spawn_blocking",
+            ],
+        ),
+        (
+            "docs/reference/primitives/rendering-strategy.md",
+            &[
+                "applyRenderPatch",
+                "ViewportRenderPatch",
+                "declared covered range",
+                "exact authoritative",
+            ],
+        ),
+        (
+            "docs/development/performance.md",
+            &[
+                "bytePositionField",
+                "SYNTAX_EXECUTOR_MAX_JOBS",
+                "PERF_SNAPSHOT_CAPACITY",
+                "ViewportRenderPatch",
+                "target/perf/",
+            ],
+        ),
+        (
+            "docs/development/architecture-ownership.md",
+            &[
+                "## Plan 099 editor performance ownership",
+                "BytePositionIndex",
+                "SYNTAX_EXECUTOR_MAX_JOBS",
+                "No package-facing API exposes these owners",
+            ],
+        ),
+        (
+            "docs/development/build-and-test.md",
+            &[
+                "### Plan 099 editor performance verification",
+                "editor_performance_matrix_holds_deterministic_invariants",
+                "target/perf/editor-performance/<label>/",
+            ],
+        ),
+        (
+            "docs/development/file-open-save-reload-workflow.md",
+            &[
+                "one current CodeMirror `Text`",
+                "DocumentChunkRequest",
+                "detached snapshot only while no view exists",
+                "no app-wide document-session singleton",
+            ],
+        ),
+        (
+            "docs/reference/packages/creating-packages.md",
+            &[
+                "## Plan 099 editor-performance authoring contract",
+                "BytePositionIndex",
+                "ViewportRenderPatch",
+                "SyntaxSession",
+                "Current host bounds are compiled safety policy",
+            ],
+        ),
+        (
+            "docs/development/tauri-react-parity-ledger.json",
+            &["BytePositionIndex", "SyntaxSession", "ViewportRenderPatch"],
+        ),
+    ];
+    for (path, markers) in checks {
+        let text = read(path);
+        for marker in *markers {
+            assert!(
+                text.contains(marker),
+                "{path} is missing Plan 099 documentation marker {marker:?}"
+            );
+        }
+    }
+
+    for (path, stale) in [
+        (
+            "docs/reference/primitives/parse-update-strategy.md",
+            "This document is architecture-only",
+        ),
+        (
+            "docs/reference/primitives/parse-update-strategy.md",
+            "A future `src/server/parse_coordinator.rs`",
+        ),
+        (
+            "docs/reference/primitives/parse-update-strategy.md",
+            "no-decoration-update",
+        ),
+        (
+            "docs/reference/primitives/rendering-strategy.md",
+            "This document is architecture-only",
+        ),
+        (
+            "docs/development/performance.md",
+            "memoized per-document line",
+        ),
+        ("docs/development/performance.md", "`textIndex`"),
+        (
+            "docs/reference/primitives/registry.md",
+            "Budget Constants Proposed by This Registry",
+        ),
+    ] {
+        assert!(
+            !read(path).contains(stale),
+            "{path} retains stale Plan 099 documentation claim {stale:?}"
+        );
+    }
+}
+
+#[test]
 fn narrow_security_markers_are_present_with_actionable_paths() {
     let contracts = documentation_contracts();
     for entry in contract_entries(&contracts, "security_contracts") {

@@ -1,13 +1,8 @@
 {
   "version": 1,
-  "updated": "2026-08-26T04:15:00Z",
+  "updated": "2026-08-28T12:52:32Z",
   "native_client_frozen": true,
-  "status_vocabulary": [
-    "pending",
-    "ported",
-    "verified",
-    "approved-removed"
-  ],
+  "status_vocabulary": ["pending", "ported", "verified", "approved-removed"],
   "baseline_blockers": [
     "AT-SPI/accesskit_consumer TreeUpdate panic risk on focused dirty-pane close paths (Plan 086 crash; Phase 26 regression tests added, live AT-SPI risk remains a release blocker until the Tauri client replaces AccessKit/AT-SPI plumbing)",
     "cargo test --all-targets FAIL packages::bundled::tests::bundled_extension_points_match_real_contributions: \"@clay/chat extension point chat.entrySurface declares scope `chat.entry` that names no real contribution of the package\" (src/packages/bundled.rs:432)",
@@ -27,9 +22,7 @@
         "src/bin/clay-server.rs",
         "src/driver/mod.rs"
       ],
-      "current_tests": [
-        "tests/manual_smoke_docs.rs"
-      ],
+      "current_tests": ["tests/manual_smoke_docs.rs"],
       "manual_steps": [
         {
           "module": "test-plan/01-launch-and-connection.md",
@@ -57,21 +50,16 @@
             "L21",
             "L22",
             "L23",
-            "L24"
+            "L24",
+            "L25",
+            "L26"
           ]
         }
       ],
-      "public_apis": [
-        "application.quit"
-      ],
+      "public_apis": ["application.quit"],
       "protocol_messages": {
-        "client": [
-          "Hello"
-        ],
-        "server": [
-          "Welcome",
-          "Error"
-        ],
+        "client": ["Hello"],
+        "server": ["Welcome", "Error"],
         "agent": []
       },
       "target_owner": "src-tauri/src + frontend/src/state/connection-store.ts",
@@ -91,9 +79,7 @@
         "src/server/configuration.rs",
         "runtime/js/configuration.js"
       ],
-      "current_tests": [
-        "tests/persistent_runtime_hot_reload.rs"
-      ],
+      "current_tests": ["tests/persistent_runtime_hot_reload.rs"],
       "manual_steps": [
         {
           "module": "test-plan/02-configuration-init-js.md",
@@ -136,9 +122,7 @@
         "configuration.setPackageOption"
       ],
       "protocol_messages": {
-        "client": [
-          "RuntimeGenerationInstalled"
-        ],
+        "client": ["RuntimeGenerationInstalled"],
         "server": [],
         "agent": []
       },
@@ -164,9 +148,7 @@
         "src/shell/path_browser.rs",
         "src/masonry_pane_document.rs"
       ],
-      "current_tests": [
-        "tests/package_loading.rs"
-      ],
+      "current_tests": ["tests/package_loading.rs"],
       "manual_steps": [
         {
           "module": "test-plan/03-files-and-workspace.md",
@@ -228,7 +210,9 @@
             "F49",
             "F50",
             "F51",
-            "F52"
+            "F52",
+            "F53",
+            "F54"
           ]
         }
       ],
@@ -300,9 +284,7 @@
         "src/masonry_pane_document.rs",
         "src/client/behavior.rs"
       ],
-      "current_tests": [
-        "tests/editor_performance_invariants.rs"
-      ],
+      "current_tests": ["tests/editor_performance_invariants.rs"],
       "manual_steps": [
         {
           "module": "test-plan/04-core-editing.md",
@@ -342,7 +324,9 @@
             "E33",
             "E34",
             "E35",
-            "E36"
+            "E36",
+            "E37",
+            "E38"
           ]
         }
       ],
@@ -367,10 +351,7 @@
         "editor.rotateHeading"
       ],
       "protocol_messages": {
-        "client": [
-          "Edit",
-          "EditorIntent"
-        ],
+        "client": ["Edit", "EditorIntent"],
         "server": [
           "EditAck",
           "EditRejected",
@@ -382,6 +363,7 @@
       "target_owner": "frontend/src/editor/ClayEditor.tsx + sync/*",
       "target_tests": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
       "primitives": [
+        "BytePositionIndex",
         "DocumentClassification",
         "KeyRoutingOverride",
         "MajorModeActivation",
@@ -396,13 +378,8 @@
       "area": "editor",
       "status": "verified",
       "migration_phase": 7,
-      "current_owner": [
-        "src/editor/cursor.rs",
-        "src/editor/selection.rs"
-      ],
-      "current_tests": [
-        "tests/syntax_grammar.rs"
-      ],
+      "current_owner": ["src/editor/cursor.rs", "src/editor/selection.rs"],
+      "current_tests": ["tests/syntax_grammar.rs"],
       "manual_steps": [
         {
           "module": "test-plan/05-movement-and-selection.md",
@@ -446,12 +423,8 @@
       "area": "editor",
       "status": "verified",
       "migration_phase": 7,
-      "current_owner": [
-        "src/editor/cursor.rs"
-      ],
-      "current_tests": [
-        "tests/syntax_grammar.rs"
-      ],
+      "current_owner": ["src/editor/cursor.rs"],
+      "current_tests": ["tests/syntax_grammar.rs"],
       "manual_steps": [
         {
           "module": "test-plan/06-multi-cursor.md",
@@ -507,9 +480,7 @@
         "src/editor/typography.rs",
         "src/editor/layout.rs"
       ],
-      "current_tests": [
-        "tests/typography_protocol.rs"
-      ],
+      "current_tests": ["tests/typography_protocol.rs"],
       "manual_steps": [
         {
           "module": "test-plan/07-caret-and-typography.md",
@@ -544,22 +515,15 @@
           ]
         }
       ],
-      "public_apis": [
-        "editor.clientSetCursorStyle"
-      ],
+      "public_apis": ["editor.clientSetCursorStyle"],
       "protocol_messages": {
         "client": [],
-        "server": [
-          "CaretStyleOverride",
-          "EditorLayoutOverride"
-        ],
+        "server": ["CaretStyleOverride", "EditorLayoutOverride"],
         "agent": []
       },
       "target_owner": "frontend/src/theme/* + CodeMirror theme extensions",
       "target_tests": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
-      "primitives": [
-        "SemanticTypographyRole"
-      ],
+      "primitives": ["SemanticTypographyRole"],
       "verified_automated": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
       "verified_manual": "test-plan/07-caret-and-typography.md execution records and phase UI review evidence"
     },
@@ -617,7 +581,9 @@
             "S29",
             "S30",
             "S31",
-            "S32"
+            "S32",
+            "S33",
+            "S34"
           ]
         }
       ],
@@ -644,7 +610,7 @@
       ],
       "protocol_messages": {
         "client": [
-          "DecorationViewportRequest",
+          "ViewportRenderRequest",
           "CompletionRequest",
           "LanguageIntelligenceRequest",
           "SelectionQueryRequest"
@@ -660,7 +626,8 @@
           "CompletionRejected",
           "LanguageIntelligenceResult",
           "LanguageIntelligenceRejected",
-          "SelectionQueryResult"
+          "SelectionQueryResult",
+          "ViewportRenderPatch"
         ],
         "agent": []
       },
@@ -673,7 +640,9 @@
         "FoldingRange",
         "IncrementalParseUpdate",
         "LanguageIntelligenceRequestAndResult",
-        "SyntaxGrammarContribution"
+        "SyntaxGrammarContribution",
+        "SyntaxSession",
+        "ViewportRenderPatch"
       ],
       "verified_automated": "frontend/src/editor/extensions/*.test.ts + existing Rust primitive suites + manual test-plan module",
       "verified_manual": "test-plan/08-syntax-and-textobjects.md execution records and phase UI review evidence"
@@ -757,10 +726,7 @@
       ],
       "protocol_messages": {
         "client": [],
-        "server": [
-          "ActiveTheme",
-          "ActiveTypography"
-        ],
+        "server": ["ActiveTheme", "ActiveTypography"],
         "agent": []
       },
       "target_owner": "frontend/src/packages/* + frontend/src/settings/*",
@@ -811,14 +777,8 @@
         "ui.serverRequestLayoutIntent"
       ],
       "protocol_messages": {
-        "client": [
-          "SduiAction"
-        ],
-        "server": [
-          "SduiSnapshot",
-          "SduiUpdate",
-          "RuntimeStateSnapshot"
-        ],
+        "client": ["SduiAction"],
+        "server": ["SduiSnapshot", "SduiUpdate", "RuntimeStateSnapshot"],
         "agent": []
       },
       "target_owner": "frontend/src/sdui/* registry",
@@ -845,9 +805,7 @@
         "src/server/control_center.rs",
         "src/shell/transient_menu.rs"
       ],
-      "current_tests": [
-        "tests/command_execution.rs"
-      ],
+      "current_tests": ["tests/command_execution.rs"],
       "manual_steps": [
         {
           "module": "test-plan/10-keybindings-and-commands.md",
@@ -1040,7 +998,14 @@
             "Q34",
             "Q35",
             "Q36",
-            "Q37"
+            "Q37",
+            "M1",
+            "M2",
+            "M3",
+            "M4",
+            "M5",
+            "M6",
+            "M7"
           ]
         }
       ],
@@ -1052,7 +1017,7 @@
       },
       "target_owner": "frontend/scripts/bundle-budget.mjs + src-tauri/src/release.rs + docs/development/performance.md",
       "target_tests": "tests/performance_budgets.rs::tauri_react_bundle_budgets_are_documented + frontend check:budget",
-      "primitives": [],
+      "primitives": ["BytePositionIndex", "SyntaxSession", "ViewportRenderPatch"],
       "verified_automated": "tests/performance_budgets.rs::tauri_react_bundle_budgets_are_documented + frontend check:budget",
       "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence"
     },
@@ -1062,22 +1027,12 @@
       "area": "platform",
       "status": "verified",
       "migration_phase": 11,
-      "current_owner": [
-        "docs/development/windows.md"
-      ],
+      "current_owner": ["docs/development/windows.md"],
       "current_tests": [],
       "manual_steps": [
         {
           "module": "test-plan/12-platform-windows.md",
-          "steps": [
-            "W1",
-            "W2",
-            "W3",
-            "W4",
-            "W5",
-            "W6",
-            "W7"
-          ]
+          "steps": ["W1", "W2", "W3", "W4", "W5", "W6", "W7"]
         }
       ],
       "public_apis": [],
@@ -1152,6 +1107,8 @@
             "D17",
             "D18",
             "D19",
+            "D20",
+            "D21",
             "S23",
             "S24",
             "S25",
@@ -1198,19 +1155,12 @@
       ],
       "protocol_messages": {
         "client": [],
-        "server": [
-          "ShellPreferences",
-          "ShellClientCommandRequest"
-        ],
+        "server": ["ShellPreferences", "ShellClientCommandRequest"],
         "agent": []
       },
       "target_owner": "frontend/src/shell/{panes,splits}/*",
       "target_tests": "frontend split-tree tests + test-plan/13",
-      "primitives": [
-        "PaneSlotLayout",
-        "PaneSplitTree",
-        "WorkingAreaLayout"
-      ],
+      "primitives": ["PaneSlotLayout", "PaneSplitTree", "WorkingAreaLayout"],
       "verified_automated": "frontend split-tree tests + test-plan/13",
       "verified_manual": "test-plan/13-window-splits.md execution records and phase UI review evidence"
     },
@@ -1226,9 +1176,7 @@
         "src/driver/restore.rs",
         "src/masonry_shell/window_tabs.rs"
       ],
-      "current_tests": [
-        "tests/window_management_protocol.rs"
-      ],
+      "current_tests": ["tests/window_management_protocol.rs"],
       "manual_steps": [
         {
           "module": "test-plan/14-tabs.md",
@@ -1308,7 +1256,9 @@
             "T73",
             "T74",
             "T75",
-            "T76"
+            "T76",
+            "T77",
+            "T78"
           ]
         }
       ],
@@ -1323,20 +1273,13 @@
         "shell.clientTabMoveTo"
       ],
       "protocol_messages": {
-        "client": [
-          "TabCommand"
-        ],
-        "server": [
-          "TabRegistry"
-        ],
+        "client": ["TabCommand"],
+        "server": ["TabRegistry"],
         "agent": []
       },
       "target_owner": "frontend/src/shell/tabs/* + persistence/layout.ts",
       "target_tests": "frontend tab isolation tests + test-plan/14",
-      "primitives": [
-        "TabBarChrome",
-        "TabRegistryBinding"
-      ],
+      "primitives": ["TabBarChrome", "TabRegistryBinding"],
       "verified_automated": "frontend tab isolation tests + test-plan/14",
       "verified_manual": "test-plan/14-tabs.md execution records and phase UI review evidence"
     },
@@ -1351,18 +1294,12 @@
         "src/server/agent_agui.rs (target)",
         "src/protocol/agent.rs"
       ],
-      "current_tests": [
-        "tests/agent_protocol.rs"
-      ],
+      "current_tests": ["tests/agent_protocol.rs"],
       "manual_steps": [],
       "public_apis": [],
       "protocol_messages": {
-        "client": [
-          "Agent"
-        ],
-        "server": [
-          "Agent"
-        ],
+        "client": ["Agent"],
+        "server": ["Agent"],
         "agent": [
           "Snapshot",
           "Event",
@@ -1374,10 +1311,7 @@
       },
       "target_owner": "src-tauri/src/bridge/agent.rs + frontend/src/{agent,chat}/*",
       "target_tests": "AG-UI event mapping tests",
-      "primitives": [
-        "CommandDeclaration",
-        "CommandExecution"
-      ],
+      "primitives": ["CommandDeclaration", "CommandExecution"],
       "verified_automated": "AG-UI event mapping tests",
       "verified_manual": "Phase 4-10 retained visual/accessibility review evidence under code-reviews/screenshots/"
     },
@@ -1391,9 +1325,7 @@
         "src/masonry_shell/accessibility.rs",
         "src/editor/accessibility.rs"
       ],
-      "current_tests": [
-        "tests/live_atspi_smoke.rs"
-      ],
+      "current_tests": ["tests/live_atspi_smoke.rs"],
       "manual_steps": [],
       "public_apis": [],
       "protocol_messages": {
@@ -1413,10 +1345,7 @@
       "area": "security",
       "status": "verified",
       "migration_phase": 8,
-      "current_owner": [
-        "src/server/js_runtime.rs",
-        "src/packages/record.rs"
-      ],
+      "current_owner": ["src/server/js_runtime.rs", "src/packages/record.rs"],
       "current_tests": [
         "tests/runtime_sandbox_harness.rs",
         "tests/rust_visibility_api_mapping.rs"

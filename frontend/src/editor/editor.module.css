@@ -101,7 +101,362 @@
 
 .canvas :global(.cm-clay-link) {
   cursor: pointer;
+  text-decoration: underline;
   text-underline-offset: var(--clay-dimension-border-thin, 2px);
+}
+
+/* Closed token classes: the only styling surface for server spans.
+   Wire token types map to these fixed classes once; unknown values
+   fall back to the inert paragraph class, so no server string can
+   reach CSS. Modifier and font-role classes override token rules by
+   source order (equal specificity, later wins). */
+
+.canvas :global(.cm-clay-t-namespace) {
+  color: var(--clay-editor-namespace-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-namespace-weight, normal);
+  font-style: var(--clay-editor-namespace-style, normal);
+  text-decoration: var(--clay-editor-namespace-decoration, none);
+  background: var(--clay-editor-namespace-background, transparent);
+  font-size: calc(1em * var(--clay-editor-namespace-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-type) {
+  color: var(--clay-editor-type-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-type-weight, normal);
+  font-style: var(--clay-editor-type-style, normal);
+  text-decoration: var(--clay-editor-type-decoration, none);
+  background: var(--clay-editor-type-background, transparent);
+  font-size: calc(1em * var(--clay-editor-type-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-class) {
+  color: var(--clay-editor-class-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-class-weight, normal);
+  font-style: var(--clay-editor-class-style, normal);
+  text-decoration: var(--clay-editor-class-decoration, none);
+  background: var(--clay-editor-class-background, transparent);
+  font-size: calc(1em * var(--clay-editor-class-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-enum) {
+  color: var(--clay-editor-enum-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-enum-weight, normal);
+  font-style: var(--clay-editor-enum-style, normal);
+  text-decoration: var(--clay-editor-enum-decoration, none);
+  background: var(--clay-editor-enum-background, transparent);
+  font-size: calc(1em * var(--clay-editor-enum-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-interface) {
+  color: var(--clay-editor-interface-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-interface-weight, normal);
+  font-style: var(--clay-editor-interface-style, normal);
+  text-decoration: var(--clay-editor-interface-decoration, none);
+  background: var(--clay-editor-interface-background, transparent);
+  font-size: calc(1em * var(--clay-editor-interface-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-struct) {
+  color: var(--clay-editor-struct-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-struct-weight, normal);
+  font-style: var(--clay-editor-struct-style, normal);
+  text-decoration: var(--clay-editor-struct-decoration, none);
+  background: var(--clay-editor-struct-background, transparent);
+  font-size: calc(1em * var(--clay-editor-struct-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-typeparameter) {
+  color: var(--clay-editor-typeparameter-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-typeparameter-weight, normal);
+  font-style: var(--clay-editor-typeparameter-style, normal);
+  text-decoration: var(--clay-editor-typeparameter-decoration, none);
+  background: var(--clay-editor-typeparameter-background, transparent);
+  font-size: calc(1em * var(--clay-editor-typeparameter-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-parameter) {
+  color: var(--clay-editor-parameter-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-parameter-weight, normal);
+  font-style: var(--clay-editor-parameter-style, normal);
+  text-decoration: var(--clay-editor-parameter-decoration, none);
+  background: var(--clay-editor-parameter-background, transparent);
+  font-size: calc(1em * var(--clay-editor-parameter-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-variable) {
+  color: var(--clay-editor-variable-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-variable-weight, normal);
+  font-style: var(--clay-editor-variable-style, normal);
+  text-decoration: var(--clay-editor-variable-decoration, none);
+  background: var(--clay-editor-variable-background, transparent);
+  font-size: calc(1em * var(--clay-editor-variable-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-property) {
+  color: var(--clay-editor-property-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-property-weight, normal);
+  font-style: var(--clay-editor-property-style, normal);
+  text-decoration: var(--clay-editor-property-decoration, none);
+  background: var(--clay-editor-property-background, transparent);
+  font-size: calc(1em * var(--clay-editor-property-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-enummember) {
+  color: var(--clay-editor-enummember-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-enummember-weight, normal);
+  font-style: var(--clay-editor-enummember-style, normal);
+  text-decoration: var(--clay-editor-enummember-decoration, none);
+  background: var(--clay-editor-enummember-background, transparent);
+  font-size: calc(1em * var(--clay-editor-enummember-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-event) {
+  color: var(--clay-editor-event-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-event-weight, normal);
+  font-style: var(--clay-editor-event-style, normal);
+  text-decoration: var(--clay-editor-event-decoration, none);
+  background: var(--clay-editor-event-background, transparent);
+  font-size: calc(1em * var(--clay-editor-event-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-function) {
+  color: var(--clay-editor-function-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-function-weight, normal);
+  font-style: var(--clay-editor-function-style, normal);
+  text-decoration: var(--clay-editor-function-decoration, none);
+  background: var(--clay-editor-function-background, transparent);
+  font-size: calc(1em * var(--clay-editor-function-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-method) {
+  color: var(--clay-editor-method-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-method-weight, normal);
+  font-style: var(--clay-editor-method-style, normal);
+  text-decoration: var(--clay-editor-method-decoration, none);
+  background: var(--clay-editor-method-background, transparent);
+  font-size: calc(1em * var(--clay-editor-method-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-macro) {
+  color: var(--clay-editor-macro-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-macro-weight, normal);
+  font-style: var(--clay-editor-macro-style, normal);
+  text-decoration: var(--clay-editor-macro-decoration, none);
+  background: var(--clay-editor-macro-background, transparent);
+  font-size: calc(1em * var(--clay-editor-macro-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-keyword) {
+  color: var(--clay-editor-keyword-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-keyword-weight, normal);
+  font-style: var(--clay-editor-keyword-style, normal);
+  text-decoration: var(--clay-editor-keyword-decoration, none);
+  background: var(--clay-editor-keyword-background, transparent);
+  font-size: calc(1em * var(--clay-editor-keyword-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-modifier) {
+  color: var(--clay-editor-modifier-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-modifier-weight, normal);
+  font-style: var(--clay-editor-modifier-style, normal);
+  text-decoration: var(--clay-editor-modifier-decoration, none);
+  background: var(--clay-editor-modifier-background, transparent);
+  font-size: calc(1em * var(--clay-editor-modifier-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-comment) {
+  color: var(--clay-editor-comment-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-comment-weight, normal);
+  font-style: var(--clay-editor-comment-style, normal);
+  text-decoration: var(--clay-editor-comment-decoration, none);
+  background: var(--clay-editor-comment-background, transparent);
+  font-size: calc(1em * var(--clay-editor-comment-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-string) {
+  color: var(--clay-editor-string-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-string-weight, normal);
+  font-style: var(--clay-editor-string-style, normal);
+  text-decoration: var(--clay-editor-string-decoration, none);
+  background: var(--clay-editor-string-background, transparent);
+  font-size: calc(1em * var(--clay-editor-string-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-number) {
+  color: var(--clay-editor-number-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-number-weight, normal);
+  font-style: var(--clay-editor-number-style, normal);
+  text-decoration: var(--clay-editor-number-decoration, none);
+  background: var(--clay-editor-number-background, transparent);
+  font-size: calc(1em * var(--clay-editor-number-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-regexp) {
+  color: var(--clay-editor-regexp-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-regexp-weight, normal);
+  font-style: var(--clay-editor-regexp-style, normal);
+  text-decoration: var(--clay-editor-regexp-decoration, none);
+  background: var(--clay-editor-regexp-background, transparent);
+  font-size: calc(1em * var(--clay-editor-regexp-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-operator) {
+  color: var(--clay-editor-operator-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-operator-weight, normal);
+  font-style: var(--clay-editor-operator-style, normal);
+  text-decoration: var(--clay-editor-operator-decoration, none);
+  background: var(--clay-editor-operator-background, transparent);
+  font-size: calc(1em * var(--clay-editor-operator-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-decorator) {
+  color: var(--clay-editor-decorator-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-decorator-weight, normal);
+  font-style: var(--clay-editor-decorator-style, normal);
+  text-decoration: var(--clay-editor-decorator-decoration, none);
+  background: var(--clay-editor-decorator-background, transparent);
+  font-size: calc(1em * var(--clay-editor-decorator-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-heading1) {
+  color: var(--clay-editor-heading1-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-heading1-weight, normal);
+  font-style: var(--clay-editor-heading1-style, normal);
+  text-decoration: var(--clay-editor-heading1-decoration, none);
+  background: var(--clay-editor-heading1-background, transparent);
+  font-size: calc(1em * var(--clay-editor-heading1-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-heading2) {
+  color: var(--clay-editor-heading2-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-heading2-weight, normal);
+  font-style: var(--clay-editor-heading2-style, normal);
+  text-decoration: var(--clay-editor-heading2-decoration, none);
+  background: var(--clay-editor-heading2-background, transparent);
+  font-size: calc(1em * var(--clay-editor-heading2-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-heading3) {
+  color: var(--clay-editor-heading3-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-heading3-weight, normal);
+  font-style: var(--clay-editor-heading3-style, normal);
+  text-decoration: var(--clay-editor-heading3-decoration, none);
+  background: var(--clay-editor-heading3-background, transparent);
+  font-size: calc(1em * var(--clay-editor-heading3-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-heading4) {
+  color: var(--clay-editor-heading4-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-heading4-weight, normal);
+  font-style: var(--clay-editor-heading4-style, normal);
+  text-decoration: var(--clay-editor-heading4-decoration, none);
+  background: var(--clay-editor-heading4-background, transparent);
+  font-size: calc(1em * var(--clay-editor-heading4-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-heading5) {
+  color: var(--clay-editor-heading5-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-heading5-weight, normal);
+  font-style: var(--clay-editor-heading5-style, normal);
+  text-decoration: var(--clay-editor-heading5-decoration, none);
+  background: var(--clay-editor-heading5-background, transparent);
+  font-size: calc(1em * var(--clay-editor-heading5-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-heading6) {
+  color: var(--clay-editor-heading6-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-heading6-weight, normal);
+  font-style: var(--clay-editor-heading6-style, normal);
+  text-decoration: var(--clay-editor-heading6-decoration, none);
+  background: var(--clay-editor-heading6-background, transparent);
+  font-size: calc(1em * var(--clay-editor-heading6-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-listitem) {
+  color: var(--clay-editor-listitem-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-listitem-weight, normal);
+  font-style: var(--clay-editor-listitem-style, normal);
+  text-decoration: var(--clay-editor-listitem-decoration, none);
+  background: var(--clay-editor-listitem-background, transparent);
+  font-size: calc(1em * var(--clay-editor-listitem-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-quote) {
+  color: var(--clay-editor-quote-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-quote-weight, normal);
+  font-style: var(--clay-editor-quote-style, normal);
+  text-decoration: var(--clay-editor-quote-decoration, none);
+  background: var(--clay-editor-quote-background, transparent);
+  font-size: calc(1em * var(--clay-editor-quote-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-codeblock) {
+  color: var(--clay-editor-codeblock-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-codeblock-weight, normal);
+  font-style: var(--clay-editor-codeblock-style, normal);
+  text-decoration: var(--clay-editor-codeblock-decoration, none);
+  background: var(--clay-editor-codeblock-background, transparent);
+  font-size: calc(1em * var(--clay-editor-codeblock-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-codespan) {
+  color: var(--clay-editor-codespan-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-codespan-weight, normal);
+  font-style: var(--clay-editor-codespan-style, normal);
+  text-decoration: var(--clay-editor-codespan-decoration, none);
+  background: var(--clay-editor-codespan-background, transparent);
+  font-size: calc(1em * var(--clay-editor-codespan-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-link) {
+  color: var(--clay-editor-link-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-link-weight, normal);
+  font-style: var(--clay-editor-link-style, normal);
+  text-decoration: var(--clay-editor-link-decoration, none);
+  background: var(--clay-editor-link-background, transparent);
+  font-size: calc(1em * var(--clay-editor-link-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-paragraph) {
+  color: var(--clay-editor-paragraph-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-paragraph-weight, normal);
+  font-style: var(--clay-editor-paragraph-style, normal);
+  text-decoration: var(--clay-editor-paragraph-decoration, none);
+  background: var(--clay-editor-paragraph-background, transparent);
+  font-size: calc(1em * var(--clay-editor-paragraph-scale, 1));
+}
+
+.canvas :global(.cm-clay-t-searchmatch) {
+  color: var(--clay-editor-searchmatch-color, var(--clay-text-primary));
+  font-weight: var(--clay-editor-searchmatch-weight, normal);
+  font-style: var(--clay-editor-searchmatch-style, normal);
+  text-decoration: var(--clay-editor-searchmatch-decoration, none);
+  background: var(--clay-editor-searchmatch-background, transparent);
+  font-size: calc(1em * var(--clay-editor-searchmatch-scale, 1));
+}
+
+.canvas :global(.cm-clay-m-bold) {
+  font-weight: bold;
+}
+
+.canvas :global(.cm-clay-m-italic) {
+  font-style: italic;
+}
+
+.canvas :global(.cm-clay-m-underline) {
+  text-decoration: underline;
+}
+
+.canvas :global(.cm-clay-m-strikethrough) {
+  text-decoration: line-through;
+}
+
+.canvas :global(.cm-clay-f-monospace) {
+  font-family: var(--clay-font-monospace);
+}
+
+.canvas :global(.cm-clay-f-proportional) {
+  font-family: var(--clay-font-proportional);
 }
 
 .canvas :global(.cm-clay-hover) {

@@ -2825,6 +2825,67 @@ Authoritative API details, backing paths, budgets, and error codes remain in
 [UI Chrome Primitives](../primitives/ui-chrome-primitives.md), and the
 [Primitive Registry](../primitives/registry.md).
 
+## Plan 099 editor-performance authoring contract
+
+Plan 099 changes how Clay implements editor performance without expanding the
+package author API. Packages still declare validated, inert contributions and
+run only on the server; Clay owns the client position index, viewport request
+completion, syntax scheduling, and render state.
+
+| Internal primitive | Package-facing boundary |
+| --- | --- |
+| `BytePositionIndex` / `bytePositionField` | Client-only UTF-16/UTF-8 conversion. Packages receive no editor `Text`, position-index handle, CodeMirror state, or per-keystroke callback. Publish byte ranges through existing server APIs. |
+| `ViewportRenderRequest` / `ViewportRenderPatch` | Clay-owned protocol v29 transport. Packages do not forge request IDs, complete patches, covered ranges, or terminal status; their validated decoration/diagnostic/fold output is aggregated by the server. |
+| `SyntaxSession` | Server-internal `(generation, document, grammar)` latest-wins worker. Packages use `parse.serverRegisterParseHandler` or `syntax.serverRegisterSyntaxGrammar`; they do not select executor threads, parser lifetimes, cache eviction, or request pacing. |
+
+A normal package continues to load explicitly from `~/.config/clay/init.js`:
+
+```js
+import { loadPackage } from "clay:packages";
+
+await loadPackage("@clay/rust");
+```
+
+For syntax or decorations, use the documented registration/publication facades:
+
+- `syntax.serverRegisterSyntaxGrammar` declares grammar metadata and style-map
+  contributions. First-party native descriptors remain host-owned; a package
+  must not add a language-specific Rust/client branch or a hidden grammar path.
+- `parse.serverRegisterParseHandler` receives only server-prepared bounded
+  `ParseWindowSnapshot` values and exact accepted-edit metadata. Parse work is
+  `Background`, cancellable, and stale-version checked.
+- `decorations.serverPublishDecorations`,
+  `diagnostics.serverPublishDiagnostics`, and
+  `folding.serverPublishFoldingRanges` publish bounded inert data. Output
+  members may be split into 128-byte decoration sets, but output fan-out never
+  creates sibling parser jobs.
+
+Current host bounds are compiled safety policy, not package options:
+`MAX_CHUNK_BYTES` is 256 KiB, native grammar context is 768 KiB,
+`INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` is 4 KiB,
+`DECORATION_PAYLOAD_BUDGET_BYTES` and diagnostic payloads are 8 KiB,
+`SYNTAX_CACHE_BUDGET_BYTES` is 30 MiB, native syntax concurrency is four
+blocking jobs, per-document parser state and mode activations are each capped
+at 64, and open document resident memory is capped at 256 MiB. No
+`setPackageOption` key can raise these limits, force full-document parsing, or
+move package code into the client hot path.
+
+Open/first-chunk and behavior state return before background syntax completes.
+If a package parser times out, fails, publishes stale data, or exceeds a
+payload/window budget, Clay keeps the document editable with its current
+`core.code`/`core.text` behavior and reports a bounded sanitized diagnostic.
+The client may retain or interpolate already-validated inert spans, but current
+server output replaces only its authoritative covered range. Packages must not
+add debounce-only settings, manual decoration publication to `init.js`, client
+parsers, callbacks, raw ops, CSS, native widgets, or synchronous IPC.
+
+Performance-sensitive package changes should prove their contract with
+`tests/suites/runtime.rs` parser/session tests, `tests/suites/protocol.rs`
+codec/budget tests, frontend editor invariant tests, and the source-free
+`CLAY_PERF_PROFILE=1` harness. Wall-clock p95 values are local evidence and
+become blocking only after three stable designated-device runs; no package
+telemetry or source text is collected.
+
 ## Documentation Requirements
 
 Each package should include docs for:

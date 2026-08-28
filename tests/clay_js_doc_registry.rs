@@ -2086,7 +2086,7 @@ fn canonical_example_covers_theme_typography_and_modular_configuration() {
         .expect("read canonical init.js example");
 
     for import in [
-        r#"import { loadConfigurationModule, getConfigurationState } from "clay:configuration";"#,
+        r#"import { loadConfigurationModule, getConfigurationState, setPackageOption } from "clay:configuration";"#,
         r#"import { setTheme, setTypography, setAppearance } from "clay:theme";"#,
         r#"import { clientSetCursorStyle } from "clay:editor";"#,
         r#"import { clientSetEditorLayout } from "clay:editor";"#,
@@ -2148,6 +2148,20 @@ fn canonical_example_covers_theme_typography_and_modular_configuration() {
             && example.contains("path: \"./packages/third-party.js\""),
         "canonical example must keep package configuration loads modular and optional"
     );
+    for marker in [
+        "// setPackageOption({",
+        "packagePrefix: \"markdown\"",
+        "option: \"markdown.layout.defaultVisibility\"",
+        "Planned — NOT callable yet:",
+        "setModePreference",
+        "setDecorationTheme",
+        "setParsePolicy",
+    ] {
+        assert!(
+            example.contains(marker),
+            "canonical example must distinguish implemented and planned configuration APIs: {marker}"
+        );
+    }
 
     let configuration =
         std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
@@ -2165,6 +2179,44 @@ fn canonical_example_covers_theme_typography_and_modular_configuration() {
             "configuration docs must cover canonical example marker {marker}"
         );
     }
+}
+
+#[test]
+fn plan099_configuration_surface_keeps_editor_performance_controls_host_owned() {
+    let root = repository_root();
+    let configuration =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration API guide");
+
+    for marker in [
+        "## Plan 099 editor-performance configuration review",
+        "SYNTAX_EXECUTOR_MAX_JOBS = 4",
+        "SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES = 64",
+        "MODE_ACTIVATION_CACHE_ENTRIES = 64",
+        "SYNTAX_CACHE_BUDGET_BYTES = 30 MiB",
+        "LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB = 256 MiB",
+        "VIEWPORT_OVERSCAN = 4096",
+        "PERF_SNAPSHOT_CAPACITY = 4096",
+        "CLAY_PERF_PROFILE=1",
+        "syntax.executorMaxJobs",
+        "performance.traceCapacity",
+        "Plan 099 adds no new user-facing configuration API or option",
+    ] {
+        assert!(
+            configuration.contains(marker),
+            "Plan 099 configuration review must document host-owned marker {marker}"
+        );
+    }
+
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    assert!(
+        registry.by_id("configuration.setPackageOption").is_some(),
+        "existing package-owned configuration API must remain discoverable"
+    );
+    assert!(
+        registry.by_id("configuration.setParsePolicy").is_none(),
+        "unimplemented parse-policy API must remain out of the public registry"
+    );
 }
 
 #[test]

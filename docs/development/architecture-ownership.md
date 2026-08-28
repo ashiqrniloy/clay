@@ -35,6 +35,27 @@ no new trait unless multiple current implementations already require one.
 | `frontend/src/chat` (ChatPanel + agent transport) | AG-UI message snapshot, run status | `AbstractAgent` transport over Tauri channel; submit/cancel intents to declared commands | Transcript/composer presentation; composer interaction is local-only | Credential-free events; inert tool payloads | Abort cancels run; unsubscribe drops channel |
 | Retained neutral Rust modules (`src/shell/{layout,layout_persist,file_browser,path_browser,fuzzy,transient_menu}`, `src/editor/{position_map,theme,typography}`, `src/client`) | Layout tree/persistence schema, browser/path/fuzzy data, position maps, typography roles, `ClientEditQueue`/session event types | Pure computation used by both bridge and tests | No painting — renderer-neutral by contract | Same validation rules as before cutover | Drop semantics unchanged |
 
+## Plan 099 editor performance ownership
+
+Plan 099 keeps one owner for each performance-sensitive state and moves CPU
+work away from connection and browser hot paths:
+
+| Concern | Owner | Contract |
+|---|---|---|
+| Canonical document and bounded parser input | `src/server/document.rs` / `src/server/workspace.rs` | Server-owned `DocumentState`/rope; head and chunk responses are UTF-8-safe and bounded by `MAX_CHUNK_BYTES` plus the 256 MiB resident-document budget. |
+| Syntax scheduling and parser state | `src/server/parse_coordinator.rs` + `src/server/syntax_session.rs` | One `(generation, document, grammar)` session with one latest-wins mailbox; native handlers use four shared `spawn_blocking` permits; each document owns its parser/tree state; stale output never publishes. |
+| Mode activation | `src/server/js_runtime/mod.rs` + `src/server/connection/documents.rs` | Completed activation manifests are cached per generation and classification input, capped at 64 entries; cache hits avoid generated V8 open evaluation without changing package authority. |
+| Protocol completion | `src/protocol/parse.rs` + `src/server/connection/mod.rs` | `ViewportRenderRequest` receives exactly one `ViewportRenderPatch` with complete/empty/rejected status and output-derived `covered_ranges`; parse context is not falsely claimed. |
+| Bridge delivery | `src-tauri/src/bridge/forwarder.rs` | Strict-FIFO live lane carries sibling members; latest-wins lane coalesces only obsolete whole patches per document, never individual decoration/diagnostic/fold members. |
+| Editor offsets and render state | `frontend/src/editor/position-index.ts` + `frontend/src/editor/extensions/{render-patch,decorations,diagnostics,folding}.ts` | `BytePositionIndex` is the one incremental numeric position field and `applyRenderPatch` is the one atomic render effect; client maps bounded output once, replaces exact authority, maps local edits, and prunes bounded overscan. |
+| React/workspace metadata | `frontend/src/shell/workspace-controller.ts` | Routes envelopes to the owning pane; loading/diagnostic snapshots notify the shell, while ack/pending churn remains pane-local and does not schedule persistence. |
+| Performance evidence | `src/perf/metrics.rs` + `frontend/src/editor/performance.ts` | Opt-in schema-v1 source-free traces, bounded at 4,096 events per recorder; p50/p95/max are local developer evidence, not public package telemetry. |
+
+No package-facing API exposes these owners. Packages publish validated inert
+syntax/decoration/diagnostic/fold data through existing server facades; parser,
+position-index, viewport-completion, trace, and scheduler controls remain
+internal.
+
 ## Server-owned menu sessions — presentation bridge
 
 `server TransientMenuSession → Tauri bridge forwarder → React workspace controller (snapshot state + typed intent enqueue) → CommandCentre modal (focus containment, listbox projection, polite count)`. Server owns session/filter/selection/activation. Client presentation ownership is ONE surface per concern: modal geometry/focus/restoration in the React Aria wrapper, intent emission through the bounded edit queue, accessibility strings from the sanitized snapshot. The workspace controller routes snapshots to panes but owns no menu session state.
@@ -51,12 +72,14 @@ no new trait unless multiple current implementations already require one.
 
 | Hot path | Budget / guard |
 |---|---|
-| Keypress → local glyph/caret update | `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` = 16 ms; CodeMirror applies edits locally first, bounded ordered deltas queue asynchronously (`frontend/src/editor` tests + `tests/suites/protocol.rs` hot-path guards) |
+| Keypress → local glyph/caret update | `KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS` = 16 ms; CodeMirror applies edits locally first, `bytePositionField` maps offsets incrementally, and bounded ordered deltas queue asynchronously (`frontend/src/editor` tests + `tests/suites/protocol.rs` hot-path guards) |
 | Pane render / tab switch | `PANE_PAINT_P95_BUDGET_MS` = 1 ms, `TAB_SWITCH_P95_BUDGET_MS` = 1 ms; React commit measured by the frontend test suite; no synchronous server/JS round trip in the keystroke path |
-| Edit ack / scroll-layout-render | `EDIT_ACK_P95_BUDGET_MS` = 40 ms, `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS` = 16 ms |
+| Edit ack / scroll-layout-render | `EDIT_ACK_P95_BUDGET_MS` = 40 ms, `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS` = 16 ms; viewport replies use one atomic `ViewportRenderPatch` and never wait in local transaction/paint |
 | Command centre open / filter | `COMMAND_CENTRE_OPEN_P95_BUDGET_MS` = 50 ms, `FILTER_UPDATE_P95_BUDGET_MS` = 4 ms; listing payload 64 KiB, `TRANSIENT_MENU_MAX_ITEMS` = 256 |
 | Runtime eval / config / mode activation | `JS_RUNTIME_EVALUATION_TIMEOUT_MS` = 5 s, heap 128 MiB; `RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS` = 25 ms, `MODE_ACTIVATION_P95_BUDGET_MS` = 100 ms |
 | IPC frame / document load | `DEFAULT_MAX_FRAME_SIZE` = 1 MiB; heads/chunks use `MAX_CHUNK_BYTES` = 256 KiB; server-owned resident rope budget = 256 MiB; no full-doc IPC on ordinary edits (deltas only) |
+| Syntax scheduling / retained parser state | `SYNTAX_EXECUTOR_MAX_JOBS` = 4; `SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES` = 64; `SYNTAX_CACHE_BUDGET_BYTES` = 30 MiB; latest-wins per-document session, native CPU never runs on Tokio workers |
+| Developer traces | `PERF_SNAPSHOT_CAPACITY` = 4,096; disabled by default; numeric IDs/versions/byte counts and sanitized stage names only |
 | Frontend bundle budgets | Startup shell ≤ 180 kB gzip, total application ≤ 400 kB gzip; enforced by `frontend/scripts/bundle-budget.mjs` in CI |
 | Tests pinning these | `src/perf/budgets.rs` constants, `benches/protocol_server_baselines.rs`, `tests/performance_budgets.rs`, `tests/package_loading.rs`, codec/malformed-archive suites, frontend Vitest editor/SDUI/agent suites |
 

@@ -2,13 +2,19 @@
 
 Clay is a client/server code editor. See [Clay documentation](docs/index.md) and the [launch guide](docs/development/launch-and-gui-smoke.md).
 
-## Run
+## Run from a source checkout
 
 ```bash
+cd frontend && npm ci && npm run build
+cd .. && cargo build -p clay -p clay-desktop
 cargo run
 ```
 
-Bare `cargo run` connects to an existing local Clay server or starts one in the background.
+`cargo run` builds only the `clay` launcher. It reuses sibling
+`clay-desktop`/`clay-server` executables, and the desktop embeds
+`frontend/dist`; run the build steps above after source changes so the GUI and
+server are not stale. Bare `cargo run` then replaces the default-endpoint
+server and opens the desktop.
 
 ## Fully restart the server on Linux
 
@@ -45,7 +51,7 @@ A new server safely replaces a stale Unix socket. If no server remains but start
 rm -f "${XDG_RUNTIME_DIR:-/tmp/clay-$USER}/clay.sock"
 ```
 
-Then start a fresh server and GUI:
+Then start a fresh server and GUI from already-built artifacts:
 
 ```bash
 cd /path/to/clay

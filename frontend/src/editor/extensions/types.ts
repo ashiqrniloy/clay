@@ -72,6 +72,7 @@ export interface DecorationSet {
   viewportByteStart: number;
   viewportByteEnd: number;
   spans: DecorationSpan[];
+  traceId?: number;
 }
 
 export interface DiagnosticSpan extends ByteRange {
@@ -100,6 +101,20 @@ export interface FoldingRangeSet {
   documentVersion: number;
   packagePrefix: string;
   ranges: FoldingRange[];
+}
+
+/** Protocol v29 atomic answer to one viewport render request. */
+export interface ViewportRenderPatchDto {
+  requestId: number;
+  documentId: number;
+  documentVersion: number;
+  status: "complete" | "empty" | "rejected";
+  reason?: string | null;
+  coveredRanges: ByteRange[];
+  decorations: DecorationSet[];
+  diagnostics: DiagnosticSet[];
+  folds: FoldingRangeSet[];
+  traceId?: number | null;
 }
 
 export interface CompletionItemDto {

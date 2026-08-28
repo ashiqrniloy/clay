@@ -1,10 +1,47 @@
 # Clay Primitives Reference
 
-This directory is the Phase 16 architecture source for package- and mode-controlled Clay primitives. These documents define the registry, security baseline, rendering/parse strategies, Markdown POC prerequisites, and implementation backlog for Phase 17 and Phase 18, including Phase 18.3 runtime-backed slot-aware package UI contribution primitives, Phase 18.4 runtime-backed package input/state/layout-override/configuration primitives, Phase 18.9 generic `core.text`/`core.code` fallback modes, shebang/content-probe classification, generic key-behavior (electric/pair/comment) transforms, mode-discovery commands, and the Phase 18.16 tiered `SyntaxGrammarContribution` engine built on the Phase 18.10 grammar metadata contract (package-author contract in [Creating Clay Packages](../packages/creating-packages.md#phase-1816-authoring-contract-tiered-syntax-engine)).
+This directory is the Phase 16 architecture source and current reference for package- and mode-controlled Clay primitives. These documents define the registry, security baseline, rendering/parse strategies, Markdown POC prerequisites, and implementation backlog for Phase 17 and Phase 18, including Phase 18.3 runtime-backed slot-aware package UI contribution primitives, Phase 18.4 runtime-backed package input/state/layout-override/configuration primitives, Phase 18.9 generic `core.text`/`core.code` fallback modes, shebang/content-probe classification, generic key-behavior (electric/pair/comment) transforms, mode-discovery commands, the Phase 18.16 tiered `SyntaxGrammarContribution` engine, and the Plan 099 server-authoritative editor performance primitives (package-author contract in [Creating Clay Packages](../packages/creating-packages.md#phase-1816-authoring-contract-tiered-syntax-engine)).
 
 ## Plan 098 document chunk transfer
 
 `DocumentChunkTransfer` is an internal protocol v27 primitive for initial, open, reload, resync, and persisted-document restore text. Server-issued `DocumentTextHead` values carry total bytes plus one bounded first chunk; versioned client requests receive at most `MAX_CHUNK_BYTES` (256 KiB) from the authorized canonical rope. Invalid sizes, offsets, access, or versions fail with typed rejection. Transfer stays asynchronous and outside CodeMirror transactions, React render, paint, layout, and input handlers. See [Primitive Registry Schema](registry.md#category-matrix), [Protocol Codec](../../wiki/modules/protocol-codec.md), and [Desktop Typed Bridge](../../wiki/modules/desktop-typed-bridge.md).
+
+## Plan 099 editor performance primitives
+
+Plan 099 is implemented on the server-authoritative Tauri/React path. These
+three primitives are internal implementation contracts, not package-facing
+Clay JS APIs:
+
+- `BytePositionIndex` (`frontend/src/editor/position-index.ts`) is the shared
+  CodeMirror `bytePositionField`. It builds once for a `Text`; each document
+  change path-copies only changed whole-line chunks of 64 lines. Leaves retain
+  numeric UTF-16/UTF-8 widths only, so edit, viewport, decoration, diagnostic,
+  fold, completion, intelligence, and selection paths share structure instead
+  of rebuilding a document-sized line table. A single 1 MiB line remains an
+  explicit O(line) conversion ceiling.
+- `ViewportRenderPatch` (`src/protocol/parse.rs`, protocol v29) pairs one
+  metadata-only `ViewportRenderRequest` id with exactly one complete, empty, or
+  rejected answer. `covered_ranges` describe output authority, not parser
+  context. Ordered decoration, diagnostic, and fold members apply in one client
+  render transaction; Tauri may discard only obsolete whole patches per
+  document, never sibling members.
+- `SyntaxSession` (`src/server/syntax_session.rs`, owned by
+  `ParseCoordinator`) keeps one latest-wins mailbox per document/grammar/
+  generation. Native handlers run under four shared blocking permits, each
+  document owns its parser/tree state, the retained tree cache is capped at 64
+  states, and the per-generation mode-activation cache is capped at 64 entries.
+  JavaScript handlers remain on the server runtime worker.
+
+Packages continue to use documented server-side registration/publication APIs
+such as `parse.serverRegisterParseHandler`,
+`syntax.serverRegisterSyntaxGrammar`, `decorations.serverPublishDecorations`,
+`diagnostics.serverPublishDiagnostics`, and
+`folding.serverPublishFoldingRanges`. Package code does not receive the
+position index, patch completion protocol, parser handles, trace contents, or
+scheduler controls. See [Primitive Registry Schema](registry.md), [Incremental
+Parse and Background Parse Update Strategy](parse-update-strategy.md),
+[Rendering Customization Strategy](rendering-strategy.md), and [Performance
+Fixtures and Baseline Workflow](../../development/performance.md).
 
 ## Phase 18.16 syntax engine summary
 
@@ -14,7 +51,7 @@ The Phase 18.10 grammar metadata baseline remains documented in [Creating Clay P
 
 The implemented path accepts one canonical `ParseInputEdit` for each consecutive document version and stable bounded window. `TreeSitterSyntaxHandler` reuses the matching Tree-sitter tree, applies `Tree::edit`, reparses once, and queries the UTF-8-safe envelope formed from `Tree::changed_ranges` plus explicit invalidations intersected with the visible range. One parse/capture pass produces complete captures and fans them into stable 128-byte `DecorationSet` outputs; output chunk count never creates parser jobs. Changed/visible chunks publish first, every member is validated atomically, and empty syntax chunks remain authoritative replacements.
 
-`EditorDecorationState` interpolates validated inert syntax spans through optimistic edits, with generic broad-token edge inheritance and authoritative current-version replacement. Package grammar captures—not whitespace, idle, caret movement, or a language-specific scheduler branch—define whole-token and comment/string/prose/code boundaries. First-party packages remain opt-in through one explicit `await loadPackage("@clay/<language>")` line in `~/.config/clay/init.js`; no copied manifest or manual parser/decorator registration is required.
+Frontend decoration, diagnostic, and folding state fields interpolate validated inert syntax spans through optimistic edits, with generic broad-token edge inheritance and authoritative current-version replacement. Package grammar captures—not whitespace, idle, caret movement, or a language-specific scheduler branch—define whole-token and comment/string/prose/code boundaries. First-party packages remain opt-in through one explicit `await loadPackage("@clay/<language>")` line in `~/.config/clay/init.js`; no copied manifest or manual parser/decorator registration is required.
 
 ## Documents
 

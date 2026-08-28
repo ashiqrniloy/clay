@@ -15,7 +15,7 @@
 
 ## Overview
 
-The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 introduced `DecorationViewportRequest`; version 3 accompanies grouped native decoration chunks and analyzer-only diagnostic semantics; version 4 introduces the Phase 19 complete `RuntimeStateSnapshot` / `RuntimeGenerationInstalled` reload contract; version 5 (Plan 059) adds `ServerMessage::DecorationBatch` for single-frame multi-chunk parse updates and pairs with the `ReadPumpGuard` cancellation-safe framing pattern; protocol v15 moves `InitialDocument` and initial workspace SDUI after tab binding. Phase 28 adds protocol versions 20-23 for `FoldingRangeSet`, Link targets, InlayHint payloads, and completion recency metadata; Phase 25 bumps the pin to 24 for boxed agent messages; package UI reaches version 26. Plan 098 bumps the current wire pin to 27 for bounded document heads and pull-based chunks. Older servers are rejected before incompatible message discriminants or payload semantics are used.
+The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 introduced `DecorationViewportRequest`; version 3 accompanies grouped native decoration chunks and analyzer-only diagnostic semantics; version 4 introduces the Phase 19 complete `RuntimeStateSnapshot` / `RuntimeGenerationInstalled` reload contract; version 5 (Plan 059) adds `ServerMessage::DecorationBatch` for single-frame multi-chunk parse updates and pairs with the `ReadPumpGuard` cancellation-safe framing pattern; protocol v15 moves `InitialDocument` and initial workspace SDUI after tab binding. Phase 28 adds protocol versions 20-23 for `FoldingRangeSet`, Link targets, InlayHint payloads, and completion recency metadata; Phase 25 bumps the pin to 24 for boxed agent messages; package UI reaches version 26. Plan 098 bumps the current wire pin to 27 for bounded document heads and pull-based chunks. Plan 099 bumps it to 28 for optional content-free performance trace IDs on viewport, parse, and decoration messages, and to 29 for the atomic viewport render protocol: `ViewportRenderRequest` (monotonic request id + visible byte bounds) is answered by exactly one `ServerMessage::ViewportRenderPatch` carrying ordered decoration/diagnostic/fold members, authoritative covered ranges, and a complete/empty/rejected terminal status. Older servers are rejected before incompatible message discriminants or payload semantics are used.
 
 ## Responsibilities
 
@@ -27,9 +27,10 @@ The protocol module defines the shared client/server IPC message contract. It us
 - Represent Phase 9/19/Plan 060 file/workspace commands and results: workspace-root open, selected-file open, save, reload, status, list, explicit document close, document metadata, and typed file-operation failures.
 - Represent Phase 12 SDUI bootstrap/update/action messages: `SduiSnapshot`, `SduiUpdate`, and `SduiAction`.
 - Represent Phase 13 runtime diagnostics with severity, stable code, and sanitized message fields.
-- Represent Phase 18 handoff decoration updates as bounded `DecorationSet` messages and metadata-only `DecorationViewportRequest` messages for scroll-driven window scheduling.
+- Represent Phase 18 handoff decoration updates as bounded `DecorationSet` messages and protocol-v29 metadata-only `ViewportRenderRequest`/`ViewportRenderPatch` messages for scroll-driven window scheduling.
 - Represent Phase 18.16.5 `ActiveTypography` separately from `ActiveTheme`: three bounded fallback-stack/size profiles, a revision, document defaults, and closed semantic roles.
 - Define Phase 18 handoff parse shapes (`ParseEditNotification` and `IncrementalParseUpdate`) as serializable server-side data without adding parse results to hot edit-ack IPC.
+- Keep viewport completion explicit: one request ID receives one complete, empty, or rejected `ViewportRenderPatch`; decoration, diagnostic, and fold members remain ordered inside that envelope.
 - Encode and decode messages as `rkyv` payloads with a big-endian 4-byte length prefix.
 - Reject oversized, incomplete, mismatched, or invalid frames before callers receive a protocol message.
 - Avoid adding executable behavior, extension authority, direct file workspace authority, client-executed SDUI code, or AI mutation privileges.
@@ -46,7 +47,7 @@ Phase 12 adds SDUI protocol variants without a second serialization path. `Serve
 
 Phase 13 adds `RuntimeDiagnostic` and `ServerMessage::RuntimeDiagnostic` for server-side JavaScript/configuration errors. Diagnostics carry `DiagnosticSeverity`, stable Clay error code, and sanitized actionable message; they do not carry raw source snippets, absolute paths, environment dumps, tokens, or authority handles.
 
-Phase 17 adds `ServerMessage::DecorationSet` for validated inline editor decorations. The message reuses the same codec boundary; server-side decoration validation enforces document version, viewport byte range, package provenance, inert style tokens, and `DECORATION_PAYLOAD_BUDGET_BYTES` before publication. Plan 059 (protocol version 5) adds `ServerMessage::DecorationBatch(Vec<DecorationSet>)` so multi-chunk parse updates ship in a single frame; single-chunk updates retain the plain `DecorationSet` wire shape. `ClientMessage::DecorationViewportRequest` carries only client/document/version IDs and visible byte bounds; it never carries document text. The server validates those fields, reads canonical text from the already-open document, and schedules a bounded native parse window. Phase 17 also defines `src/protocol/parse.rs` shapes for parse notifications and incremental parse updates; those types are `rkyv`-serializable for downstream/cache use, but the coordinator keeps parse updates server-side rather than adding them to ordinary edit acknowledgement messages.
+Phase 17 adds `ServerMessage::DecorationSet` for validated inline editor decorations. The message reuses the same codec boundary; server-side decoration validation enforces document version, viewport byte range, package provenance, inert style tokens, and `DECORATION_PAYLOAD_BUDGET_BYTES` before publication. Plan 059 (protocol version 5) adds `ServerMessage::DecorationBatch(Vec<DecorationSet>)` so multi-chunk parse updates ship in a single frame; single-chunk updates retain the plain `DecorationSet` wire shape. Protocol v29 `ClientMessage::ViewportRenderRequest` carries only client/document/version IDs, a monotonic request id, visible byte bounds, and optional trace metadata; it never carries document text. The server validates those fields, clamps the range to the document's total bytes before allocating parse windows, reads canonical text from the already-open document, and answers with exactly one `ServerMessage::ViewportRenderPatch` per request id: rejected (unknown document/stale version/invalid range/activation failure), empty (no registered handler), or complete with ordered decoration/diagnostic/fold members and covered ranges derived from those members. Edit-driven parse updates keep the per-update `DecorationBatch`/`DecorationSet`/`DiagnosticSet`/`FoldingRangeSet` frames. Phase 17 also defines `src/protocol/parse.rs` shapes for parse notifications and incremental parse updates; those types are `rkyv`-serializable for downstream/cache use, but the coordinator keeps parse updates server-side rather than adding them to ordinary edit acknowledgement messages.
 
 `BehaviorManifest::minimal_text_editing` now builds the default declarative text behavior manifest with an ID, behavior version, scope, document font role, key bindings, command declarations, routing policies, and editor rules; it is data, not script code. `core.text` defaults proportional and `core.code` defaults monospace.
 
@@ -122,14 +123,17 @@ stream ──tokio::io::split──▶ reader ──[read-pump task]──▶ mp
   schema/publication updates, behavior-version rejection metadata, lease/version
   edit deltas, stale-edit rejection, resync snapshots, region-lock rejection
   metadata, file/workspace commands including `OpenSelectedFile` and
-  `CloseDocument`, decoration viewport requests, workspace result messages,
-  typed file-operation failures, v27 document heads/chunk requests/chunks/rejections with frame and size guards, SDUI snapshot/update/action messages, and runtime diagnostic messages.
+  `CloseDocument`, v29 viewport render requests/patches, workspace result messages,
+  typed file-operation failures, v27 document heads/chunk requests/chunks/rejections with frame and size guards, v29 viewport render requests/complete-empty-rejected patches, SDUI snapshot/update/action messages, and runtime diagnostic messages.
 - `src/server/connection/mod.rs`: table-driven forged-ID coverage for every post-Hello message family plus close/access/subscription cleanup tests.
-- `tests/decoration_transport.rs::decoration_transport_round_trips_through_protocol_codec`: verifies `ServerMessage::DecorationSet` uses the shared codec boundary.
+- `src/protocol/codec.rs::protocol_round_trips_viewport_render_patches` and
+  `src/server/connection/mod.rs::viewport_render_requests_answer_one_patch_per_request_id`:
+  verify the shared codec boundary, patch statuses, request identity, and
+  request-scoped delivery.
 - `tests/typography_protocol.rs`: codec round trip for all profiles/revision plus invalid profile and role-layer rejection coverage.
 - `src/client/mod.rs` and `src/server/connection/mod.rs`: bootstrap ordering and live-delivery tests consume the fifth `ActiveTypography` frame before post-bootstrap SDUI/capability traffic.
 - `src/protocol/codec.rs`: rejection tests for oversized Phase 5 frames, oversized manifest messages, invalid client archived bytes, invalid server/manifest archived bytes, compact generated framing/archive mutations, truncation sweeps, deterministic byte mutations, misaligned declared lengths, and read-side oversized declarations.
-- `tests/editor_intelligence_protocol.rs`: Phase 28 codec compatibility for the protocol version 27 handshake pin, folding, Link/InlayHint `DecorationSet`/`DecorationBatch`, inert `DecorationTarget` click/hover data, completion recency, hover request/results, and bounded malformed-frame rejection.
+- `tests/editor_intelligence_protocol.rs`: Phase 28 codec compatibility for the protocol version 29 handshake pin, folding, Link/InlayHint `DecorationSet`/`DecorationBatch`, inert `DecorationTarget` click/hover data, completion recency, hover request/results, and bounded malformed-frame rejection.
 - `tests/agent_protocol.rs`: Phase 25 boxed agent command/message round-trips, secret omission, malformed-frame rejection, reserved `agent` domain.
 - Relevant command: `cargo test protocol`.
 
@@ -137,6 +141,7 @@ stream ──tokio::io::split──▶ reader ──[read-pump task]──▶ mp
 
 - [Behavior Manifests](behavior-manifests.md)
 - [Decoration Transport](decoration-transport.md)
+- [Editor Viewport Render Patch](../flows/editor-viewport-render-patch.md)
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
 - [Document Leases and Region Locks](../flows/document-leases-and-region-locks.md)
 - `plans/005-Phase4-IPC-Client-Server-Skeleton.md`

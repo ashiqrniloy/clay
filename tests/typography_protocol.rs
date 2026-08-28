@@ -90,6 +90,7 @@ fn decoration_font_role_is_limited_to_syntax_and_semantic_layers() {
         viewport_byte_start: 0,
         viewport_byte_end: 4,
         spans: vec![diagnostic],
+        trace_id: None,
     };
 
     assert_eq!(

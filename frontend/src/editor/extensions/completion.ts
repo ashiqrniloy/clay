@@ -7,11 +7,8 @@ import {
 } from "@codemirror/autocomplete";
 import type { Extension } from "@codemirror/state";
 
-import {
-  textIndex,
-  utf16ToUtf8Indexed,
-  utf8ToUtf16Indexed,
-} from "../position-map";
+import { positionIndex } from "../position-index";
+import { utf16ToUtf8Indexed, utf8ToUtf16Indexed } from "../position-map";
 import type { CompletionItemDto, CompletionResultSet } from "./types";
 
 interface CompletionContextData {
@@ -79,7 +76,7 @@ export class CompletionProjection {
     if (!context.explicit && !word?.text && trigger === "manual") return null;
 
     const id = this.requestId++;
-    const index = textIndex(context.state.doc);
+    const index = positionIndex(context.state);
     const from = word?.from ?? context.pos;
     const resultPromise = new Promise<CompletionResultSet | null>((resolve) => {
       this.waiting.set(id, resolve);
@@ -128,7 +125,7 @@ export class CompletionProjection {
       result.behaviorVersion !== meta.behaviorVersion
     )
       return null;
-    const currentIndex = textIndex(context.state.doc);
+    const currentIndex = positionIndex(context.state);
     const resultFrom = utf8ToUtf16Indexed(
       currentIndex,
       result.replacementRange.byteStart,

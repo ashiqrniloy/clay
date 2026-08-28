@@ -37,6 +37,7 @@ pub mod parse_coordinator;
 pub mod runtime_sandbox;
 mod sdui;
 pub mod syntax;
+pub mod syntax_session;
 mod tab_registry;
 mod ui;
 pub(crate) mod workspace;
@@ -2392,6 +2393,7 @@ mod runtime_outputs_tests {
             viewport_byte_start: 0,
             viewport_byte_end: 0,
             spans: vec![],
+            trace_id: None,
         }
     }
 
@@ -4148,6 +4150,9 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                         decoration_updates: Vec::new(),
                         diagnostic_update: None,
                         folding_update: None,
+                        trace_id: None,
+                        request_id: None,
+                        client_id: None,
                     })
                 },
             )
@@ -4295,6 +4300,9 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                         decoration_updates: Vec::new(),
                         diagnostic_update: None,
                         folding_update: None,
+                        trace_id: notification.trace_id,
+                        request_id: notification.request_id,
+                        client_id: None,
                     })
                 },
             )
@@ -4318,6 +4326,9 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 viewport: ParseByteRange::new(0, 8),
                 invalidated_ranges: vec![ParseByteRange::new(0, 8)],
                 accepted_edit: None,
+                trace_id: None,
+                request_id: None,
+                client_id: None,
             })
             .unwrap();
         server.parse_coordinator.cancel_older_generations(2);

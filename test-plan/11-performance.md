@@ -241,7 +241,7 @@ No performance budget was changed.
 | Q34 | Open the synthetic 50 MiB UTF-8 `large.md` through the real desktop smoke path | First head/first paint stays under 500 ms, full chunk assembly under 5 s, and each head/chunk stays at or below `MAX_CHUNK_BYTES` (256 KiB); no full-document IPC frame is emitted |
 | Q35 | Edit the ready 50 MiB document, Save, and Reload | Save acknowledgement remains bounded and responsive; disk/reloaded bytes equal the edited document; ordinary editor input does not wait on chunk or save IO |
 | Q36 | Attempt `oversize.txt` (257 MiB sparse) and `binary.dat` | Resident-budget and binary-sniff refusals return promptly with typed diagnostics; no large content allocation, stale loading loop, or unbounded memory growth occurs |
-| Q37 | Inspect the protocol-v27 runtime run and frame assertions | `DocumentChunk` payloads remain ≤256 KiB and below the 1 MiB codec frame ceiling; v27 handshake and mixed-version rejection remain deterministic |
+| Q37 | Inspect the protocol-v28 runtime run and frame assertions | `DocumentChunk` payloads remain ≤256 KiB and below the 1 MiB codec frame ceiling; v28 handshake and mixed-version rejection remain deterministic |
 
 ## Plan 098 Linux execution record (2026-08-26)
 
@@ -256,3 +256,35 @@ Known ceiling for this record: live WebKitGTK/portal interaction was not
 repeatable because the window moved off-screen and AT-SPI exposed only the
 native frame. Automated bounds and server timing do not substitute for GUI
 feel; repeat Q34–Q36 with a stable target before marking live interaction PASS.
+
+## Plan 099 Linux execution record (2026-08-28)
+
+Evidence: [`manual-test-plan.md`](../code-reviews/screenshots/2026-08-28-plan099-manual/manual-test-plan.md) and `target/perf/editor-performance/plan099-manual-20260828-181828/`.
+
+The full harness generated 72 synthetic fixtures (1/10/50 MiB × four line
+shapes × `.txt`, `.md`, `.rs`, `.ts`, `.tsx`, `.js`), rebuilt the profiled
+frontend and binaries, launched real Tauri/WebKit against a private server,
+and closed the window through its AT-SPI Close action. `--enforce` passed:
+zero long tasks over 50 ms; frontend retained 18/dropped 0; desktop 216/0;
+server 221/0. Bootstrap-only p95s were frontend open/ready 0/0 ms, desktop
+codec decode/encode 0.151/0.043 ms, server codec decode/encode 0.035/0.233
+ms, and configuration load 14.056 ms. `bridge.patch_delivery` was absent,
+and parser queue count was 0, because no fixture was opened.
+
+| Step | Result | Evidence |
+|---|---|---|
+| M1 | PARTIAL / UNRESOLVED | Fixture generation/private launch/Connected welcome passed; file-browser opens and ready content were not drivable. |
+| M2 | UNRESOLVED | Keyboard input unavailable. |
+| M3 | UNRESOLVED | Keyboard/scroll input unavailable; no viewport patch stage. |
+| M4 | UNRESOLVED | Keyboard input unavailable. |
+| M5 | UNRESOLVED | No fixture opened or edited. |
+| M6 | UNRESOLVED | Keyboard input unavailable. |
+| M7 | UNRESOLVED | No document session existed for meaningful server resync. |
+
+Supplemental one-fixture idle RSS observation: server 58,188 KiB, client
+13,876 KiB, desktop 211,888 KiB, tracked total 283,952 KiB (277.3 MiB).
+This is startup/idle process RSS, not the 256 MiB document-resident budget.
+Host: Linux 7.1.8-50.stable, Ryzen 9 PRO 7940HS, GNOME Wayland,
+WebKitGTK 2.52.5, Rust 1.96.1, Node 24.19.0. The designated minimum-device
+three-run timing gate remains open. No manual editor-flow pass is inferred
+from the bootstrap trace.

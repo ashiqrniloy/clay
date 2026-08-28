@@ -380,3 +380,20 @@ roots containing distinct filenames/content.
 | Tab bar/single workspace | PASS static/real AT-SPI | Fixture captures expose `Window tabs`/selected Workspace; `tabs-splits/accessibility.txt` confirms the real Tauri tree |
 | Tab/split persistence and switching | PASS automated; UNRESOLVED physical interaction | Layout/persistence/controller tests pass; host keyboard/window targeting prevented a live switch/reload sequence |
 | Tab labels and path privacy | PASS | Real and fixture trees expose workspace/document basenames only; no retained PNG includes a host absolute path |
+
+## Plan 099 tab/session recovery steps
+
+| # | Action | Expected |
+|---|---|---|
+| T77 | With two tabs/documents open, stop and restart the server, then reload both tabs | Each tab reconnects through its own session, restores its workspace/document identity, drops stale patches, and does not lose authoritative text or dirty-state ownership. |
+| T78 | In two tabs with split panes, open duplicate files and switch tabs while a viewport request is pending | Routing remains active-tab/per-pane scoped; one tab's document, patch, or grant never appears in the other; pending work is latest-wins and bounded. |
+
+## Plan 099 Linux execution record (2026-08-28)
+
+| Check | Result | Evidence |
+|---|---|---|
+| T77 | UNRESOLVED live; retained PASS evidence | No document session or keyboard-capable backend was available. Prior final-build recovery/tab artifacts and automated reconnect/isolation tests remain the available evidence. |
+| T78 | UNRESOLVED live; PASS automated companion | The profiled client launched only its bootstrap state; cross-tab/pane routing was not manually driven. |
+
+Do not treat the harness's zero parser queue as evidence that tab recovery
+had no pending syntax work; this run did not establish document sessions.

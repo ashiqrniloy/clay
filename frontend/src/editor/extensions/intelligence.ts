@@ -7,11 +7,8 @@ import {
   type Tooltip,
 } from "@codemirror/view";
 
-import {
-  textIndex,
-  utf16ToUtf8Indexed,
-  utf8ToUtf16Indexed,
-} from "../position-map";
+import { positionIndex } from "../position-index";
+import { utf16ToUtf8Indexed, utf8ToUtf16Indexed } from "../position-map";
 import type { LanguageFeature, LanguageResult, TextLocation } from "./types";
 
 interface Current {
@@ -40,7 +37,7 @@ export class IntelligenceProjection {
         const hover =
           result && "hover" in result.payload ? result.payload.hover : null;
         if (!hover?.markdown) return null;
-        const index = textIndex(view.state.doc);
+        const index = positionIndex(view.state);
         return {
           pos: hover.range
             ? utf8ToUtf16Indexed(index, hover.range.byteStart)
@@ -165,7 +162,7 @@ export class IntelligenceProjection {
         return;
       }
       const at = utf8ToUtf16Indexed(
-        textIndex(view.state.doc),
+        positionIndex(view.state),
         location.openDocument.range.byteStart,
       );
       view.dispatch({ selection: { anchor: at }, scrollIntoView: true });
@@ -199,7 +196,7 @@ export class IntelligenceProjection {
           documentVersion: meta.documentVersion,
           behaviorVersion: meta.behaviorVersion,
           cursorByteOffset: utf16ToUtf8Indexed(
-            textIndex(view.state.doc),
+            positionIndex(view.state),
             position,
           ),
           feature,

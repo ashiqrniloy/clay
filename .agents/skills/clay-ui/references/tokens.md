@@ -2,6 +2,8 @@
 
 Typed tokens are the only styling currency. Packages declare semantic tokens that resolve through same-typed core fallbacks (`ThemeTokenResolver`, `src/shell/theme.rs`). Users override theme and fonts via configuration; nothing hardcodes raw colors or sizes.
 
+Content themes are the sole normal-rendering color authority. UI design-system recipes may select semantic theme color roles for component slots/states and apply typed opacity/effects, but must never define palettes, literal colors, or package-owned color values. Shell, component, border, focus, selection, diagnostic, overlay, and solid material fallback colors all resolve from the active theme. Browser/OS system colors are reserved for forced-colors accessibility behavior.
+
 Resolution happens at theme/configuration install time. Native paint, layout, pointer, scroll, keypress, and text-event hot paths read cached resolved values only — no package JavaScript, theme parsing, raw IPC, or re-resolution runs per frame.
 
 ## Token Types

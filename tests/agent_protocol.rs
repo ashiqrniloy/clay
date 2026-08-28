@@ -247,7 +247,7 @@ fn every_server_message() -> Vec<AgentServerMessage> {
 
 #[test]
 fn phase25_protocol_version_is_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 27);
+    assert_eq!(PROTOCOL_VERSION, 29);
 }
 
 #[test]

@@ -1875,4 +1875,26 @@ mod covering_tests {
             .expect("windows");
         assert_eq!(windows.len(), 4);
     }
+
+    #[test]
+    fn viewport_render_cap_one_window_for_the_atomic_patch() {
+        let mut document = DocumentState::new(
+            1,
+            "z".repeat(200_000),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        document.acquire_access(0);
+        let policy = ParsePolicy::new(4_096, 512, 30 * 1024 * 1024, 5_000);
+        let windows = document
+            .parse_windows_covering(
+                "core",
+                "core.code",
+                ParseByteRange::new(0, 200_000),
+                policy,
+                1,
+            )
+            .expect("windows");
+        assert_eq!(windows.len(), 1);
+        assert!(windows[0].byte_range().len() <= 4_096);
+    }
 }

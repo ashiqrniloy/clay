@@ -380,6 +380,8 @@ async fn disabled_package_callback_publications_fail_closed() {
         accepted_edit: None,
         parse_windows: Vec::new(),
         memory_budget: None,
+        trace_id: None,
+        request_id: None,
     };
     let error = service
         .invoke_parse_handler(registration, notification)
@@ -1488,6 +1490,9 @@ async fn js_parse_handler_bridge_runs_registered_markdown_handler() {
         viewport: ParseByteRange::new(0, text.len() as u64),
         invalidated_ranges: vec![ParseByteRange::new(0, text.len() as u64)],
         accepted_edit: None,
+        trace_id: None,
+        request_id: None,
+        client_id: None,
     };
     let windows = vec![ParseWindowSnapshot {
         document_id: 1,
@@ -1579,6 +1584,9 @@ async fn js_parse_handler_bridge_accepts_inert_diagnostic_records() {
             viewport: ParseByteRange::new(0, 8),
             invalidated_ranges: vec![ParseByteRange::new(0, 1)],
             accepted_edit: None,
+            trace_id: None,
+            request_id: None,
+            client_id: None,
         })
         .unwrap();
 
@@ -2907,6 +2915,8 @@ async fn js_parse_handler_timeout_uses_registered_budget() {
         accepted_edit: None,
         parse_windows: Vec::new(),
         memory_budget: None,
+        trace_id: None,
+        request_id: None,
     };
     let started = std::time::Instant::now();
     let error = service

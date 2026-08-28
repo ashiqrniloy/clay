@@ -85,6 +85,27 @@ export function documentChunkRequestPayload(
   });
 }
 
+export function viewportRenderRequestPayload(
+  documentId: number,
+  documentVersion: number,
+  requestId: number,
+  byteStart: number,
+  byteEnd: number,
+  traceId: number,
+  clientId = 0,
+): string {
+  const payload: Record<string, number> = {
+    clientId,
+    documentId,
+    documentVersion,
+    requestId,
+    byteStart,
+    byteEnd,
+  };
+  if (traceId > 0) payload.traceId = traceId;
+  return JSON.stringify({ family: "viewportRenderRequest", payload });
+}
+
 export type EditRejection =
   | "leaseRequired"
   | "readOnlyDocument"

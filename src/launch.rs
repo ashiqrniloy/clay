@@ -195,7 +195,30 @@ pub(crate) fn run_server(
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(async { IpcServer::try_new(config)?.run().await })?;
+        .block_on(async {
+            let server = IpcServer::try_new(config)?;
+            #[cfg(unix)]
+            {
+                let mut terminate =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+                tokio::select! {
+                    result = server.run() => result.map_err(Box::<dyn Error>::from)?,
+                    _ = terminate.recv() => {
+                        // Editor performance harness: dump the sanitized server
+                        // summary before exit. No-op without CLAY_PERF_REPORT_DIR.
+                        if let Some(path) = clay::perf::metrics::write_perf_report("clay-server") {
+                            eprintln!("clay perf report written to {}", path.display());
+                        }
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                server.run().await?;
+            }
+            #[allow(unreachable_code)]
+            Ok::<(), Box<dyn Error>>(())
+        })?;
     Ok(())
 }
 
@@ -257,6 +280,9 @@ pub(crate) fn resolve_desktop_binary() -> PathBuf {
 pub(crate) fn desktop_command(endpoint: &IpcEndpoint) -> Command {
     let mut command = Command::new(resolve_desktop_binary());
     command.env("CLAY_ENDPOINT", endpoint.as_child_arg());
+    if clay::perf::metrics::global_recorder().is_enabled() {
+        command.env(clay::perf::metrics::PERF_PROFILE_ENV, "1");
+    }
     command
 }
 
@@ -296,6 +322,14 @@ pub(crate) fn run_restart(endpoint: IpcEndpoint) -> Result<(), Box<dyn Error>> {
         child
             .arg("server")
             .arg(endpoint.as_child_arg())
+            .env(
+                clay::perf::metrics::PERF_PROFILE_ENV,
+                if clay::perf::metrics::global_recorder().is_enabled() {
+                    "1"
+                } else {
+                    "0"
+                },
+            )
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit());
@@ -371,7 +405,14 @@ impl ManagedServer {
         configuration_root: Option<&Path>,
     ) -> Result<Self, Box<dyn Error>> {
         let mut command = Command::new(executable);
-        command.arg("server").arg(endpoint.as_child_arg());
+        command.arg("server").arg(endpoint.as_child_arg()).env(
+            clay::perf::metrics::PERF_PROFILE_ENV,
+            if clay::perf::metrics::global_recorder().is_enabled() {
+                "1"
+            } else {
+                "0"
+            },
+        );
         if let Some(root) = configuration_root {
             command
                 .arg("--config-fixture")

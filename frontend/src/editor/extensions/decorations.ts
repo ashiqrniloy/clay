@@ -1,8 +1,9 @@
 import {
   StateEffect,
   StateField,
+  type EditorState,
   type Extension,
-  type Text,
+  type StateEffect as StateEffectValue,
 } from "@codemirror/state";
 import {
   Decoration,
@@ -11,38 +12,77 @@ import {
   type DecorationSet as CmDecorationSet,
 } from "@codemirror/view";
 
-import { textIndex, utf8ToUtf16Indexed } from "../position-map";
+import { positionIndex } from "../position-index";
+import { utf8ToUtf16Batch } from "../position-map";
 import type { DecorationSet, DecorationTarget, TokenType } from "./types";
+import {
+  applyRenderPatch,
+  coveredRangeOf,
+  guardOf,
+  mapItems,
+  pruneOutside,
+  replaceCovered,
+  unionRange,
+  type ByteRange16,
+  type InlayItem,
+  type LinkItem,
+  type MarkItem,
+  type RenderPatch,
+} from "./render-patch";
 
-const replaceDecorationChunk = StateEffect.define<DecorationSet>();
-const clearDecorations = StateEffect.define<null>();
 const setInlaysVisible = StateEffect.define<boolean>();
 
 interface DecorationState {
-  chunks: ReadonlyMap<string, DecorationSet>;
-  ranges: CmDecorationSet;
-  links: readonly { from: number; to: number; target: DecorationTarget }[];
+  marks: MarkItem[];
+  inlays: InlayItem[];
+  links: LinkItem[];
   inlaysVisible: boolean;
-  documentVersion: number | null;
+  ranges: CmDecorationSet;
 }
 
-function chunkKey(set: DecorationSet): string {
-  return `${set.packagePrefix}:${set.kind}:${set.viewportByteStart}:${set.viewportByteEnd}`;
-}
+/** Closed token-class table: wire token types can never inject CSS. */
+const TOKEN_CLASSES: Readonly<Record<TokenType | "searchMatch", string>> = {
+  namespace: "cm-clay-t-namespace",
+  type: "cm-clay-t-type",
+  class: "cm-clay-t-class",
+  enum: "cm-clay-t-enum",
+  interface: "cm-clay-t-interface",
+  struct: "cm-clay-t-struct",
+  typeParameter: "cm-clay-t-typeparameter",
+  parameter: "cm-clay-t-parameter",
+  variable: "cm-clay-t-variable",
+  property: "cm-clay-t-property",
+  enumMember: "cm-clay-t-enummember",
+  event: "cm-clay-t-event",
+  function: "cm-clay-t-function",
+  method: "cm-clay-t-method",
+  macro: "cm-clay-t-macro",
+  keyword: "cm-clay-t-keyword",
+  modifier: "cm-clay-t-modifier",
+  comment: "cm-clay-t-comment",
+  string: "cm-clay-t-string",
+  number: "cm-clay-t-number",
+  regexp: "cm-clay-t-regexp",
+  operator: "cm-clay-t-operator",
+  decorator: "cm-clay-t-decorator",
+  heading1: "cm-clay-t-heading1",
+  heading2: "cm-clay-t-heading2",
+  heading3: "cm-clay-t-heading3",
+  heading4: "cm-clay-t-heading4",
+  heading5: "cm-clay-t-heading5",
+  heading6: "cm-clay-t-heading6",
+  listItem: "cm-clay-t-listitem",
+  quote: "cm-clay-t-quote",
+  codeBlock: "cm-clay-t-codeblock",
+  codeSpan: "cm-clay-t-codespan",
+  link: "cm-clay-t-link",
+  paragraph: "cm-clay-t-paragraph",
+  searchMatch: "cm-clay-t-searchmatch",
+};
 
-function modifierStyle(bits: number): Record<string, string> {
-  const style: Record<string, string> = {};
-  if (bits & (1 << 10)) style.fontWeight = "bold";
-  if (bits & (1 << 11)) style.fontStyle = "italic";
-  const lines: string[] = [];
-  if (bits & (1 << 12)) lines.push("underline");
-  if (bits & (1 << 13)) lines.push("line-through");
-  if (lines.length) style.textDecoration = lines.join(" ");
-  return style;
-}
-
-function tokenPrefix(token: TokenType | "searchMatch"): string {
-  return `--clay-editor-${token.toLowerCase()}`;
+function tokenClass(token: TokenType | "searchMatch"): string {
+  // Unknown wire values fall back to an inert class instead of reaching CSS.
+  return TOKEN_CLASSES[token] ?? TOKEN_CLASSES.paragraph;
 }
 
 class InlayWidget extends WidgetType {
@@ -65,144 +105,220 @@ class InlayWidget extends WidgetType {
   }
 }
 
-function project(
-  chunks: Iterable<DecorationSet>,
-  doc: Text,
-  inlaysVisible: boolean,
-): Pick<DecorationState, "ranges" | "links"> {
-  // One index per document version; each span conversion is a binary search
-  // plus intra-line scan. The previous per-span full-document scans made
-  // every decoration arrival a multi-second freeze on large files.
-  const index = textIndex(doc);
-  const convert = (utf8: number) => utf8ToUtf16Indexed(index, utf8);
-  const marks: Array<{
-    from: number;
-    to: number;
-    priority: number;
-    decoration: Decoration;
-  }> = [];
-  const links: Array<{ from: number; to: number; target: DecorationTarget }> =
-    [];
-  for (const set of chunks) {
-    for (const span of set.spans) {
-      const from = convert(span.byteStart);
-      const to = convert(span.byteEnd);
-      if (from > to || to > index.totalUtf16) continue;
-      if (span.kind === "inlayHint" && span.inlay) {
-        if (!inlaysVisible) continue;
-        const side = span.inlay.placement === "before" ? -1 : 1;
-        marks.push({
-          from: side < 0 ? from : to,
-          to: side < 0 ? from : to,
-          priority: span.priority,
-          decoration: Decoration.widget({
-            widget: new InlayWidget(span.inlay.label),
-            side,
-          }),
-        });
-        continue;
-      }
-      if (from === to) continue;
-      const prefix = tokenPrefix(
-        span.kind === "searchMatch" ? "searchMatch" : span.tokenType,
-      );
-      const style: Record<string, string> = {
-        color: `var(${prefix}-color, var(--clay-text-primary))`,
-        fontWeight: `var(${prefix}-weight, normal)`,
-        fontStyle: `var(${prefix}-style, normal)`,
-        textDecoration: `var(${prefix}-decoration, none)`,
-        ...modifierStyle(span.modifiers),
-      };
-      if (span.fontRole && span.fontRole !== "inherit") {
-        style.fontFamily = `var(--clay-font-${span.fontRole})`;
-      }
-      style.backgroundColor = `var(${prefix}-background, transparent)`;
-      style.fontSize = `calc(1em * var(${prefix}-scale, 1))`;
-      if (span.kind === "link") style.textDecoration = "underline";
-      marks.push({
-        from,
-        to,
+function markClasses(
+  token: TokenType | "searchMatch",
+  modifiers: number,
+  fontRole: string | null,
+  link: boolean,
+): string {
+  const classes = [tokenClass(token)];
+  if (modifiers & (1 << 10)) classes.push("cm-clay-m-bold");
+  if (modifiers & (1 << 11)) classes.push("cm-clay-m-italic");
+  if (modifiers & (1 << 12)) classes.push("cm-clay-m-underline");
+  if (modifiers & (1 << 13)) classes.push("cm-clay-m-strikethrough");
+  if (fontRole === "monospace" || fontRole === "proportional")
+    classes.push(`cm-clay-f-${fontRole}`);
+  if (link) classes.push("cm-clay-link");
+  return classes.join(" ");
+}
+
+/**
+ * Project a validated server set into UTF-16 render items exactly once, at
+ * patch-construction time. Retained items are never re-projected — later
+ * patches only replace their covered range and prune outside the guard.
+ */
+export function decorationPatch(
+  state: EditorState,
+  set: DecorationSet,
+  prune = true,
+): StateEffectValue<RenderPatch> {
+  const index = positionIndex(state);
+  const covered = coveredRangeOf(
+    index,
+    set.viewportByteStart,
+    set.viewportByteEnd,
+  );
+  const authority = `${set.packagePrefix}:${set.kind}`;
+  // One resumable scan per line: batch-convert every span boundary first
+  // instead of one line scan per span.
+  const converted = utf8ToUtf16Batch(
+    index,
+    set.spans.flatMap((span) => [span.byteStart, span.byteEnd]),
+  );
+  const marks: MarkItem[] = [];
+  const inlays: InlayItem[] = [];
+  const links: LinkItem[] = [];
+  for (let i = 0; i < set.spans.length; i += 1) {
+    const span = set.spans[i];
+    if (!span) continue;
+    const from = converted[i * 2] ?? 0;
+    const to = converted[i * 2 + 1] ?? 0;
+    if (from > to || to > index.totalUtf16) continue;
+    if (span.kind === "inlayHint" && span.inlay) {
+      const side = span.inlay.placement === "before" ? -1 : 1;
+      const at = side < 0 ? from : to;
+      inlays.push({
+        from: at,
+        to: at,
+        authority,
         priority: span.priority,
-        decoration: Decoration.mark({
-          class: span.kind === "link" ? "cm-clay-link" : undefined,
-          attributes: {
-            style: Object.entries(style)
-              .map(
-                ([k, v]) =>
-                  `${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}:${v}`,
-              )
-              .join(";"),
-          },
+        decoration: Decoration.widget({
+          widget: new InlayWidget(span.inlay.label),
+          side,
         }),
       });
-      if (span.kind === "link" && span.target)
-        links.push({ from, to, target: span.target });
+      continue;
     }
+    if (from === to) continue;
+    if (span.kind === "link" && span.target)
+      links.push({ from, to, authority, target: span.target });
+    marks.push({
+      from,
+      to,
+      authority,
+      priority: span.priority,
+      decoration: Decoration.mark({
+        class: markClasses(
+          span.kind === "searchMatch" ? "searchMatch" : span.tokenType,
+          span.modifiers,
+          span.fontRole,
+          span.kind === "link",
+        ),
+      }),
+    });
   }
-  marks.sort(
-    (a, b) => a.from - b.from || a.priority - b.priority || a.to - b.to,
-  );
-  return {
-    ranges: Decoration.set(
-      marks.map((item) => item.decoration.range(item.from, item.to)),
-      true,
-    ),
+  return applyRenderPatch.of({
+    kind: "decoration",
+    authority,
+    covered,
+    marks,
+    inlays,
     links,
-  };
+    prune,
+  });
+}
+
+export function retainDecorations(covered: ByteRange16) {
+  return applyRenderPatch.of({ kind: "retain", covered });
+}
+
+function buildRanges(
+  marks: readonly MarkItem[],
+  inlays: readonly InlayItem[],
+  inlaysVisible: boolean,
+): CmDecorationSet {
+  const all = inlaysVisible
+    ? [...marks, ...(inlays as readonly MarkItem[])]
+    : marks;
+  if (!all.length) return Decoration.none;
+  return Decoration.set(
+    all.map((item) => item.decoration.range(item.from, item.to)),
+    true,
+  );
 }
 
 const decorationField = StateField.define<DecorationState>({
   create: () => ({
-    chunks: new Map(),
-    ranges: Decoration.none,
+    marks: [],
+    inlays: [],
     links: [],
     inlaysVisible: true,
-    documentVersion: null,
+    ranges: Decoration.none,
   }),
   update(value, transaction) {
-    let chunks = value.chunks;
-    let inlaysVisible = value.inlaysVisible;
-    let documentVersion = value.documentVersion;
-    let replaced = false;
+    let { marks, inlays, links, inlaysVisible } = value;
+    let dirty = false;
+    let pruneCovered: ByteRange16 | null = null;
+    if (transaction.docChanged) {
+      const mappedMarks = mapItems(value.marks, transaction.changes);
+      marks =
+        mappedMarks === value.marks
+          ? value.marks
+          : mappedMarks.filter((item) => item.from < item.to);
+      inlays = mapItems(value.inlays, transaction.changes);
+      links = mapItems(value.links, transaction.changes);
+      dirty = true;
+    }
     for (const effect of transaction.effects) {
-      if (effect.is(clearDecorations)) {
-        chunks = new Map();
-        replaced = true;
-      } else if (effect.is(setInlaysVisible)) {
+      if (effect.is(setInlaysVisible)) {
         inlaysVisible = effect.value;
-        replaced = true;
-      } else if (effect.is(replaceDecorationChunk)) {
-        const next =
-          effect.value.documentVersion === documentVersion
-            ? new Map(chunks)
-            : new Map<string, DecorationSet>();
-        documentVersion = effect.value.documentVersion;
-        next.set(chunkKey(effect.value), effect.value);
-        chunks = next;
-        replaced = true;
+        dirty = true;
+      } else if (effect.is(applyRenderPatch)) {
+        const patch = effect.value;
+        if (patch.kind === "reset") {
+          marks = [];
+          inlays = [];
+          links = [];
+          pruneCovered = null;
+          dirty = true;
+        } else if (patch.kind === "retain") {
+          pruneCovered = unionRange(pruneCovered, patch.covered);
+          dirty = true;
+        } else if (patch.kind === "decoration") {
+          marks = replaceCovered(
+            marks,
+            patch.authority,
+            patch.covered,
+            patch.marks,
+          );
+          inlays = replaceCovered(
+            inlays,
+            patch.authority,
+            patch.covered,
+            patch.inlays,
+          );
+          links = replaceCovered(
+            links,
+            patch.authority,
+            patch.covered,
+            patch.links,
+          );
+          if (patch.prune !== false)
+            pruneCovered = unionRange(pruneCovered, patch.covered);
+          dirty = true;
+        }
       }
     }
-    if (replaced) {
-      const projected = project(
-        chunks.values(),
-        transaction.state.doc,
-        inlaysVisible,
-      );
-      return { chunks, inlaysVisible, documentVersion, ...projected };
+    if (pruneCovered) {
+      const guard = guardOf(pruneCovered);
+      marks = pruneOutside(marks, guard);
+      inlays = pruneOutside(inlays, guard);
+      links = pruneOutside(links, guard);
     }
-    if (transaction.docChanged)
-      return { ...value, ranges: value.ranges.map(transaction.changes) };
-    return value;
+    if (!dirty) return value;
+    return {
+      marks,
+      inlays,
+      links,
+      inlaysVisible,
+      ranges: buildRanges(marks, inlays, inlaysVisible),
+    };
   },
   provide: (field) =>
     EditorView.decorations.from(field, (value) => value.ranges),
 });
 
 export const decorationExtension: Extension = decorationField;
-export const replaceDecorations = (set: DecorationSet) =>
-  replaceDecorationChunk.of(set);
-export const resetDecorations = () => clearDecorations.of(null);
+
+export const replaceDecorations = (state: EditorState, set: DecorationSet) =>
+  decorationPatch(state, set);
+export const resetDecorations = () => applyRenderPatch.of({ kind: "reset" });
 export const showInlays = (visible: boolean) => setInlaysVisible.of(visible);
+
+export interface DecorationStats {
+  marks: number;
+  inlays: number;
+  links: number;
+}
+
+export function decorationStats(state: EditorState): DecorationStats {
+  const value = state.field(decorationField);
+  return {
+    marks: value.marks.length,
+    inlays: value.inlays.length,
+    links: value.links.length,
+  };
+}
 
 export function linkAt(
   view: EditorView,

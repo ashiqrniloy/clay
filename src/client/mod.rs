@@ -16,7 +16,10 @@ use std::{
 use crate::ipc::IpcEndpoint;
 use crate::perf::{
     budgets::{COMPLETION_RECENCY_MAX_ITEM_CHARS, COMPLETION_RECENCY_MAX_ITEMS},
-    metrics::{MetricMetadata, global_recorder},
+    metrics::{
+        BRIDGE_CLIENT_DELIVERY, BRIDGE_SERVER_DELIVERY, MetricMetadata, MetricValue,
+        global_recorder,
+    },
 };
 use crate::protocol::{
     ActiveTypography, BehaviorManifest, BehaviorScope, BehaviorVersion, CaretStyle, ClientId,
@@ -409,7 +412,8 @@ impl ClientEditQueue {
         let recorder = global_recorder();
         let _scope = recorder.scope_with_metadata(
             "client.edit_queue.enqueue",
-            MetricMetadata::document(event.document_id, event.base_version),
+            MetricMetadata::document(event.document_id, event.base_version)
+                .with_trace_id(Some(transaction_id)),
         );
         let operation = event.operation;
         let (base_version, lease_id) = {
@@ -456,19 +460,22 @@ impl ClientEditQueue {
         Ok(())
     }
 
-    pub(crate) fn enqueue_decoration_viewport_request(
+    pub(crate) fn enqueue_viewport_render_request(
         &self,
         document_id: DocumentId,
         document_version: DocumentVersion,
+        request_id: crate::protocol::ViewportRequestId,
         byte_start: u64,
         byte_end: u64,
     ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        let message = ClientMessage::DecorationViewportRequest {
+        let message = ClientMessage::ViewportRenderRequest {
             client_id: self.client_id,
             document_id,
             document_version,
+            request_id,
             byte_start,
             byte_end,
+            trace_id: None,
         };
         if self.sender.capacity() <= 1 {
             return Err(mpsc::error::TrySendError::Full(message));
@@ -951,6 +958,8 @@ pub enum ClientConnectionEvent {
     DecorationBatch(Vec<DecorationSet>),
     DiagnosticSet(DiagnosticSet),
     FoldingRangeSet(crate::protocol::FoldingRangeSet),
+    /// Protocol v29: one complete atomic answer to a `ViewportRenderRequest`.
+    ViewportRenderPatch(crate::protocol::ViewportRenderPatch),
     CompletionResult(CompletionResultSet),
     CompletionRejected {
         request_id: CompletionRequestId,
@@ -1028,6 +1037,7 @@ impl ClientConnectionEvent {
             ClientConnectionEvent::DecorationBatch(sets) => sets.first().map(|set| set.document_id),
             ClientConnectionEvent::DiagnosticSet(set) => Some(set.document_id),
             ClientConnectionEvent::FoldingRangeSet(set) => Some(set.document_id),
+            ClientConnectionEvent::ViewportRenderPatch(patch) => Some(patch.document_id),
             ClientConnectionEvent::CompletionResult(result) => Some(result.document_id),
             ClientConnectionEvent::LanguageIntelligenceResult(result) => Some(result.document_id),
             ClientConnectionEvent::SelectionQueryResult(result) => Some(result.document_id),
@@ -1606,6 +1616,25 @@ fn pending_handshake_event(
     }
 }
 
+fn client_message_trace_id(message: &ClientMessage) -> Option<u64> {
+    match message {
+        ClientMessage::Edit { transaction_id, .. } => Some(*transaction_id),
+        ClientMessage::ViewportRenderRequest { trace_id, .. } => *trace_id,
+        _ => None,
+    }
+}
+
+fn server_message_trace_id(message: &ServerMessage) -> Option<u64> {
+    match message {
+        ServerMessage::EditAck { transaction_id, .. }
+        | ServerMessage::EditRejected { transaction_id, .. } => Some(*transaction_id),
+        ServerMessage::DecorationSet(set) => set.trace_id,
+        ServerMessage::DecorationBatch(sets) => sets.first().and_then(|set| set.trace_id),
+        ServerMessage::ViewportRenderPatch(patch) => patch.trace_id,
+        _ => None,
+    }
+}
+
 fn rejection_requests_resync(reason: &EditRejection) -> bool {
     matches!(
         reason,
@@ -1666,9 +1695,26 @@ async fn run_connection<S>(
                     let _ = events.send(ClientConnectionEvent::Disconnected).await;
                     return;
                 };
+                let recorder = global_recorder();
+                let delivery = recorder
+                    .is_enabled()
+                    .then(|| client_message_trace_id(&message))
+                    .flatten()
+                    .map(|trace_id| {
+                        recorder.scope_with_metadata(
+                            BRIDGE_CLIENT_DELIVERY,
+                            MetricMetadata::default().with_trace_id(Some(trace_id)),
+                        )
+                    });
                 if let Err(error) = codec.write_client_message(&mut writer, &message).await {
+                    if let Some(delivery) = delivery {
+                        delivery.finish();
+                    }
                     let _ = events.send(ClientConnectionEvent::ConnectionError(error.to_string())).await;
                     return;
+                }
+                if let Some(delivery) = delivery {
+                    delivery.finish();
                 }
             }
             incoming = incoming_rx.recv() => {
@@ -1676,6 +1722,17 @@ async fn run_connection<S>(
                     let _ = events.send(ClientConnectionEvent::Disconnected).await;
                     return;
                 };
+                let recorder = global_recorder();
+                if recorder.is_enabled()
+                    && let Ok(message) = &incoming
+                    && let Some(trace_id) = server_message_trace_id(message)
+                {
+                    recorder.record_with_metadata(
+                        BRIDGE_SERVER_DELIVERY,
+                        MetricValue::Counter { amount: 1 },
+                        MetricMetadata::default().with_trace_id(Some(trace_id)),
+                    );
+                }
                 match incoming {
                     Ok(ServerMessage::EditAck { document_id, confirmed_version, transaction_id }) => {
                         let recorder = global_recorder();
@@ -1806,6 +1863,9 @@ async fn run_connection<S>(
                     }
                     Ok(ServerMessage::FoldingRangeSet(set)) => {
                         let _ = events.send(ClientConnectionEvent::FoldingRangeSet(set)).await;
+                    }
+                    Ok(ServerMessage::ViewportRenderPatch(patch)) => {
+                        let _ = events.send(ClientConnectionEvent::ViewportRenderPatch(patch)).await;
                     }
                     Ok(ServerMessage::CompletionResult { result }) => {
                         let _ = events.send(ClientConnectionEvent::CompletionResult(result)).await;
@@ -2388,22 +2448,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn decoration_viewport_request_emits_bounded_range_metadata() {
+    async fn viewport_render_request_emits_bounded_range_metadata() {
         let (queue, mut receiver) = ClientEditQueue::bounded(2);
         let queue = queue.with_authority(42, &DocumentAccess::ReadOnly);
 
         queue
-            .enqueue_decoration_viewport_request(7, 3, 1_024, 2_048)
+            .enqueue_viewport_render_request(7, 3, 1, 1_024, 2_048)
             .unwrap();
 
         assert_eq!(
             receiver.recv().await.unwrap(),
-            ClientMessage::DecorationViewportRequest {
+            ClientMessage::ViewportRenderRequest {
                 client_id: 42,
                 document_id: 7,
                 document_version: 3,
+                request_id: 1,
                 byte_start: 1_024,
                 byte_end: 2_048,
+                trace_id: None,
             }
         );
     }
@@ -2414,10 +2476,10 @@ mod tests {
         let queue = queue.with_authority(42, &DocumentAccess::ReadOnly);
 
         queue
-            .enqueue_decoration_viewport_request(7, 3, 1_024, 2_048)
+            .enqueue_viewport_render_request(7, 3, 1, 1_024, 2_048)
             .unwrap();
         assert!(matches!(
-            queue.enqueue_decoration_viewport_request(7, 3, 2_048, 3_072),
+            queue.enqueue_viewport_render_request(7, 3, 2, 2_048, 3_072),
             Err(tokio::sync::mpsc::error::TrySendError::Full(_))
         ));
         queue
@@ -2435,7 +2497,7 @@ mod tests {
 
         assert!(matches!(
             receiver.recv().await.unwrap(),
-            ClientMessage::DecorationViewportRequest { .. }
+            ClientMessage::ViewportRenderRequest { .. }
         ));
         assert!(matches!(
             receiver.recv().await.unwrap(),
@@ -2497,6 +2559,7 @@ mod tests {
             viewport_byte_start: 0,
             viewport_byte_end: 4096,
             spans,
+            trace_id: None,
         };
         let frame = codec
             .encode_server_message(&ServerMessage::DecorationSet(set))
@@ -2509,7 +2572,7 @@ mod tests {
         server_end.write_all(&frame[..split]).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         edit_queue
-            .enqueue_decoration_viewport_request(1, 1, 0, 4096)
+            .enqueue_viewport_render_request(1, 1, 1, 0, 4096)
             .unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         server_end.write_all(&frame[split..]).await.unwrap();
@@ -2594,6 +2657,7 @@ mod tests {
                 70,
                 provenance.clone(),
             )],
+            trace_id: None,
         };
         codec
             .write_server_message(
@@ -4167,6 +4231,7 @@ mod tests {
                 | ClientConnectionEvent::DecorationBatch(_)
                 | ClientConnectionEvent::DiagnosticSet(_)
                 | ClientConnectionEvent::FoldingRangeSet(_)
+                | ClientConnectionEvent::ViewportRenderPatch(_)
         ) {
             event = session.events.recv().await.unwrap();
         }

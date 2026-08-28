@@ -242,6 +242,29 @@ Recommended task title:
 
 Place this task after entry-gate/baseline tasks and before UI implementation tasks.
 
+## UI Design-System Package Task
+
+Each Clay plan that adds or changes UI design-system packages, component recipes, design-system selection, or recipe-driven component styling must preserve the approved typed recipe boundary.
+
+The task should require:
+
+- Keep content themes, user-owned typography, and UI design systems as separate configuration and invalidation layers. Preserve existing `theme.setTheme` and `theme.setTypography` compatibility.
+- Keep content themes as the sole normal-rendering color authority. Recipes may map component slots/states to semantic active-theme color roles and apply typed opacity/effects, but must reject palettes, literals, and package-owned color values. Browser/OS system colors are reserved for forced-colors mode.
+- Model design systems as versioned, inert `clay.contributions` data mapping host-owned component kinds, semantic slots, variants, and interaction states to typed non-color visual recipe properties and semantic theme-color-role references.
+- Reject raw CSS, selectors, JSX, scripts, renderer callbacks, URLs, literal colors, color aliases/palettes, arbitrary transforms/filters, and direct Tauri APIs. React Aria and Clay retain behavior, focus, accessibility semantics, and DOM ownership.
+- Validate exact package provenance, current generation, schema version, property/token types, color-role references, bounds, recipe completeness, contrast across representative themes, reduced-motion/transparency fallbacks, and revocation before atomic install.
+- Keep component kinds, slots, recipe properties, tokens, and style variables additive and versioned. Existing fixed non-color recipes remain fallback until migration completes; fallback colors always resolve through active-theme roles.
+- Include both restrained Neobrutal and Glass conformance fixtures across at least two materially different content themes. The abstraction is incomplete if either requires host component source changes or declares a concrete color.
+- Apply `.agents/skills/project-patterns/references/ui-design-system-packages.md` and retain the complete per-task UI skill stack mandate.
+
+Recommended task title:
+
+```markdown
+- [ ] Review and implement the typed UI design-system recipe boundary
+```
+
+Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md`.
+
 ## Mandatory UI Visual and Accessibility Review Task
 
 Each Clay plan that touches app UI must include one post-implementation task that reviews the implemented interface visually and through accessibility tooling before final API/documentation/wiki work.

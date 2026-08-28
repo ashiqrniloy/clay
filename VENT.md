@@ -101,3 +101,15 @@ Plan 098 fixture review hit existing Vite HMR fragility again: after source/buil
 ## 26-08-26 04:12 — Plan 098 real desktop manual test
 
 Plan 098 desktop manual run hit repeatable host tooling friction: GNOME/portal focus moved Clay and the GTK chooser off-screen, and AT-SPI exposed only the native frame; repeated move/resize/coordinate retries were needed before a synthetic file could be selected, then loaded-editor interaction still could not be verified. Prevent with deterministic Tauri window placement/targeting plus a stable WebKitGTK AT-SPI bridge or a committed automation path that does not depend on portal focus.
+## 26-08-27 04:15 — post-edit-format-order
+
+Frontend format check failed twice because edits were made after the prior formatting pass (session.ts was reformatted, then edited again). Prevent by running formatting only after all source edits, or use a final changed-file format gate before the full suite.
+## 26-08-28 16:01 — Tauri visual capture offscreen/stale-binary friction
+
+Visual capture repeatedly launched Clay partly off-screen and portal screenshots captured unrelated desktop regions; workaround was list_windows → get_app_state → activate/resize/move → immediate targeted/portal capture. Capture helper should pin a visible window position/size or use targeted screenshot output directly, and should rebuild/validate the exact desktop binary before runs.
+## 26-08-28 22:25 — legacy markdown formatting
+
+Legacy Markdown references are not Prettier-clean; whole-file --write creates unrelated churn and can alter literal wildcard prose. Repeated workaround was targeted/manual edits plus source-aware doc tests. Add a repository Markdown formatting baseline or per-directory check so new docs can be validated without rewriting historical files.
+## 26-08-29 00:02 — cargo test filter arity
+
+Cargo test accepts one positional filter, but repeated attempts passed multiple test names and failed before running. Workaround was one `cargo test --test protocol` full suite. A helper or documented multi-filter wrapper would prevent this recurring CLI retry.

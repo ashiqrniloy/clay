@@ -814,6 +814,9 @@ pub struct DecorationSet {
     pub viewport_byte_start: u64,
     pub viewport_byte_end: u64,
     pub spans: Vec<DecorationSpan>,
+    /// Optional content-free trace linking a viewport/edit to its patch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<crate::protocol::PerformanceTraceId>,
 }
 
 impl DecorationSet {

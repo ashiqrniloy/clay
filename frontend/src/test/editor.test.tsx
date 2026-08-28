@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, act } from "@testing-library/react";
 
 import type { BootstrapDto } from "../bridge/types";
+import { editorPerformance, PERFORMANCE_STAGE } from "../editor/performance";
 import { ClayEditor } from "../editor/ClayEditor";
 import {
   clayEditorTheme,
@@ -16,7 +17,7 @@ afterEach(cleanup);
 
 const bootstrap = {
   clientId: 1,
-  protocolVersion: 27,
+  protocolVersion: 28,
   endpoint: "test",
   generation: 1,
   initialDocument: {
@@ -107,6 +108,11 @@ describe("editor lifecycle", () => {
       "Loading full document…",
     );
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(
+      sent
+        .map((payload) => JSON.parse(payload))
+        .some((message) => message.family === "viewportRenderRequest"),
+    ).toBe(true);
 
     act(() => {
       session.handleEnvelope({
@@ -120,5 +126,52 @@ describe("editor lifecycle", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     expect(screen.getByText(/seed-full/)).toBeInTheDocument();
+  });
+
+  it("does not reconfigure read-only on unrelated metadata updates", () => {
+    editorPerformance.configure(true);
+    editorPerformance.clear();
+    const session = createDocumentSession({ send: async () => undefined });
+    session.installInitial(bootstrap);
+    render(<ClayEditor session={session} />);
+    const reconfigures = () =>
+      editorPerformance.snapshot().metrics[
+        PERFORMANCE_STAGE.compartmentReconfigure
+      ]?.count ?? 0;
+    const before = reconfigures();
+
+    act(() => {
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "editAck",
+          data: { documentId: 1, version: 2, transactionId: 1 },
+        },
+      });
+    });
+    expect(session.store.get()?.version).toBe(2);
+    expect(reconfigures()).toBe(before);
+
+    // Flipping loading (or access) still reconfigures exactly once.
+    act(() => {
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "documentOpened",
+          data: {
+            metadata: {
+              documentId: 1,
+              version: 2,
+              dirty: false,
+              access: { readOnly: null },
+              path: "",
+            },
+            head: { totalBytes: 4, firstChunk: "seed" },
+          },
+        },
+      });
+    });
+    expect(reconfigures()).toBe(before + 1);
+    editorPerformance.configure(false);
   });
 });

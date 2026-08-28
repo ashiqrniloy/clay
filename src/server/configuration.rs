@@ -1033,6 +1033,21 @@ mod tests {
             "centered.overlayWidth",
             "build.debugProfile",
             "build.targetDirectory",
+            // Plan 099: parser, viewport, retention, and trace budgets are
+            // compiled host policy, never user/package configuration.
+            "syntax.executorMaxJobs",
+            "syntax.documentTreeCacheEntries",
+            "syntax.modeActivationCacheEntries",
+            "syntax.cacheBudgetBytes",
+            "syntax.parseWindowBytes",
+            "syntax.requestPacingMs",
+            "editor.viewportOverscan",
+            "editor.decorationCacheBytes",
+            "editor.positionIndex",
+            "performance.traceCapacity",
+            "performance.longTaskBudget",
+            "performance.deviceBudget",
+            "document.residentMemoryBudget",
         ] {
             let option = format!("audit.{suffix}");
             let error = runtime

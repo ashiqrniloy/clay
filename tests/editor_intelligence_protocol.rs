@@ -76,6 +76,7 @@ fn link_set() -> DecorationSet {
                 },
             ),
         ],
+        trace_id: None,
     }
 }
 
@@ -97,6 +98,7 @@ fn inlay_set() -> DecorationSet {
             10,
             provenance("lsp-rust"),
         )],
+        trace_id: None,
     }
 }
 
@@ -132,7 +134,7 @@ fn folding_set() -> FoldingRangeSet {
 
 #[test]
 fn phase28_protocol_version_is_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 27);
+    assert_eq!(PROTOCOL_VERSION, 29);
 }
 
 #[test]
@@ -182,6 +184,7 @@ fn link_and_inlay_decoration_messages_round_trip_through_codec() {
                 text: "x".repeat(128),
             },
         )],
+        trace_id: None,
     };
     assert!(matches!(
         Codec::new(128).encode_server_message(&ServerMessage::DecorationSet(oversized_target)),
