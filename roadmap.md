@@ -1,398 +1,362 @@
-# Clay Tauri + React Migration Roadmap
+# Clay Coding Agent and `st` Autonomous Agent Roadmap
 
-Status: approved architecture migration. This roadmap replaces every prior
-roadmap phase. Completed implementation remains repository history; unfinished
-native-client phases are not carried forward unless required by the parity
-ledger below.
+Status: draft for user iteration. This roadmap supersedes the completed
+Tauri + React migration roadmap as the repository's forward plan. The
+migration roadmap is finished (all 21 tasks of `plans/097` checked) and
+remains in git history; its governing decision
+(`decision-logs/2026-08-23-0052-tauri-react-client-architecture.md`) stays
+authoritative for architecture rules that this roadmap inherits.
 
-Decision: `decision-logs/2026-08-23-0052-tauri-react-client-architecture.md`.
-Executable master plan: `plans/097-Tauri-React-Architecture-Migration.md`.
+Governing decisions already made:
 
-## Target Architecture
+- `decision-logs/2026-08-21-1758-native-prism-host-no-acp-cli-parity.md`:
+  Clay-owned Node `clay-agent` daemon wraps Prism 0.3.0; no ACP/AG-UI as the
+  first-party agent bus; coding agent must reach CLI-parity inside Clay.
+- `decision-logs/2026-08-21-2152-product-surfaces-are-replaceable-packages.md`:
+  product surfaces are replaceable first-party packages; third-party packages
+  extend/replace through declared extension points with user approval.
+- This roadmap adds no new binding decisions. Open decisions are listed at
+  the end and need `decision-logs/` entries before implementation.
 
-- Tauri v2 desktop shell.
-- React + strict TypeScript + Vite frontend.
-- React Router Data Mode with an in-memory router for application surfaces.
-- CodeMirror 6 primary text/code editor.
-- Accessible headless React primitives, semantic HTML, CSS Modules, and Clay
-  theme tokens projected to CSS custom properties.
-- Separate Rust Clay server remains canonical for documents, workspaces,
-  packages, language services, persistence, permissions, and `deno_core`.
-- Existing length-prefixed `rkyv` transport remains between Tauri Rust and the
-  Clay server.
-- Typed Tauri commands/channels form the React boundary. TauRPC is optional
-  replaceable glue, accepted only after an exact-version spike.
-- Existing two persistent package-runtime trust domains remain unchanged.
-- Existing Clay-owned Prism `clay-agent` daemon remains. AG-UI becomes the
-  React-facing event/state protocol over a custom Tauri channel transport.
-- Product surfaces remain replaceable first-party packages. Third-party UI is
-  declarative by default or isolated in a sandboxed surface without direct
-  Tauri IPC.
-- Linux remains the blocking development and CI host.
+## Product Shape
 
-## Non-Negotiable Migration Rules
+Three layers, strict separation:
 
-1. Server authority does not move into React, CodeMirror, Zustand, or Tauri
-   managed state.
-2. Ordinary typing applies locally before any React render, Tauri IPC, server,
-   package JavaScript, file IO, or agent work.
-3. Main webview receives narrow Clay commands only; broad filesystem, shell,
-   process, and network plugin capabilities stay denied.
-4. Existing package provenance, generation, permission, extension-point,
-   replacement, and revocation checks remain server-enforced.
-5. Stable SDUI node IDs, bounded snapshots/updates, and inert command intents
-   remain the package UI contract.
-6. Current feature behavior is ported before native client deletion. Native
-   and web clients are never permanent parallel products.
-7. Every phase updates affected public docs, implementation wiki pages,
-   architecture maps, manual test modules, examples, and generated registries
-   in the same phase.
-8. No new product feature may delay parity unless it is required by the new
-   architecture. LaTeX, notebooks, terminal, broad VSIX execution, and later
-   agent profiles remain post-parity work.
+1. **`clay-agent` daemon (Clay core, Node ≥ 20).** Hosts `@arnilo/prism`
+   0.3.0 plus the first-party Prism packages. Owns providers, models,
+   credentials (vault + keychain), SQLite persistence, run ledger, tools,
+   compaction strategies, skills, commands, workflows, supervision, and
+   delegation. Packages never spawn or speak to it directly; they use public
+   `agent.*` Clay JS APIs served by the Rust server.
+2. **`@clay/coding-agent` (first-party Clay package, "base coding agent").**
+   Minimal, pi-coding-agent-parity coding agent: coding tools against Clay
+   documents, approvals, sessions, branching, compaction, steering, commands,
+   plan files. Replaceable like `@clay/chat`; contains no workflow opinions.
+3. **`st` (third-party Clay package, author's own workflow).** A
+   comprehensive autonomous coding agent composed entirely from the base
+   layer's primitives plus Prism packages. Not shipped or activated by
+   default; nothing in the base layer depends on it.
 
-## Definition of Current Feature Parity
+The base agent stays minimal by design (pi-like). All autonomy policy
+(phased roadmaps, sub-agent validation, per-task model routing, external
+agent delegation, memory cadence) lives in `st` or in host-free orchestration
+helpers the daemon exposes generically.
 
-Migration cannot cut over while any implemented behavior below lacks an
-accepted Tauri/React equivalent or an explicitly approved removal decision:
+## Prism Capability Review (verified against 0.3.0)
 
-- Launch, server discovery/spawn, reconnect, diagnostics, editable/read-only
-  access, and graceful shutdown.
-- File/folder dialogs, workspace roots, file browser, open/save/reload,
-  conflicts, dirty state, duplicate-open routing, and path browsing.
-- Optimistic versioned editing, leases, resync, undo/redo, clipboard, IME,
-  keymaps, sequence chords, movement, selection, multi-cursor, snippets, and
-  accessibility editing semantics.
-- Syntax themes, Tree-sitter decorations, diagnostics, completion, LSP
-  intelligence, folding, links, inlay hints, Markdown editing/preview, and
-  current large-file limits.
-- Splits, panes, tabs, per-tab workspaces, independent client connections,
-  focus policies, resize/reorder/close, restore, and layout persistence.
-- Command Centre, fuzzy command mode, dired-style path mode, modal focus,
-  package provenance, keybinding details, and keyboard-only operation.
-- `init.js`, modular configuration, hot reload, package loading, two runtime
-  trust domains, package replacement/extension, package UI, settings, themes,
-  typography, appearance, and Git discovery.
-- `@clay/chat`, provider/model/agent/setup/session flows, persisted transcripts,
-  cancellation, streaming, credential secrecy, and package-owned landing.
-- Existing Linux security, accessibility, performance, protocol compatibility,
-  documentation-as-code, and maintenance validation gates.
+Review method: full read of `@arnilo/prism@0.3.0` docs surface plus a
+network-free smoke suite (`/tmp/prism-smoke/smoke.mjs`, 37 assertions, all
+passing) exercising the exact seams this roadmap needs.
 
-## Phase 1: Freeze, Baseline, and Parity Ledger
+| Requirement | Prism primitive | Package | Verdict |
+| --- | --- | --- | --- |
+| Pi-parity coding tools | `shell`/`read`/`write`/`edit` are documented behavioral ports of pi tools; plus `repo_list`/`repo_search`/`glob`/`delete`/`move`, opt-in `createGitTools`, `coding_check`; host `operations` seams for Clay document authority | `@arnilo/prism-coding-agent` | ✅ smoke-verified |
+| Approvals/sandboxing | `createCodingApprovalPolicy`, `createSandboxCodingComposition`, Docker/native backends, `ExecutionPolicy` | `@arnilo/prism-coding-security` | ✅ smoke-verified |
+| Sessions, branching, persistence | `AgentSession` run/stream/steer/compact/abort/checkout/fork/clone; branching handles; JSONL/SQLite/Postgres stores | `@arnilo/prism`, `@arnilo/prism-session-store-sqlite` | ✅ (SQLite already wired in daemon) |
+| Slash commands | `CommandDefinition` contributions via extension kernel; RPC `command` seam; ACP `available_commands_update` parity exists | `@arnilo/prism` | ✅ with host dispatch (see E3) |
+| Workflow-type picker ("ask me") | `createAskUserDecisionTool` (blocking) and `suspendAskUserDecision` + `createAskUserDecisionResumeValidator` (durable) | `@arnilo/prism-coding-agent` | ✅ smoke-verified, blocked by defect D1 |
+| Loop-until-goal orchestration | Bounded DAG workflows (`defineWorkflow`/`runWorkflow`/`resumeWorkflow`/`replayWorkflow`), durable suspend/resume, sagas, `runCodingGoalVerify` | `@arnilo/prism-workflows` | ✅ smoke-verified with host iteration (see E2) |
+| Custom per-run loops | `AgentLoopStrategy` escape hatch with `LoopContext`; durable snapshot/restore; `generateValidateReviseLoop` for validated artifacts | `@arnilo/prism` | ✅ smoke-verified |
+| Plan generation | `writeCodingPlanFile`/`parseCodingPlanTodos`, bounded `state.coding` checkpoint metadata; custom `create-plan` skill via skill registry + progressive disclosure | `@arnilo/prism-coding-agent`, `@arnilo/prism` | ✅ |
+| Sub-agent fan-out (criteria/tests/validation) | `createSupervisor` allow-listed children, per-child models, narrowed permissions, budgets, durable nested approvals | `@arnilo/prism-supervisor` | ✅ smoke-verified |
+| Per-task model selection | `AgentDefinition.model`, `RunOptions.model`, use-case bindings (`resolveUseCaseModel`), governance via `@arnilo/prism-model-router` | `@arnilo/prism` + router | ✅ |
+| External agent delegation (Antigravity) | `createAntigravityCliAgent` + `createAntigravityDelegationTool`; per-run ephemeral MCP server, conversation resume, event projection | `@arnilo/prism-antigravity-agent` | ✅ documented (host owns `agy` auth; not smoke-tested) |
+| Observational memory + auto-compaction | `createObservationalMemory().attach()`: post-run observe/reflect/drop workers with independent models, `compactAfterTokens`, fast model-free compaction strategy | `@arnilo/prism-compaction-observational-memory` | ✅ smoke-verified |
+| Exact-id recall | `createRecallMemoryTool` (`{id}` exact recall + cursor paging), `om:status`/`om:view` command factories | same | ✅ smoke-verified (fail-closed behavior confirmed) |
+| Declarative third-party agents | `AgentDefinition` + `resolveAgentDefinition`/`resolveAgentBundle`, extension kernel `registerAgent`/`registerSkill`/`registerCommand` | `@arnilo/prism` | ✅ smoke-verified (see E1 friction) |
+| Durable human gates mid-run | `interruptBeforeTool`, `AgentRunLifecycle`/`resumeAgentRun`, pending-decision CAS | `@arnilo/prism` | ✅ documented |
+| MCP tools in agent runs | `@arnilo/prism-mcp` client bridge (bounded, OAuth) | `@arnilo/prism-mcp` | ✅ documented |
+| Validation/eval gating | `@arnilo/prism-evals` scorers/datasets/experiments/CI thresholds | `@arnilo/prism-evals` | ✅ documented |
 
-### Scope
+## Prism Readiness: Defects and Enhancements Required Before Phase 1
 
-- Freeze native-client feature expansion except release/security fixes needed
-  to establish a trustworthy baseline.
-- Run all Linux blocking gates and current Node tests; record failures without
-  weakening tests or budgets.
-- Build a machine-readable parity ledger mapping every current manual-test
-  step, public API, protocol family, package contribution, UI surface,
-  accessibility contract, performance budget, and security invariant to its
-  target owner and migration phase.
-- Record current screenshot/accessibility fixtures for representative editor,
-  tabs/splits, Command Centre, package UI, theme, error/recovery, and Chat
-  states.
-- Classify source into keep, adapt, port, and delete sets. Preserve behavior
-  tests even when implementation-specific native tests will later be replaced.
+Land these in the Prism repo first; ship as a 0.3.1 patch (defects) plus
+optional 0.4.0 items (enhancements). "Required" = blocks a roadmap phase;
+"optional" = has an acceptable host workaround that is already reflected in
+the phase designs below.
 
-### Exit Gate
+### Defects (required)
 
-- Linux baseline is reproducible.
-- Every implemented user-visible behavior has one target phase and test owner.
-- Known failing checks are either fixed or explicitly blocking later cutover.
-- No undocumented feature can disappear during migration.
+- **D1 — `suspendAskUserDecision` drops `allowCustom` when omitted.**
+  `toAskUserDecisionSuspendData` copies `request.allowCustom` without
+  defaulting. After the durable JSON round-trip the key vanishes, and the
+  package's own `isAskUserDecisionSuspendData` then fails (`typeof
+  allowCustom === "boolean"`), so `createAskUserDecisionResumeValidator`
+  throws `suspension.data missing ask_user_decision request` on every resume.
+  Reproduced in the smoke suite; the tool path normalizes correctly, only the
+  workflow suspend path is broken. **Fix:** default `allowCustom: false` in
+  `toAskUserDecisionSuspendData` (matching the tool path) and add a resume
+  round-trip test without explicit `allowCustom`. This defect blocks `st`'s
+  durable `/start` flow.
 
-## Phase 2: Tauri Workspace and Secure Desktop Skeleton
+### Enhancements (required unless waived per phase)
 
-### Scope
+- **E1 — `resolveAgentDefinition` requires `model` even when
+  `context.overrides.model` is supplied.** Resolution throws `Agent "<name>"
+  has no model` before overrides apply, contradicting the doc table where
+  `model` is optional. Either allow `overrides.model` (or a context-level
+  default model) to satisfy resolution, or document model-or-`create()` as
+  mandatory. Reproduced in smoke suite. Clay can work around this by
+  injecting the user's selected model into the definition before resolution;
+  enhancement preferred so third-party agent packages stay declarative.
+- **E2 — Documented host pattern (or primitive) for bounded
+  iterate-until-done orchestration.** Workflows are acyclic and
+  revision-fingerprinted by design. `st`'s "loop until the goal is achieved"
+  therefore needs either a Prism helper (e.g. a bounded `iterateUntil` saga
+  variant with explicit state, budgets, and termination predicates) or a
+  documented host-loop pattern: one workflow run per phase, host re-enters
+  with updated state until exit criteria pass. Cheapest acceptable outcome is
+  the documented pattern plus a runnable example; the daemon then implements
+  exactly that pattern.
 
-- Add a Tauri v2 crate and React/Vite/TypeScript frontend without moving the
-  existing server crate or server entry point.
-- Add deterministic frontend dependency locking, formatting, linting, type
-  checking, unit testing, and production build commands.
-- Implement one main webview with strict CSP and minimal capability files.
-- Implement local server discovery/spawn/connect/shutdown using Clay-owned Rust
-  code. Package code receives no process handle or spawn capability.
-- Provide launch, loading, server-error, reconnect, and unsupported-platform
-  surfaces using semantic accessible HTML and Clay token placeholders.
-- Establish Linux WebKitGTK prerequisites and CI build packaging smoke.
+### Enhancements (optional; workarounds already in phase designs)
 
-### Exit Gate
+- **E3 — Commands that drive.** `CommandExecutionContext` carries only
+  ids/signal/metadata, so a contributed command cannot start a run, steer, or
+  launch a workflow. Clay's daemon will map slash commands to host drivers
+  (`/start` → `st` workflow start) outside Prism. Optional Prism enhancement:
+  optional host-supplied driver hooks on command context.
+- **E4 — Supervisor child event passthrough.** Supervisor `subscribe()`
+  emits delegation lifecycle metadata only. `st`'s UI wants optional per-turn
+  child event streaming (redacted, capped) for nested-run visibility;
+  milestone-level events are an acceptable v1.
+- **E5 — Cross-session observational memory scope.** OM is per
+  session/branch. `st` phases delegate to child sessions; an opt-in shared
+  scope (or a documented host composition funneling child summaries into the
+  parent session store) would let recall span a whole build. v1 acceptable:
+  parent session records delegation outcomes, so parent OM covers them
+  naturally.
+- **E6 — Composite example.** A single `examples/autonomous-coding-loop.ts`
+  combining supervisor + workflows + OM + goal-verify would freeze the
+  intended composition and become Clay's conformance reference.
 
-- Tauri opens on Linux, connects to a real Clay server, reports connection
-  state, and shuts down without orphaning server/client resources.
-- Main webview has no broad Tauri filesystem/shell/process authority.
-- Existing native client remains runnable only as a temporary parity oracle.
+### Behavioral constraints (accepted, not defects — they shape the design)
 
-## Phase 3: Typed Frontend Bridge and Session Bootstrap
+- `session.compact()` fails closed while a run is active, so `st` maps one
+  plan task to one run and compacts at task boundaries. This also makes
+  "trigger compaction after each task" mechanical.
+- A suspended workflow node's `execute` is re-invoked with `ctx.resume`
+  after approval; resume-blind nodes re-suspend silently. Every `st` node
+  must be written resume-aware (`ctx.resume ? answer : suspend(...)`),
+  verified by the smoke suite after fixing the node, not Prism.
+- Supervisor child factories must return an `Agent` with a stable config and
+  durable store for nested approvals to resume; returning a session crashes
+  delegation (host-side requirement, keep in authoring docs).
+- Workflows bounds: `maxNodes` default 1,000 — generated phase DAGs are
+  comfortably inside limits, and definition `revision` must bump when node
+  behavior changes.
+- Antigravity delegation requires the host-owned authenticated `agy` binary;
+  Prism never manages Google credentials. Clay treats it as an optional
+  delegation target that is hidden when `agy` is absent.
 
-### Scope
+## Phase 0: Prism 0.3.1/0.4.0 Readiness
 
-- Keep the server protocol and `rkyv` codec intact behind Tauri Rust.
-- Define bounded JSON-compatible frontend DTOs for bootstrap, tab, document,
-  runtime, menu, package UI, theme, diagnostics, language, and agent families.
-- Use strings for identifiers that may exceed JavaScript safe integer range.
-- Add typed Tauri commands for request/response operations and channels for
-  ordered streams, cancellation, backpressure, reconnect, and resync.
-- Run the TauRPC compatibility spike. Pin exact Rust/npm/Specta/Tauri versions
-  if retained; otherwise use native Tauri commands with generated TypeScript
-  DTOs. Keep either choice behind one frontend bridge module.
-- Implement React bootstrap stores for connection/session state without making
-  them canonical domain state.
-
-### Exit Gate
-
-- Real server bootstrap reaches React through validated typed messages.
-- Malformed/oversized/stale frames fail closed before frontend installation.
-- Reconnect and latest-state recovery work without full-document traffic for
-  ordinary edits.
-- Bridge choice is documented and replaceable.
-
-## Phase 4: React UI, Design-System, Theme, and Accessibility Foundation
-
-### Scope
-
-- Establish application routes, shell composition, error boundaries, loading
-  states, and narrow/wide desktop layout behavior.
-- Port Clay component semantics to accessible React primitives, preferring
-  React Aria Components and native HTML over custom ARIA widgets.
-- Implement one frontend theme runtime. Validate existing theme package data in
-  Rust, emit a resolved snapshot, map tokens to CSS custom properties, and
-  adapt syntax/editor tokens to CodeMirror.
-- Preserve user-owned `ui`, `monospace`, and `proportional` font roles plus the
-  semantic typography hierarchy.
-- Keep light/dark/system appearance, package themes, contrast rejection, live
-  theme reload, density, spacing, radius, and state-token behavior.
-- Create a deterministic UI fixture/review route for visual, responsive,
-  interaction-state, and accessibility testing; do not add a second product UI.
-
-### Exit Gate
-
-- Core controls are keyboard-operable, named, focus-visible, themeable, and
-  tested in light/dark plus large typography.
-- No raw package CSS or concrete package font/size authority reaches host UI.
-- Token/theme changes do not trigger package JavaScript or server work per
-  animation frame.
-
-## Phase 5: CodeMirror Editing and Versioned Synchronization Foundation
+Change requests are filed in the Prism repo at
+`docs/clay-integration-findings.md` (BUG-1/BUG-2, FEATURE-1..6, DOCS-1
+mapping one-to-one to D1/E1–E6 plus docs constraints).
 
 ### Scope
 
-- Mount CodeMirror directly through a focused React lifecycle adapter; editor
-  state does not live in ordinary React component state.
-- Port document open, local shadow state, transaction IDs, pending edit queue,
-  optimistic application, acknowledgements, stale rejection, correction, and
-  full resync.
-- Define one reviewed UTF-16 line/column ↔ canonical UTF-8 byte conversion
-  boundary and test Unicode, emoji, combining marks, CRLF, and malformed input.
-- Batch ordinary edit transmission without delaying local paint.
-- Port caret/selection/viewport retention, dirty/read-only status, save/reload,
-  conflict recovery, and document close.
-- Establish CodeMirror extension compartments for behavior manifest, language,
-  theme, typography, keymap, read-only state, and decorations.
+- Fix D1 with a regression test covering durable suspend/resume without an
+  explicit `allowCustom`.
+- Resolve E1 (preferred: overrides/context fallback model for declarative
+  definitions; minimum: doc correction).
+- Resolve E2 (preferred: documented host-loop pattern + example; no new
+  runtime machinery unless the pattern proves awkward).
+- Optionally land E3–E6 by need during later phases.
+- Publish and bump `clay-agent` dependency pins as one atomic set.
 
 ### Exit Gate
 
-- Real files can be opened, edited, saved, rejected, corrected, and resynced
-  against the existing server.
-- Local typing remains responsive with a slow or absent IPC consumer.
-- Unicode positions and server versions remain exact.
+- The Clay smoke suite (moved from `/tmp` into `clay-agent/src/__tests__`)
+  passes against the published packages, including the D1 resume path with
+  omitted `allowCustom`.
 
-## Phase 6: Pane, Split, Tab, Workspace, and Persistence Parity
+## Phase 1: Base Coding Agent Host Uplift (`clay-agent`)
 
 ### Scope
 
-- Port shell working area, generic pane-content host, split tree, fixed slots,
-  divider drag, keyboard resize/move, focus policies, and four-pane cap.
-- Port per-pane independent editor views and duplicate-open focus routing.
-- Port tabs as independent server client connections with per-tab workspaces,
-  active modes, documents, split trees, dirty-close protection, and tab order.
-- Port keyboard tab/pane commands, numbered navigation, sequence chords, and
-  user keybinding overrides.
-- Port versioned layout persistence and hostile/corrupt-file fallback.
-- Preserve focus, selection, viewport, and transient state by stable IDs during
-  React reconciliation and tab/pane moves.
+- Register `@arnilo/prism-coding-agent` tools with Clay-operation backends:
+  `read`/`write`/`edit` route through Clay document authority (versions,
+  leases, dirty buffers) via the documented `operations` seams per the
+  2026-08-21 decision; `shell`/list/search/glob stay workspace-confined.
+- Wire `ExecutionPolicy` approvals (`@arnilo/prism-coding-security`) through
+  the server to Clay confirmation UI; identity-scoped caching of decisions.
+- Add compaction strategies (default + coding LLM compaction +
+  observational-memory fast compaction) and daemon RPC to select/per-run
+  override.
+- Add skills registry plumbing and package-contributed skill text
+  (progressive disclosure, `load_skill`).
+- Add command dispatch (`CommandDefinition` → daemon RPC) so packages can
+  register `/verb` commands; E3 workaround: commands resolve host drivers.
+- Add durable run support (`interruptBeforeTool`, lifecycle resume) and run
+  state RPC for approval surfaces.
+- Add MCP server wiring from package-declared MCP manifests (allow-listed).
+- Keep mock-mode and existing chat flows byte-compatible.
 
 ### Exit Gate
 
-- Every current split/tab manual-test scenario passes in React.
-- Cross-tab workspace/document/grant isolation remains server-enforced.
-- Restore/reconnect does not duplicate clients or leak leases.
+- Linux gates pass: `cargo fmt --check`, `cargo check --all-targets`,
+  `cargo clippy --all-targets -- -D warnings`, server/daemon tests.
+- A session can run the nine coding tools against an open Clay document with
+  dirty-buffer fidelity, approval prompts, and persisted history.
+- Compaction (manual and threshold) runs mid-session; observational memory
+  attach works against the daemon store.
 
-## Phase 7: Complete Editor, Rendering, and Language-Intelligence Parity
+## Phase 2: `@clay/coding-agent` Package (Minimal Base Agent)
 
 ### Scope
 
-- Port movement, selection, multi-cursor, cursor undo, text objects, smart
-  select, snippets, comment/list/heading transforms, bracket behavior, and
-  multi-stroke key routing.
-- Port clipboard, IME composition, accessible editable-text semantics, caret
-  shape/blink, ligatures, wrapping, horizontal scroll, prose column, gutters,
-  active line, indent guides, and bracket matching.
-- Adapt server-issued syntax, semantic, diagnostic, search, link, inlay, fold,
-  and background decorations to CodeMirror extensions without adding a second
-  parser or language authority in the frontend.
-- Port completion ordering, exclusive providers, snippets, caret-anchored popup,
-  stale/error dismissal, and accepted-item application.
-- Port hover, definition, signature help, code actions, LSP diagnostics,
-  folding, link activation, and inlay toggles through existing server services.
-- Port Markdown source editing and current preview behavior using sanitized web
-  rendering while retaining package/mode ownership.
+- First-party package registering the `coding` agent profile: coding tool
+  set, system prompt layer, `create-plan`-style skill, slash commands
+  (`/compact`, `/new`, `/branch`+checkout map, `/model` picker hook), plan
+  file conventions (`plans/`), and the minimal UI surface (transcript +
+  composer + approval cards) composed from existing SDUI primitives and the
+  chat extension points.
+- Pi-parity behaviors: streaming, steering/cancel, session list/resume,
+  branch fork/checkout, manual + auto compaction, provider/model switching.
+- No autonomy, workflows, sub-agents, or memory cadence policy — those are
+  `st` concerns.
+- Replaceable like `@clay/chat`; third-party packages extend/replace via
+  declared extension points with user approval.
 
 ### Exit Gate
 
-- Editor and language parity ledger is complete.
-- Current large-file, typing, scrolling, decoration, completion, and language
-  service budgets pass or have stricter measured replacements.
-- No package/mode-specific Rust branch is added for frontend convenience.
+- Pi-parity checklist (documented in the plan) passes manually on Linux with
+  at least one real provider and the mock provider in CI.
+- Deleting/disabling the package leaves the daemon and chat fully functional.
 
-## Phase 8: React SDUI, Package UI, and Trust-Boundary Parity
+## Phase 3: Third-Party Agent Package Platform
 
 ### Scope
 
-- Implement stable-ID React reconciliation for existing SDUI snapshots and
-  updates. Preserve local focus, scroll, input, collapse, menu, and transient
-  state when node identity survives.
-- Port the package component catalog, fixed slots, pane-content contribution,
-  overlays, modal containment, disabled/state semantics, action intents, and
-  payload limits.
-- Preserve package manifests as the single contribution source, explicit
-  one-line `loadPackage`, extension points, `extends`/`replaces`, provenance,
-  generation, revocation, rollback, and two persistent Deno trust domains.
-- Define trusted first-party compiled UI registration without giving package
-  logic Tauri authority.
-- Keep third-party UI declarative by default. Add isolated custom surfaces only
-  if a current parity requirement needs them; otherwise defer the mechanism.
-- Port package settings, Git status, file-browser, and Chat entry composition
-  onto the same component registry.
+- Public `agent.*` Clay JS API surface for packages: register agent profiles
+  (declarative `AgentDefinition` data), skills, commands, tool descriptors
+  bound to server-executed implementations, and workflow definitions; list
+  and start workflows; subscribe to run/workflow event streams; surface
+  ask-user decisions and approvals into Clay UI.
+- Daemon-side enforcement: package contributions are inert data until the
+  daemon activates them under trust/permission policy; no package code runs
+  in the daemon; secret containment unchanged.
+- Authoring docs + conformance tests + a reference toy package (not `st`)
+  proving the extension path end to end.
 
 ### Exit Gate
 
-- Existing first-party packages load unchanged or through a documented schema
-  migration and retain behavior/UI parity.
-- Third-party runtime cannot import internal modules, call internal ops, access
-  Tauri, inject host CSS, or impersonate first-party provenance.
-- Package disable/reload/replacement cleans up UI and executable authority.
+- A test-only third-party package registers an agent, a skill, a command,
+  and a durable workflow, and runs it through the public API with user
+  approval, on Linux.
 
-## Phase 9: Command Centre, Configuration, Settings, and Desktop Workflow Parity
+## Phase 4: `st` Package — Orchestration Core
 
 ### Scope
 
-- Port the centered Command Centre, scrim, fuzzy command list, path browser,
-  provider/model/agent/session pickers, modal focus containment, result-count
-  announcements, and keyboard-only operation.
-- Port native file/folder dialogs through narrow Tauri commands while keeping
-  server-issued grants and browse authority unchanged.
-- Port `init.js` configuration diagnostics, modular imports, watcher-triggered
-  hot reload, runtime generation replacement, and atomic frontend state install.
-- Port settings UI for appearance, themes, typography, package state, and
-  documented preferences without inventing a second configuration store.
-- Port status/recovery/error surfaces, workspace/file browser, Git discovery,
-  clipboard commands, and desktop shortcuts.
+- `/start` command and `st start` entry: asks the workflow type via
+  `ask_user_decision` (durable suspend path after D1); types are a registered
+  set of loop implementations (initial set approved in a decision log;
+  `build` is the reference implementation).
+- `build` loop: capture goal (prompt or attached file via document/resource
+  APIs) → generate phased roadmap (validated artifact via
+  `generateValidateReviseLoop` or structured output) → persist roadmap as
+  workspace Markdown + bounded `state.coding` metadata.
+- Per phase: auto-prompt plan creation using the package's customized
+  `create-plan` skill, then drive tasks one run at a time; per-task boundary
+  triggers observational-memory observe/reflect and explicit compaction.
+- Orchestrator runs host-side in the daemon per phase workflows (E2 pattern)
+  with user-visible pause/cancel/steer, budgets, and durable resume across
+  daemon restarts (checkpoints + `definitionRevision`).
 
 ### Exit Gate
 
-- Existing configuration, Command Centre, path, settings, and file workflows
-  pass automated and manual parity checks.
-- Secrets and absolute paths remain absent from logs, menu snapshots, rendered
-  errors, and accessible names.
+- On a fixture repository with the mock provider, `build` goes from goal to
+  roadmap to per-phase plans to executed tasks with suspend/resume across a
+  simulated daemon restart, all decisions auto-answered by test policy.
 
-## Phase 10: AG-UI Agent and Chat Parity
+## Phase 5: `st` Sub-Agent Validation Loop and Delegation
 
 ### Scope
 
-- Keep one Clay-owned Prism `clay-agent` daemon and existing Rust server process
-  manager, credential vault, provider kernel, and persisted session store.
-- Add a server adapter from bounded Prism/Clay events to AG-UI lifecycle,
-  message, tool, state snapshot/delta, raw/custom, cancellation, and error
-  events.
-- Implement a custom AG-UI `AbstractAgent` transport over Tauri commands and
-  channels; do not open a localhost HTTP/SSE listener.
-- Port `@clay/chat` landing, composer, transcript, provider/model/agent/setup,
-  session list/resume/delete, streaming, cancellation, thinking, usage, and
-  unconfigured-provider states.
-- Preserve package ownership: replacing/disabling `@clay/chat` changes product
-  presentation/profile registration but cannot access daemon/process/secrets.
-- Keep ACP and coding-agent-only tools, diffs, MCP, PTY, and AI-safe mutation out
-  unless they are already implemented when the Phase 1 parity ledger freezes.
+- Supervisor children, each an isolated session with its own model
+  (`AgentDefinition.model` per task type): acceptance-criteria writer, test
+  writer, validator. Implementation agent never writes its own acceptance
+  tests (tunnel-vision separation is structural: separate sessions, separate
+  histories).
+- Planning-time task typing in the roadmap schema (`type`, `model`,
+  `delegate` fields) mapped at execution to: base agent run, specific Prism
+  model, or Antigravity delegation via
+  `createAntigravityDelegationTool`-equivalent wiring behind a feature check
+  for `agy` availability.
+- Validation node runs named checks (`coding_check`) with diagnostic deltas
+  and feeds failures back as the next auto-prompt; bounded retry budget per
+  task; escalation to user decision after budget exhaustion.
+- Optional: Prism evals wired as a release gate for `st` behavior
+  regressions.
 
 ### Exit Gate
 
-- Current Chat workflows pass through AG-UI with no duplicate event model in
-  React.
-- Credentials never enter AG-UI state, logs, snapshots, DOM attributes, or
-  accessibility names.
-- Agent streaming never blocks editor input or unbounds transcript memory.
+- Fixture build completes with criteria/tests authored by child agents that
+  never saw the implementation agent's session, and proven by store
+  inspection; per-task model routing demonstrated with at least two
+  providers/models in one run; Antigravity path proven or proven-absent with
+  a clean skip.
 
-## Phase 11: Remote, Platform, Packaging, and Operational Hardening
+## Phase 6: `st` Memory Cadence and Autonomy Hardening
 
 ### Scope
 
-- Verify local, remote, container, and multi-client server connections through
-  the same frontend bridge without moving remote authority into the webview.
-- Test Linux WebKitGTK first; retain practical Windows/macOS support without
-  weakening Linux behavior.
-- Add Tauri packaging, application identity, icons, desktop integration,
-  updater signing/configuration, crash diagnostics, and server/agent artifact
-  bundling.
-- Add CSP/capability regression tests, dependency audit policy, SBOM/license
-  checks, and packaged-install smoke tests.
-- Establish frontend bundle, startup, memory, tab switch, editor, Command
-  Centre, SDUI, and agent-stream budgets.
+- Observational memory attached to the `st` orchestrator session and each
+  durable child session: per-task compaction (fast strategy), recall tool
+  active, `om:status`/`om:view` surfaces in Clay UI.
+- Memory-aware auto-prompts: each task prompt renders prior memory state plus
+  plan excerpt; post-task flush before the next task.
+- Guardrails: per-workflow budgets (tokens, wall time, tool calls), loop
+  termination predicates, stuck detection with user escalation, full audit
+  trail via run ledger + policy ledger.
+- Failure drills: compaction loss, child failure, provider outage, daemon
+  crash mid-task, restart resume.
 
 ### Exit Gate
 
-- A packaged Linux build installs, launches, edits, reconnects, updates through
-  a safe test channel, and uninstalls cleanly.
-- Remote/container scenarios retain current server authority and security.
-- Blocking Rust, TypeScript, frontend test, audit, and package smoke gates pass.
+- In a scripted long-build fixture, recall demonstrably recovers pre-crash
+  decisions after restart, budgets terminate a runaway loop deterministically,
+  and the escalation path reaches the Clay UI.
 
-## Phase 12: Parity Certification, Native Client Removal, and Documentation Cutover
+## Phase 7: Hardening, Documentation, and Distribution
 
 ### Scope
 
-- Execute every parity-ledger automated and manual check on the Tauri/React
-  build. Retain screenshot, accessibility-tree, performance, security, and
-  packaged-build evidence.
-- Resolve every gap; do not classify missing behavior as parity by deleting or
-  weakening its test. Product removals require separate user approval and a
-  superseding decision log.
-- Make Tauri the default `clay` desktop launch path while keeping `clay server`
-  independently runnable.
-- Delete native client, Masonry/Vello/Parley/winit dependencies, local
-  Masonry/AccessKit patches, native-only UI modules, obsolete benchmarks,
-  obsolete fixtures, and native-only launch code.
-- Rewrite architecture, development, security, performance, accessibility,
-  package authoring, primitive reference, Clay JS API, manual-test, code-wiki,
-  examples, build, platform, and contribution documentation to describe only
-  the implemented target architecture. Preserve historical plans and decision
-  logs as history; mark superseded decisions rather than rewriting them.
-- Add deterministic searches/tests preventing stale claims such as "native
-  Masonry client", "no AG-UI", direct package widget authority, or obsolete
-  source paths in current documentation.
+- `roadmap.md` (this file) finalized post-review; per-phase numbered plans
+  in `plans/` (105+) created at phase start per `create-plan`; decision logs
+  for the open decisions below and any new ones.
+- Package authoring guide for agent packages; `st` published as the reference
+  third-party agent package; base agent shipped with Clay unchanged for
+  users who never install `st`.
+- Code-wiki updates, manual test modules, registry/doc truth tests per
+  project documentation-as-code rules.
+- Performance and security review: daemon event throughput, memory worker
+  overhead, approval UX latency, redaction coverage across new event kinds.
 
 ### Exit Gate
 
-- Parity ledger has zero unresolved rows.
-- Tauri/React is the only production desktop client.
-- Linux format/check/clippy/tests, frontend lint/typecheck/tests/build, Node
-  daemon tests, audits, documentation registry checks, wiki navigation checks,
-  manual test plan, visual/a11y review, and packaged smoke all pass.
-- Repository current-state documentation is internally consistent; historical
-  decision logs and completed plans remain clearly historical.
+- Linux blocking gates, daemon tests, package conformance, and manual test
+  plan all pass; documentation is internally consistent; `st` install/
+  remove cycles leave no residue in the base agent.
 
-## Post-Parity Work (Not Part of This Migration)
+## Open Decisions (need `decision-logs/` before implementation)
 
-After Phase 12, create separate approved plans for:
+1. `st` package name, registry id, and distribution channel.
+2. The initial workflow-type set beyond `build` (fix? research? review?) and
+   their loop semantics.
+3. Whether E2 lands as a documented pattern or a new Prism primitive.
+4. Default acceptance: auto-approve scope for `st` (which actions still
+   require explicit user approval in fully-autonomous runs).
+5. Observational memory defaults: worker models, thresholds, retention per
+   session vs per workspace.
 
-- Terminal emulator and PTY support.
-- JSON/YAML/TOML structured editing beyond current text-mode parity.
-- Python, Jupyter kernels, and `.ipynb` cell UI.
-- LaTeX/TexLab/Tectonic/PDF.js workflows.
-- Rich PDF/Markdown cross-document links.
-- Coding Agent, AI-safe mutation, diffs, approvals, tools, MCP, and sandboxing
-  if not already present in the Phase 1 parity ledger.
-- Personal, Work, Research, Finance, and Clay meta-agent packages.
-- Declarative VSIX asset import; browser extension-host subset only after a
-  separate compatibility/security decision.
+## Post-Roadmap (not in scope)
+
+- Additional `st` workflow types and meta-agent packages (Personal, Work,
+  Research, Finance per the superseded roadmap's post-parity list).
+- Cross-session shared memory scopes (E5) if per-session composition proves
+  insufficient.
+- Remote/distributed `st` runs over the Clay server protocol.

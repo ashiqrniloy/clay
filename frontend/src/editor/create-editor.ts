@@ -1,10 +1,12 @@
 import {
   EditorState,
+  Prec,
   type Extension,
   type Text,
   type Transaction,
 } from "@codemirror/state";
 import {
+  drawSelection,
   EditorView,
   keymap,
   placeholder as placeholderExt,
@@ -58,7 +60,9 @@ export const clayEditorTheme = EditorView.theme({
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { overflow: "auto", fontFamily: "inherit" },
   ".cm-content": {
-    caretColor: "var(--clay-accent-primary)",
+    // Native WebKitGTK caret lags and leaves a ghost bar on backspace.
+    // drawSelection paints .cm-cursor; keep the native caret invisible.
+    caretColor: "transparent",
     padding: "var(--clay-spacing-sm, 12px)",
   },
   ".cm-cursor, .cm-dropCursor": {
@@ -69,6 +73,20 @@ export const clayEditorTheme = EditorView.theme({
   },
   ".cm-activeLine": { backgroundColor: "transparent" },
 });
+
+// WebKitGTK ignores `caret-color: transparent`. drawSelection also restores
+// `caret-color: initial` on focused descendants, which leaves a native bar
+// at the old offset after backspace. Match the surface so only .cm-cursor shows.
+const hideNativeCaret = Prec.highest(
+  EditorView.theme({
+    ".cm-content, .cm-line": {
+      caretColor: "var(--clay-surface-main) !important",
+    },
+    ".cm-content :focus": {
+      caretColor: "var(--clay-surface-main) !important",
+    },
+  }),
+);
 
 export function createEditor(options: CreateEditorOptions): EditorView {
   const saveKey = keymap.of([
@@ -147,6 +165,8 @@ export function createEditor(options: CreateEditorOptions): EditorView {
         behaviorCompartment.of([]),
         decorationCompartment.of([]),
         placeholderExt(options.placeholder ?? ""),
+        drawSelection(),
+        hideNativeCaret,
         inputEvents,
         listener,
         EditorView.lineWrapping,

@@ -146,6 +146,136 @@ describe("atomic viewport render patches", () => {
     editor.destroy();
   });
 
+  it("drops a mark that covered the token plus newline after backspace", () => {
+    const editor = mounted("fn\nnext", [decorationExtension]);
+    editor.dispatch({
+      effects: replaceDecorations(
+        editor.state,
+        decorationSet([{ byteStart: 0, byteEnd: 3 }], [0, 8]),
+      ),
+    });
+    expect(editor.dom.querySelector(".cm-clay-t-keyword")?.textContent).toBe(
+      "fn",
+    );
+    editor.dispatch({ changes: { from: 1, to: 2 } });
+    editor.dispatch({ changes: { from: 0, to: 1 } });
+    expect(editor.state.doc.toString()).toBe("\nnext");
+    expect(decorationStats(editor.state).marks).toBe(0);
+    expect(editor.dom.querySelector(".cm-clay-t-keyword")).toBeNull();
+    editor.destroy();
+  });
+
+  it("does not leave a highlighted space after backspacing a token", () => {
+    const editor = mounted("fn \n", [decorationExtension]);
+    editor.dispatch({
+      effects: replaceDecorations(
+        editor.state,
+        decorationSet([{ byteStart: 0, byteEnd: 2 }], [0, 4]),
+      ),
+    });
+    // Insert a space after the token the way typing does, then delete the token.
+    editor.dispatch({
+      changes: { from: 2, insert: "x" },
+      selection: { anchor: 3 },
+    });
+    editor.dispatch({ changes: { from: 2, to: 3 } });
+    editor.dispatch({ changes: { from: 1, to: 2 } });
+    editor.dispatch({ changes: { from: 0, to: 1 } });
+    expect(editor.state.doc.toString()).toBe(" \n");
+    expect(decorationStats(editor.state).marks).toBe(0);
+    expect(editor.dom.querySelector(".cm-clay-t-keyword")).toBeNull();
+    editor.destroy();
+  });
+
+  it("does not grow a mark onto text inserted at its exclusive end", () => {
+    const editor = mounted("fn\n", [decorationExtension]);
+    editor.dispatch({
+      effects: replaceDecorations(
+        editor.state,
+        decorationSet([{ byteStart: 0, byteEnd: 2 }], [0, 3]),
+      ),
+    });
+    editor.dispatch({ changes: { from: 2, insert: " " } });
+    expect(editor.dom.querySelector(".cm-clay-t-keyword")?.textContent).toBe(
+      "fn",
+    );
+    editor.destroy();
+  });
+
+  it("drops an impl keyword after four backspaces, including the rest of the line", () => {
+    const editor = mounted("impl Foo {\n", [decorationExtension]);
+    editor.dispatch({
+      selection: { anchor: 4 },
+      effects: replaceDecorations(
+        editor.state,
+        decorationSet([{ byteStart: 0, byteEnd: 4 }], [0, 11]),
+      ),
+    });
+    expect(editor.dom.querySelector(".cm-clay-t-keyword")?.textContent).toBe(
+      "impl",
+    );
+    for (let i = 0; i < 4; i += 1)
+      editor.dispatch({ changes: { from: 3 - i, to: 4 - i } });
+    expect(editor.state.doc.toString()).toBe(" Foo {\n");
+    expect(decorationStats(editor.state).marks).toBe(0);
+    expect(editor.dom.querySelector(".cm-clay-t-keyword")).toBeNull();
+    editor.destroy();
+  });
+
+  it("clears the final JavaScript keyword fragment when the document becomes empty", () => {
+    const editor = mounted("function", [decorationExtension]);
+    editor.dispatch({
+      effects: replaceDecorations(
+        editor.state,
+        decorationSet([{ byteStart: 0, byteEnd: 8 }], [0, 8], "javascript"),
+      ),
+    });
+    expect(editor.dom.querySelector(".cm-clay-t-keyword")?.textContent).toBe(
+      "function",
+    );
+    for (let end = 8; end > 0; end -= 1)
+      editor.dispatch({ changes: { from: end - 1, to: end } });
+    expect(editor.state.doc.length).toBe(0);
+    expect(decorationStats(editor.state).marks).toBe(0);
+    expect(editor.dom.querySelector(".cm-clay-t-keyword")).toBeNull();
+    editor.destroy();
+  });
+
+  it("drops a mark as soon as backspace overlaps it, without waiting for a patch", () => {
+    const editor = mounted("hello\nnext", [decorationExtension]);
+    editor.dispatch({
+      effects: replaceDecorations(
+        editor.state,
+        decorationSet([{ byteStart: 0, byteEnd: 5 }], [0, 10]),
+      ),
+    });
+    expect(editor.dom.querySelector(".cm-clay-t-keyword")?.textContent).toBe(
+      "hello",
+    );
+    editor.dispatch({ changes: { from: 4, to: 5 } });
+    expect(editor.state.doc.toString()).toBe("hell\nnext");
+    expect(decorationStats(editor.state).marks).toBe(0);
+    expect(editor.dom.querySelector(".cm-clay-t-keyword")).toBeNull();
+    editor.destroy();
+  });
+
+  it("drops syntax marks that backspace deleted instead of sticking to the newline", () => {
+    const editor = mounted("fn\nnext", [decorationExtension]);
+    editor.dispatch({
+      effects: replaceDecorations(
+        editor.state,
+        decorationSet([{ byteStart: 0, byteEnd: 2 }], [0, 8]),
+      ),
+    });
+    expect(decorationStats(editor.state).marks).toBe(1);
+    editor.dispatch({ changes: { from: 1, to: 2 } });
+    editor.dispatch({ changes: { from: 0, to: 1 } });
+    expect(editor.state.doc.toString()).toBe("\nnext");
+    expect(decorationStats(editor.state).marks).toBe(0);
+    expect(editor.dom.querySelector(".cm-clay-t-keyword")).toBeNull();
+    editor.destroy();
+  });
+
   it("maps unaffected spans through local edits", () => {
     const editor = mounted("aaaa\nbbbb\ncccc", [decorationExtension]);
     editor.dispatch({

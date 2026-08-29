@@ -8,6 +8,7 @@ import { EditorView } from "@codemirror/view";
 import { foldable } from "@codemirror/language";
 import { describe, expect, it } from "vitest";
 
+import { createEditor } from "../create-editor";
 import { applyEnterRule, behaviorExtensions } from "./behavior";
 import {
   decorationExtension,
@@ -212,6 +213,23 @@ describe("editor parity adapters", () => {
     insertAtSelections(editor, "x");
     expect(editor.state.doc.toString()).toBe("xone\nxtwo");
     expect(editor.state.selection.ranges).toHaveLength(2);
+    editor.destroy();
+  });
+});
+
+describe("drawn caret", () => {
+  it("installs a cursor layer and keeps one selection after last-char delete", () => {
+    const editor = createEditor({ parent: document.body, doc: "ab\n" });
+    expect(editor.dom.querySelector(".cm-cursorLayer")).not.toBeNull();
+    editor.dispatch({ selection: EditorSelection.cursor(2) });
+    editor.dispatch({ changes: { from: 1, to: 2 } });
+    expect(editor.state.doc.toString()).toBe("a\n");
+    expect(editor.state.selection.main.head).toBe(1);
+    editor.dispatch({ changes: { from: 0, to: 1 } });
+    expect(editor.state.doc.toString()).toBe("\n");
+    expect(editor.state.selection.main.head).toBe(0);
+    expect(editor.state.selection.ranges).toHaveLength(1);
+    expect(editor.dom.querySelectorAll(".cm-cursorLayer")).toHaveLength(1);
     editor.destroy();
   });
 });

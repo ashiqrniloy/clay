@@ -29,6 +29,7 @@ export type RenderPatch =
       items: DiagnosticItem[];
     }
   | { kind: "fold"; authority: string; ranges: FoldItem[] }
+  | { kind: "clearSyntax" }
   | { kind: "reset" }
   | { kind: "retain"; covered: ByteRange16 };
 
@@ -140,19 +141,76 @@ export function pruneOutside<T extends RangedItem>(
  * items clamp to empty (from === to); callers drop them where emptiness is
  * invalid (marks, folds).
  */
+/** Drop leading/trailing whitespace so a mark cannot wrap a newline or leftover space. WebKit paints those as a ghost caret. */
+export function clipLineBreaks(
+  doc: { sliceString(from: number, to: number): string },
+  from: number,
+  to: number,
+): ByteRange16 | null {
+  let start = from;
+  let end = to;
+  while (start < end) {
+    const ch = doc.sliceString(start, start + 1);
+    if (ch !== "\n" && ch !== "\r" && ch !== " " && ch !== "\t") break;
+    start += 1;
+  }
+  while (end > start) {
+    const ch = doc.sliceString(end - 1, end);
+    if (ch !== "\n" && ch !== "\r" && ch !== " " && ch !== "\t") break;
+    end -= 1;
+  }
+  return start < end ? { from: start, to: end } : null;
+}
+
+export function clipMappedItems<T extends ByteRange16>(
+  items: readonly T[],
+  doc: { sliceString(from: number, to: number): string },
+): T[] {
+  const next: T[] = [];
+  for (const item of items) {
+    const clipped = clipLineBreaks(doc, item.from, item.to);
+    if (!clipped) continue;
+    next.push(
+      clipped.from === item.from && clipped.to === item.to
+        ? item
+        : { ...item, from: clipped.from, to: clipped.to },
+    );
+  }
+  return next;
+}
+
+function overlapsDelete(item: ByteRange16, range: ByteRange16): boolean {
+  if (item.from < range.to && item.to > range.from) return true;
+  // Zero-width inlays sit on the exclusive end; keep them from becoming a ghost widget.
+  return (
+    item.from === item.to && item.from >= range.from && item.from <= range.to
+  );
+}
+
 export function mapItems<T extends ByteRange16>(
   items: readonly T[],
   changes: ChangeSet,
 ): T[] {
-  let copy: T[] | null = null;
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index];
+  if (items.length === 0 || changes.empty) return items as T[];
+  const deleted: ByteRange16[] = [];
+  changes.iterChanges((fromA, toA) => {
+    if (toA > fromA) deleted.push({ from: fromA, to: toA });
+  });
+  const next: T[] = [];
+  for (const item of items) {
     if (!item) continue;
-    const from = changes.mapPos(item.from);
-    const to = Math.max(from, changes.mapPos(item.to, 1));
-    if (from === item.from && to === item.to) continue;
-    if (!copy) copy = items.slice();
-    copy[index] = { ...item, from, to };
+    // Drop anything the user just deleted. Mapping through the change left a
+    // 1ch leftover (highlighted space / inlay) that looked like a second caret
+    // until the ~1s syntax patch arrived — and prune:false then kept it.
+    if (deleted.some((range) => overlapsDelete(item, range))) continue;
+    // Exclusive range: start sticks right, end sticks left, so inserts at the
+    // edges stay outside the mark.
+    const from = changes.mapPos(item.from, 1);
+    const to = changes.mapPos(item.to, -1);
+    if (from >= to) continue;
+    next.push(
+      from === item.from && to === item.to ? item : { ...item, from, to },
+    );
   }
-  return copy ?? (items as T[]);
+  return next;
 }

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { deleteCharBackward } from "@codemirror/commands";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -279,6 +280,78 @@ describe("viewport request pacing", () => {
       patchEnvelope({ requestId: 2, decorations: [set(7)] }),
     );
     expect(view.dom.querySelector(".cm-clay-t-keyword")).not.toBeNull();
+    projection.detach(view);
+    view.destroy();
+  });
+
+  it("does not repaint impl from a late viewport reply after backspace", () => {
+    const sent: string[] = [];
+    const projection = projectionWith(sent);
+    projection.installInitial({ behaviorVersion: 2 });
+    const view = mounted(projection, "impl Foo {\n");
+    projection.attach(view);
+    const implSet: DecorationSet = {
+      documentId: 4,
+      documentVersion: 7,
+      packagePrefix: "rust",
+      kind: "syntax",
+      viewportByteStart: 0,
+      viewportByteEnd: 11,
+      spans: [
+        {
+          byteStart: 0,
+          byteEnd: 4,
+          kind: "syntax",
+          tokenType: "keyword",
+          modifiers: 0,
+          scope: null,
+          fontRole: null,
+          priority: 1,
+          provenance,
+          target: null,
+          inlay: null,
+        },
+      ],
+    };
+    projection.handleEnvelope(
+      patchEnvelope({ requestId: 1, decorations: [implSet] }),
+    );
+    expect(view.dom.querySelector(".cm-clay-t-keyword")?.textContent).toBe(
+      "impl",
+    );
+    view.dispatch({ selection: { anchor: 4 } });
+    for (let i = 0; i < 4; i += 1) deleteCharBackward(view);
+    expect(view.state.doc.toString()).toBe(" Foo {\n");
+    expect(view.dom.querySelector(".cm-clay-t-keyword")).toBeNull();
+    const followUp = sent
+      .map((payload) => JSON.parse(payload))
+      .filter((value) => value.family === "viewportRenderRequest")
+      .at(-1);
+    expect(followUp?.payload.requestId).toBeGreaterThan(1);
+    projection.handleEnvelope(
+      patchEnvelope({
+        requestId: followUp.payload.requestId,
+        decorations: [implSet],
+      }),
+    );
+    expect(view.dom.querySelector(".cm-clay-t-keyword")).toBeNull();
+    projection.detach(view);
+    view.destroy();
+  });
+
+  it("an authoritative empty completion clears stale decorations", () => {
+    const sent: string[] = [];
+    const projection = projectionWith(sent);
+    projection.installInitial({ behaviorVersion: 2 });
+    const view = mounted(projection, "line\n".repeat(20));
+    projection.attach(view);
+    projection.handleEnvelope(envelope(set(7)));
+    projection.handleEnvelope(
+      envelope({ ...set(7), packagePrefix: "lsp", kind: "semantic" }),
+    );
+    expect(view.dom.querySelectorAll(".cm-clay-t-keyword")).toHaveLength(2);
+    projection.handleEnvelope(patchEnvelope({ requestId: 1, status: "empty" }));
+    expect(view.dom.querySelectorAll(".cm-clay-t-keyword")).toHaveLength(1);
     projection.detach(view);
     view.destroy();
   });

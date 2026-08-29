@@ -17,6 +17,8 @@ import { utf8ToUtf16Batch } from "../position-map";
 import type { DecorationSet, DecorationTarget, TokenType } from "./types";
 import {
   applyRenderPatch,
+  clipLineBreaks,
+  clipMappedItems,
   coveredRangeOf,
   guardOf,
   mapItems,
@@ -169,12 +171,18 @@ export function decorationPatch(
       });
       continue;
     }
-    if (from === to) continue;
+    const clipped = clipLineBreaks(state.doc, from, to);
+    if (!clipped) continue;
     if (span.kind === "link" && span.target)
-      links.push({ from, to, authority, target: span.target });
+      links.push({
+        from: clipped.from,
+        to: clipped.to,
+        authority,
+        target: span.target,
+      });
     marks.push({
-      from,
-      to,
+      from: clipped.from,
+      to: clipped.to,
       authority,
       priority: span.priority,
       decoration: Decoration.mark({
@@ -230,13 +238,23 @@ const decorationField = StateField.define<DecorationState>({
     let dirty = false;
     let pruneCovered: ByteRange16 | null = null;
     if (transaction.docChanged) {
-      const mappedMarks = mapItems(value.marks, transaction.changes);
-      marks =
-        mappedMarks === value.marks
-          ? value.marks
-          : mappedMarks.filter((item) => item.from < item.to);
-      inlays = mapItems(value.inlays, transaction.changes);
-      links = mapItems(value.links, transaction.changes);
+      if (transaction.state.doc.length === 0) {
+        // Empty text has no valid render range. Clear synchronously instead
+        // of waiting for a server patch whose covered range is also empty.
+        marks = [];
+        inlays = [];
+        links = [];
+      } else {
+        marks = clipMappedItems(
+          mapItems(value.marks, transaction.changes),
+          transaction.state.doc,
+        );
+        inlays = mapItems(value.inlays, transaction.changes);
+        links = clipMappedItems(
+          mapItems(value.links, transaction.changes),
+          transaction.state.doc,
+        );
+      }
       dirty = true;
     }
     for (const effect of transaction.effects) {
@@ -250,6 +268,13 @@ const decorationField = StateField.define<DecorationState>({
           inlays = [];
           links = [];
           pruneCovered = null;
+          dirty = true;
+        } else if (patch.kind === "clearSyntax") {
+          const keep = (item: { authority: string }) =>
+            !item.authority.endsWith(":syntax");
+          marks = marks.filter(keep);
+          inlays = inlays.filter(keep);
+          links = links.filter(keep);
           dirty = true;
         } else if (patch.kind === "retain") {
           pruneCovered = unionRange(pruneCovered, patch.covered);
@@ -303,6 +328,9 @@ export const decorationExtension: Extension = decorationField;
 export const replaceDecorations = (state: EditorState, set: DecorationSet) =>
   decorationPatch(state, set);
 export const resetDecorations = () => applyRenderPatch.of({ kind: "reset" });
+export const clearSyntaxDecorations = (): StateEffectValue<RenderPatch> =>
+  applyRenderPatch.of({ kind: "clearSyntax" });
+
 export const showInlays = (visible: boolean) => setInlaysVisible.of(visible);
 
 export interface DecorationStats {

@@ -30,7 +30,7 @@ snapshot while no view exists).
 
 ## Responsibilities
 
-- Mount one `EditorView` per visible document identity.
+- Mount one `EditorView` per visible document identity. `drawSelection()` owns the caret (`.cm-cursor`); native WebKitGTK caret is painted in the surface color so backspace cannot leave a ghost bar at the previous offset.
 - Own exactly one current `Text` per pane session: `view.state.doc` while
   attached; a detached snapshot (latest user text, acked or not) only while no
   view exists. `installAuthoritative` compares by content (`Text.eq`), so a
@@ -94,10 +94,13 @@ Behavior manifests and intelligence results remain server-issued inert data.
    driven by one generic atomic patch effect (`extensions/render-patch.ts`):
    - a decoration patch carries already-projected UTF-16 mark/inlay/link
      items plus the covered viewport range; the decoration field replaces
-     exactly the same-authority items intersecting that covered range
-     (empty patches clear just that slice), maps retained items through
-     local edits, and prunes outside covered ± max(4,096, covered) so
-     retained render data is visible plus bounded overscan;
+     exactly the same-authority items intersecting that covered range,
+     drops marks intersected by local deletions, clears all decoration state
+     synchronously when the document becomes empty, and prunes outside covered
+     ± max(4,096, covered) so retained render data is visible plus bounded
+     overscan. An authoritative `ViewportRenderPatch` with `status: empty`
+     also clears syntax decoration state instead of treating zero output as a
+     no-op;
    - diagnostics live in their own state field with covered-range
      replacement, edit mapping, and suppressor-interval merge + binary-search
      suppression (no quadratic scan); the lint extension is synced with

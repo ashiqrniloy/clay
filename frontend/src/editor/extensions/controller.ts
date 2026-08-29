@@ -36,6 +36,7 @@ import { accessibilityExtension } from "./accessibility";
 import { behaviorExtensions } from "./behavior";
 import { CompletionProjection } from "./completion";
 import {
+  clearSyntaxDecorations,
   decorationExtension,
   decorationPatch,
   linkAt,
@@ -116,6 +117,9 @@ export class EditorProjection {
   /** Monotonic viewport request identity; stale patch ids drop on arrival. */
   private nextViewportRequestId = 1;
   private latestViewportRequestId = 0;
+  /** Bumped on every local doc change; inflight replies from before the edit drop. */
+  private docEpoch = 0;
+  private sentEpoch = 0;
 
   constructor(private readonly options: Options) {
     const current = () => {
@@ -151,6 +155,7 @@ export class EditorProjection {
       diagnosticExtension,
       foldingExtension,
       EditorView.updateListener.of((update) => {
+        if (update.docChanged) this.docEpoch += 1;
         if (update.viewportChanged || update.docChanged)
           this.requestViewport(update.view);
       }),
@@ -266,8 +271,17 @@ export class EditorProjection {
         // Stale request: a newer viewport already superseded this one.
         if (patch.requestId < this.latestViewportRequestId) break;
         patchTraceId = patch.traceId ?? this.viewportTraceId;
-        if (patch.status === "rejected" || patch.status === "empty") {
-          // Explicit terminal answer: nothing to apply, pipe freed now.
+        if (this.sentEpoch !== this.docEpoch || patch.status === "rejected") {
+          // Doc moved since this request, or the server rejected it: do not
+          // mutate the current projection, but free the request pipe.
+          this.viewportArrived(patchTraceId);
+          break;
+        }
+        if (patch.status === "empty") {
+          // Empty is authoritative: no renderable decorations remain for the
+          // current document/viewport. Treating it as a no-op left the last
+          // keyword fragment painted after deleting the document to empty.
+          effects.push({ effects: clearSyntaxDecorations() });
           this.viewportArrived(patchTraceId);
           break;
         }
@@ -515,6 +529,7 @@ export class EditorProjection {
     }
     this.lastViewport = key;
     this.viewportInflight = true;
+    this.sentEpoch = this.docEpoch;
     const requestId = this.nextViewportRequestId;
     this.nextViewportRequestId += 1;
     this.latestViewportRequestId = requestId;

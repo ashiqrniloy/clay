@@ -3,7 +3,7 @@
 ## What it is
 
 `src-tauri/src/` is the desktop process shell: windowing, the Clay server
-*process* lifecycle, and the narrow Tauri command surface the webview may
+_process_ lifecycle, and the narrow Tauri command surface the webview may
 call. It owns no document, package, configuration, or agent authority — all
 of that stays in the Clay server (`clay` crate). The bridge session that
 talks to a running server lives next door in
@@ -11,13 +11,14 @@ talks to a running server lives next door in
 
 ## Modules
 
-| File | Responsibility |
-| --- | --- |
-| `main.rs` | Entry point; calls `clay_desktop::run()`. |
-| `lib.rs` | `run()` resolves the endpoint fail-closed, builds managed state (`Supervisor`, `BridgeState`, `DialogState`), registers the invoke handler, and maps `RunEvent::ExitRequested` to supervisor shutdown so no child server outlives the window. |
-| `server.rs` | `Supervisor`: adopt-or-spawn lifecycle for the `clay-server` sidecar. Typed `ServerStatus { Connecting, Connected { pid }, Disconnected { reason } }`. |
-| `commands.rs` | The complete Tauri command surface (`server_status`, `session_*`, `agent_*`, `tab_*`, dialog commands). Every command delegates to managed state; none contains protocol or policy logic. |
-| `release.rs` | Release identity and endpoint resolution: `desktop_endpoint()` derives the IPC endpoint from release identity, locates the sidecar binary by target triple (`CLAY_HOST_TRIPLE`, set in `build.rs`), and fails closed on mismatch. |
+| File          | Responsibility                                                                                                                                                                                                                                |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `main.rs`     | Entry point; calls `clay_desktop::run()`.                                                                                                                                                                                                     |
+| `build.rs`    | Runs `tauri_build` and watches `../frontend/dist` recursively so rebuilt renderer assets always force a new embedded desktop binary.                                                                                                          |
+| `lib.rs`      | `run()` resolves the endpoint fail-closed, builds managed state (`Supervisor`, `BridgeState`, `DialogState`), registers the invoke handler, and maps `RunEvent::ExitRequested` to supervisor shutdown so no child server outlives the window. |
+| `server.rs`   | `Supervisor`: adopt-or-spawn lifecycle for the `clay-server` sidecar. Typed `ServerStatus { Connecting, Connected { pid }, Disconnected { reason } }`.                                                                                        |
+| `commands.rs` | The complete Tauri command surface (`server_status`, `session_*`, `agent_*`, `tab_*`, dialog commands). Every command delegates to managed state; none contains protocol or policy logic.                                                     |
+| `release.rs`  | Release identity and endpoint resolution: `desktop_endpoint()` derives the IPC endpoint from release identity, locates the sidecar binary by target triple (`CLAY_HOST_TRIPLE`, set in `build.rs`), and fails closed on mismatch.             |
 
 ## Supervisor semantics
 
@@ -59,6 +60,10 @@ explicitly granted through dialogs. Adoption makes `clay server` + `clay client`
 Development launch is `clay` / `cargo run` (stops leftover servers on the
 endpoint, then opens the desktop); `clay restart` replaces the server without
 a GUI; `clay client` attaches another window without killing servers.
+`scripts/build.sh run` first builds `frontend/dist`, then both `clay` and
+`clay-desktop`, then executes `target/debug/clay`. The explicit desktop build
+and `build.rs` dist watcher are both required: otherwise Cargo may launch a
+previous desktop executable whose embedded JavaScript predates the source fix.
 
 ## Tests
 

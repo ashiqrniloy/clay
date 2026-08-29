@@ -16,12 +16,12 @@ The installed Cargo 1.96.1 documentation defines line tables as its minimal sour
 
 Cargo auto-discovery is disabled because every top-level `tests/*.rs` file otherwise becomes a separately linked binary. Four explicit roots use plain `#[path] mod` declarations; source files stay independently readable and test names gain only their source-module prefix.
 
-| Suite | Source modules |
-|---|---|
-| `security` | language-server authority, package conflicts/graph/loading/primitive gate, runtime sandbox, Rust visibility |
-| `runtime` | command/completion/intelligence, LSP bridges, parse/runtime reload/update, selected-file smoke, syntax grammar |
-| `editor` | decoration transport, editor invariants, Markdown rendering/mode, diagnostics, themes, typography |
-| `protocol` | Clay JS docs/facades, smoke/package docs, fixtures/budgets/protocol performance, primitive docs |
+| Suite      | Source modules                                                                                                 |
+| ---------- | -------------------------------------------------------------------------------------------------------------- |
+| `security` | language-server authority, package conflicts/graph/loading/primitive gate, runtime sandbox, Rust visibility    |
+| `runtime`  | command/completion/intelligence, LSP bridges, parse/runtime reload/update, selected-file smoke, syntax grammar |
+| `editor`   | decoration transport, editor invariants, Markdown rendering/mode, diagnostics, themes, typography              |
+| `protocol` | Clay JS docs/facades, smoke/package docs, fixtures/budgets/protocol performance, primitive docs                |
 
 Run a suite or one former source harness with a module filter:
 
@@ -83,15 +83,16 @@ Without the WebKit/GTK/dbus headers, workspace-wide Cargo commands fail inside
 ### Local build and run (no CI needed)
 
 ```bash
-cd frontend && npm ci && npm run build   # renderer → frontend/dist
-cd .. && cargo build -p clay -p clay-desktop
+scripts/build.sh           # frontend/dist + debug clay and clay-desktop
+scripts/build.sh run       # same, then target/debug/clay (GUI)
+# equivalent: cd frontend && npm run build && cd .. && cargo build -p clay -p clay-desktop
 cargo run                  # kill leftover default-endpoint servers, then open GUI
 cargo run -- restart       # replace the server, no GUI
 cargo run -- client        # extra GUI against a running server
 CLAY_SERVER_BIN=/path/to/clay-server target/debug/clay-desktop   # explicit override
 ```
 
-Debug `clay-desktop` embeds `frontend/dist` (`custom-protocol` is the default feature). Rebuild the desktop crate after `npm run build` so the bundle is current. Hot-reload uses Vite instead: `cd frontend && npm run dev` in one terminal and `cargo tauri dev` in another (`tauri dev` disables `custom-protocol` and loads `http://localhost:1420`).
+Debug `clay-desktop` embeds `frontend/dist` (`custom-protocol` is the default feature). `src-tauri/build.rs` watches that directory, and `scripts/build.sh` explicitly builds `clay-desktop` after `npm run build`, so production-renderer changes cannot leave a stale embedded GUI. Hot-reload uses Vite instead: `cd frontend && npm run dev` in one terminal and `cargo tauri dev` in another (`tauri dev` disables `custom-protocol` and loads `http://localhost:1420`).
 
 The desktop shell resolves `clay-server` as `$CLAY_SERVER_BIN` → sibling of
 its own executable → `PATH`. If an endpoint already has a live listener
@@ -272,14 +273,14 @@ closing the window kills and reaps spawned server processes.
 
 Measurements used one normal `target/` on Linux (`x86_64`, Cargo/rustc 1.96.1), `cargo clean`, then `cargo test --all-targets --no-run`. Timings are snapshots, not hard gates.
 
-| Metric | Full debug, 33 integration roots | Line tables, 4 roots | Change |
-|---|---:|---:|---:|
-| Clean build/link | 89.070 s | 61.724 s | -30.7% |
-| Warm relink snapshot | 15.903 s | 7.250 s | -54.4% |
-| Cargo test/bench executable harnesses | 43 | 14 | -67.4% |
-| `target/` | 21,942,578,072 B | 6,711,040,962 B | -69.4% |
-| `target/debug/deps` | 19,521,134,614 B | 5,213,466,962 B | -73.3% |
-| `target/debug/incremental` | 1,953,003,235 B | 1,031,228,815 B | -47.2% |
+| Metric                                | Full debug, 33 integration roots | Line tables, 4 roots | Change |
+| ------------------------------------- | -------------------------------: | -------------------: | -----: |
+| Clean build/link                      |                         89.070 s |             61.724 s | -30.7% |
+| Warm relink snapshot                  |                         15.903 s |              7.250 s | -54.4% |
+| Cargo test/bench executable harnesses |                               43 |                   14 | -67.4% |
+| `target/`                             |                 21,942,578,072 B |      6,711,040,962 B | -69.4% |
+| `target/debug/deps`                   |                 19,521,134,614 B |      5,213,466,962 B | -73.3% |
+| `target/debug/incremental`            |                  1,953,003,235 B |      1,031,228,815 B | -47.2% |
 
 The warm baseline is Plan 060's pre-change relink snapshot; the after value touches one integration source before `--no-run`. No production crate split or test runner was added.
 
