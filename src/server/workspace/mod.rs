@@ -2877,7 +2877,9 @@ static LISTING_CANCELLATIONS: LazyLock<std::sync::Mutex<HashMap<String, ListingC
 /// token when the caller created it first. Reusing the token prevents a cancel
 /// racing list startup from being lost through replacement.
 pub(crate) fn register_listing_cancel_token(id: String) -> ListingCancelToken {
-    let mut map = LISTING_CANCELLATIONS.lock().unwrap();
+    let mut map = LISTING_CANCELLATIONS
+        .lock()
+        .expect("listing-cancellation registry mutex poisoned");
     map.entry(id)
         .or_insert_with(|| Arc::new(AtomicBool::new(false)))
         .clone()
@@ -2899,7 +2901,9 @@ pub(crate) fn create_listing_cancel_token() -> (String, ListingCancelToken) {
 
 /// Cancel a registered listing by token id. Returns true if the token existed.
 pub(crate) fn cancel_listing(token_id: &str) -> bool {
-    let map = LISTING_CANCELLATIONS.lock().unwrap();
+    let map = LISTING_CANCELLATIONS
+        .lock()
+        .expect("listing-cancellation registry mutex poisoned");
     if let Some(token) = map.get(token_id) {
         token.store(true, Ordering::Relaxed);
         true
@@ -2910,7 +2914,9 @@ pub(crate) fn cancel_listing(token_id: &str) -> bool {
 
 /// Remove a registered cancellation token. Called when the listing ends.
 pub(crate) fn remove_listing_cancel_token(token_id: &str) {
-    let mut map = LISTING_CANCELLATIONS.lock().unwrap();
+    let mut map = LISTING_CANCELLATIONS
+        .lock()
+        .expect("listing-cancellation registry mutex poisoned");
     map.remove(token_id);
 }
 

@@ -1634,7 +1634,10 @@ impl IpcServer {
         let sweep_states = Arc::clone(&self.tab_states);
         let sweep_tx = self.tab_registry_tx.clone();
         let sweep_live = Arc::clone(&self.live_clients);
-        sweep_live.lock().unwrap().insert(client_id);
+        sweep_live
+            .lock()
+            .expect("live-client set mutex poisoned")
+            .insert(client_id);
         let codec = self.codec;
         connections.spawn(async move {
             // The permit lives exactly as long as the connection task.
@@ -1697,7 +1700,10 @@ async fn sweep_expired_tabs(
 ) {
     let snapshot = {
         let mut registry = tab_registry.lock().await;
-        let live = live_clients.lock().unwrap().clone();
+        let live = live_clients
+            .lock()
+            .expect("live-client set mutex poisoned")
+            .clone();
         let removed = registry.sweep_expired(
             std::time::Instant::now(),
             crate::perf::budgets::REGISTRY_TAB_TTL,
@@ -1725,7 +1731,10 @@ struct LiveClientGuard {
 
 impl Drop for LiveClientGuard {
     fn drop(&mut self) {
-        self.set.lock().unwrap().remove(&self.client_id);
+        self.set
+            .lock()
+            .expect("live-client set mutex poisoned")
+            .remove(&self.client_id);
     }
 }
 

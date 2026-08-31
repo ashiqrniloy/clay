@@ -399,7 +399,10 @@ where
     // switches to its bound tab after `New`/`Reclaim`. Clean the last state
     // actually routed to this connection even when a later `Reclaim` removed
     // its registry binding before the old connection exited.
-    let tracked_state = cleanup_bound_state.lock().unwrap().clone();
+    let tracked_state = cleanup_bound_state
+        .lock()
+        .expect("cleanup bound-state mutex poisoned")
+        .clone();
     let tracked_state = match tracked_state {
         Some(state) => Some(state),
         None => match cleanup_server.as_ref() {
@@ -935,7 +938,8 @@ where
                 continue;
             };
             bound_tab_id = routed.tab_id;
-            *bound_state.lock().unwrap() = Some(routed.state.clone());
+            *bound_state.lock().expect("bound tab-state mutex poisoned") =
+                Some(routed.state.clone());
             document = routed.state.welcome;
             workspace = routed.state.workspace;
         }
