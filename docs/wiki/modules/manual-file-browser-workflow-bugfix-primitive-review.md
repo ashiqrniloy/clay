@@ -45,7 +45,7 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 
 - Primitive: Clay-owned file-browser composition over `WorkspaceRootDiscovery` and `BoundedFileListService`.
 - Owner: server `WorkspaceState` owns roots, listing, traversal checks, and file-open authority; `FileBrowserState` builds inert SDUI rows.
-- Code: `src/server/workspace.rs`, `src/shell/file_browser.rs`, `src/server/command_execution.rs`.
+- Code: `src/server/workspace/mod.rs`, `src/shell/file_browser.rs`, `src/server/command_execution.rs`.
 - Bug boundary: nested row identity must keep `SduiListItem.id` and `SduiActionSource::ListItem.item_id` identical; root-relative `relativePath` belongs in action arguments only.
 - Hot path: browsing/opening is explicit server-first command work; paint and scroll must not relist directories.
 
@@ -68,7 +68,7 @@ The target workflow remains: user config in `~/.config/clay/init.js`, `cargo run
 
 - Primitive: `PaneSlotLayout` / fixed left-slot geometry.
 - Owner: Clay shell/client layout owns main-region geometry; packages cannot mutate Masonry widgets or native layout directly.
-- Code: `src/shell/layout.rs`, `src/masonry_shell/mod.rs`, `src/masonry_sdui.rs::editor_region_for_document`, `src/masonry_editor.rs::editor_main_rect`.
+- Code: `src/shell/layout/mod.rs`, `src/masonry_shell/mod.rs`, `src/masonry_sdui.rs::editor_region_for_document`, `src/masonry_editor.rs::editor_main_rect`.
 - Bug boundary: the editor must reserve the Clay-owned left file-browser pane even after the active document ID changes. Rebinding the server file-browser tree for every document open is not required for the generic fix.
 
 ### EditorSurface visual scroll and paint chrome

@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverSaveDocument
 js_facade: runtime/js/documents.js::serverSaveDocument
-backing_rust: src/server/workspace.rs::WorkspaceState::save_document
+backing_rust: src/server/workspace/mod.rs::WorkspaceState::save_document
 deno_op: op_clay_documents_save_document
 deno_op_path: src/server/ops/documents.rs::op_clay_documents_save_document
 name: serverSaveDocument
@@ -105,8 +105,8 @@ Use `documents.serverSaveDocument` only through the documented Clay JS facade. D
 
 - JS facade: `runtime/js/documents.js::serverSaveDocument`
 - Deno op: `src/server/ops/documents.rs::op_clay_documents_save_document` (`op_clay_documents_save_document`)
-- Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::save_document`
-- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection/mod.rs`, and `src/server/workspace.rs`
+- Backing Rust/current owner: `src/server/workspace/mod.rs::WorkspaceState::save_document`
+- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection/mod.rs`, and `src/server/workspace/mod.rs`
 
 ## Lookup metadata
 

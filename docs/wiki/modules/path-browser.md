@@ -44,7 +44,7 @@ command id never changed).
   `PathBrowserTransition` (`FilterOnly` / `Relist { target }`),
   `PathBrowserActivation` (`Descend` / `OpenFile` / `OpenWorkspace`),
   `PathBrowserEntry`.
-- `src/server/workspace.rs` — the built-in user-browse listing primitive:
+- `src/server/workspace/mod.rs` — the built-in user-browse listing primitive:
   `UserBrowseListingPlan`, `UserBrowsePage`/`UserBrowseEntry`/
   `UserBrowseEntryKind`, `UserBrowseError`, `traverse_user_browse_directory`
   (sync, bounded), `execute_user_browse_listing` (`spawn_blocking` wrapper),
@@ -131,7 +131,7 @@ installed entries, a persisted `selected_index`, and a sticky
 
 ## Built-in user-browse listing primitive
 
-`traverse_user_browse_directory` (in `src/server/workspace.rs`, `pub(crate)`,
+`traverse_user_browse_directory` (in `src/server/workspace/mod.rs`, `pub(crate)`,
 reachable only from the built-in session):
 
 - Canonicalizes the requested directory, verifies it is a directory, and
@@ -266,7 +266,7 @@ reachable only from the built-in session):
   canonicalization, directory-first order, fuzzy ranking, selection clamp/
   wrap, oversize clamps, sticky error suppression, activation resolution,
   descend target, no-Symlink conversion, projection).
-- `src/server/workspace.rs` — 8 `user_browse` tests (bounded windows,
+- `src/server/workspace/mod.rs` — 8 `user_browse` tests (bounded windows,
   deterministic order, non-directory/error paths, seed resolution).
 - `src/server/menu_sessions.rs` — 11 tests (navigate relists, activation
   dispatch incl. `OpenFile`/`OpenWorkspace` outcomes, no-op helpers on

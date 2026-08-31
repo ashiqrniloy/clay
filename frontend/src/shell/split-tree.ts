@@ -1,4 +1,4 @@
-// Client-local pane split tree. Mirrors `src/shell/layout.rs` semantics:
+// Client-local pane split tree. Mirrors `src/shell/layout/mod.rs` semantics:
 // 4-pane cap, ratio clamp 0.05–0.95, equal-area comb, close-merges-sibling,
 // reading-order move. Content type is not stored here.
 

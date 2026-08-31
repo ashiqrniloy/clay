@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientClosePane
 js_facade: runtime/js/shell.js::clientClosePane
-backing_rust: src/client_commands.rs::EditorClientCommand; src/shell/layout.rs::PaneSplitTree
+backing_rust: src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientClosePane
@@ -109,7 +109,7 @@ Use `shell.clientClosePane` only as a documented command ID for `bindKey` to rem
 
 - JS facade: `runtime/js/shell.js::clientClosePane`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/client_commands.rs::ShellClientCommand` (dirty guard, document release, conflict-menu sync); `src/client_commands.rs::ShellClientCommand (client-local; React PaneTree and workspace controller)`; `src/shell/layout.rs::PaneSplitTree`; `src/client_commands.rs::EditorClientCommand (client-local close guard; React workspace controller)` / `close_pane`
+- Backing Rust/current owner: `src/client_commands.rs::ShellClientCommand` (dirty guard, document release, conflict-menu sync); `src/client_commands.rs::ShellClientCommand (client-local; React PaneTree and workspace controller)`; `src/shell/layout/mod.rs::PaneSplitTree`; `src/client_commands.rs::EditorClientCommand (client-local close guard; React workspace controller)` / `close_pane`
 
 ## Lookup metadata
 

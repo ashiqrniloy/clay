@@ -7,7 +7,7 @@
 - Decision: `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md` (first-party package expansion component) and `decision-logs/2026-07-11-1418-semantic-font-roles-and-user-owned-typography.md`.
 - Patterns: `.agents/skills/project-patterns/references/language-capability-sequencing.md`, `mode-primitive-first.md`, `protocol-and-performance.md`, and `authority-boundaries.md`.
 - Predecessor reviews: `docs/wiki/modules/phase18.14-language-package-expansion-primitive-review.md`, `docs/wiki/modules/phase18.16-tiered-tree-sitter-engine-primitive-review.md`, `docs/wiki/modules/phase18.16.5-typography-primitive-review.md`, `docs/wiki/modules/phase18.17-range-diagnostics-primitive-review.md`.
-- `src/server/syntax.rs` (`FIRST_PARTY_NATIVE_GRAMMARS`, `NativeGrammarDescriptor`, `DEFAULT_NATIVE_STYLE_MAP`, `MARKDOWN_NATIVE_STYLE_MAP`, `SyntaxEngineTier`, `TreeSitterSyntaxHandler`, `SyntaxGrammarRegistry`).
+- `src/server/syntax/mod.rs` (`FIRST_PARTY_NATIVE_GRAMMARS`, `NativeGrammarDescriptor`, `DEFAULT_NATIVE_STYLE_MAP`, `MARKDOWN_NATIVE_STYLE_MAP`, `SyntaxEngineTier`, `TreeSitterSyntaxHandler`, `SyntaxGrammarRegistry`).
 - `src/packages/record/mod.rs` (`SyntaxStyleMapEntry`, `SyntaxGrammarContributionDescriptor`, `is_known_syntax_style_token`).
 - `src/protocol/decorations.rs` (`TokenType`, `Modifiers`, `DecorationSpan`, `classify_style_token`, `from_style_token`).
 - `src/editor/theme.rs` (`StyleRegistry`).
@@ -26,7 +26,7 @@ The target outcome is four first-party language packages whose grammar captures 
 
 ### Tiered syntax engine and first-party native grammars
 
-`src/server/syntax.rs::SyntaxGrammarRegistry::with_first_party_native()` already registers `src/server/syntax.rs::FIRST_PARTY_NATIVE_GRAMMARS` at server startup: `tree-sitter-rust` (rust, `.rs`), `tree-sitter-typescript` (typescript `.ts` + tsx `.tsx`), `tree-sitter-javascript` (javascript `.js`/`.jsx`/`.mjs`/`.cjs`), and `tree-sitter-md-025` (markdown `.md`/`.markdown`/`.mdown`). Each `NativeGrammarDescriptor` carries `grammar_source`, a `highlights_query_path` pointing at the package `queries/highlights.scm`, a static `style_map`, and a `language: fn() -> Language` constructor. The host knows no language names beyond this data table; dispatch is by grammar/extension lookup, never `match language_id`.
+`src/server/syntax/mod.rs::SyntaxGrammarRegistry::with_first_party_native()` already registers `src/server/syntax/mod.rs::FIRST_PARTY_NATIVE_GRAMMARS` at server startup: `tree-sitter-rust` (rust, `.rs`), `tree-sitter-typescript` (typescript `.ts` + tsx `.tsx`), `tree-sitter-javascript` (javascript `.js`/`.jsx`/`.mjs`/`.cjs`), and `tree-sitter-md-025` (markdown `.md`/`.markdown`/`.mdown`). Each `NativeGrammarDescriptor` carries `grammar_source`, a `highlights_query_path` pointing at the package `queries/highlights.scm`, a static `style_map`, and a `language: fn() -> Language` constructor. The host knows no language names beyond this data table; dispatch is by grammar/extension lookup, never `match language_id`.
 
 `SyntaxEngineTier::{Native, Wasm, JavaScriptFallback}` selects the engine. First-party languages default to Tier 1 `Native`; a package may declare a higher-priority Tier 2 wasm grammar to override it only through documented, user/package-initiated engine selection recorded in provenance. `is_shadowed_by_native_first_party` means the Phase 18.14 package `tree-sitter-wasm` contributions no longer drive first-party highlighting — the native registration owns the actual parse.
 
@@ -82,7 +82,7 @@ Phase 18.18 moves the Markdown decoration styleMap onto the vocabulary contract 
 
 ### Promote first-party grammar styleMaps to vocabulary `TokenType` + `Modifiers`
 
-This is the central generic gap. `SyntaxStyleMapEntry` (`src/packages/record/mod.rs`) and the native `NativeGrammarDescriptor::style_map` (`src/server/syntax.rs`) must gain the ability to express Phase 18.15 `TokenType` + `Modifiers` directly, so first-party grammar captures emit true vocabulary tokens instead of the lossy `style_token` compatibility fallback.
+This is the central generic gap. `SyntaxStyleMapEntry` (`src/packages/record/mod.rs`) and the native `NativeGrammarDescriptor::style_map` (`src/server/syntax/mod.rs`) must gain the ability to express Phase 18.15 `TokenType` + `Modifiers` directly, so first-party grammar captures emit true vocabulary tokens instead of the lossy `style_token` compatibility fallback.
 
 Acceptable implementation: extend the style-map primitive generically — a style-map entry may carry either the legacy `style_token` string (kept for third-party/back-compat) or a `{ tokenType, modifiers }` vocabulary mapping (plus the existing optional `fontRole`). Update `DEFAULT_NATIVE_STYLE_MAP` and `MARKDOWN_NATIVE_STYLE_MAP` (and the four package `styleMap` contributions) to the vocabulary form: `keyword → Keyword`, `string → String`, `comment → Comment`, `function.declaration → Function + Declaration`, `type → Type`/`Interface`/`Struct`, Markdown `**x** → Paragraph + Bold`, `_x_ → Paragraph + Italic`, `# h1 → Heading1`, code spans/blocks → `CodeSpan`/`CodeBlock` (+ `Monospace` font role). The capture name in `queries/highlights.scm` is the join key; the styleMap maps capture → vocabulary, never capture → color. Unmatched captures stay unstyled (no crash, no default color leak).
 

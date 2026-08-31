@@ -22,7 +22,7 @@
 - `src/server/parse_coordinator.rs`
 - `src/server/decorations.rs`
 - `src/server/ui.rs`
-- `src/shell/layout.rs`
+- `src/shell/layout/mod.rs`
 
 ## Scope
 
@@ -56,7 +56,7 @@ install != enable != load != runtime execution != package-manager execution != c
 | Mode activation | `DocumentClassification`, `MajorModeActivation`, `serverRegisterModePattern`, `serverActivateMajorMode` | Server owns classification and activation; client receives installed behavior manifests and mode state. | Needs package graph ordering so extended/replaced modes compose or disable deterministically. |
 | Commands/key routing/text transforms | command registry, keybinding APIs, behavior manifests | Commands and key routes are registered as inert metadata; client-first text transforms remain Rust-known manifest data. | Needs conflict resolution and package-control/import-aware precedence without package-specific client branches. |
 | Parse/decorations/folding/completion | `ParseCoordinator`, `IncrementalParseUpdate`, `DecorationSet`, `DecorationSpan`, folding/completion registry rows | Background server-side work is cancellable, versioned, bounded, publication-validated before client delivery, and package-scoped cancellation via `ParseCoordinator::cancel_package` withdraws handlers and aborts in-flight tasks on revocation. | Needs authorization checks for requested package capability at registration/request/publication boundaries beyond current enable-time grants. |
-| SDUI/package UI/layout/input/state/configuration | `src/server/ui.rs`, `src/shell/layout.rs`, `clay:ui`, `clay:configuration`, package UI validators | Packages declare inert UI/component/layout/input/state/configuration contributions; Clay owns Masonry/native layout and validates payloads. | Needs package graph precedence and package-scoped withdrawal for all contribution indexes. |
+| SDUI/package UI/layout/input/state/configuration | `src/server/ui.rs`, `src/shell/layout/mod.rs`, `clay:ui`, `clay:configuration`, package UI validators | Packages declare inert UI/component/layout/input/state/configuration contributions; Clay owns Masonry/native layout and validates payloads. | Needs package graph precedence and package-scoped withdrawal for all contribution indexes. |
 | Client delivery | protocol messages, behavior manifests, SDUI, decorations, diagnostics | Client receives validated inert data and server-routed intents; no package JavaScript runs in Masonry paint/layout/input/text handlers. | Future `client-runtime`/`native-ui` capability must be a separately documented API; Plan 035 should not smuggle it through package loading. |
 | Sandbox/profile | persistent runtime sandbox design and hardening docs | Separate-process sandbox harness and runtime profile design exist as hardening primitives. | Needs `native-trust | sandboxed | restricted` profile selection tied to package authorization and production routing. |
 

@@ -38,7 +38,7 @@ Clay registers two always-on built-in Clay-owned fallback modes at server startu
 
 ## Active syntax grammar is separate from active major mode (Phase 18.10)
 
-Phase 18.10 adds syntax grammar selection in `src/server/syntax.rs` without changing the major-mode registry contract. `ModeRegistry` still owns exactly one active major mode per document and still owns behavior-version changes. `SyntaxGrammarRegistry::select_for_document` receives the already-selected `MajorModeActivation` plus the same open-document classification metadata, records an optional `active_syntax_grammar`, and copies the active mode/behavior version only for diagnostics.
+Phase 18.10 adds syntax grammar selection in `src/server/syntax/mod.rs` without changing the major-mode registry contract. `ModeRegistry` still owns exactly one active major mode per document and still owns behavior-version changes. `SyntaxGrammarRegistry::select_for_document` receives the already-selected `MajorModeActivation` plus the same open-document classification metadata, records an optional `active_syntax_grammar`, and copies the active mode/behavior version only for diagnostics.
 
 This lets fallback documents stay editable through `core.code` or `core.text` while a grammar-only package supplies highlighting:
 

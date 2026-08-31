@@ -18,7 +18,7 @@
 - `src/masonry_editor.rs` (`EditorClientCommand`, default key bindings, selection-query enqueue/apply, anim-frame blink loop)
 - `src/server/ops/editor.rs` (trusted editor validation ops)
 - `src/server/ops/modes.rs` (`parse_movement_rules`, `parse_caret_style`)
-- `src/server/syntax.rs` (`TreeSitterSyntaxHandler::selection_query_ranges`, textobject/smart-select query runners)
+- `src/server/syntax/mod.rs` (`TreeSitterSyntaxHandler::selection_query_ranges`, textobject/smart-select query runners)
 - `src/server/connection/mod.rs` (`SelectionQueryRequest` dispatch)
 - `packages/{rust,typescript,javascript}/queries/textobjects.scm`
 - `runtime/js/editor.js`, `runtime/js/behavior.js`
@@ -99,7 +99,7 @@ First- and third-party packages may access the editor ops and trigger execution 
 
 - `src/editor/surface/mod.rs`: movement classifier/motion tests, `effective_caret_style_resolves_override_manifest_theme`, multi-cursor edit/undo (`add_cursor_refuses_to_stack_on_same_line_or_past_edges`, `cursor_undo_restores_previous_selection_set`), selection-query request/apply round-trip.
 - `src/masonry_editor.rs`: `editor_client_command_maps_ids_and_moves_caret`, `editor_client_command_dispatches_multi_cursor_commands`, `selection_query_result_applies_ranges_keeps_unmatched_and_drops_stale`.
-- `src/server/syntax.rs`: textobject query compile + function/comment direction tests, smart-select expand/shrink monotonicity, markdown degrade-to-none.
+- `src/server/syntax/mod.rs`: textobject query compile + function/comment direction tests, smart-select expand/shrink monotonicity, markdown degrade-to-none.
 - `src/server/ops/editor.rs`: deny-by-default validation tests for every editor op.
 - `src/protocol/textobjects.rs`: command-ID round trips, unknown-ID rejection, cursor-bound validation.
 - `src/server/js_runtime/mod.rs`: `third_party_runtime_cannot_see_trusted_ops_or_admin_modules` (editor ops visible but gated third-party), `editor_control_gate_enforces_permission_and_declared_mode`, `third_party_editor_control_gate_requires_declared_mode`, `editor_control_execute_publishes_gated_known_commands_only`.

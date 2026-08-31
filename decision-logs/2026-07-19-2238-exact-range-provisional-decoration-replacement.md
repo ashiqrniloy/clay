@@ -51,7 +51,7 @@ Regression coverage must compose real grammar output, repeated local comment edi
 
 - `src/editor/surface.rs::{EditorDecorationState::apply_set,EditorDecorationState::apply_edit,interpolate_range}`
 - `src/protocol/decorations.rs::{DecorationSet,DecorationChunkKey}`
-- `src/server/syntax.rs::{replacement_ranges,decoration_sets_for_ranges}`
+- `src/server/syntax/mod.rs::{replacement_ranges,decoration_sets_for_ranges}`
 - `tests/syntax_grammar.rs`
 - `tests/decoration_transport.rs`
 - `decision-logs/2026-07-19-1912-syntax-decoration-continuity-and-complete-authoritative-replacement.md`

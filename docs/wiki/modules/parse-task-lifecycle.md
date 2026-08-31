@@ -4,7 +4,7 @@
 
 - `src/server/parse_coordinator.rs` — scheduling, validation, stale-result handling, and output routing.
 - `src/server/syntax_session.rs` — latest-wins mailbox and bounded native executor.
-- `src/server/syntax.rs` — parser/tree state and bounded windows.
+- `src/server/syntax/mod.rs` — parser/tree state and bounded windows.
 - `src/server/connection/{documents,mod}.rs` — open/edit/viewport scheduling and patch aggregation.
 - `src/server/document.rs` — canonical rope snapshot boundary.
 - `src/protocol/parse.rs` — notification/update metadata.
@@ -87,7 +87,7 @@ handler text, paths, query text, or parser internals.
 - `src/server/parse_coordinator.rs` — permission, cancellation, stale-result,
   budget, runtime-diagnostic, session, and non-blocking acknowledgement tests.
 - `src/server/syntax_session.rs` — mailbox and executor unit tests.
-- `src/server/syntax.rs` — bounded window and per-document cache tests.
+- `src/server/syntax/mod.rs` — bounded window and per-document cache tests.
 - `src/server/connection/mod.rs` — open-before-parse and one-patch-per-request
   integration tests.
 - `tests/editor_performance.rs` — 30-cell mode/edit/version/patch matrix.

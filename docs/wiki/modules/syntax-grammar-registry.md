@@ -3,7 +3,7 @@
 ## Source
 
 - `src/packages/record/mod.rs`
-- `src/server/syntax.rs`
+- `src/server/syntax/mod.rs`
 - `runtime/js/syntax.js`
 - `runtime/js/web-tree-sitter-host.ts`
 - `src/server/ops/syntax.rs`
@@ -25,7 +25,7 @@ Phase 18.16 turns `SyntaxGrammarContribution` metadata into a tiered syntax engi
 
 ## Primitive Coverage
 
-- **`SyntaxGrammarContribution` / `SyntaxGrammarRegistry`** — owned by `src/server/syntax.rs`; package metadata and registry state carry provenance, `SyntaxEngineTier`, native source or WASM/query paths, vocabulary style maps, and bounded parse budgets.
+- **`SyntaxGrammarContribution` / `SyntaxGrammarRegistry`** — owned by `src/server/syntax/mod.rs`; package metadata and registry state carry provenance, `SyntaxEngineTier`, native source or WASM/query paths, vocabulary style maps, and bounded parse budgets.
 - **Clay JS boundary** — `clay:syntax.serverRegisterSyntaxGrammar` registers inert grammar metadata; `clay:syntax.setSyntaxEnginePreference` records an explicit user tier preference. Public usage is documented in [`server-register-syntax-grammar`](../../reference/clay-js-api/syntax/server-register-syntax-grammar.md) and [`set-syntax-engine-preference`](../../reference/clay-js-api/syntax/set-syntax-engine-preference.md).
 - **Parse/decorations primitives** — `ParseCoordinator` owns background scheduling, cancellation, stale-result rejection, and sanitized diagnostics; `DecorationSet`/`DecorationSpan` owns bounded inert output and `StyleRegistry` resolves colors during native paint. Syntax packages require `parse-document` and `render-decorations`.
 - **Reuse rule** — future language packages add descriptor/package data and queries; they reuse the registry, host adapter, mapper, coordinator, and decoration transport rather than adding language-specific Rust/client branches.
@@ -48,7 +48,7 @@ The validator rejects non-`@clay/*` syntax grammar packages in Phase 18.10, exte
 
 ## Registry State
 
-`SyntaxGrammarRegistry` in `src/server/syntax.rs` is server-owned registry state for already validated descriptors. Phase 18.16 adds Tier 1 native first-party registration: `SyntaxGrammarRegistry::with_first_party_native()` seeds compiled-in descriptors at server runtime startup for Rust, TypeScript, TSX, JavaScript/JSX/MJS/CJS, and Markdown before package load entries run. First-party `@clay/{rust,typescript,javascript,markdown}` packages omit `syntaxGrammars`; query files stay `include_str!`-sourced from the package tree. `register_package` stages package grammar contributions from a `PackageRecord` and fails with `OwnedByNativeDescriptor` when a contribution is fully shadowed by the matching native descriptor — not a silent skip. `serverRegisterSyntaxGrammar` on a native-owned package prefix returns `syntax.owned_by_native_descriptor`. `clay package inspect` / `PackageInspection.native_syntax_languages` surfaces that ownership. Inverting style maps from trusted package records is a future decision. Explicit Tier 2 selection uses `register_package_with_explicit_tier2_override`, which removes only the matching first-party native descriptor before inserting the WASM contribution.
+`SyntaxGrammarRegistry` in `src/server/syntax/mod.rs` is server-owned registry state for already validated descriptors. Phase 18.16 adds Tier 1 native first-party registration: `SyntaxGrammarRegistry::with_first_party_native()` seeds compiled-in descriptors at server runtime startup for Rust, TypeScript, TSX, JavaScript/JSX/MJS/CJS, and Markdown before package load entries run. First-party `@clay/{rust,typescript,javascript,markdown}` packages omit `syntaxGrammars`; query files stay `include_str!`-sourced from the package tree. `register_package` stages package grammar contributions from a `PackageRecord` and fails with `OwnedByNativeDescriptor` when a contribution is fully shadowed by the matching native descriptor — not a silent skip. `serverRegisterSyntaxGrammar` on a native-owned package prefix returns `syntax.owned_by_native_descriptor`. `clay package inspect` / `PackageInspection.native_syntax_languages` surfaces that ownership. Inverting style maps from trusted package records is a future decision. Explicit Tier 2 selection uses `register_package_with_explicit_tier2_override`, which removes only the matching first-party native descriptor before inserting the WASM contribution.
 
 The registry indexes by:
 
@@ -137,7 +137,7 @@ Plan 071 (task 10) adds first-party **text-object queries** alongside highlights
 
 ## Tree-sitter Parse/Highlight Handler
 
-`TreeSitterSyntaxHandler` in `src/server/syntax.rs` is the server-side parse handler for validated grammar contributions. It is generic: callers provide the validated `SyntaxGrammarContribution`, a resolved `tree_sitter::Language`, and the package highlight query text. The handler:
+`TreeSitterSyntaxHandler` in `src/server/syntax/mod.rs` is the server-side parse handler for validated grammar contributions. It is generic: callers provide the validated `SyntaxGrammarContribution`, a resolved `tree_sitter::Language`, and the package highlight query text. The handler:
 
 1. compiles the highlight `Query` once at handler construction
 2. creates and configures one `tree_sitter::Parser` per handler, reused across all parses for that grammar instead of recreating it per document open (avoids repeated wasm language instantiation in debug builds)

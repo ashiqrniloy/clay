@@ -9,7 +9,7 @@
 - `docs/wiki/modules/server-ipc-skeleton.md`
 - `docs/wiki/modules/first-party-language-packages.md`
 - `docs/wiki/modules/masonry-editor.md`
-- `src/server/workspace.rs`
+- `src/server/workspace/mod.rs`
 - `src/shell/file_browser.rs`
 - `src/server/command_execution.rs`
 - `src/server/connection/mod.rs`

@@ -47,7 +47,7 @@ This review completes the primitive-first gate before implementation. It invento
 
 ### Shell, slot, and transient overlay primitives
 
-- `src/shell/layout.rs` implements internal `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` state. The `bottom` slot already exists as a Clay-owned attachment point.
+- `src/shell/layout/mod.rs` implements internal `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` state. The `bottom` slot already exists as a Clay-owned attachment point.
 - `src/masonry_shell/mod.rs` owns the native shell root and places the editor child from installed layout state. Masonry layout reads validated state only; it must not parse packages, run JavaScript, wait on IPC, or mutate package UI state during layout.
 - `src/shell/package_ui.rs::PackageUiRuntimeState` stores fixed panels and transient overlays. Accepted overlays render separately from fixed slots and do not consume `PaneSlotLayout` geometry.
 - `src/masonry_sdui.rs::SduiNativeState` paints package fixed panels and transient overlays from inert runtime state and can structurally observe panels/overlays without document text, widget handles, raw action authority, raw CSS, or executable code.

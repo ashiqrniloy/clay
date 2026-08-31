@@ -141,7 +141,7 @@ Semantic role declaration grants no filesystem, network, shell, package-manager,
 Primary source paths:
 
 - Protocol and validation: `src/protocol/mod.rs`, `src/protocol/decorations.rs`, `src/packages/record/mod.rs`, `src/server/ui.rs`
-- Mode/range parsing: `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/ops/decorations.rs`, `src/server/syntax.rs`
+- Mode/range parsing: `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/ops/decorations.rs`, `src/server/syntax/mod.rs`
 - Client resolution/layout: `src/editor/typography.rs`, `src/editor/layout.rs`, `src/editor/surface/mod.rs`
 - Native UI/components: `src/shell/package_ui.rs`, `src/shell/theme.rs`; rendered by the React theme adapter (`frontend/src/theme`)
 

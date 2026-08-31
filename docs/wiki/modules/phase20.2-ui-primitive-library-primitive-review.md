@@ -4,7 +4,7 @@
 
 - `src/shell/theme.rs`
 - `src/shell/components.rs`
-- `src/shell/layout.rs`
+- `src/shell/layout/mod.rs`
 - `src/shell/package_ui.rs`
 - `src/shell/transient_menu.rs`
 - `src/editor/theme.rs`
@@ -46,7 +46,7 @@ Phase 20.2 adds a small `pub(crate)` paint-primitive module (`src/shell/primitiv
 | `TypographyRegistry` | `src/editor/typography.rs`; validates/resolves three profiles once, appends generic fallbacks, installs only newer revisions, and serves cached Parley stacks/sizes and shared geometry. | Reuse for text-bearing primitives (badge, `kbd` hint). Primitives read `UiTextVariant` metrics from `TypographyRegistry`. |
 | `UiTextVariant` | `src/editor/typography.rs`; seven semantic variants (`Display`, `Title`, `Section`, `Body`, `Status`, `Detail`, `Caption`) resolve from a selected semantic `FontRole`. | Reuse for badge/`kbd` text. Primitives select `Body`, `Detail`, or `Caption` variants. |
 | `ComponentKind` / style variables | `src/shell/components.rs`; 11 implemented kinds (`editorView`, `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, `statusItem`), four reserved kinds (`table`, `dropdown`, `collapse`, `modal`), token-typed style variables, closed enum variants, semantic `fontRole`, and raw-style rejection. | Reuse unchanged. No new component kind in Phase 20.2. Primitives are `pub(crate)` paint helpers, not package-facing components. |
-| `PaneSlotLayout` / `FixedSlotState` | `src/shell/layout.rs`; mandatory `main`, optional fixed `left`/`right`/`top`/`bottom` slots, finite ordered bounds, clamping, visibility/collapse, and deterministic geometry. | Reuse for panel chrome geometry. Primitives paint chrome around slot rectangles; they do not mutate slot state. |
+| `PaneSlotLayout` / `FixedSlotState` | `src/shell/layout/mod.rs`; mandatory `main`, optional fixed `left`/`right`/`top`/`bottom` slots, finite ordered bounds, clamping, visibility/collapse, and deterministic geometry. | Reuse for panel chrome geometry. Primitives paint chrome around slot rectangles; they do not mutate slot state. |
 | `PackageUiRuntimeState` | `src/shell/package_ui.rs`; accepted fixed panels and transient overlays composed into shell-owned slot geometry. | Reuse for package panel/overlay chrome. Primitives paint chrome around `FixedPackagePanel` and `TransientPackageOverlay` rectangles. |
 | `TransientMenuSession` | `src/shell/transient_menu.rs`; bounded prompt/query/item list, selection index, status text, focus policy, accessibility labels, and inert activation actions. | Reuse for transient menu chrome. Primitives paint bottom-pane prompt chrome, completion pop-up chrome around `TransientMenuSession` rectangles. |
 | Structural observations | `WorkingAreaLayoutObservation`, package panel/overlay observations, `SduiObservableSnapshot`, and `SduiStatusObservation`. | Reuse for geometry, accessibility, compatibility, and update-count assertions; do not expose raw theme maps or native handles. |
@@ -172,7 +172,7 @@ Phase 20.2 must not implement those deferred primitives/components, restyle ever
 ## Tests
 
 - `tests/primitives_docs.rs::phase20_2_ui_primitive_library_primitive_review_is_linked_and_complete`: locks inventory, reuse, generic gaps, additive compatibility, hot-path/security boundaries, and phase ownership.
-- Existing `src/shell/theme.rs`, `src/shell/components.rs`, `src/editor/typography.rs`, `src/shell/layout.rs`, `src/shell/package_ui.rs`, `src/masonry_sdui.rs`, theme-package, typography-protocol, payload-budget, accessibility, and editor source-guard tests provide the executable baseline.
+- Existing `src/shell/theme.rs`, `src/shell/components.rs`, `src/editor/typography.rs`, `src/shell/layout/mod.rs`, `src/shell/package_ui.rs`, `src/masonry_sdui.rs`, theme-package, typography-protocol, payload-budget, accessibility, and editor source-guard tests provide the executable baseline.
 - Phase 20.2 adds:
   - Unit/structural tests: each primitive consumes tokens (no raw values) and renders all applicable `InteractionState`s; primitives panic-free on zero-size rects; `InteractionState::Disabled` applies `opacity.disabled`.
   - Token-guard test: new tokens (if any) are additive with same-typed fallback and within domain bounds; no existing token renamed/repurposed.

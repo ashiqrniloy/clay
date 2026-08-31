@@ -8,7 +8,7 @@
 - Decision: `decision-logs/2026-07-09-0352-tiered-tree-sitter-themable-syntax-vocabulary-theme-registry-and-opt-in-lsp.md`.
 - Patterns: `.agents/skills/project-patterns/references/language-capability-sequencing.md`, `mode-primitive-first.md`, `protocol-and-performance.md`, and `authority-boundaries.md`.
 - `src/protocol/mod.rs`, `src/protocol/decorations.rs`, `src/protocol/parse.rs`.
-- `src/server/decorations.rs`, `src/server/parse_coordinator.rs`, `src/server/syntax.rs`, `src/server/ops/decorations.rs`.
+- `src/server/decorations.rs`, `src/server/parse_coordinator.rs`, `src/server/syntax/mod.rs`, `src/server/ops/decorations.rs`.
 - `runtime/js/decorations.js`, `src/client/mod.rs`, `src/masonry_editor.rs`.
 - `src/editor/theme.rs`, `src/editor/surface/mod.rs`, `src/editor/layout.rs`.
 - `tests/primitives_docs.rs`, `tests/parse_coordinator.rs`, `tests/decoration_transport.rs`, `tests/syntax_grammar.rs`, `tests/editor_performance_invariants.rs`.
@@ -49,7 +49,7 @@ The scheduler is reused unchanged. Coordinator validation matches diagnostic doc
 
 ### Tiered syntax engine and Tree-sitter error nodes
 
-`src/server/syntax.rs::TreeSitterSyntaxHandler` already receives bounded parse windows, reuses cached parsers/trees, and maps generic captures through one language-neutral path. Tree-sitter v0.25.10 exposes `Node::{has_error,is_error,is_missing,byte_range,walk}`; `(ERROR)` and `(MISSING)` query patterns provide the equivalent capture model.
+`src/server/syntax/mod.rs::TreeSitterSyntaxHandler` already receives bounded parse windows, reuses cached parsers/trees, and maps generic captures through one language-neutral path. Tree-sitter v0.25.10 exposes `Node::{has_error,is_error,is_missing,byte_range,walk}`; `(ERROR)` and `(MISSING)` query patterns provide the equivalent capture model.
 
 Generic extraction can short-circuit on `root.has_error()`, walk only the bounded parsed tree, and translate local node bytes through the parse window. No Rust, TypeScript, TypeScript/TSX, JavaScript, or Markdown branch is needed. Tier 2 and Tier 3 adapters should emit the same inert engine-neutral diagnostic capture shape when operational.
 

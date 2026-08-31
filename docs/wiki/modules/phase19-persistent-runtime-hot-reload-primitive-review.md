@@ -6,7 +6,7 @@
 - `src/server/mod.rs`
 - `src/server/connection/mod.rs`
 - `src/server/parse_coordinator.rs`
-- `src/server/workspace.rs`
+- `src/server/workspace/mod.rs`
 - `runtime/js/packages.js`
 - `runtime/js/modes.js`
 - `runtime/js/parse.js`

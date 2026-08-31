@@ -14,7 +14,7 @@
 - `src/editor/surface/mod.rs` — `normalize_visible_text_style_runs`, `set_typography`, `document_font_role`, `layout_style_revision`.
 - `src/masonry_sdui.rs` — `SduiNativeState.typography`, `text_metrics`/`component_metrics`, accessibility bounds.
 - `src/shell/package_ui.rs`, `src/server/ui.rs`, `src/packages/record/mod.rs` — component `style.fontRole` validation.
-- `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/syntax.rs` — mode `defaultFontRole` and style-map roles.
+- `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/syntax/mod.rs` — mode `defaultFontRole` and style-map roles.
 - Tests: `tests/typography_protocol.rs`, `tests/editor_performance_invariants.rs`, `tests/decoration_transport.rs`, `tests/markdown_mode.rs`, `tests/primitives_docs.rs`, `tests/package_loading_docs.rs`, `tests/manual_smoke_docs.rs`.
 - Authoritative public API: [`theme.setTypography`](../../reference/clay-js-api/theme/set-typography.md).
 - Authoritative package/mode contract: [Semantic Typography Roles](../../reference/primitives/typography.md).
@@ -155,7 +155,7 @@ for run in style_runs {
 
 ## Primitive Coverage
 
-- `SemanticTypographyRole` — field-level extension of existing mode/decoration/syntax/UI primitives, not a new package setter or permission. Owning modules: `src/protocol/mod.rs`, `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/ops/decorations.rs`, `src/server/syntax.rs`, `src/server/ui.rs`, `src/packages/record/mod.rs`.
+- `SemanticTypographyRole` — field-level extension of existing mode/decoration/syntax/UI primitives, not a new package setter or permission. Owning modules: `src/protocol/mod.rs`, `src/packages/modes.rs`, `src/server/ops/modes.rs`, `src/server/ops/decorations.rs`, `src/server/syntax/mod.rs`, `src/server/ui.rs`, `src/packages/record/mod.rs`.
 - JS facade/op: `theme.setTypography` (`runtime/js/theme.js`) → `op_clay_theme_set_typography` (`src/server/ops/typography.rs`). No separate package typography op exists; the only public surface is the user-facing setter documented in [`set-typography.md`](../../reference/clay-js-api/theme/set-typography.md).
 - Validation/budgets: `MAX_FONT_FAMILIES_PER_PROFILE=8`, `MAX_FONT_FAMILY_BYTES=128`, `MIN_FONT_SIZE=6.0`, `MAX_FONT_SIZE=96.0`, `HIERARCHY_SCALE_MAX=4.0`, `TYPOGRAPHY_PAYLOAD_BUDGET_BYTES=1024`; `FontProfile::validate()` requires a non-empty stack, a trailing generic fallback, finite bounded size, and no control characters; `ActiveTypography::validate()` validates all three profiles and the complete hierarchy atomically.
 - Hot-path policy: configuration/protocol/normalization run outside paint/input/layout; native hot paths read cached `TypographyRegistry`/profile/style/layout state only — no package JavaScript, IPC, filesystem/network access, font download, or server-side installed-font discovery. `typography_updates_do_not_enter_editor_hot_paths` guards this.

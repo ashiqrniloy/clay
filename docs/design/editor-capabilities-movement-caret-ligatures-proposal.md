@@ -734,7 +734,7 @@ Each phase is independently shippable and follows Clay's Linux-blocking gates
 - New `ClientUiCommand` IDs `editor.clientSelectTextobject`
   (`{ object, around: bool, direction: next | prev | current }`) and
   `editor.clientSmartSelect` (`{ action: expand | shrink }`) that query the
-  document's syntax tree (reusing `src/server/syntax.rs` `tree_sitter` engine +
+  document's syntax tree (reusing `src/server/syntax/mod.rs` `tree_sitter` engine +
   `QueryCursor`) for the range(s) around the primary caret and apply them as
   selection(s). Multi-cursor-aware: `clientSelectTextobject` can grow the
   selection set across all carets.

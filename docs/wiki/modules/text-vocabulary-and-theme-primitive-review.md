@@ -39,7 +39,7 @@ Phase 18.15 replaces the free-form `style_token: String` on `DecorationSpan` wit
 
 ### Decoration production (server side)
 
-The tree-sitter/native handler `decorations_for_window` in `src/server/syntax.rs` emits `DecorationSpan` entries with `style_token` strings (e.g. `keyword.control`) clamped to the viewport and capped at `MAX_SYNTAX_HIGHLIGHT_SPANS`. `schedule_open_parse` drives parse/decoration through `ParseCoordinator`; `open_document_followup_messages` in `src/server/connection/mod.rs` ships the resulting `DecorationSet` to the client. Source: `src/server/syntax.rs`, `src/server/parse_coordinator.rs`, `src/server/connection/mod.rs`.
+The tree-sitter/native handler `decorations_for_window` in `src/server/syntax/mod.rs` emits `DecorationSpan` entries with `style_token` strings (e.g. `keyword.control`) clamped to the viewport and capped at `MAX_SYNTAX_HIGHLIGHT_SPANS`. `schedule_open_parse` drives parse/decoration through `ParseCoordinator`; `open_document_followup_messages` in `src/server/connection/mod.rs` ships the resulting `DecorationSet` to the client. Source: `src/server/syntax/mod.rs`, `src/server/parse_coordinator.rs`, `src/server/connection/mod.rs`.
 
 ## Generic Phase 18.15 Primitive Gaps
 

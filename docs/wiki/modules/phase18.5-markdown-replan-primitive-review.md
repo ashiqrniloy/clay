@@ -30,7 +30,7 @@
 - `docs/wiki/modules/markdown-mode-activation.md`
 - `docs/wiki/modules/first-party-markdown-package.md`
 - `docs/wiki/modules/configuration-runtime.md`
-- `src/shell/layout.rs`
+- `src/shell/layout/mod.rs`
 - `src/shell/package_ui.rs`
 - `src/shell/components.rs`
 - `src/shell/theme.rs`
@@ -83,7 +83,7 @@ The review rejects Markdown-specific Rust editor/parser/render/shell branches. M
 
 | Primitive | Current source paths | What Markdown can use it for now | Runtime classification | Security and validation boundary |
 | --- | --- | --- | --- | --- |
-| `WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout` | `src/shell/layout.rs`, `src/masonry_shell/mod.rs` | Main editor already lives in the mandatory `main` slot; optional fixed `left`/`right`/`top`/`bottom` slots exist for an optional preview. | Startup/update work for layout state; Masonry layout/paint reads installed state only. | Shell safety preserves at least one pane and one `main` slot, rejects invalid ratios/sizes/stale updates, and keeps native widget IDs, direct Masonry mutation, raw CSS, raw ops, and client JS internal/non-authoritative. |
+| `WorkingAreaLayout`, `PaneSplitTree`, `PaneSlotLayout` | `src/shell/layout/mod.rs`, `src/masonry_shell/mod.rs` | Main editor already lives in the mandatory `main` slot; optional fixed `left`/`right`/`top`/`bottom` slots exist for an optional preview. | Startup/update work for layout state; Masonry layout/paint reads installed state only. | Shell safety preserves at least one pane and one `main` slot, rejects invalid ratios/sizes/stale updates, and keeps native widget IDs, direct Masonry mutation, raw CSS, raw ops, and client JS internal/non-authoritative. |
 | `PanelContribution` (`serverRegisterPanelContribution`) | `runtime/js/ui.js`, `src/server/ops/ui.rs`, `src/server/ui.rs`, `src/shell/package_ui.rs` | Optional Markdown preview/status panel as a package-prefixed `PanelContribution` targeting the `right` slot with `defaultVisibility: "hidden"`. | Package load/config/update work for registration; paint/layout state read for fixed-panel composition. | Server validators reject duplicate IDs/slots/tokens, unregistered actions, raw CSS/native handles/raw ops/client JS, and payloads over budget. Phase 18.3 supports `kind: "fixed"`; transient UI must use `TransientOverlayContribution`. |
 | `ComponentContribution` (`serverRegisterComponentContribution`) | `runtime/js/ui.js`, `src/server/ops/ui.rs`, `src/server/ui.rs`, `src/shell/components.rs` | Component nodes for any preview panel body (`panel`, `label`, `button`, `list`, `editorView`, `flex`, `stack`). | Package load/config/update work for validation; protocol/client update work for install; paint/layout state read for native composition. | Component IDs must be package-prefixed or Clay-owned; validators reject raw CSS, raw colors outside typed token contracts, native handles, renderer callbacks, client-side JavaScript, raw `Deno.core.ops`, unsupported component kinds, unregistered actions, and oversize payloads. |
 | `TransientOverlayContribution` (`serverRegisterTransientOverlayContribution`) | `runtime/js/ui.js`, `src/server/ops/ui.rs`, `src/server/ui.rs` | Optional Markdown status/preview overlays (separate from fixed-slot geometry) if ever needed. | Package load/config/update work; explicit UI update work for open/dismiss; paint/layout state read for overlay composition. | Validates package provenance, focus policy, dismissal policy, accessibility role/label, action targets, and payload budget. |

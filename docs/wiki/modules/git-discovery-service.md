@@ -3,7 +3,7 @@
 ## Source
 
 - `src/server/git.rs`
-- `src/server/workspace.rs`
+- `src/server/workspace/mod.rs`
 - `src/server/mod.rs`
 - `src/server/ops/git.rs`
 - `runtime/js/git.js`

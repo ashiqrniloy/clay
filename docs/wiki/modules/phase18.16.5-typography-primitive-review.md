@@ -8,7 +8,7 @@
 - `src/protocol/mod.rs`, `src/protocol/decorations.rs`, `src/client/mod.rs`, `src/server/connection/mod.rs`.
 - `src/editor/layout.rs`, `src/editor/surface/mod.rs`, `src/editor/theme.rs`, `src/editor/viewport.rs`.
 - `src/masonry_editor.rs`, `src/masonry_sdui.rs`, `src/shell/theme.rs`, `src/shell/components.rs`, `src/shell/package_ui.rs`.
-- `src/packages/record/mod.rs`, `src/server/modes.rs`, `src/server/syntax.rs`.
+- `src/packages/record/mod.rs`, `src/server/modes.rs`, `src/server/syntax/mod.rs`.
 - `tests/primitives_docs.rs`, `tests/editor_performance_invariants.rs`, `tests/decoration_transport.rs`.
 
 ## Overview
@@ -27,7 +27,7 @@ That delivery path is reusable for configuration evaluation, atomic replacement,
 
 ### Style registry and decoration transport
 
-`src/editor/theme.rs::StyleRegistry` resolves `TokenType` + `Modifiers` to colors and text attributes. `src/protocol/decorations.rs::DecorationSpan` already provides validated byte ranges, `DecorationKind` layers (`Syntax`, `Semantic`, `Diagnostic`, `SearchMatch`), priority, provenance, viewport bounds, and rkyv transport. `DecorationSet` is cached and version-gated before `EditorSurface` paint consumes it. `src/server/syntax.rs` and `src/server/modes.rs` already turn generic package metadata into bounded mode/decorations data.
+`src/editor/theme.rs::StyleRegistry` resolves `TokenType` + `Modifiers` to colors and text attributes. `src/protocol/decorations.rs::DecorationSpan` already provides validated byte ranges, `DecorationKind` layers (`Syntax`, `Semantic`, `Diagnostic`, `SearchMatch`), priority, provenance, viewport bounds, and rkyv transport. `DecorationSet` is cached and version-gated before `EditorSurface` paint consumes it. `src/server/syntax/mod.rs` and `src/server/modes.rs` already turn generic package metadata into bounded mode/decorations data.
 
 These are reusable semantic carriers. `StyleRegistry` remains color/text-attribute ownership and must not choose fonts. Decoration spans must gain only an optional enum role on authorized layout-owning layers; they must not gain raw Parley properties, family strings, sizes, callbacks, or package executable data.
 

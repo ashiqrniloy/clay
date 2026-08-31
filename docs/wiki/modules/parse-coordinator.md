@@ -4,7 +4,7 @@
 
 - `src/server/parse_coordinator.rs` — handler registry, session lifecycle, scheduling, validation, and publication.
 - `src/server/syntax_session.rs` — per-document latest-wins mailbox and bounded executor.
-- `src/server/syntax.rs` — native Tree-sitter parser/tree state and window parsing.
+- `src/server/syntax/mod.rs` — native Tree-sitter parser/tree state and window parsing.
 - `src/server/connection/{documents,mod}.rs` — open/edit/viewport scheduling and request aggregation.
 - `src/server/document.rs` — canonical rope snapshots and parse-window slicing.
 - `src/server/js_runtime/{mod,validation}.rs` and `src/server/ops/parse.rs` — runtime-backed package handler boundary.
@@ -174,7 +174,7 @@ internals.
 - `src/server/parse_coordinator.rs` — bounded-session scheduling, Tokio timer
   starvation, latest-wins coalescing, independent document progress, and
   request-scoped completion.
-- `src/server/syntax.rs` — per-document parser/tree cache and window-byte bound.
+- `src/server/syntax/mod.rs` — per-document parser/tree cache and window-byte bound.
 - `src/server/connection/mod.rs::open_document_renders_before_background_parse_completes` —
   open response before parse completion.
 - `src/server/connection/mod.rs::viewport_render_requests_answer_one_patch_per_request_id` —

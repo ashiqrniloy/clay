@@ -39,7 +39,7 @@
 - `src/server/ops/mod.rs`
 - `src/server/ops/keybindings.rs`
 - `src/server/js_runtime/mod.rs`
-- `src/server/syntax.rs`
+- `src/server/syntax/mod.rs`
 - `src/server/control_center.rs`
 - `src/server/document.rs`
 - `src/packages/permissions.rs`
@@ -104,7 +104,7 @@ The first implementation ships one minimal built-in buffer-word provider. LSP, A
 
 ### Syntax grammar registry and package provenance
 
-- `src/server/syntax.rs` owns `SyntaxGrammarRegistry`, active syntax grammar selection, package-provenance records, and `TreeSitterSyntaxHandler`; `src/packages/record/mod.rs` parses and validates `SyntaxGrammarContributionDescriptor` metadata.
+- `src/server/syntax/mod.rs` owns `SyntaxGrammarRegistry`, active syntax grammar selection, package-provenance records, and `TreeSitterSyntaxHandler`; `src/packages/record/mod.rs` parses and validates `SyntaxGrammarContributionDescriptor` metadata.
 - `docs/wiki/modules/syntax-grammar-registry.md` documents the registry/provenance/active-selection pattern. Completion provider registration should reuse the same package-prefixed ID, provenance, permission, and disable/revocation withdrawal model.
 - Active completion providers are separate from active major mode and active syntax grammar: a document may have `active_major_mode = core.code`, `active_syntax_grammar = rust`, and `active_completion_providers = [core.bufferWords]` independently.
 

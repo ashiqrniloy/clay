@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverOpenFile
 js_facade: runtime/js/commands.js::serverOpenFile
-backing_rust: src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::open_existing_file; src/server/workspace.rs::WorkspaceState::open_selected_file
+backing_rust: src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace/mod.rs::WorkspaceState::open_existing_file; src/server/workspace/mod.rs::WorkspaceState::open_selected_file
 deno_op: op_clay_commands_execute_command
 deno_op_path: src/server/ops/commands.rs::op_clay_commands_execute_command
 name: serverOpenFile
@@ -91,7 +91,7 @@ Use `commands.serverOpenFile` only through the documented Clay JS facade. Do not
 
 - JS facade: `runtime/js/commands.js::serverOpenFile`
 - Deno op: `src/server/ops/commands.rs::op_clay_commands_execute_command` (`op_clay_commands_execute_command`)
-- Backing Rust/current owner: `src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::open_existing_file; src/server/workspace.rs::WorkspaceState::open_selected_file`
+- Backing Rust/current owner: `src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace/mod.rs::WorkspaceState::open_existing_file; src/server/workspace/mod.rs::WorkspaceState::open_selected_file`
 
 ## Lookup metadata
 

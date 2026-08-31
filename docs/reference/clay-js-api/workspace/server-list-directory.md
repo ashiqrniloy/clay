@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverListDirectory
 js_facade: runtime/js/workspace.js::serverListDirectory
-backing_rust: src/server/workspace.rs::WorkspaceState::list_directory
+backing_rust: src/server/workspace/mod.rs::WorkspaceState::list_directory
 deno_op: op_clay_workspace_list_directory
 deno_op_path: src/server/ops/workspace.rs::op_clay_workspace_list_directory
 name: serverListDirectory
@@ -107,7 +107,7 @@ Use `workspace.serverListDirectory` only through the documented Clay JS facade. 
 
 - JS facade: `runtime/js/workspace.js::serverListDirectory`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_list_directory` (`op_clay_workspace_list_directory`)
-- Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::list_directory`
+- Backing Rust/current owner: `src/server/workspace/mod.rs::WorkspaceState::list_directory`
 
 ## Lookup metadata
 

@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSmartSelect
 js_facade: runtime/js/editor.js::clientSmartSelect
-backing_rust: src/client_commands.rs::EditorClientCommand; src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges
+backing_rust: src/client_commands.rs::EditorClientCommand; src/server/syntax/mod.rs::TreeSitterSyntaxHandler::selection_query_ranges
 deno_op: op_clay_editor_smart_select
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_smart_select
 name: clientSmartSelect
@@ -97,8 +97,8 @@ Use `editor.clientSmartSelect` when the user asks for AST-aware expand/shrink se
 
 - JS facade: `runtime/js/editor.js::clientSmartSelect`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_smart_select`
-- Server tree walk: `src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges`
-- Client application: `src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges`
+- Server tree walk: `src/server/syntax/mod.rs::TreeSitterSyntaxHandler::selection_query_ranges`
+- Client application: `src/server/syntax/mod.rs::TreeSitterSyntaxHandler::selection_query_ranges`
 
 ## Lookup metadata
 

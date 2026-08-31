@@ -41,7 +41,7 @@ This review records architecture constraints only. It adds no runtime behavior a
 
 ### Workspace roots and navigation
 
-`src/server/workspace.rs::WorkspaceState` owns canonical workspace roots, single-file grants, document/path identity, root-relative display paths, traversal rejection, and validated file opening. `canonical_file_state` re-canonicalizes and rejects paths outside the selected root. Go-to-definition locations can therefore use an open `DocumentId` or `WorkspaceRootId` plus normalized relative path and byte range. Raw absolute paths and external `file://` URIs are not canonical Clay locations.
+`src/server/workspace/mod.rs::WorkspaceState` owns canonical workspace roots, single-file grants, document/path identity, root-relative display paths, traversal rejection, and validated file opening. `canonical_file_state` re-canonicalizes and rejects paths outside the selected root. Go-to-definition locations can therefore use an open `DocumentId` or `WorkspaceRootId` plus normalized relative path and byte range. Raw absolute paths and external `file://` URIs are not canonical Clay locations.
 
 ### Document identity/version state
 

@@ -30,7 +30,7 @@
 - `src/packages/modes.rs`
 - `src/server/completion.rs`
 - `src/server/parse_coordinator.rs`
-- `src/server/syntax.rs`
+- `src/server/syntax/mod.rs`
 - `src/server/js_runtime/mod.rs`
 - `docs/reference/packages/rust.md`
 - `docs/reference/packages/typescript.md`

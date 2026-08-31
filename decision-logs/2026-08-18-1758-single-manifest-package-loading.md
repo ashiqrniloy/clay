@@ -63,7 +63,7 @@ copies can silently drift.
 - `packages/rust/dist/load.js`, `packages/typescript/dist/load.js` —
   `serverRegisterSyntaxGrammar({})` and `serverRegisterCompletionProvider({})`
   empty-args calls that only trigger manifest reads.
-- `src/server/syntax.rs:741` — `is_shadowed_by_native_first_party` skips
+- `src/server/syntax/mod.rs:741` — `is_shadowed_by_native_first_party` skips
   package contributions for the four first-party languages, making their
   package.json `syntaxGrammars[].styleMap` inert.
 - `src/server/ops/modes.rs` — imperative `serverRegisterModePattern` path
@@ -74,7 +74,7 @@ copies can silently drift.
 - `packages/{rust,typescript,javascript,markdown}/package.json` and
   `dist/load.js` — the duplication instances.
 - `src/packages/bundled.rs` — fingerprinted bundled inventory.
-- `src/server/syntax.rs` — native-first-party shadowing.
+- `src/server/syntax/mod.rs` — native-first-party shadowing.
 - Code review of 2026-08-18 (session), findings §"One style map too many" and
   §"Load ceremony".
 

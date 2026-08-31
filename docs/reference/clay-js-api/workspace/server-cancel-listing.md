@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverCancelListing
 js_facade: runtime/js/workspace.js::serverCancelListing
-backing_rust: src/server/workspace.rs::cancel_listing
+backing_rust: src/server/workspace/mod.rs::cancel_listing
 deno_op: op_clay_workspace_cancel_listing
 deno_op_path: src/server/ops/workspace.rs::op_clay_workspace_cancel_listing
 name: serverCancelListing
@@ -91,7 +91,7 @@ Use `workspace.serverCancelListing` only through the documented Clay JS facade. 
 
 - JS facade: `runtime/js/workspace.js::serverCancelListing`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_cancel_listing` (`op_clay_workspace_cancel_listing`)
-- Backing Rust/current owner: `src/server/workspace.rs::cancel_listing`
+- Backing Rust/current owner: `src/server/workspace/mod.rs::cancel_listing`
 
 ## Lookup metadata
 

@@ -16,7 +16,7 @@
 - `docs/wiki/modules/command-registry.md`
 - `docs/wiki/modules/package-loading.md`
 - `docs/wiki/modules/slot-aware-package-ui.md`
-- `src/server/workspace.rs`
+- `src/server/workspace/mod.rs`
 - `src/server/command_execution.rs`
 - `src/server/control_center.rs`
 - `src/shell/transient_menu.rs`
@@ -35,7 +35,7 @@ The key finding is boring: Git needs one new reusable server primitive, not a cu
 
 ### Workspace roots and file authority
 
-- `src/server/workspace.rs::WorkspaceState` is the server source of truth for workspace roots, open documents, canonical paths, selected-file grants, and bounded directory listing.
+- `src/server/workspace/mod.rs::WorkspaceState` is the server source of truth for workspace roots, open documents, canonical paths, selected-file grants, and bounded directory listing.
 - `WorkspaceRootDiscovery` and `BoundedFileListService` from Phase 18.12 already provide known workspace roots and server-owned root/listing authority. Git must consume those roots rather than rediscover workspaces independently.
 - `runtime/js/workspace.js::serverListWorkspaceRoots`, `serverAddWorkspaceRoot`, `serverDiscoverWorkspaceRootForPath`, and `serverListDirectory` are documented Clay JS facades for workspace discovery/listing. `@clay/git` should read root identity/status through a Git API that is keyed by these workspace roots.
 - The package boundary stays unchanged: packages cannot add roots, marker files, ignore rules, raw path scans, or arbitrary filesystem listing providers.

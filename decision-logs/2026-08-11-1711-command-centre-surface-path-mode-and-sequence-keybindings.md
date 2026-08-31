@@ -100,7 +100,7 @@ workspace roots with no dired-style path bar.
   (`set_active_menu`, overlay observations, z-order tokens) already project
   menu sessions to the client; `TransientMenuOrigin` is designed to be
   extended with new anchors.
-- `src/shell/file_browser.rs` and `src/server/workspace.rs` provide bounded,
+- `src/shell/file_browser.rs` and `src/server/workspace/mod.rs` provide bounded,
   grant-scoped listing machinery; `OpenFilePieces`/root-grant flows cover
   converting a picked path into an explicit grant.
 - `src/server/tab_registry.rs::open_workspace` and `connection.rs` per-tab
@@ -113,7 +113,7 @@ workspace roots with no dired-style path bar.
 
 - `src/server/control_center.rs`, `src/shell/transient_menu.rs`,
   `src/shell/file_browser.rs`, `src/server/command_execution.rs`,
-  `src/server/tab_registry.rs`, `src/server/workspace.rs`,
+  `src/server/tab_registry.rs`, `src/server/workspace/mod.rs`,
   `src/client/behavior.rs`, `src/masonry_sdui.rs`, `src/masonry_shell.rs`.
 - `roadmap.md` — Phase 24: Command Centre (24.1–24.5).
 - `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md`

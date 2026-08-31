@@ -4,11 +4,11 @@
 
 - `src/server/syntax_session.rs` — `SessionMailbox`, `SessionReceiver`, and `SyntaxExecutor`.
 - `src/server/parse_coordinator.rs` — session registry, enqueue/close lifecycle, and result publication.
-- `src/server/syntax.rs` — per-document parser/tree state and bounded window/cache operations.
+- `src/server/syntax/mod.rs` — per-document parser/tree state and bounded window/cache operations.
 - `src/server/connection/{documents,mod}.rs` — validated scheduling and request-scoped patch aggregation.
 - `src/server/js_runtime/{mod,validation}.rs` — mode activation and package handler boundary.
 - `src/perf/budgets.rs` — executor, tree-cache, mode-cache, and parse-memory bounds.
-- Tests: `src/server/syntax_session.rs`, `src/server/parse_coordinator.rs`, `src/server/syntax.rs`, `src/server/connection/mod.rs`.
+- Tests: `src/server/syntax_session.rs`, `src/server/parse_coordinator.rs`, `src/server/syntax/mod.rs`, `src/server/connection/mod.rs`.
 
 ## Overview
 
@@ -92,7 +92,7 @@ bounded to `MODE_ACTIVATION_CACHE_ENTRIES` (64).
 - `src/server/parse_coordinator.rs` — timer starvation, 100-update latest-wins,
   same-language independent documents, superseded/closed request completion,
   and session cleanup.
-- `src/server/syntax.rs::document_tree_cache_is_bounded_and_windows_respect_byte_budget` —
+- `src/server/syntax/mod.rs::document_tree_cache_is_bounded_and_windows_respect_byte_budget` —
   window refusal and bounded per-document cache.
 - `src/server/connection/mod.rs::mode_activation_cache_hit_skips_generated_module_evaluation` —
   activation identity parity and no repeat generated-module evaluation.

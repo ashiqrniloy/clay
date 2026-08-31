@@ -4,7 +4,7 @@
 
 - `src/shell/theme.rs`
 - `src/shell/components.rs`
-- `src/shell/layout.rs`
+- `src/shell/layout/mod.rs`
 - `src/shell/package_ui.rs`
 - `src/editor/theme.rs`
 - `src/editor/typography.rs`
@@ -44,7 +44,7 @@ package semantic token -> same-typed core fallback -> resolved component style
 | `UiTextVariant` | `src/editor/typography.rs`; `Body`, `Status`, `Title`, and `Detail` resolve from a selected semantic `FontRole`. | Add `Display`, `Section`, and `Caption`; preserve existing default scales and role ownership. |
 | Component style validation | `src/shell/components.rs`, `src/server/ui.rs`, and `src/packages/record/mod.rs`; 11 implemented kinds, four reserved kinds, token-typed style variables, closed enum variants, semantic `fontRole`, and raw-style rejection. | Reuse unchanged component kinds and style-variable names. New token domains become available to generic validators/accessors only where a documented variable consumes them. |
 | Package theme-token declarations | `clay.contributions.themeTokens` and `ui.serverRegisterThemeToken`; package-prefixed semantic aliases with a description and same-typed core fallback, no raw value. | Preserve this alias contract. Theme package `designTokens` are a separate static value-overlay contract and must not let ordinary packages set concrete global values. |
-| Panel/slot geometry | `PaneSlotLayout` and `FixedSlotState` in `src/shell/layout.rs`; mandatory `main`, optional fixed sides, finite ordered bounds, clamping, visibility/collapse, and deterministic geometry. | Keep geometry and validation. Replace only independent default sources in `src/shell/package_ui.rs` and `src/masonry_sdui.rs` with one token-resolved layout-default view. |
+| Panel/slot geometry | `PaneSlotLayout` and `FixedSlotState` in `src/shell/layout/mod.rs`; mandatory `main`, optional fixed sides, finite ordered bounds, clamping, visibility/collapse, and deterministic geometry. | Keep geometry and validation. Replace only independent default sources in `src/shell/package_ui.rs` and `src/masonry_sdui.rs` with one token-resolved layout-default view. |
 | Structural observations | `WorkingAreaLayoutObservation`, package panel/overlay observations, `SduiObservableSnapshot`, and `SduiStatusObservation`. | Reuse for geometry, accessibility, compatibility, and update-count assertions; do not expose raw theme maps or native handles. |
 
 ## Reusable Capability Before New Code
@@ -135,7 +135,7 @@ Task 11 (this wiki pass) records the final implementation state in those pages a
 ## Tests
 
 - `tests/primitives_docs.rs::phase20_1_ui_design_language_primitive_review_is_linked_and_complete`: locks inventory, reuse, generic gaps, additive compatibility, hot-path/security boundaries, and phase ownership.
-- Existing `src/shell/theme.rs`, `src/shell/components.rs`, `src/editor/typography.rs`, `src/shell/layout.rs`, `src/shell/package_ui.rs`, `src/masonry_sdui.rs`, theme-package, typography-protocol, payload-budget, accessibility, and editor source-guard tests provide the executable baseline.
+- Existing `src/shell/theme.rs`, `src/shell/components.rs`, `src/editor/typography.rs`, `src/shell/layout/mod.rs`, `src/shell/package_ui.rs`, `src/masonry_sdui.rs`, theme-package, typography-protocol, payload-budget, accessibility, and editor source-guard tests provide the executable baseline.
 
 ```bash
 cargo test --test protocol primitives_docs::phase20_1_ui_design_language_primitive_review_is_linked_and_complete

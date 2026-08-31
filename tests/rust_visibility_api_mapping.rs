@@ -91,13 +91,19 @@ fn internal_runtime_mechanics_are_not_public() {
         ),
         ("src/server/ops/mod.rs", "pub struct PackageContext"),
         ("src/server/output_router.rs", "pub struct OutputRouter"),
-        ("src/server/workspace.rs", "pub struct TargetIdentity"),
-        ("src/server/workspace.rs", "pub struct DirectoryListingPlan"),
+        ("src/server/workspace/mod.rs", "pub struct TargetIdentity"),
         (
-            "src/server/workspace.rs",
+            "src/server/workspace/mod.rs",
+            "pub struct DirectoryListingPlan",
+        ),
+        (
+            "src/server/workspace/mod.rs",
             "pub struct ListingCancellationGuard",
         ),
-        ("src/server/workspace.rs", "pub struct CloseDocumentOutcome"),
+        (
+            "src/server/workspace/mod.rs",
+            "pub struct CloseDocumentOutcome",
+        ),
         (
             "src/server/connection/mod.rs",
             "pub struct RuntimeDiagnosticStore",
@@ -292,8 +298,8 @@ fn phase22_8_per_tab_state_has_no_new_public_programmatic_surface() {
         );
     }
 
-    let workspace =
-        fs::read_to_string(root.join("src/server/workspace.rs")).expect("read server/workspace.rs");
+    let workspace = fs::read_to_string(root.join("src/server/workspace/mod.rs"))
+        .expect("read server/workspace.rs");
     assert!(
         workspace.contains("pub(crate) fn with_document_id_allocator"),
         "WorkspaceState allocator plumbing must stay pub(crate)"

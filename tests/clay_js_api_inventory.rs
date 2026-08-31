@@ -617,7 +617,7 @@ fn inventory_rust_paths_name_existing_source_files() {
                     concat!(
                         "{id}: {field} names missing source file {path}; point at a retained ",
                         "renderer-neutral owner (src/client_commands.rs, src/server/*, ",
-                        "src/shell/layout.rs) or the React/CodeMirror frontend owner"
+                        "src/shell/layout/mod.rs) or the React/CodeMirror frontend owner"
                     ),
                     id = id,
                     field = field,

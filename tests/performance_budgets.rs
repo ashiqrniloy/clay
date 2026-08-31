@@ -35,9 +35,9 @@ fn ui_observability_doc() -> String {
 fn workspace_open_path_stays_streamed_and_head_bounded() {
     let source = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/server/workspace.rs"
+        "/src/server/workspace/mod.rs"
     ))
-    .expect("read src/server/workspace.rs");
+    .expect("read src/server/workspace/mod.rs");
     let start = source
         .find("async fn read_file_streamed")
         .expect("streaming open helper must remain present");
@@ -763,6 +763,9 @@ fn folding_and_inlay_payloads_deny_above_cap() {
 
     for path in ["src/protocol", "src/server", "src/editor"] {
         for rust_file in rust_sources_under(path) {
+            if is_sibling_test_file(&rust_file) {
+                continue;
+            }
             let source = std::fs::read_to_string(&rust_file)
                 .unwrap_or_else(|error| panic!("read {}: {error}", rust_file.display()));
             let body = production_body(&source);
@@ -822,6 +825,13 @@ fn production_body(src: &str) -> &str {
         return &src[..index];
     }
     src
+}
+
+/// Sibling `tests.rs` module files are test-only by convention
+/// (`#[cfg(test)] mod tests;` in the owning mod.rs); the guards above
+/// cannot see the declaration from the sibling file itself.
+fn is_sibling_test_file(path: &std::path::Path) -> bool {
+    path.file_name().and_then(|name| name.to_str()) == Some("tests.rs")
 }
 
 fn mentions_folding_publish(body: &str) -> bool {

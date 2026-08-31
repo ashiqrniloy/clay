@@ -53,7 +53,7 @@ Clay can adopt the useful parts without adding client parser execution: local sp
 - [Zed incremental changed ranges](https://github.com/zed-industries/zed/blob/edeaf598c7495bd7b9e9a05d68e61f08ad275d16/crates/language/src/syntax_map.rs#L664-L829)
 - [VS Code inserted-character tokenization](https://github.com/microsoft/vscode/blob/56d6f639fb09e6610c9eb8f56439496b9536e283/src/vs/editor/common/model/textModelTokens.ts#L75-L101)
 - `src/server/connection.rs::schedule_parse_window`
-- `src/server/syntax.rs::TreeSitterSyntaxHandler::parse_sync`
+- `src/server/syntax/mod.rs::TreeSitterSyntaxHandler::parse_sync`
 - `src/server/parse_coordinator.rs::schedule_parse_with_windows`
 - `src/editor/surface.rs::EditorDecorationState::apply_edit`
 - `docs/wiki/modules/{parse-coordinator,parse-task-lifecycle,decoration-transport,syntax-grammar-registry}.md`

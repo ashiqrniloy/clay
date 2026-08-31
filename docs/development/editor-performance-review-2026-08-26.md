@@ -180,7 +180,7 @@ One document owner. If view exists, dispatch one no-history append and set sessi
 
 **Evidence**
 
-- `src/server/syntax.rs:11` (`SYNTAX_DECORATION_CHUNK_BYTES = 128`)
+- `src/server/syntax/mod.rs:11` (`SYNTAX_DECORATION_CHUNK_BYTES = 128`)
 - `frontend/src/editor/extensions/controller.ts:246-254`
 - `frontend/src/editor/extensions/decorations.ts:169-191`
 
@@ -228,8 +228,8 @@ After canonical open/edit and required response, enqueue lightweight latest-wins
 
 **Evidence**
 
-- `src/server/syntax.rs:1374-1382`
-- `src/server/syntax.rs:2341-2348`
+- `src/server/syntax/mod.rs:1374-1382`
+- `src/server/syntax/mod.rs:2341-2348`
 - `src/server/parse_coordinator.rs:694`
 
 Coordinator uses `tokio::spawn`, but native handler's async future directly calls synchronous `parse_sync`. Parser and tree maps use standard mutexes. One parser mutex per grammar serializes all documents using that grammar while occupying Tokio workers.
@@ -277,7 +277,7 @@ Coalesce whole request-scoped atomic patches, keyed by client/document/feature/r
 
 **Evidence**
 
-- `src/server/syntax.rs:1734-1740`
+- `src/server/syntax/mod.rs:1734-1740`
 - `frontend/src/editor/extensions/folding.ts:51-66`
 
 Every syntax parse, including scroll viewport parse, walks tree to produce folds. Frontend fold service scans every range in every set for each queried line.

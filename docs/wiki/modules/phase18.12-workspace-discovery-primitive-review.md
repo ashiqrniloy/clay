@@ -13,10 +13,10 @@
 - `docs/wiki/modules/slot-aware-package-ui.md`
 - `docs/wiki/modules/phase18.8-transient-menu-command-execution-primitive-review.md`
 - `docs/wiki/modules/phase18.9-generic-text-code-modes-primitive-review.md`
-- `src/server/workspace.rs`
+- `src/server/workspace/mod.rs`
 - `src/server/ops/workspace.rs`
 - `runtime/js/workspace.js`
-- `src/shell/layout.rs`
+- `src/shell/layout/mod.rs`
 - `src/shell/package_ui.rs`
 - `src/masonry_shell/mod.rs`
 - `src/masonry_sdui.rs`
@@ -36,7 +36,7 @@ The headline finding is that most of the file browser can be built without new R
 
 ### Workspace roots and file authority
 
-- `src/server/workspace.rs::WorkspaceState` is the server-side source of truth for workspace roots and open file documents. It already stores `WorkspaceRoot { id, authority }` values with `WorkspaceAuthority::Directory { canonical_path }` and `WorkspaceAuthority::SingleFile { canonical_path }`.
+- `src/server/workspace/mod.rs::WorkspaceState` is the server-side source of truth for workspace roots and open file documents. It already stores `WorkspaceRoot { id, authority }` values with `WorkspaceAuthority::Directory { canonical_path }` and `WorkspaceAuthority::SingleFile { canonical_path }`.
 - `WorkspaceState::add_root` canonicalizes a path, deduplicates by canonical path, and returns a stable `WorkspaceRootId`. It rejects paths that are not directories (for directory roots) and already handles `WorkspaceRootMetadata` display names/paths via `list_root_metadata`.
 - `WorkspaceState::open_existing_file` opens a file that is already inside a known root, while `WorkspaceState::open_selected_file` creates a single-file grant for a browser-picked file outside any root. The selected-file grant flow is the existing path for user-exposed files that are not under a workspace root.
 - `src/server/ops/workspace.rs::op_clay_workspace_list_roots` exposes root metadata to the controlled server runtime, and `runtime/js/workspace.js::serverListWorkspaceRoots` is the stable Clay JS facade. No direct client filesystem access is exposed.
@@ -44,7 +44,7 @@ The headline finding is that most of the file browser can be built without new R
 
 ### Shell layout and slots
 
-- `src/shell/layout.rs` implements internal `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` state. `PaneSlotLayout` already has a mandatory `main` slot and optional fixed `left`, `right`, `top`, and `bottom` slots.
+- `src/shell/layout/mod.rs` implements internal `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` state. `PaneSlotLayout` already has a mandatory `main` slot and optional fixed `left`, `right`, `top`, and `bottom` slots.
 - `FixedSlotId::Left` is the intended slot for file trees, outlines, and similar side panels; `FixedSlotId::Bottom` is intended for diagnostics, output, and transient menus.
 - `src/masonry_shell/mod.rs::ClayShellWidget` places the editor child from installed layout state. Masonry layout reads validated state only and does not parse packages, run JavaScript, wait on IPC, or mutate package UI state during layout.
 - `src/shell/package_ui.rs::PackageUiRuntimeState` stores accepted fixed panels and transient overlays. Accepted fixed panels compose into `PaneSlotLayout` geometry; accepted transient overlays render separately and do not consume fixed slot geometry.

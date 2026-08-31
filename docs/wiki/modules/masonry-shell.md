@@ -8,7 +8,7 @@
 
 - `src/masonry_shell/mod.rs`
 - `src/shell/mod.rs`
-- `src/shell/layout.rs`
+- `src/shell/layout/mod.rs`
 - `src/lib.rs`
 - `src/launch.rs`
 - `src/app_driver.rs`
@@ -50,7 +50,7 @@ Plan 088 Task 6 also installs each tab's `ActiveTypography` into shell chrome. T
 
 `src/launch.rs::run_editor` constructs an `EditorWidget`, wraps it in `ClayShellWidget::single_editor(...)`, records the child editor `WidgetId`, and starts the Masonry window with the shell as the root widget. The driver sets Masonry focus fallback to the editor child and routes existing `EditorAction` handling back to that child ID, so connection events, file-open UI command results, SDUI snapshots, edit acknowledgements, and resync snapshots continue to mutate `EditorWidget` rather than the shell container.
 
-`src/shell/layout.rs` owns the reusable shell state:
+`src/shell/layout/mod.rs` owns the reusable shell state:
 
 1. `WorkingAreaLayout` records the shell layout version, working-area ID, editor component binding, and installed `PaneSplitTree`.
 2. `PaneSplitTree` stores a validated tree of `PaneSplitNode::Leaf` and `PaneSplitNode::Split` values with a stable active `PaneId`.
@@ -93,15 +93,15 @@ The examples are internal Rust-only. They are not public `clay:ui` JavaScript AP
 ## Primitive Coverage
 
 - `WorkingAreaLayout`
-  - Owner/source: `src/shell/layout.rs`.
+  - Owner/source: `src/shell/layout/mod.rs`.
   - Runtime status: internal Rust state installed by the shell root for the default one-editor working area.
   - Public API status: planned `ui.serverRegisterWorkingAreaLayout` inventory stub only; no callable `clay:ui` facade/op is exposed in Phase 18.2.
 - `PaneSplitTree`
-  - Owner/source: `src/shell/layout.rs`.
+  - Owner/source: `src/shell/layout/mod.rs`.
   - Runtime status: internal Rust state with leaf/split nodes, active pane metadata, bounded ratios, duplicate-ID rejection, node-count bound, and deterministic geometry helpers.
   - Public API status: planned `ui.serverRegisterPaneSplitTree` inventory stub only; packages cannot mutate Masonry children or provide split callbacks.
 - `PaneSlotLayout`
-  - Owner/source: `src/shell/layout.rs`.
+  - Owner/source: `src/shell/layout/mod.rs`.
   - Runtime status: internal Rust state with mandatory `main`, optional fixed `left`/`right`/`top`/`bottom` slots, finite size validation, min/max clamps, visibility, collapse state, user-resize metadata, and deterministic main/fixed-slot geometry.
   - Public API status: planned `ui.serverSetPaneSlotLayout` inventory stub only; package-facing panel contributions and user layout overrides remain deferred.
 
@@ -127,18 +127,18 @@ Phase 18.2 is an internal runtime foundation, not a public package UI API releas
 
 ## Tests
 
-- `src/shell/layout.rs::tests::pane_split_tree_default_has_one_leaf`: validates default one-pane topology and full-area geometry.
-- `src/shell/layout.rs::tests::pane_split_tree_rejects_duplicate_pane_ids`: validates duplicate leaf ID rejection.
-- `src/shell/layout.rs::tests::pane_split_tree_rejects_invalid_ratios`: validates ratio bounds and non-finite rejection.
-- `src/shell/layout.rs::tests::pane_split_tree_rejects_oversize_tree_payloads`: validates the internal split-tree node-count ceiling.
-- `src/shell/layout.rs::tests::pane_split_tree_computes_horizontal_and_vertical_geometry`: validates generic split rectangle calculation.
-- `src/shell/layout.rs::tests::pane_slot_layout_requires_main_slot`: validates that `main` is mandatory and main-only geometry fills the pane.
-- `src/shell/layout.rs::tests::pane_slot_layout_computes_main_with_left_right_top_bottom_slots`: validates fixed-slot geometry for every side.
-- `src/shell/layout.rs::tests::pane_slot_layout_clamps_fixed_panel_sizes`: validates min/max clamps, collapse, and visibility.
-- `src/shell/layout.rs::tests::working_area_editor_component_uses_main_slot_rect`: validates editor component placement uses the pane's `main` slot.
-- `src/shell/layout.rs::tests::working_area_layout_applies_inert_validated_update`: validates successful bounded shell state updates increment the local layout version and preserve split/slot observations.
-- `src/shell/layout.rs::tests::shell_layout_update_rejects_stale_or_oversize_payload`: validates stale base versions and oversize slot-layout payloads are rejected.
-- `src/shell/layout.rs::tests::shell_layout_update_rejects_malformed_slot_and_editor_targets`: validates missing editor panes and duplicate slot assignments are rejected.
+- `src/shell/layout/mod.rs::tests::pane_split_tree_default_has_one_leaf`: validates default one-pane topology and full-area geometry.
+- `src/shell/layout/mod.rs::tests::pane_split_tree_rejects_duplicate_pane_ids`: validates duplicate leaf ID rejection.
+- `src/shell/layout/mod.rs::tests::pane_split_tree_rejects_invalid_ratios`: validates ratio bounds and non-finite rejection.
+- `src/shell/layout/mod.rs::tests::pane_split_tree_rejects_oversize_tree_payloads`: validates the internal split-tree node-count ceiling.
+- `src/shell/layout/mod.rs::tests::pane_split_tree_computes_horizontal_and_vertical_geometry`: validates generic split rectangle calculation.
+- `src/shell/layout/mod.rs::tests::pane_slot_layout_requires_main_slot`: validates that `main` is mandatory and main-only geometry fills the pane.
+- `src/shell/layout/mod.rs::tests::pane_slot_layout_computes_main_with_left_right_top_bottom_slots`: validates fixed-slot geometry for every side.
+- `src/shell/layout/mod.rs::tests::pane_slot_layout_clamps_fixed_panel_sizes`: validates min/max clamps, collapse, and visibility.
+- `src/shell/layout/mod.rs::tests::working_area_editor_component_uses_main_slot_rect`: validates editor component placement uses the pane's `main` slot.
+- `src/shell/layout/mod.rs::tests::working_area_layout_applies_inert_validated_update`: validates successful bounded shell state updates increment the local layout version and preserve split/slot observations.
+- `src/shell/layout/mod.rs::tests::shell_layout_update_rejects_stale_or_oversize_payload`: validates stale base versions and oversize slot-layout payloads are rejected.
+- `src/shell/layout/mod.rs::tests::shell_layout_update_rejects_malformed_slot_and_editor_targets`: validates missing editor panes and duplicate slot assignments are rejected.
 - `src/masonry_shell/mod.rs::tests::shell_observable_snapshot_captures_default_working_area`: validates the default structural shell observation without exposing widget handles.
 - `src/masonry_shell/mod.rs::tests::shell_observable_snapshot_captures_split_and_slots`: validates split/slot structural observation after an inert update.
 - `src/masonry_shell/mod.rs::tests::shell_observation_does_not_expose_document_text_or_native_handles`: validates the snapshot debug surface omits document/native/raw authority markers.
@@ -218,7 +218,7 @@ widget. Valid editor Entry focus remains unchanged. Tests:
 
 ### Source Paths
 
-- `src/shell/layout.rs`: Split divider hit-test, drag ratio, slot resize/collapse, focus traversal, `split_pane` composition.
+- `src/shell/layout/mod.rs`: Split divider hit-test, drag ratio, slot resize/collapse, focus traversal, `split_pane` composition.
 - `src/shell/layout_persist.rs`: Serialization, I/O, apply/restore.
 - `src/masonry_shell/mod.rs`: Pointer/keyboard event handlers, paint, persistence debounce.
 - `src/server/ui.rs`: `RegisteredLayoutIntent`, `request_layout_intent` validation.
@@ -227,7 +227,7 @@ widget. Valid editor Entry focus remains unchanged. Tests:
 
 ### Tests
 
-- `src/shell/layout.rs`: 52 tests (geometry invariants, clamping, collapse, focus traversal, split composition, drag interaction).
+- `src/shell/layout/mod.rs`: 52 tests (geometry invariants, clamping, collapse, focus traversal, split composition, drag interaction).
 - `src/shell/layout_persist.rs`: 6 tests (round-trip, corrupt fallback, selective persistence).
 - `src/server/ui.rs`: 6 tests (intent validation: ratio, orientation, provenance, duplicate, default position).
 - Command: `cargo test --lib shell --quiet`
@@ -238,7 +238,7 @@ Phase 22.1 (2026-08-05) turns the single-pane shell into a real multi-pane worki
 
 ### PaneSplitTree Lifecycle Operations
 
-`src/shell/layout.rs` extends the Phase 18.2 tree with four immutable lifecycle operations (each returns a new tree or `None`):
+`src/shell/layout/mod.rs` extends the Phase 18.2 tree with four immutable lifecycle operations (each returns a new tree or `None`):
 
 - `split_pane(...)` — now capped: returns `None` once the tree reaches `MAX_PANES_PER_TAB` (4).
 - `close_pane(pane_id)` — removes the leaf and promotes its sibling subtree; returns `None` for the last pane or a missing ID. Focus hands off to the sibling subtree's first leaf.
@@ -299,7 +299,7 @@ Phase 22.2 (2026-08-05) wires document views into the pane hosts and makes the s
 
 ### Source Paths
 
-- `src/shell/layout.rs`: lifecycle ops, `MAX_PANES_PER_TAB`, `PaneResizeDirection`, `replace_pane_tree`.
+- `src/shell/layout/mod.rs`: lifecycle ops, `MAX_PANES_PER_TAB`, `PaneResizeDirection`, `replace_pane_tree`.
 - `src/masonry_pane_host.rs`: `PaneContentHost` widget (placeholder/document content, `set_document_view`/`clear_content`).
 - `src/masonry_shell/mod.rs`: `pane_hosts` map, `pane_targets` routing map, reconcile, focus policy, `PaneFocused` actions, `ShellClientCommand` dispatch.
 - `src/app_driver.rs`: shell action target + `ShellCommand`/`ShellPreferences` dispatch.
@@ -311,7 +311,7 @@ Phase 22.2 (2026-08-05) wires document views into the pane hosts and makes the s
 
 ### Tests
 
-- `src/shell/layout.rs`: cap rejection, equal-area redivision (2/3/4 panes, area equality), close/merge/focus-handoff, move swaps + end no-ops + ratio preservation, keyboard resize bordering/deepest/clamp/no-divider. Command: `cargo test --lib shell::layout --quiet`.
+- `src/shell/layout/mod.rs`: cap rejection, equal-area redivision (2/3/4 panes, area equality), close/merge/focus-handoff, move swaps + end no-ops + ratio preservation, keyboard resize bordering/deepest/clamp/no-divider. Command: `cargo test --lib shell::layout --quiet`.
 - `src/masonry_shell/mod.rs`: host identity stability across tree mutations, orphan detachment, placeholder hosting, per-pane placement, click-to-focus on placeholders, focus-policy behavior (default, follows-cursor, drag-skip), all 12 command dispatches, 4-pane cap enforcement, the no-server/no-JS hot-path guard, and (22.2) independent per-pane document views with document-scoped routing, typing-isolation hot-path guard, routing-target cleanup on pane close, and concurrent per-pane major modes isolated across behavior manifests. Phase 22.8 verification re-runs this matrix with per-tab server roots/document sets, per-document lease/version reservations, retained-session switching, duplicate-open ownership, and the four-pane cap; no split or hot-path implementation changes were needed. Command: `cargo test --lib masonry_shell --quiet`.
 - `src/server/js_runtime/mod.rs`: policy publish/reject/default-unset through real init.js evaluation.
 - `src/server/ops/keybindings.rs`: all 12 shell IDs bindable + `ClientUiCommand`-routed; unknown `shell.*` rejected.
@@ -715,7 +715,7 @@ gate (the `bindKey` config path).
 ### Cleanup sweep
 
 - Removed the `#![allow(dead_code)]` module attribute from
-  `src/shell/layout.rs`; test-only layout symbols (observation types,
+  `src/shell/layout/mod.rs`; test-only layout symbols (observation types,
   `FixedSlotState` methods, `has_main_slot`, `PaneSlotLayoutError`,
   `working_area_id`/`root_pane_id`, `observable_snapshot`/`slot_observations`,
   `observe_pane_tree_node`) are now `#[cfg(test)]`-gated (the layout types

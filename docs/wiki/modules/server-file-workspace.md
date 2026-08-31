@@ -2,7 +2,7 @@
 
 ## Source
 
-- `src/server/workspace.rs`
+- `src/server/workspace/mod.rs`
 - `src/server/document.rs`
 
 ## Overview
@@ -91,32 +91,32 @@ let reloaded = workspace.reload_document(opened.document_id, false).await?;
 
 ## Tests
 
-- `src/server/workspace.rs`: `duplicate_open_reuses_document_and_preserves_lease_policy` verifies duplicate canonical registrations share the document ID and lease policy.
-- `src/server/workspace.rs`: `open_existing_file_loads_utf8_text` verifies server-side file loading creates a clean version-1 document snapshot.
-- `src/server/workspace.rs`: `duplicate_open_reuses_loaded_document_and_lease_policy` verifies duplicate opens reuse the existing in-memory document without re-reading changed disk contents.
-- `src/server/workspace.rs`: `open_invalid_utf8_reports_file_io_error_without_document_entry` verifies invalid UTF-8 is reported and leaves registry indexes empty.
-- `src/server/workspace.rs`: `open_existing_file_streams_large_utf8_text_and_bounds_head`, `selected_open_streams_large_text_without_file_size_ceiling`, `reload_streams_new_text_and_replaces_resident_bytes`, and `utf8_scalar_split_across_file_read_buffers_remains_valid` verify large-file streaming, bounded heads, replacement accounting, and cross-read UTF-8 carry handling.
-- `src/server/workspace.rs`: `document_budget_rejects_open_and_close_releases_resident_bytes` and `binary_sniff_rejects_nul_in_leading_bytes_but_not_after_boundary` verify server-owned budget accounting and the documented 8 KiB binary-sniff boundary.
-- `src/server/workspace.rs`: `selected_file_open_grants_only_the_selected_file` verifies an explicit selected-file open creates a single-file grant that rejects sibling paths.
-- `src/server/workspace.rs`: `selected_file_open_rejects_directory_and_invalid_utf8_without_document_entry` and `selected_file_open_rejects_special_file_without_document_entry` verify selected directories, special files, and invalid UTF-8 files do not create document entries or grants.
-- `src/server/workspace.rs`: `workspace_rejects_path_traversal_outside_root` verifies `..` traversal cannot authorize a sibling file outside the root.
-- `src/server/workspace.rs`: `workspace_rejects_directory_and_special_file_open` verifies directories and Unix socket files are rejected as document opens.
-- `src/server/workspace.rs`: `workspace_canonicalizes_symlink_before_authorization` verifies escaping symlinks are denied and in-root symlinks canonicalize consistently.
-- `src/server/workspace.rs`: `file_backed_document_dirty_state_tracks_accepted_edits_and_clean_marking` verifies loaded files start clean, accepted edits mark dirty, and clean marking is explicit.
-- `src/server/workspace.rs`: `accepted_edit_marks_file_document_dirty_and_save_marks_clean` verifies accepted edits dirty file-backed documents and successful saves clear dirty state.
-- `src/server/workspace.rs`: `save_writes_canonical_rope_text_to_disk` verifies saves persist the server canonical rope text, including UTF-8 text.
-- `src/server/workspace.rs`: `reload_dirty_document_requires_force_or_rejects` verifies dirty reloads are rejected unless forced and forced reloads replace canonical text.
-- `src/server/workspace.rs`: `reload_clean_document_refreshes_disk_text_and_marks_clean` verifies clean reloads refresh from disk and stay clean.
-- `src/server/workspace.rs`: `save_missing_file_returns_typed_error_and_keeps_dirty` verifies missing files produce typed errors without clearing dirty state.
-- `src/server/workspace.rs`: `save_stale_metadata_returns_typed_error_and_keeps_dirty` verifies external on-disk changes are stale-save conflicts and preserve unsaved edits.
-- `src/server/workspace.rs`: `workspace_diagnostic_for_missing_root_is_actionable` verifies missing root diagnostics include a stable code and container/toolbox/distrobox hint.
-- `src/server/workspace.rs`: `workspace_diagnostic_sanitizes_unauthorized_paths` verifies outside-root diagnostics avoid leaking the unauthorized path.
-- `src/server/workspace.rs`: `workspace_permission_denied_keeps_document_dirty` verifies permission-denied saves report a stable diagnostic and preserve dirty in-memory state.
+- `src/server/workspace/mod.rs`: `duplicate_open_reuses_document_and_preserves_lease_policy` verifies duplicate canonical registrations share the document ID and lease policy.
+- `src/server/workspace/mod.rs`: `open_existing_file_loads_utf8_text` verifies server-side file loading creates a clean version-1 document snapshot.
+- `src/server/workspace/mod.rs`: `duplicate_open_reuses_loaded_document_and_lease_policy` verifies duplicate opens reuse the existing in-memory document without re-reading changed disk contents.
+- `src/server/workspace/mod.rs`: `open_invalid_utf8_reports_file_io_error_without_document_entry` verifies invalid UTF-8 is reported and leaves registry indexes empty.
+- `src/server/workspace/mod.rs`: `open_existing_file_streams_large_utf8_text_and_bounds_head`, `selected_open_streams_large_text_without_file_size_ceiling`, `reload_streams_new_text_and_replaces_resident_bytes`, and `utf8_scalar_split_across_file_read_buffers_remains_valid` verify large-file streaming, bounded heads, replacement accounting, and cross-read UTF-8 carry handling.
+- `src/server/workspace/mod.rs`: `document_budget_rejects_open_and_close_releases_resident_bytes` and `binary_sniff_rejects_nul_in_leading_bytes_but_not_after_boundary` verify server-owned budget accounting and the documented 8 KiB binary-sniff boundary.
+- `src/server/workspace/mod.rs`: `selected_file_open_grants_only_the_selected_file` verifies an explicit selected-file open creates a single-file grant that rejects sibling paths.
+- `src/server/workspace/mod.rs`: `selected_file_open_rejects_directory_and_invalid_utf8_without_document_entry` and `selected_file_open_rejects_special_file_without_document_entry` verify selected directories, special files, and invalid UTF-8 files do not create document entries or grants.
+- `src/server/workspace/mod.rs`: `workspace_rejects_path_traversal_outside_root` verifies `..` traversal cannot authorize a sibling file outside the root.
+- `src/server/workspace/mod.rs`: `workspace_rejects_directory_and_special_file_open` verifies directories and Unix socket files are rejected as document opens.
+- `src/server/workspace/mod.rs`: `workspace_canonicalizes_symlink_before_authorization` verifies escaping symlinks are denied and in-root symlinks canonicalize consistently.
+- `src/server/workspace/mod.rs`: `file_backed_document_dirty_state_tracks_accepted_edits_and_clean_marking` verifies loaded files start clean, accepted edits mark dirty, and clean marking is explicit.
+- `src/server/workspace/mod.rs`: `accepted_edit_marks_file_document_dirty_and_save_marks_clean` verifies accepted edits dirty file-backed documents and successful saves clear dirty state.
+- `src/server/workspace/mod.rs`: `save_writes_canonical_rope_text_to_disk` verifies saves persist the server canonical rope text, including UTF-8 text.
+- `src/server/workspace/mod.rs`: `reload_dirty_document_requires_force_or_rejects` verifies dirty reloads are rejected unless forced and forced reloads replace canonical text.
+- `src/server/workspace/mod.rs`: `reload_clean_document_refreshes_disk_text_and_marks_clean` verifies clean reloads refresh from disk and stay clean.
+- `src/server/workspace/mod.rs`: `save_missing_file_returns_typed_error_and_keeps_dirty` verifies missing files produce typed errors without clearing dirty state.
+- `src/server/workspace/mod.rs`: `save_stale_metadata_returns_typed_error_and_keeps_dirty` verifies external on-disk changes are stale-save conflicts and preserve unsaved edits.
+- `src/server/workspace/mod.rs`: `workspace_diagnostic_for_missing_root_is_actionable` verifies missing root diagnostics include a stable code and container/toolbox/distrobox hint.
+- `src/server/workspace/mod.rs`: `workspace_diagnostic_sanitizes_unauthorized_paths` verifies outside-root diagnostics avoid leaking the unauthorized path.
+- `src/server/workspace/mod.rs`: `workspace_permission_denied_keeps_document_dirty` verifies permission-denied saves report a stable diagnostic and preserve dirty in-memory state.
 - `src/server/mod.rs`: `server_accepts_configured_workspace_roots_and_reports_invalid_roots` verifies startup root configuration is validated and invalid roots produce a typed server error.
 - `src/server/connection/mod.rs`: `connection_open_document_sends_snapshot_and_manifest_without_full_document_on_edit_ack` verifies open dispatch returns the initial file snapshot and manifest while later edit acknowledgements remain metadata-only.
 - `src/server/connection/mod.rs`: `file_io_errors_are_typed_protocol_failures` verifies workspace IO failures map to stable protocol error codes.
 - `src/server/js_runtime/mod.rs`: `document_facade_open_status_list_round_trip`, `workspace_roots_facade_reports_authorized_roots`, and `document_facade_rejects_unauthorized_paths` verify the runtime-backed `clay:documents`/`clay:workspace` subset reuses server workspace validation.
-- Phase 18.12 workspace discovery/listing tests in `src/server/workspace.rs`: root deduplication, cwd fallback, marker ancestry discovery, no-marker fallback, explicit directory/file grants, grant deduplication, unknown marker rejection, bounded listing, max-depth/max-entry truncation, default and root `.gitignore` ignores, traversal rejection, cancellation, child counts, and permission-denied diagnostics. Plan 060 T8 tests in `src/server/ops/workspace.rs` block traversal on a FIFO-backed `.gitignore` while open/save complete, then verify cooperative cancellation and token removal on success, error, and unwind.
+- Phase 18.12 workspace discovery/listing tests in `src/server/workspace/mod.rs`: root deduplication, cwd fallback, marker ancestry discovery, no-marker fallback, explicit directory/file grants, grant deduplication, unknown marker rejection, bounded listing, max-depth/max-entry truncation, default and root `.gitignore` ignores, traversal rejection, cancellation, child counts, and permission-denied diagnostics. Plan 060 T8 tests in `src/server/ops/workspace.rs` block traversal on a FIFO-backed `.gitignore` while open/save complete, then verify cooperative cancellation and token removal on success, error, and unwind.
 - `src/server/connection/mod.rs`: `connection_add_selected_workspace_root_sends_file_browser_snapshot` and `connection_add_selected_workspace_root_rejects_stale_capability` cover selected-folder root grants and stale-token rejection.
 - `src/server/connection/mod.rs`: `cross_tab_workspace_and_document_authority_is_fail_closed` covers per-tab list/open/resync/status/edit/save/reload/close denial, foreign root IDs, cross-connection capability rejection, unchanged target text/version/dirty state, and rejection of a bound connection's foreign `Reclaim`.
 - Relevant commands: `cargo test workspace:: --lib`, `cargo test server::connection::tests`, `cargo test`.

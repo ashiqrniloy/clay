@@ -6,7 +6,7 @@
 - `src/server/mod.rs`
 - `src/server/tab_registry.rs`
 - `src/server/connection/mod.rs`
-- `src/server/workspace.rs`
+- `src/server/workspace/mod.rs`
 - `src/server/document.rs`
 - `src/protocol/codec.rs`
 - `src/ipc.rs`

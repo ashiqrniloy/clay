@@ -60,7 +60,7 @@ The review confirms that existing editor, SDUI, behavior-manifest, command/actio
 
 Implement a Clay-owned working-area state and shell root above the editor.
 
-- Tentative files: `src/shell/mod.rs`, `src/shell/layout.rs`, `src/masonry_shell/mod.rs`, `src/lib.rs`, and `src/main.rs`.
+- Tentative files: `src/shell/mod.rs`, `src/shell/layout/mod.rs`, `src/masonry_shell/mod.rs`, `src/lib.rs`, and `src/main.rs`.
 - State should record one native window working area, one active pane tree root, the active pane, a layout version, and the editor component binding needed for focus/action routing.
 - The Masonry widget should be a Clay-owned container (for example `ClayShellWidget`) that registers the existing `EditorWidget` as a child and exposes internal child-ID accessors for the driver.
 - Startup can construct the default one-pane working area. Mutation/update paths may later apply validated shell state. Masonry layout/paint should only read installed shell state and place already-registered children.
@@ -70,7 +70,7 @@ Implement a Clay-owned working-area state and shell root above the editor.
 
 Implement generic pane/split topology state independent of package or mode behavior.
 
-- Tentative files: `src/shell/layout.rs` plus shell widget layout tests in `src/masonry_shell/mod.rs`.
+- Tentative files: `src/shell/layout/mod.rs` plus shell widget layout tests in `src/masonry_shell/mod.rs`.
 - Model leaf panes and horizontal/vertical split nodes with stable pane IDs, split orientation, bounded ratio/min/max validation, a default one-leaf tree, active-pane metadata, and geometry helpers.
 - Validation must reject duplicate pane IDs, unsupported orientations, invalid split ratios, empty trees, oversize future payloads, raw native handles, raw CSS, raw ops, and client-JS hooks by type or validator.
 - Split topology changes are startup/update work only. Layout computes rectangles from installed state and must not add/remove Masonry children during layout.
@@ -79,7 +79,7 @@ Implement generic pane/split topology state independent of package or mode behav
 
 Implement leaf-pane slot state and geometry for `main` plus optional fixed slots.
 
-- Tentative files: `src/shell/layout.rs`, `src/masonry_shell/mod.rs`, `src/masonry_sdui.rs`, and `src/masonry_editor.rs` if adapter methods are needed.
+- Tentative files: `src/shell/layout/mod.rs`, `src/masonry_shell/mod.rs`, `src/masonry_sdui.rs`, and `src/masonry_editor.rs` if adapter methods are needed.
 - Every leaf pane has exactly one mandatory `main` slot. Optional `left`, `right`, `top`, and `bottom` slots should carry visibility, collapsed state, current size, min/max size, and future resize provenance.
 - Geometry should compute `main` from visible fixed slots and keep editor input, caret, selection, scroll, paint, and status behavior bounded to the main region.
 - Existing `SduiNativeState` can be bridged as internal Clay-owned slot content for the current side panel until Phase 18.3 implements slot-aware `PanelContribution` and `ComponentContribution`.

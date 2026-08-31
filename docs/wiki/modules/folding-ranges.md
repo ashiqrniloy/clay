@@ -6,7 +6,7 @@
 - `src/protocol/parse.rs` — optional fold member on `IncrementalParseUpdate` and `ViewportRenderPatch`.
 - `src/protocol/mod.rs` — fold message/event variants and protocol versioning.
 - `src/server/folding.rs` — publication validation and generic Tree-sitter derivation.
-- `src/server/syntax.rs` — core fold generation beside native syntax parsing.
+- `src/server/syntax/mod.rs` — core fold generation beside native syntax parsing.
 - `src/server/ops/folding.rs`, `runtime/js/folding.js` — package publication boundary.
 - `src/server/parse_coordinator.rs`, `src/server/connection/mod.rs` — validation and delivery.
 - `src/client/mod.rs` and `src-tauri/src/bridge/{dto,forwarder}.rs` — typed event and bridge transport.

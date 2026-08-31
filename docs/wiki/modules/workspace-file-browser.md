@@ -2,7 +2,7 @@
 
 ## Source
 
-- `src/server/workspace.rs`
+- `src/server/workspace/mod.rs`
 - `src/server/ops/workspace.rs`
 - `src/server/ops/commands.rs`
 - `runtime/js/workspace.js`
@@ -98,7 +98,7 @@ await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].re
 ## Primitive Coverage
 
 - Primitive/category: `WorkspaceRootDiscovery`, `BoundedFileListService`, Clay-owned file-browser composition, workspace command execution.
-- Rust owners: `src/server/workspace.rs`, `src/shell/file_browser.rs`, `src/server/command_execution.rs`.
+- Rust owners: `src/server/workspace/mod.rs`, `src/shell/file_browser.rs`, `src/server/command_execution.rs`.
 - Ops/facades: `op_clay_workspace_*`, `op_clay_commands_execute_command`, `runtime/js/workspace.js`, `runtime/js/commands.js`.
 - Public docs: `docs/reference/clay-js-api/workspace/`, `docs/reference/clay-js-api/commands/server-execute-command.md`, `server-open-file.md`, `server-open-directory.md`, `server-reveal-in-tree.md`, and `docs/development/launch-and-gui-smoke.md#end-to-end-file-browser-workflow-smoke`.
 - Hot-path policy: discovery/listing/opening are server/runtime work; typing, local paint, layout, scroll, and package JavaScript hot paths do not list directories or scan workspaces.
@@ -125,7 +125,7 @@ Checks: `src/shell/file_browser.rs` tree/header/action tests; `src/driver/reconc
 
 ## Tests
 
-- `src/server/workspace.rs`: root discovery, explicit grants, root deduplication, bounded directory listing, `*` backtracking/`?`/Unicode/directory-only and root-relative path ignore rules, unsupported-rule and oversized-input fail-closed pages, traversal rejection, cancellation, child counts, and diagnostics.
+- `src/server/workspace/mod.rs`: root discovery, explicit grants, root deduplication, bounded directory listing, `*` backtracking/`?`/Unicode/directory-only and root-relative path ignore rules, unsupported-rule and oversized-input fail-closed pages, traversal rejection, cancellation, child counts, and diagnostics.
 - `src/shell/fuzzy.rs` / `src/shell/file_browser.rs`: shared bounded fuzzy subsequence scorer (`fuzzy_score`/`fuzzy_score_fields`) used by `fuzzy_session` (Phase 24.2), SDUI tree shape, sanitized workspace-name/relative-directory header, editor-only hidden tree, current-directory parent row, row/action source identity for nested files, directory-row navigation command IDs, command IDs, and list action opening through the workspace API.
 - `src/server/command_execution.rs`: workspace open/directory-navigation/reveal/toggle execution, selected-file grants, missing arguments, and save-related command absence.
 - `src/server/connection/mod.rs`: `workspace_directory_action_sends_refreshed_file_browser_snapshot` verifies directory navigation returns a refreshed `SduiSnapshot`; deferred-handshake/toggle coverage proves the initial editor-only snapshot and later visible tree; `file_browser_open_uses_generic_open_document_followups` opens as client 99 and proves that same client can immediately submit an accepted edit with the returned lease.

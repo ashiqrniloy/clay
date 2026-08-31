@@ -17,7 +17,7 @@
 - `docs/wiki/modules/syntax-grammar-registry.md`
 - `docs/wiki/modules/phase18.10-tree-sitter-grammar-primitive-review.md`
 - `docs/wiki/modules/editor-theme-registry.md`
-- `src/server/syntax.rs`
+- `src/server/syntax/mod.rs`
 - `src/server/parse_coordinator.rs`
 - `src/server/connection/mod.rs`
 - `src/protocol/decorations.rs`
@@ -51,7 +51,7 @@ Tier 1 is native compiled-in first-party Tree-sitter grammar data, Tier 2 is a h
 ### Grammar registry and package grammar metadata
 
 - `src/packages/record/mod.rs::SyntaxGrammarContributionDescriptor` already parses package `clay.contributions.syntaxGrammars` metadata: `languageId`, `filePatterns`, grammar artifact path, query paths, `styleMap`, budgets, and package provenance.
-- `src/server/syntax.rs::SyntaxGrammarRegistry` indexes validated grammar contributions by contribution ID, language ID, extension, and exact filename.
+- `src/server/syntax/mod.rs::SyntaxGrammarRegistry` indexes validated grammar contributions by contribution ID, language ID, extension, and exact filename.
 - `SyntaxGrammarRegistry::select_for_document` keeps active syntax grammar separate from active major mode, so `core.code` / `core.text` editability remains available when highlighting is absent or invalid.
 - Existing first-party packages provide partial grammar metadata: `@clay/rust`, `@clay/typescript`, and `@clay/javascript` have `queries/highlights.scm` and placeholder `grammars/README.md`; `@clay/markdown` currently has a markdown-it JS parser package and no Tree-sitter grammar metadata/artifact yet.
 - Current package metadata still names `tree-sitter-wasm` artifacts; Phase 18.16 must generalize this into a tiered descriptor without breaking the package-root confinement and provenance checks.

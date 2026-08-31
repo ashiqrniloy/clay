@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverDiscoverWorkspaceRootForPath
 js_facade: runtime/js/workspace.js::serverDiscoverWorkspaceRootForPath
-backing_rust: src/server/workspace.rs::WorkspaceState::discover_root_for_path
+backing_rust: src/server/workspace/mod.rs::WorkspaceState::discover_root_for_path
 deno_op: op_clay_workspace_discover_root_for_path
 deno_op_path: src/server/ops/workspace.rs::op_clay_workspace_discover_root_for_path
 name: serverDiscoverWorkspaceRootForPath
@@ -91,7 +91,7 @@ Use `workspace.serverDiscoverWorkspaceRootForPath` only through the documented C
 
 - JS facade: `runtime/js/workspace.js::serverDiscoverWorkspaceRootForPath`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_discover_root_for_path` (`op_clay_workspace_discover_root_for_path`)
-- Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::discover_root_for_path`
+- Backing Rust/current owner: `src/server/workspace/mod.rs::WorkspaceState::discover_root_for_path`
 
 ## Lookup metadata
 

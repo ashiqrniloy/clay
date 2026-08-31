@@ -624,7 +624,7 @@ fn validate_record(record: &PackageApprovalRecord) -> Result<(), String> {
 /// over the target. The rename is atomic, so a crash mid-write never leaves
 /// a torn store; a stale temp is removed on failure.
 // ponytail: no parent-directory fsync; the atomic rename already guarantees
-// the store is never torn, matching src/server/workspace.rs atomic saves.
+// the store is never torn, matching src/server/workspace/mod.rs atomic saves.
 // Plan 060 filesystem-integrity work may consolidate this helper later.
 fn atomic_write_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ApprovalStoreError> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));

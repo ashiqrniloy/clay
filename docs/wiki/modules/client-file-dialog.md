@@ -15,7 +15,7 @@
 - `src/client/behavior.rs` (client UI command routing contract)
 - `src/client_commands.rs`
 - `src/protocol/mod.rs` (`ClientMessage::OpenSelectedFile`, `AddSelectedWorkspaceRoot`)
-- `src/server/workspace.rs` (`WorkspaceState::open_selected_file`)
+- `src/server/workspace/mod.rs` (`WorkspaceState::open_selected_file`)
 - `src/server/connection/workspace.rs`
 - `runtime/js/documents.js`, `runtime/js/workspace.js`
 - `docs/reference/clay-js-api/documents/client-open-file-dialog.md`

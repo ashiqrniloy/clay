@@ -9,7 +9,7 @@
 - `src/server/parse_coordinator.rs`
 - `src/server/{completion,language_intelligence,document_analysis}.rs`
 - `src/server/{behavior,sdui,ui,syntax,decorations,diagnostics}.rs`
-- `src/server/workspace.rs`
+- `src/server/workspace/mod.rs`
 - `src/protocol/runtime.rs`
 - `src/client/{mod,runtime_state}.rs`
 - `src/masonry_editor.rs`

@@ -5,7 +5,7 @@
 - `src/protocol/mod.rs` — `DocumentTextHead`, `DocumentChunk`, request, and rejection shapes.
 - `src/protocol/codec.rs` — frame and request-size guards.
 - `src/perf/budgets.rs` — `MAX_CHUNK_BYTES`, resident-memory, and frame budgets.
-- `src/server/workspace.rs` — streamed open/reload/read and atomic save.
+- `src/server/workspace/mod.rs` — streamed open/reload/read and atomic save.
 - `src/server/document.rs` — rope head/chunk reads and parse-window slicing.
 - `src/server/connection/documents.rs` — routed chunk request handling.
 - `src/server/connection/mod.rs` — connection dispatch.
@@ -16,7 +16,7 @@
 - `frontend/src/editor/sync/session.ts` — one-owner load state machine.
 - `frontend/src/editor/ClayEditor.tsx` — read-only/loading projection.
 - `frontend/src/editor/create-editor.ts` — CodeMirror view setup.
-- Tests: `src/server/workspace.rs`, `src/server/document.rs`, `src/protocol/codec.rs`, `frontend/src/editor/sync/session.test.ts`, `tests/editor_performance.rs`.
+- Tests: `src/server/workspace/mod.rs`, `src/server/document.rs`, `src/protocol/codec.rs`, `frontend/src/editor/sync/session.test.ts`, `tests/editor_performance.rs`.
 
 ## Overview
 
@@ -140,7 +140,7 @@ partially assembled document. A new head/reload/resync is the recovery boundary.
 
 ## Tests
 
-- `src/server/workspace.rs` — large-file stream, UTF-8 head boundary, binary
+- `src/server/workspace/mod.rs` — large-file stream, UTF-8 head boundary, binary
   sniff, resident budget, save/reload, and cross-read behavior.
 - `src/server/document.rs` — rope head/chunk bounds and canonical version checks.
 - `src/protocol/codec.rs` — chunk round trips, frame bound, and invalid request

@@ -63,7 +63,7 @@ The user raised three structural objections to the native-crates route: (1) "all
 - `src/server/parse_coordinator.rs::finish_task` — the silent `let Ok(update) = result else { failed_tasks += 1; return; }` drop.
 - `src/server/js_runtime.rs::evaluate_js_parse_handler` and `src/server/ops/parse.rs::op_clay_parse_register_parse_handler` — the JS parse-handler bridge and `runtimeBridge` flag the generic adapter will use.
 - `src/server/ops/syntax.rs::op_clay_syntax_register_syntax_grammar` and `src/packages/record.rs` (`SyntaxGrammarContributionDescriptor`, `validate_package_asset_path` accepting `.wasm`) — grammar metadata validation already in place.
-- `src/server/syntax.rs::TreeSitterSyntaxHandler` — native handler currently with zero production call sites; remains available for tests and as the reference shape for decoration output.
+- `src/server/syntax/mod.rs::TreeSitterSyntaxHandler` — native handler currently with zero production call sites; remains available for tests and as the reference shape for decoration output.
 - `packages/rust/package.json`, `packages/typescript/package.json`, `packages/javascript/package.json` — declare `tree-sitter-wasm` grammars, `highlights.scm` queries, and `styleMap` already.
 - `packages/rust/grammars/README.md`, `packages/typescript/grammars/README.md` — document the package-root-confined `tree-sitter-wasm` contract and that Clay binds the artifact through Clay-owned server syntax code.
 - `packages/markdown/dist/parser.js` and `packages/markdown/dist/sdui.js` — current package-JS decoration parser and (separate) preview SDUI panel.

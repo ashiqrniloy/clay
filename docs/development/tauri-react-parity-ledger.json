@@ -1055,7 +1055,7 @@
       "status": "verified",
       "migration_phase": 6,
       "current_owner": [
-        "src/shell/layout.rs",
+        "src/shell/layout/mod.rs",
         "src/masonry_shell/mod.rs",
         "src/masonry_pane_host.rs"
       ],

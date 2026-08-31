@@ -14,7 +14,7 @@
 - `src/server/ops/language_server.rs`
 - `src/server/ops/document_analysis.rs`
 - `src/server/document_analysis.rs`
-- `src/server/syntax.rs`
+- `src/server/syntax/mod.rs`
 - `src/server/completion.rs`
 - `src/server/mod.rs`
 

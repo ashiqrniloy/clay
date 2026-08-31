@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientResizePaneUp
 js_facade: runtime/js/shell.js::clientResizePaneUp
-backing_rust: src/client_commands.rs::EditorClientCommand; src/shell/layout.rs::PaneSplitTree
+backing_rust: src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientResizePaneUp
@@ -104,7 +104,7 @@ Use `shell.clientResizePaneUp` only as a documented command ID for `bindKey` to 
 
 - JS facade: `runtime/js/shell.js::clientResizePaneUp`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/client_commands.rs::ShellClientCommand (client-local; React PaneTree and workspace controller)`; `src/shell/layout.rs::PaneSplitTree`
+- Backing Rust/current owner: `src/client_commands.rs::ShellClientCommand (client-local; React PaneTree and workspace controller)`; `src/shell/layout/mod.rs::PaneSplitTree`
 
 ## Lookup metadata
 

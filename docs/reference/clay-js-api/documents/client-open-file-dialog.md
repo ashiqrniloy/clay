@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:documents"
 js_export: clientOpenFileDialog
 js_facade: runtime/js/documents.js::clientOpenFileDialog
-backing_rust: src/client_commands.rs::EditorClientCommand; src-tauri/src/commands.rs::dialog_open_file; src/server/workspace.rs::WorkspaceState::open_selected_file; src/protocol/mod.rs::ClientMessage::OpenSelectedFile
+backing_rust: src/client_commands.rs::EditorClientCommand; src-tauri/src/commands.rs::dialog_open_file; src/server/workspace/mod.rs::WorkspaceState::open_selected_file; src/protocol/mod.rs::ClientMessage::OpenSelectedFile
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientOpenFileDialog
@@ -112,8 +112,8 @@ Use `documents.clientOpenFileDialog` as a documented command ID for `bindKey`. A
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
 - JS facade: `runtime/js/documents.js::clientOpenFileDialog`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src-tauri/src/commands.rs::dialog_open_file` (native portal picker); `src/client/behavior.rs::ClientBehaviorState::route_key` (client UI command routing); `src/server/workspace.rs::WorkspaceState::open_selected_file`; `src/protocol/mod.rs::ClientMessage::OpenSelectedFile`
-- Current implementation audit path: `frontend/src/shell/workspace-controller.ts` (command dispatch → `openFileDialog` adapter), `frontend/src/bridge/client.ts::openFileDialog` (Tauri invoke), `src-tauri/src/commands.rs::dialog_open_file` (ashpd portal picker, per-dialog busy lock, grant-feed via `BridgeState::accept_selected_path`), and `src/server/workspace.rs::WorkspaceState::open_selected_file`
+- Backing Rust/current owner: `src-tauri/src/commands.rs::dialog_open_file` (native portal picker); `src/client/behavior.rs::ClientBehaviorState::route_key` (client UI command routing); `src/server/workspace/mod.rs::WorkspaceState::open_selected_file`; `src/protocol/mod.rs::ClientMessage::OpenSelectedFile`
+- Current implementation audit path: `frontend/src/shell/workspace-controller.ts` (command dispatch → `openFileDialog` adapter), `frontend/src/bridge/client.ts::openFileDialog` (Tauri invoke), `src-tauri/src/commands.rs::dialog_open_file` (ashpd portal picker, per-dialog busy lock, grant-feed via `BridgeState::accept_selected_path`), and `src/server/workspace/mod.rs::WorkspaceState::open_selected_file`
 
 ## Lookup metadata
 

@@ -32,7 +32,7 @@ package SDUI slots (Phase 7), native Masonry chrome (delete after parity).
    session map. `session_request` stamps the target tab's `client_id`.
 2. Events leave the bridge as `Routed { clientId, tabId, event }` so a
    document open in tab A cannot land on tab B's pane sessions.
-3. `split-tree.ts` mirrors `src/shell/layout.rs`: equal split, close-merges
+3. `split-tree.ts` mirrors `src/shell/layout/mod.rs`: equal split, close-merges
    sibling, equal-area comb, reading-order move, 0.05–0.95 clamp.
 4. `react-resizable-panels` draws nested groups; keyboard chords in
    `use-shell-chords.ts` call the same tree ops.
