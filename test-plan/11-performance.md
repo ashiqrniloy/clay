@@ -242,6 +242,8 @@ No performance budget was changed.
 | Q35 | Edit the ready 50 MiB document, Save, and Reload | Save acknowledgement remains bounded and responsive; disk/reloaded bytes equal the edited document; ordinary editor input does not wait on chunk or save IO |
 | Q36 | Attempt `oversize.txt` (257 MiB sparse) and `binary.dat` | Resident-budget and binary-sniff refusals return promptly with typed diagnostics; no large content allocation, stale loading loop, or unbounded memory growth occurs |
 | Q37 | Inspect the protocol-v28 runtime run and frame assertions | `DocumentChunk` payloads remain ≤256 KiB and below the 1 MiB codec frame ceiling; v28 handshake and mixed-version rejection remain deterministic |
+| Q38 | Load the app after the Plan 105 index code-split (restart or fresh launch) | Startup fetches the `index` chunk plus the parallel `codemirror` chunk via modulepreload with no sequential first-paint waterfall; the index raw size stays below the 500 KiB rollup warning; `npm run check:budget` shell (≤180 kB gzip) and total (≤400 kB gzip) budgets hold |
+
 
 ## Plan 098 Linux execution record (2026-08-26)
 
@@ -303,3 +305,10 @@ Plan 103 production build budgets (enforced via `npm run check:budget`):
 - Total bundle gzip: 359.6 kB (≤ 400 kB budget)
 Effect bounds: max blur 32px, max shadow layers 3, max motion 1000ms, max border width 8px.
 Zero recipe computation occurs in React render loops or keystroke hot paths.
+
+
+## Plan 105 chunk-split startup record (2026-09-01)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Q38 | PASS | Task 9 build evidence (`docs/development/performance.md`): index raw 517.98 → 468.84 kB (≈148.7 kB gzip), rollup warning cleared; `codemirror` chunk (361.65 kB raw / 117.80 kB gzip) loads in parallel via modulepreload (2 requests, no waterfall); `npm run check:budget` gates shell 153.4 kB/≤180 kB and total 359.7 kB/≤400 kB gzip; all frontend tests green. The documented trade-off (startup gzip up ~101 kB because the eager shell already imported a codemirror slice; editor-open bytes drop equally) is recorded there. The 2026-09-01 launch-gate capture `code-reviews/screenshots/2026-09-01-plan105-manual/default/` boots this exact split build with the welcome state rendering normally — no startup regression observed. |

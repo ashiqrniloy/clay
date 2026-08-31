@@ -157,3 +157,22 @@ GUI pass.
 The full run passed `--enforce` with zero long tasks over 50 ms and bounded
 retention. Do not treat the bootstrap-only p95 table or zero parser queue as
 proof of L26; repeat on an input-capable designated device.
+
+## Plan 105 Linux execution record (2026-09-01)
+
+Repository-review remediation plan (junk/dead-code removal, internal refactors,
+frontend chunk split, docs). No user-visible behavior change by design; this
+record is the required launch-gate smoke after the structural work.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Launch gate (L1/L12/L15 class) | PASS | `scripts/capture-ui-review.sh --fixture ui-review-default --output code-reviews/screenshots/2026-09-01-plan105-manual/default` on the freshly built `target/debug/clay` (contains all Plan 105 changes through task 12): `review.status=PASS`, 900×600 logical, private socket, mode-700 isolated config. Clay-only crop `screenshot-clay.png` shows the welcome state (Start with a file or folder, Open file/Open folder), `CLAY`/`Workspace` tab bar, and the sanitized status hint with workspace basename — no absolute host path. Full-desktop portal PNG (contained unrelated user windows) was deleted per the evidence-retention policy. |
+| AT-SPI structure | PASS | `accessibility.txt` exposes the `Clay` frame, `Clay workspace`, `Window tabs`, and named `Open file`/`Open folder` actions; no `/home/...` path appears in any name/footer. Footer `Connected` text remains invisible to AT-SPI names — the documented WebKitGTK live-region ceiling (Plan 097 record), not a Plan 105 regression. |
+| Observer/lease/restart/local-fallback (L2–L5, L9–L11) | NOT RUN — unchanged | `computer-use-linux doctor` (2026-09-01): `can_send_development_input=false` (no uinput/xdotool/ydotool/wtype). These flows are untouched by the plan (extraction code was moved, not modified; dialog backend deletion kept the Tauri bridge path); prior live records remain the evidence. |
+
+Dialog open path: the deleted `src/client/file_dialog.rs` backends were never
+JS- or Tauri-reachable (task-13 inventory); the live dialog path remains
+`invoke("dialog_open_file" | "dialog_open_folder")` → `src-tauri/src/commands.rs::pick_path`
+(ashpd portal), and the Open file/Open folder welcome actions render with
+sanitized names in the capture. Live chooser selection stays input-blocked as
+in every prior record.

@@ -219,3 +219,16 @@ a typing-flow claim.
 ## Plan 103 Editor Boundary & Design-System Cross-Reference (2026-08-30)
 
 Editor pane container and scrollbars consume `--clay-ds-editor-view-*` recipe variables. The CodeMirror editor canvas text, carets, selections, search highlights, and syntax decorations strictly preserve theme color authority (`var(--clay-editor-*)` and `var(--clay-syntax-*)`). Design systems cannot modify syntax colors or text rendering. See [Module 15](15-ui-design-systems.md) for full design-system switching checks.
+
+
+## Plan 105 Linux execution record (2026-09-01)
+
+Plan 105 changed no editor behavior by design (connection-loop extraction,
+test-module moves, unwrap/expect annotations). E37/E38 automated companions
+re-verified on this branch:
+
+| Check | Result | Evidence |
+|---|---|---|
+| E37 automated companion | PASS | Split `tests/editor_performance.rs` runtime suite (green 2026-08-31, 49.44 s combined) still covers server-authoritative typing/viewport/patch flows including the 10 MiB and 50 MiB cells — the same large-file delayed-parse paths E37 exercises; frontend hot-path suite green (194 tests, task 7). |
+| E38 automated companion | PASS | Same suite plus the protocol/runtime `large_document` tests (chunk bounds, resync, no-history/remount invariants) green on this branch (task 6 full run). |
+| E37/E38 live typing | UNRESOLVED | `computer-use-linux doctor` 2026-09-01: no capable input backend (`can_send_development_input=false`). Unchanged from Plan 098/099 records; not a Plan 105 regression. |

@@ -333,3 +333,26 @@ resident-budget measurement.
 No existing step was deleted or weakened. Synthetic roots were removed and
 retained reports contain no user files, source text, credentials, or ambient
 paths.
+
+
+## Plan 105 manual test-plan execution record (2026-09-01)
+
+Plan 105 (repository review remediation) changes no user-visible behavior by
+design: junk/dead-code removal (task 2: tracked scratch files; task 3: never-
+compiled native dialog backends), internal refactors (tasks 5, 6, 7, 8, 12),
+build config (task 9, index code-split), drift guards/docs (tasks 4, 10, 11,
+13). The one deliberate shipping change is the chunk split's startup-loading
+behavior, recorded as new step Q38 in [module 11](11-performance.md) instead
+of chat-only.
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 01 launch gate (L1/L12/L15 class) + AT-SPI structure | PASS | `scripts/capture-ui-review.sh` fresh-build capture `code-reviews/screenshots/2026-09-01-plan105-manual/default/` (`review.status=PASS`); Clay-only crop retained, full-desktop PNG deleted per evidence policy; welcome state, tab bar, named open actions, sanitized status; footer-invisible-to-AT-SPI stays the documented WebKitGTK ceiling. |
+| 04 E37/E38 | PASS automated / UNRESOLVED live | Split editor_performance runtime suite + frontend hot-path suites green on this branch; live typing blocked by the same no-input-backend host ceiling (doctor 2026-09-01). |
+| 13 D20/D21, split/tree structure | PASS automated / UNRESOLVED live | Split/pane isolation suites green in full runs; retained Plan 099/plan-097 artifacts unchanged; no input backend for interactive splits. |
+| 11 Q38 (chunk-split startup) | PASS | Vite modulepreload parallel load verified with `npm run check:budget` (153.4/180 + 359.7/400 kB gzip) and boot capture of the split build (module 11 record). |
+| 12 platform Windows | N/A | Linux-primary validation per plan; no Windows claims made or weakened. |
+
+No manual test step was deleted or weakened. Ledger coverage: Q38 added to
+`performance.budgets.feel` (`docs/development/tauri-react-parity-ledger.json`)
+with verification evidence; `tests/documentation_coverage.rs` passes.

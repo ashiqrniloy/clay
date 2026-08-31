@@ -370,3 +370,16 @@ not SDUI — packages contribute chrome only as inert manifest data.
 ## Plan 103 Split Tree Recipe & Design-System Cross-Reference (2026-08-30)
 
 Pane split tree panes, resize handles, and separator borders consume `--clay-ds-pane-split-tree-*` recipe variables. Drag/keyboard split geometry and ratios remain host-managed by `react-resizable-panels`. Design systems cannot alter split ratios or pane containment. See [Module 15](15-ui-design-systems.md) for full design-system switching checks.
+
+
+## Plan 105 Linux execution record (2026-09-01)
+
+No split/pane behavior change by design (connection-family extraction and
+test-module moves only). Split/pane isolation suites green in the full branch
+runs (lib 1,164 + protocol 201 + runtime 71 + security 134 + presentation 40,
+2026-08-31 task 6 verification). D20/D21 interactive passes remain
+UNRESOLVED: same no-input-backend host ceiling (`doctor`
+`can_send_development_input=false`, 2026-09-01); retained Plan 099 four-pane
+artifacts and the 2026-08-24 parity AT-SPI split records remain the live
+evidence. Launch-gate capture: `code-reviews/screenshots/2026-09-01-plan105-manual/default/`
+(module 01 record).
