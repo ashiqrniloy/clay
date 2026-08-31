@@ -101,7 +101,7 @@ Run focused coverage with:
 
 ```bash
 cd frontend && npm test -- --run src/editor/sync/session.test.ts
-cargo test --test runtime editor_performance_matrix_holds_deterministic_invariants -- --exact
+cargo test --test runtime editor_performance_
 ```
 
 ## Related

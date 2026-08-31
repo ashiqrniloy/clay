@@ -104,8 +104,8 @@ measurement uses the React/Tauri paths documented below.
 
 ## Plan 099 deterministic matrix
 
-`tests/editor_performance.rs::editor_performance_matrix_holds_deterministic_invariants`
-uses one real IPC server and 30 generated-fixture cells. It drives the typed
+`tests/editor_performance.rs` size-class matrix (`editor_performance_small_cells_hold_invariants`, `editor_performance_medium_cells_hold_invariants`, `editor_performance_large_cells_hold_invariants`)
+uses one real IPC server per size class and 31 generated-fixture cells. It drives the typed
 protocol and asserts mode classification, one atomic patch per request ID,
 exact edit/version accounting, save/reload/resync behavior, and close
 retirement across sizes, line shapes, and first-party extensions.
@@ -216,7 +216,7 @@ Run focused coverage with:
 
 ```bash
 cargo test --test protocol perf_fixtures:: performance_budgets::
-cargo test --test runtime editor_performance_matrix_holds_deterministic_invariants -- --exact
+cargo test --test runtime editor_performance_
 cd frontend && npm test -- --run src/editor/performance.test.ts src/editor/extensions/performance.test.ts
 ```
 

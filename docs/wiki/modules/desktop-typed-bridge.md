@@ -149,7 +149,7 @@ Run focused coverage with:
 
 ```bash
 cargo test -p clay-desktop --all-targets
-cargo test --test runtime editor_performance_matrix_holds_deterministic_invariants -- --exact
+cargo test --test runtime editor_performance_
 cd frontend && npm test -- --run src/test/bridge.test.ts
 ```
 

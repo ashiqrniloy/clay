@@ -115,11 +115,16 @@ npm run check:budget  # shell gzip ≤ 180 kB; total (incl. editor) ≤ 400 kB
 ### Plan 099 editor performance verification
 
 Run Cargo gates serially. The deterministic matrix uses the real server and
-protocol; the frontend suite uses the real `createEditor` path and never makes
-machine-variant wall-clock timing a CI assertion:
+protocol, split into per-size-class tests (`editor_performance_small_cells_hold_invariants`,
+`editor_performance_medium_cells_hold_invariants`,
+`editor_performance_large_cells_hold_invariants`) that the harness runs in
+parallel (plan 105 task 8): small (24 cells at 64 KiB), medium (5 cells at
+1 MiB), and large (10 MiB + 50 MiB); the frontend suite uses the real
+`createEditor` path and never makes machine-variant wall-clock timing a CI
+assertion:
 
 ```bash
-cargo test --test runtime editor_performance::editor_performance_matrix_holds_deterministic_invariants -- --exact
+cargo test --test runtime editor_performance_
 cargo test --test protocol performance_budgets
 cargo test --test protocol primitives_docs::plan099_editor_documentation_matches_current_implementation
 cargo test --test protocol documentation_coverage::plan099_reference_docs_are_cross_linked_and_current

@@ -281,7 +281,9 @@ fn plan099_editor_documentation_matches_current_implementation() {
             "docs/development/build-and-test.md",
             &[
                 "### Plan 099 editor performance verification",
-                "editor_performance_matrix_holds_deterministic_invariants",
+                "editor_performance_small_cells_hold_invariants",
+                "editor_performance_medium_cells_hold_invariants",
+                "editor_performance_large_cells_hold_invariants",
                 "target/perf/editor-performance/<label>/",
             ],
         ),

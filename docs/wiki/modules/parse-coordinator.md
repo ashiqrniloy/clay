@@ -190,7 +190,7 @@ Run focused coverage with:
 ```bash
 cargo test --lib server::syntax_session
 cargo test --lib server::parse_coordinator
-cargo test --test runtime editor_performance_matrix_holds_deterministic_invariants -- --exact
+cargo test --test runtime editor_performance_
 ```
 
 ## Related

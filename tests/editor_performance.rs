@@ -102,11 +102,78 @@ fn matrix() -> Vec<MatrixCell> {
     cells
 }
 
-/// The whole matrix runs in one test against one server: package modes are
-/// loaded once and cells share the process, mirroring a real session.
+/// Size classes for the parallel split (review P2-3): each class runs its
+/// own server inside its own test, so the cargo test harness threads run the
+/// classes concurrently instead of one ~656-second serial matrix.
+#[derive(Clone, Copy)]
+enum SizeClass {
+    /// 24 cells: every fixture shape x every first-party extension at 64 KiB.
+    Small,
+    /// 5 cells: mixed-unicode shape at 1 MiB per language.
+    Medium,
+    /// 2 cells: full-transfer open/viewport/close at 10 MiB and 50 MiB.
+    Large,
+}
+
+fn cells_for(class: SizeClass) -> Vec<MatrixCell> {
+    matrix()
+        .into_iter()
+        .filter(|cell| match class {
+            SizeClass::Small => cell.size_bytes < 1024 * 1024,
+            SizeClass::Medium => {
+                cell.size_bytes >= 1024 * 1024 && cell.size_bytes < 10 * 1024 * 1024
+            }
+            SizeClass::Large => cell.size_bytes >= 10 * 1024 * 1024,
+        })
+        .collect()
+}
+
+// One server per size class, mirroring a real session: package modes are
+// loaded once per class and the class's cells share the process. The classes
+// are separate tests so the harness runs them in parallel (review P2-3);
+// before the split the whole matrix was one ~656-second serial test.
+//
+// Cells covered per test:
+// - Small (24): 64 KiB x {mixed-unicode, many-short-lines, long-lines,
+//   newline-heavy} x {txt, md, rs, ts, tsx, js}
+// - Medium (5): 1 MiB mixed-unicode x {txt, md, rs, ts, js}
+// - Large (2): 10 MiB mixed-unicode txt, 50 MiB long-lines txt
+
 #[tokio::test]
-async fn editor_performance_matrix_holds_deterministic_invariants() {
-    let root = temp_dir("editor-perf-matrix");
+async fn editor_performance_small_cells_hold_invariants() {
+    run_matrix_cells(SizeClass::Small, "editor-perf-small", "editor-perf-small")
+        .await
+        .expect("every 64 KiB matrix cell passes its invariants");
+}
+
+#[tokio::test]
+async fn editor_performance_medium_cells_hold_invariants() {
+    run_matrix_cells(
+        SizeClass::Medium,
+        "editor-perf-medium",
+        "editor-perf-medium",
+    )
+    .await
+    .expect("every 1 MiB matrix cell passes its invariants");
+}
+
+#[tokio::test]
+async fn editor_performance_large_cells_hold_invariants() {
+    run_matrix_cells(SizeClass::Large, "editor-perf-large", "editor-perf-large")
+        .await
+        .expect("every large matrix cell passes its invariants");
+}
+
+/// Shared per-class runner: deterministic fixture generation under the
+/// approved temp root, one server, then the full invariant walk for the
+/// class's cells (open, mode, viewport, edit, save, reload, resync, close).
+async fn run_matrix_cells(
+    class: SizeClass,
+    root_label: &'static str,
+    endpoint_name: &'static str,
+) -> Result<(), String> {
+    let cells = cells_for(class);
+    let root = temp_dir(root_label);
     fs::create_dir_all(&root).unwrap();
     let config_root = root.join("config");
     fs::create_dir_all(&config_root).unwrap();
@@ -123,8 +190,8 @@ await loadPackage("@clay/javascript");
     let workspace = root.join("workspace");
     fs::create_dir_all(&workspace).unwrap();
 
-    // Generate every fixture once (deterministic content, approved root).
-    for cell in matrix() {
+    // Generate every class fixture once (deterministic content, approved root).
+    for cell in &cells {
         let mut bytes = Vec::new();
         generate_fixture(
             &FixtureSpec {
@@ -142,21 +209,25 @@ await loadPackage("@clay/javascript");
         .unwrap();
     }
 
-    let endpoint = smoke_endpoint("editor-perf-matrix");
+    let endpoint = smoke_endpoint(endpoint_name);
     let mut config = ServerConfig::new(endpoint.clone());
     config.configuration_root = Some(config_root);
     let server = IpcServer::try_new(config).expect("test server config is valid");
     let server = tokio::spawn(async move { server.run().await });
 
-    let result = run_matrix(&endpoint, &workspace).await;
+    let result = run_matrix(&endpoint, &workspace, &cells).await;
     server.abort();
     let _ = server.await;
     let _ = fs::remove_dir_all(&root);
 
-    result.expect("every matrix cell passes its invariants");
+    result
 }
 
-async fn run_matrix(endpoint: &IpcEndpoint, workspace: &std::path::Path) -> Result<(), String> {
+async fn run_matrix(
+    endpoint: &IpcEndpoint,
+    workspace: &std::path::Path,
+    cells: &[MatrixCell],
+) -> Result<(), String> {
     let mut stream = connect_with_retry(endpoint).await;
     let codec = Codec::default();
     codec
@@ -205,7 +276,7 @@ async fn run_matrix(endpoint: &IpcEndpoint, workspace: &std::path::Path) -> Resu
     };
 
     let mut document_id;
-    for cell in matrix() {
+    for cell in cells {
         let path = format!("fixture-{}.{}", cell.label, cell.extension);
         // -- open (progressive loading: head arrives, chunks on demand) --
         codec
@@ -474,7 +545,18 @@ where
 {
     let mut seen = 0;
     for _ in 0..64 {
-        match timeout(Duration::from_secs(10), codec.read_server_message(stream)).await {
+        // 2026-08-31 (review P2-3): the probe used a flat 10 s read gap,
+        // which dominated the matrix wall time (20 s per cell, ~656 s
+        // suite). The patch itself always arrives at t=0 locally; the gap
+        // exists only to trip on LATE duplicates. Before the patch the gap
+        // is generous (30 s) so a loaded CI parse lane is never cut off;
+        // after the patch one 1 s idle gap proves no duplicate follows.
+        let gap = if seen == 0 {
+            Duration::from_secs(30)
+        } else {
+            Duration::from_secs(1)
+        };
+        match timeout(gap, codec.read_server_message(stream)).await {
             Err(_) => break,
             Ok(Err(error)) => return Err(format!("{label}: read failed: {error}")),
             Ok(Ok(message)) => match message {
