@@ -94,6 +94,8 @@ and the [UI Chrome Primitives](primitives/ui-chrome-primitives.md) reference.
 
 ## Reference Documents
 
+- [UI Design Systems](ui-design-systems.md) — Plan 101/102/103 public specification for typed UI design-system recipe contributions, property domains, state mapping, deterministic fallbacks, accessibility layers, and programmatic activation.
+- [UI Design-System Recipe Matrix](../development/ui-design-system-recipe-matrix.md) — Plan 101 comprehensive matrix of all package component kinds, internal surfaces, chrome primitives, semantic recipe slots, applicable interaction states, allowed property families, layout-neutrality classifications, active-theme color role sources, accessibility invariants, and deterministic fallback resolution.
 - [UI Chrome Primitives](primitives/ui-chrome-primitives.md) — Phase 20.2 native chrome primitive layer (`src/shell/primitives.rs`): divider, focus ring, panel chrome, scroll chrome, badge, kbd hint, icon slot, tooltip shell, and the Phase 24.4 token-driven scrim; token mapping, interaction states, accessibility roles, and the conformance contract.
 - [Clay Shell and Package UI/Layout Strategy](primitives/shell-layout-strategy.md) — shell vocabulary, working area, pane/split tree, fixed/transient slots, package UI/state/style contract, and the Tauri/React client implementation boundary.
 - [Creating Clay Packages](packages/creating-packages.md) — package authoring guide. The Components section and the UI and Layout Model section define the package-facing authoring contract; the Styling and Themes section and the Phase 20.1/20.4/20.7 authoring contracts define token/theme usage. Implemented-vs-planned markers in the guide match the component catalog exactly.

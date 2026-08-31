@@ -1,6 +1,7 @@
 //! Renderer-neutral shell models used by server validation and Tauri state projection.
 
 pub(crate) mod components;
+pub mod design_system;
 pub(crate) mod file_browser;
 pub(crate) mod fuzzy;
 pub(crate) mod layout;

@@ -65,6 +65,36 @@ Hidden JSON/TOML/ad hoc package UI configuration keys remain rejected; in lowerc
 
 Phase 18.5 (plan `plans/028-Phase18.5-Replan-Markdown-End-User-Loading-After-Shell-Layout-Work.md`) replans Markdown end-user loading on top of these generic primitives. Its task-8 configuration audit confirms every Markdown-relevant behavior-changing surface is either a runtime-backed Clay JS API or an explicitly planned/unavailable API: Markdown package options and theme-token/layout overrides go through the same `setPackageOption`, `serverSetLayoutOverride`, `serverRegisterThemeToken`, `serverRegisterPanelContribution`, `serverRegisterInputContribution`, and `serverRegisterUiStateScope` APIs already promoted in Phase 18.3/18.4; `setModePreference`, `setDecorationTheme`, and `setParsePolicy` remain planned, while `loadPackage` is runtime-backed and consumes installed/authorized/adopted package state. The Markdown preview defaults to `defaultVisibility: "hidden"` through `serverRegisterPanelContribution` rather than a hard-coded side panel or hidden key. No Markdown-specific configuration validator, hidden-key system, or package-specific Rust configuration branch was added.
 
+## Plan 102 design-system selection and reload semantics
+
+`theme.setDesignSystem("<specifier>")` (see
+[`docs/reference/clay-js-api/theme/set-design-system.md`](../../reference/clay-js-api/theme/set-design-system.md))
+participates in the exact same selection/reload pipeline as `setTheme`:
+
+- **Selection** is one line in `init.js` (or a persisted `designSystem`
+  preference; ui-session precedence wins over `init.js`). The op resolves
+  `@clay/core` to the built-in baseline, enables first-party bundled records
+  on demand, and resolves third-party specifiers only through already-enabled
+  records — selection never installs, adopts, or promotes a package
+  (`theme.load_failed` for missing/unenabled, `theme.invalid_design_system`
+  when the enabled package contributes no `uiDesignSystem`).
+- **Reload:** the watcher (~2 s debounce) re-runs `init.js`; a failed reload
+  (invalid specifier, syntax error, rejected package) preserves the previous
+  generation and surfaces the sanitized `JavaScript runtime evaluation
+  failed.` status diagnostic. Recovery is edit-and-reload or restart.
+- **Generation commit** revalidates the selection against enabled records
+  (name + version + contribution still present); a revoked/replaced package
+  demotes the next generation to `@clay/core` instead of failing the shell.
+  Implementation and lifecycle: [UI Design System Runtime](ui-design-system-runtime.md).
+- **No configuration keys were added.** Watcher tuning, design-system
+  allowlists, and fallback policy stay compiled; `setPackageOption` and hidden
+  `init.js` keys reject them. Tests:
+  `set_design_system_core_via_init_js`,
+  `set_design_system_rejection_leaves_state_clean`,
+  `persisted_preferences_design_system_applied`, and
+  `reload_with_missing_design_system_preserves_previous_generation_and_reports_diagnostic`
+  (`src/server/mod.rs` / `src/server/js_runtime/mod.rs` tests).
+
 ## Plan 099 configuration closure
 
 Plan 099 adds no new user-facing configuration surface. The incremental
@@ -126,7 +156,7 @@ Implemented generic additions are: bounded module-error collection/drain for opt
 
 ## Phase 20.6 persisted preferences and precedence
 
-Phase 20.6 adds `PersistedPreferences` in `src/server/configuration.rs`: a closed `~/.config/clay/preferences.json` store with at most three keys (`theme`, `appearance`, `typography`), bounded to `PREFERENCES_PAYLOAD_BUDGET_BYTES` (8 KiB), validated at load and persist time, and authority-rejecting. `load_preferences` skips `null` fields and drops corrupted/oversized/manual-edit fields field-by-field with a diagnostic so startup never breaks. `persist_preference` writes atomically (tmp + rename); `clear_preferences` backs `settings.reset`. The `setPackageOption` source taxonomy is extended with `ui-session` to label these persisted values, but no new `clay:configuration` export is added — appearance is a `clay:theme` API (`theme.setAppearance`), and the `clay:configuration` module stays closed.
+Phase 20.6 adds `PersistedPreferences` in `src/server/configuration.rs`: a closed `~/.config/clay/preferences.json` store with at most four keys (`theme`, `appearance`, `typography`, `designSystem` — the last added by Plan 102 as a validated non-empty specifier string), bounded to `PREFERENCES_PAYLOAD_BUDGET_BYTES` (8 KiB), validated at load and persist time, and authority-rejecting. `load_preferences` skips `null` fields and drops corrupted/oversized/manual-edit fields field-by-field with a diagnostic so startup never breaks. `persist_preference` writes atomically (tmp + rename); `clear_preferences` backs `settings.reset`. The `setPackageOption` source taxonomy is extended with `ui-session` to label these persisted values, but no new `clay:configuration` export is added — appearance is a `clay:theme` API (`theme.setAppearance`), and the `clay:configuration` module stays closed.
 
 A single documented precedence applies on every startup/reload (highest wins): `ui-session` (`preferences.json`, written by `settings.setTheme`/`settings.setAppearance`) > `init-js` (`init.js` `setTheme`/`setAppearance`/`setTypography`) > canonical/package default (appearance-derived Modus default or Clay core default). `apply_persisted_preferences` runs in the `src/server/js_runtime/mod.rs` harvest immediately after `init.js` evaluation, so a UI choice always overrides the equivalent `init.js` call. Canonical-default resolution (Modus Operandi/Vivendi) also runs in the harvest when no explicit theme was set. Full implementation, settings surface, and the `@clay/settings` package details: [Phase 20.6 Theme Package Segregation and Settings UI](phase20.6-theme-segregation-settings-ui.md).
 

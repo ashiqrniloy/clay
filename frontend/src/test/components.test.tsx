@@ -1,12 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+afterEach(cleanup);
+
 import {
+  ClayBadge,
   ClayButton,
   ClayCollapse,
+  ClayDivider,
+  ClayDropdown,
+  ClayKbd,
   ClayList,
   ClayModal,
+  ClayText,
   ClayTextField,
 } from "../components";
 
@@ -131,5 +138,183 @@ describe("ClayModal focus containment", () => {
     expect(dialog).toContainElement(document.activeElement as HTMLElement);
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("ClayButton variants & recipe integration", () => {
+  it("renders all four variants with deterministic CSS classes and button semantics", () => {
+    const { rerender } = render(
+      <ClayButton variant="default">Default</ClayButton>,
+    );
+    expect(screen.getByRole("button", { name: "Default" })).toBeInTheDocument();
+
+    rerender(<ClayButton variant="primary">Primary</ClayButton>);
+    expect(screen.getByRole("button", { name: "Primary" })).toBeInTheDocument();
+
+    rerender(<ClayButton variant="muted">Muted</ClayButton>);
+    expect(screen.getByRole("button", { name: "Muted" })).toBeInTheDocument();
+
+    rerender(<ClayButton variant="danger">Danger</ClayButton>);
+    expect(screen.getByRole("button", { name: "Danger" })).toBeInTheDocument();
+  });
+});
+
+function InteractiveTestSurface() {
+  return (
+    <div>
+      <ClayTextField
+        label="Workspace Name"
+        value="Project Alpha"
+        onChange={() => {}}
+      />
+      <ClayCollapse title="Advanced Settings">
+        <span>Expanded details panel</span>
+      </ClayCollapse>
+    </div>
+  );
+}
+
+describe("host recipe attributes and state mapping", () => {
+  it("renders closed host-owned data-clay-component and data-clay-slot attributes on all primitives", () => {
+    const { container } = render(
+      <div>
+        <ClayButton variant="primary">Action</ClayButton>
+        <ClayBadge>Beta</ClayBadge>
+        <ClayKbd>⌘K</ClayKbd>
+        <ClayDivider />
+        <ClayText variant="title">Heading</ClayText>
+        <ClayText variant="status">Online</ClayText>
+        <ClayTextField label="Name" value="test" onChange={() => {}} />
+        <ClayDropdown
+          label="Select Option"
+          options={[{ id: "1", label: "Option 1" }]}
+          selectedId="1"
+          onSelect={() => {}}
+        />
+        <ClayList
+          ariaLabel="Items"
+          items={[{ id: "a", title: "Item A", detail: "info" }]}
+        />
+        <ClayCollapse title="Section">
+          <span>Content</span>
+        </ClayCollapse>
+      </div>,
+    );
+
+    const button = screen.getByRole("button", { name: "Action" });
+    expect(button).toHaveAttribute("data-clay-component", "button");
+    expect(button).toHaveAttribute("data-clay-slot", "root");
+    expect(button).toHaveAttribute("data-variant", "primary");
+
+    const badge = screen.getByText("Beta");
+    expect(badge).toHaveAttribute("data-clay-component", "badge");
+    expect(badge).toHaveAttribute("data-clay-slot", "root");
+
+    const kbd = screen.getByText("⌘K");
+    expect(kbd).toHaveAttribute("data-clay-component", "kbd");
+    expect(kbd).toHaveAttribute("data-clay-slot", "root");
+
+    const divider = container.querySelector("hr");
+    expect(divider).toHaveAttribute("data-clay-component", "divider");
+    expect(divider).toHaveAttribute("data-clay-slot", "root");
+
+    const heading = screen.getByText("Heading");
+    expect(heading).toHaveAttribute("data-clay-component", "label");
+    expect(heading).toHaveAttribute("data-clay-slot", "root");
+    expect(heading).toHaveAttribute("data-variant", "title");
+
+    const status = screen.getByText("Online");
+    expect(status).toHaveAttribute("data-clay-component", "statusItem");
+    expect(status).toHaveAttribute("data-clay-slot", "root");
+    expect(status).toHaveAttribute("data-variant", "status");
+
+    const textField = container.querySelector(
+      '[data-clay-component="textInput"]',
+    );
+    expect(textField).toBeInTheDocument();
+    expect(textField).toHaveAttribute("data-clay-slot", "field");
+
+    const collapse = screen.getByRole("button", { name: /Section/ });
+    expect(collapse).toHaveAttribute("data-clay-component", "collapse");
+    expect(collapse).toHaveAttribute("data-clay-slot", "header");
+  });
+
+  it("preserves state precedence so disabled and invalid states are not masked by hover or active", async () => {
+    const user = userEvent.setup();
+    const onPress = vi.fn();
+    render(
+      <ClayButton isDisabled onPress={onPress}>
+        Disabled Button
+      </ClayButton>,
+    );
+    const button = screen.getByRole("button", { name: "Disabled Button" });
+    expect(button).toHaveAttribute("data-disabled");
+
+    await user.hover(button);
+    // When disabled, React Aria retains data-disabled and suppresses action
+    expect(button).toHaveAttribute("data-disabled");
+    await user.click(button);
+    expect(onPress).not.toHaveBeenCalled();
+  });
+
+  it("does not trigger recipe-related React re-renders on hover or focus state changes", async () => {
+    const user = userEvent.setup();
+    let renderCount = 0;
+    function TrackedButton() {
+      renderCount++;
+      return <ClayButton>Hover Me</ClayButton>;
+    }
+
+    render(<TrackedButton />);
+    expect(renderCount).toBe(1);
+
+    const button = screen.getByRole("button", { name: "Hover Me" });
+    await user.hover(button);
+    button.focus();
+
+    // Hover and focus states are purely CSS pseudo-class/attribute driven;
+    // no React re-render occurs for recipe resolution.
+    expect(renderCount).toBe(1);
+  });
+
+  it("maintains stable component state across runtime recipe variable updates", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<InteractiveTestSurface />);
+
+    // Expand collapse
+    const collapseToggle = screen.getByRole("button", {
+      name: /Advanced Settings/,
+    });
+    await user.click(collapseToggle);
+    expect(collapseToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Expanded details panel")).toBeInTheDocument();
+
+    // Simulate recipe CSS variable updates on document root (as done by DesignSystemStore)
+    document.documentElement.style.setProperty(
+      "--clay-ds-text-input-default-input-rest-border-radius",
+      "8px",
+    );
+    document.documentElement.style.setProperty(
+      "--clay-ds-collapse-default-header-rest-border-radius",
+      "4px",
+    );
+
+    // Rerender
+    rerender(<InteractiveTestSurface />);
+
+    // Input value and disclosure state remain completely preserved
+    expect(screen.getByLabelText("Workspace Name")).toHaveValue(
+      "Project Alpha",
+    );
+    expect(collapseToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Expanded details panel")).toBeInTheDocument();
+
+    // Cleanup style
+    document.documentElement.style.removeProperty(
+      "--clay-ds-text-input-default-input-rest-border-radius",
+    );
+    document.documentElement.style.removeProperty(
+      "--clay-ds-collapse-default-header-rest-border-radius",
+    );
   });
 });

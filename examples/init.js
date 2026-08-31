@@ -70,7 +70,7 @@ import { loadConfigurationModule, getConfigurationState, setPackageOption } from
 // setTheme selects a loaded first-party theme package by specifier. The theme
 // owns colors, text styles (including diagnostic styles), and component
 // tokens. Themes never execute user code or accept raw CSS.
-import { setTheme, setTypography, setAppearance } from "clay:theme";
+import { setTheme, setTypography, setAppearance, setDesignSystem } from "clay:theme";
 
 setTheme("@clay/theme-gruvbox-material-dark");
 // setTheme("@clay/theme-gruvbox-material-light");
@@ -84,6 +84,20 @@ setTheme("@clay/theme-gruvbox-material-dark");
 // setAppearance("light");  // canonical Modus Operandi
 // setAppearance("dark");   // canonical Modus Vivendi
 // setAppearance("system"); // OS signal, dark fallback
+
+// setDesignSystem activates a package-contributed UI design system — inert
+// component recipes (geometry, materials, shadows, borders, motion) layered
+// on top of the active theme. Content themes supply every concrete UI/editor
+// color; recipes map semantic color roles and cannot declare raw CSS or colors.
+// Bundled restrained Neobrutal recipes (@clay/design-neobrutal) are the default
+// design system (0px radii, 1px structural borders, 2px hard offset shadows);
+// omission keeps the built-in @clay/core baseline, so no call is needed by default.
+// To try a non-default system, install and adopt its package first
+// (selection itself installs nothing and grants no new package authority),
+// then uncomment exactly one line (e.g. Glass reference system):
+// setDesignSystem("@clay/design-glass");
+// A missing, revoked, or invalid selection keeps the previous working
+// generation, records a diagnostic, and never blocks startup.
 
 // ----------------------------------------------------------------------------
 // 3. Typography + ligatures — clay:theme setTypography

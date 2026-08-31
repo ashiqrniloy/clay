@@ -17,6 +17,8 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [Rendering Customization Strategy](reference/primitives/rendering-strategy.md) — Phase 16 inert rendering declarations, decoration update shape, SDUI reuse, client rendering attachment points, budgets, and security boundaries.
 - [Clay Shell and Package UI/Layout Strategy](reference/primitives/shell-layout-strategy.md) — Phase 18.1/18.2 shell vocabulary and runtime status, Phase 18.3 runtime-backed slot-aware package UI contribution contract, working area and pane/slot layout model, package UI/state/style contract, and the Tauri/React client implementation boundary.
 - [UI Components, Tokens, and Conformance](reference/ui-components.md) — navigation and contract entry for Clay's reusable UI surface: links the component catalog, token catalog, chrome primitives, package authoring guide, Phase 20.7 conformance rules, and the create-plan UI requirements.
+- [UI Design Systems](reference/ui-design-systems.md) — public specification for typed UI design-system recipe architecture, contribution schema, fallback rules, accessibility invariants, bundled design systems, and programmatic activation (Plans 101–104).
+- [UI Design System Recipe Matrix](development/ui-design-system-recipe-matrix.md) — complete component, slot, state, property, and fallback matrix for package-contributed UI design systems (Plan 101).
 - [UI Chrome Primitives](reference/primitives/ui-chrome-primitives.md) — Phase 20.2 native chrome primitive layer, token-driven design, interaction states, accessibility roles, routing, conformance contract, and package authoring contract.
 - [Incremental Parse and Background Parse Update Strategy](reference/primitives/parse-update-strategy.md) — bounded per-document syntax sessions, tiered syntax engines, non-blocking open, atomic viewport patches, diagnostics, budgets, and security boundaries.
 - [Markdown Mode POC Requirements](reference/primitives/markdown-mode-requirements.md) — Phase 16 Markdown mode Phase 18 readiness checklist, primitive prerequisite map, performance targets, API stubs, and first-party package security scope.
@@ -140,6 +142,7 @@ The generated documentation registry must read this section as the explicit incl
 - [setTheme](reference/clay-js-api/theme/set-theme.md) — `theme.setTheme`
 - [setAppearance](reference/clay-js-api/theme/set-appearance.md) — `theme.setAppearance`
 - [setTypography](reference/clay-js-api/theme/set-typography.md) — `theme.setTypography`
+- [setDesignSystem](reference/clay-js-api/theme/set-design-system.md) — `theme.setDesignSystem`
 - [completionTriggerCharactersFromEditorRules](reference/clay-js-api/completion/completion-trigger-characters-from-editor-rules.md) — `completion.completionTriggerCharactersFromEditorRules`
 - [serverListCompletionProvidersForTrigger](reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md) — `completion.serverListCompletionProvidersForTrigger`
 - [serverDisableCompletion](reference/clay-js-api/completion/server-disable-completion.md) — `completion.serverDisableCompletion`

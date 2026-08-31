@@ -2815,6 +2815,29 @@ current_rust_owner = "src/server/ops/typography.rs::op_clay_theme_set_typography
 registry_public = true
 
 [[api]]
+id = "theme.setDesignSystem"
+category = "theme"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:theme"
+js_export = "setDesignSystem"
+user_facing_name = "Set Design System"
+authority = "inert-recipe-activation-active-theme-color-sourcing"
+runtime_path = "init-js-op-to-active-design-system-handshake"
+hot_path_policy = "Configuration-time only; validates and resolves the uiDesignSystem declaration into an ActiveDesignSystem snapshot before first paint. The React adapter rewrites recipe CSS custom properties only on snapshot revision changes; paint performs no JS, filesystem, package resolution, or server IPC."
+facade_path = "runtime/js/theme.js::setDesignSystem"
+backing_rust = "src/server/ops/theme.rs::op_clay_theme_set_design_system; src/server/ops/theme.rs::apply_design_system; src/shell/design_system.rs::resolve_design_system"
+deno_op = "op_clay_theme_set_design_system"
+deno_op_path = "src/server/ops/theme.rs::op_clay_theme_set_design_system"
+documentation_path = "docs/reference/clay-js-api/theme/set-design-system.md"
+key_bindings = []
+custom_properties = ["specifier:string=required"]
+permissions = []
+security_notes = "Activates inert recipe data that may select among active-theme color roles and set bounded non-color values but never contains concrete colors, so color authority stays with the active theme and no raw CSS is possible. @clay/core is built in; other specifiers must already be enabled package records or are adopted through the package service's existing enable/trust path with no automatic trust promotion. On failure or package revocation the previous valid design system is preserved and a sanitized diagnostic surfaces; missing recipes resolve through @clay/core fallbacks. Does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority."
+current_rust_owner = "src/server/ops/theme.rs::op_clay_theme_set_design_system"
+registry_public = true
+
+[[api]]
 id = "language.serverRegisterLanguageIntelligenceProvider"
 category = "language-intelligence"
 visibility = "public"

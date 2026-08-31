@@ -272,7 +272,10 @@ fn package_record_accepts_full_markdown_contract() {
     assert_eq!(record.manifest.name, "@clay/markdown");
     assert_eq!(record.manifest.version, "0.1.0");
     assert_eq!(record.manifest.clay.api_prefix, "markdown");
-    assert_eq!(record.manifest.clay.entry, "./dist/index.js");
+    assert_eq!(
+        record.manifest.clay.entry.as_deref(),
+        Some("./dist/index.js")
+    );
     assert_eq!(
         record.manifest.clay.load_entry.as_deref(),
         Some("./dist/load.js")
@@ -2930,4 +2933,188 @@ fn replacement_language_server_requires_own_fresh_grant() {
         service.revoke_language_server_grants("@vendor/lsp-target"),
         1
     );
+}
+
+#[test]
+fn package_manifest_accepts_ui_design_system_and_detects_conflict() {
+    let pkg1 = json!({
+        "name": "@clay/theme-neobrutal",
+        "version": "0.1.0",
+        "type": "module",
+        "exports": { ".": "./dist/index.js" },
+        "clay": {
+            "apiPrefix": "clay-theme-neobrutal",
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "docs": "./docs/index.md",
+            "permissions": [],
+            "modes": [],
+            "contributions": {
+                "uiDesignSystem": {
+                    "schemaVersion": 1,
+                    "id": "@clay/theme-neobrutal",
+                    "displayName": "Neobrutal Reference",
+                    "values": {
+                        "controlRadius": { "type": "radius", "value": 4.0 }
+                    },
+                    "recipes": {
+                        "button.primary.root.rest": {
+                            "backgroundColor": "accent.primary",
+                            "borderRadius": 4.0,
+                            "borderWidth": 1.0
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let record1 = assemble_package_record(&pkg1).expect("package 1 record assembles");
+    let ds = record1
+        .contributions
+        .ui_design_system
+        .as_ref()
+        .expect("ui_design_system present");
+    assert_eq!(ds.id, "@clay/theme-neobrutal");
+    assert_eq!(ds.recipe_count, 1);
+    assert_eq!(ds.value_count, 1);
+
+    // Package 2 with duplicate UI design system ID
+    let mut pkg2 = json!({
+        "name": "@vendor/duplicate-ds",
+        "version": "1.0.0",
+        "type": "module",
+        "exports": { ".": "./dist/index.js" },
+        "clay": {
+            "apiPrefix": "dup-ds",
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "docs": "./docs/index.md",
+            "permissions": [],
+            "modes": [],
+            "contributions": {
+                "uiDesignSystem": {
+                    "schemaVersion": 1,
+                    "id": "@clay/theme-neobrutal",
+                    "displayName": "Duplicate Neobrutal",
+                    "recipes": {}
+                }
+            }
+        }
+    });
+
+    // Package 2 assembly fails because `@clay/theme-neobrutal` is not owned by `dup-ds`
+    let err = assemble_package_record(&pkg2).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+
+    // When package 2 uses its own prefix as ID:
+    pkg2["clay"]["contributions"]["uiDesignSystem"]["id"] = json!("dup-ds.system");
+    let record2 = assemble_package_record(&pkg2).expect("package 2 record assembles with own id");
+
+    // Both together have no conflict
+    check_enabled_packages(&[record1.clone(), record2]).expect("no conflict with distinct IDs");
+}
+
+#[test]
+fn data_only_package_manifest_validates_without_entry() {
+    let pkg = json!({
+        "name": "@vendor/data-only-design-system",
+        "version": "1.0.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "vendor-ds",
+            "docs": "./docs/index.md",
+            "permissions": [],
+            "modes": [],
+            "contributions": {
+                "uiDesignSystem": {
+                    "schemaVersion": 1,
+                    "id": "vendor-ds.clean",
+                    "displayName": "Vendor Clean Design System",
+                    "recipes": {
+                        "button.default.root.rest": {
+                            "backgroundColor": "surface.control",
+                            "borderRadius": 6.0
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let record = assemble_package_record(&pkg).expect("data-only package without entry validates");
+    assert_eq!(record.manifest.name, "@vendor/data-only-design-system");
+    assert!(record.manifest.clay.entry.is_none());
+    assert!(record.manifest.clay.load_entry.is_none());
+    assert!(record.contributions.ui_design_system.is_some());
+}
+
+#[test]
+fn data_only_package_rejects_missing_entry_when_permissions_requested() {
+    let pkg = json!({
+        "name": "@vendor/broken-active-package",
+        "version": "1.0.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "broken",
+            "docs": "./docs/index.md",
+            "permissions": ["command-registration"],
+            "modes": [],
+            "contributions": {
+                "commands": [{
+                    "id": "broken.action",
+                    "displayName": "Broken Action",
+                    "routingPolicy": "server-first"
+                }]
+            }
+        }
+    });
+
+    let err = assemble_package_record(&pkg).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::ManifestValidationFailed);
+    assert!(
+        err.message.contains("clay.entry is required"),
+        "expected missing entry error, got: {}",
+        err.message
+    );
+}
+
+#[test]
+fn data_only_package_service_enables_without_javascript_execution() {
+    let backend = FakeBackend::new();
+    let mut service = PackageService::new("/tmp/clay-data-only-test-store", Box::new(backend));
+
+    let pkg = json!({
+        "name": "@vendor/declarative-theme",
+        "version": "1.0.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "declarative-theme",
+            "docs": "./docs/index.md",
+            "permissions": [],
+            "modes": [],
+            "contributions": {
+                "uiDesignSystem": {
+                    "schemaVersion": 1,
+                    "id": "declarative-theme.palette",
+                    "displayName": "Declarative Theme",
+                    "recipes": {}
+                }
+            }
+        }
+    });
+
+    service
+        .install_from_value(pkg)
+        .expect("install_from_value succeeds for data-only package");
+
+    service
+        .approve_package("@vendor/declarative-theme", "test-user")
+        .expect("approval succeeds");
+
+    let enabled = service
+        .enable("@vendor/declarative-theme")
+        .expect("data-only package enables without error");
+    assert_eq!(enabled.manifest.name, "@vendor/declarative-theme");
+    assert!(enabled.manifest.clay.entry.is_none());
 }

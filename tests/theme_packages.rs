@@ -515,3 +515,162 @@ fn theme_package_below_aa_contrast_is_rejected() {
         failure.ratio
     );
 }
+
+#[test]
+fn design_neobrutal_bundled_package_validates_as_inert_data() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/packages/design-neobrutal/package.json");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("read @clay/design-neobrutal package.json ({path}): {err}"));
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|err| panic!("parse @clay/design-neobrutal as JSON: {err}"));
+
+    let record = assemble_package_record(&value).unwrap_or_else(|err| {
+        panic!(
+            "@clay/design-neobrutal must validate as inert design-system data: rule={:?} msg={}",
+            err.rule, err.message
+        )
+    });
+
+    assert_eq!(record.manifest.name, "@clay/design-neobrutal");
+    assert_eq!(record.manifest.version, "0.1.0");
+    assert!(record.manifest.clay.permissions.is_empty());
+    assert!(record.manifest.clay.modes.is_empty());
+    assert!(record.manifest.clay.entry.is_none());
+    assert!(record.manifest.clay.load_entry.is_none());
+
+    let ds = record
+        .contributions
+        .ui_design_system
+        .as_ref()
+        .expect("@clay/design-neobrutal must contribute uiDesignSystem");
+
+    assert_eq!(ds.id, "@clay/design-neobrutal");
+    assert_eq!(ds.schema_version, 1);
+    assert_eq!(ds.display_name, "Neobrutal (Default)");
+    assert!(
+        ds.recipe_count >= 25,
+        "must contain at least 25 component recipes, got {}",
+        ds.recipe_count
+    );
+
+    // Verify raw JSON contains zero literal color strings (#..., rgb, hsl)
+    let decl_str = &ds.declaration_json;
+    assert!(
+        !decl_str.contains("\"#"),
+        "design system must not contain literal hex colors"
+    );
+    assert!(
+        !decl_str.contains("rgb("),
+        "design system must not contain rgb() colors"
+    );
+    assert!(
+        !decl_str.contains("hsl("),
+        "design system must not contain hsl() colors"
+    );
+
+    // Parse declaration and verify Neobrutal 90-degree corner geometry
+    let decl: clay::shell::design_system::UiDesignSystemDeclaration =
+        serde_json::from_str(decl_str).expect("declaration_json must deserialize cleanly");
+    assert_eq!(decl.schema_version, 1);
+
+    for (key, recipe) in &decl.recipes {
+        if let Some(radius) = recipe.border_radius {
+            assert_eq!(
+                radius, 0.0,
+                "Neobrutal recipe {key} must have border_radius 0.0, got {radius}"
+            );
+        }
+    }
+}
+
+#[test]
+fn design_glass_bundled_package_validates_as_inert_data() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/packages/design-glass/package.json");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("read @clay/design-glass package.json ({path}): {err}"));
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|err| panic!("parse @clay/design-glass as JSON: {err}"));
+
+    let record = assemble_package_record(&value).unwrap_or_else(|err| {
+        panic!(
+            "@clay/design-glass must validate as inert design-system data: rule={:?} msg={}",
+            err.rule, err.message
+        )
+    });
+
+    assert_eq!(record.manifest.name, "@clay/design-glass");
+    assert_eq!(record.manifest.version, "0.1.0");
+    assert!(record.manifest.clay.permissions.is_empty());
+    assert!(record.manifest.clay.modes.is_empty());
+    assert!(record.manifest.clay.entry.is_none());
+    assert!(record.manifest.clay.load_entry.is_none());
+
+    let ds = record
+        .contributions
+        .ui_design_system
+        .as_ref()
+        .expect("@clay/design-glass must contribute uiDesignSystem");
+
+    assert_eq!(ds.id, "@clay/design-glass");
+    assert_eq!(ds.schema_version, 1);
+    assert_eq!(ds.display_name, "Glass (Reference)");
+    assert!(
+        ds.recipe_count >= 25,
+        "must contain at least 25 component recipes, got {}",
+        ds.recipe_count
+    );
+
+    // Verify raw JSON contains zero literal color strings (#..., rgb, hsl)
+    let decl_str = &ds.declaration_json;
+    assert!(
+        !decl_str.contains("\"#"),
+        "design system must not contain literal hex colors"
+    );
+    assert!(
+        !decl_str.contains("rgb("),
+        "design system must not contain rgb() colors"
+    );
+    assert!(
+        !decl_str.contains("hsl("),
+        "design system must not contain hsl() colors"
+    );
+
+    // Parse declaration and verify Glass geometry, blur boundaries, and highlights
+    let decl: clay::shell::design_system::UiDesignSystemDeclaration =
+        serde_json::from_str(decl_str).expect("declaration_json must deserialize cleanly");
+    assert_eq!(decl.schema_version, 1);
+
+    // Performance Invariant: Editor text and scroll container must NOT apply backdrop blur
+    for (key, recipe) in &decl.recipes {
+        let key_str = key.to_string();
+        if key_str.starts_with("editor.") || key_str.starts_with("scroll.") {
+            assert_eq!(
+                recipe.backdrop_blur.unwrap_or(0.0),
+                0.0,
+                "Recipe {key_str} in scrolling/editor path must have backdrop_blur 0.0 for 60fps performance"
+            );
+        }
+    }
+
+    // Modal dialog must have frosted glass properties (blur > 0, inner highlight)
+    let modal_key = clay::shell::design_system::RecipeKey::new(
+        "modal",
+        "default",
+        "dialog",
+        clay::shell::design_system::RecipeState::Rest,
+    );
+    let modal_dialog = decl
+        .recipes
+        .get(&modal_key)
+        .expect("modal dialog recipe must exist");
+    assert!(
+        modal_dialog.backdrop_blur.unwrap_or(0.0) >= 16.0,
+        "modal dialog must have blur >= 16.0"
+    );
+    assert!(
+        modal_dialog.inner_highlight.is_some(),
+        "modal dialog must have inner highlight for optical refraction"
+    );
+}

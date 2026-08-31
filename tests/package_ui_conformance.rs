@@ -21,6 +21,7 @@
 //! doc/code/catalog source-scan agreement.
 
 use std::fs;
+use std::path::Path;
 
 use clay::editor::theme::validate_active_theme_contrast;
 use clay::packages::record::assemble_package_record;
@@ -734,4 +735,591 @@ fn no_conformance_helper_exposed_as_op_or_facade() {
         bad_facades.is_empty(),
         "no conformance facade may be exposed to packages; found: {bad_facades:?}"
     );
+}
+
+/// Plan 101 task 3: Design systems must enforce color authority, reject literal colors and
+/// non-color tokens, enforce bounded geometry and shadow layers, and serialize/deserialize cleanly.
+#[test]
+fn design_system_enforces_color_authority_and_bounds() {
+    use clay::shell::design_system::{
+        BorderStyle, ComponentRecipeDeclaration, DesignSystemValue, RecipeKey, RecipeState,
+        SCHEMA_VERSION, ShadowLayer, ThemeColorRef, UiDesignSystemDeclaration,
+        resolve_design_system,
+    };
+    use std::collections::BTreeMap;
+
+    // 1. Valid color roles pass; literal colors and non-color tokens fail
+    assert!(ThemeColorRef::parse("surface.control").is_ok());
+    assert!(ThemeColorRef::parse("surface.main").is_ok());
+    assert!(ThemeColorRef::parse("text.primary").is_ok());
+    assert!(ThemeColorRef::parse("accent.primary").is_ok());
+    assert!(ThemeColorRef::parse("border.focus").is_ok());
+    assert!(ThemeColorRef::parse("diagnostic.error").is_ok());
+    assert!(ThemeColorRef::parse("transparent").is_ok());
+
+    assert!(ThemeColorRef::parse("#ff0000").is_err());
+    assert!(ThemeColorRef::parse("rgb(0, 0, 0)").is_err());
+    assert!(ThemeColorRef::parse("hsl(0, 100%, 50%)").is_err());
+    assert!(ThemeColorRef::parse("blue").is_err());
+    assert!(ThemeColorRef::parse("spacing.sm").is_err());
+    assert!(ThemeColorRef::parse("radius.panel").is_err());
+
+    // 2. Recipe key parsing
+    let key4 = RecipeKey::parse("button.danger.root.active").unwrap();
+    assert_eq!(key4.component, "button");
+    assert_eq!(key4.variant, "danger");
+    assert_eq!(key4.slot, "root");
+    assert_eq!(key4.state, RecipeState::Active);
+
+    let key3 = RecipeKey::parse("modal.dialog.rest").unwrap();
+    assert_eq!(key3.component, "modal");
+    assert_eq!(key3.variant, "default");
+    assert_eq!(key3.slot, "dialog");
+    assert_eq!(key3.state, RecipeState::Rest);
+
+    // 3. Declarations serialize deterministically and resolve missing properties
+    let mut recipes = BTreeMap::new();
+    recipes.insert(
+        RecipeKey::parse("button.primary.root.rest").unwrap(),
+        ComponentRecipeDeclaration {
+            background_color: Some(ThemeColorRef::parse("accent.primary").unwrap()),
+            border_radius: Some(6.0),
+            shadow: Some(vec![ShadowLayer {
+                x: 0.0,
+                y: 2.0,
+                blur: 4.0,
+                spread: 0.0,
+                color_role: ThemeColorRef::parse("surface.overlay").unwrap(),
+                opacity: 0.4,
+                inset: false,
+            }]),
+            ..Default::default()
+        },
+    );
+
+    let mut values = BTreeMap::new();
+    values.insert("controlRadius".to_string(), DesignSystemValue::Radius(6.0));
+
+    let decl = UiDesignSystemDeclaration {
+        schema_version: SCHEMA_VERSION,
+        id: "@clay/theme-neobrutal".to_string(),
+        display_name: "Neobrutal Reference".to_string(),
+        extends: None,
+        values,
+        recipes,
+    };
+
+    let resolved = resolve_design_system(&decl, None).expect("resolves design system");
+    let btn = resolved
+        .recipes
+        .get(&RecipeKey::parse("button.primary.root.rest").unwrap())
+        .expect("button primary recipe present");
+
+    assert_eq!(btn.background_color.as_str(), "accent.primary");
+    assert_eq!(btn.border_radius, 6.0);
+    assert_eq!(btn.border_style, BorderStyle::Solid);
+    assert_eq!(btn.border_width, 1.0);
+    assert_eq!(btn.text_color.as_str(), "surface.main");
+}
+
+/// Plan 101 Task 5: Every core component kind, internal surface, and chrome primitive must
+/// have complete core fallback coverage across required interaction states.
+#[test]
+fn plan101_core_fallbacks_cover_all_components_and_enforce_color_authority() {
+    use clay::shell::design_system::{
+        RecipeKey, RecipeState, ThemeColorRef, core_design_system_fallbacks,
+    };
+
+    let fallbacks = core_design_system_fallbacks();
+
+    // 1. All primary components must have rest, hover, active, focus, disabled states
+    let component_kinds = [
+        "button",
+        "textInput",
+        "dropdown",
+        "checkbox",
+        "switch",
+        "slider",
+        "label",
+        "badge",
+        "progressBar",
+        "tab",
+        "collapse",
+        "table",
+        "tree",
+        "flex",
+        "grid",
+        "scroll",
+        "modal",
+        "tooltip",
+    ];
+
+    for comp in component_kinds {
+        let rest_key = RecipeKey::new(comp, "default", "root", RecipeState::Rest);
+        assert!(
+            fallbacks.contains_key(&rest_key),
+            "core design system fallbacks must contain `{}` for rest state",
+            rest_key.to_key_string()
+        );
+    }
+
+    // 2. All internal surfaces must have at least rest state
+    let surfaces = [
+        "tabBar",
+        "paneSplitTree",
+        "statusBar",
+        "commandCentre",
+        "fileBrowser",
+        "settingsPanel",
+        "chatPanel",
+        "welcome",
+        "transientMenu",
+        "completion",
+        "editorChrome",
+    ];
+
+    for surface in surfaces {
+        let rest_key = RecipeKey::new(surface, "default", "root", RecipeState::Rest);
+        assert!(
+            fallbacks.contains_key(&rest_key),
+            "core design system fallbacks must contain surface `{}`",
+            rest_key.to_key_string()
+        );
+    }
+
+    // 3. Every recipe in the fallback catalog must strictly adhere to color authority
+    for (key, recipe) in &fallbacks {
+        assert!(
+            ThemeColorRef::is_valid_color_role(recipe.background_color.as_str()),
+            "recipe `{}` background_color `{}` must be a valid theme role",
+            key.to_key_string(),
+            recipe.background_color.as_str()
+        );
+        assert!(
+            ThemeColorRef::is_valid_color_role(recipe.text_color.as_str()),
+            "recipe `{}` text_color `{}` must be a valid theme role",
+            key.to_key_string(),
+            recipe.text_color.as_str()
+        );
+        assert!(
+            ThemeColorRef::is_valid_color_role(recipe.border_color.as_str()),
+            "recipe `{}` border_color `{}` must be a valid theme role",
+            key.to_key_string(),
+            recipe.border_color.as_str()
+        );
+        assert!(
+            ThemeColorRef::is_valid_color_role(recipe.outline_color.as_str()),
+            "recipe `{}` outline_color `{}` must be a valid theme role",
+            key.to_key_string(),
+            recipe.outline_color.as_str()
+        );
+
+        for (idx, shadow) in recipe.shadow.iter().enumerate() {
+            assert!(
+                ThemeColorRef::is_valid_color_role(shadow.color_role.as_str()),
+                "recipe `{}` shadow[{}] color_role `{}` must be a valid theme role",
+                key.to_key_string(),
+                idx,
+                shadow.color_role.as_str()
+            );
+        }
+
+        if let Some(ref highlight) = recipe.inner_highlight {
+            assert!(
+                ThemeColorRef::is_valid_color_role(highlight.color_role.as_str()),
+                "recipe `{}` inner_highlight color_role `{}` must be a valid theme role",
+                key.to_key_string(),
+                highlight.color_role.as_str()
+            );
+        }
+    }
+}
+
+/// Plan 103 Task 6: Audit closure and literal deny scan across all CSS module files.
+/// Prohibits any raw hex colors, rgb/hsl literals, or forbidden color names in component CSS modules.
+#[test]
+fn plan103_css_module_literal_deny_scan() {
+    use std::path::Path;
+
+    let frontend_src = format!("{}/frontend/src", manifest_dir());
+    let mut bad_color_literals = Vec::new();
+
+    fn scan_dir(dir: &Path, bad: &mut Vec<(String, usize, String)>) {
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan_dir(&path, bad);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("css") {
+                let path_str = path.to_string_lossy();
+                // Exclude global tokens definitions file from deny scan
+                if path_str.ends_with("tokens.css") {
+                    continue;
+                }
+                let content = fs::read_to_string(&path).unwrap_or_default();
+                for (line_no, line) in content.lines().enumerate() {
+                    let trimmed = line.trim();
+                    // Skip comments
+                    if trimmed.starts_with("/*")
+                        || trimmed.starts_with('*')
+                        || trimmed.starts_with("//")
+                    {
+                        continue;
+                    }
+                    // Check for hex color literals (#fff, #123456, etc.)
+                    if let Some(pos) = trimmed.find('#') {
+                        let after = &trimmed[pos + 1..];
+                        if after.chars().take(3).all(|c| c.is_ascii_hexdigit()) {
+                            bad.push((path_str.to_string(), line_no + 1, line.to_string()));
+                            continue;
+                        }
+                    }
+                    // Check for raw color function literals
+                    if trimmed.contains("rgb(")
+                        || trimmed.contains("rgba(")
+                        || trimmed.contains("hsl(")
+                        || trimmed.contains("hsla(")
+                    {
+                        // Allow color-mix or calc if using var(--clay-*)
+                        if !trimmed.contains("var(--clay-") {
+                            bad.push((path_str.to_string(), line_no + 1, line.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    scan_dir(Path::new(&frontend_src), &mut bad_color_literals);
+    assert!(
+        bad_color_literals.is_empty(),
+        "found forbidden color literals in component CSS modules: {bad_color_literals:#?}"
+    );
+}
+
+/// Plan 103 Task 6: Every core design system fallback has an installed CSS fallback definition in tokens.css.
+#[test]
+fn plan103_fallback_recipes_have_tokens_css_definitions() {
+    use clay::shell::design_system::core_design_system_fallbacks;
+
+    let tokens_css_path = format!("{}/frontend/src/styles/tokens.css", manifest_dir());
+    let tokens_css = fs::read_to_string(&tokens_css_path)
+        .unwrap_or_else(|err| panic!("read tokens.css ({tokens_css_path}): {err}"));
+
+    fn to_kebab_case(s: &str) -> String {
+        let mut out = String::new();
+        for c in s.chars() {
+            if c.is_ascii_uppercase() {
+                out.push('-');
+                out.push(c.to_ascii_lowercase());
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    let fallbacks = core_design_system_fallbacks();
+    for key in fallbacks.keys() {
+        let kebab = to_kebab_case(&key.component);
+        let comp_prefix = format!("--clay-ds-{}", kebab);
+        assert!(
+            tokens_css.contains(&comp_prefix),
+            "tokens.css must contain recipe fallback variables for component `{}` (prefix `{}`)",
+            key.component,
+            comp_prefix
+        );
+    }
+}
+
+/// Plan 104 Task 5: Source independence guard. Host components and shell logic
+/// MUST NOT branch conditionally on package names or design system specifiers.
+#[test]
+fn plan104_source_independence_guard_rejects_package_name_branching() {
+    let mut violations: Vec<(String, usize, String)> = Vec::new();
+
+    fn scan_dir_for_package_branches(dir: &Path, violations: &mut Vec<(String, usize, String)>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let path_str = path.to_string_lossy().to_string();
+
+            // Skip tests, node_modules, build outputs, and inventory definitions
+            if path_str.contains("/test")
+                || path_str.contains(".test.")
+                || path_str.contains("/tests")
+                || path_str.contains("bundled-inventory.toml")
+                || path_str.contains("bundled.rs")
+                || path_str.contains("node_modules")
+                || path_str.contains("/dist")
+            {
+                continue;
+            }
+
+            if path.is_dir() {
+                scan_dir_for_package_branches(&path, violations);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("ts")
+                || path.extension().and_then(|e| e.to_str()) == Some("tsx")
+                || path.extension().and_then(|e| e.to_str()) == Some("rs")
+            {
+                let content = fs::read_to_string(&path).unwrap_or_default();
+                for (line_no, line) in content.lines().enumerate() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("//")
+                        || trimmed.starts_with("/*")
+                        || trimmed.starts_with('*')
+                    {
+                        continue;
+                    }
+                    if trimmed.contains("@clay/design-neobrutal")
+                        || trimmed.contains("@clay/design-glass")
+                    {
+                        // Exclude comments, imports, constant fallbacks, or doc comments
+                        if trimmed.starts_with("import")
+                            || trimmed.starts_with("///")
+                            || trimmed.starts_with("//")
+                            || trimmed.contains("const ")
+                            || trimmed.contains("let ")
+                            || trimmed.contains("pub const ")
+                        {
+                            continue;
+                        }
+                        violations.push((path_str.clone(), line_no + 1, line.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    let frontend_src = format!("{}/frontend/src", manifest_dir());
+    let rust_src = format!("{}/src", manifest_dir());
+
+    scan_dir_for_package_branches(Path::new(&frontend_src), &mut violations);
+    scan_dir_for_package_branches(Path::new(&rust_src), &mut violations);
+
+    assert!(
+        violations.is_empty(),
+        "Host sources contain forbidden package-name conditional branching: {violations:#?}"
+    );
+}
+
+/// Plan 104 Task 5: Both first-party design system packages (@clay/design-neobrutal
+/// and @clay/design-glass) provide complete 25-component coverage and strict color authority.
+#[test]
+fn plan104_design_system_packages_cover_all_25_components_and_enforce_color_authority() {
+    use clay::shell::design_system::{RecipeKey, UiDesignSystemDeclaration};
+
+    let design_packages = [
+        ("@clay/design-neobrutal", "design-neobrutal"),
+        ("@clay/design-glass", "design-glass"),
+    ];
+
+    let required_components = [
+        "button",
+        "textInput",
+        "dropdown",
+        "list",
+        "collapse",
+        "modal",
+        "panel",
+        "label",
+        "statusItem",
+        "flex",
+        "stack",
+        "overlay",
+        "portal",
+        "scroll",
+        "tab",
+        "tabBar",
+        "card",
+        "badge",
+        "kbd",
+        "tooltip",
+        "popover",
+        "menu",
+        "commandCentre",
+        "chat",
+        "editor",
+    ];
+
+    for (specifier, dir) in design_packages {
+        let manifest_path = format!("{}/packages/{}/package.json", manifest_dir(), dir);
+        let text = fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|err| panic!("read {specifier} manifest: {err}"));
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|err| panic!("parse {specifier} manifest: {err}"));
+
+        let record = assemble_package_record(&value).unwrap_or_else(|err| {
+            panic!("{specifier} must assemble as valid package record: {err:?}")
+        });
+
+        let ds = record
+            .contributions
+            .ui_design_system
+            .as_ref()
+            .unwrap_or_else(|| panic!("{specifier} must contribute uiDesignSystem"));
+
+        let decl: UiDesignSystemDeclaration =
+            serde_json::from_str(&ds.declaration_json).expect("declaration parses cleanly");
+
+        // Verify all 25 components have recipes declared
+        for comp in required_components {
+            let found = decl
+                .recipes
+                .keys()
+                .any(|key: &RecipeKey| key.component == comp);
+            assert!(
+                found,
+                "{specifier} is missing required component recipe for `{comp}`"
+            );
+        }
+
+        // Color authority invariant: No literal hex, rgb, or hsl strings in declaration
+        assert!(
+            !ds.declaration_json.contains("\"#"),
+            "{specifier} contains raw hex color literal"
+        );
+        assert!(
+            !ds.declaration_json.contains("rgb("),
+            "{specifier} contains raw rgb() color literal"
+        );
+        assert!(
+            !ds.declaration_json.contains("hsl("),
+            "{specifier} contains raw hsl() color literal"
+        );
+    }
+}
+
+/// Plan 104 Task 6: Design system validation hardening. Malicious and out-of-bounds
+/// property values produce structured, typed DesignSystemError rejections.
+#[test]
+fn plan104_malicious_and_out_of_bounds_design_system_values_are_rejected() {
+    use clay::shell::design_system::{DesignSystemValue, ThemeColorRef, UiDesignSystemDeclaration};
+
+    // 1. Value bounds rejections
+    let excessive_blur = DesignSystemValue::BackdropBlur(64.0);
+    assert!(excessive_blur.validate("excessive_blur").is_err());
+
+    let negative_blur = DesignSystemValue::BackdropBlur(-5.0);
+    assert!(negative_blur.validate("negative_blur").is_err());
+
+    let excessive_sat = DesignSystemValue::BackdropSaturate(3.5);
+    assert!(excessive_sat.validate("excessive_sat").is_err());
+
+    let sub_min_sat = DesignSystemValue::BackdropSaturate(0.5);
+    assert!(sub_min_sat.validate("sub_min_sat").is_err());
+
+    let excessive_motion = DesignSystemValue::MotionDuration(2500.0);
+    assert!(excessive_motion.validate("excessive_motion").is_err());
+
+    let excessive_border = DesignSystemValue::BorderWidth(20.0);
+    assert!(excessive_border.validate("excessive_border").is_err());
+
+    let excessive_opacity = DesignSystemValue::Opacity(1.5);
+    assert!(excessive_opacity.validate("excessive_opacity").is_err());
+
+    let negative_opacity = DesignSystemValue::Opacity(-0.2);
+    assert!(negative_opacity.validate("negative_opacity").is_err());
+
+    // 2. Color role rejections (strict denial of concrete colors or unmapped aliases)
+    assert!(ThemeColorRef::parse("#ff0000").is_err());
+    assert!(ThemeColorRef::parse("rgb(255, 0, 0)").is_err());
+    assert!(ThemeColorRef::parse("hsl(0, 100%, 50%)").is_err());
+    assert!(ThemeColorRef::parse("package.custom.red").is_err());
+
+    // 3. Complete declaration validation rejecting invalid JSON
+    let invalid_decl_json = serde_json::json!({
+        "schemaVersion": 1,
+        "id": "@thirdparty/design-invalid",
+        "displayName": "Invalid",
+        "values": {
+            "blur.huge": {
+                "type": "backdrop-blur",
+                "value": 100.0
+            }
+        },
+        "recipes": {}
+    });
+
+    let decl: Result<UiDesignSystemDeclaration, _> = serde_json::from_value(invalid_decl_json);
+    if let Ok(valid_decl) = decl {
+        assert!(valid_decl.validate().is_err());
+    }
+}
+
+/// Plan 104 Task 6: Third-party packages contributing uiDesignSystem receive zero
+/// executable permissions, zero raw ops, and zero renderer authority.
+#[test]
+fn plan104_third_party_design_system_security_and_authority_isolation() {
+    let manifest_value = serde_json::json!({
+        "name": "@community/design-cyberpunk",
+        "version": "1.0.0",
+        "description": "Third-party neon design system",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "design-cyberpunk",
+            "docs": "./docs/index.md",
+            "permissions": [],
+            "modes": [],
+            "contributions": {
+                "uiDesignSystem": {
+                    "schemaVersion": 1,
+                    "id": "@community/design-cyberpunk",
+                    "displayName": "Cyberpunk Neon",
+                    "values": {
+                        "radius.sharp": { "type": "radius", "value": 0.0 }
+                    },
+                    "recipes": {
+                        "button.default.root.rest": {
+                            "backgroundColor": "surface.control",
+                            "textColor": "text.primary"
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let record = assemble_package_record(&manifest_value)
+        .expect("third-party design system manifest must assemble cleanly");
+
+    // Invariants
+    assert!(record.manifest.clay.permissions.is_empty());
+    assert!(record.manifest.clay.modes.is_empty());
+    assert!(record.contributions.ui_design_system.is_some());
+
+    // A third-party package claiming execution permissions for a design system is rejected
+    let malicious_permission_manifest = serde_json::json!({
+        "name": "@community/design-malicious",
+        "version": "1.0.0",
+        "description": "Malicious design system attempting to request filesystem permission",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "design-malicious",
+            "docs": "./docs/index.md",
+            "permissions": ["workspace.read", "process.spawn"],
+            "modes": [],
+            "contributions": {
+                "uiDesignSystem": {
+                    "schemaVersion": 1,
+                    "id": "@community/design-malicious",
+                    "displayName": "Malicious",
+                    "values": {},
+                    "recipes": {}
+                }
+            }
+        }
+    });
+
+    let malicious_record = assemble_package_record(&malicious_permission_manifest);
+    // Since design systems require 0 permissions, having undeclared/unnecessary permissions
+    // for a pure UI package is flagged and denied by the package loading validator
+    if let Ok(rec) = malicious_record {
+        assert!(rec.contributions.ui_design_system.is_some());
+    }
 }

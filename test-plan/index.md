@@ -86,12 +86,14 @@ references) were replaced with current equivalents in modules 01, 04, 07, 10,
 | 12 | [Platform: Windows](12-platform-windows.md) | MSVC toolchain, named pipes, native dialogs | `docs/development/windows.md` |
 | 13 | [Window splits](13-window-splits.md) | split/close/add-equal/move/resize panes, pane focus policies, per-pane document views + concurrent modes (22.2), Phase 22.8 per-tab multi-document isolation, shell keybinding overrides (per active tab since 22.3), direction-named split aliases (22.7), per-tab persistence cross-check (22.5), pane a11y roles + split/pane announcements (22.6) | `docs/reference/primitives/shell-layout-strategy.md`, `docs/development/accessibility.md` |
 | 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, selected-root tab binding and per-tab workspace/document isolation (22.8), open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), tab a11y (TabList/Tab roles, activate/create/close announcements) + cross-tab grant isolation/denial checks (22.6/22.8), tab-bar overflow scroll (22.7), active-typography geometry and sanitized tab labels (Plan 088), single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/react-tabs-and-splits.md`, `docs/wiki/modules/tabs-and-clients.md`, `docs/development/accessibility.md` |
+| 15 | [UI design systems](15-ui-design-systems.md) | built-in fallback startup, default `@clay/design-neobrutal` selection, `@clay/design-glass` reference system with solid fallbacks, watcher reload switching, invalid/revoked selection recovery with sanitized diagnostics and previous-generation retention, no-adoption security checks, color-authority conformance, restart persistence through `init.js`, 25-component recipe migration, DOM/state continuity, forced-colors/reduced-motion/transparency accessibility fallbacks, and cross-theme recoloring consistency (Plans 102, 103 & 104) | `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `.impeccable/review/plan-104/` |
 
 ## Coverage matrix (what to run when)
 
 | Change touches | Minimum manual modules |
 |----------------|------------------------|
 | Client rendering / surface / paint / transient overlays | 01, 04, 07, 10, 11 |
+| UI design systems / component recipes / visual migration | 15, 02, 07, 09, 11 |
 | Editor movement/selection/caret primitives | 05, 06, 07, 10 |
 | Typography / font features | 07 |
 | Protocol / IPC / connection | 01, 03, 04 |
@@ -118,6 +120,7 @@ references) were replaced with current equivalents in modules 01, 04, 07, 10,
 | Plan 097 Phase 10 AG-UI chat over Tauri channels | 09 (@clay/chat surface), 10 (chat intents), 11 (stream feel) |
 | Plan 097 Phase 11 release hardening/packaging/updates/security | 01 (launch identity), 11 (budgets), 12 (platform policy) |
 | Plan 097 Phase 12 parity certification/cutover/native removal | 01, 13, 14 + full regression pass of modules above |
+| Plan 102 UI design systems (selection, switching, fallback/revocation recovery) | 15, 02 (C16–C18 watcher reload), 09 (adoption/revocation), 11 (switch latency) |
 | Plan 098 chunked document loading | 01 (L23–L24), 03 (F48–F52), 11 (Q34–Q37) |
 | Plan 099 server-authoritative editor performance and manual matrix | 01 (L25–L26), 03 (F53–F54), 04 (E37–E38), 08 (S33–S34), 11 (M1–M7), 13 (D20–D21), 14 (T77–T78); deep reference: `docs/development/performance.md` |
 

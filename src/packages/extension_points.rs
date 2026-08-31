@@ -69,6 +69,7 @@ pub enum ExtensionContributionKind {
     ComponentContribution,
     OverlayContribution,
     ThemeTokens,
+    UiDesignSystem,
     SduiRegion,
     StatusItem,
 }
@@ -90,6 +91,7 @@ impl ExtensionContributionKind {
             Self::ComponentContribution => "componentContribution",
             Self::OverlayContribution => "overlayContribution",
             Self::ThemeTokens => "themeTokens",
+            Self::UiDesignSystem => "uiDesignSystem",
             Self::SduiRegion => "sduiRegion",
             Self::StatusItem => "statusItem",
         }
@@ -111,6 +113,7 @@ impl ExtensionContributionKind {
             "componentContribution" => Self::ComponentContribution,
             "overlayContribution" => Self::OverlayContribution,
             "themeTokens" => Self::ThemeTokens,
+            "uiDesignSystem" => Self::UiDesignSystem,
             "sduiRegion" => Self::SduiRegion,
             "statusItem" => Self::StatusItem,
             _ => return None,

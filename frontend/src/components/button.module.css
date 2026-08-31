@@ -1,68 +1,279 @@
 /* Clay button — five interaction states from tokens, zero radius
- * (mechanical geometry), variants default/muted/primary/danger. */
+ * (mechanical geometry), variants default/muted/primary/danger.
+ * Consumes host-owned design-system recipe variables with fallback to core tokens. */
 
 .button {
   display: inline-flex;
   align-items: center;
-  gap: var(--clay-spacing-inline, 6px);
-  border: var(--clay-dimension-border-hairline, 1px) solid transparent;
-  border-radius: 0;
-  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  gap: var(
+    --clay-ds-button-default-root-rest-gap,
+    var(--clay-spacing-inline, 6px)
+  );
+  border: var(
+      --clay-ds-button-default-root-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-button-default-root-rest-border-style, solid)
+    var(--clay-ds-button-default-root-rest-border-color, transparent);
+  border-radius: var(--clay-ds-button-default-root-rest-border-radius, 0);
+  padding: var(
+    --clay-ds-button-default-root-rest-padding,
+    var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px)
+  );
   font-family: var(--clay-font-ui);
   font-size: var(--clay-text-body-size);
   cursor: pointer;
+  box-shadow: var(--clay-ds-button-default-root-rest-shadow, none);
+  transform: var(--clay-ds-button-default-root-rest-transform-preset, none);
   transition:
-    background-color var(--clay-motion-fast, 100ms) linear,
-    border-color var(--clay-motion-fast, 100ms) linear;
+    background-color
+      var(
+        --clay-ds-button-default-root-rest-transition-duration,
+        var(--clay-motion-fast, 100ms)
+      )
+      var(--clay-ds-button-default-root-rest-transition-timing, linear),
+    border-color
+      var(
+        --clay-ds-button-default-root-rest-transition-duration,
+        var(--clay-motion-fast, 100ms)
+      )
+      var(--clay-ds-button-default-root-rest-transition-timing, linear),
+    box-shadow
+      var(
+        --clay-ds-button-default-root-rest-transition-duration,
+        var(--clay-motion-fast, 100ms)
+      )
+      var(--clay-ds-button-default-root-rest-transition-timing, linear),
+    transform
+      var(
+        --clay-ds-button-default-root-rest-transition-duration,
+        var(--clay-motion-fast, 100ms)
+      )
+      var(--clay-ds-button-default-root-rest-transition-timing, linear);
 }
 
 /* Rest */
 .default {
-  background: var(--clay-surface-control);
-  color: var(--clay-text-primary);
+  background: var(
+    --clay-ds-button-default-root-rest-background-color,
+    var(--clay-surface-control)
+  );
+  color: var(
+    --clay-ds-button-default-root-rest-text-color,
+    var(--clay-text-primary)
+  );
+  border-color: var(
+    --clay-ds-button-default-root-rest-border-color,
+    transparent
+  );
+  border-radius: var(--clay-ds-button-default-root-rest-border-radius, 0);
+  box-shadow: var(--clay-ds-button-default-root-rest-shadow, none);
 }
 .muted {
-  background: transparent;
-  color: var(--clay-text-muted);
+  background: var(
+    --clay-ds-button-muted-root-rest-background-color,
+    transparent
+  );
+  color: var(
+    --clay-ds-button-muted-root-rest-text-color,
+    var(--clay-text-muted)
+  );
+  border-color: var(--clay-ds-button-muted-root-rest-border-color, transparent);
+  border-radius: var(
+    --clay-ds-button-muted-root-rest-border-radius,
+    var(--clay-ds-button-default-root-rest-border-radius, 0)
+  );
+  box-shadow: var(--clay-ds-button-muted-root-rest-shadow, none);
 }
 .primary {
-  background: var(--clay-accent-primary);
-  color: var(--clay-surface-main);
+  background: var(
+    --clay-ds-button-primary-root-rest-background-color,
+    var(--clay-accent-primary)
+  );
+  color: var(
+    --clay-ds-button-primary-root-rest-text-color,
+    var(--clay-surface-main)
+  );
+  border-color: var(
+    --clay-ds-button-primary-root-rest-border-color,
+    transparent
+  );
+  border-radius: var(
+    --clay-ds-button-primary-root-rest-border-radius,
+    var(--clay-ds-button-default-root-rest-border-radius, 0)
+  );
+  box-shadow: var(--clay-ds-button-primary-root-rest-shadow, none);
 }
 .danger {
-  background: var(--clay-surface-control);
-  color: var(--clay-diagnostic-error);
+  background: var(
+    --clay-ds-button-danger-root-rest-background-color,
+    var(--clay-surface-control)
+  );
+  color: var(
+    --clay-ds-button-danger-root-rest-text-color,
+    var(--clay-diagnostic-error)
+  );
+  border-color: var(
+    --clay-ds-button-danger-root-rest-border-color,
+    transparent
+  );
+  border-radius: var(
+    --clay-ds-button-danger-root-rest-border-radius,
+    var(--clay-ds-button-default-root-rest-border-radius, 0)
+  );
+  box-shadow: var(--clay-ds-button-danger-root-rest-shadow, none);
 }
 
 /* Hover */
 .default[data-hovered],
 .default:not([data-disabled]):not([data-pressed]):hover {
-  background: var(--clay-surface-hover);
+  background: var(
+    --clay-ds-button-default-root-hover-background-color,
+    var(--clay-surface-hover)
+  );
+  color: var(
+    --clay-ds-button-default-root-hover-text-color,
+    var(--clay-text-primary)
+  );
+  border-color: var(
+    --clay-ds-button-default-root-hover-border-color,
+    var(--clay-ds-button-default-root-rest-border-color, transparent)
+  );
+  box-shadow: var(--clay-ds-button-default-root-hover-shadow, none);
+  transform: var(--clay-ds-button-default-root-hover-transform-preset, none);
 }
 .muted[data-hovered] {
-  color: var(--clay-text-primary);
+  background: var(
+    --clay-ds-button-muted-root-hover-background-color,
+    transparent
+  );
+  color: var(
+    --clay-ds-button-muted-root-hover-text-color,
+    var(--clay-text-primary)
+  );
+  border-color: var(
+    --clay-ds-button-muted-root-hover-border-color,
+    var(--clay-ds-button-muted-root-rest-border-color, transparent)
+  );
+  box-shadow: var(--clay-ds-button-muted-root-hover-shadow, none);
+  transform: var(--clay-ds-button-muted-root-hover-transform-preset, none);
 }
 .primary[data-hovered] {
-  filter: brightness(1.1);
+  background: var(
+    --clay-ds-button-primary-root-hover-background-color,
+    var(--clay-surface-hover)
+  );
+  color: var(
+    --clay-ds-button-primary-root-hover-text-color,
+    var(--clay-surface-main)
+  );
+  border-color: var(
+    --clay-ds-button-primary-root-hover-border-color,
+    var(--clay-ds-button-primary-root-rest-border-color, transparent)
+  );
+  box-shadow: var(--clay-ds-button-primary-root-hover-shadow, none);
+  transform: var(--clay-ds-button-primary-root-hover-transform-preset, none);
+}
+.danger[data-hovered] {
+  background: var(
+    --clay-ds-button-danger-root-hover-background-color,
+    var(--clay-surface-hover)
+  );
+  color: var(
+    --clay-ds-button-danger-root-hover-text-color,
+    var(--clay-diagnostic-error)
+  );
+  border-color: var(
+    --clay-ds-button-danger-root-hover-border-color,
+    var(--clay-ds-button-danger-root-rest-border-color, transparent)
+  );
+  box-shadow: var(--clay-ds-button-danger-root-hover-shadow, none);
+  transform: var(--clay-ds-button-danger-root-hover-transform-preset, none);
 }
 
 /* Active (pressed) */
-.default[data-pressed],
+.default[data-pressed] {
+  background: var(
+    --clay-ds-button-default-root-active-background-color,
+    var(--clay-surface-active)
+  );
+  box-shadow: var(--clay-ds-button-default-root-active-shadow, none);
+  transform: var(
+    --clay-ds-button-default-root-active-transform-preset,
+    translateY(1px)
+  );
+}
 .muted[data-pressed] {
-  background: var(--clay-surface-active);
+  background: var(
+    --clay-ds-button-muted-root-active-background-color,
+    var(--clay-surface-active)
+  );
+  box-shadow: var(--clay-ds-button-muted-root-active-shadow, none);
+  transform: var(
+    --clay-ds-button-muted-root-active-transform-preset,
+    translateY(1px)
+  );
+}
+.primary[data-pressed] {
+  background: var(
+    --clay-ds-button-primary-root-active-background-color,
+    var(--clay-surface-active)
+  );
+  color: var(
+    --clay-ds-button-primary-root-active-text-color,
+    var(--clay-surface-main)
+  );
+  box-shadow: var(--clay-ds-button-primary-root-active-shadow, none);
+  transform: var(
+    --clay-ds-button-primary-root-active-transform-preset,
+    translateY(1px)
+  );
+}
+.danger[data-pressed] {
+  background: var(
+    --clay-ds-button-danger-root-active-background-color,
+    var(--clay-surface-active)
+  );
+  color: var(
+    --clay-ds-button-danger-root-active-text-color,
+    var(--clay-diagnostic-error)
+  );
+  box-shadow: var(--clay-ds-button-danger-root-active-shadow, none);
+  transform: var(
+    --clay-ds-button-danger-root-active-transform-preset,
+    translateY(1px)
+  );
 }
 
 /* Focus */
 .button[data-focused],
 .button:focus-visible {
-  outline: 2px solid var(--clay-focus-ring);
-  outline-offset: 1px;
+  outline: var(--clay-ds-button-default-root-focus-outline-width, 2px)
+    var(--clay-ds-button-default-root-focus-outline-style, solid)
+    var(
+      --clay-ds-button-default-root-focus-outline-color,
+      var(--clay-focus-ring)
+    );
+  outline-offset: var(--clay-ds-button-default-root-focus-outline-offset, 1px);
 }
 
 /* Disabled */
 .button[data-disabled] {
-  background: var(--clay-surface-disabled);
-  color: var(--clay-text-disabled);
-  opacity: var(--clay-opacity-disabled);
+  background: var(
+    --clay-ds-button-default-root-disabled-background-color,
+    var(--clay-surface-disabled)
+  );
+  color: var(
+    --clay-ds-button-default-root-disabled-text-color,
+    var(--clay-text-disabled)
+  );
+  opacity: var(
+    --clay-ds-button-default-root-disabled-opacity,
+    var(--clay-opacity-disabled)
+  );
+  border-color: var(
+    --clay-ds-button-default-root-disabled-border-color,
+    transparent
+  );
   cursor: default;
 }

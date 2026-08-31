@@ -29,7 +29,7 @@ patch's decoration/diagnostic/fold members independently.
 
 | Module         | Responsibility                                                                                                       |
 | -------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `dto.rs`       | `BootstrapDto`, runtime/theme/typography snapshots, and `BridgeEnvelope`.                                            |
+| `dto.rs`       | `BootstrapDto`, runtime/theme/typography snapshots, `DesignSystemSnapshotDto`/`DesignSystemProvenanceDto` (Plan 102), and `BridgeEnvelope`.                                                    |
 | `errors.rs`    | Sanitized `{ code, message }` errors with `MAX_REQUEST_BYTES = 512 KiB` request protection.                          |
 | `session.rs`   | Single live client session, handshake/reconnect generations, request parsing, client-id stamping, and event pumping. |
 | `forwarder.rs` | Live FIFO lane (capacity 512), whole viewport-patch latest-wins slots, lifecycle bypass, and delivery metrics.       |
@@ -81,6 +81,26 @@ server ClientConnectionEvent
   -> workspace controller / owning pane session
 ```
 
+## Design-system snapshot DTO (Plan 102)
+
+The runtime snapshot carries `activeDesignSystem: DesignSystemSnapshotDto` —
+specifier, `schemaVersion`, `generation`, `provenance`, and the resolved
+recipe table projected to bounded camelCase variables.
+`DesignSystemProvenanceDto` is the exact trust-domain record:
+`packageName`, `packageVersion`, `apiPrefix`, `trustDomain`.
+
+- **Deny fields:** package source paths, entry points, manifest JSON,
+  approval state, and any recipe text beyond the validated bounded values are
+  never projected; the webview receives finished variables, not declarations.
+- **Authority:** provenance is informational — it grants the webview nothing
+  and is not accepted back as request input.
+- **Bounds:** the full core recipe table (30+ recipes, 300+ variables) must
+  serialize under 128 KiB; `dto_roundtrips.rs` fails the build budget if the
+  projection grows past it.
+- `BootstrapDto` carries the same shape (`ActiveDesignSystem::core_fallback`
+  is the default when no package design system is active), so reconnects and
+  cold boots see one coherent type.
+
 ## JSON and identity boundaries
 
 Protocol types use serde-derived adjacent envelopes and camelCase names. The
@@ -112,7 +132,10 @@ identity; bridge stamping is correlation protection, not a grant.
 - `src-tauri/tests/bridge_session.rs` — real server bootstrap, tab registry,
   disconnect, reconnect generation, and identity lifecycle.
 - `src-tauri/tests/dto_roundtrips.rs` — typed JSON round trips and exhaustive
-  event/message shape coverage.
+  event/message shape coverage, including design-system snapshot/provenance
+  round trips, authority/size pins, and the 128 KiB serialized-snapshot
+  ceiling (`runtime_snapshot_dto_with_active_design_system_round_trip`,
+  `design_system_snapshot_dto_round_trip_and_variables`).
 - `src-tauri/src/bridge/forwarder.rs::coalescing_keeps_latest_whole_patch_and_live_order` —
   latest whole-patch replacement, FIFO ordering, and disconnect bypass.
 - `src-tauri/src/bridge/forwarder.rs::sibling_members_stay_one_complete_patch` —

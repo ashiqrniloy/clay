@@ -722,7 +722,8 @@
         "packages.loadPackage",
         "theme.setTheme",
         "theme.setAppearance",
-        "theme.setTypography"
+        "theme.setTypography",
+        "theme.setDesignSystem"
       ],
       "protocol_messages": {
         "client": [],

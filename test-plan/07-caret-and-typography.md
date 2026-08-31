@@ -148,3 +148,7 @@ runtime chrome override API (by design; packages cannot forge chrome).
 | Status/focus contrast | PASS static/structural | Token contrast suites pass and visible focus styling remains present in the captured controls |
 
 No new theme budget or token was introduced.
+
+## Plan 103 Typography & Design-System Cross-Reference (2026-08-30)
+
+User typography (`UiTypographyHierarchy` and font roles configured via `setTypography`) strictly owns font family stacks and scale ratios across all UI surfaces and editor views. UI design systems cannot inject custom font families, point sizes, or concrete typography overrides. See [Module 15](15-ui-design-systems.md) for full design-system switching checks.

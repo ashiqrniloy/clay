@@ -174,4 +174,38 @@ describe("editor lifecycle", () => {
     expect(reconfigures()).toBe(before + 1);
     editorPerformance.configure(false);
   });
+
+  it("preserves EditorView and document text across recipe CSS variable updates", () => {
+    const session = createDocumentSession({ send: async () => undefined });
+    session.installInitial(bootstrap);
+    const { rerender } = render(<ClayEditor session={session} />);
+
+    expect(screen.getByTestId("clay-editor")).toBeInTheDocument();
+    expect(screen.getByText("ws")).toBeInTheDocument();
+
+    // Modify recipe variables on document root
+    document.documentElement.style.setProperty(
+      "--clay-ds-editor-default-root-rest-background-color",
+      "var(--clay-surface-main)",
+    );
+    document.documentElement.style.setProperty(
+      "--clay-ds-editor-default-gutters-rest-background-color",
+      "var(--clay-surface-panel)",
+    );
+
+    rerender(<ClayEditor session={session} />);
+
+    expect(screen.getByTestId("clay-editor")).toBeInTheDocument();
+    expect(screen.getByText("ws")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: /Editor ws/ }),
+    ).toBeInTheDocument();
+
+    document.documentElement.style.removeProperty(
+      "--clay-ds-editor-default-root-rest-background-color",
+    );
+    document.documentElement.style.removeProperty(
+      "--clay-ds-editor-default-gutters-rest-background-color",
+    );
+  });
 });

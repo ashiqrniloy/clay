@@ -4242,6 +4242,40 @@
       "async": false
     },
     {
+      "id": "theme.setDesignSystem",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/theme/set-design-system.md",
+      "js_module": "clay:theme",
+      "js_export": "setDesignSystem",
+      "js_facade": "runtime/js/theme.js::setDesignSystem",
+      "backing_rust": "src/server/ops/theme.rs::op_clay_theme_set_design_system; src/server/ops/theme.rs::apply_design_system; src/shell/design_system.rs::resolve_design_system",
+      "deno_op": "op_clay_theme_set_design_system",
+      "deno_op_path": "src/server/ops/theme.rs::op_clay_theme_set_design_system",
+      "name": "setDesignSystem",
+      "user_facing_name": "Set Design System",
+      "summary": "Explicitly activate a UI design system (the built-in `@clay/core` baseline or one adopted package's `uiDesignSystem` contribution) for component recipes; color authority always stays with the active theme.",
+      "owner": "server",
+      "phase": "Phase 22.4",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "specifier",
+          "type": "string",
+          "default": "required",
+          "description": "`@clay/core` (built-in baseline) or the name of one loaded package that contributes a `uiDesignSystem` declaration."
+        }
+      ],
+      "security": "Activates inert recipe data only: recipes may select among active-theme color roles and set bounded non-color values, but never contain concrete colors, so color authority always stays with the active theme and no raw CSS is possible. `@clay/core` is built in; any other specifier must already be an enabled package record or is adopted through the package service's existing enable/trust path — there is no automatic trust promotion, and provenance/trust-domain requirements come from that path. On failure or later package revocation the previous valid design system is preserved and the sanitized diagnostic surfaces; recipes resolve through `@clay/core` fallbacks for missing components. Does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.",
+      "agent_guidance": "Use setDesignSystem(\"@clay/core\") from init.js for the built-in baseline, or a loaded package name that contributes a `uiDesignSystem`. Colors come only from the active theme; never suggest raw CSS or package-owned colors. If the package is later removed, Clay keeps the last valid design system until a valid reload succeeds.",
+      "lookup_tags": ["theme", "design-system", "recipes", "init", "core", "fallback"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "theme.setTheme",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/theme/set-theme.md",

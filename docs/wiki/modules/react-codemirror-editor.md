@@ -222,6 +222,7 @@ view.dispatch({
 - `src-tauri/src/bridge/editor.rs`: camelCase document event shape.
 - `src-tauri/tests/config_security.rs`: CodeMirror-compatible style CSP while
   keeping script inline/eval and remote origins forbidden.
+- Plan 103 Design-System Boundary: The editor pane container, header, and scrollbars consume `--clay-ds-editor-view-*` recipe variables. The CodeMirror editor canvas text, carets, selections, search highlights, and syntax decorations strictly preserve theme color authority (`var(--clay-editor-*)` and `var(--clay-syntax-*)`). Design systems cannot modify syntax colors or text rendering.
 
 ```bash
 cargo test -p clay --lib editor::position_map
@@ -234,6 +235,7 @@ cd frontend && npm test
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
 - [Editor Viewport Render Patch](../flows/editor-viewport-render-patch.md)
 - [Client Edit Emission](../flows/client-edit-emission.md)
+- [UI Design System Runtime](ui-design-system-runtime.md)
 - [Desktop Typed Bridge](desktop-typed-bridge.md)
 - [React Shell](react-shell.md)
 - `docs/development/tauri-react-primitive-migration.md`

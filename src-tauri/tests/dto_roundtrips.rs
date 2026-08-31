@@ -654,3 +654,347 @@ fn theme_snapshot_envelope_shape() {
     assert_eq!(json["tokens"]["surface.main"]["value"], "#100f17");
     assert_eq!(json["tokens"]["density.default"]["type"], "level");
 }
+
+#[test]
+fn baseline_theme_snapshot_dto_size_and_bounds() {
+    use clay::shell::theme::ThemeTokenValueDto;
+    use std::collections::BTreeMap;
+
+    let mut tokens = BTreeMap::new();
+    for i in 0..50 {
+        tokens.insert(
+            format!("token.{i}"),
+            ThemeTokenValueDto::Color(format!("#{:06x}", i * 1000)),
+        );
+    }
+    let snapshot = clay_desktop_lib::bridge::ThemeSnapshotDto {
+        specifier: "@clay/theme-modus-operandi".into(),
+        tokens,
+        editor_styles: BTreeMap::new(),
+        density_scale: 1.0,
+    };
+    let serialized = serde_json::to_string(&snapshot).unwrap();
+    // Baseline size of 50 resolved tokens is ~3-4 KB, well within budget (< 16 KiB)
+    assert!(
+        serialized.len() < 16 * 1024,
+        "serialized theme snapshot size was {} bytes",
+        serialized.len()
+    );
+    assert!(!serialized.is_empty());
+}
+
+#[test]
+fn design_system_snapshot_dto_round_trip_and_variables() {
+    use clay::protocol::ActiveDesignSystem;
+    use clay::shell::design_system::{
+        BorderStyle, InnerHighlight, OutlineStyle, RecipeKey, RecipeState, ResolvedComponentRecipe,
+        ShadowLayer, ThemeColorRef, TransformPreset, TransitionTiming,
+    };
+    use clay_desktop_lib::bridge::DesignSystemSnapshotDto;
+
+    let mut ads = ActiveDesignSystem::core_fallback(7);
+    ads.specifier = "@clay/design-glass".to_string();
+
+    // Add rich recipe with all non-color properties, shadows, and inner highlight
+    let custom_key = RecipeKey::new("modal", "glass", "surface", RecipeState::Rest);
+    let custom_recipe = ResolvedComponentRecipe {
+        background_color: ThemeColorRef("surface.overlay".to_string()),
+        background_opacity: 0.85,
+        text_color: ThemeColorRef("text.primary".to_string()),
+        border_color: ThemeColorRef("border.subtle".to_string()),
+        border_width: 1.0,
+        border_style: BorderStyle::Solid,
+        border_radius: 12.0,
+        padding: Some("spacing.md".to_string()),
+        gap: Some("spacing.sm".to_string()),
+        shadow: vec![ShadowLayer {
+            x: 0.0,
+            y: 8.0,
+            blur: 24.0,
+            spread: 0.0,
+            color_role: ThemeColorRef("surface.scrim".to_string()),
+            opacity: 0.35,
+            inset: false,
+        }],
+        backdrop_blur: 16.0,
+        backdrop_saturate: 1.5,
+        inner_highlight: Some(InnerHighlight {
+            color_role: ThemeColorRef("surface.hover".to_string()),
+            opacity: 0.5,
+            width: 1.0,
+        }),
+        opacity: 1.0,
+        outline_color: ThemeColorRef("focus.ring".to_string()),
+        outline_width: 2.0,
+        outline_offset: 2.0,
+        outline_style: OutlineStyle::Solid,
+        transition_duration: 150.0,
+        transition_timing: TransitionTiming::EaseOut,
+        transform_preset: TransformPreset::HoverLift,
+    };
+    ads.recipes.insert(custom_key.clone(), custom_recipe);
+
+    let dto = DesignSystemSnapshotDto::resolve(&ads).expect("resolve must succeed");
+    let json = serde_json::to_value(&dto).expect("serialize to value");
+
+    // Verify metadata
+    assert_eq!(json["specifier"], "@clay/design-glass");
+    assert_eq!(json["schemaVersion"], 1);
+    assert_eq!(json["generation"], 7);
+    assert_eq!(json["provenance"]["packageName"], "core");
+    assert_eq!(json["provenance"]["trustDomain"], "trusted");
+
+    // Verify structured recipes
+    let key_str = custom_key.to_key_string();
+    assert_eq!(
+        json["recipes"][&key_str]["backgroundColor"],
+        "surface.overlay"
+    );
+    assert_eq!(json["recipes"][&key_str]["backgroundOpacity"], 0.85);
+    assert_eq!(json["recipes"][&key_str]["borderRadius"], 12.0);
+    assert_eq!(json["recipes"][&key_str]["backdropBlur"], 16.0);
+    assert_eq!(json["recipes"][&key_str]["backdropSaturate"], 1.5);
+    assert_eq!(json["recipes"][&key_str]["shadow"][0]["blur"], 24.0);
+    assert_eq!(
+        json["recipes"][&key_str]["innerHighlight"]["color"],
+        "surface.hover"
+    );
+
+    // Verify flattened typed variables
+    assert_eq!(
+        json["variables"][format!("{key_str}.backgroundColor")]["type"],
+        "theme-color-role"
+    );
+    assert_eq!(
+        json["variables"][format!("{key_str}.backgroundColor")]["value"],
+        "surface.overlay"
+    );
+    assert_eq!(
+        json["variables"][format!("{key_str}.borderRadius")]["type"],
+        "radius"
+    );
+    assert_eq!(
+        json["variables"][format!("{key_str}.borderRadius")]["value"],
+        12.0
+    );
+    assert_eq!(
+        json["variables"][format!("{key_str}.borderWidth")]["type"],
+        "border-width"
+    );
+    assert_eq!(
+        json["variables"][format!("{key_str}.borderWidth")]["value"],
+        1.0
+    );
+    assert_eq!(
+        json["variables"][format!("{key_str}.backdropBlur")]["type"],
+        "backdrop-blur"
+    );
+    assert_eq!(
+        json["variables"][format!("{key_str}.backdropBlur")]["value"],
+        16.0
+    );
+    assert_eq!(
+        json["variables"][format!("{key_str}.backdropSaturate")]["type"],
+        "backdrop-saturate"
+    );
+    assert_eq!(
+        json["variables"][format!("{key_str}.backdropSaturate")]["value"],
+        1.5
+    );
+    assert_eq!(
+        json["variables"][format!("{key_str}.transitionDuration")]["type"],
+        "motion-duration"
+    );
+    assert_eq!(
+        json["variables"][format!("{key_str}.transitionDuration")]["value"],
+        150.0
+    );
+
+    // Roundtrip deserialize from JSON
+    let roundtripped: DesignSystemSnapshotDto =
+        serde_json::from_value(json).expect("deserialize roundtrip");
+    assert_eq!(roundtripped, dto);
+}
+
+#[test]
+fn design_system_snapshot_dto_color_denial() {
+    use clay::protocol::ActiveDesignSystem;
+    use clay::shell::design_system::{
+        InnerHighlight, RecipeKey, RecipeState, ShadowLayer, ThemeColorRef,
+    };
+    use clay_desktop_lib::bridge::DesignSystemSnapshotDto;
+
+    // Test 1: Literal hex in background_color
+    let mut ads = ActiveDesignSystem::core_fallback(1);
+    let key = RecipeKey::new("button", "primary", "root", RecipeState::Rest);
+    let mut recipe = ads.recipes.get(&key).unwrap().clone();
+    recipe.background_color = ThemeColorRef("#ff0000".to_string());
+    ads.recipes.insert(key.clone(), recipe);
+
+    let err = DesignSystemSnapshotDto::resolve(&ads).unwrap_err();
+    assert!(
+        err.contains("color") && (err.contains("rejected") || err.contains("color denial")),
+        "error was: {err}"
+    );
+
+    // Test 2: Literal rgb in border_color
+    let mut ads = ActiveDesignSystem::core_fallback(1);
+    let mut recipe = ads.recipes.get(&key).unwrap().clone();
+    recipe.border_color = ThemeColorRef("rgb(255, 0, 0)".to_string());
+    ads.recipes.insert(key.clone(), recipe);
+
+    let err = DesignSystemSnapshotDto::resolve(&ads).unwrap_err();
+    assert!(
+        err.contains("color") && (err.contains("rejected") || err.contains("color denial")),
+        "error was: {err}"
+    );
+
+    // Test 3: Invalid unmapped token in shadow
+    let mut ads = ActiveDesignSystem::core_fallback(1);
+    let mut recipe = ads.recipes.get(&key).unwrap().clone();
+    recipe.shadow = vec![ShadowLayer {
+        x: 0.0,
+        y: 4.0,
+        blur: 8.0,
+        spread: 0.0,
+        color_role: ThemeColorRef("unknown.token".to_string()),
+        opacity: 0.5,
+        inset: false,
+    }];
+    ads.recipes.insert(key.clone(), recipe);
+
+    let err = DesignSystemSnapshotDto::resolve(&ads).unwrap_err();
+    assert!(
+        err.contains("color") && (err.contains("rejected") || err.contains("color denial")),
+        "error was: {err}"
+    );
+
+    // Test 4: Invalid unmapped token in inner_highlight
+    let mut ads = ActiveDesignSystem::core_fallback(1);
+    let mut recipe = ads.recipes.get(&key).unwrap().clone();
+    recipe.inner_highlight = Some(InnerHighlight {
+        color_role: ThemeColorRef("my.custom.palette.blue".to_string()),
+        opacity: 0.5,
+        width: 1.0,
+    });
+    ads.recipes.insert(key, recipe);
+
+    let err = DesignSystemSnapshotDto::resolve(&ads).unwrap_err();
+    assert!(
+        err.contains("color") && (err.contains("rejected") || err.contains("color denial")),
+        "error was: {err}"
+    );
+}
+
+#[test]
+fn design_system_snapshot_dto_authority_denial() {
+    use clay::protocol::ActiveDesignSystem;
+    use clay_desktop_lib::bridge::DesignSystemSnapshotDto;
+
+    let ads = ActiveDesignSystem::core_fallback(1);
+    let dto = DesignSystemSnapshotDto::resolve(&ads).expect("resolve core fallback");
+    let serialized = serde_json::to_string(&dto).expect("serialize");
+
+    // Authority deny checks: ensure no filesystem paths, source code, CSS selectors, or Tauri capabilities exist
+    assert!(!serialized.contains("/home/"));
+    assert!(!serialized.contains("/Users/"));
+    assert!(!serialized.contains("function("));
+    assert!(!serialized.contains("eval("));
+    assert!(!serialized.contains(".ts"));
+    assert!(!serialized.contains(".js"));
+    assert!(!serialized.contains("class"));
+    assert!(!serialized.contains("tauri:"));
+}
+
+#[test]
+fn design_system_snapshot_dto_size_budget() {
+    use clay::protocol::ActiveDesignSystem;
+    use clay_desktop_lib::bridge::DesignSystemSnapshotDto;
+
+    let ads = ActiveDesignSystem::core_fallback(1);
+    let dto = DesignSystemSnapshotDto::resolve(&ads).expect("resolve core fallback");
+    let serialized = serde_json::to_string(&dto).expect("serialize");
+
+    // Full core recipe table with 30+ recipes and 300+ variables must stay < 128 KiB
+    assert!(
+        serialized.len() < 128 * 1024,
+        "serialized active design system was {} bytes (exceeds 128 KiB budget)",
+        serialized.len()
+    );
+    assert!(!serialized.is_empty());
+}
+
+#[test]
+fn runtime_snapshot_dto_with_active_design_system_round_trip() {
+    use clay::protocol::{
+        ActiveDesignSystem, ActiveTheme, ActiveTypography, BehaviorManifest, PackagePanelContent,
+        PackageUiProvenance, PackageUiSnapshot, PackageUiTrustDomain, RuntimeStateSnapshot,
+        SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
+    };
+    use clay_desktop_lib::bridge::{BridgeEnvelope, RuntimeSnapshotDto};
+
+    let snapshot = RuntimeStateSnapshot {
+        runtime_generation_id: 5,
+        client_id: 3,
+        behavior: BehaviorManifest::minimal_text_editing(5),
+        active_theme: ActiveTheme {
+            specifier: "@clay/default".into(),
+            overrides: Vec::new(),
+            design_tokens: Vec::new(),
+        },
+        active_typography: ActiveTypography::default(),
+        active_design_system: ActiveDesignSystem::core_fallback(5),
+        sdui_tree: SduiTree {
+            ui_version: 5,
+            root_id: SduiNodeId(1),
+            nodes: vec![SduiNode::new(
+                SduiNodeId(1),
+                SduiNodeKind::Label {
+                    text: "Ready".into(),
+                },
+            )],
+        },
+        package_ui: PackageUiSnapshot {
+            version: 5,
+            panels: vec![PackagePanelContent {
+                id: "settings.surface".into(),
+                slot: "right".into(),
+                visibility: "visible".into(),
+                component_json: r#"{"id":"settings.root","kind":"panel","children":[]}"#.into(),
+                action_targets: Vec::new(),
+                provenance: PackageUiProvenance {
+                    package_name: "@clay/settings".into(),
+                    package_version: "0.1.0".into(),
+                    api_prefix: "settings".into(),
+                    trust_domain: PackageUiTrustDomain::Trusted,
+                },
+            }],
+            ..Default::default()
+        },
+        documents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+
+    let dto = RuntimeSnapshotDto::resolve(snapshot).expect("projection");
+    let envelope = BridgeEnvelope::RuntimeSnapshot {
+        client_id: 3,
+        tab_id: None,
+        snapshot: Box::new(dto),
+    };
+    let value = serde_json::to_value(&envelope).expect("serialize envelope");
+
+    assert_eq!(value["kind"], "runtimeSnapshot");
+    assert_eq!(
+        value["data"]["snapshot"]["activeDesignSystem"]["specifier"],
+        "@clay/core"
+    );
+    assert_eq!(
+        value["data"]["snapshot"]["activeDesignSystem"]["generation"],
+        5
+    );
+    assert!(
+        value["data"]["snapshot"]["activeDesignSystem"]["variables"]
+            .get("button.primary.root.rest.backgroundColor")
+            .is_some()
+    );
+}

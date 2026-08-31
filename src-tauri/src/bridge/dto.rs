@@ -9,18 +9,20 @@
 use clay::client::{ClientConnectionEvent, ClientInitialState};
 use clay::editor::theme::{StyleRegistry, color_hex};
 use clay::protocol::{
-    ActiveTypography, BehaviorManifest, ClientId, DecorationKind, DocumentAccess, DocumentId,
-    DocumentVersion, FontProfile, Modifiers, PackageUiProvenance, RuntimeDiagnostic,
-    RuntimeStateSnapshot, SduiTree, TabId, TokenType, UiTypographyHierarchy,
+    ActiveDesignSystem, ActiveTypography, BehaviorManifest, ClientId, DecorationKind,
+    DocumentAccess, DocumentId, DocumentVersion, FontProfile, Modifiers, PackageUiProvenance,
+    PackageUiTrustDomain, RuntimeDiagnostic, RuntimeStateSnapshot, SduiTree, TabId, TokenType,
+    UiTypographyHierarchy,
 };
+use clay::shell::design_system::ThemeColorRef;
 use clay::shell::theme::{ThemeTokenValueDto, density_spacing_scale, resolve_theme_token_snapshot};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Complete session state installed on connect/reconnect. One atomic
 /// projection: the webview replaces its previous bootstrap wholesale
 /// (reconnect must never merge across sessions).
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapDto {
     pub client_id: ClientId,
@@ -44,6 +46,7 @@ pub struct BootstrapDto {
     /// sees raw override data or performs resolution.
     pub active_theme: ThemeSnapshotDto,
     pub active_typography: TypographySnapshotDto,
+    pub active_design_system: DesignSystemSnapshotDto,
 }
 
 /// Resolved theme projection consumed by the frontend theme adapter.
@@ -143,10 +146,7 @@ fn editor_style_snapshot(theme: &clay::protocol::ActiveTheme) -> BTreeMap<String
 impl ThemeSnapshotDto {
     /// Resolve one snapshot through the Rust authority. Contrast validation
     /// runs first; a below-AA theme is rejected before it reaches the DOM.
-    pub(crate) fn resolve(
-        specifier: &str,
-        theme: &clay::protocol::ActiveTheme,
-    ) -> Result<Self, String> {
+    pub fn resolve(specifier: &str, theme: &clay::protocol::ActiveTheme) -> Result<Self, String> {
         let tokens = resolve_theme_token_snapshot(theme)
             .map_err(|failure| format!("theme rejected: {failure:?}"))?;
         let density_scale = density_spacing_scale(&tokens);
@@ -183,7 +183,7 @@ impl From<&ActiveTypography> for TypographySnapshotDto {
     }
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct InitialDocumentDto {
     pub document_id: DocumentId,
@@ -205,22 +205,334 @@ impl InitialDocumentDto {
     }
 }
 
+/// Resolved UI design system projection consumed by the frontend design-system adapter.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DesignSystemSnapshotDto {
+    pub specifier: String,
+    pub schema_version: u32,
+    pub generation: u64,
+    pub provenance: DesignSystemProvenanceDto,
+    pub recipes: BTreeMap<String, ComponentRecipeDto>,
+    pub variables: BTreeMap<String, DesignSystemVariableValueDto>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DesignSystemProvenanceDto {
+    pub package_name: String,
+    pub package_version: String,
+    pub api_prefix: String,
+    pub trust_domain: PackageUiTrustDomain,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ComponentRecipeDto {
+    pub background_color: String,
+    pub background_opacity: f64,
+    pub text_color: String,
+    pub border_color: String,
+    pub border_width: f64,
+    pub border_style: String,
+    pub border_radius: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub padding: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gap: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadow: Vec<ShadowLayerDto>,
+    pub backdrop_blur: f64,
+    pub backdrop_saturate: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inner_highlight: Option<InnerHighlightDto>,
+    pub opacity: f64,
+    pub outline_color: String,
+    pub outline_width: f64,
+    pub outline_offset: f64,
+    pub outline_style: String,
+    pub transition_duration: f64,
+    pub transition_timing: String,
+    pub transform_preset: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShadowLayerDto {
+    pub x: f64,
+    pub y: f64,
+    pub blur: f64,
+    pub spread: f64,
+    pub color: String,
+    pub opacity: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InnerHighlightDto {
+    pub color: String,
+    pub opacity: f64,
+    pub width: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "kebab-case")]
+pub enum DesignSystemVariableValueDto {
+    ThemeColorRole(String),
+    Dimension(f64),
+    Radius(f64),
+    BorderWidth(f64),
+    BorderStyle(String),
+    SpacingToken(String),
+    Opacity(f64),
+    BackdropBlur(f64),
+    BackdropSaturate(f64),
+    Shadow(Vec<ShadowLayerDto>),
+    InnerHighlight(InnerHighlightDto),
+    OutlineStyle(String),
+    MotionDuration(f64),
+    TransitionTiming(String),
+    TransformPreset(String),
+}
+
+impl DesignSystemSnapshotDto {
+    pub fn resolve(active: &ActiveDesignSystem) -> Result<Self, String> {
+        active
+            .validate()
+            .map_err(|err| format!("design system validation failed: {err}"))?;
+
+        let mut recipes = BTreeMap::new();
+        let mut variables = BTreeMap::new();
+
+        for (key, recipe) in &active.recipes {
+            let key_str = key.to_key_string();
+
+            // Strict color denial check: reject concrete literal colors and invalid roles
+            if !ThemeColorRef::is_valid_color_role(&recipe.background_color.0) {
+                return Err(format!(
+                    "color denial: invalid background_color `{}` in recipe `{key_str}`",
+                    recipe.background_color.0
+                ));
+            }
+            if !ThemeColorRef::is_valid_color_role(&recipe.text_color.0) {
+                return Err(format!(
+                    "color denial: invalid text_color `{}` in recipe `{key_str}`",
+                    recipe.text_color.0
+                ));
+            }
+            if !ThemeColorRef::is_valid_color_role(&recipe.border_color.0) {
+                return Err(format!(
+                    "color denial: invalid border_color `{}` in recipe `{key_str}`",
+                    recipe.border_color.0
+                ));
+            }
+            if !ThemeColorRef::is_valid_color_role(&recipe.outline_color.0) {
+                return Err(format!(
+                    "color denial: invalid outline_color `{}` in recipe `{key_str}`",
+                    recipe.outline_color.0
+                ));
+            }
+
+            let mut shadow_dtos = Vec::with_capacity(recipe.shadow.len());
+            for s in &recipe.shadow {
+                if !ThemeColorRef::is_valid_color_role(&s.color_role.0) {
+                    return Err(format!(
+                        "color denial: invalid shadow color `{}` in recipe `{key_str}`",
+                        s.color_role.0
+                    ));
+                }
+                shadow_dtos.push(ShadowLayerDto {
+                    x: s.x,
+                    y: s.y,
+                    blur: s.blur,
+                    spread: s.spread,
+                    color: s.color_role.0.clone(),
+                    opacity: s.opacity,
+                });
+            }
+
+            let inner_highlight_dto = match &recipe.inner_highlight {
+                Some(ih) => {
+                    if !ThemeColorRef::is_valid_color_role(&ih.color_role.0) {
+                        return Err(format!(
+                            "color denial: invalid inner_highlight color `{}` in recipe `{key_str}`",
+                            ih.color_role.0
+                        ));
+                    }
+                    Some(InnerHighlightDto {
+                        color: ih.color_role.0.clone(),
+                        opacity: ih.opacity,
+                        width: ih.width,
+                    })
+                }
+                None => None,
+            };
+
+            let recipe_dto = ComponentRecipeDto {
+                background_color: recipe.background_color.0.clone(),
+                background_opacity: recipe.background_opacity,
+                text_color: recipe.text_color.0.clone(),
+                border_color: recipe.border_color.0.clone(),
+                border_width: recipe.border_width,
+                border_style: recipe.border_style.as_str().to_string(),
+                border_radius: recipe.border_radius,
+                padding: recipe.padding.clone(),
+                gap: recipe.gap.clone(),
+                shadow: shadow_dtos.clone(),
+                backdrop_blur: recipe.backdrop_blur,
+                backdrop_saturate: recipe.backdrop_saturate,
+                inner_highlight: inner_highlight_dto.clone(),
+                opacity: recipe.opacity,
+                outline_color: recipe.outline_color.0.clone(),
+                outline_width: recipe.outline_width,
+                outline_offset: recipe.outline_offset,
+                outline_style: recipe.outline_style.as_str().to_string(),
+                transition_duration: recipe.transition_duration,
+                transition_timing: recipe.transition_timing.as_str().to_string(),
+                transform_preset: recipe.transform_preset.as_str().to_string(),
+            };
+            recipes.insert(key_str.clone(), recipe_dto);
+
+            // Populate variables table with deterministic sorted keys
+            variables.insert(
+                format!("{key_str}.backgroundColor"),
+                DesignSystemVariableValueDto::ThemeColorRole(recipe.background_color.0.clone()),
+            );
+            variables.insert(
+                format!("{key_str}.backgroundOpacity"),
+                DesignSystemVariableValueDto::Opacity(recipe.background_opacity),
+            );
+            variables.insert(
+                format!("{key_str}.textColor"),
+                DesignSystemVariableValueDto::ThemeColorRole(recipe.text_color.0.clone()),
+            );
+            variables.insert(
+                format!("{key_str}.borderColor"),
+                DesignSystemVariableValueDto::ThemeColorRole(recipe.border_color.0.clone()),
+            );
+            variables.insert(
+                format!("{key_str}.borderWidth"),
+                DesignSystemVariableValueDto::BorderWidth(recipe.border_width),
+            );
+            variables.insert(
+                format!("{key_str}.borderStyle"),
+                DesignSystemVariableValueDto::BorderStyle(recipe.border_style.as_str().to_string()),
+            );
+            variables.insert(
+                format!("{key_str}.borderRadius"),
+                DesignSystemVariableValueDto::Radius(recipe.border_radius),
+            );
+            if let Some(ref p) = recipe.padding {
+                variables.insert(
+                    format!("{key_str}.padding"),
+                    DesignSystemVariableValueDto::SpacingToken(p.clone()),
+                );
+            }
+            if let Some(ref g) = recipe.gap {
+                variables.insert(
+                    format!("{key_str}.gap"),
+                    DesignSystemVariableValueDto::SpacingToken(g.clone()),
+                );
+            }
+            if !shadow_dtos.is_empty() {
+                variables.insert(
+                    format!("{key_str}.shadow"),
+                    DesignSystemVariableValueDto::Shadow(shadow_dtos),
+                );
+            }
+            if recipe.backdrop_blur > 0.0 {
+                variables.insert(
+                    format!("{key_str}.backdropBlur"),
+                    DesignSystemVariableValueDto::BackdropBlur(recipe.backdrop_blur),
+                );
+            }
+            if (recipe.backdrop_saturate - 1.0).abs() > f64::EPSILON {
+                variables.insert(
+                    format!("{key_str}.backdropSaturate"),
+                    DesignSystemVariableValueDto::BackdropSaturate(recipe.backdrop_saturate),
+                );
+            }
+            if let Some(ih) = inner_highlight_dto {
+                variables.insert(
+                    format!("{key_str}.innerHighlight"),
+                    DesignSystemVariableValueDto::InnerHighlight(ih),
+                );
+            }
+            if (recipe.opacity - 1.0).abs() > f64::EPSILON {
+                variables.insert(
+                    format!("{key_str}.opacity"),
+                    DesignSystemVariableValueDto::Opacity(recipe.opacity),
+                );
+            }
+            variables.insert(
+                format!("{key_str}.outlineColor"),
+                DesignSystemVariableValueDto::ThemeColorRole(recipe.outline_color.0.clone()),
+            );
+            variables.insert(
+                format!("{key_str}.outlineWidth"),
+                DesignSystemVariableValueDto::Dimension(recipe.outline_width),
+            );
+            variables.insert(
+                format!("{key_str}.outlineOffset"),
+                DesignSystemVariableValueDto::Dimension(recipe.outline_offset),
+            );
+            variables.insert(
+                format!("{key_str}.outlineStyle"),
+                DesignSystemVariableValueDto::OutlineStyle(
+                    recipe.outline_style.as_str().to_string(),
+                ),
+            );
+            variables.insert(
+                format!("{key_str}.transitionDuration"),
+                DesignSystemVariableValueDto::MotionDuration(recipe.transition_duration),
+            );
+            variables.insert(
+                format!("{key_str}.transitionTiming"),
+                DesignSystemVariableValueDto::TransitionTiming(
+                    recipe.transition_timing.as_str().to_string(),
+                ),
+            );
+            variables.insert(
+                format!("{key_str}.transformPreset"),
+                DesignSystemVariableValueDto::TransformPreset(
+                    recipe.transform_preset.as_str().to_string(),
+                ),
+            );
+        }
+
+        Ok(Self {
+            specifier: active.specifier.clone(),
+            schema_version: active.schema_version,
+            generation: active.generation,
+            provenance: DesignSystemProvenanceDto {
+                package_name: active.provenance.package_name.clone(),
+                package_version: active.provenance.package_version.clone(),
+                api_prefix: active.provenance.api_prefix.clone(),
+                trust_domain: active.provenance.trust_domain,
+            },
+            recipes,
+            variables,
+        })
+    }
+}
+
 /// Safe atomic runtime-generation projection. Raw theme overrides and JSON
 /// component strings are resolved/parsed in Rust before the webview observes it.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSnapshotDto {
     pub runtime_generation_id: u64,
     pub behavior_manifest: BehaviorManifest,
     pub active_theme: ThemeSnapshotDto,
     pub active_typography: TypographySnapshotDto,
+    pub active_design_system: DesignSystemSnapshotDto,
     pub sdui_tree: SduiTree,
     pub package_ui: PackageUiSnapshotDto,
     pub documents: Vec<clay::protocol::DocumentRuntimeRenderState>,
     pub diagnostics: Vec<RuntimeDiagnostic>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageUiSnapshotDto {
     pub version: u64,
@@ -231,7 +543,7 @@ pub struct PackageUiSnapshotDto {
     pub input_routes: Vec<clay::protocol::PackageInputRouteContent>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageSurfaceDto {
     pub id: String,
@@ -240,7 +552,7 @@ pub struct PackageSurfaceDto {
     pub provenance: PackageUiProvenance,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PackagePanelDto {
     pub id: String,
@@ -251,7 +563,7 @@ pub struct PackagePanelDto {
     pub provenance: PackageUiProvenance,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageOverlayDto {
     pub id: String,
@@ -264,7 +576,7 @@ pub struct PackageOverlayDto {
 }
 
 impl RuntimeSnapshotDto {
-    pub(crate) fn resolve(snapshot: RuntimeStateSnapshot) -> Result<Self, String> {
+    pub fn resolve(snapshot: RuntimeStateSnapshot) -> Result<Self, String> {
         snapshot
             .validate()
             .map_err(|error| format!("invalid runtime snapshot: {error:?}"))?;
@@ -276,6 +588,7 @@ impl RuntimeSnapshotDto {
                 &snapshot.active_theme,
             )?,
             active_typography: TypographySnapshotDto::from(&snapshot.active_typography),
+            active_design_system: DesignSystemSnapshotDto::resolve(&snapshot.active_design_system)?,
             sdui_tree: snapshot.sdui_tree,
             package_ui: PackageUiSnapshotDto::parse(snapshot.package_ui)?,
             documents: snapshot.documents,
@@ -416,6 +729,7 @@ mod runtime_projection_tests {
                 design_tokens: Vec::new(),
             },
             active_typography: ActiveTypography::default(),
+            active_design_system: ActiveDesignSystem::core_fallback(3),
             sdui_tree: SduiTree {
                 ui_version: 3,
                 root_id: SduiNodeId(1),

@@ -1552,10 +1552,16 @@ impl TreeSitterSyntaxHandler {
     }
 
     /// Evict arbitrary entries beyond the bounded per-document cache so cold
-    /// grammars from closed documents cannot accumulate unbounded tree state.
-    fn bound_tree_cache(&self, trees: &mut HashMap<DocumentId, CachedSyntaxState>) {
+    /// grammars from closed documents cannot accumulate unbounded tree state,
+    /// while preserving the newly inserted document.
+    fn bound_tree_cache(
+        &self,
+        trees: &mut HashMap<DocumentId, CachedSyntaxState>,
+        keep: DocumentId,
+    ) {
         while trees.len() > crate::perf::budgets::SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES {
-            let Some(victim) = trees.keys().next().copied() else {
+            let victim = trees.keys().find(|&&k| k != keep).copied();
+            let Some(victim) = victim else {
                 break;
             };
             trees.remove(&victim);
@@ -1816,7 +1822,7 @@ impl TreeSitterSyntaxHandler {
                     parser,
                 },
             );
-            self.bound_tree_cache(&mut trees);
+            self.bound_tree_cache(&mut trees, notification.document_id);
         }
 
         Ok(IncrementalParseUpdate {

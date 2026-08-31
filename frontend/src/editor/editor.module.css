@@ -1,22 +1,42 @@
-/* Editor host: one compartment filling the pane main slot. */
+/* Editor host: one compartment filling the pane main slot.
+ * Consumes host-owned design-system recipe variables with fallback to core tokens. */
 
 .host {
   display: grid;
   grid-template-rows: auto 1fr;
   height: 100%;
   min-height: 0;
-  background: var(--clay-surface-main);
+  background: var(
+    --clay-ds-editor-default-root-rest-background-color,
+    var(--clay-surface-main)
+  );
 }
 
 .chrome {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--clay-spacing-sm, 12px);
-  padding: var(--clay-spacing-xxs, 4px) var(--clay-spacing-sm, 12px);
-  background: var(--clay-surface-panel);
-  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-hairline);
+  gap: var(
+    --clay-ds-editor-default-chrome-rest-gap,
+    var(--clay-spacing-sm, 12px)
+  );
+  padding: var(
+    --clay-ds-editor-default-chrome-rest-padding,
+    var(--clay-spacing-xxs, 4px) var(--clay-spacing-sm, 12px)
+  );
+  background: var(
+    --clay-ds-editor-default-chrome-rest-background-color,
+    var(--clay-surface-panel)
+  );
+  border-bottom: var(
+      --clay-ds-editor-default-chrome-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-editor-default-chrome-rest-border-style, solid)
+    var(
+      --clay-ds-editor-default-chrome-rest-border-color,
+      var(--clay-border-hairline)
+    );
 }
 
 .meta {
@@ -39,10 +59,23 @@
   min-width: 12rem;
   height: 2rem;
   padding: 0 var(--clay-spacing-xs, 8px);
-  border: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-subtle);
-  background: var(--clay-surface-control);
-  color: var(--clay-text-primary);
+  border: var(
+      --clay-ds-editor-default-path-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-editor-default-path-rest-border-style, solid)
+    var(
+      --clay-ds-editor-default-path-rest-border-color,
+      var(--clay-border-subtle)
+    );
+  background: var(
+    --clay-ds-editor-default-path-rest-background-color,
+    var(--clay-surface-control)
+  );
+  color: var(
+    --clay-ds-editor-default-path-rest-text-color,
+    var(--clay-text-primary)
+  );
   font: inherit;
   font-size: var(--clay-text-status-size);
 }
@@ -62,23 +95,52 @@
 }
 
 .canvas :global(.cm-gutters) {
-  background: var(--clay-surface-panel);
-  color: var(--clay-text-muted);
-  border-right: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-hairline);
+  background: var(
+    --clay-ds-editor-default-gutters-rest-background-color,
+    var(--clay-surface-panel)
+  );
+  color: var(
+    --clay-ds-editor-default-gutters-rest-text-color,
+    var(--clay-text-muted)
+  );
+  border-right: var(
+      --clay-ds-editor-default-gutters-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-editor-default-gutters-rest-border-color,
+      var(--clay-border-hairline)
+    );
 }
 
 .canvas :global(.cm-activeLine),
 .canvas :global(.cm-activeLineGutter) {
-  background: var(--clay-surface-hover);
+  background: var(
+    --clay-ds-editor-default-active-line-rest-background-color,
+    var(--clay-surface-hover)
+  );
 }
 
 .canvas :global(.cm-tooltip),
 .canvas :global(.cm-panels) {
-  border: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-strong);
-  background: var(--clay-surface-overlay);
-  color: var(--clay-text-primary);
+  border: var(
+      --clay-ds-editor-default-tooltip-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-editor-default-tooltip-rest-border-color,
+      var(--clay-border-strong)
+    );
+  background: var(
+    --clay-ds-editor-default-tooltip-rest-background-color,
+    var(--clay-surface-overlay)
+  );
+  color: var(
+    --clay-ds-editor-default-tooltip-rest-text-color,
+    var(--clay-text-primary)
+  );
   box-shadow: none;
 }
 
@@ -87,8 +149,14 @@
 }
 
 .canvas :global(.cm-tooltip-autocomplete > ul > li[aria-selected]) {
-  background: var(--clay-surface-selected);
-  color: var(--clay-text-primary);
+  background: var(
+    --clay-ds-editor-default-tooltip-selected-background-color,
+    var(--clay-surface-selected)
+  );
+  color: var(
+    --clay-ds-editor-default-tooltip-selected-text-color,
+    var(--clay-text-primary)
+  );
 }
 
 .canvas :global(.cm-clay-inlay)::after {

@@ -8,6 +8,7 @@ import {
   ClayModal,
   ClayText,
   ClayTextField,
+  recipeAttributes,
 } from "../components";
 import { packageIntent, sduiActionPayload, type IntentSender } from "./actions";
 import type {
@@ -89,6 +90,7 @@ export function PackageComponent({
           className={styles.panel}
           style={style}
           aria-labelledby={node.title ? `${node.id}-title` : undefined}
+          {...recipeAttributes("panel", "root", node.style?.variant)}
         >
           {node.title && (
             <ClayText id={`${node.id}-title`} variant="title" role={role(node)}>
@@ -166,7 +168,11 @@ export function PackageComponent({
       return <PackageDropdown node={node} uiVersion={uiVersion} send={send} />;
     case "collapse":
       return (
-        <div className={styles.container} style={style}>
+        <div
+          className={styles.container}
+          style={style}
+          {...recipeAttributes("collapse", "root")}
+        >
           <ClayCollapse title={node.title ?? node.label ?? "Section"}>
             {children}
           </ClayCollapse>
@@ -185,15 +191,38 @@ export function PackageComponent({
         <div
           className={node.direction === "row" ? styles.row : styles.column}
           style={style}
+          {...recipeAttributes("flex", "root")}
         >
           {children}
         </div>
       );
     case "stack":
+      return (
+        <div
+          className={styles.stack}
+          style={style}
+          {...recipeAttributes("stack", "root")}
+        >
+          {children}
+        </div>
+      );
     case "overlay":
+      return (
+        <div
+          className={styles.stack}
+          style={style}
+          {...recipeAttributes("overlay", "root")}
+        >
+          {children}
+        </div>
+      );
     case "portal":
       return (
-        <div className={styles.stack} style={style}>
+        <div
+          className={styles.stack}
+          style={style}
+          {...recipeAttributes("portal", "root")}
+        >
           {children}
         </div>
       );
@@ -204,6 +233,7 @@ export function PackageComponent({
           style={style}
           tabIndex={0}
           aria-label={node.title ?? node.label ?? "Scrollable package content"}
+          {...recipeAttributes("scroll", "root")}
         >
           {children}
         </div>

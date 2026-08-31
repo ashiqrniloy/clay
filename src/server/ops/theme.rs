@@ -241,6 +241,187 @@ pub(super) fn op_clay_theme_set_appearance(
     .map_err(|_| JsErrorBox::generic("theme.invalid_request: serialization failed"))
 }
 
+/// Apply an explicit UI design-system selection (Plan 102).
+///
+/// Resolves against exact current package records (`clay.contributions.uiDesignSystem`),
+/// resolves full component recipe fallback inheritance against Clay's built-in core baseline,
+/// and installs the resolved [`crate::shell::design_system::ActiveDesignSystem`] snapshot on `ClayOpState`.
+///
+/// Special cases:
+/// - `@clay/core`, `clay:core`, `core`: selects and installs the built-in core design-system baseline.
+///
+/// Package specifiers:
+/// - Validates non-empty string.
+/// - Resolves and enables first-party (`@clay/*`) or adopted third-party packages through `PackageService`.
+/// - Rejects packages that declare no `uiDesignSystem` contribution.
+/// - Validates schema version, bounds, and theme color-role authority.
+/// - Resolves parent design systems if `extends` is specified.
+/// - Leaves previous active design system untouched on any error.
+pub(crate) fn apply_design_system(
+    clay_state: &std::sync::Arc<ClayOpState>,
+    specifier: &str,
+) -> Result<crate::shell::design_system::ActiveDesignSystem, JsErrorBox> {
+    let trimmed = specifier.trim();
+    if trimmed.is_empty() {
+        return Err(JsErrorBox::generic(
+            "theme.invalid_request: setDesignSystem requires a non-empty `specifier`",
+        ));
+    }
+
+    if trimmed == "@clay/core" || trimmed == "clay:core" || trimmed == "core" {
+        let active = crate::shell::design_system::ActiveDesignSystem::core_fallback(0);
+        clay_state.set_active_design_system(active.clone());
+        clay_state.set_explicit_design_system_active(true);
+        return Ok(active);
+    }
+
+    let record = {
+        let mut service = clay_state
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned");
+        if trimmed.starts_with("@clay/") {
+            let (record, _root, _name) =
+                super::packages::ensure_first_party_record(clay_state, trimmed)?;
+            record
+        } else {
+            // Adopted third-party package
+            if let Some(rec) = service
+                .enabled_records()
+                .find(|r| r.manifest.name == trimmed)
+            {
+                rec.clone()
+            } else {
+                match service.enable(trimmed) {
+                    Ok(r) => r.clone(),
+                    Err(crate::packages::service::PackageServiceError::AlreadyEnabled {
+                        ..
+                    }) => service
+                        .enabled_records()
+                        .find(|r| r.manifest.name == trimmed)
+                        .ok_or_else(|| {
+                            JsErrorBox::generic(format!(
+                                "theme.load_failed: enabled package `{trimmed}` not found"
+                            ))
+                        })?
+                        .clone(),
+                    Err(err) => {
+                        return Err(JsErrorBox::generic(format!(
+                            "theme.load_failed: failed to enable package `{trimmed}`: {err}"
+                        )));
+                    }
+                }
+            }
+        }
+    };
+
+    let descriptor = record
+        .contributions
+        .ui_design_system
+        .as_ref()
+        .ok_or_else(|| {
+            JsErrorBox::generic(format!(
+                "theme.invalid_design_system: package `{trimmed}` does not contribute a uiDesignSystem"
+            ))
+        })?;
+
+    let declaration: crate::shell::design_system::UiDesignSystemDeclaration = serde_json::from_str(
+        &descriptor.declaration_json,
+    )
+    .map_err(|err| {
+        JsErrorBox::generic(format!(
+            "theme.invalid_design_system: failed to deserialize uiDesignSystem declaration: {err}"
+        ))
+    })?;
+
+    let parent_resolved = if let Some(ref parent_id) = declaration.extends {
+        if parent_id == "@clay/core" || parent_id == "clay:core" || parent_id == "core" {
+            Some(crate::shell::design_system::ResolvedUiDesignSystem::core_fallback())
+        } else {
+            let service = clay_state
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            let parent_record = service.enabled_records().find(|r| {
+                r.manifest.name == *parent_id
+                    || r.contributions
+                        .ui_design_system
+                        .as_ref()
+                        .is_some_and(|ds| ds.id == *parent_id)
+            });
+            if let Some(parent_rec) = parent_record {
+                if let Some(ref parent_ds) = parent_rec.contributions.ui_design_system {
+                    let parent_decl: crate::shell::design_system::UiDesignSystemDeclaration =
+                        serde_json::from_str(&parent_ds.declaration_json).map_err(|err| {
+                            JsErrorBox::generic(format!(
+                                "theme.invalid_design_system: parent declaration error: {err}"
+                            ))
+                        })?;
+                    Some(
+                        crate::shell::design_system::resolve_design_system(&parent_decl, None)
+                            .map_err(|err| {
+                                JsErrorBox::generic(format!(
+                                    "theme.invalid_design_system: parent resolution failed: {err}"
+                                ))
+                            })?,
+                    )
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let resolved =
+        crate::shell::design_system::resolve_design_system(&declaration, parent_resolved.as_ref())
+            .map_err(|err| {
+                JsErrorBox::generic(format!(
+                    "theme.invalid_design_system: resolution failed: {err}"
+                ))
+            })?;
+
+    let provenance = crate::shell::design_system::DesignSystemProvenance::from_record(&record);
+    let active = crate::shell::design_system::ActiveDesignSystem::from_resolved(
+        trimmed, 0, provenance, resolved,
+    );
+
+    clay_state.set_active_design_system(active.clone());
+    clay_state.set_explicit_design_system_active(true);
+    Ok(active)
+}
+
+/// `setDesignSystem` Clay JS op (Plan 102). Resolves `specifier` against package
+/// records (`clay.contributions.uiDesignSystem`), validates bounds and color authority,
+/// computes complete fallback-resolved component recipes, and installs the active design system.
+#[op2]
+#[string]
+pub(super) fn op_clay_theme_set_design_system(
+    state: &mut OpState,
+    #[string] request_json: String,
+) -> Result<String, JsErrorBox> {
+    let request: Value = serde_json::from_str(&request_json).map_err(|_| {
+        JsErrorBox::generic("theme.invalid_request: setDesignSystem requires { specifier: string }")
+    })?;
+    let Some(specifier) = request.get("specifier").and_then(Value::as_str) else {
+        return Err(JsErrorBox::generic(
+            "theme.invalid_request: setDesignSystem requires a `specifier` string",
+        ));
+    };
+    let clay_state = state.borrow::<std::sync::Arc<ClayOpState>>();
+    let active = apply_design_system(clay_state, specifier)?;
+    let recipe_count = active.recipes.len();
+    serde_json::to_string(&json!({
+        "specifier": specifier,
+        "recipeCount": recipe_count,
+        "schemaVersion": active.schema_version,
+    }))
+    .map_err(|_| JsErrorBox::generic("theme.invalid_request: serialization failed"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,5 +531,161 @@ mod tests {
             .expect("prior valid theme remains");
         assert_eq!(still_active.specifier, "@clay/core");
         assert!(still_active.design_tokens.is_empty());
+    }
+
+    #[test]
+    fn apply_design_system_core_baseline() {
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+        assert!(clay_state.active_design_system().is_none());
+        assert!(!clay_state.explicit_design_system_active());
+
+        let active = apply_design_system(&clay_state, "@clay/core").expect("apply core");
+        assert_eq!(active.specifier, "@clay/core");
+        assert_eq!(active.provenance.package_name, "core");
+        assert_eq!(
+            active.provenance.trust_domain,
+            crate::protocol::PackageUiTrustDomain::Trusted
+        );
+        assert!(!active.recipes.is_empty());
+        assert!(clay_state.explicit_design_system_active());
+        assert_eq!(
+            clay_state.active_design_system().unwrap().specifier,
+            "@clay/core"
+        );
+
+        let active2 = apply_design_system(&clay_state, "core").expect("apply core alias");
+        assert_eq!(active2.specifier, "@clay/core");
+    }
+
+    #[test]
+    fn apply_design_system_rejects_empty_specifier() {
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+        let err = apply_design_system(&clay_state, "   ").expect_err("rejects empty");
+        assert!(err.to_string().contains("theme.invalid_request"));
+        assert!(clay_state.active_design_system().is_none());
+        assert!(!clay_state.explicit_design_system_active());
+    }
+
+    #[test]
+    fn apply_design_system_rejects_missing_package_and_preserves_state() {
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+        let initial = apply_design_system(&clay_state, "@clay/core").unwrap();
+        assert_eq!(initial.specifier, "@clay/core");
+
+        let err = apply_design_system(&clay_state, "@vendor/non-existent-ds")
+            .expect_err("rejects non-existent package");
+        assert!(err.to_string().contains("theme.load_failed"));
+
+        // Prior active design system is preserved untouched
+        let active = clay_state.active_design_system().unwrap();
+        assert_eq!(active.specifier, "@clay/core");
+        assert_eq!(active.provenance.package_name, "core");
+    }
+
+    #[test]
+    fn apply_design_system_with_adopted_package_and_inheritance() {
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+        let package_json = serde_json::json!({
+            "name": "@vendor/custom-nord-ds",
+            "version": "0.1.0",
+            "type": "module",
+            "exports": { ".": "./dist/index.js" },
+            "clay": {
+                "apiPrefix": "nord",
+                "entry": "./dist/index.js",
+                "permissions": [],
+                "modes": ["nord"],
+                "docs": "./docs/index.md",
+                "contributions": {
+                    "uiDesignSystem": {
+                        "schemaVersion": 1,
+                        "id": "@vendor/custom-nord-ds",
+                        "displayName": "Nord Design System",
+                        "extends": "@clay/core",
+                        "values": {
+                            "radii.button": {
+                                "type": "radius",
+                                "value": 6.0
+                            }
+                        },
+                        "recipes": {
+                            "button.primary.root.rest": {
+                                "borderRadius": 6.0,
+                                "backgroundColor": "accent.primary",
+                                "textColor": "surface.main"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        let fixture_dir = std::env::temp_dir().join(format!(
+            "clay-test-ds-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(fixture_dir.join("dist")).unwrap();
+        std::fs::create_dir_all(fixture_dir.join("docs")).unwrap();
+        std::fs::write(fixture_dir.join("dist/index.js"), "// noop").unwrap();
+        std::fs::write(fixture_dir.join("docs/index.md"), "# Nord").unwrap();
+        {
+            let mut service = clay_state.package_service().lock().unwrap();
+            service
+                .install_from_value_at_root_with_spec(
+                    package_json,
+                    fixture_dir.clone(),
+                    "local:nord-ds",
+                )
+                .unwrap();
+            service
+                .authorize_package(
+                    "@vendor/custom-nord-ds",
+                    vec![],
+                    crate::packages::authorization::RuntimeProfile::Restricted,
+                    "test",
+                )
+                .unwrap();
+            service
+                .approve_package("@vendor/custom-nord-ds", "cli")
+                .unwrap();
+        }
+
+        let active = apply_design_system(&clay_state, "@vendor/custom-nord-ds")
+            .expect("adopted third-party design system applies");
+        assert_eq!(active.specifier, "@vendor/custom-nord-ds");
+        assert_eq!(active.provenance.package_name, "@vendor/custom-nord-ds");
+        assert_eq!(active.provenance.api_prefix, "nord");
+        assert_eq!(
+            active.provenance.trust_domain,
+            crate::protocol::PackageUiTrustDomain::ThirdParty
+        );
+
+        // Check that overridden recipe has the custom border radius
+        let btn_key = crate::shell::design_system::RecipeKey::new(
+            "button",
+            "primary",
+            "root",
+            crate::shell::design_system::RecipeState::Rest,
+        );
+        let btn_recipe = active.recipes.get(&btn_key).expect("button recipe present");
+        assert_eq!(btn_recipe.border_radius, 6.0);
+
+        // Check that untouched recipes inherit from core baseline
+        let input_key = crate::shell::design_system::RecipeKey::new(
+            "textInput",
+            "default",
+            "root",
+            crate::shell::design_system::RecipeState::Rest,
+        );
+        let input_recipe = active
+            .recipes
+            .get(&input_key)
+            .expect("input recipe inherited from core");
+        assert_eq!(input_recipe.border_width, 1.0);
+
+        let _ = std::fs::remove_dir_all(fixture_dir);
     }
 }

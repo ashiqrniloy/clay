@@ -1,6 +1,4 @@
-// App-level store singletons. Created lazily so tests can import types
-// without touching `document`.
-
+import { createDesignSystemStore } from "./design-system-store";
 import { createThemeStore } from "./theme-store";
 
 function safeCreate<T>(create: () => T, fallback: T): T {
@@ -17,5 +15,16 @@ export const themeStore = safeCreate(
   // jsdom-less contexts (pure reducers) get a no-op style target.
   createThemeStore({
     style: { setProperty: () => {} } as unknown as CSSStyleDeclaration,
+  }),
+);
+
+/** Design system runtime singleton; installs recipe variables into the document root. */
+export const designSystemStore = safeCreate(
+  () => createDesignSystemStore(),
+  createDesignSystemStore({
+    style: {
+      setProperty: () => {},
+      removeProperty: () => {},
+    } as unknown as CSSStyleDeclaration,
   }),
 );

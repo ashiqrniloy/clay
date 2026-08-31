@@ -216,6 +216,25 @@ Packages declare semantic tokens through `clay.ui.serverRegisterThemeToken` (`ru
 
 Theme packages may also ship typed UI design-token overrides via `clay.contributions.designTokens` (`UiDesignTokenOverride`), validated into `ActiveTheme.design_tokens` and resolved client-side into `ResolvedUiTheme`. Each override's value variant must match the core token's type and pass domain bounds (dimension ordering, opacity `[0,1]`, `motion-duration` `[0,1000]`, valid level names). Raw CSS, raw colors, style strings, renderer callbacks, native handles, and raw ops are rejected at load time.
 
+## UI Design-System Value Domains (Plan 101)
+
+UI design systems (`clay.contributions.uiDesignSystem`) declare typed non-color values and recipe mappings that separate visual styling (geometry, material, state, motion) from content-theme color authority.
+
+- **Theme Color Role References (`themeColor`):** Every color property in a design-system recipe must reference an active-theme color role (`surface.control`, `text.primary`, `accent.primary`, `border.focus`, etc.) or `transparent`. Literal colors (`#hex`, `rgb()`, `hsl()`, named colors) and package-owned color palettes are strictly rejected at validation.
+- **Namespaced Non-Color Values (`values`):** Packages may define reusable non-color scalars scoped to the design system:
+  - `dimension`: finite f64 px `[0, 8192]`
+  - `radius`: finite f64 px `[0, 32]` or `9999` (full pill)
+  - `border-width`: finite f64 px `[0, 8]`
+  - `opacity`: finite f64 `[0, 1]`
+  - `backdrop-blur`: finite f64 px `[0, 32]`
+  - `backdrop-saturate`: finite f64 `[1.0, 2.0]`
+  - `motion-duration`: finite f64 ms `[0, 1000]`
+  - `border-style`: `none`, `solid`, `dashed`, `dotted`
+  - `transition-timing`: `linear`, `ease-out`, `spring-snappy`, `spring-smooth`
+  - `transform-preset`: `none`, `press-subtle`, `press-shift-down`, `hover-lift`
+- **Structured Shadow Layers (`shadow`):** Up to 3 bounded layers `{ x: [-32..32], y: [-32..32], blur: [0..64], spread: [-16..16], colorRole: ThemeRole, opacity: [0..1], inset: bool }`.
+- **Inner Highlight Rim (`innerHighlight`):** `{ colorRole: ThemeRole, opacity: [0..1], width: [1..4] }`.
+
 ## Plan 088 token consumption (no additions)
 
 Plan 088 Tasks 3–7 use the existing typed token catalog; no core token or package token domain was added. The modernization contract is consumption-only:

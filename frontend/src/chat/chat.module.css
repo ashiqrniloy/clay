@@ -1,29 +1,67 @@
 /* Chat surface — token-only styling, blueprint-grid compartmentalization.
-   Visible 1px compartments via grid gap on contrasting surfaces. */
+ * Visible 1px compartments via grid gap on contrasting surfaces.
+ * Consumes host-owned design-system recipe variables with fallback to core tokens. */
 
 .chat {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
   height: 100%;
   min-height: 0;
-  background: var(--clay-surface-main);
-  color: var(--clay-text-main);
-  border: 1px solid var(--clay-border-hairline);
+  background: var(
+    --clay-ds-chat-default-root-rest-background-color,
+    var(--clay-surface-main)
+  );
+  color: var(
+    --clay-ds-chat-default-root-rest-text-color,
+    var(--clay-text-primary)
+  );
+  border: var(
+      --clay-ds-chat-default-root-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-chat-default-root-rest-border-style, solid)
+    var(
+      --clay-ds-chat-default-root-rest-border-color,
+      var(--clay-border-hairline)
+    );
 }
 
 .header {
   display: grid;
-  gap: var(--clay-spacing-xs);
-  padding: var(--clay-spacing-lg) var(--clay-spacing-lg) var(--clay-spacing-md);
-  border-bottom: 2px solid var(--clay-border-strong);
+  gap: var(--clay-ds-chat-default-header-rest-gap, var(--clay-spacing-xs, 8px));
+  padding: var(
+    --clay-ds-chat-default-header-rest-padding,
+    var(--clay-spacing-lg, 24px) var(--clay-spacing-lg, 24px)
+      var(--clay-spacing-md, 16px)
+  );
+  border-bottom: var(
+      --clay-ds-chat-default-header-rest-border-width,
+      var(--clay-dimension-border-thin, 2px)
+    )
+    solid
+    var(
+      --clay-ds-chat-default-header-rest-border-color,
+      var(--clay-border-strong)
+    );
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 1px;
-  background: var(--clay-border-hairline);
-  border-bottom: 1px solid var(--clay-border-hairline);
+  background: var(
+    --clay-ds-chat-default-actions-rest-background-color,
+    var(--clay-border-hairline)
+  );
+  border-bottom: var(
+      --clay-ds-chat-default-actions-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-chat-default-actions-rest-border-color,
+      var(--clay-border-hairline)
+    );
 }
 
 .actions > * {
@@ -33,11 +71,17 @@
 .transcriptScroll {
   overflow-y: auto;
   min-height: 0;
-  padding: var(--clay-spacing-md) var(--clay-spacing-lg);
+  padding: var(
+    --clay-ds-chat-default-transcript-rest-padding,
+    var(--clay-spacing-md, 16px) var(--clay-spacing-lg, 24px)
+  );
   display: grid;
-  gap: var(--clay-spacing-sm);
+  gap: var(--clay-spacing-sm, 12px);
   align-content: start;
-  background: var(--clay-surface-panel);
+  background: var(
+    --clay-ds-chat-default-transcript-rest-background-color,
+    var(--clay-surface-panel)
+  );
 }
 
 .user,
@@ -50,15 +94,35 @@
 
 .user {
   justify-self: end;
-  padding: var(--clay-spacing-sm) var(--clay-spacing-md);
-  border: 1px solid var(--clay-border-strong);
-  background: var(--clay-surface-badge);
+  padding: var(--clay-spacing-sm, 12px) var(--clay-spacing-md, 16px);
+  border: var(
+      --clay-ds-chat-default-user-bubble-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-chat-default-user-bubble-rest-border-color,
+      var(--clay-border-strong)
+    );
+  border-radius: var(--clay-ds-chat-default-user-bubble-rest-border-radius, 0);
+  background: var(
+    --clay-ds-chat-default-user-bubble-rest-background-color,
+    var(--clay-surface-badge)
+  );
 }
 
 .assistant {
   justify-self: start;
-  padding: var(--clay-spacing-sm) var(--clay-spacing-md);
-  border-left: 2px solid var(--clay-accent-primary);
+  padding: var(--clay-spacing-sm, 12px) var(--clay-spacing-md, 16px);
+  border-left: var(
+      --clay-ds-chat-default-assistant-bubble-rest-border-width,
+      var(--clay-dimension-border-thin, 2px)
+    )
+    solid
+    var(
+      --clay-ds-chat-default-assistant-bubble-rest-border-color,
+      var(--clay-accent-primary)
+    );
 }
 
 .thinking {
@@ -71,19 +135,28 @@
 
 .error [data-clay-kind],
 .error {
-  border-left: 2px solid var(--clay-diagnostic-error);
-  padding-left: var(--clay-spacing-sm);
+  border-left: var(--clay-dimension-border-thin, 2px) solid
+    var(--clay-diagnostic-error);
+  padding-left: var(--clay-spacing-sm, 12px);
 }
 
 .empty {
   margin: auto;
-  padding: var(--clay-spacing-xl) 0;
+  padding: var(--clay-spacing-xl, 32px) 0;
   text-align: center;
 }
 
 .sessions {
-  border-top: 1px solid var(--clay-border-hairline);
-  padding: var(--clay-spacing-sm) var(--clay-spacing-lg);
+  border-top: var(
+      --clay-ds-chat-default-sessions-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-chat-default-sessions-rest-border-color,
+      var(--clay-border-hairline)
+    );
+  padding: var(--clay-spacing-sm, 12px) var(--clay-spacing-lg, 24px);
   max-height: 30%;
   overflow-y: auto;
 }
@@ -101,9 +174,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--clay-spacing-md);
-  padding: var(--clay-spacing-xs) var(--clay-spacing-sm);
-  background: var(--clay-surface-main);
+  gap: var(--clay-spacing-md, 16px);
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  background: var(
+    --clay-ds-chat-default-session-row-rest-background-color,
+    var(--clay-surface-main)
+  );
 }
 
 .sessionId {
@@ -114,27 +190,46 @@
 
 .sessionActions {
   display: inline-flex;
-  gap: var(--clay-spacing-xs);
+  gap: var(--clay-spacing-xs, 8px);
   flex: 0 0 auto;
 }
 
 .composerArea {
-  border-top: 2px solid var(--clay-border-strong);
+  border-top: var(
+      --clay-ds-chat-default-composer-rest-border-width,
+      var(--clay-dimension-border-thin, 2px)
+    )
+    solid
+    var(
+      --clay-ds-chat-default-composer-rest-border-color,
+      var(--clay-border-strong)
+    );
 }
 
 .statusLine {
   margin: 0;
-  padding: var(--clay-spacing-xs) var(--clay-spacing-lg);
-  border-bottom: 1px solid var(--clay-border-hairline);
-  background: var(--clay-surface-panel);
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-lg, 24px);
+  border-bottom: var(
+      --clay-ds-chat-default-status-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-chat-default-status-rest-border-color,
+      var(--clay-border-hairline)
+    );
+  background: var(
+    --clay-ds-chat-default-status-rest-background-color,
+    var(--clay-surface-panel)
+  );
 }
 
 .composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
-  gap: var(--clay-spacing-sm);
-  padding: var(--clay-spacing-md) var(--clay-spacing-lg);
+  gap: var(--clay-spacing-sm, 12px);
+  padding: var(--clay-spacing-md, 16px) var(--clay-spacing-lg, 24px);
 }
 
 .composerActions {

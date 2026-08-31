@@ -4,31 +4,69 @@
 .badge {
   display: inline-flex;
   align-items: center;
-  background: var(--clay-surface-badge);
-  color: var(--clay-text-badge);
-  border-radius: var(--clay-radius-xs, 2px);
-  padding: 0 var(--clay-spacing-badge, 4px);
+  background: var(
+    --clay-ds-badge-default-root-rest-background-color,
+    var(--clay-surface-badge)
+  );
+  color: var(
+    --clay-ds-badge-default-root-rest-text-color,
+    var(--clay-text-badge)
+  );
+  border: var(--clay-ds-badge-default-root-rest-border-width, 0px)
+    var(--clay-ds-badge-default-root-rest-border-style, solid)
+    var(--clay-ds-badge-default-root-rest-border-color, transparent);
+  border-radius: var(
+    --clay-ds-badge-default-root-rest-border-radius,
+    var(--clay-radius-xs, 2px)
+  );
+  padding: var(
+    --clay-ds-badge-default-root-rest-padding,
+    0 var(--clay-spacing-badge, 4px)
+  );
   font-size: var(--clay-text-caption-size);
 }
 
 .kbd {
   display: inline-flex;
   align-items: center;
-  background: var(--clay-surface-kbd);
-  color: var(--clay-text-kbd);
-  border: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-kbd);
-  border-radius: var(--clay-radius-xs, 2px);
-  min-height: var(--clay-dimension-kbd-height, 20px);
-  padding: 0 var(--clay-spacing-xxs, 4px);
+  background: var(
+    --clay-ds-kbd-default-root-rest-background-color,
+    var(--clay-surface-kbd)
+  );
+  color: var(--clay-ds-kbd-default-root-rest-text-color, var(--clay-text-kbd));
+  border: var(
+      --clay-ds-kbd-default-root-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-kbd-default-root-rest-border-style, solid)
+    var(--clay-ds-kbd-default-root-rest-border-color, var(--clay-border-kbd));
+  border-radius: var(
+    --clay-ds-kbd-default-root-rest-border-radius,
+    var(--clay-radius-xs, 2px)
+  );
+  min-height: var(
+    --clay-ds-kbd-default-root-rest-min-height,
+    var(--clay-dimension-kbd-height, 20px)
+  );
+  padding: var(
+    --clay-ds-kbd-default-root-rest-padding,
+    0 var(--clay-spacing-xxs, 4px)
+  );
   font-family: var(--clay-font-monospace);
   font-size: var(--clay-text-caption-size);
 }
 
 .divider {
   border: none;
-  border-top: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-hairline);
+  border-top: var(
+      --clay-ds-divider-default-root-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-divider-default-root-rest-border-style, solid)
+    var(
+      --clay-ds-divider-default-root-rest-border-color,
+      var(--clay-border-hairline)
+    );
   margin: 0;
   width: 100%;
 }

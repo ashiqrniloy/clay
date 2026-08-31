@@ -1,6 +1,9 @@
 .surface {
   display: grid;
-  gap: var(--clay-spacing-sm, 12px);
+  gap: var(
+    --clay-ds-command-centre-default-root-rest-gap,
+    var(--clay-spacing-sm, 12px)
+  );
   width: min(
     calc(
       var(--clay-dimension-overlay-centered-width, 640px) - 2 *
@@ -25,12 +28,22 @@
   min-height: calc(var(--clay-spacing-xxl, 48px) * 2);
   display: grid;
   place-items: center;
-  border-top: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-subtle);
+  border-top: var(
+      --clay-ds-command-centre-default-root-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-command-centre-default-root-rest-border-color,
+      var(--clay-border-subtle)
+    );
 }
 
 .status {
-  color: var(--clay-text-muted);
+  color: var(
+    --clay-ds-command-centre-default-root-rest-text-color,
+    var(--clay-text-muted)
+  );
   font-family: var(--clay-font-ui);
   font-size: var(--clay-text-status-size);
   font-variant-numeric: tabular-nums;

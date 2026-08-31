@@ -220,4 +220,24 @@ Deep references: `docs/reference/packages/creating-packages.md`,
 | Chat package landing | PASS static + real AT-SPI | `chat/fixture-*` and `chat-landing/accessibility.txt` expose provenance-backed setup actions, transcript log, composer, and status |
 | Package actions/trust domain | PASS automated | Package UI conformance, package loading, cross-domain, and replacement tests remain green |
 
+## Plan 101 UI design-system recipe foundation execution record (2026-08-29)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Inert recipe contribution parsing (`clay.contributions.uiDesignSystem`) | PASS automated | `packages::record::tests::ui_design_system_valid_declaration_parses_into_descriptor` and `package_manifest_accepts_ui_design_system_and_detects_conflict` |
+| Prohibited authority & color authority rejection | PASS automated | `packages::record::tests::ui_design_system_rejects_literal_colors_and_prohibited_authorities` rejects raw CSS, scripts, class names, `#hex`, `rgb()`, and non-color tokens |
+| Core fallback coverage & AT-SPI accessibility | PASS live + automated | `plan101_core_fallbacks_cover_all_components_and_enforce_color_authority` (all 18 component kinds + 11 surfaces) and `.impeccable/review/plan-101/default/accessibility.txt` |
+
 No package JavaScript or raw UI authority enters the frontend render path.
+
+## Plan 102 & 103 design-system adoption and component migration cross-reference
+
+Design-system selection never installs or adopts: it resolves through the
+same enabled-record/authorization paths verified above and fails closed on
+missing, replaced, or revoked records (`theme.load_failed`/
+`theme.invalid_design_system`, previous generation retained). All catalog
+components and surfaces render through closed `--clay-ds-*` host recipe
+properties and active theme color roles with zero raw CSS injection or color
+leaks. Adoption, revocation-fallback, component recipe migration, and
+color-authority steps: [15 — UI design systems](15-ui-design-systems.md)
+(UI-DS-01…UI-DS-15, executed 2026-08-30).

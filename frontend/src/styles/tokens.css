@@ -59,4 +59,361 @@
   --clay-editor-string-color: var(--clay-diagnostic-success);
   --clay-editor-comment-color: var(--clay-text-muted);
   --clay-editor-link-color: var(--clay-accent-primary);
+
+  /* Host fallback design-system recipe variables (core baseline defaults).
+     Dynamic ActiveDesignSystem snapshots override these at runtime. */
+  --clay-ds-button-default-root-rest-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-button-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-button-default-root-rest-border-color: var(--clay-border-subtle);
+  --clay-ds-button-default-root-rest-border-width: 1px;
+  --clay-ds-button-default-root-rest-border-style: solid;
+  --clay-ds-button-default-root-rest-border-radius: 0px;
+  --clay-ds-button-default-root-rest-backdrop-blur: 0px;
+  --clay-ds-button-default-root-rest-backdrop-saturate: 1;
+  --clay-ds-button-default-root-rest-opacity: 1;
+  --clay-ds-button-default-root-rest-outline-color: var(--clay-focus-ring);
+  --clay-ds-button-default-root-rest-outline-width: 2px;
+  --clay-ds-button-default-root-rest-outline-offset: 2px;
+  --clay-ds-button-default-root-rest-outline-style: solid;
+  --clay-ds-button-default-root-rest-transition-duration: 100ms;
+  --clay-ds-button-default-root-rest-transition-timing: ease-out;
+  --clay-ds-button-default-root-rest-transform-preset: none;
+
+  --clay-ds-button-primary-root-rest-background-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-button-primary-root-rest-text-color: var(--clay-surface-main);
+  --clay-ds-button-primary-root-rest-border-color: var(--clay-border-subtle);
+  --clay-ds-button-primary-root-rest-border-width: 1px;
+  --clay-ds-button-primary-root-rest-border-style: solid;
+  --clay-ds-button-primary-root-rest-border-radius: 0px;
+
+  --clay-ds-button-muted-root-rest-background-color: transparent;
+  --clay-ds-button-muted-root-rest-text-color: var(--clay-text-muted);
+  --clay-ds-button-muted-root-rest-border-color: transparent;
+
+  --clay-ds-button-danger-root-rest-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-button-danger-root-rest-text-color: var(--clay-diagnostic-error);
+  --clay-ds-button-danger-root-rest-border-color: transparent;
+
+  --clay-ds-text-input-default-root-rest-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-text-input-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-text-input-default-root-rest-border-color: var(
+    --clay-border-subtle
+  );
+  --clay-ds-text-input-default-root-rest-border-width: 1px;
+  --clay-ds-text-input-default-root-rest-border-style: solid;
+  --clay-ds-text-input-default-root-rest-border-radius: 0px;
+
+  --clay-ds-text-input-default-input-rest-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-text-input-default-input-rest-text-color: var(--clay-text-primary);
+  --clay-ds-text-input-default-input-rest-border-color: var(
+    --clay-border-subtle
+  );
+  --clay-ds-text-input-default-input-rest-border-width: 1px;
+  --clay-ds-text-input-default-input-rest-border-style: solid;
+  --clay-ds-text-input-default-input-rest-border-radius: 0px;
+
+  --clay-ds-modal-default-dialog-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-modal-default-dialog-rest-text-color: var(--clay-text-primary);
+  --clay-ds-modal-default-dialog-rest-border-color: var(--clay-border-strong);
+  --clay-ds-modal-default-dialog-rest-border-width: 1px;
+  --clay-ds-modal-default-dialog-rest-border-style: solid;
+  --clay-ds-modal-default-dialog-rest-border-radius: 0px;
+
+  --clay-ds-modal-default-surface-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-modal-default-surface-rest-text-color: var(--clay-text-primary);
+  --clay-ds-modal-default-surface-rest-border-color: var(--clay-border-strong);
+  --clay-ds-modal-default-surface-rest-border-width: 1px;
+  --clay-ds-modal-default-surface-rest-border-style: solid;
+  --clay-ds-modal-default-surface-rest-border-radius: 0px;
+
+  --clay-ds-modal-default-scrim-rest-background-color: color-mix(
+    in srgb,
+    var(--clay-surface-scrim) calc(var(--clay-opacity-scrim) * 100%),
+    transparent
+  );
+  --clay-ds-modal-default-scrim-rest-backdrop-blur: 0px;
+
+  --clay-ds-panel-default-root-rest-background-color: var(--clay-surface-panel);
+  --clay-ds-panel-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-panel-default-root-rest-border-color: var(--clay-border-subtle);
+  --clay-ds-panel-default-root-rest-border-width: 1px;
+  --clay-ds-panel-default-root-rest-border-style: solid;
+  --clay-ds-panel-default-root-rest-border-radius: 0px;
+
+  --clay-ds-dropdown-default-trigger-rest-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-dropdown-default-trigger-rest-text-color: var(--clay-text-primary);
+  --clay-ds-dropdown-default-trigger-rest-border-color: var(
+    --clay-border-subtle
+  );
+  --clay-ds-dropdown-default-trigger-rest-border-width: 1px;
+  --clay-ds-dropdown-default-trigger-rest-border-style: solid;
+  --clay-ds-dropdown-default-trigger-rest-border-radius: 0px;
+
+  --clay-ds-dropdown-default-popover-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-dropdown-default-popover-rest-border-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-dropdown-default-popover-rest-border-width: 1px;
+  --clay-ds-dropdown-default-popover-rest-border-style: solid;
+  --clay-ds-dropdown-default-popover-rest-border-radius: 0px;
+
+  --clay-ds-dropdown-default-surface-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-dropdown-default-surface-rest-border-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-dropdown-default-surface-rest-border-width: 1px;
+  --clay-ds-dropdown-default-surface-rest-border-style: solid;
+  --clay-ds-dropdown-default-surface-rest-border-radius: 0px;
+
+  --clay-ds-list-default-row-rest-background-color: var(--clay-surface-list);
+  --clay-ds-list-default-row-rest-text-color: var(--clay-text-primary);
+  --clay-ds-list-default-row-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-list-default-row-rest-border-width: 1px;
+
+  --clay-ds-list-default-item-rest-background-color: var(--clay-surface-list);
+  --clay-ds-list-default-item-rest-text-color: var(--clay-text-primary);
+  --clay-ds-list-default-item-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-list-default-item-rest-border-width: 1px;
+
+  --clay-ds-collapse-default-header-rest-background-color: transparent;
+  --clay-ds-collapse-default-header-rest-text-color: var(--clay-text-primary);
+  --clay-ds-collapse-default-header-rest-border-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-collapse-default-header-rest-border-width: 1px;
+
+  --clay-ds-badge-default-root-rest-background-color: var(--clay-surface-badge);
+  --clay-ds-badge-default-root-rest-text-color: var(--clay-text-badge);
+  --clay-ds-badge-default-root-rest-border-radius: 2px;
+
+  --clay-ds-kbd-default-root-rest-background-color: var(--clay-surface-kbd);
+  --clay-ds-kbd-default-root-rest-text-color: var(--clay-text-kbd);
+  --clay-ds-kbd-default-root-rest-border-color: var(--clay-border-kbd);
+  --clay-ds-kbd-default-root-rest-border-width: 1px;
+  --clay-ds-kbd-default-root-rest-border-radius: 2px;
+
+  --clay-ds-divider-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-divider-default-root-rest-border-width: 1px;
+
+  --clay-ds-tab-default-item-rest-background-color: var(--clay-surface-panel);
+  --clay-ds-tab-default-item-rest-text-color: var(--clay-text-muted);
+  --clay-ds-tab-default-item-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-tab-default-item-rest-border-width: 1px;
+  --clay-ds-tab-default-item-rest-border-radius: 0px;
+
+  --clay-ds-shell-default-root-rest-background-color: var(--clay-surface-main);
+  --clay-ds-shell-default-header-rest-background-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-shell-default-header-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-shell-default-header-rest-border-width: 1px;
+  --clay-ds-shell-default-header-rest-border-style: solid;
+  --clay-ds-shell-default-brand-rest-background-color: var(
+    --clay-surface-panel
+  );
+  --clay-ds-shell-default-brand-rest-text-color: var(--clay-text-muted);
+  --clay-ds-shell-default-working-area-rest-background-color: var(
+    --clay-surface-main
+  );
+  --clay-ds-shell-default-footer-rest-background-color: var(
+    --clay-surface-panel
+  );
+  --clay-ds-shell-default-footer-rest-text-color: var(--clay-text-muted);
+  --clay-ds-shell-default-footer-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-shell-default-footer-rest-border-width: 1px;
+  --clay-ds-shell-default-footer-rest-border-style: solid;
+
+  --clay-ds-pane-default-group-rest-background-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-pane-default-root-rest-background-color: var(--clay-surface-main);
+  --clay-ds-pane-default-root-rest-outline-color: transparent;
+  --clay-ds-pane-default-root-rest-outline-width: 1px;
+  --clay-ds-pane-default-root-rest-outline-style: solid;
+  --clay-ds-pane-default-root-rest-border-radius: 0px;
+  --clay-ds-pane-default-root-active-outline-color: var(--clay-border-focus);
+  --clay-ds-pane-default-divider-rest-background-color: var(
+    --clay-border-strong
+  );
+  --clay-ds-pane-default-divider-rest-width: 2px;
+  --clay-ds-pane-default-divider-focus-outline-color: var(--clay-focus-ring);
+  --clay-ds-pane-default-divider-focus-outline-width: 2px;
+  --clay-ds-pane-default-divider-focus-outline-style: solid;
+
+  --clay-ds-editor-default-root-rest-background-color: var(--clay-surface-main);
+  --clay-ds-editor-default-chrome-rest-background-color: var(
+    --clay-surface-panel
+  );
+  --clay-ds-editor-default-chrome-rest-border-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-editor-default-chrome-rest-border-width: 1px;
+  --clay-ds-editor-default-chrome-rest-border-style: solid;
+  --clay-ds-editor-default-path-rest-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-editor-default-path-rest-text-color: var(--clay-text-primary);
+  --clay-ds-editor-default-path-rest-border-color: var(--clay-border-subtle);
+  --clay-ds-editor-default-path-rest-border-width: 1px;
+  --clay-ds-editor-default-path-rest-border-style: solid;
+  --clay-ds-editor-default-gutters-rest-background-color: var(
+    --clay-surface-panel
+  );
+  --clay-ds-editor-default-gutters-rest-text-color: var(--clay-text-muted);
+  --clay-ds-editor-default-gutters-rest-border-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-editor-default-gutters-rest-border-width: 1px;
+  --clay-ds-editor-default-active-line-rest-background-color: var(
+    --clay-surface-hover
+  );
+  --clay-ds-editor-default-tooltip-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-editor-default-tooltip-rest-text-color: var(--clay-text-primary);
+  --clay-ds-editor-default-tooltip-rest-border-color: var(--clay-border-strong);
+  --clay-ds-editor-default-tooltip-rest-border-width: 1px;
+  --clay-ds-editor-default-tooltip-selected-background-color: var(
+    --clay-surface-selected
+  );
+  --clay-ds-editor-default-tooltip-selected-text-color: var(
+    --clay-text-primary
+  );
+
+  --clay-ds-chat-default-root-rest-background-color: var(--clay-surface-main);
+  --clay-ds-chat-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-chat-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-chat-default-root-rest-border-width: 1px;
+  --clay-ds-chat-default-root-rest-border-style: solid;
+  --clay-ds-chat-default-header-rest-border-color: var(--clay-border-strong);
+  --clay-ds-chat-default-header-rest-border-width: 2px;
+  --clay-ds-chat-default-actions-rest-background-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-chat-default-actions-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-chat-default-actions-rest-border-width: 1px;
+  --clay-ds-chat-default-transcript-rest-background-color: var(
+    --clay-surface-panel
+  );
+  --clay-ds-chat-default-user-bubble-rest-background-color: var(
+    --clay-surface-badge
+  );
+  --clay-ds-chat-default-user-bubble-rest-border-color: var(
+    --clay-border-strong
+  );
+  --clay-ds-chat-default-user-bubble-rest-border-width: 1px;
+  --clay-ds-chat-default-user-bubble-rest-border-radius: 0px;
+  --clay-ds-chat-default-assistant-bubble-rest-border-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-chat-default-assistant-bubble-rest-border-width: 2px;
+  --clay-ds-chat-default-sessions-rest-border-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-chat-default-sessions-rest-border-width: 1px;
+  --clay-ds-chat-default-session-row-rest-background-color: var(
+    --clay-surface-main
+  );
+  --clay-ds-chat-default-composer-rest-border-color: var(--clay-border-strong);
+  --clay-ds-chat-default-composer-rest-border-width: 2px;
+  --clay-ds-chat-default-status-rest-background-color: var(
+    --clay-surface-panel
+  );
+  --clay-ds-chat-default-status-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-chat-default-status-rest-border-width: 1px;
+
+  --clay-ds-settings-default-root-rest-background-color: var(
+    --clay-surface-panel
+  );
+  --clay-ds-settings-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-settings-default-root-rest-border-color: var(--clay-border-subtle);
+  --clay-ds-settings-default-root-rest-border-width: 1px;
+  --clay-ds-settings-default-root-rest-border-style: solid;
+  --clay-ds-settings-default-heading-rest-border-color: var(
+    --clay-border-subtle
+  );
+  --clay-ds-settings-default-heading-rest-border-width: 1px;
+  --clay-ds-settings-default-actions-rest-border-color: var(
+    --clay-border-subtle
+  );
+  --clay-ds-settings-default-actions-rest-border-width: 1px;
+
+  --clay-ds-command-centre-default-root-rest-border-color: var(
+    --clay-border-subtle
+  );
+  --clay-ds-command-centre-default-root-rest-border-width: 1px;
+  --clay-ds-command-centre-default-root-rest-text-color: var(--clay-text-muted);
+
+  --clay-ds-chat-panel-default-root-rest-background-color: var(
+    --clay-surface-main
+  );
+  --clay-ds-settings-panel-default-root-rest-background-color: var(
+    --clay-surface-panel
+  );
+  --clay-ds-tab-bar-default-root-rest-background-color: var(
+    --clay-surface-main
+  );
+  --clay-ds-pane-split-tree-default-root-rest-background-color: var(
+    --clay-surface-main
+  );
+  --clay-ds-status-bar-default-root-rest-background-color: var(
+    --clay-surface-panel
+  );
+  --clay-ds-file-browser-default-root-rest-background-color: var(
+    --clay-surface-panel
+  );
+  --clay-ds-welcome-default-root-rest-background-color: var(
+    --clay-surface-main
+  );
+  --clay-ds-transient-menu-default-root-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-completion-default-root-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-editor-chrome-default-root-rest-background-color: var(
+    --clay-surface-panel
+  );
+
+  --clay-ds-checkbox-default-root-rest-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-switch-default-root-rest-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-slider-default-root-rest-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-label-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-progress-bar-default-root-rest-background-color: var(
+    --clay-surface-panel
+  );
+  --clay-ds-table-default-root-rest-background-color: var(--clay-surface-list);
+  --clay-ds-tree-default-root-rest-background-color: var(--clay-surface-list);
+  --clay-ds-flex-default-root-rest-background-color: transparent;
+  --clay-ds-grid-default-root-rest-background-color: transparent;
+  --clay-ds-scroll-default-root-rest-background-color: transparent;
+  --clay-ds-tooltip-default-root-rest-background-color: var(
+    --clay-surface-overlay
+  );
 }

@@ -4,7 +4,9 @@ use super::*;
 use serde_json::Value;
 
 use crate::packages::permissions::PackagePermission;
-use crate::perf::budgets::BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES;
+use crate::perf::budgets::{
+    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES,
+};
 
 pub(super) fn parse_docs_metadata(
     value: Option<&Value>,
@@ -60,13 +62,30 @@ pub(super) fn parse_performance_metadata(
         )),
     };
 
-    if estimated_manifest_bytes > BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES {
+    let (max_budget, budget_name) = if raw_manifest
+        .get("clay")
+        .and_then(|c| c.get("contributions"))
+        .and_then(|c| c.get("uiDesignSystem"))
+        .is_some()
+    {
+        (
+            UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES,
+            "UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES",
+        )
+    } else {
+        (
+            BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES,
+            "BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES",
+        )
+    };
+
+    if estimated_manifest_bytes > max_budget {
         return Err(ctx.error(
             PackageRecordRule::PayloadBudgetExceeded,
             None,
             format!(
                 "package estimated manifest payload ({estimated_manifest_bytes} bytes) exceeds \
-                 BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES ({BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES} bytes)"
+                 {budget_name} ({max_budget} bytes)"
             ),
         ));
     }

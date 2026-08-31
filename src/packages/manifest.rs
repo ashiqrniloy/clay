@@ -5,7 +5,9 @@ use serde_json::{Value, json};
 use crate::packages::permissions::{
     PackagePermission, PermissionValidationError, is_prohibited_authority, parse_permission,
 };
-use crate::perf::budgets::BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES;
+use crate::perf::budgets::{
+    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClayPackageManifest {
@@ -27,7 +29,7 @@ pub struct ClayPackageMetadata {
     /// (movement/selection/caret ops and the programmatic execution channel).
     /// May reference foreign modes (e.g. `core.code`); enforced per call.
     pub editor_control_modes: Vec<String>,
-    pub entry: String,
+    pub entry: Option<String>,
     pub load_entry: Option<String>,
     pub graph: PackageGraphRelations,
     /// Owner-declared versioned extension points (`clay-extension-point-v1`).
@@ -322,7 +324,17 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
     );
 
     let value = expand_capability_preset(value, &context)?;
-    if payload_size(&value) > BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES {
+    let max_budget = if value
+        .get("clay")
+        .and_then(|c| c.get("contributions"))
+        .and_then(|c| c.get("uiDesignSystem"))
+        .is_some()
+    {
+        UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES
+    } else {
+        BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES
+    };
+    if payload_size(&value) > max_budget {
         return Err(context.diagnostic(
             PackageValidationRule::PayloadTooLarge,
             "package metadata exceeds the primitive load-time payload budget",
@@ -389,8 +401,19 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
         ));
     }
 
-    let entry = required_string_field(clay.get("entry"), "clay.entry", &context)?;
-    validate_entry_path(&entry, "clay.entry", &context)?;
+    let entry = match clay.get("entry") {
+        Some(Value::String(entry)) => {
+            validate_entry_path(entry, "clay.entry", &context)?;
+            Some(entry.clone())
+        }
+        Some(_) => {
+            return Err(context.diagnostic(
+                PackageValidationRule::InvalidEntry,
+                "clay.entry must be a string when present",
+            ));
+        }
+        None => None,
+    };
     let load_entry = match clay.get("loadEntry") {
         Some(Value::String(load_entry)) => {
             validate_entry_path(load_entry, "clay.loadEntry", &context)?;
@@ -406,6 +429,12 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
     };
 
     let permissions = parse_requested_capabilities(clay, &context)?;
+    if entry.is_none() && !permissions.is_empty() {
+        return Err(context.diagnostic(
+            PackageValidationRule::InvalidEntry,
+            "clay.entry is required when permissions are requested",
+        ));
+    }
     let modes = parse_modes(clay.get("modes"), &api_prefix, &context)?;
     let editor_control_modes =
         parse_editor_control(clay.get("editorControl"), &permissions, &context)?;
@@ -944,20 +973,6 @@ fn validate_entry_path(
         ));
     }
     Ok(())
-}
-
-fn required_string_field(
-    value: Option<&Value>,
-    field: &str,
-    context: &DiagnosticContext,
-) -> Result<String, PackageDiagnostic> {
-    match value {
-        Some(Value::String(text)) if !text.trim().is_empty() => Ok(text.clone()),
-        _ => Err(context.diagnostic(
-            PackageValidationRule::MissingField,
-            format!("{field} must be a non-empty string"),
-        )),
-    }
 }
 
 fn read_string(value: &Value, key: &str) -> Option<String> {

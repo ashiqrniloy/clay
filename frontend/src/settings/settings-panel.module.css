@@ -5,10 +5,23 @@
   height: 100%;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
-  background: var(--clay-surface-panel);
-  color: var(--clay-text-primary);
-  border-left: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-subtle);
+  background: var(
+    --clay-ds-settings-default-root-rest-background-color,
+    var(--clay-surface-panel)
+  );
+  color: var(
+    --clay-ds-settings-default-root-rest-text-color,
+    var(--clay-text-primary)
+  );
+  border-left: var(
+      --clay-ds-settings-default-root-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-settings-default-root-rest-border-style, solid)
+    var(
+      --clay-ds-settings-default-root-rest-border-color,
+      var(--clay-border-subtle)
+    );
 }
 
 .heading,
@@ -21,14 +34,28 @@
 }
 
 .heading {
-  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-subtle);
+  border-bottom: var(
+      --clay-ds-settings-default-heading-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-settings-default-heading-rest-border-color,
+      var(--clay-border-subtle)
+    );
 }
 
 .actions {
   flex-wrap: wrap;
-  border-top: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-subtle);
+  border-top: var(
+      --clay-ds-settings-default-actions-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-settings-default-actions-rest-border-color,
+      var(--clay-border-subtle)
+    );
 }
 
 .scroll {

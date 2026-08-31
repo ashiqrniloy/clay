@@ -38,9 +38,19 @@
   height: 100%;
   overflow: auto;
   padding: var(--clay-spacing-md, 16px);
-  background: var(--clay-surface-panel);
-  border-right: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-subtle);
+  background: var(
+    --clay-ds-panel-default-root-rest-background-color,
+    var(--clay-surface-panel)
+  );
+  border-right: var(
+      --clay-ds-panel-default-root-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-panel-default-root-rest-border-style, solid)
+    var(
+      --clay-ds-panel-default-root-rest-border-color,
+      var(--clay-border-subtle)
+    );
 }
 
 @media (max-width: 720px) {
@@ -55,7 +65,14 @@
 
   .panel {
     border-right: 0;
-    border-bottom: var(--clay-dimension-border-hairline, 1px) solid
-      var(--clay-border-subtle);
+    border-bottom: var(
+        --clay-ds-panel-default-root-rest-border-width,
+        var(--clay-dimension-border-hairline, 1px)
+      )
+      var(--clay-ds-panel-default-root-rest-border-style, solid)
+      var(
+        --clay-ds-panel-default-root-rest-border-color,
+        var(--clay-border-subtle)
+      );
   }
 }

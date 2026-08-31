@@ -21,6 +21,7 @@ use crate::protocol::{
     ActiveTheme, ActiveTypography, BehaviorManifest, ClientId, DecorationSet, DiagnosticSet,
     DocumentId, DocumentVersion, RuntimeDiagnostic, SduiTree,
 };
+pub use crate::shell::design_system::{ActiveDesignSystem, DesignSystemProvenance};
 
 /// Monotonic runtime-generation identity shared by server contributions and
 /// client snapshots. Independently monotonic behavior/document versions remain
@@ -256,16 +257,23 @@ pub struct RuntimeStateSnapshot {
     pub behavior: BehaviorManifest,
     pub active_theme: ActiveTheme,
     pub active_typography: ActiveTypography,
+    #[serde(default = "default_active_design_system")]
+    pub active_design_system: ActiveDesignSystem,
     pub sdui_tree: SduiTree,
     pub package_ui: PackageUiSnapshot,
     pub documents: Vec<DocumentRuntimeRenderState>,
     pub diagnostics: Vec<RuntimeDiagnostic>,
 }
 
+fn default_active_design_system() -> ActiveDesignSystem {
+    ActiveDesignSystem::core_fallback(0)
+}
+
 /// Why a runtime snapshot failed validation before install or fan-out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeStateSnapshotValidationError {
     InvalidTypography,
+    InvalidDesignSystem,
     EmptyBehaviorManifestId,
     TooManyDocuments { count: usize, max: usize },
     DuplicateDocumentId { document_id: DocumentId },
@@ -371,6 +379,9 @@ impl RuntimeStateSnapshot {
         self.active_typography
             .validate()
             .map_err(|_| RuntimeStateSnapshotValidationError::InvalidTypography)?;
+        self.active_design_system
+            .validate()
+            .map_err(|_| RuntimeStateSnapshotValidationError::InvalidDesignSystem)?;
         if self.behavior.manifest_id.trim().is_empty() {
             return Err(RuntimeStateSnapshotValidationError::EmptyBehaviorManifestId);
         }

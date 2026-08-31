@@ -52,6 +52,19 @@ function bootstrap(): BootstrapDto {
         caption: 0.75,
       },
     },
+    activeDesignSystem: {
+      specifier: "@clay/core",
+      schemaVersion: 1,
+      generation: 1,
+      provenance: {
+        packageName: "core",
+        packageVersion: "1.0.0",
+        apiPrefix: "clay",
+        trustDomain: "trusted",
+      },
+      recipes: {},
+      variables: {},
+    },
   };
 }
 

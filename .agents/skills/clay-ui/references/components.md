@@ -240,6 +240,33 @@ Reuse-first: before adding any of these, confirm no implemented kind composes to
 
 The `typography` style variable references one of seven semantic `UiTextVariant` tokens (see [tokens.md](tokens.md#typography)): `body`, `title`, `status`, `display`, `section`, `detail`, `caption`. Variants are scale ratios over the selected role base, resolved through the user-owned `UiTypographyHierarchy` — never absolute point sizes. Phase 20.1 added `display`, `section`, `detail`, and `caption` additively; existing `body`/`title`/`status` usage is unchanged. No new style variable was added in Phase 20.1.
 
+## UI Design-System Recipe Slots (Plan 101)
+
+Package contributions (`clay.contributions.uiDesignSystem`) style host components by targeting stable, semantic slot names. All visual colors resolve from the active content theme; recipes define geometry, materials, states, and motion without injecting raw CSS. Full slot/state/fallback matrix: [`docs/development/ui-design-system-recipe-matrix.md`](../../../../docs/development/ui-design-system-recipe-matrix.md).
+
+| Component / Surface | Target Kind / Surface | Stable Recipe Slots | Notes |
+| --- | --- | --- | --- |
+| `button` | `button` | `root`, `label`, `icon` | Variants `default`, `muted`, `primary`, `danger`; states `rest`, `hover`, `active`, `focus`, `disabled` |
+| `textInput` | `textInput` | `field`, `label`, `input`, `description`, `error` | States `rest`, `hover`, `focus`, `disabled`, `invalid`; validation states `none`, `error`, `warning`, `success` |
+| `dropdown` | `dropdown` | `trigger`, `triggerLabel`, `indicator`, `popover`, `list`, `item`, `itemLabel` | States `rest`, `hover`, `active`, `focus`, `disabled`, `open`, `selected` |
+| `list` | `list` | `root`, `row`, `rowTitle`, `rowDetail` | States `rest`, `hover`, `active`, `focus`, `selected`, `disabled` |
+| `collapse` | `collapse` | `root`, `header`, `title`, `chevron`, `body` | States `rest`, `hover`, `focus`, `expanded` |
+| `modal` | `modal` | `scrim`, `dialog`, `title`, `body` | Z-modal stacking, focus trap, and Escape dismissal |
+| `panel` | `panel` | `root`, `header`, `title`, `body` | Fixed and transient panel slots |
+| `label` | `label` | `root` | Semantic typography variant scales |
+| `statusItem` | `statusItem` | `root` | Status bar text item |
+| `flex` / `stack` / `overlay` / `portal` | Layout containers | `root` | Layout and layer containers |
+| `scroll` | `scroll` | `root`, `scrollbarTrack`, `scrollbarThumb` | Native scrollable area + token-styled scrollbars |
+| `editorView` | `editorView` | `root`, `canvas` | Host editor pane container and CodeMirror view |
+| `tabBar` | `tabBar` | `bar`, `card`, `cardLabel`, `closeButton`, `dirtyIndicator` | Window tab strip and tab cards |
+| `paneSplitTree` | `paneSplitTree` | `group`, `pane`, `handle`, `indicator` | Split tree panes and draggable separator handles |
+| `statusBar` | `statusBar` | `root`, `item` | App landmark footer |
+| `commandCentre` | `commandCentre` | `scrim`, `dialog`, `input`, `listBox`, `item`, `status`, `empty` | Centered modal Command Centre and Path Browser |
+| `fileBrowser` | `fileBrowser` | `root`, `header`, `tree`, `item`, `itemIcon`, `itemLabel` | Workspace file tree surface |
+| `settingsPanel` | `settingsPanel` | `panel`, `heading`, `actions`, `fields` | Trusted presentation module for `@clay/settings` |
+| `chatPanel` | `chatPanel` | `root`, `header`, `transcript`, `userMessage`, `assistantMessage`, `thinking`, `composer`, `statusLine` | Main empty-tab pane content |
+| `badge` / `kbd` / `divider` / `tooltip` / `scrim` / `focusRing` / `scrollChrome` / `iconSlot` | Chrome primitives | `root`, `label`, `ring`, `track`, `thumb`, `content` | Chrome primitives |
+
 ## Rules for Adding Components
 
 1. Prefer composing existing kinds (`flex`, `stack`, `overlay`, `scroll`, `list`, `label`, `button`) before adding a kind.
@@ -247,3 +274,4 @@ The `typography` style variable references one of seven semantic `UiTextVariant`
 3. New style variables must be token-typed or closed enums — no raw values.
 4. Every component ships with all interaction states styled from tokens.
 5. Update this catalog, `docs/reference/packages/creating-packages.md`, and the component validation tests together.
+

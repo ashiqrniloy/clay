@@ -53,6 +53,19 @@ const ready: ConnectionState = {
         caption: 0.75,
       },
     },
+    activeDesignSystem: {
+      specifier: "@clay/core",
+      schemaVersion: 1,
+      generation: 1,
+      provenance: {
+        packageName: "core",
+        packageVersion: "1.0.0",
+        apiPrefix: "clay",
+        trustDomain: "trusted",
+      },
+      recipes: {},
+      variables: {},
+    },
   },
 };
 
@@ -110,5 +123,48 @@ describe("narrow/wide working area", () => {
       </WorkingArea>,
     );
     expect(screen.getByRole("separator")).toBeInTheDocument();
+  });
+});
+
+describe("design-system shell and surface stability", () => {
+  it("preserves shell layout, tab strip, and status across recipe variable updates", () => {
+    const { rerender } = renderAt("/workspace");
+    expect(screen.getByRole("banner")).toBeInTheDocument();
+    expect(
+      screen.getByRole("tablist", { name: "Window tabs" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("shell-status")).toHaveTextContent("Connected");
+
+    // Simulate recipe variable overrides on document root
+    document.documentElement.style.setProperty(
+      "--clay-ds-shell-default-root-rest-background-color",
+      "var(--clay-surface-main)",
+    );
+    document.documentElement.style.setProperty(
+      "--clay-ds-pane-default-divider-rest-width",
+      "4px",
+    );
+
+    rerender(
+      <RouterProvider
+        router={createAppRouter(
+          { connection: ready, onReconnect: () => {} },
+          "/workspace",
+        )}
+      />,
+    );
+
+    expect(screen.getByRole("banner")).toBeInTheDocument();
+    expect(
+      screen.getByRole("tablist", { name: "Window tabs" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("shell-status")).toHaveTextContent("Connected");
+
+    document.documentElement.style.removeProperty(
+      "--clay-ds-shell-default-root-rest-background-color",
+    );
+    document.documentElement.style.removeProperty(
+      "--clay-ds-pane-default-divider-rest-width",
+    );
   });
 });

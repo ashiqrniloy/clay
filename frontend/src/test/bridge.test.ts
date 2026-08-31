@@ -7,6 +7,7 @@ import {
   type BootstrapDto,
   type ThemeSnapshot,
   type TypographySnapshot,
+  type DesignSystemSnapshot,
 } from "../bridge/types";
 import {
   applyEnvelope,
@@ -45,6 +46,28 @@ const typographySnapshot: TypographySnapshot = {
     caption: 0.75,
   },
 };
+const designSystemSnapshot: DesignSystemSnapshot = {
+  specifier: "@clay/core",
+  schemaVersion: 1,
+  generation: 1,
+  provenance: {
+    packageName: "core",
+    packageVersion: "1.0.0",
+    apiPrefix: "clay",
+    trustDomain: "trusted",
+  },
+  recipes: {},
+  variables: {
+    "button.primary.root.rest.backgroundColor": {
+      type: "theme-color-role",
+      value: "accent.primary",
+    },
+    "button.primary.root.rest.borderRadius": {
+      type: "radius",
+      value: 0,
+    },
+  },
+};
 
 const bootstrap: BootstrapDto = {
   clientId: 1,
@@ -66,6 +89,7 @@ const bootstrap: BootstrapDto = {
   },
   activeTheme: themeSnapshot,
   activeTypography: typographySnapshot,
+  activeDesignSystem: designSystemSnapshot,
 };
 
 describe("connection store", () => {
@@ -119,5 +143,123 @@ describe("bridge error normalization", () => {
     expect(normalized.code).toBe("invalidRequest");
     expect(normalized.message).toBe("boom");
     expect(normalizeBridgeError(42).message).toContain("42");
+  });
+});
+
+describe("design system DTO projection", () => {
+  it("carries activeDesignSystem in bootstrap state with typed variables", () => {
+    expect(bootstrap.activeDesignSystem.specifier).toBe("@clay/core");
+    expect(bootstrap.activeDesignSystem.schemaVersion).toBe(1);
+    expect(bootstrap.activeDesignSystem.generation).toBe(1);
+    expect(bootstrap.activeDesignSystem.provenance.packageName).toBe("core");
+    expect(bootstrap.activeDesignSystem.provenance.trustDomain).toBe("trusted");
+
+    const colorVar =
+      bootstrap.activeDesignSystem.variables[
+        "button.primary.root.rest.backgroundColor"
+      ];
+    expect(colorVar).toEqual({
+      type: "theme-color-role",
+      value: "accent.primary",
+    });
+
+    const radiusVar =
+      bootstrap.activeDesignSystem.variables[
+        "button.primary.root.rest.borderRadius"
+      ];
+    expect(radiusVar).toEqual({
+      type: "radius",
+      value: 0,
+    });
+  });
+
+  it("handles runtimeSnapshot envelopes carrying activeDesignSystem", () => {
+    const envelope: BridgeEnvelope = {
+      kind: "runtimeSnapshot",
+      data: {
+        clientId: 1,
+        tabId: null,
+        snapshot: {
+          runtimeGenerationId: 2,
+          behaviorManifest: {},
+          activeTheme: themeSnapshot,
+          activeTypography: typographySnapshot,
+          activeDesignSystem: {
+            specifier: "@clay/design-glass",
+            schemaVersion: 1,
+            generation: 2,
+            provenance: {
+              packageName: "@clay/design-glass",
+              packageVersion: "0.2.0",
+              apiPrefix: "glass",
+              trustDomain: "thirdParty",
+            },
+            recipes: {
+              "button.primary.root.rest": {
+                backgroundColor: "surface.overlay",
+                backgroundOpacity: 0.9,
+                textColor: "text.primary",
+                borderColor: "border.subtle",
+                borderWidth: 1,
+                borderStyle: "solid",
+                borderRadius: 8,
+                shadow: [],
+                backdropBlur: 12,
+                backdropSaturate: 1.2,
+                opacity: 1,
+                outlineColor: "focus.ring",
+                outlineWidth: 2,
+                outlineOffset: 1,
+                outlineStyle: "solid",
+                transitionDuration: 100,
+                transitionTiming: "linear",
+                transformPreset: "none",
+              },
+            },
+            variables: {
+              "button.primary.root.rest.backgroundColor": {
+                type: "theme-color-role",
+                value: "surface.overlay",
+              },
+              "button.primary.root.rest.backdropBlur": {
+                type: "backdrop-blur",
+                value: 12,
+              },
+            },
+          },
+          sduiTree: { uiVersion: 2, rootId: 1, nodes: [] },
+          packageUi: {
+            version: 2,
+            emptyTab: null,
+            panels: [],
+            overlays: [],
+            components: [],
+            inputRoutes: [],
+          },
+          documents: [],
+          diagnostics: [],
+        },
+      },
+    };
+
+    if (envelope.kind === "runtimeSnapshot") {
+      expect(envelope.data.snapshot.activeDesignSystem.specifier).toBe(
+        "@clay/design-glass",
+      );
+      expect(envelope.data.snapshot.activeDesignSystem.generation).toBe(2);
+      expect(
+        envelope.data.snapshot.activeDesignSystem.recipes[
+          "button.primary.root.rest"
+        ]?.backdropBlur,
+      ).toBe(12);
+      expect(
+        envelope.data.snapshot.activeDesignSystem.variables[
+          "button.primary.root.rest.backdropBlur"
+        ],
+      ).toEqual({
+        type: "backdrop-blur",
+        value: 12,
+      });
+    }
   });
 });

@@ -1,4 +1,8 @@
-import type { ThemeSnapshot, TypographySnapshot } from "../theme/types";
+import type {
+  ThemeSnapshot,
+  TypographySnapshot,
+  DesignSystemSnapshot,
+} from "../theme/types";
 
 export type SduiNodeId = number;
 
@@ -177,6 +181,7 @@ export interface RuntimeSnapshot {
   behaviorManifest: Record<string, unknown>;
   activeTheme: ThemeSnapshot;
   activeTypography: TypographySnapshot;
+  activeDesignSystem: DesignSystemSnapshot;
   sduiTree: SduiTree;
   packageUi: PackageUiSnapshot;
   documents: Array<Record<string, unknown>>;

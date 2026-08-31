@@ -136,3 +136,14 @@ mv ~/.config/clay/packages.bak ~/.config/clay/packages 2>/dev/null || true
 | Live reload/theme switching | UNRESOLVED interaction | Host cannot safely focus Clay or deliver keyboard chords. No live reload pass inferred from fixture screenshots |
 
 No configuration API or hidden authority was added by this review.
+
+## Plan 102 design-system selection cross-reference
+
+`setDesignSystem` follows all configuration rules verified above (one-line
+`init.js` selection, watcher auto-reload with ~2 s debounce, failed reload
+keeps the previous generation, sanitized diagnostics). Design-system-specific
+switching, fallback, and recovery steps live in
+[15 — UI design systems](15-ui-design-systems.md) (UI-DS-01…UI-DS-10, executed
+2026-08-30). Note finding F-2 there: after a failed watcher reload, later
+`init.js` changes stop triggering reloads until restart — C16–C18 should be
+re-verified after that fix.

@@ -366,3 +366,7 @@ not SDUI — packages contribute chrome only as inert manifest data.
 |---|---|---|
 | D20 | UNRESOLVED live; retained PASS evidence | No keyboard input reached the WebKit view. Final-build four-pane screenshot is under `code-reviews/screenshots/2026-08-28-plan099-editor-performance/editor-dark-four-pane/`; linear per-pane invariants remain automated. |
 | D21 | UNRESOLVED live; PASS automated companion | No pane/file interaction was drivable; workspace-controller routing and per-pane isolation tests remain green. |
+
+## Plan 103 Split Tree Recipe & Design-System Cross-Reference (2026-08-30)
+
+Pane split tree panes, resize handles, and separator borders consume `--clay-ds-pane-split-tree-*` recipe variables. Drag/keyboard split geometry and ratios remain host-managed by `react-resizable-panels`. Design systems cannot alter split ratios or pane containment. See [Module 15](15-ui-design-systems.md) for full design-system switching checks.

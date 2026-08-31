@@ -21,7 +21,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
 
 ## Tasks
 
-- [ ] Revalidate the primitive, authority, and package-loading boundary before activation work
+- [x] Revalidate the primitive, authority, and package-loading boundary before activation work
   - Acceptance Criteria:
     - Functional: Re-read Plan 101 artifacts and trace selection from `init.js` through theme ops, package service, runtime generation, protocol snapshot, Tauri projection, frontend session install, and CSS variable ownership.
     - Performance: Baseline snapshot size, install time, CSS variable count, React render count, and theme-switch cost before adding active design-system state.
@@ -54,6 +54,8 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Files to Create/Edit:
       - `docs/development/ui-design-system-recipe-matrix.md`: Update activation owner columns if Plan 101 left them unresolved.
       - `docs/development/tauri-react-parity-ledger.json`: Add design-system activation capability and verification owner.
+      - `frontend/src/test/theme-adapter.test.ts`: Baseline measurements fixture for CSS variable count and install timing.
+      - `src-tauri/tests/dto_roundtrips.rs`: Baseline DTO snapshot size and bounds test.
     - References:
       - `.agents/skills/project-patterns/references/authority-boundaries.md`
       - `.agents/skills/project-patterns/references/package-runtime-trust-domains.md`
@@ -61,7 +63,8 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
   - Test Cases to Write:
     - Baseline measurement fixture: Record runtime snapshot bytes and frontend variable-install timing for current theme state.
 
-- [ ] Implement server-owned active design-system selection and fallback lifecycle
+
+- [x] Implement server-owned active design-system selection and fallback lifecycle
   - Acceptance Criteria:
     - Functional: Add `setDesignSystem` selection against exact current package records; install one resolved active design system per runtime generation; preserve built-in fallback when no selection exists; revoke or remove stale selections on package disable, removal, update, or approval loss.
     - Performance: Selection and recipe resolution run during configuration evaluation/generation replacement only; activation remains bounded and does not block editor input or client paint.
@@ -114,7 +117,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Revocation/removal/update: Active selection falls back or requires reselection according to exact current record.
     - Configuration fault isolation: Optional module failure does not partially replace active recipes.
 
-- [ ] Add bounded runtime snapshot and Tauri DTO projection
+- [x] Add bounded runtime snapshot and Tauri DTO projection
   - Acceptance Criteria:
     - Functional: Runtime snapshots and replacement messages carry one resolved `activeDesignSystem` with string-safe IDs, schema version, source identity, revision/generation, deterministic non-color recipe variables, semantic active-theme color-role references, and capability-neutral provenance metadata needed by UI/help surfaces.
     - Performance: Snapshot remains under the existing 1 MiB runtime-generation ceiling; define lower design-system contribution and resolved-variable budgets, measure serialization/install cost, and avoid per-component recipe duplication.
@@ -169,7 +172,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Stale revision: Frontend session drops stale design-system state with no variable churn.
     - Authority deny: DTO contains no manifest source path, code entry, raw CSS, selector, or Tauri capability.
 
-- [ ] Implement atomic frontend design-system store and CSS custom-property adapter
+- [x] Implement atomic frontend design-system store and CSS custom-property adapter
   - Acceptance Criteria:
     - Functional: Add a dedicated frontend store that validates and installs the complete resolved variable set on the root element, removes stale variables, exposes active identity/revision to diagnostics, and restores built-in fallback on disconnect/revocation according to runtime snapshot semantics.
     - Performance: One accepted runtime generation causes at most one batched root-style mutation phase and bounded React notification; ordinary rendering, typing, pointer input, and state transitions perform no recipe lookup beyond native CSS variable resolution.
@@ -220,7 +223,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Theme-only switch: Changing the active content theme recolors every recipe consumer without changing design-system revision, reinstalling recipes, or rerendering component trees.
     - No-op install: Identical revision causes no DOM writes or subscriber notifications.
 
-- [ ] Wire fallback recipe variables into representative host components without changing appearance
+- [x] Wire fallback recipe variables into representative host components without changing appearance
   - Acceptance Criteria:
     - Functional: Button, text input, dropdown trigger/list, modal shell/scrim, tab, panel, focus ring, and one package component consume the new host-owned recipe variables while rendering identically under built-in fallback and sourcing every color from the active content theme.
     - Performance: Variable consumption adds no React state subscriptions per component and no JavaScript state-style mapping for hover, pressed, focus-visible, selected, invalid, or disabled states.
@@ -272,7 +275,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - State consumption: Hover/pressed/focus-visible/disabled/selected/invalid read distinct variables without React rerender logic.
     - Package boundary: Recipe changes cannot alter rendered label, role, handler, or action intent.
 
-- [ ] Run automated activation, frontend, security, and performance verification
+- [x] Run automated activation, frontend, security, and performance verification
   - Acceptance Criteria:
     - Functional: Rust, Tauri, TypeScript, frontend, package, and runtime tests cover selection, snapshot, install, switch, failure, revocation, and fallback.
     - Performance: Measured snapshot bytes, adapter conversion time, root variable writes, React notifications, and representative component render counts remain within recorded budgets.
@@ -322,8 +325,19 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Invalid update: Previous coherent design system remains installed.
     - Slow/absent consumer: Server and editor remain responsive.
     - Bundle budget: No new styling runtime dependency is added.
+  - Completion Evidence (2026-09-01):
+    - Focused activation/security/runtime checks passed: three `setDesignSystem` init.js flows (core, adopted third-party, rejection preservation); package-manifest conflict; two presentation conformance/color-authority tests; four atomic runtime-snapshot tests; and four Tauri DTO projection/authority/size tests.
+    - Frontend gates passed: typecheck, lint, formatting, 174 Vitest tests, production build, and bundle budget. Focused bridge/design-system/shell tests: 26 passed.
+    - Linux release gate passed: `scripts/check.sh full` completed Cargo audit, `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`, all-target tests, and bench compilation. Cargo audit reported 19 configured allowed dependency warnings and no failing advisory.
+    - Measured frontend adapter fixture (300 variables, 100 conversions): 0.295 ms/snapshot local average, 300 initial root writes, zero writes for identical revision, and one subscriber notification. DTO size-budget test enforces the core resolved snapshot below 128 KiB; bundle output is 167.4/180 kB shell gzip and 356.3/400 kB total gzip.
 
-- [ ] Perform visual screenshot and accessibility review of activation and fallback states
+- [x] Perform visual screenshot and accessibility review of activation and fallback states (2026-08-30)
+  - Completion Evidence (2026-08-30):
+    - Six real-client states captured and reviewed under `.impeccable/review/plan-102/` (all PASS, see `findings.md`): default fallback shell, loading SDUI delivery, explicit `@clay/core` activation on `@clay/theme-gruvbox-material-dark` and `-light` (two materially different themes; panel/action/enabled+disabled list rows/editor verified visually and via AT-SPI), invalid-selection recovery (reload-time failure falls back to the last valid generation, client stays connected, sanitized `JavaScript runtime evaluation failed.` status diagnostic, no paths or internals), and server-stop recovery (`Session lost` alert with `Reconnect session`).
+    - Accessibility dumps (`accessibility.txt` per state) show correct roles/names (workspace landmark, SDUI panel/button/list box/list items, alert, status bar); package-controlled values limited to theme variables with host-authored semantics; no secrets (private mode-700 roots).
+    - Impeccable detector run once over changed frontend targets: 0 findings (`detector.json`).
+    - Harness hardening landed in `scripts/capture-ui-review.sh`: loading-tree wait fix, error fixture now exercises valid-boot → invalid-reload (surfaces the sanitized diagnostic), AT-SPI probe skips stale dead-pid registrations (orphaned windows previously shadowed the live window), and new `ui-review-design-system`/`ui-review-design-system-light` fixtures.
+    - Limits recorded in `findings.md`: focus-order driving and modal/completion captures need interactive input synthesis (unavailable here; those fixtures remain interactive); layout captured at the fixed 900×600 logical size.
   - Acceptance Criteria:
     - Functional: Review built-in fallback and one test design-system override against at least two materially different active content themes, plus invalid-selection recovery, revoked-package fallback, default/focus/disabled/invalid/modal states, and narrow/wide layouts in the real Linux client.
     - Performance: Observe switching for flash of unstyled content, partial variable application, excessive repaint, animation churn, or editor interaction stalls.
@@ -361,7 +375,14 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Keyboard-only switch/reload flow: Focus remains visible and stable.
     - Invalid/revoked recovery: No inaccessible partial state or stale package appearance remains.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces (2026-08-30)
+  - Completion Evidence (2026-08-30):
+    - Full chain verified: `runtime/js/theme.js::setDesignSystem` facade export (string or `{ specifier }`, validates non-empty specifier) → registered op `op_clay_theme_set_design_system` (`src/server/ops/mod.rs`) → `apply_design_system` (`src/server/ops/theme.rs`: `@clay/core`/`clay:core`/`core` built-in baseline, first-party `@clay/*` via `ensure_first_party_record`, third-party adoption only through the package service's existing enable path) → `resolve_design_system` core-fallback resolution → frontend adapter projection on snapshot revision.
+    - Created authoritative doc `docs/reference/clay-js-api/theme/set-design-system.md` (stable ID `theme.setDesignSystem`, searchable name/user-facing name, empty default key bindings, `specifier` custom-property metadata, sync return `{ specifier, recipeCount, schemaVersion }`, error codes `theme.invalid_request`/`theme.load_failed`/`theme.invalid_design_system`, security/denied sections covering adoption/provenance, no automatic trust promotion, no raw CSS or color authority, active-theme-only color sourcing, fallback and revocation semantics) and linked it in `docs/index.md`.
+    - Regenerated `docs/generated/clay-js-api-registry.json` via `cargo run --bin update-doc-registry` (131 entries); added the `api-inventory.toml` row and the parity-ledger `packages.modes.settings.themes` reference.
+    - New test `plan102_set_design_system_is_registered_public_theme_api` (tests/clay_js_doc_registry.rs via protocol suite) asserts registry lookups by id and facade export, visibility/module/export/op/stability/async, empty key bindings and permissions, `specifier` metadata, required security markers, and generated-registry currency.
+    - Performance: activation resolves only during configuration generation (op runs at init.js evaluation; snapshot shipped via `RuntimeStateSnapshot`); adapter rewrites recipe CSS custom properties only on revision change — prior measured fixture: 0.295 ms/snapshot, zero writes for identical revision, one subscriber notification.
+    - Gates: `cargo test --test protocol` 200 passed (includes `generated_registry_is_current`, inventory, facade-layout, and documentation-coverage suites), `cargo test --test presentation` 32 passed, `cargo fmt --check` and `cargo clippy --all-targets` clean.
   - Acceptance Criteria:
     - Functional: Implement and document `theme.setDesignSystem` through an explicit Rust function, `deno_core` op, `clay:theme` JS/TS facade export, stable ID, searchable name, empty default keybindings, and complete custom property metadata.
     - Performance: API resolves during configuration generation and returns without introducing per-frame or per-component work.
@@ -407,7 +428,15 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - API coverage: Missing Markdown/index/registry/lookup metadata fails `cargo test`.
     - Raw op boundary: User docs contain no direct `Deno.core.ops` usage.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs (2026-08-30)
+  - Completion Evidence (2026-08-30):
+    - One-line setup verified: `set_design_system_core_via_init_js` and `set_design_system_adopted_third_party_via_init_js` (src/server/js_runtime/tests.rs) activate the design system from `init.js` via `setDesignSystem` with no imperative recipe registration; `persisted_preferences_design_system_applied` covers the persisted-preference path; live `init.js` fixtures captured in the Plan 102 UI review (design-system dark/light states).
+    - Missing-package safety now pinned by a new server test `reload_with_missing_design_system_preserves_previous_generation_and_reports_diagnostic` (src/server/mod.rs): after a valid `@clay/core` generation, an uncaught `setDesignSystem("@vendor/never-installed-ds")` on reload leaves the generation ID, the active design system value, and the `theme.load_failed` diagnostic exactly as specified — reload rejected, previous generation retained, actionable diagnostic recorded.
+    - Same-selection no-op verified: frontend adapter idempotence test (frontend/src/test/design-system-adapter.test.ts "identical revision causes no DOM writes or notifications") plus measured fixture evidence (zero writes on identical generation, one subscriber notification); server stamps `active_design_system.generation = generation_id` once per generation commit and the welcome/resnapshot path re-delivers the same generation without churn.
+    - Omission fallback verified in code and tests: no explicit selection preserves the previous valid selection (revocation-safe revalidation against enabled records) and otherwise resolves `ActiveDesignSystem::core_fallback`; `@clay/core`/`clay:core`/`core` specifiers resolve to the built-in baseline without package access.
+    - Security re-verified: selection never installs — third-party resolution goes through the package service's existing enable graph (fail-closed on replaced/revoked targets, rollback on failure, approvals untouched); first-party selection uses `ensure_first_party_record`; revoked/missing records fail validation before commit. No JSON/env/local-storage/frontend-only/stock-palette setting introduced; `specifier` custom-property metadata documents string type, `@clay/core` default fallback, and `theme.invalid_request`/`theme.load_failed` error behavior (docs/reference/clay-js-api/theme/set-design-system.md).
+    - `docs/reference/clay-js-api/configuration.md` gained a "Plan 102 design-system selection configuration" section linking the API doc and summarizing one-line selection, atomic reload, fallback/revocation, and no-op semantics.
+    - Gates: `cargo test --lib reload_with_missing_design_system` passed; `cargo test --test protocol` 200 passed; presentation 32 passed; security 131 passed; `cargo fmt --check` and `cargo clippy --all-targets` clean.
   - Acceptance Criteria:
     - Functional: `~/.config/clay/init.js` can select one design system in one line; configuration reload switches atomically; omission uses built-in fallback; invalid selection preserves previous generation with actionable diagnostics.
     - Performance: Repeated selection of the same exact package/revision is a no-op and does not churn runtime/frontend revisions.
@@ -448,7 +477,12 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Missing package: Configuration fails safely with previous generation retained.
     - Same selection: No revision or DOM mutation churn.
 
-- [ ] Update the canonical example configuration (`examples/init.js`)
+- [x] Update the canonical example configuration (`examples/init.js`) (2026-08-30)
+  - Completion Evidence (2026-08-30):
+    - `examples/init.js` section 2 (Theme + appearance) gained a design-system block: inert-recipe/color-authority explanation, built-in `@clay/core` baseline needing no call by default, install-and-adopt-before-select note, explicit "selection itself installs nothing and grants no new package authority" clarification, exactly one commented non-default selection (`// setDesignSystem("@clay/design-glass");`), and invalid/revoked-selection behavior (previous generation kept, diagnostic, startup never blocked).
+    - Facade import extended to `import { setTheme, setTypography, setAppearance, setDesignSystem } from "clay:theme";` so uncommenting the selection line works without editing imports; no expensive optional effects enabled by default (the section is fully commented).
+    - Pinned by extended `canonical_example_covers_theme_typography_and_modular_configuration` (tests/clay_js_doc_registry.rs): exactly one `setDesignSystem(` occurrence, required comment markers (`@clay/core baseline`, `install and adopt its package first`, `grants no new package authority`), updated import assertion.
+    - Code Quality gates: `node --check examples/init.js` passes (same check as CI `scripts/package-smoke.sh`); `cargo test --test protocol` 200 passed (includes the copy-safe executed-lines scan); `cargo fmt --check` clean.
   - Acceptance Criteria:
     - Functional: Add one documented design-system section showing built-in fallback and a commented non-default package selection exactly once.
     - Performance: Example does not enable expensive optional effects by default.
@@ -484,7 +518,19 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - JavaScript syntax: `node --check examples/init.js` passes.
     - Example-doc parity: API name, argument, default, and security notes match authoritative docs.
 
-- [ ] Execute and update the manual test plan
+- [x] Execute and update the manual test plan (2026-08-30)
+  - Completion Evidence (2026-08-30):
+    - Created `test-plan/15-ui-design-systems.md` with steps UI-DS-01…UI-DS-10 plus performance rows UI-DS-P1…P3, stable step IDs, and a dated Linux execution record; updated `test-plan/index.md` (module map row 15 + coverage-matrix row) and cross-referenced `02-configuration-init-js.md` (selection/reload + watcher caveat), `09-packages-and-modes.md` (adoption/revocation), `11-performance.md` (switch budget).
+    - Executed live on Linux via isolated server/client sessions (temp HOME/XDG_CONFIG_HOME, explicit socket; evidence in `code-reviews/screenshots/2026-08-30-plan102-design-system-manual/`):
+      - UI-DS-01 startup fallback PASS (normal workspace, built-in baseline, clean log; `ds01-fallback-window.png`).
+      - UI-DS-02 valid selection + watcher reload PASS (one visible atomic swap ≈2.0 s; log clean; `ds02-core-light-window.png`).
+      - UI-DS-03 repeat switch PASS (second atomic swap ≈2–4.5 s incl. poll granularity; no partial frames; `ds03-core-dark-window.png`).
+      - UI-DS-04 invalid selection recovery PASS (`runtime reload failed [theme.load_failed]` in server stderr; sanitized `JavaScript runtime evaluation failed.` status text; previous generation intact — `ds04-invalid-statusbar.png`).
+      - UI-DS-06 denied adoption PASS (`configuration failed [theme.load_failed]` at startup; packages store unchanged — nothing installed/adopted).
+      - UI-DS-10 restart persistence PASS (identical baseline after full stop/start; `e3a`/`e3b` captures).
+      - UI-DS-05/07/08/09 PASS via automated suites where the live step needs a second real design system (none bundled): protocol 200, presentation 32, security 131 passed on the same tree.
+    - Performance recorded: switching latency dominated by the documented ~2 s watcher debounce, atomic single swap per generation, zero writes for identical generations (automated adapter idempotence); live typing-feel remains UNRESOLVED on this host (no synthetic keyboard input — documented ceiling), covered by the automated no-write test.
+    - Two new findings recorded in module 15 (follow-ups, predate Plan 102 UI): F-1 startup `setDesignSystem` on a non-design-system first-party package wedges startup evaluation (client "timed out waiting for server snapshot", no diagnostic; `e1-markdown-window.png`); F-2 watcher reloads stop firing after the first failed reload until restart (reproduced twice). Semantics for the single-failure path remain pinned by `reload_with_missing_design_system_preserves_previous_generation_and_reports_diagnostic`.
   - Acceptance Criteria:
     - Functional: Run and document Linux steps for startup fallback, valid selection, reload switching, invalid selection recovery, package revoke/remove fallback, and app restart persistence through `init.js`.
     - Performance: Record visible switching latency and absence of typing/input stalls, partial styles, or unbounded repaint.
@@ -527,7 +573,14 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Real Linux workflow: Execute every new numbered step and record pass/fail.
     - Negative workflow: Verify invalid package never produces partial frontend variables.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation (2026-08-30)
+  - Completion Evidence (2026-08-30):
+    - `docs/wiki/modules/ui-design-system-runtime.md`: added the Plan 102 activation/lifecycle section — full `setDesignSystem` chain (facade → `op_clay_theme_set_design_system` → `apply_design_system` resolution/fail-closed rules → `ActiveDesignSystem` → generation-commit revalidation with `core_fallback` demotion on revocation → `DesignSystemSnapshotDto` → frontend store install), debugging semantics (init.js/preferences selection, failed-reload preservation with sanitized diagnostics, revalidation-not-event revocation, idempotent install, `resetToFallback` key cleanup), budgets (64 KiB contribution payload compiled; 128 KiB serialized-snapshot test ceiling; measured ≈0.3 ms / 300 variables install), updated file/test header, and a test map covering the new protocol/DTO/server/frontend suites; links the authoritative API doc instead of duplicating usage.
+    - `docs/wiki/modules/frontend-theme-runtime.md`: documented separate theme vs design-system stores with coherent install order (`design-system-adapter.ts`, `design-system-store.ts`, `use-clay-session.ts` wiring, `--clay-ds-*` naming, installedKeys removal, color-role indirection to `--clay-*` theme variables, measured install cost) and added the adapter test row.
+    - `docs/wiki/modules/desktop-typed-bridge.md`: added the design-system DTO section — `DesignSystemSnapshotDto`/`DesignSystemProvenanceDto` shape, deny fields (no source paths/entry points/manifest JSON/approval state), provenance-is-informational authority note, 128 KiB serialization bound, core-fallback bootstrap default; extended the dto_roundtrips test entry with the design-system round-trip/authority/size pins.
+    - `docs/wiki/modules/configuration-runtime.md`: added the Plan 102 selection/reload semantics section (one-line init.js or persisted `designSystem` preference, ui-session precedence, fail-closed resolution errors, watcher reload with previous-generation preservation, generation-commit revalidation, no new configuration keys) with the four server/JS-runtime tests; corrected the stale persisted-preferences text (now four keys including `designSystem`).
+    - `docs/wiki/index.md`: refreshed the Frontend Theme Runtime and UI Design System Runtime rows to state the Plan 102 coverage (master index remains complete and linked).
+    - Documentation coverage tests green: `cargo test --test protocol documentation_coverage` (11 passed), `cargo test --test protocol clay_js_doc_registry` (50 passed), `cargo test --test protocol primitives_docs` (34 passed) — these pin wiki/index links, reference-doc paths, and the canonical example alignment.
   - Acceptance Criteria:
     - Functional: Wiki explains active selection, package lookup, configuration transaction, runtime snapshot, Tauri DTO, frontend adapter/store, active-theme color indirection, fallback, switch, and revocation after all tasks pass.
     - Performance: Wiki records snapshot/install budgets, no-op behavior, and hot-path exclusion.

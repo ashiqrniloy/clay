@@ -1,5 +1,6 @@
 /* Fixture route: deterministic visual states for development/test builds
- * only. Not a production second shell. */
+ * only. Not a production second shell.
+ * Consumes host-owned design-system recipe variables with fallback to core tokens. */
 
 .fixture {
   height: 100%;
@@ -20,7 +21,10 @@
   grid-template-rows: auto 1fr;
   height: 100%;
   min-height: 0;
-  background: var(--clay-surface-main);
+  background: var(
+    --clay-ds-panel-default-root-rest-background-color,
+    var(--clay-surface-main)
+  );
 }
 
 .documentSurface {
@@ -32,9 +36,19 @@
   display: flex;
   align-items: center;
   padding: var(--clay-spacing-xxs, 4px) var(--clay-spacing-sm, 12px);
-  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-hairline);
-  background: var(--clay-surface-panel);
+  border-bottom: var(
+      --clay-ds-panel-default-root-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-panel-default-root-rest-border-color,
+      var(--clay-border-hairline)
+    );
+  background: var(
+    --clay-ds-panel-default-root-rest-background-color,
+    var(--clay-surface-panel)
+  );
   color: var(--clay-text-primary);
 }
 
@@ -46,9 +60,19 @@
 }
 
 .panel {
-  background: var(--clay-surface-panel);
-  border: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-hairline);
+  background: var(
+    --clay-ds-panel-default-root-rest-background-color,
+    var(--clay-surface-panel)
+  );
+  border: var(
+      --clay-ds-panel-default-root-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-panel-default-root-rest-border-color,
+      var(--clay-border-hairline)
+    );
   padding: var(--clay-spacing-md, 16px);
 }
 
@@ -57,8 +81,15 @@
   place-items: center;
   min-height: 96px;
   background: var(--clay-surface-list);
-  border: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-hairline);
+  border: var(
+      --clay-ds-panel-default-root-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    solid
+    var(
+      --clay-ds-panel-default-root-rest-border-color,
+      var(--clay-border-hairline)
+    );
 }
 
 .stack {

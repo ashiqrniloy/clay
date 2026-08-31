@@ -165,7 +165,7 @@ fn package_manifest_accepts_minimal_markdown_fixture() {
         ]
     );
     assert_eq!(manifest.clay.modes, vec!["markdown".to_string()]);
-    assert_eq!(manifest.clay.entry, "./dist/index.js");
+    assert_eq!(manifest.clay.entry.as_deref(), Some("./dist/index.js"));
     assert_eq!(manifest.clay.load_entry.as_deref(), Some("./dist/load.js"));
 }
 

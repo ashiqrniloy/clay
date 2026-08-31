@@ -1,13 +1,20 @@
-/* Catalog `modal`: token-driven scrim + dialog chrome, z.modal stacking. */
+/* Catalog `modal`: token-driven scrim + dialog chrome, z.modal stacking.
+ * Consumes host-owned design-system recipe variables with fallback to core tokens. */
 
 .scrim {
   position: fixed;
   inset: 0;
   /* Opacity lives on the fill, not the overlay, so the dialog stays opaque. */
-  background: color-mix(
-    in srgb,
-    var(--clay-surface-scrim) calc(var(--clay-opacity-scrim) * 100%),
-    transparent
+  background: var(
+    --clay-ds-modal-default-scrim-rest-background-color,
+    color-mix(
+      in srgb,
+      var(--clay-surface-scrim) calc(var(--clay-opacity-scrim) * 100%),
+      transparent
+    )
+  );
+  backdrop-filter: blur(
+    var(--clay-ds-modal-default-scrim-rest-backdrop-blur, 0px)
   );
   z-index: var(--clay-z-modal, 40);
   display: grid;
@@ -15,20 +22,81 @@
 }
 
 .dialog {
-  background: var(--clay-surface-overlay);
-  color: var(--clay-text-primary);
-  border: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-strong);
-  border-radius: 0;
+  background: var(
+    --clay-ds-modal-default-dialog-rest-background-color,
+    var(
+      --clay-ds-modal-default-surface-rest-background-color,
+      var(--clay-surface-overlay)
+    )
+  );
+  color: var(
+    --clay-ds-modal-default-dialog-rest-text-color,
+    var(
+      --clay-ds-modal-default-surface-rest-text-color,
+      var(--clay-text-primary)
+    )
+  );
+  border: var(
+      --clay-ds-modal-default-dialog-rest-border-width,
+      var(
+        --clay-ds-modal-default-surface-rest-border-width,
+        var(--clay-dimension-border-hairline, 1px)
+      )
+    )
+    var(
+      --clay-ds-modal-default-dialog-rest-border-style,
+      var(--clay-ds-modal-default-surface-rest-border-style, solid)
+    )
+    var(
+      --clay-ds-modal-default-dialog-rest-border-color,
+      var(
+        --clay-ds-modal-default-surface-rest-border-color,
+        var(--clay-border-strong)
+      )
+    );
+  border-radius: var(
+    --clay-ds-modal-default-dialog-rest-border-radius,
+    var(--clay-ds-modal-default-surface-rest-border-radius, 0)
+  );
+  box-shadow: var(
+    --clay-ds-modal-default-dialog-rest-shadow,
+    var(--clay-ds-modal-default-surface-rest-shadow, none)
+  );
+  backdrop-filter: blur(
+      var(
+        --clay-ds-modal-default-dialog-rest-backdrop-blur,
+        var(--clay-ds-modal-default-surface-rest-backdrop-blur, 0px)
+      )
+    )
+    saturate(
+      var(
+        --clay-ds-modal-default-dialog-rest-backdrop-saturate,
+        var(--clay-ds-modal-default-surface-rest-backdrop-saturate, 1)
+      )
+    );
   min-width: 320px;
   max-width: min(var(--clay-dimension-overlay-centered-width, 640px), 90vw);
   max-height: 80vh;
   overflow-y: auto;
-  padding: var(--clay-spacing-md, 16px);
+  padding: var(
+    --clay-ds-modal-default-dialog-rest-padding,
+    var(
+      --clay-ds-modal-default-surface-rest-padding,
+      var(--clay-spacing-md, 16px)
+    )
+  );
 }
 
 .title {
-  margin: 0 0 var(--clay-spacing-sm, 12px);
+  margin: 0 0
+    var(
+      --clay-ds-modal-default-title-rest-margin-bottom,
+      var(--clay-spacing-sm, 12px)
+    );
+  color: var(
+    --clay-ds-modal-default-title-rest-text-color,
+    var(--clay-text-primary)
+  );
   font-size: var(--clay-text-title-size);
   line-height: var(--clay-text-title-line-height);
 }

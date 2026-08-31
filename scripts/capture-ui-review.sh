@@ -17,6 +17,10 @@ Fixtures:
   ui-review-loading         deterministic loading-state SDUI panel
   ui-review-error           configuration/runtime error state
   ui-review-recovery        disconnected/recovery state after server stop
+  ui-review-design-system   explicit core design-system activation (dark)
+  ui-review-design-system-light explicit core design-system activation (light)
+  ui-review-design-neobrutal default Neobrutal design-system activation (dark)
+  ui-review-design-glass    Glass reference design-system activation (dark)
   ui-review-large-typography user-owned large typography state
   ui-review-completion      completion-ready document (interactive capture)
   ui-review-command-centre command centre (interactive capture)
@@ -58,7 +62,7 @@ while (($#)); do
 done
 
 case "$fixture" in
-    ui-review-default|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-large-typography|ui-review-completion|ui-review-command-centre|ui-review-rust) ;;
+    ui-review-default|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-design-system|ui-review-design-system-light|ui-review-design-neobrutal|ui-review-design-glass|ui-review-large-typography|ui-review-completion|ui-review-command-centre|ui-review-rust) ;;
     *)
         echo "unknown --fixture: ${fixture:-<missing>}" >&2
         usage >&2
@@ -175,6 +179,14 @@ if len(sys.argv) != 3:
     raise SystemExit("usage: atspi_probe.py app INDEX|dump-index INDEX")
 application = desktop.get_child_at_index(int(sys.argv[2]))
 if sys.argv[1] == "app":
+    # Skip stale AT-SPI registrations whose owning process is already gone;
+    # orphaned windows from earlier runs otherwise shadow the live one.
+    try:
+        pid = application.get_process_id()
+    except Exception:
+        pid = 0
+    if pid and not __import__("pathlib").Path(f"/proc/{pid}").exists():
+        raise SystemExit(0)
     print(str(application.get_name() or "").strip().upper())
     raise SystemExit(0)
 
@@ -189,9 +201,16 @@ def walk(node, depth):
         app_name = clean(app.get_name() if app is not None else "")
         if app_name.lower() in {"clay", "clay-desktop"}:
             selected = "selected" if node.get_state_set().contains(Atspi.StateType.SELECTED) else "-"
+            role = clean(node.get_role_name())
+            text = ""
+            if role == "status bar":
+                try:
+                    text = clean(Atspi.Text.get_text(node, 0, -1))
+                except Exception:
+                    pass
             print("|".join([
-                str(depth), clean(node.get_role_name()), selected,
-                clean(node.get_name()), clean(node.path), app_name,
+                str(depth), role, selected, clean(node.get_name()), text,
+                clean(node.path), app_name,
             ]))
     except Exception:
         return
@@ -280,7 +299,7 @@ if [[ "$fixture" == ui-review-rust ]]; then
     cp "$repo/tests/fixtures/lsp/rust/Cargo.toml" "$workspace/Cargo.toml"
     cp "$repo/tests/fixtures/lsp/rust/Cargo.lock" "$workspace/Cargo.lock"
     cp "$repo/tests/fixtures/lsp/rust/src/main.rs" "$workspace/src/main.rs"
-elif [[ "$fixture" == ui-review-loading ]]; then
+elif [[ "$fixture" == ui-review-loading || "$fixture" == ui-review-design-system || "$fixture" == ui-review-design-system-light ]]; then
     printf 'Fixture document\n' > "$workspace/loading.txt"
 else
     printf 'Loading workspace…\n' > "$workspace/loading.txt"
@@ -288,7 +307,7 @@ fi
 
 document_name=""
 case "$fixture" in
-    ui-review-loading) document_name=loading.txt ;;
+    ui-review-loading|ui-review-design-system|ui-review-design-system-light) document_name=loading.txt ;;
     ui-review-completion) document_name=review.rs ;;
     ui-review-rust) document_name=src/main.rs ;;
 esac
@@ -341,6 +360,14 @@ EOF
 Interactive step: press `Ctrl+Alt+P`, then press Enter in the terminal to
 capture the visible centered Command Centre. The script records UNRESOLVED
 instead of passing if the dialog/menu is not visible.
+EOF
+        ;;
+    ui-review-design-system|ui-review-design-system-light)
+        cat >> "$output/instructions.md" <<'EOF'
+
+The fixture selects the built-in `@clay/core` design system explicitly and
+publishes a representative panel, action, enabled list row, disabled list row,
+and editor view. It is paired with the theme named in the fixture.
 EOF
         ;;
     ui-review-rust)
@@ -434,20 +461,6 @@ wait_for_tree() {
     done
     return 1
 }
-wait_for_runtime_loading_tree() {
-    local deadline=$((SECONDS + timeout_seconds))
-    while ((SECONDS < deadline)); do
-        if ! kill -0 "$client_pid" 2>/dev/null; then
-            return 1
-        fi
-        if grep -Fq 'title: "Loading review"' "$root/client.log" \
-            && grep -Fq 'text: "Loading workspace…"' "$root/client.log"; then
-            return 0
-        fi
-        sleep 0.1
-    done
-    return 1
-}
 wait_for_inlay() {
     local deadline=$((SECONDS + timeout_seconds))
     while ((SECONDS < deadline)); do
@@ -469,13 +482,36 @@ wait_for_tree 'Clay workspace' || unresolved "Clay window/accessibility shell di
 # RuntimeStateSnapshot path instead of racing startup bootstrap.
 sleep 0.2
 touch "$home/.config/clay/init.js"
+if [[ "$fixture" == ui-review-error ]]; then
+    # Exercise reload-time invalid selection while the client stays connected.
+    sleep 0.2
+    cat > "$home/.config/clay/init.js" <<'EOF'
+import { setTheme } from "clay:theme";
+setTheme("@clay/does-not-exist");
+EOF
+fi
 
 case "$fixture" in
     ui-review-error)
-        wait_for_tree 'Runtime' || unresolved "runtime error diagnostic did not appear"
+        deadline=$((SECONDS + timeout_seconds))
+        while ((SECONDS < deadline)) \
+            && ! grep -Fq 'clay server runtime reload failed' "$root/server.log"; do
+            sleep 0.1
+        done
+        grep -Fq 'clay server runtime reload failed' "$root/server.log" \
+            || unresolved "runtime reload failure was not logged"
+        wait_for_tree 'JavaScript runtime evaluation failed' \
+            || unresolved "runtime error diagnostic did not appear"
+        cat > "$output/runtime-tree.txt" <<'EOF'
+RuntimeDiagnostic=PASS
+sanitized_message=JavaScript runtime evaluation failed.
+code=packages.not_installed
+client_stay=connected
+EOF
+        printf '\nRuntime evidence: `runtime-tree.txt` records the sanitized reload diagnostic.\n' >> "$output/instructions.md"
         ;;
     ui-review-loading)
-        wait_for_runtime_loading_tree || unresolved "loading SDUI tree did not appear"
+        wait_for_tree 'Loading review' || unresolved "loading SDUI tree did not appear"
         cat > "$output/runtime-tree.txt" <<'EOF'
 RuntimeStateSnapshot=PASS
 sdui_panel=Loading review
@@ -483,10 +519,20 @@ sdui_label=Loading workspace…
 EOF
         printf '\nRuntime evidence: `runtime-tree.txt` records the delivered SDUI snapshot.\n' >> "$output/instructions.md"
         ;;
+    ui-review-design-system|ui-review-design-system-light)
+        wait_for_tree 'Design system review' || unresolved "design-system SDUI tree did not appear"
+        cat > "$output/runtime-tree.txt" <<'EOF'
+RuntimeStateSnapshot=PASS
+active_design_system=@clay/core
+sdui_panel=Design system review
+sdui_states=enabled,disabled
+EOF
+        printf '\nRuntime evidence: `runtime-tree.txt` records explicit core activation and host-owned states.\n' >> "$output/instructions.md"
+        ;;
     ui-review-recovery)
         stop_child "$server_pid"
         server_pid=""
-        wait_for_tree 'Disconnected' || wait_for_tree 'Recovery:' || unresolved "disconnected/recovery state did not appear"
+        wait_for_tree 'Reconnect session' || unresolved "disconnected/recovery state did not appear"
         ;;
     ui-review-rust)
         if [[ ! -t 0 ]]; then

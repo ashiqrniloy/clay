@@ -107,6 +107,8 @@ pub const TYPOGRAPHY_PAYLOAD_BUDGET_BYTES: usize = 1024;
 /// Rust-mediated only; checked before allocation-heavy parsing so a hostile
 /// sibling package cannot force unbounded buffering across the trust boundary.
 pub const CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES: usize = 8192;
+/// Maximum payload budget for one inert UI design-system contribution declaration (Plan 101).
+pub const UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES: usize = 64 * 1024;
 
 // Runtime SDUI `publishTree` budgets. A package- or config-published tree is
 // untrusted input parsed into a `serde_json::Value` and then converted into a

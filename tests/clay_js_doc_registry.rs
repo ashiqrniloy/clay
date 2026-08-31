@@ -2087,7 +2087,7 @@ fn canonical_example_covers_theme_typography_and_modular_configuration() {
 
     for import in [
         r#"import { loadConfigurationModule, getConfigurationState, setPackageOption } from "clay:configuration";"#,
-        r#"import { setTheme, setTypography, setAppearance } from "clay:theme";"#,
+        r#"import { setTheme, setTypography, setAppearance, setDesignSystem } from "clay:theme";"#,
         r#"import { clientSetCursorStyle } from "clay:editor";"#,
         r#"import { clientSetEditorLayout } from "clay:editor";"#,
         r#"import { bindKey, unbindKey } from "clay:keybindings";"#,
@@ -2114,6 +2114,25 @@ fn canonical_example_covers_theme_typography_and_modular_configuration() {
         1,
         "canonical example must keep one active atomic typography call"
     );
+    // Plan 102: design-system selection is documented once as a commented
+    // non-default option; the built-in @clay/core fallback needs no call,
+    // and comments must state install/adopt-before-select plus no new
+    // package authority from selection.
+    assert_eq!(
+        example.matches("setDesignSystem(").count(),
+        1,
+        "canonical example must document setDesignSystem selection exactly once"
+    );
+    for marker in [
+        "@clay/core baseline",
+        "install and adopt its package first",
+        "grants no new package authority",
+    ] {
+        assert!(
+            example.contains(marker),
+            "canonical example design-system comments must cover {marker}"
+        );
+    }
     for theme in [
         "@clay/theme-gruvbox-material-light",
         "@clay/theme-modus-operandi",
@@ -2557,4 +2576,62 @@ fn canonical_example_active_configuration_is_copy_safe() {
             );
         }
     }
+}
+
+#[test]
+fn plan102_set_design_system_is_registered_public_theme_api() {
+    let root = repository_root();
+    let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
+
+    // Registry lookups expose the API by id, facade export, and custom property.
+    let entry = registry
+        .by_id("theme.setDesignSystem")
+        .expect("theme.setDesignSystem must be a registered public theme API");
+    assert_eq!(
+        registry.by_js_export("clay:theme", "setDesignSystem"),
+        Some(entry),
+        "theme.setDesignSystem must be discoverable by clay:theme facade export"
+    );
+    assert_eq!(entry.visibility, "public");
+    assert_eq!(entry.js_module, "clay:theme");
+    assert_eq!(entry.js_export, "setDesignSystem");
+    assert_eq!(entry.js_facade, "runtime/js/theme.js::setDesignSystem");
+    assert_eq!(entry.deno_op, "op_clay_theme_set_design_system");
+    assert_eq!(entry.stability, "runtime-backed");
+    assert!(!entry.is_async);
+    assert_eq!(entry.key_bindings, Vec::<String>::new());
+    assert_eq!(entry.permissions, Vec::<String>::new());
+    assert!(
+        entry
+            .custom_properties
+            .iter()
+            .any(|property| property.name == "specifier"),
+        "setDesignSystem must document the `specifier` custom property"
+    );
+
+    // Security semantics: adoption/provenance, no automatic trust promotion,
+    // no raw CSS or color authority, active-theme-only color sourcing,
+    // fallback and revocation behavior.
+    for marker in [
+        "no automatic trust promotion",
+        "raw CSS",
+        "active-theme",
+        "revocation",
+        "preserved",
+    ] {
+        assert!(
+            entry.security.contains(marker),
+            "theme.setDesignSystem security must mention {marker}"
+        );
+    }
+    for denied in denied_configuration_authorities() {
+        assert!(
+            entry.security.contains(denied),
+            "theme.setDesignSystem must deny {denied} authority"
+        );
+    }
+
+    // The doc keeps its generated registry entry current.
+    check_generated_registry_current(&root)
+        .unwrap_or_else(|error| panic!("{error}\nRepair command: {UPDATE_COMMAND}"));
 }

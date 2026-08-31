@@ -488,6 +488,28 @@ pub struct PackageOptionContributionDescriptor {
     pub estimated_payload_bytes: usize,
 }
 
+/// Inert descriptor for a UI design-system contribution declared by a package
+/// via `clay.contributions.uiDesignSystem` (Plan 101).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiDesignSystemContributionDescriptor {
+    /// Design-system identifier (e.g. `@clay/theme-neobrutal`).
+    pub id: String,
+    /// Schema version (must be `1`).
+    pub schema_version: u32,
+    /// Human-readable display name for the design system.
+    pub display_name: String,
+    /// Optional parent design system identifier to extend.
+    pub extends: Option<String>,
+    /// Number of declared namespaced non-color values.
+    pub value_count: usize,
+    /// Number of declared component recipes.
+    pub recipe_count: usize,
+    /// Raw serialized declaration JSON (inert data).
+    pub declaration_json: String,
+    /// Estimated bounded payload size in bytes.
+    pub estimated_payload_bytes: usize,
+}
+
 /// All inert primitive contribution descriptors declared by a package.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackageContributions {
@@ -518,6 +540,8 @@ pub struct PackageContributions {
     pub ui_state_scopes: Vec<UiStateScopeContributionDescriptor>,
     pub layout_overrides: Vec<LayoutOverrideContributionDescriptor>,
     pub package_options: Vec<PackageOptionContributionDescriptor>,
+    /// Inert UI design-system declaration (Plan 101).
+    pub ui_design_system: Option<UiDesignSystemContributionDescriptor>,
 }
 
 // ── Documentation and performance metadata ───────────────────────────────────
@@ -867,6 +891,10 @@ fn parse_contributions(
         )?,
         None => Vec::new(),
     };
+    let ui_design_system = match map.get("uiDesignSystem") {
+        Some(v) => theme::parse_ui_design_system_contribution(v, api_prefix, ctx)?,
+        None => None,
+    };
 
     Ok(PackageContributions {
         mode_patterns,
@@ -890,6 +918,7 @@ fn parse_contributions(
         ui_state_scopes,
         layout_overrides,
         package_options,
+        ui_design_system,
     })
 }
 
@@ -1590,5 +1619,122 @@ mod tests {
         }));
         let err = validate_manifest_value(&value).unwrap_err();
         assert!(err.message.contains("no wildcards"), "{}", err.message);
+    }
+
+    fn theme_fixture_with_ui_design_system(ds: Value) -> Value {
+        json!({
+            "name": "@clay/theme-neobrutal",
+            "version": "0.1.0",
+            "type": "module",
+            "exports": { ".": "./dist/index.js" },
+            "clay": {
+                "apiPrefix": "clay-theme-neobrutal",
+                "entry": "./dist/index.js",
+                "loadEntry": "./dist/load.js",
+                "docs": "./docs/index.md",
+                "permissions": [],
+                "modes": [],
+                "contributions": {
+                    "uiDesignSystem": ds
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn ui_design_system_valid_declaration_parses_into_descriptor() {
+        let fixture = theme_fixture_with_ui_design_system(json!({
+            "schemaVersion": 1,
+            "id": "@clay/theme-neobrutal",
+            "displayName": "Neobrutal Reference",
+            "values": {
+                "controlRadius": { "type": "radius", "value": 6.0 },
+                "borderThick": { "type": "border-width", "value": 2.0 }
+            },
+            "recipes": {
+                "button.primary.root.rest": {
+                    "backgroundColor": "accent.primary",
+                    "borderRadius": 6.0,
+                    "borderWidth": 2.0,
+                    "shadow": [
+                        {
+                            "x": 0.0,
+                            "y": 2.0,
+                            "blur": 4.0,
+                            "spread": 0.0,
+                            "colorRole": "surface.overlay",
+                            "opacity": 0.35,
+                            "inset": false
+                        }
+                    ]
+                }
+            }
+        }));
+
+        let record = assemble_package_record(&fixture).expect("assembles package record");
+        let ds = record
+            .contributions
+            .ui_design_system
+            .expect("ui_design_system descriptor present");
+
+        assert_eq!(ds.id, "@clay/theme-neobrutal");
+        assert_eq!(ds.schema_version, 1);
+        assert_eq!(ds.display_name, "Neobrutal Reference");
+        assert_eq!(ds.value_count, 2);
+        assert_eq!(ds.recipe_count, 1);
+        assert!(ds.estimated_payload_bytes > 0);
+        assert!(ds.declaration_json.contains("accent.primary"));
+    }
+
+    #[test]
+    fn ui_design_system_rejects_literal_colors_and_prohibited_authorities() {
+        // Literal hex color rejected
+        let fixture = theme_fixture_with_ui_design_system(json!({
+            "schemaVersion": 1,
+            "id": "@clay/theme-neobrutal",
+            "displayName": "Bad Colors",
+            "recipes": {
+                "button.primary.root.rest": {
+                    "backgroundColor": "#ff0000"
+                }
+            }
+        }));
+        let err = assemble_package_record(&fixture).unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("literal color"));
+
+        // Raw CSS rejected
+        let fixture = theme_fixture_with_ui_design_system(json!({
+            "schemaVersion": 1,
+            "id": "@clay/theme-neobrutal",
+            "displayName": "Bad CSS",
+            "css": "button { color: red; }",
+            "recipes": {}
+        }));
+        let err = assemble_package_record(&fixture).unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("raw CSS"));
+
+        // Script/callback rejected
+        let fixture = theme_fixture_with_ui_design_system(json!({
+            "schemaVersion": 1,
+            "id": "@clay/theme-neobrutal",
+            "displayName": "Bad Code",
+            "code": "console.log(1)",
+            "recipes": {}
+        }));
+        let err = assemble_package_record(&fixture).unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+
+        // Foreign ID rejected
+        let fixture = theme_fixture_with_ui_design_system(json!({
+            "schemaVersion": 1,
+            "id": "foreign-unowned-id",
+            "displayName": "Foreign",
+            "recipes": {}
+        }));
+        let err = assemble_package_record(&fixture).unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("namespace"));
     }
 }

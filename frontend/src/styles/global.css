@@ -39,3 +39,82 @@ body {
   scrollbar-color: var(--clay-surface-scrollbar)
     var(--clay-surface-scrollbar-track);
 }
+
+/* =========================================================================
+   Accessibility & Performance Fallback Layer (Plan 103 Task 5)
+   ========================================================================= */
+
+/* 1. Reduced Motion: Non-essential animations & transitions collapse to 0s */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+    transform: none !important;
+  }
+}
+
+/* 2. Reduced Transparency: Disable backdrop filters and fall back to solid theme surfaces */
+@media (prefers-reduced-transparency: reduce) {
+  [data-clay-material="glass"],
+  [data-clay-component="modal"][data-clay-slot="scrim"],
+  [data-clay-component="dropdown"][data-clay-slot="popover"] {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: var(--clay-surface-overlay) !important;
+  }
+}
+
+/* 3. Unsupported Backdrop Filter Fallback */
+@supports not (backdrop-filter: blur(1px)) {
+  [data-clay-material="glass"],
+  [data-clay-component="modal"][data-clay-slot="scrim"],
+  [data-clay-component="dropdown"][data-clay-slot="popover"] {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: var(--clay-surface-overlay);
+  }
+}
+
+/* 4. Forced Colors Mode (High Contrast): OS system colors take precedence for affordances */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 1px !important;
+  }
+
+  [aria-selected="true"],
+  [data-selected] {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    color: HighlightText !important;
+  }
+
+  [disabled],
+  [aria-disabled="true"],
+  [data-disabled] {
+    color: GrayText !important;
+    border-color: GrayText !important;
+  }
+
+  [aria-invalid="true"],
+  [data-invalid] {
+    outline: 2px solid Mark !important;
+  }
+
+  [data-clay-component="modal"][data-clay-slot="dialog"] {
+    border: 1px solid CanvasText !important;
+  }
+
+  [data-clay-component="modal"][data-clay-slot="scrim"] {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  * {
+    scrollbar-color: auto;
+  }
+}

@@ -517,7 +517,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 85);
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 86);
 
     let facades = read("src/server/facades.rs")
         .lines()
@@ -545,7 +545,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
         }
     }
     let package_section = marked_section(&plan, "package-inventory");
-    assert_exact_inventory(package_section, &packages, 15);
+    assert_exact_inventory(package_section, &packages, 17);
     assert_eq!(package_section.matches("`packages/lsp-shared`").count(), 1);
 }
 
@@ -1864,4 +1864,131 @@ fn create_plan_ui_requirements_name_existing_catalog_files() {
             );
         }
     }
+}
+
+#[test]
+fn plan101_recipe_matrix_covers_every_component_kind_and_internal_surface() {
+    let matrix = read("docs/development/ui-design-system-recipe-matrix.md");
+    let components = read(".agents/skills/clay-ui/references/components.md");
+
+    // All 15 implemented kinds plus reserved table
+    let kinds = [
+        "editorView",
+        "panel",
+        "label",
+        "button",
+        "list",
+        "flex",
+        "stack",
+        "overlay",
+        "scroll",
+        "portal",
+        "statusItem",
+        "dropdown",
+        "collapse",
+        "modal",
+        "textInput",
+        "table",
+    ];
+    for kind in kinds {
+        assert!(
+            matrix.contains(&format!("`{kind}`")),
+            "ui-design-system-recipe-matrix.md must cover component kind `{kind}`"
+        );
+    }
+
+    // All internal surfaces
+    let surfaces = [
+        "tabBar",
+        "paneSplitTree",
+        "statusBar",
+        "commandCentre",
+        "fileBrowser",
+        "settingsPanel",
+        "chatPanel",
+        "welcome",
+        "transientMenu",
+        "completion",
+        "editorChrome",
+    ];
+    for surface in surfaces {
+        assert!(
+            matrix.contains(&format!("`{surface}`")),
+            "ui-design-system-recipe-matrix.md must cover surface `{surface}`"
+        );
+    }
+
+    // Chrome primitives
+    let primitives = [
+        "badge",
+        "kbd",
+        "divider",
+        "tooltip",
+        "scrim",
+        "focusRing",
+        "scrollChrome",
+        "iconSlot",
+    ];
+    for primitive in primitives {
+        assert!(
+            matrix.contains(&format!("`{primitive}`")),
+            "ui-design-system-recipe-matrix.md must cover chrome primitive `{primitive}`"
+        );
+    }
+
+    // Check components.md links to the matrix
+    assert!(
+        components.contains("ui-design-system-recipe-matrix.md"),
+        "components.md must link to ui-design-system-recipe-matrix.md"
+    );
+}
+
+#[test]
+fn plan101_recipe_matrix_enforces_color_authority_and_prohibited_authorities() {
+    let matrix = read("docs/development/ui-design-system-recipe-matrix.md");
+
+    for required in [
+        "Content Themes as Sole Color Authority",
+        "Forced-Colors Accessibility Exception",
+        "Prohibited Authorities Deny List",
+        "Deterministic Fallback",
+        "Fallback Resolution and Inheritance Algorithm",
+        "Layout-Neutral",
+        "Layout-Affecting",
+    ] {
+        assert!(
+            matrix.contains(required),
+            "ui-design-system-recipe-matrix.md must document `{required}`"
+        );
+    }
+}
+
+#[test]
+fn plan101_documentation_cross_links_and_token_synchronization() {
+    let ui_components = read("docs/reference/ui-components.md");
+    let react_mapping = read("docs/development/react-ui-catalog-mapping.md");
+    let creating_packages = read("docs/reference/packages/creating-packages.md");
+    let tokens_md = read(".agents/skills/clay-ui/references/tokens.md");
+    let product_md = read("PRODUCT.md");
+
+    assert!(
+        ui_components.contains("ui-design-system-recipe-matrix.md"),
+        "docs/reference/ui-components.md must link to ui-design-system-recipe-matrix.md"
+    );
+    assert!(
+        react_mapping.contains("ui-design-system-recipe-matrix.md"),
+        "docs/development/react-ui-catalog-mapping.md must link to ui-design-system-recipe-matrix.md"
+    );
+    assert!(
+        creating_packages.contains("clay.contributions.uiDesignSystem"),
+        "docs/reference/packages/creating-packages.md must document clay.contributions.uiDesignSystem"
+    );
+    assert!(
+        tokens_md.contains("UI Design-System Value Domains (Plan 101)"),
+        "tokens.md must document UI Design-System Value Domains"
+    );
+    assert!(
+        product_md.contains("Design-System Recipe Separation"),
+        "PRODUCT.md must record design-system recipe commitments"
+    );
 }

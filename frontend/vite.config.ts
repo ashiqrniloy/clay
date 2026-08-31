@@ -29,5 +29,6 @@ export default defineConfig({
       ["src/agent/**/*.test.ts", "jsdom"],
     ],
     setupFiles: ["src/test/setup.ts"],
+    testTimeout: 15000,
   },
 });

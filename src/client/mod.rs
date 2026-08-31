@@ -3888,6 +3888,9 @@ mod tests {
                 design_tokens: Vec::new(),
             },
             active_typography: ActiveTypography::default(),
+            active_design_system: crate::shell::design_system::ActiveDesignSystem::core_fallback(
+                generation,
+            ),
             sdui_tree: SduiTree {
                 ui_version: generation,
                 root_id: SduiNodeId(1),

@@ -153,3 +153,39 @@ describe("installVariables", () => {
     expect(written.get("--clay-motion-fast")).toBe("100ms");
   });
 });
+
+describe("baseline measurements (Plan 102 Task 1)", () => {
+  it("measures baseline theme and typography variable counts", () => {
+    const themeVars = themeCssVariables(theme);
+    const typoVars = typographyCssVariables(typography);
+    // Sample theme has 7 core tokens + 1 editor style (5 emitted props when background is null) = 12 variables
+    expect(themeVars.length).toBe(12);
+    // Typography has 3 font roles + 7 variant sizes + 7 line heights + 1 ligature setting = 18 variables
+    expect(typoVars.length).toBe(18);
+    expect(themeVars.length + typoVars.length).toBe(30);
+  });
+
+  it("measures baseline installVariables execution timing and stability", () => {
+    const written = new Map<string, string>();
+    const fakeStyle = {
+      setProperty(name: string, value: string) {
+        written.set(name, value);
+      },
+    } as unknown as CSSStyleDeclaration;
+    const allVars = [
+      ...themeCssVariables(theme),
+      ...typographyCssVariables(typography),
+    ];
+
+    const start = performance.now();
+    const iterations = 500;
+    for (let i = 0; i < iterations; i++) {
+      installVariables(fakeStyle, allVars);
+    }
+    const elapsed = performance.now() - start;
+    const avgPerInstallMs = elapsed / iterations;
+    // Each install must be fast (sub-0.1ms per full install)
+    expect(avgPerInstallMs).toBeLessThan(0.1);
+    expect(written.size).toBe(30);
+  });
+});

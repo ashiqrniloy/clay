@@ -21,7 +21,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
 
 ## Tasks
 
-- [ ] Capture product truth and visual-authority prerequisites before redesign implementation
+- [x] Capture product truth and visual-authority prerequisites before redesign implementation
   - Acceptance Criteria:
     - Functional: Run the Impeccable init interview, write `PRODUCT.md` with confirmed product truth, classify Clay as an Operate-mode desktop editor, and record the approved restrained utilitarian Neobrutal default plus Glass replacement requirement as a binding brand commitment without inventing palettes, fonts, claims, or assets.
     - Performance: Product documentation introduces no runtime work and records long-session density, input latency, and low-distraction use as durable constraints.
@@ -60,7 +60,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
   - Test Cases to Write:
     - Product record review: Confirm required schema comment, platform, users, purpose, constraints, principles, and accessibility sections contain confirmed facts only.
 
-- [ ] Review existing UI primitives and finalize the component-recipe matrix
+- [x] Review existing UI primitives and finalize the component-recipe matrix
   - Acceptance Criteria:
     - Functional: Inventory all implemented package component kinds, Clay-native surfaces, React Aria parts/slots, CSS Modules, semantic variants, applicable interaction states, and existing token consumers; define stable semantic slots and required fallback resolution for each.
     - Performance: Matrix marks layout-neutral versus layout-affecting properties and prohibits runtime parsing, package execution, selector matching, and unbounded style expansion during React render/input paths.
@@ -107,7 +107,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Matrix coverage test: Every implemented `ComponentKind` and listed Clay-native surface has at least one recipe owner and fallback.
     - State coverage test: Every applicable React Aria state maps to a semantic recipe state without CSS selector exposure.
 
-- [ ] Define versioned recipe, theme-role reference, non-color value, inheritance, and fallback types
+- [x] Define versioned recipe, theme-role reference, non-color value, inheritance, and fallback types
   - Acceptance Criteria:
     - Functional: Add typed Rust data for design-system identity, schema version, component recipe keys, semantic slots, variants, states, semantic theme color-role references, non-color property values, namespaced non-color values, inheritance, and fully resolved fallback output.
     - Performance: Bound recipe count, slot count, state count, property count, structured shadow layers, string lengths, and serialized size; use ordered maps or deterministic sorting for stable snapshots and tests.
@@ -163,7 +163,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Inheritance resolution: Missing package entries resolve through the Clay fallback without partial state, and fallback colors still reference active-theme roles.
     - Unknown schema test: Unsupported versions and unknown property/state names fail with actionable diagnostics.
 
-- [ ] Add manifest and package-record validation for inert UI design-system contributions
+- [x] Add manifest and package-record validation for inert UI design-system contributions
   - Acceptance Criteria:
     - Functional: `clay.contributions.uiDesignSystem` becomes the sole package registration path for design-system recipes; package records retain exact name, version, integrity/provenance, trust domain, generation, schema version, and validated resolved contribution metadata.
     - Performance: Validation runs at package parse/adoption or configuration reload, never during React render, browser input, layout, or animation frames.
@@ -220,7 +220,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Trust classification: An adopted `@clay/*`-named package is not promoted to trusted.
     - Duplicate and stale schema diagnostics: Errors identify package, field, rejected value, and expected type.
 
-- [ ] Add deterministic recipe, catalog, and documentation conformance gates
+- [x] Add deterministic recipe, catalog, and documentation conformance gates
   - Acceptance Criteria:
     - Functional: Tests fail when component/slot/state/property catalogs drift from Rust enums, recipe matrix, Clay UI skill references, or package authoring docs.
     - Performance: Conformance tests run offline and add no production runtime work.
@@ -265,7 +265,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Accessibility-state completeness test: Required semantic states resolve after fallback.
     - Color-source conformance: Every normal recipe color resolves through a known active-theme role; only forced-colors rules may resolve browser/OS system colors.
 
-- [ ] Perform visual screenshot and accessibility review of the compatibility fallback
+- [x] Perform visual screenshot and accessibility review of the compatibility fallback
   - Acceptance Criteria:
     - Functional: Launch the real Linux React client with no active package recipe under at least two materially different content themes, confirm current appearance and behavior remain unchanged, confirm all component colors follow theme selection, and exercise representative button, text input, dropdown, modal, tab, package panel, Command Centre, and editor-chrome states.
     - Performance: Review records startup/render regressions and confirms schema/record work causes no per-frame package parsing or visible transition churn.
@@ -305,7 +305,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Accessibility tree: Verify role, name, disabled/selected/expanded/invalid state, and modal containment.
     - Compatibility image review: Compare baseline and fallback screenshots at matching dimensions.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: Inventory public Rust functions added by this plan; expose none unless they represent a public capability, and record that design-system selection remains deferred to Plan 102 while manifest contribution parsing is documented as package data.
     - Performance: No public op or facade adds runtime work to rendering or input paths.
@@ -344,7 +344,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Rust visibility inventory: New public server functions have a documented facade or are narrowed.
     - Registry freshness: `cargo test` detects stale API docs artifacts.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
   - Acceptance Criteria:
     - Functional: Confirm this foundation plan adds no user-selectable behavior yet and therefore does not add an undocumented configuration key; preserve `setTheme` as the sole concrete color-selection path and reserve design-system selection implementation for Plan 102.
     - Performance: No configuration reload work is added beyond package manifest validation already required at load time.
@@ -379,7 +379,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
   - Test Cases to Write:
     - Configuration surface scan: No undocumented `designSystem` key or frontend-local selection exists.
 
-- [ ] Execute and update the manual test plan
+- [x] Execute and update the manual test plan
   - Acceptance Criteria:
     - Functional: Run relevant Linux steps for launch, configuration, packages, themes, and representative UI states; add bounded recipe-manifest validation steps and expected failures.
     - Performance: Record that package recipe validation occurs during load/reload and does not change typing or UI interaction latency.
@@ -420,7 +420,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Manual valid package: Confirm data-only contribution loads without executing renderer code.
     - Manual invalid package: Confirm raw CSS, literal/package-owned colors, and unsupported schema fail with actionable diagnostics.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: The project code wiki documents recipe declarations, semantic active-theme color-role references, rejection of design-system color values, validation, fallback, package-record flow, limits, and current activation boundary after all implementation and verification tasks pass.
     - Performance: Wiki explains install-time resolution and absence of package parsing/execution in frontend hot paths.
@@ -458,8 +458,11 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
 
 ## Compromises Made
 
-- To be filled after tasks are completed and tests pass.
+1. **Runtime Activation Deferred to Plan 102:** Plan 101 strictly establishes the inert data structures, validation engine, payload budgets (64 KiB), conflict detection, and core fallback catalog. Package design systems are parsed and validated into descriptors at package enable/load time, while user switching (`clay.ui.setDesignSystem` or `init.js` configuration) is reserved for Plan 102.
+2. **Immediate Serde Validation on `ThemeColorRef`:** Rather than storing unvalidated strings and deferring checks, `ThemeColorRef` implements `TryFrom<String>` during serde deserialization, immediately rejecting literal `#hex`, `rgb()`, `hsl()`, named CSS colors, and non-color tokens at manifest parse time.
 
 ## Further Actions
 
-- To be filled after task completion with improvements, rationale, and priority.
+1. **Plan 102 Execution (UI Design-System Activation and Runtime Selection):** Implement runtime design-system selection, snapshot transport over Tauri bridge, and CSS property generation in frontend. (*Priority: High*)
+2. **Reference Design System Packages:** Author comprehensive `@clay/theme-glass` and `@clay/theme-compact` package fixtures to exercise live switching across all 18 component kinds under Plan 102. (*Priority: Medium*)
+

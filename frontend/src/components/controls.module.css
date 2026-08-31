@@ -1,45 +1,177 @@
 /* Catalog `dropdown` (single-select), `list` rows, `collapse`, and modal
  * chrome share this module: token-driven surfaces, hairline borders, zero
- * radius, five interaction states. */
+ * radius, five interaction states.
+ * Consumes host-owned design-system recipe variables with fallback to core tokens. */
 
 .selectTrigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--clay-spacing-xs, 8px);
+  gap: var(
+    --clay-ds-dropdown-default-trigger-rest-gap,
+    var(--clay-spacing-xs, 8px)
+  );
   width: 100%;
-  background: var(--clay-surface-control);
-  color: var(--clay-text-primary);
-  border: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-subtle);
-  border-radius: 0;
-  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  background: var(
+    --clay-ds-dropdown-default-trigger-rest-background-color,
+    var(--clay-surface-control)
+  );
+  color: var(
+    --clay-ds-dropdown-default-trigger-rest-text-color,
+    var(--clay-text-primary)
+  );
+  border: var(
+      --clay-ds-dropdown-default-trigger-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-dropdown-default-trigger-rest-border-style, solid)
+    var(
+      --clay-ds-dropdown-default-trigger-rest-border-color,
+      var(--clay-border-subtle)
+    );
+  border-radius: var(--clay-ds-dropdown-default-trigger-rest-border-radius, 0);
+  padding: var(
+    --clay-ds-dropdown-default-trigger-rest-padding,
+    var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px)
+  );
   cursor: pointer;
   font-family: inherit;
   font-size: var(--clay-text-body-size);
+  box-shadow: var(--clay-ds-dropdown-default-trigger-rest-shadow, none);
+  transform: var(
+    --clay-ds-dropdown-default-trigger-rest-transform-preset,
+    none
+  );
+  transition:
+    background-color
+      var(
+        --clay-ds-dropdown-default-trigger-rest-transition-duration,
+        var(--clay-motion-fast, 100ms)
+      )
+      var(--clay-ds-dropdown-default-trigger-rest-transition-timing, linear),
+    border-color
+      var(
+        --clay-ds-dropdown-default-trigger-rest-transition-duration,
+        var(--clay-motion-fast, 100ms)
+      )
+      var(--clay-ds-dropdown-default-trigger-rest-transition-timing, linear),
+    box-shadow
+      var(
+        --clay-ds-dropdown-default-trigger-rest-transition-duration,
+        var(--clay-motion-fast, 100ms)
+      )
+      var(--clay-ds-dropdown-default-trigger-rest-transition-timing, linear);
 }
 
 .selectTrigger[data-hovered] {
-  background: var(--clay-surface-hover);
+  background: var(
+    --clay-ds-dropdown-default-trigger-hover-background-color,
+    var(--clay-surface-hover)
+  );
+  color: var(
+    --clay-ds-dropdown-default-trigger-hover-text-color,
+    var(--clay-text-primary)
+  );
+  border-color: var(
+    --clay-ds-dropdown-default-trigger-hover-border-color,
+    var(--clay-border-subtle)
+  );
+  box-shadow: var(--clay-ds-dropdown-default-trigger-hover-shadow, none);
+  transform: var(
+    --clay-ds-dropdown-default-trigger-hover-transform-preset,
+    none
+  );
 }
 .selectTrigger[data-pressed] {
-  background: var(--clay-surface-active);
+  background: var(
+    --clay-ds-dropdown-default-trigger-active-background-color,
+    var(--clay-surface-active)
+  );
+  color: var(
+    --clay-ds-dropdown-default-trigger-active-text-color,
+    var(--clay-text-primary)
+  );
+  box-shadow: var(--clay-ds-dropdown-default-trigger-active-shadow, none);
+  transform: var(
+    --clay-ds-dropdown-default-trigger-active-transform-preset,
+    translateY(1px)
+  );
 }
 .selectTrigger[data-focused],
 .selectTrigger:focus-visible {
-  outline: 2px solid var(--clay-focus-ring);
-  outline-offset: 1px;
+  outline: var(--clay-ds-dropdown-default-trigger-focus-outline-width, 2px)
+    var(--clay-ds-dropdown-default-trigger-focus-outline-style, solid)
+    var(
+      --clay-ds-dropdown-default-trigger-focus-outline-color,
+      var(--clay-focus-ring)
+    );
+  outline-offset: var(
+    --clay-ds-dropdown-default-trigger-focus-outline-offset,
+    1px
+  );
 }
 .selectTrigger[data-disabled] {
-  background: var(--clay-surface-disabled);
-  color: var(--clay-text-disabled);
-  opacity: var(--clay-opacity-disabled);
+  background: var(
+    --clay-ds-dropdown-default-trigger-disabled-background-color,
+    var(--clay-surface-disabled)
+  );
+  color: var(
+    --clay-ds-dropdown-default-trigger-disabled-text-color,
+    var(--clay-text-disabled)
+  );
+  opacity: var(
+    --clay-ds-dropdown-default-trigger-disabled-opacity,
+    var(--clay-opacity-disabled)
+  );
+  cursor: default;
 }
 
 .popover {
-  background: var(--clay-surface-overlay);
-  border: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-hairline);
+  background: var(
+    --clay-ds-dropdown-default-popover-rest-background-color,
+    var(
+      --clay-ds-dropdown-default-surface-rest-background-color,
+      var(--clay-surface-overlay)
+    )
+  );
+  border: var(
+      --clay-ds-dropdown-default-popover-rest-border-width,
+      var(
+        --clay-ds-dropdown-default-surface-rest-border-width,
+        var(--clay-dimension-border-hairline, 1px)
+      )
+    )
+    var(
+      --clay-ds-dropdown-default-popover-rest-border-style,
+      var(--clay-ds-dropdown-default-surface-rest-border-style, solid)
+    )
+    var(
+      --clay-ds-dropdown-default-popover-rest-border-color,
+      var(
+        --clay-ds-dropdown-default-surface-rest-border-color,
+        var(--clay-border-hairline)
+      )
+    );
+  border-radius: var(
+    --clay-ds-dropdown-default-popover-rest-border-radius,
+    var(--clay-ds-dropdown-default-surface-rest-border-radius, 0)
+  );
+  box-shadow: var(
+    --clay-ds-dropdown-default-popover-rest-shadow,
+    var(--clay-ds-dropdown-default-surface-rest-shadow, none)
+  );
+  backdrop-filter: blur(
+      var(
+        --clay-ds-dropdown-default-popover-rest-backdrop-blur,
+        var(--clay-ds-dropdown-default-surface-rest-backdrop-blur, 0px)
+      )
+    )
+    saturate(
+      var(
+        --clay-ds-dropdown-default-popover-rest-backdrop-saturate,
+        var(--clay-ds-dropdown-default-surface-rest-backdrop-saturate, 1)
+      )
+    );
   min-width: 160px;
   max-height: 320px;
   overflow-y: auto;
@@ -56,32 +188,150 @@
 .listRow {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  background: var(--clay-surface-list);
-  color: var(--clay-text-primary);
-  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-hairline);
-  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  gap: var(
+    --clay-ds-list-default-row-rest-gap,
+    var(--clay-ds-list-default-item-rest-gap, 2px)
+  );
+  background: var(
+    --clay-ds-list-default-row-rest-background-color,
+    var(
+      --clay-ds-list-default-item-rest-background-color,
+      var(--clay-surface-list)
+    )
+  );
+  color: var(
+    --clay-ds-list-default-row-rest-text-color,
+    var(--clay-ds-list-default-item-rest-text-color, var(--clay-text-primary))
+  );
+  border-bottom: var(
+      --clay-ds-list-default-row-rest-border-width,
+      var(
+        --clay-ds-list-default-item-rest-border-width,
+        var(--clay-dimension-border-hairline, 1px)
+      )
+    )
+    var(
+      --clay-ds-list-default-row-rest-border-style,
+      var(--clay-ds-list-default-item-rest-border-style, solid)
+    )
+    var(
+      --clay-ds-list-default-row-rest-border-color,
+      var(
+        --clay-ds-list-default-item-rest-border-color,
+        var(--clay-border-hairline)
+      )
+    );
+  border-radius: var(
+    --clay-ds-list-default-row-rest-border-radius,
+    var(--clay-ds-list-default-item-rest-border-radius, 0)
+  );
+  padding: var(
+    --clay-ds-list-default-row-rest-padding,
+    var(
+      --clay-ds-list-default-item-rest-padding,
+      var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px)
+    )
+  );
   cursor: pointer;
+  box-shadow: var(
+    --clay-ds-list-default-row-rest-shadow,
+    var(--clay-ds-list-default-item-rest-shadow, none)
+  );
+  transition:
+    background-color
+      var(
+        --clay-ds-list-default-row-rest-transition-duration,
+        var(
+          --clay-ds-list-default-item-rest-transition-duration,
+          var(--clay-motion-fast, 100ms)
+        )
+      )
+      var(
+        --clay-ds-list-default-row-rest-transition-timing,
+        var(--clay-ds-list-default-item-rest-transition-timing, linear)
+      ),
+    color
+      var(
+        --clay-ds-list-default-row-rest-transition-duration,
+        var(
+          --clay-ds-list-default-item-rest-transition-duration,
+          var(--clay-motion-fast, 100ms)
+        )
+      )
+      var(
+        --clay-ds-list-default-row-rest-transition-timing,
+        var(--clay-ds-list-default-item-rest-transition-timing, linear)
+      );
 }
 
 .listRow[data-hovered] {
-  background: var(--clay-surface-hover);
+  background: var(
+    --clay-ds-list-default-row-hover-background-color,
+    var(
+      --clay-ds-list-default-item-hover-background-color,
+      var(--clay-surface-hover)
+    )
+  );
+  color: var(
+    --clay-ds-list-default-row-hover-text-color,
+    var(--clay-ds-list-default-item-hover-text-color, var(--clay-text-primary))
+  );
 }
 .listRow[data-pressed] {
-  background: var(--clay-surface-active);
+  background: var(
+    --clay-ds-list-default-row-active-background-color,
+    var(
+      --clay-ds-list-default-item-active-background-color,
+      var(--clay-surface-active)
+    )
+  );
 }
 .listRow[data-focused],
 .listRow:focus-visible {
-  outline: 2px solid var(--clay-focus-ring);
-  outline-offset: -2px;
+  outline: var(
+      --clay-ds-list-default-row-focus-outline-width,
+      var(--clay-ds-list-default-item-focus-outline-width, 2px)
+    )
+    var(
+      --clay-ds-list-default-row-focus-outline-style,
+      var(--clay-ds-list-default-item-focus-outline-style, solid)
+    )
+    var(
+      --clay-ds-list-default-row-focus-outline-color,
+      var(
+        --clay-ds-list-default-item-focus-outline-color,
+        var(--clay-focus-ring)
+      )
+    );
+  outline-offset: var(
+    --clay-ds-list-default-row-focus-outline-offset,
+    var(--clay-ds-list-default-item-focus-outline-offset, -2px)
+  );
 }
 .listRow[data-selected] {
-  background: var(--clay-surface-selected);
+  background: var(
+    --clay-ds-list-default-row-selected-background-color,
+    var(
+      --clay-ds-list-default-item-selected-background-color,
+      var(--clay-surface-selected)
+    )
+  );
 }
 .listRow[data-disabled] {
-  color: var(--clay-text-disabled);
-  opacity: var(--clay-opacity-disabled);
+  color: var(
+    --clay-ds-list-default-row-disabled-text-color,
+    var(
+      --clay-ds-list-default-item-disabled-text-color,
+      var(--clay-text-disabled)
+    )
+  );
+  opacity: var(
+    --clay-ds-list-default-row-disabled-opacity,
+    var(
+      --clay-ds-list-default-item-disabled-opacity,
+      var(--clay-opacity-disabled)
+    )
+  );
   cursor: default;
 }
 
@@ -95,25 +345,67 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: transparent;
-  color: var(--clay-text-primary);
+  background: var(
+    --clay-ds-collapse-default-header-rest-background-color,
+    transparent
+  );
+  color: var(
+    --clay-ds-collapse-default-header-rest-text-color,
+    var(--clay-text-primary)
+  );
   border: none;
-  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-hairline);
-  border-radius: 0;
-  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  border-bottom: var(
+      --clay-ds-collapse-default-header-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-collapse-default-header-rest-border-style, solid)
+    var(
+      --clay-ds-collapse-default-header-rest-border-color,
+      var(--clay-border-hairline)
+    );
+  border-radius: var(--clay-ds-collapse-default-header-rest-border-radius, 0);
+  padding: var(
+    --clay-ds-collapse-default-header-rest-padding,
+    var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px)
+  );
   cursor: pointer;
   font-family: inherit;
   font-size: var(--clay-text-section-size);
+  transition:
+    background-color
+      var(
+        --clay-ds-collapse-default-header-rest-transition-duration,
+        var(--clay-motion-fast, 100ms)
+      )
+      var(--clay-ds-collapse-default-header-rest-transition-timing, linear),
+    color
+      var(
+        --clay-ds-collapse-default-header-rest-transition-duration,
+        var(--clay-motion-fast, 100ms)
+      )
+      var(--clay-ds-collapse-default-header-rest-transition-timing, linear);
 }
 .collapseHeader[data-focused],
 .collapseHeader:focus-visible {
-  outline: 2px solid var(--clay-focus-ring);
-  outline-offset: -2px;
+  outline: var(--clay-ds-collapse-default-header-focus-outline-width, 2px)
+    var(--clay-ds-collapse-default-header-focus-outline-style, solid)
+    var(
+      --clay-ds-collapse-default-header-focus-outline-color,
+      var(--clay-focus-ring)
+    );
+  outline-offset: var(
+    --clay-ds-collapse-default-header-focus-outline-offset,
+    -2px
+  );
 }
 
 .collapseChevron {
-  transition: transform var(--clay-motion-fast, 100ms) linear;
+  transition: transform
+    var(
+      --clay-ds-collapse-default-chevron-rest-transition-duration,
+      var(--clay-motion-fast, 100ms)
+    )
+    var(--clay-ds-collapse-default-chevron-rest-transition-timing, linear);
 }
 
 .collapseChevronExpanded {
@@ -121,7 +413,25 @@
 }
 
 .collapseBody {
-  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-hairline);
-  padding: var(--clay-spacing-sm, 12px);
+  background: var(
+    --clay-ds-collapse-default-body-rest-background-color,
+    transparent
+  );
+  color: var(
+    --clay-ds-collapse-default-body-rest-text-color,
+    var(--clay-text-primary)
+  );
+  border-bottom: var(
+      --clay-ds-collapse-default-body-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-collapse-default-body-rest-border-style, solid)
+    var(
+      --clay-ds-collapse-default-body-rest-border-color,
+      var(--clay-border-hairline)
+    );
+  padding: var(
+    --clay-ds-collapse-default-body-rest-padding,
+    var(--clay-spacing-sm, 12px)
+  );
 }

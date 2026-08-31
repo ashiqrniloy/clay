@@ -1,0 +1,27 @@
+0|application|-|clay-desktop||/org/a11y/atspi/accessible/root|clay-desktop
+1|frame|-|Clay||/org/a11y/atspi/accessible/11|clay-desktop
+2|panel|-|||/org/a11y/atspi/accessible/1|clay-desktop
+3|panel|-|||/org/a11y/atspi/accessible/3|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/5|clay-desktop
+5|separator|-|||/org/a11y/atspi/accessible/7|clay-desktop
+5|button|-|Minimise||/org/a11y/atspi/accessible/12|clay-desktop
+5|button|-|Maximise||/org/a11y/atspi/accessible/10|clay-desktop
+5|button|-|Close||/org/a11y/atspi/accessible/13|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/6|clay-desktop
+5|label|-|Clay||/org/a11y/atspi/accessible/8|clay-desktop
+5|label|-|||/org/a11y/atspi/accessible/9|clay-desktop
+2|filler|-|||/org/a11y/atspi/accessible/2|clay-desktop
+3|filler|-|||/org/a11y/atspi/accessible/4|clay-desktop
+4|filler|-|||/org/a11y/webkit/accessible/f084c7a9_74d7_40ae_b550_690b07736dd5|clay-desktop
+5|scroll pane|-|||/org/a11y/atspi/accessible/62741d04_bce9_45c9_90d1_6c2666c86b7a|clay-desktop
+6|document web|-|Clay||/org/a11y/atspi/accessible/9a7fc973_51f8_4ed5_9759_9e8e2acb3324|clay-desktop
+7|landmark|-|||/org/a11y/atspi/accessible/5f6a7c09_425d_41a0_849c_80128641b940|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/7df118ba_fb33_4074_8799_14b58516e663|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/fb8268f7_1d6a_44ae_a52b_968f49bd6dc7|clay-desktop
+9|page tab list|-|Window tabs||/org/a11y/atspi/accessible/ac188260_c74d_47e2_8388_342ee44eac22|clay-desktop
+10|page tab|selected|Workspace||/org/a11y/atspi/accessible/b268e73b_9842_4b55_bfdf_adfd5d9ebfdc|clay-desktop
+7|landmark|-|Clay workspace||/org/a11y/atspi/accessible/0627cbf6_fa3b_4a51_a523_d6246407efe7|clay-desktop
+8|notification|-|||/org/a11y/atspi/accessible/00eda030_8445_429e_b856_1d5cbf9fde58|clay-desktop
+9|button|-|Reconnect session||/org/a11y/atspi/accessible/fd8e1093_468d_464c_9b0a_c640dad60d05|clay-desktop
+7|landmark|-|||/org/a11y/atspi/accessible/ad87764f_f5ce_485c_b26c_9b3f06878b56|clay-desktop
+8|status bar|-||unknown workspace document 1 Hint: Open the document through the server before saving, reloading, or querying it.|/org/a11y/atspi/accessible/5ec28c77_74b7_4523_95aa_f53af23bf123|clay-desktop

@@ -11,6 +11,7 @@ import {
 } from "react-aria-components";
 
 import styles from "./controls.module.css";
+import { recipeAttributes } from "./recipe-attributes";
 
 // ---------------------------------------------------------------- dropdown
 
@@ -44,18 +45,28 @@ export function ClayDropdown({
       onSelectionChange={(key) => onSelect(String(key))}
       isDisabled={disabled}
     >
-      <Button className={styles.selectTrigger}>
+      <Button
+        className={styles.selectTrigger}
+        {...recipeAttributes("dropdown", "trigger")}
+      >
         <SelectValue>{selected?.label ?? label}</SelectValue>
         <span aria-hidden="true">▾</span>
       </Button>
-      <Popover className={styles.popover}>
-        <ListBox className={styles.listBox}>
+      <Popover
+        className={styles.popover}
+        {...recipeAttributes("dropdown", "popover")}
+      >
+        <ListBox
+          className={styles.listBox}
+          {...recipeAttributes("dropdown", "list")}
+        >
           {options.map((option) => (
             <ListBoxItem
               key={option.id}
               id={option.id}
               className={styles.listRow}
               isDisabled={option.disabled}
+              {...recipeAttributes("dropdown", "item")}
             >
               {option.label}
             </ListBoxItem>
@@ -108,6 +119,7 @@ export function ClayList({
           : undefined
       }
       onAction={onAction ? (key) => onAction(String(key)) : undefined}
+      {...recipeAttributes("list", "root")}
     >
       {items.map((item) => (
         <ListBoxItem
@@ -116,10 +128,16 @@ export function ClayList({
           textValue={item.title}
           className={styles.listRow}
           isDisabled={item.disabled}
+          {...recipeAttributes("list", "row")}
         >
-          <span>{item.title}</span>
+          <span {...recipeAttributes("list", "rowTitle")}>{item.title}</span>
           {item.detail && (
-            <span className={styles.rowDetail}>{item.detail}</span>
+            <span
+              className={styles.rowDetail}
+              {...recipeAttributes("list", "rowDetail")}
+            >
+              {item.detail}
+            </span>
           )}
         </ListBoxItem>
       ))}
@@ -152,17 +170,22 @@ export function ClayCollapse({
         className={styles.collapseHeader}
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
+        {...recipeAttributes("collapse", "header")}
       >
-        <span>{title}</span>
+        <span {...recipeAttributes("collapse", "title")}>{title}</span>
         <span
           aria-hidden="true"
           className={`${styles.collapseChevron} ${expanded ? styles.collapseChevronExpanded : ""}`}
+          {...recipeAttributes("collapse", "chevron")}
         >
           ▸
         </span>
       </button>
       {expanded && (
-        <DisclosurePanel className={styles.collapseBody}>
+        <DisclosurePanel
+          className={styles.collapseBody}
+          {...recipeAttributes("collapse", "body")}
+        >
           {children}
         </DisclosurePanel>
       )}

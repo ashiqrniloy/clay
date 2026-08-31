@@ -1,27 +1,54 @@
 .group {
   height: 100%;
   min-height: 0;
-  background: var(--clay-border-hairline);
+  background: var(
+    --clay-ds-pane-default-group-rest-background-color,
+    var(--clay-border-hairline)
+  );
 }
 
 .pane {
   height: 100%;
   min-height: 0;
-  background: var(--clay-surface-main);
-  outline: var(--clay-dimension-border-hairline, 1px) solid transparent;
+  background: var(
+    --clay-ds-pane-default-root-rest-background-color,
+    var(--clay-surface-main)
+  );
+  outline: var(
+      --clay-ds-pane-default-root-rest-outline-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-pane-default-root-rest-outline-style, solid)
+    var(--clay-ds-pane-default-root-rest-outline-color, transparent);
+  border-radius: var(--clay-ds-pane-default-root-rest-border-radius, 0);
 }
 
 .pane.active {
-  outline-color: var(--clay-border-focus);
+  outline-color: var(
+    --clay-ds-pane-default-root-active-outline-color,
+    var(--clay-border-focus)
+  );
 }
 
 .separator {
-  background: var(--clay-border-strong);
-  flex: 0 0 var(--clay-dimension-border-thin, 2px);
+  background: var(
+    --clay-ds-pane-default-divider-rest-background-color,
+    var(--clay-border-strong)
+  );
+  flex: 0 0
+    var(
+      --clay-ds-pane-default-divider-rest-width,
+      var(--clay-dimension-border-thin, 2px)
+    );
 }
 
 .separator:focus-visible {
-  outline: 2px solid var(--clay-focus-ring);
+  outline: var(--clay-ds-pane-default-divider-focus-outline-width, 2px)
+    var(--clay-ds-pane-default-divider-focus-outline-style, solid)
+    var(
+      --clay-ds-pane-default-divider-focus-outline-color,
+      var(--clay-focus-ring)
+    );
   outline-offset: 0;
 }
 

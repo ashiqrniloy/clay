@@ -47,6 +47,19 @@ All three profiles are required and validated before replacement. Failed startup
 
 Configuration runs outside interaction hot paths. One changed complete value produces one bounded client installation; paint/input/layout consume cached profiles. Clay does not validate installed fonts on the server, open/fetch/download fonts, or grant filesystem, network, shell, package, extension, raw-op, or client-side JavaScript authority. Packages select semantic roles only and cannot override concrete user families or sizes.
 
+## Plan 102 design-system selection configuration
+
+[`theme.setDesignSystem`](theme/set-design-system.md) selects an active UI design system in one line over an already enabled/adopted package record or the built-in fallback:
+
+```js
+import { setDesignSystem } from "clay:theme";
+
+setDesignSystem("@clay/design-glass");
+// omission or revocation falls back to default @clay/design-neobrutal (built-in core baseline)
+```
+
+Selection resolves only during configuration evaluation and is validated against the package service's enabled records before the candidate generation commits: reload swaps atomically, an invalid or revoked selection preserves the previous generation and records a `theme.load_failed` diagnostic, and re-delivering an identical generation causes no frontend DOM writes. Selection installs nothing and grants no package, filesystem, network, shell, extension, raw-op, or client-side JavaScript authority; recipe data stays inert and color authority remains with the active theme.
+
 ## Phase 18.17 range diagnostics configuration review
 
 Phase 18.17 reviewed range diagnostics and syntax-error highlighting and did **not** promote a new user-facing diagnostic toggle, squiggle geometry setting, per-severity preference, or `clay:configuration` API. Default outcome: syntax-error publication follows the active syntax engine; severity colors come from the active theme.

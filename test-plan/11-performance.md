@@ -288,3 +288,18 @@ Host: Linux 7.1.8-50.stable, Ryzen 9 PRO 7940HS, GNOME Wayland,
 WebKitGTK 2.52.5, Rust 1.96.1, Node 24.19.0. The designated minimum-device
 three-run timing gate remains open. No manual editor-flow pass is inferred
 from the bootstrap trace.
+
+## Plan 102 & 103 design-system switching and paint budget cross-reference
+
+Design-system/theme switch latency, atomicity, effect bounds, and no-churn observations:
+[15 — UI design systems](15-ui-design-systems.md) (UI-DS-P1…UI-DS-P3,
+recorded 2026-08-30): visible swap ≈2 s dominated by the documented watcher
+debounce, one atomic swap per generation, no partial frames, zero frontend
+writes for identical generations (automated adapter idempotence test).
+
+Plan 103 production build budgets (enforced via `npm run check:budget`):
+- Shell gzip: 169.3 kB (≤ 180 kB budget)
+- Package renderer gzip: 28.0 kB
+- Total bundle gzip: 359.6 kB (≤ 400 kB budget)
+Effect bounds: max blur 32px, max shadow layers 3, max motion 1000ms, max border width 8px.
+Zero recipe computation occurs in React render loops or keystroke hot paths.

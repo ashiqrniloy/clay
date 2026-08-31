@@ -1,6 +1,7 @@
 import type { HTMLAttributes, ReactNode } from "react";
 
 import styles from "./text.module.css";
+import { recipeAttributes } from "./recipe-attributes";
 
 export type TextVariant =
   "display" | "title" | "section" | "body" | "status" | "detail" | "caption";
@@ -33,8 +34,10 @@ export function ClayText({
   ]
     .filter(Boolean)
     .join(" ");
+  const componentKind = variant === "status" ? "statusItem" : "label";
+  const attrs = recipeAttributes(componentKind, "root", variant);
   return (
-    <span className={classes} {...rest}>
+    <span className={classes} {...attrs} {...rest}>
       {children}
     </span>
   );

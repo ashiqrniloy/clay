@@ -397,3 +397,7 @@ roots containing distinct filenames/content.
 
 Do not treat the harness's zero parser queue as evidence that tab recovery
 had no pending syntax work; this run did not establish document sessions.
+
+## Plan 103 Tab Bar Recipe & Design-System Cross-Reference (2026-08-30)
+
+Tab bar container, card slots, card labels, close affordance, and dirty indicators consume `--clay-ds-tab-bar-*` recipe variables. Tab switching, selection state, and active workspace binding remain host-owned and unaffected by design-system switching. See [Module 15](15-ui-design-systems.md) for full design-system switching checks.

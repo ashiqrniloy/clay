@@ -23,7 +23,7 @@ const PACKAGE_OPTION_SOURCES: &[&str] =
 /// validated at load and persist time so a corrupted/manually-edited file falls
 /// back safely without granting authority.
 const PREFERENCES_PAYLOAD_BUDGET_BYTES: usize = 8 * 1024;
-const PREFERENCES_KEYS: &[&str] = &["theme", "appearance", "typography"];
+const PREFERENCES_KEYS: &[&str] = &["theme", "appearance", "typography", "designSystem"];
 const PREFERENCES_APPEARANCE_VALUES: &[&str] = &["light", "dark", "system"];
 const PANEL_VISIBILITY_VALUES: &[&str] = &["visible", "hidden", "collapsed"];
 const PANEL_SLOT_VALUES: &[&str] = &["left", "right", "top", "bottom"];
@@ -376,6 +376,10 @@ impl ConfigurationRuntime {
                     Ok(()) => prefs.typography = Some(field.clone()),
                     Err(reason) => prefs.diagnostics.push(reason),
                 },
+                "designSystem" => match validate_preference_design_system(field) {
+                    Ok(specifier) => prefs.design_system = Some(specifier),
+                    Err(reason) => prefs.diagnostics.push(reason),
+                },
                 _ => unreachable!("PREFERENCES_KEYS bounds the match"),
             }
         }
@@ -402,6 +406,9 @@ impl ConfigurationRuntime {
             "typography" => validate_preference_typography(&value)
                 .map(|_| prefs.typography = Some(value))
                 .map_err(ConfigurationError::InvalidPackageOption)?,
+            "designSystem" => validate_preference_design_system(&value)
+                .map(|specifier| prefs.design_system = Some(specifier))
+                .map_err(ConfigurationError::InvalidPackageOption)?,
             _ => {
                 return Err(ConfigurationError::InvalidPackageOption(format!(
                     "preferences key `{key}` is not recognized"
@@ -425,6 +432,7 @@ impl ConfigurationRuntime {
             "theme": prefs.theme,
             "appearance": prefs.appearance.map(crate::protocol::Appearance::as_str),
             "typography": prefs.typography,
+            "designSystem": prefs.design_system,
         });
         let bytes = serde_json::to_vec(&object).map_err(|error| {
             ConfigurationError::InvalidPackageOption(format!(
@@ -791,7 +799,20 @@ pub(crate) struct PersistedPreferences {
     pub(crate) theme: Option<String>,
     pub(crate) appearance: Option<crate::protocol::Appearance>,
     pub(crate) typography: Option<Value>,
+    pub(crate) design_system: Option<String>,
     pub(crate) diagnostics: Vec<String>,
+}
+
+/// Validate a persisted `design_system` value: non-empty string specifier.
+fn validate_preference_design_system(value: &Value) -> Result<String, String> {
+    let specifier = value
+        .as_str()
+        .ok_or_else(|| "preferences.json `designSystem` must be a string; dropping".to_string())?;
+    let trimmed = specifier.trim();
+    if trimmed.is_empty() {
+        return Err("preferences.json `designSystem` must not be empty; dropping".to_string());
+    }
+    Ok(trimmed.to_string())
 }
 
 /// Validate a persisted `theme` value: must be a first-party bundled

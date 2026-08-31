@@ -62,9 +62,7 @@ removal (Phase 12).
 6. `renderer.tsx` recursively renders SDUI panels, labels, buttons, lists,
    flex/stack containers, and the real editor slot. Existing server action
    intents are forwarded unchanged with current UI version.
-7. `registry.tsx` maps package kinds onto Clay components. Stable component IDs
-   are React keys, so unrelated snapshots preserve focus, input values,
-   disclosure/dropdown state, and scroll state.
+7. `registry.tsx` maps package kinds onto Clay components. In Plan 103, components and slots expose static recipe attributes (`data-clay-component`, `data-clay-slot`, `data-variant`) consuming closed `--clay-ds-*` properties. Stable component IDs are React keys, so unrelated snapshots and runtime design-system variable updates preserve focus, input values, disclosure/dropdown state, and scroll state.
 8. `PackageWorkspace.tsx` composes optional top/left/right/bottom panels around
    mandatory `main`, contains overlays, and appends package status items.
    Narrow layout stacks fixed panels while retaining a usable main region.
@@ -162,11 +160,14 @@ cd frontend && npx vitest run && npm run build && npm run check:budget
 
 ## Related
 
+- [UI Design System Runtime](ui-design-system-runtime.md) — Plan 101 inert UI design-system recipe schema and fallback engine.
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [Slot-Aware Package UI](slot-aware-package-ui.md)
 - [Third-Party Runtime Authority](third-party-runtime-authority.md)
 - [React Shell](react-shell.md)
 - [Desktop Typed Bridge](desktop-typed-bridge.md)
 - `docs/reference/packages/creating-packages.md`
+- `docs/development/ui-design-system-recipe-matrix.md`
 - `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`
 - `decision-logs/2026-08-23-0052-tauri-react-client-architecture.md`
+- `decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md`

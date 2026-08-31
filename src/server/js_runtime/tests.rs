@@ -10128,3 +10128,196 @@ async fn trusted_reload_reruns_markdown_execute_only_load_entry() {
             .any(|handler| handler.mode_id == "markdown")
     );
 }
+
+#[tokio::test]
+async fn set_design_system_core_via_init_js() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let root = config_fixture("set-design-system-core-init");
+    fs::write(
+        root.join("init.js"),
+        r#"
+        import { setDesignSystem } from "clay:theme";
+        const summary = setDesignSystem("@clay/core");
+        Deno.core.ops.op_clay_runtime_record(
+            `ds:${summary.specifier}:recipes:${summary.recipeCount}`
+        );
+        "#,
+    )
+    .unwrap();
+
+    let result = ClayJsRuntimeService::default()
+        .load_configuration_from_root(root)
+        .await
+        .expect("setDesignSystem('@clay/core') must succeed");
+
+    let ds = result
+        .active_design_system
+        .expect("active design system snapshot emitted");
+    assert_eq!(ds.specifier, "@clay/core");
+    assert_eq!(ds.provenance.package_name, "core");
+    assert_eq!(
+        ds.provenance.trust_domain,
+        crate::protocol::PackageUiTrustDomain::Trusted
+    );
+    assert!(!ds.recipes.is_empty());
+    assert!(
+        result
+            .op_records
+            .iter()
+            .any(|record| record.starts_with("ds:@clay/core:recipes:")),
+        "setDesignSystem summary must reach init.js"
+    );
+}
+
+#[tokio::test]
+async fn set_design_system_adopted_third_party_via_init_js() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let service = ClayJsRuntimeService::default();
+    let root = config_fixture("set-design-system-third-party");
+    let package_json = serde_json::json!({
+        "name": "@vendor/custom-tokyo-night-ds",
+        "version": "0.1.0",
+        "type": "module",
+        "exports": { ".": "./dist/index.js" },
+        "clay": {
+            "apiPrefix": "tokyonight",
+            "entry": "./dist/index.js",
+            "permissions": [],
+            "modes": ["tokyonight"],
+            "docs": "./docs/index.md",
+            "contributions": {
+                "uiDesignSystem": {
+                    "schemaVersion": 1,
+                    "id": "@vendor/custom-tokyo-night-ds",
+                    "displayName": "Tokyo Night Design System",
+                    "extends": "@clay/core",
+                    "values": {
+                        "radii.panel": {
+                            "type": "radius",
+                            "value": 8.0
+                        }
+                    },
+                    "recipes": {
+                        "panel.default.root.rest": {
+                            "borderRadius": 8.0,
+                            "backgroundColor": "surface.panel"
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let pkg_root = root.join("pkg");
+    fs::create_dir_all(pkg_root.join("dist")).unwrap();
+    fs::create_dir_all(pkg_root.join("docs")).unwrap();
+    fs::write(pkg_root.join("dist/index.js"), "// noop").unwrap();
+    fs::write(pkg_root.join("docs/index.md"), "# Tokyo Night").unwrap();
+
+    {
+        let op_state = service.test_op_state();
+        let mut locked = op_state.package_service().lock().unwrap();
+        locked
+            .install_from_value_at_root_with_spec(package_json, pkg_root, "local:tokyo-night-ds")
+            .unwrap();
+        locked
+            .authorize_package(
+                "@vendor/custom-tokyo-night-ds",
+                vec![],
+                crate::packages::authorization::RuntimeProfile::Restricted,
+                "test",
+            )
+            .unwrap();
+        locked
+            .approve_package("@vendor/custom-tokyo-night-ds", "cli")
+            .unwrap();
+    }
+
+    fs::write(
+        root.join("init.js"),
+        r#"
+        import { setDesignSystem } from "clay:theme";
+        setDesignSystem("@vendor/custom-tokyo-night-ds");
+        "#,
+    )
+    .unwrap();
+
+    let result = service
+        .load_configuration_from_root(root)
+        .await
+        .expect("third-party setDesignSystem must succeed");
+
+    let ds = result
+        .active_design_system
+        .expect("active design system emitted");
+    assert_eq!(ds.specifier, "@vendor/custom-tokyo-night-ds");
+    assert_eq!(
+        ds.provenance.trust_domain,
+        crate::protocol::PackageUiTrustDomain::ThirdParty
+    );
+    let panel_key = crate::shell::design_system::RecipeKey::new(
+        "panel",
+        "default",
+        "root",
+        crate::shell::design_system::RecipeState::Rest,
+    );
+    let panel_recipe = ds.recipes.get(&panel_key).expect("panel recipe present");
+    assert_eq!(panel_recipe.border_radius, 8.0);
+}
+
+#[tokio::test]
+async fn set_design_system_rejection_leaves_state_clean() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let root = config_fixture("set-design-system-reject-init");
+    fs::write(
+        root.join("init.js"),
+        r#"
+        import { setDesignSystem } from "clay:theme";
+        try {
+            setDesignSystem("@vendor/non-existent-package");
+        } catch (err) {
+            Deno.core.ops.op_clay_runtime_record(`caught:${err.message}`);
+        }
+        "#,
+    )
+    .unwrap();
+
+    let result = ClayJsRuntimeService::default()
+        .load_configuration_from_root(root)
+        .await
+        .expect("init.js with caught error must load");
+
+    assert!(result.active_design_system.is_none());
+    assert!(
+        result
+            .op_records
+            .iter()
+            .any(|r| r.contains("theme.load_failed")),
+        "rejection error was caught and recorded"
+    );
+}
+
+#[tokio::test]
+async fn persisted_preferences_design_system_applied() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let root = config_fixture("persisted-design-system-pref");
+    fs::write(root.join("init.js"), "// no explicit setDesignSystem\n").unwrap();
+    fs::write(
+        root.join("preferences.json"),
+        serde_json::json!({
+            "designSystem": "@clay/core"
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let result = ClayJsRuntimeService::default()
+        .load_configuration_from_root(root)
+        .await
+        .expect("persisted preferences with designSystem must load");
+
+    let ds = result
+        .active_design_system
+        .expect("active design system applied from preferences");
+    assert_eq!(ds.specifier, "@clay/core");
+}

@@ -21,14 +21,24 @@ export const asDocumentId = (raw: number): DocumentId => raw as DocumentId;
 
 // ------------------------------------------------------------- bootstrap
 
-import type { ThemeSnapshot, TypographySnapshot } from "../theme/types";
+import type {
+  ThemeSnapshot,
+  TypographySnapshot,
+  DesignSystemSnapshot,
+} from "../theme/types";
 import type { RuntimeSnapshot } from "../sdui/types";
 export type {
   ThemeSnapshot,
   TypographySnapshot,
+  DesignSystemSnapshot,
   ThemeTokenValue,
   FontProfile,
   TypographyHierarchy,
+  DesignSystemVariableValue,
+  ComponentRecipeDto,
+  DesignSystemProvenanceDto,
+  ShadowLayerDto,
+  InnerHighlightDto,
 } from "../theme/types";
 
 export interface DocumentTextHeadDto {
@@ -97,6 +107,7 @@ export interface BootstrapDto {
   /** Fully resolved by the Rust bridge; the adapter only projects CSS vars. */
   activeTheme: ThemeSnapshot;
   activeTypography: TypographySnapshot;
+  activeDesignSystem: DesignSystemSnapshot;
 }
 
 // ------------------------------------------------------------ envelopes

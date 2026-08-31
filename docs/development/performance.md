@@ -1139,3 +1139,20 @@ chunks are classified separately from the shell so async features never
 inflate the startup path. Keystroke-to-local-paint stays owned by CodeMirror
 with bounded ordered deltas queued asynchronously; server work, package
 JavaScript, IPC batching, and AI streams never sit on the local paint path.
+
+## UI Design System Performance Budgets & Invariants (Plan 104)
+
+UI Design System packages contributed via `clay.contributions.uiDesignSystem` conform to strict performance ceilings and invariant boundaries:
+
+- **Manifest Payload Budget**: Design system contribution declarations are capped at `UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES = 65,536` (64 KiB), ensuring instantaneous IPC serialization and bounded memory overhead.
+- **Single-Pass Variable Projection**: `installDesignSystemVariables` projects the active snapshot into CSS custom properties in a single batched pass on the root element. Switching design systems causes zero React component unmounts/remounts and generates no runtime style recalculation storms.
+- **Zero Runtime Scripting**: Styling is applied entirely via CSS custom properties (`--clay-ds-*`) without package JavaScript execution or DOM mutation observers.
+- **Scroll & Editor Canvas Invariants**: The primary text editor canvas, line number gutter, and scroll track containers strictly enforce `backdropBlur == 0.0` (0px blur) across all design systems. This guarantees 60fps scrolling and sub-millisecond typing latency on large files without GPU fill-rate exhaustion.
+- **Effect Ceilings**:
+  - Max shadow layers: `<= 8` layers per recipe.
+  - Max backdrop blur: `<= 32.0px`.
+  - Backdrop saturation: `[1.0, 2.0]`.
+  - Transition duration: `<= 1000.0ms`.
+  - Max standard radius: `<= 32.0px` (or `9999.0px` full pill).
+  - Max border width: `<= 8.0px`.
+

@@ -215,3 +215,7 @@ explicit rather than inferred from static screenshots.
 
 The harness recorded zero long tasks only for its bootstrap trace; this is not
 a typing-flow claim.
+
+## Plan 103 Editor Boundary & Design-System Cross-Reference (2026-08-30)
+
+Editor pane container and scrollbars consume `--clay-ds-editor-view-*` recipe variables. The CodeMirror editor canvas text, carets, selections, search highlights, and syntax decorations strictly preserve theme color authority (`var(--clay-editor-*)` and `var(--clay-syntax-*)`). Design systems cannot modify syntax colors or text rendering. See [Module 15](15-ui-design-systems.md) for full design-system switching checks.

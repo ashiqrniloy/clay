@@ -5,7 +5,10 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-use crate::perf::budgets::SDUI_UPDATE_PAYLOAD_BUDGET_BYTES;
+use crate::perf::budgets::{
+    SDUI_UPDATE_PAYLOAD_BUDGET_BYTES, UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES,
+};
+use crate::shell::design_system::UiDesignSystemDeclaration;
 use crate::shell::theme::{
     DensityLevel, ElevationLevel, MotionDuration, PackageThemeToken, ThemeTokenResolver,
     ThemeTokenType, ZLevel, core_fallback_matches_type, core_token_type, is_valid_dimension,
@@ -563,6 +566,105 @@ pub(super) fn theme_resolver_for_package_tokens(
         });
     }
     resolver
+}
+
+pub(super) fn parse_ui_design_system_contribution(
+    value: &Value,
+    api_prefix: &str,
+    ctx: &ErrorContext,
+) -> Result<Option<UiDesignSystemContributionDescriptor>, PackageRecordError> {
+    let size = contribution_payload_size(value);
+    if size > UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES {
+        return Err(ctx.error(
+            PackageRecordRule::PayloadBudgetExceeded,
+            None,
+            format!(
+                "uiDesignSystem contribution payload ({size} bytes) exceeds UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES ({UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES} bytes)"
+            ),
+        ));
+    }
+
+    reject_ui_prohibited_authority(value, ctx)?;
+
+    let obj = value.as_object().ok_or_else(|| {
+        ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            None,
+            "clay.contributions.uiDesignSystem must be an object",
+        )
+    })?;
+
+    // Disallow raw CSS strings, selectors, script/callback fields
+    for forbidden in [
+        "rawColor",
+        "rawCss",
+        "css",
+        "cssText",
+        "selectors",
+        "rules",
+        "classes",
+        "class",
+        "className",
+        "styleString",
+        "script",
+        "tauri",
+        "invoke",
+        "callback",
+        "handler",
+    ] {
+        if obj.contains_key(forbidden) {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                Some(forbidden),
+                "uiDesignSystem must not contain raw CSS, class selectors, or executable callback fields",
+            ));
+        }
+    }
+
+    // Deserialize into UiDesignSystemDeclaration
+    let decl: UiDesignSystemDeclaration = match serde_json::from_value(value.clone()) {
+        Ok(d) => d,
+        Err(err) => {
+            return Err(ctx.error(
+                PackageRecordRule::InvalidContributionDescriptor,
+                None,
+                format!("failed to parse uiDesignSystem contribution: {err}"),
+            ));
+        }
+    };
+
+    // Validate the declaration (schema version, bounds, color authority, recipe keys)
+    if let Err(ds_err) = decl.validate() {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            ds_err.value.as_deref(),
+            format!("{}: {}", ds_err.field, ds_err.message),
+        ));
+    }
+
+    // Ensure the ID uses the package apiPrefix or matches package specifier
+    if !is_package_owned_id(&decl.id, api_prefix)
+        && decl.id != ctx.package_name.as_deref().unwrap_or("")
+    {
+        return Err(ctx.error(
+            PackageRecordRule::InvalidContributionDescriptor,
+            Some(&decl.id),
+            "uiDesignSystem id must match package name or use the package apiPrefix namespace",
+        ));
+    }
+
+    let declaration_json = serde_json::to_string(&decl).unwrap_or_default();
+
+    Ok(Some(UiDesignSystemContributionDescriptor {
+        id: decl.id,
+        schema_version: decl.schema_version,
+        display_name: decl.display_name,
+        extends: decl.extends,
+        value_count: decl.values.len(),
+        recipe_count: decl.recipes.len(),
+        declaration_json,
+        estimated_payload_bytes: size,
+    }))
 }
 
 // ── Utility ──────────────────────────────────────────────────────────────────

@@ -8,7 +8,10 @@
 //! state; nothing is merged across sessions.
 
 use super::agent::AgentRelay;
-use super::dto::{BootstrapDto, InitialDocumentDto, ThemeSnapshotDto, TypographySnapshotDto};
+use super::dto::{
+    BootstrapDto, DesignSystemSnapshotDto, InitialDocumentDto, ThemeSnapshotDto,
+    TypographySnapshotDto,
+};
 use super::errors::{BridgeError, MAX_REQUEST_BYTES};
 use super::forwarder::{Forwarder, SinkRegistry};
 use clay::client::{
@@ -370,6 +373,10 @@ impl BridgeState {
             )
             .map_err(BridgeError::invalid_request)?,
             active_typography: TypographySnapshotDto::from(&initial_state.active_typography),
+            active_design_system: DesignSystemSnapshotDto::resolve(
+                &clay::shell::design_system::ActiveDesignSystem::core_fallback(generation),
+            )
+            .map_err(BridgeError::invalid_request)?,
             initial_document: InitialDocumentDto::from_initial_state(&initial_state),
             behavior_manifest: initial_state.behavior_manifest.clone(),
         };

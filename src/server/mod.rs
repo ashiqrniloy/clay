@@ -491,6 +491,8 @@ struct RuntimeGenerationCandidate {
     active_theme: Option<crate::protocol::ActiveTheme>,
     expected_typography: crate::protocol::ActiveTypography,
     active_typography: crate::protocol::ActiveTypography,
+    expected_design_system: crate::shell::design_system::ActiveDesignSystem,
+    active_design_system: crate::shell::design_system::ActiveDesignSystem,
     open_documents: Vec<workspace::OpenDocumentRefresh>,
     runtime_snapshot: RuntimeStateSnapshot,
 }
@@ -572,6 +574,8 @@ pub struct IpcServer {
     /// Resolved active theme snapshot (Plan 046 task 7 `setTheme`) shipped to the
     /// client during the welcome handshake. `None` = Clay default theme.
     active_theme: Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
+    /// Phase 102 resolved active UI design-system snapshot.
+    active_design_system: Arc<Mutex<crate::shell::design_system::ActiveDesignSystem>>,
     runtime_diagnostics: Arc<Mutex<connection::RuntimeDiagnosticStore>>,
     /// Active-connection ceiling: each accepted connection must hold one
     /// permit for its lifetime; excess connections are refused at accept time
@@ -690,6 +694,9 @@ impl IpcServer {
             behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),
             sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
             active_theme: Arc::new(Mutex::new(None)),
+            active_design_system: Arc::new(Mutex::new(
+                crate::shell::design_system::ActiveDesignSystem::core_fallback(0),
+            )),
             runtime_diagnostics: Arc::new(
                 Mutex::new(connection::RuntimeDiagnosticStore::default()),
             ),
@@ -1249,6 +1256,49 @@ impl IpcServer {
                 overrides: Vec::new(),
                 design_tokens: Vec::new(),
             });
+        let expected_design_system = self.active_design_system.lock().await.clone();
+        let mut active_design_system = if let Some(selected) =
+            evaluation.active_design_system.clone()
+        {
+            let packages = service
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            if selected.provenance.package_name != "core" {
+                let is_valid = packages.enabled_records().any(|r| {
+                    r.manifest.name == selected.provenance.package_name
+                        && r.manifest.version == selected.provenance.package_version
+                        && r.contributions.ui_design_system.is_some()
+                });
+                if is_valid {
+                    selected
+                } else {
+                    crate::shell::design_system::ActiveDesignSystem::core_fallback(generation_id)
+                }
+            } else {
+                selected
+            }
+        } else {
+            let packages = service
+                .package_service()
+                .lock()
+                .expect("package service mutex poisoned");
+            if expected_design_system.provenance.package_name != "core" {
+                let is_valid = packages.enabled_records().any(|r| {
+                    r.manifest.name == expected_design_system.provenance.package_name
+                        && r.manifest.version == expected_design_system.provenance.package_version
+                        && r.contributions.ui_design_system.is_some()
+                });
+                if is_valid {
+                    expected_design_system.clone()
+                } else {
+                    crate::shell::design_system::ActiveDesignSystem::core_fallback(generation_id)
+                }
+            } else {
+                expected_design_system.clone()
+            }
+        };
+        active_design_system.generation = generation_id;
         let mut runtime_diagnostics = self.runtime_diagnostics.lock().await.snapshot();
         let package_ui = {
             let packages = service
@@ -1301,6 +1351,7 @@ impl IpcServer {
             &behavior,
             active_theme.clone(),
             active_typography.clone(),
+            active_design_system.clone(),
             sdui.cloned_tree_or_default(),
             &open_documents,
             evaluation.published_decoration_set.clone(),
@@ -1338,6 +1389,8 @@ impl IpcServer {
             active_theme: published_theme,
             expected_typography,
             active_typography,
+            expected_design_system,
+            active_design_system,
             open_documents,
             runtime_snapshot,
         })
@@ -1388,10 +1441,12 @@ impl IpcServer {
         let mut sdui = self.sdui.lock().await;
         let mut active_theme = self.active_theme.lock().await;
         let mut active_typography = self.runtime_generation.typography.current.lock().await;
+        let mut active_design_system = self.active_design_system.lock().await;
         if *behavior != candidate.expected_behavior
             || *sdui != candidate.expected_sdui
             || *active_theme != candidate.expected_theme
             || *active_typography != candidate.expected_typography
+            || *active_design_system != candidate.expected_design_system
         {
             return Err(runtime_candidate_error(
                 "runtime.active_state_conflict",
@@ -1439,6 +1494,7 @@ impl IpcServer {
         *sdui = candidate.sdui;
         *active_theme = candidate.active_theme;
         *active_typography = candidate.active_typography.clone();
+        *active_design_system = candidate.active_design_system;
         self.runtime_generation
             .swap(candidate.generation.clone())
             .await;
@@ -1469,6 +1525,7 @@ impl IpcServer {
         } else {
             self.runtime_generation.behavior_grace().clear().await;
         }
+        drop(active_design_system);
         drop(active_typography);
         drop(active_theme);
         drop(sdui);
@@ -1804,6 +1861,7 @@ fn build_runtime_state_snapshot(
     behavior: &ActiveBehaviorManifest,
     active_theme: crate::protocol::ActiveTheme,
     active_typography: crate::protocol::ActiveTypography,
+    active_design_system: crate::shell::design_system::ActiveDesignSystem,
     sdui_tree: crate::protocol::SduiTree,
     open_documents: &[workspace::OpenDocumentRefresh],
     published_decorations: Option<crate::protocol::DecorationSet>,
@@ -1845,6 +1903,7 @@ fn build_runtime_state_snapshot(
         behavior: behavior.manifest().clone(),
         active_theme,
         active_typography,
+        active_design_system,
         sdui_tree,
         package_ui,
         documents,
@@ -2433,6 +2492,7 @@ mod runtime_outputs_tests {
             document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
+            active_design_system: None,
             configuration_diagnostics: Vec::new(),
         };
 
@@ -2477,6 +2537,7 @@ mod runtime_outputs_tests {
             document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
+            active_design_system: None,
             configuration_diagnostics: Vec::new(),
         };
 
@@ -2523,6 +2584,7 @@ mod runtime_outputs_tests {
             document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
+            active_design_system: None,
             configuration_diagnostics: Vec::new(),
         };
 
@@ -2568,6 +2630,7 @@ mod runtime_outputs_tests {
             document_analyzers: vec![],
             active_theme: None,
             active_typography: None,
+            active_design_system: None,
             configuration_diagnostics: Vec::new(),
         };
 
@@ -3964,6 +4027,43 @@ Deno.core.ops.op_clay_runtime_record("still-cached");"#,
     }
 
     #[tokio::test]
+    async fn reload_with_missing_design_system_preserves_previous_generation_and_reports_diagnostic()
+     {
+        let root = temp_config_root(
+            "design-system-reload-preserve",
+            r#"import { setDesignSystem } from "clay:theme";
+setDesignSystem("@clay/core");"#,
+        );
+        let server = server_with_config(root.clone());
+
+        let loaded = server.reload_runtime_generation().await;
+        assert!(loaded.reloaded);
+        let baseline = server.active_design_system.lock().await.clone();
+        assert_eq!(baseline.specifier, "@clay/core");
+
+        fs::write(
+            root.join("init.js"),
+            r#"import { setDesignSystem } from "clay:theme";
+setDesignSystem("@vendor/never-installed-ds");"#,
+        )
+        .unwrap();
+        let failed = server.reload_runtime_generation().await;
+        assert!(!failed.reloaded);
+        assert_eq!(failed.active_generation_id, loaded.active_generation_id);
+        let retained = server.active_design_system.lock().await.clone();
+        assert_eq!(retained, baseline);
+        assert!(
+            server
+                .runtime_diagnostics
+                .lock()
+                .await
+                .snapshot()
+                .iter()
+                .any(|diagnostic| diagnostic.code == "theme.load_failed")
+        );
+    }
+
+    #[tokio::test]
     async fn reload_reruns_one_line_loads_and_rebuilds_representative_contributions() {
         let root = temp_config_root(
             "one-line-rebuild",
@@ -4465,6 +4565,9 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
                 design_tokens: Vec::new(),
             },
             active_typography: crate::protocol::ActiveTypography::default(),
+            active_design_system: crate::shell::design_system::ActiveDesignSystem::core_fallback(
+                generation,
+            ),
             sdui_tree: default_document_tree(1, 1),
             package_ui: crate::protocol::PackageUiSnapshot {
                 version: generation,
@@ -5808,6 +5911,9 @@ mod tests {
             workspace,
             sdui: Arc::new(Mutex::new(StaticSduiState::empty_for_document(1))),
             active_theme: Arc::new(Mutex::new(None)),
+            active_design_system: Arc::new(Mutex::new(
+                crate::shell::design_system::ActiveDesignSystem::core_fallback(0),
+            )),
             runtime_diagnostics: Arc::new(Mutex::new(
                 super::connection::RuntimeDiagnosticStore::default(),
             )),

@@ -5,6 +5,7 @@ Decision sources:
 - `decision-logs/2026-05-08-1958-clay-js-api-naming-and-package-distribution.md`
 - `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` (user-controlled package graph retained; same-runtime/source-ceiling rules superseded)
 - `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`
+- `decision-logs/2026-08-30-2153-st-package-name-arnilo-scope-and-npm-distribution.md` (`@arnilo/st`, npm + GitHub releases, pi install model; `clay install` appends to `loadPackage` in `init.js`; Homebrew deferred)
 
 - Clay should expose package management through both a `clay package ...` CLI and an in-app package UI, backed by one shared package-management service/path.
 - Clay should not implement its own package manager or registry. Delegate package fetching, dependency resolution, version ranges, lockfiles, integrity, caching, and registry access to an existing npm-compatible JavaScript package manager, with pnpm/npm-compatible packages as the preferred direction.

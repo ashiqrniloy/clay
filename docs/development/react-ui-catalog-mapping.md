@@ -289,6 +289,31 @@ Packages contribute only validated declarative snapshots; the frontend:
 | Generic pane-content contribution | Empty-tab landing needs a generic package pane host, not product-named kinds (Phase 25 review gap) | Generic `Package` pane-content variant in its own phase |
 | Toast/notifications | Planned, no current consumer driving urgency | Internal overlay + timer now; React Aria `Toast` if needed |
 
+## UI Design-System Recipe Slot Mappings
+
+Component recipes defined in package contributions (`clay.contributions.uiDesignSystem`) map onto host-owned React components via stable semantic slots. Behavior and accessibility remain owned by React Aria; styling is projected via host-generated CSS custom properties derived from the resolved recipe and the active content theme.
+
+The complete component, slot, state, property, and fallback inventory is documented in [UI Design-System Recipe Matrix](ui-design-system-recipe-matrix.md).
+
+- **`button`**: slots `root`, `label`, `icon` (React Owner: `ClayButton` / React Aria `Button`)
+- **`textInput`**: slots `field`, `label`, `input`, `description`, `error` (React Owner: `ClayTextField` / React Aria `TextField`)
+- **`dropdown`**: slots `trigger`, `triggerLabel`, `indicator`, `popover`, `list`, `item`, `itemLabel` (React Owner: `ClayDropdown` / React Aria `Select`)
+- **`list`**: slots `root`, `row`, `rowTitle`, `rowDetail` (React Owner: `ClayList` / React Aria `ListBox`)
+- **`collapse`**: slots `root`, `header`, `title`, `chevron`, `body` (React Owner: `ClayCollapse` / React Aria `Disclosure`)
+- **`modal`**: slots `scrim`, `dialog`, `title`, `body` (React Owner: `ClayModal` / React Aria `Modal` + `Dialog`)
+- **`panel`**: slots `root`, `header`, `title`, `body` (React Owner: `Panel` / `PackageWorkspace`)
+- **`label`**: slot `root` (React Owner: `ClayText`)
+- **`statusItem`**: slot `root` (React Owner: `PackageComponent`)
+- **`flex` / `stack` / `overlay` / `portal`**: slot `root` (React Owner: `PackageComponent`)
+- **`scroll`**: slots `root`, `scrollbarTrack`, `scrollbarThumb` (React Owner: `PackageComponent`)
+- **`editorView`**: slots `root`, `canvas` (React Owner: `ClayEditor`)
+- **`tabBar`**: slots `bar`, `card`, `cardLabel`, `closeButton`, `dirtyIndicator` (React Owner: `TabBar` / React Aria `Tabs`)
+- **`paneSplitTree`**: slots `group`, `pane`, `handle`, `indicator` (React Owner: `WorkspacePanes` / react-resizable-panels)
+- **`commandCentre`**: slots `scrim`, `dialog`, `input`, `listBox`, `item`, `status`, `empty` (React Owner: `CommandCentre`)
+- **`fileBrowser`**: slots `root`, `header`, `tree`, `item`, `itemIcon`, `itemLabel` (React Owner: `FileBrowser` / React Aria `Tree`)
+- **`settingsPanel`**: slots `panel`, `heading`, `actions`, `fields` (React Owner: `SettingsPanel`)
+- **`chatPanel`**: slots `root`, `header`, `transcript`, `userMessage`, `assistantMessage`, `thinking`, `composer`, `statusLine` (React Owner: `ChatPanel`)
+
 ## Verification
 
 - `tests/documentation_coverage.rs::react_catalog_maps_every_component_kind` —
@@ -297,3 +322,4 @@ Packages contribute only validated declarative snapshots; the frontend:
 - `tests/documentation_coverage.rs::core_tokens_project_to_css_variables_or_internal_codemirror_values`
   — every core token in `tokens.md` has its `--clay-*` projection above, and
   the editor `StyleRegistry` keys are marked internal: CodeMirror.
+

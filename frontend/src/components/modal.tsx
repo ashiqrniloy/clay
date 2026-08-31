@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Modal, ModalOverlay, Dialog, Heading } from "react-aria-components";
 
 import styles from "./modal.module.css";
+import { recipeAttributes } from "./recipe-attributes";
 
 export interface ClayModalProps {
   title: string;
@@ -24,10 +25,19 @@ export function ClayModal({ title, open, onClose, children }: ClayModalProps) {
         if (!isOpen) onClose();
       }}
       className={styles.scrim}
+      {...recipeAttributes("modal", "scrim")}
     >
       <Modal>
-        <Dialog className={styles.dialog} aria-label={title}>
-          <Heading slot="title" className={styles.title}>
+        <Dialog
+          className={styles.dialog}
+          aria-label={title}
+          {...recipeAttributes("modal", "dialog")}
+        >
+          <Heading
+            slot="title"
+            className={styles.title}
+            {...recipeAttributes("modal", "title")}
+          >
             {title}
           </Heading>
           {children}

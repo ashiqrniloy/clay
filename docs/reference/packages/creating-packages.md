@@ -1354,6 +1354,60 @@ serverRegisterThemeToken(manifest, {
 });
 ```
 
+### UI Design-System declarations (`clay.contributions.uiDesignSystem`, Plans 101–104)
+
+Packages contribute inert UI design systems via `clay.contributions.uiDesignSystem` in `package.json`. A UI design system defines how components render across semantic states, slots, and variants (geometry, material, shadows, borders, transitions, and hover/press transforms) while keeping color authority strictly owned by the active content theme.
+
+See [UI Design Systems](../ui-design-systems.md) and [theme.setDesignSystem](../clay-js-api/theme/set-design-system.md) for the full specification, property domain tables, and programmatic activation details.
+
+- **Inert Manifest Data Only:** Design systems declare structured JSON data validated at package enable/load time. They cannot declare executable JavaScript, React components, CSS strings, CSS selectors, DOM class names, native handles, or Tauri commands.
+- **Strict Color Authority Invariant:** All color properties (`backgroundColor`, `textColor`, `borderColor`, `outlineColor`, `shadow[].colorRole`, `innerHighlight.colorRole`) must be valid active-theme color-role references (e.g. `surface.control`, `text.primary`, `accent.primary`, `border.focus`, `diagnostic.error`) or `transparent`. Literal hex codes, `rgb()`/`hsl()` functions, named colors, and package-owned color palettes are strictly rejected at load time.
+- **Namespaced Non-Color Values:** Reusable scalars (radii, border widths, dimensions, opacities, blur, saturation, motion durations) are declared under `values` with strict domain validation.
+- **Payload Budget:** The serialized declaration is checked against `UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES` (64 KiB) at record assembly time.
+- **Deterministic Fallback Inheritance:** Unspecified recipe properties inherit down a deterministic 5-step fallback chain (exact recipe -> rest state -> default variant -> parent `extends` system -> Neobrutal core fallbacks).
+- **Activation API:** End users and packages activate a design system via `import { setDesignSystem } from "clay:theme"`.
+
+```json
+{
+  "name": "@clay/design-neobrutal",
+  "version": "0.1.0",
+  "clay": {
+    "apiPrefix": "design-neobrutal",
+    "entry": "./dist/index.js",
+    "contributions": {
+      "uiDesignSystem": {
+        "schemaVersion": 1,
+        "id": "@clay/design-neobrutal",
+        "displayName": "Restrained Neobrutal (Default)",
+        "values": {
+          "border.structural": { "type": "border-width", "value": 1.0 },
+          "radius.sharp": { "type": "radius", "value": 0.0 }
+        },
+        "recipes": {
+          "button.default.root.rest": {
+            "backgroundColor": "surface.control",
+            "borderWidth": 1.0,
+            "borderRadius": 0.0,
+            "borderColor": "border.subtle",
+            "shadow": [
+              {
+                "x": 2.0,
+                "y": 2.0,
+                "blur": 0.0,
+                "spread": 0.0,
+                "colorRole": "border.strong",
+                "opacity": 1.0,
+                "inset": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
 ### Phase 20.3 authoring contract: layout primitives, split interaction, and layout intents
 
 Phase 20.3 implements user-facing layout primitives: draggable split dividers, fixed slot resize handles with collapse/restore, layout persistence, focus/input routing across splits, and an inert versioned layout intent API for packages.

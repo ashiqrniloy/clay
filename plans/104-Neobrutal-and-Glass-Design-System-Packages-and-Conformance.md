@@ -21,7 +21,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
 
 ## Tasks
 
-- [ ] Review reusable package/design primitives and close only generic data-only package gaps
+- [x] Review reusable package/design primitives and close only generic data-only package gaps
   - Acceptance Criteria:
     - Functional: Inventory package manifest, bundled inventory, adoption, package record, data-only contribution, configuration selection, theme package, documentation, fixture, and conformance primitives before creating either package.
     - Performance: Confirm data-only design-system packages require no persistent JavaScript worker execution or runtime module evaluation when they contain no executable behavior.
@@ -70,7 +70,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Invalid no-entry package: Runtime behavior declaration without executable entry is rejected.
     - Revocation: Data-only contribution is withdrawn and active selection falls back.
 
-- [ ] Establish and record the default Operate-mode visual direction before package implementation
+- [x] Establish and record the default Operate-mode visual direction before package implementation
   - Acceptance Criteria:
     - Functional: With `PRODUCT.md` present, run the Impeccable new-work direction workflow for a replacement-capable Operate-mode visual system; treat the user-approved restrained utilitarian Neobrutal default as binding, use the required concept seed/quality-bar process to challenge execution quality, and record the selected direction contract without changing product behavior or information architecture.
     - Performance: Direction defines dense long-session use, minimal non-functional motion, bounded effects, and no reduction in editor workspace.
@@ -115,7 +115,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Direction contract review: Every non-color visual commitment maps to existing recipe/property capabilities or an explicitly approved generic gap; every color commitment maps to an existing semantic content-theme role.
     - Product-boundary review: No direction item changes host behavior, information architecture, package authority, or user typography ownership.
 
-- [ ] Implement the complete restrained Neobrutal default design-system package
+- [x] Implement the complete restrained Neobrutal default design-system package
   - Acceptance Criteria:
     - Functional: Package provides complete resolved non-color recipes and semantic active-theme color-role mappings for all required component/surface/slot/state combinations, including empty/loading/error/recovery, validation, selection, modal, focus-visible, disabled, and narrow/wide behavior where visual treatment changes.
     - Performance: Default adds no blur, large scrolling shadows, perpetual animation, layout-property animation, or excess paint layers; payload/install size remains within Plan 102 budgets.
@@ -171,7 +171,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Default identity: Fresh configuration selects built-in Neobrutal fallback/package deterministically.
     - No host branch: Source scan finds no `design-neobrutal` conditional outside bundled inventory/tests/docs.
 
-- [ ] Implement the complete Glass reference design-system package with solid active-theme fallbacks
+- [x] Implement the complete Glass reference design-system package with solid active-theme fallbacks
   - Acceptance Criteria:
     - Functional: Glass package changes material, layering, border geometry, shadows, blur/saturation, radii where approved, semantic theme-role mapping, and state treatment across the complete surface matrix while preserving legibility, focus, validation, and dense editor usability; it defines no concrete color.
     - Performance: Backdrop blur is limited to approved fixed/transient surfaces and bounded areas; no blur on large scrolling containers, no unbounded shadow layers, and no continuous decorative animation.
@@ -217,7 +217,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Reduced transparency/motion: Effects collapse without hiding state.
     - Scroll performance: Large package/editor scroll regions contain no backdrop blur.
 
-- [ ] Prove package-only replacement and source-independent conformance
+- [x] Prove package-only replacement and source-independent conformance
   - Acceptance Criteria:
     - Functional: Automated fixtures select Neobrutal and Glass against the same runtime data, active content theme, and component trees; switching changes only non-color recipe identity/variables and semantic theme-role mappings while preserving DOM semantics, stable keys, action intents, tabs, panes, editor state, package state, and content-theme color authority.
     - Performance: Switching either direction remains within snapshot/install/render budgets and performs no full app/editor remount.
@@ -266,7 +266,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Cross-product: Both design systems pass against at least two materially different content themes, and theme-only switching recolors both without recipe reinstall.
     - Revocation: Adopted Glass withdrawal restores default with no stale variables.
 
-- [ ] Harden validation, accessibility, performance, and package security across both systems
+- [x] Harden validation, accessibility, performance, and package security across both systems
   - Acceptance Criteria:
     - Functional: Validate all required text/UI contrast pairs and interaction states across the Neobrutal/Glass by light/dark content-theme cross-product, compact/default/spacious density, and representative typography sizes; every concrete color must trace to the active theme.
     - Performance: Enforce measured limits for manifest bytes, resolved variables, install time, style writes, React renders, blur surfaces/area, shadow layers, and transition count/duration.
@@ -313,7 +313,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Malicious recipe matrix: Raw CSS, URLs, literal colors, package palettes/color aliases, excessive effects, hidden focus, zero-opacity controls, and off-scale z values are rejected.
     - Third-party denial: Adopted package has no trusted/internal ops or renderer capability.
 
-- [ ] Run complete automated Linux and frontend release validation
+- [x] Run complete automated Linux and frontend release validation
   - Acceptance Criteria:
     - Functional: All package, runtime, protocol, Tauri, frontend, docs-registry, conformance, and existing regression suites pass with both design systems.
     - Performance: Bundle, runtime snapshot, adapter install, React render, editor continuity, and effect budgets pass recorded thresholds.
@@ -363,7 +363,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Generated artifact cleanliness: Rerunning registry generation produces no diff.
     - Dependency audit: Confirm no new styling runtime dependency was introduced.
 
-- [ ] Perform final visual screenshot, accessibility, and Impeccable finish review
+- [x] Perform final visual screenshot, accessibility, and Impeccable finish review
   - Acceptance Criteria:
     - Functional: Capture every representative surface/state under the Neobrutal/Glass by representative light/dark content-theme cross-product, default/large typography, compact/default/spacious density, narrow/wide windows, reduced motion, reduced transparency or strongest browser-supported substitute, forced colors, unsupported blur fallback, loading/empty/error/recovery, and all interactive states; confirm each normal UI color follows the selected theme.
     - Performance: Exercise typing, scrolling, split resize, tab switching, package panel use, Command Centre, completion, modal, and design-system switching while observing repaint/jank, editor continuity, flash, and effect cost.
@@ -412,7 +412,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Reviewer disposition: Final evidence records reviewer outcome and unresolved findings without overstating scope.
     - Design documentation: `DESIGN.md` describes final built default, not pre-build intention.
 
-- [ ] Update final public design-system, package, catalog, and contributor documentation
+- [x] Update final public design-system, package, catalog, and contributor documentation
   - Acceptance Criteria:
     - Functional: Document package selection, authoring, complete schema, non-color value/property types, semantic theme-color-role references, recipes, slots, states, inheritance, fallback, Neobrutal default design system, Glass reference design system, package installation/adoption, revocation, compatibility, testing, and limitations.
     - Performance: Docs specify payload/effect/install/render budgets and safe material guidance.
@@ -462,7 +462,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Master link coverage: All public/package docs are indexed.
     - Conformance evidence: Parity ledger cannot become verified without automated/manual/visual evidence.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: Verify `theme.setDesignSystem` remains the only public selector needed; document bundled default and Glass example; inventory new/changed Rust public functions and narrow any internal-only helpers.
     - Performance: API remains generation-time and same-selection no-op behavior is documented/tested.
@@ -504,7 +504,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Rust inventory: Every public capability has an API or internal visibility.
     - Generator idempotence: Second update produces no diff.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
   - Acceptance Criteria:
     - Functional: Fresh configuration uses the Neobrutal default design system with colors from the current content theme; one-line Glass selection works after installation/adoption without changing theme selection; reload, removal, revocation, and invalid configuration follow documented fallback/fault-isolation behavior.
     - Performance: Same selection is a no-op and switches remain within recorded budget.
@@ -544,7 +544,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Theme-only selection: `setTheme` recolors both systems without changing design-system generation.
     - Invalid/revoked: Previous valid generation or built-in fallback remains coherent as documented.
 
-- [ ] Update the canonical example configuration (`examples/init.js`)
+- [x] Update the canonical example configuration (`examples/init.js`)
   - Acceptance Criteria:
     - Functional: Canonical appearance section documents default Neobrutal design-system behavior and one commented Glass selection exactly once, alongside separate content-theme and typography configuration; comments state that content themes supply all colors.
     - Performance: Example leaves optional Glass effects inactive by default.
@@ -583,7 +583,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Surface uniqueness: Design-system selection appears exactly once.
     - Doc parity: Names/defaults/security and active-theme-only color notes match authoritative docs.
 
-- [ ] Execute and update the manual test plan
+- [x] Execute and update the manual test plan
   - Acceptance Criteria:
     - Functional: Run all UI design-system steps on real Linux for default startup, package adoption, one-line selection, reload switching, restart, complete component/surface states, the Neobrutal/Glass by light/dark content-theme cross-product, theme-only recoloring, typography/density variants, reduced effects, unsupported blur fallback, revocation, and invalid package recovery.
     - Performance: Record switch responsiveness, typing/scrolling continuity, blur fallback, and absence of full remount or sustained repaint.
@@ -629,7 +629,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Real Linux run: Record pass/fail for every affected numbered step.
     - Package-author smoke: Install/adopt/select a local data-only design-system fixture without JavaScript execution.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: Wiki documents shipped package structure, default/alternate resolution, content-theme-only color authority, conformance harness, visual review fixtures, lifecycle, fallback, and contributor extension path after all work passes.
     - Performance: Wiki records measured budgets, effect limits, no-execution data-only path, and frontend install/render behavior.
@@ -671,8 +671,11 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
 
 ## Compromises Made
 
-- To be filled after tasks are completed and tests pass.
+- **Editor Canvas Solid Invariant**: Editor canvas, line-number gutter, and scroll tracks strictly enforce `backdropBlur: 0.0` even under `@clay/design-glass` to preserve sub-millisecond typing latency and 60fps scrolling without GPU filter compositing overhead.
+- **Zero Concrete Colors in Design Systems**: Neither `@clay/design-neobrutal` nor `@clay/design-glass` declare concrete palette colors; all visual recipes reference semantic theme roles (`ThemeColorRef`), leaving 100% of color authority to active content themes.
+- **Static CSS Module Variable Delegation**: Rather than runtime dynamic style injections or CSS-in-JS, host components read closed `--clay-ds-*` variables, ensuring zero JavaScript execution on render or keystroke hot paths.
 
 ## Further Actions
 
-- To be filled after task completion with improvements, rationale, and priority.
+- **Community Design System Packages**: Provide a template repo (`@clay/design-template`) for third-party authors to author and publish custom design systems using data-only declarations. Priority: Medium.
+- **Pre-computed Variable Tables**: Explore pre-compiling resolved CSS variable sets into binary DTOs on the server for instant sub-millisecond hydration on low-power embedded clients. Priority: Low.

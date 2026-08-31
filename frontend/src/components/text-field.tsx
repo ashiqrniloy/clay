@@ -7,6 +7,7 @@ import {
 } from "react-aria-components";
 
 import styles from "./text-field.module.css";
+import { recipeAttributes } from "./recipe-attributes";
 
 export type ValidationState = "none" | "error" | "warning" | "success";
 
@@ -49,14 +50,21 @@ export function ClayTextField({
       isDisabled={disabled}
       isInvalid={validationState === "error"}
       aria-describedby={description ? `${label}-description` : undefined}
+      {...recipeAttributes("textInput", "field")}
     >
-      <Label className={styles.label}>{label}</Label>
+      <Label
+        className={styles.label}
+        {...recipeAttributes("textInput", "label")}
+      >
+        {label}
+      </Label>
       {multiline ? (
         <TextArea
           className={`${styles.input} ${validationClass}`}
           placeholder={placeholder}
           rows={3}
           autoFocus={autoFocus}
+          {...recipeAttributes("textInput", "input")}
           onKeyDown={(event) => {
             onKeyDown?.(event);
             if (event.defaultPrevented) return;
@@ -71,6 +79,7 @@ export function ClayTextField({
           className={`${styles.input} ${validationClass}`}
           placeholder={placeholder}
           autoFocus={autoFocus}
+          {...recipeAttributes("textInput", "input")}
           onKeyDown={(event) => {
             onKeyDown?.(event);
             if (!event.defaultPrevented && event.key === "Enter")
@@ -79,7 +88,11 @@ export function ClayTextField({
         />
       )}
       {description && (
-        <span id={`${label}-description`} className={styles.label}>
+        <span
+          id={`${label}-description`}
+          className={styles.label}
+          {...recipeAttributes("textInput", "description")}
+        >
           {description}
         </span>
       )}

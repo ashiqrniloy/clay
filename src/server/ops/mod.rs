@@ -104,7 +104,9 @@ use self::{
     sdui::{op_clay_sdui_define_node, op_clay_sdui_publish_tree},
     shell::op_clay_shell_set_pane_focus_policy,
     syntax::{op_clay_syntax_register_syntax_grammar, op_clay_syntax_set_engine_preference},
-    theme::{op_clay_theme_set_appearance, op_clay_theme_set_theme},
+    theme::{
+        op_clay_theme_set_appearance, op_clay_theme_set_design_system, op_clay_theme_set_theme,
+    },
     typography::op_clay_theme_set_typography,
     ui::{
         op_clay_ui_register_component_contribution, op_clay_ui_register_input_contribution,
@@ -258,12 +260,16 @@ pub(crate) struct ClayOpState {
     /// handshake ships it to the client. `None` = Clay default theme.
     active_theme: Mutex<Option<crate::protocol::ActiveTheme>>,
     active_typography: Mutex<Option<crate::protocol::ActiveTypography>>,
+    /// Phase 102 resolved active UI design-system snapshot from `setDesignSystem`.
+    active_design_system: Mutex<Option<crate::shell::design_system::ActiveDesignSystem>>,
     /// Phase 20.6 bounded appearance preference (`light` | `dark` | `system`).
     /// Selects the canonical default theme only when no explicit `setTheme` ran.
     appearance: Mutex<crate::protocol::Appearance>,
     /// Whether the user explicitly called `setTheme`. Once true, appearance
     /// changes no longer re-resolve the canonical default over the user's pick.
     explicit_theme_active: std::sync::atomic::AtomicBool,
+    /// Whether the user explicitly called `setDesignSystem`.
+    explicit_design_system_active: std::sync::atomic::AtomicBool,
     runtime_context: Mutex<ClayRuntimeContext>,
     // Shared PackageService for loadPackage resolution. Bundled packages are
     // seeded from CARGO_MANIFEST_DIR/packages; user-installed packages are
@@ -357,8 +363,10 @@ impl ClayOpState {
             document_analyzers: Mutex::new(Vec::new()),
             active_theme: Mutex::new(None),
             active_typography: Mutex::new(None),
+            active_design_system: Mutex::new(None),
             appearance: Mutex::new(crate::protocol::Appearance::default()),
             explicit_theme_active: std::sync::atomic::AtomicBool::new(false),
+            explicit_design_system_active: std::sync::atomic::AtomicBool::new(false),
             runtime_context: Mutex::new(ClayRuntimeContext {
                 workspace,
                 runtime_document_id,
@@ -1589,6 +1597,38 @@ impl ClayOpState {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Phase 102: record the active UI design system resolved by `setDesignSystem`.
+    pub(super) fn set_active_design_system(
+        &self,
+        design_system: crate::shell::design_system::ActiveDesignSystem,
+    ) {
+        *self
+            .active_design_system
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = Some(design_system);
+    }
+
+    /// Take the active UI design-system snapshot out of this evaluation.
+    pub(crate) fn active_design_system(
+        &self,
+    ) -> Option<crate::shell::design_system::ActiveDesignSystem> {
+        self.active_design_system
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
+    /// Phase 102: mark that the user explicitly selected a design system via `setDesignSystem`.
+    pub(super) fn set_explicit_design_system_active(&self, value: bool) {
+        self.explicit_design_system_active
+            .store(value, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn explicit_design_system_active(&self) -> bool {
+        self.explicit_design_system_active
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub(crate) fn completion_providers(
         &self,
     ) -> Vec<crate::server::completion::CompletionProviderMeta> {
@@ -1962,7 +2002,7 @@ fn op_clay_runtime_record(state: &mut OpState, #[string] value: String) -> Resul
 }
 
 // Trusted domain: configuration evaluation and bundled first-party packages.
-// This is the full trusted op set (83 ops).
+// This is the full trusted op set (86 ops).
 extension!(
     clay_runtime_trusted_extension,
     ops = [
@@ -1976,6 +2016,7 @@ extension!(
         op_clay_sdui_publish_tree,
         op_clay_shell_set_pane_focus_policy,
         op_clay_theme_set_appearance,
+        op_clay_theme_set_design_system,
         op_clay_theme_set_theme,
         op_clay_theme_set_typography,
         op_clay_ui_register_pane_content_contribution,
@@ -2170,7 +2211,7 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 85);
+        assert_eq!(trusted.len(), 86);
         // 46 = 38 public contribution ops (including folding publication) +
         // the seven shared `editor-control` gated editor ops + the gated
         // programmatic execution op (follow-up round); visibility grants
@@ -2188,6 +2229,7 @@ mod domain_extension_tests {
             "op_clay_configuration_set_package_option",
             "op_clay_shell_set_pane_focus_policy",
             "op_clay_theme_set_appearance",
+            "op_clay_theme_set_design_system",
             "op_clay_theme_set_theme",
             "op_clay_theme_set_typography",
             "op_clay_documents_open_document",

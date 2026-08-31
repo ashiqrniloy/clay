@@ -113,3 +113,6 @@ Legacy Markdown references are not Prettier-clean; whole-file --write creates un
 ## 26-08-29 00:02 — cargo test filter arity
 
 Cargo test accepts one positional filter, but repeated attempts passed multiple test names and failed before running. Workaround was one `cargo test --test protocol` full suite. A helper or documented multi-filter wrapper would prevent this recurring CLI retry.
+## 26-08-30 14:40 — repeated self-kill via pkill -f + orphaned clay processes during manual UI testing
+
+Manual server/client orchestration twice shot my own shell down: pkill -f/pgrep -f patterns matched the bash -c command string itself, killing the parent shell mid-block (zero output, steps silently skipped), which then looked like app bugs. Also `clay server` ignores SIGTERM (needed -9) and clay-desktop children survive killing the `clay client` wrapper pid, leaving orphan windows that corrupted screenshot pixel probes. Need a repo helper script for isolated clay sessions with kill-by-exact-name (-x), child-process cleanup, and self-match-proof pgrep patterns — capture-ui-review.sh exists but is fixture-specific.

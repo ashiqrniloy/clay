@@ -44,6 +44,9 @@ Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reaso
 | `ui-review-completion`       | `loadPackage('@clay/rust')` + `completion.trigger` on `Ctrl+Space`                                             | completion popup (interactive)                                      |
 | `ui-review-command-centre`   | `controlCenter.open` on `Ctrl+Alt+P` (single-stroke fixture override; not the shipped `Ctrl+X Ctrl+P` default) | centered Command Centre (interactive)                               |
 | `ui-review-rust`             | language-server authorization + `editor.toggleInlayHints` binding                                              | Rust analyzer/inlay states (interactive)                            |
+| `ui-review-design-neobrutal` | `setDesignSystem('@clay/design-neobrutal')` under Gruvbox Dark | Default Neobrutal design system active (Plan 104) |
+| `ui-review-design-glass`     | `setDesignSystem('@clay/design-glass')` under Gruvbox Dark     | Reference Glass design system active (Plan 104) |
+| `ui-review-design-system-light` | `setDesignSystem('@clay/design-neobrutal')` under Gruvbox Light | Cross-theme color authority verification (Plan 104) |
 
 The probe first locates the `clay` application index by scanning desktop children (`app INDEX` with per-call timeouts — whole-desktop enumeration hangs on some hosts), then dumps only that subtree. Hosts without `python3` + `gi.repository.Atspi` are reported as a prerequisite skip, never a pass.
 

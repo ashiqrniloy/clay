@@ -10,8 +10,9 @@ resolution in JavaScript.
 
 | File | Responsibility |
 | --- | --- |
-| `types.ts` | `ThemeSnapshot` (`tokens`, `densityScale`, `editorStyles`), `TypographySnapshot` (font roles, hierarchy, ligatures), `ThemeTokenValue` tagged union. |
+| `types.ts` | `ThemeSnapshot` (`tokens`, `densityScale`, `editorStyles`), `TypographySnapshot` (font roles, hierarchy, ligatures), `ThemeTokenValue` tagged union, `DesignSystemSnapshot` (specifier, generation, recipes → variables). |
 | `adapter.ts` | `themeCssVariables`, `typographyCssVariables`, `installVariables`, `tokenToCssName`, `variantSize`. |
+| `design-system-adapter.ts` | `designSystemCssVariables` / `installDesignSystemVariables`: projects one resolved `ActiveDesignSystem` snapshot into `--clay-ds-*` custom properties once per generation. Validates bounds, rejects literal colors/package aliases, resolves `ThemeColorRef` roles to host-owned `--clay-*` variables — no raw CSS text, no runtime style injection. |
 
 ## How it works
 
@@ -36,10 +37,35 @@ resolution in JavaScript.
 4. `installVariables` writes the sorted list onto the app root once per
    install — never per frame, never per component.
 
+## Design-system stores and coherent install (Plan 102)
+
+The frontend keeps theme/typography and design-system state in **separate
+stores with one coherent install order**:
+
+- `themeStore` holds the theme/typography snapshot; `designSystemStore`
+  (`frontend/src/state/design-system-store.ts`) holds the latest
+  `DesignSystemSnapshot` plus the exact set of installed `--clay-ds-*` key
+  names. Neither store derives from the other.
+- `use-clay-session.ts` feeds both: `themeSnapshot` envelopes update theme
+  state, bootstrap and runtime snapshots call
+  `designSystemStore.setDesignSystem(snapshot.activeDesignSystem)`, and
+  disconnects call `designSystemStore.resetToFallback()`.
+- `setDesignSystem` is **idempotent**: an unchanged `(specifier, generation,
+  schemaVersion)` triple performs zero DOM writes and notifies zero
+  subscribers. A change removes exactly the previously installed keys, then
+  writes the new set — variables never accumulate across switches.
+- Design-system variables resolve color roles to host-owned theme variables
+  (`surface.control` → `var(--clay-surface-control)`), so a theme swap alone
+  recolors an installed design system with no design-system write.
+- Install is once per activation/snapshot (measured: 300 variables ≈ 0.3 ms,
+  300 initial root writes, one notification) and is excluded from text-event,
+  edit-acknowledgement, and paint hot paths.
+
 ## Invariants and tradeoffs
 
 - **CSS custom properties are the styling currency**; components and CSS
   modules read `var(--clay-*)` only — no hardcoded colors, sizes, or shadows.
+- **Content themes are the sole color authority**: Content themes own color roles; UI design systems (see [UI Design System Runtime](ui-design-system-runtime.md)) own component geometry, materials, shadows, and motion, referencing active-theme color roles without declaring custom palettes.
 - Variant sizes are computed once in the adapter; components consume finished
   sizes so typography changes cannot desync between components.
 - Contrast floors are enforced server-side at resolution; the adapter cannot
@@ -49,8 +75,12 @@ resolution in JavaScript.
 
 - Adapter mapping/density/z-level/editor-style tests live with the Phase 4
   shell suites under `frontend/src/test/`.
+- `frontend/src/test/design-system-adapter.test.ts` — naming rule, color-role
+  resolution, bounds rejection, and install idempotence (identical generation →
+  zero writes/notifications; 300-variable fixture ≈ 0.3 ms).
 
 ## Related
 
+- [UI Design System Runtime](ui-design-system-runtime.md) — recipe schema, fallback engine, and Plan 102 activation lifecycle.
 - [React Shell, Component Registry, and Theme Runtime](react-shell.md).
 - Theme tokens reference: `docs/reference/primitives/tokens.md`.

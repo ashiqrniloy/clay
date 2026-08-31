@@ -18,3 +18,10 @@ export {
 } from "./controls";
 export { ClayModal } from "./modal";
 export { ClayBadge, ClayKbd, ClayDivider } from "./chrome";
+export {
+  recipeAttributes,
+  type ComponentKind,
+  type SlotName,
+  type VariantName,
+  type RecipeAttributes,
+} from "./recipe-attributes";

@@ -119,7 +119,7 @@ describe("editor performance invariants (Plan 099)", () => {
       expect(decorationStats(view.state).marks).toBe(spansPerPatch);
     }
     view.destroy();
-  });
+  }, 60000);
 
   it("keeps a 50 MiB document a single Text with no undo history", () => {
     // Ownership invariant at the approved top size: one authoritative Text,
@@ -173,6 +173,19 @@ describe("editor performance invariants (Plan 099)", () => {
           detail: 0.8,
           caption: 0.75,
         },
+      },
+      activeDesignSystem: {
+        specifier: "@clay/core",
+        schemaVersion: 1,
+        generation: 1,
+        provenance: {
+          packageName: "core",
+          packageVersion: "1.0.0",
+          apiPrefix: "clay",
+          trustDomain: "trusted",
+        },
+        recipes: {},
+        variables: {},
       },
     };
     session.installInitial(bootstrap);

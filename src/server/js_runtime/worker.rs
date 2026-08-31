@@ -483,6 +483,7 @@ pub(super) fn harvest_op_state_evaluation(op_state: &Arc<ClayOpState>) -> ClayRu
         document_analyzers: op_state.document_analyzers(),
         active_theme,
         active_typography: op_state.active_typography(),
+        active_design_system: op_state.active_design_system(),
         configuration_diagnostics: Vec::new(),
     }
 }

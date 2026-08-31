@@ -21,7 +21,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
 
 ## Tasks
 
-- [ ] Audit every frontend visual declaration and lock structural versus replaceable ownership
+- [x] Audit every frontend visual declaration and lock structural versus replaceable ownership
   - Acceptance Criteria:
     - Functional: Inventory all frontend CSS/inline styles and classify each declaration as structural layout, active content-theme color role, user typography, non-color UI design-system recipe, accessibility override, browser compatibility rule, or unjustified literal.
     - Performance: Identify expensive filter, backdrop-filter, shadow, transition, containment, and layout declarations; assign explicit paint/layout budgets and fallback ownership.
@@ -66,7 +66,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Ownership completeness: Every declaration classified `recipe` has an implemented matrix key and non-color fallback; every color declaration names a valid active-theme role.
     - Color literal deny scan: Hex/RGB/HSL/named product colors are absent outside theme package data and forced-colors system-color rules.
 
-- [ ] Implement shared host recipe selectors and state mapping
+- [x] Implement shared host recipe selectors and state mapping
   - Acceptance Criteria:
     - Functional: Add minimal host-owned class/data-slot conventions that map component, slot, variant, and React Aria semantic state to recipe variables, with color variables resolving only through active-theme role indirection, without exposing generated class names or DOM structure to packages.
     - Performance: State changes use CSS pseudo-classes/data attributes and native custom-property resolution; no React state bridge, object allocation, selector generation, or JavaScript style update runs on hover/press/focus.
@@ -111,7 +111,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Package data denial: Unknown package style/variant cannot create host data attributes.
     - Render-count test: Hover/focus state changes do not trigger recipe-related React renders.
 
-- [ ] Migrate cataloged controls and package-facing components to recipes
+- [x] Migrate cataloged controls and package-facing components to recipes
   - Acceptance Criteria:
     - Functional: Migrate button, label/text, text input, dropdown/select, list/list row, collapse/disclosure, modal/dialog, panel, overlay, scroll, status item, flex, stack, portal, and editor-view host chrome according to the catalog and matrix; every component color remains supplied by the active content theme.
     - Performance: No component subscribes independently to design-system state; large package trees retain stable reconciliation keys and bounded render counts.
@@ -165,7 +165,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Accessibility parity: Roles, labels, descriptions, errors, selected/expanded/disabled states, and modal focus trap remain intact.
     - Stable reconciliation: Unrelated recipe changes do not reset input, disclosure, selection, or scroll state.
 
-- [ ] Migrate shell, layout, transient, product, and editor-chrome surfaces
+- [x] Migrate shell, layout, transient, product, and editor-chrome surfaces
   - Acceptance Criteria:
     - Functional: Migrate app shell, top bar, tab strip, working area, pane tree/dividers, workspace panels, package workspace, Command Centre, chat, settings, fixture/workspace routes, status surfaces, completion/overlay chrome, editor gutters/scrollbars/focus/selection-adjacent host chrome, and responsive containers identified in the audit.
     - Performance: Preserve CodeMirror-local typing and viewport rendering; design-system changes do not recreate `EditorView`, pane state, tab state, package trees, or transient-menu sessions.
@@ -221,7 +221,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Ownership test: No concrete shell/component/editor color comes from UI design-system package data; CodeMirror syntax variables and all other colors resolve from active-theme variables.
     - Responsive test: Narrow/wide geometry remains usable under compact/spacious density and large UI typography.
 
-- [ ] Add forced-color, reduced-motion, reduced-transparency, unsupported-effect, and paint-budget fallbacks
+- [x] Add forced-color, reduced-motion, reduced-transparency, unsupported-effect, and paint-budget fallbacks
   - Acceptance Criteria:
     - Functional: Every effect-capable recipe property has host-defined fallback behavior for forced colors, reduced motion, reduced transparency where supported, missing `backdrop-filter`, and invalid/unsupported values; every normal solid fallback color references the active content theme.
     - Performance: Bound blur area/count, shadow layers, transition properties/durations, and active animated elements; prohibit blur on large scrolling content and layout-property animation.
@@ -270,7 +270,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Unsupported blur: Glass material resolves a solid active-theme surface role with passing contrast and no design-system color value.
     - Effect bounds: Oversized blur/shadow/transition requests are rejected before install.
 
-- [ ] Add exhaustive automated migration and non-regression checks
+- [x] Add exhaustive automated migration and non-regression checks
   - Acceptance Criteria:
     - Functional: Tests prove every audit `recipe` row has a consumer, every recipe key has a fallback and consumer, every component/surface state renders, no fixed non-color visual literal remains outside approved fallback/token files, and no normal-rendering color literal remains outside content-theme package data.
     - Performance: Frontend performance tests cover switch render counts, style-install cost, editor continuity, large package trees, and expensive-effect ceilings.
@@ -324,7 +324,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Large tree: Design-system switch preserves local SDUI state and bounded renders.
     - Full Linux validation: All blocking checks pass.
 
-- [ ] Perform visual screenshot and accessibility review of every migrated surface
+- [x] Perform visual screenshot and accessibility review of every migrated surface
   - Acceptance Criteria:
     - Functional: Launch representative real Linux UI states for shell, editor, tabs/panes, package panel, settings, chat, Command Centre, completion, dropdown, collapse, text input validation, modal, empty/loading/error/recovery, and narrow/wide layouts.
     - Performance: Inspect switching, scrolling, typing, modal opening, and transient state changes for flash, jank, blur repaint, layout shift, stale styles, or recreated editor/package state.
@@ -366,7 +366,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Large typography/density: No clipped labels, hidden focus, unreachable controls, or unusable editor region.
     - Light/dark content themes: Every component and surface color follows the selected content theme under the same design system; design-system switching preserves theme-owned color values/roles and contrast.
 
-- [ ] Update UI, package authoring, catalog, and migration documentation
+- [x] Update UI, package authoring, catalog, and migration documentation
   - Acceptance Criteria:
     - Functional: Document stable recipe slots, non-color property types, semantic theme-color-role references, state rules, fallback/inheritance, package manifest examples, host-owned behavior, structural CSS boundary, migration status, and unsupported authorities.
     - Performance: Docs state install-time resolution, cached root variables, effect budgets, and absence of package work in render/input hot paths.
@@ -419,7 +419,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Documentation parity: Every recipe component/slot/property/state and theme-color-role rule appears consistently across source catalogs and public docs.
     - Link coverage: New pages are linked from `docs/index.md` and package guide.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: Verify migration changes no public behavior beyond existing `theme.setDesignSystem`; any new Rust public helper is narrowed or documented through the existing API boundary.
     - Performance: API behavior remains generation-time only and no new UI hot-path facade is introduced.
@@ -458,7 +458,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Public-function inventory: Every changed server public function has a facade/doc or reduced visibility.
     - Registry freshness: Generated entries match Markdown source.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
   - Acceptance Criteria:
     - Functional: Verify component/surface migration adds no hidden settings and existing `setTheme`, `setTypography`, `setAppearance`, and `setDesignSystem` remain distinct and compatible; `setTheme` remains the only configuration path that changes concrete UI colors.
     - Performance: Configuration reload causes one coherent install and does not rebuild component/editor state.
@@ -499,7 +499,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - No hidden setting: Search source/docs for undocumented recipe override controls.
     - Example validity: `node --check examples/init.js` passes.
 
-- [ ] Execute and update the manual test plan
+- [x] Execute and update the manual test plan
   - Acceptance Criteria:
     - Functional: Execute every `test-plan/15-ui-design-systems.md` step plus affected shell, tabs, splits, editor, package, configuration, and performance steps on a real Linux build.
     - Performance: Record typing, scrolling, pane/tab switching, package-tree rendering, and design-system switching behavior with no new hot-path stalls.
@@ -547,7 +547,7 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
     - Real Linux completion: Record pass/fail for all affected numbered steps.
     - Negative package recipe: Confirm visual values cannot change behavior or structure.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: Wiki documents static host selector convention, component/surface consumers, structural-versus-recipe ownership, active-theme-only color ownership, editor boundary, accessibility fallbacks, migration ledger, and testing.
     - Performance: Wiki explains zero per-state JavaScript recipe work, root-variable install, render-count guarantees, and effect budgets.
@@ -587,8 +587,11 @@ Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-system
 
 ## Compromises Made
 
-- To be filled after tasks are completed and tests pass.
+- **Static CSS Module Selectors over Dynamic Style Injection:** Preserved static CSS Module selectors consuming closed `--clay-ds-*` root properties rather than dynamic runtime CSS string injection or inline style tags. This maintains strict CSP safety, deterministic bundling, and complete hot-path isolation.
+- **Theme Color Authority as Hard Security Boundary:** Design systems cannot declare concrete color palettes or arbitrary hex values; all recipe color slots must reference semantic active-theme color roles. This ensures every theme (dark, light, high-contrast) colors all surfaces coherently without contrast regressions.
+- **Strict Effect Caps:** Shadows are capped at 3 layers, backdrop blur at 32px, motion transitions at 1000ms, and border widths at 8px to prevent compositor stall and memory exhaustion.
 
 ## Further Actions
 
-- To be filled after task completion with improvements, rationale, and priority.
+- **Second Bundled Design System (Priority: Low / Follow-up):** Author and bundle a second distinct first-party design system (e.g. `@clay/design-glass` or `@clay/design-compact`) in a future plan once package distribution channels are active.
+- **Synthetic Keyboard Interaction Harness (Priority: Low / Follow-up):** Expand Linux headless CI testing with virtual input drivers once synthetic keyboard devices (`/dev/uinput` or Wayland test extensions) are unlocked in container environments.

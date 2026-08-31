@@ -37,6 +37,8 @@ pub(crate) struct ClayRuntimeEvaluation {
     /// configured one. The server assigns its authoritative revision only after
     /// the evaluation succeeds.
     pub(crate) active_typography: Option<crate::protocol::ActiveTypography>,
+    /// Phase 102 resolved active UI design-system snapshot from `setDesignSystem`.
+    pub(crate) active_design_system: Option<crate::shell::design_system::ActiveDesignSystem>,
     /// Warnings emitted by optional configuration-module imports. These are
     /// drained from the configuration runtime before the evaluation is
     /// returned so reload callers can retain and report them.

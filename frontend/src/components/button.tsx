@@ -2,6 +2,7 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { Button as RACButton } from "react-aria-components";
 
 import styles from "./button.module.css";
+import { recipeAttributes } from "./recipe-attributes";
 
 export type ButtonVariant = "default" | "muted" | "primary" | "danger";
 
@@ -23,10 +24,12 @@ export function ClayButton({
   isDisabled,
   ...rest
 }: ClayButtonProps & { isDisabled?: boolean }) {
+  const attrs = recipeAttributes("button", "root", variant);
   return (
     <RACButton
       className={`${styles.button} ${styles[variant] ?? styles.default}`}
       isDisabled={isDisabled}
+      {...attrs}
       {...(rest as Record<string, unknown>)}
     >
       {children}

@@ -150,6 +150,13 @@ pub(super) fn apply_persisted_preferences(
             }
         }
     }
+    if let Some(specifier) = &prefs.design_system
+        && let Err(error) = crate::server::ops::theme::apply_design_system(op_state, specifier)
+    {
+        op_state.record(format!(
+            "preferences: designSystem `{specifier}` rejected: {error}"
+        ));
+    }
 }
 
 pub(super) async fn evaluate_js_parse_handler(
