@@ -212,7 +212,7 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
     - On the ≤350-line coordinator target: not reachable without violating the plan's own constraints. The residual ~1,000 lines are (a) the `tokio::select!` transport skeleton (~470 lines of broadcast lanes the plan's Code Quality AC explicitly keeps in mod.rs), (b) the welcome/capability handshake (~190), (c) the routing match of thin family calls (~250), and (d) the trust prelude (identity gate/metrics). Compressing (a) needs a generic channel-dispatch table — the option the plan rejected ("indirection without a second consumer"); a context bag is likewise rejected by the loop's own `allow` reason ("state handles explicitly instead of hiding authority in a context bag"). Recorded as a compromise: the AC's substance (family modules own dispatch arms and errors) is satisfied by construction; the line target was extrapolated from pre-extraction numbers.
     - Gates: fmt, clippy `-D warnings` (one `#[allow(clippy::too_many_arguments)]` restored that the insertion had separated from its fn), lib 1,164 pass/1 ignored, protocol 200, security 134, presentation 40, runtime 71 pass in 628.3 s (baseline 625.4-626.0 s — +2.4 s noise; includes the `editor_performance` matrix; no hot-path change: viewport bookkeeping and parse-lane delivery are the same instructions, same locks, same channel usage).
 
-- [ ] Move giant inline test modules to sibling test files (review P2-1)
+- [x] Move giant inline test modules to sibling test files (review P2-1) (DONE 2026-08-31 21:05: four module moves to sibling tests.rs + three file->dir conversions; full suite green; drift-guard pins realigned)
   - Acceptance Criteria:
     - Functional: The six flagged files stop carrying thousands of lines of inline test code, following the existing `src/server/js_runtime/mod.rs:1534` (`mod tests;` + `src/server/js_runtime/tests.rs`) precedent: `src/server/connection/mod.rs` (tests ≈ L1786-L9679), `src/server/mod.rs` (6,681 lines), `src/client/mod.rs` (5,734; test mod from ≈ L1997), `src/server/workspace.rs` (5,724; tests from ≈ L2,036), `src/server/syntax.rs` (3,414), `src/shell/layout.rs` (3,395; test mods from L67). Plain-file modules (`workspace.rs`, `syntax.rs`, `layout.rs`, `client/mod.rs` is already a dir) are converted to directory modules (`workspace/mod.rs` + `workspace/tests.rs`) so the import path `crate::server::workspace` is unchanged; test code is moved verbatim (no test logic edits).
     - Performance: No runtime change — `#[cfg(test)]` code motion only; compile time for the test profile should not regress (record `cargo check --all-targets` time before/after).
@@ -244,6 +244,16 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - 2026-08-31 review §4 P2-1 table.
   - Test Cases to Write:
     - None new; acceptance is: same test count, same names, all green after each file move (`cargo test --lib` per commit, full suite at the end).
+    - Execution Evidence (2026-08-31 21:05):
+      - Moves (verbatim; dedent attempt reverted after it broke one `{`/`}` pair — verbatim + `cargo fmt` is the safe transform):
+        - `connection/mod.rs` 9,565→1,672 prod + `connection/tests.rs` 7,892 (515d0e9)
+        - `server/mod.rs` 6,681→5,838 + `server/tests.rs` 769 — the file has TWO top-level test modules; the tiny `#[cfg(all(test, windows))] mod windows_tests` (71 lines) stays inline (not a giant module) (d591424)
+        - `client/mod.rs` 5,729→1,991 + `client/tests.rs` 3,735 (e95554f)
+        - Plain files → directory modules per the js_runtime precedent so `crate::server::workspace` / `crate::server::syntax` / `crate::shell::layout` paths are unchanged: `workspace.rs`→`workspace/mod.rs` 3,197 + `tests.rs` 2,524; `syntax.rs`→`syntax/mod.rs` 2,495 + `tests.rs` 916 (its `include_str!("../../packages/...")` query paths bumped to `../../../` for the new nesting depth); `layout.rs`→`layout/mod.rs` 1,819 + `tests.rs` 1,573 (3ab5ff4)
+      - Test counts identical (1,164 lib, same names; `mod tests` keeps module path so existing `server::tests` etc. references hold — none exist cross-module, verified).
+      - Drift-guard follow-up (1b4ec68): 107 doc/test files pinned the old file paths (`src/server/workspace.rs` etc.) — mechanically realigned to `*/mod.rs`; `tests/performance_budgets.rs::production_body` learned the sibling-`tests.rs` convention (it truncated at an in-source `mod tests` marker that no longer exists for pure test files; the guard now skips files named `tests.rs`).
+      - Performance: `cargo check --all-targets` 10.1 s → 10.0 s warm (code motion only); full suite runtime leg 624 s (baseline 625-628 s).
+      - Gates: fmt, clippy `-D warnings`, lib 1,164, protocol 200, runtime 71, security 134, presentation 40 — all green after the full pass.
 
 - [ ] Split the `workspace-controller.ts` monolith (review P2-2)
   - Acceptance Criteria:
