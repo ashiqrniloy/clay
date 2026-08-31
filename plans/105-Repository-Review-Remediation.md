@@ -478,7 +478,7 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
     - Kept-as-is notes: workspace/mod.rs:2097 (from_utf8 re-slice of a validated prefix), 1386 (document checked above), 1705 (path index / registry sync), layout 395 (nonzero pane ID), 1615 (comb-ratio bounds), syntax 601 (first-party descriptor conflicts), client 1268 (pipe-busy retry loop invariant) — all carry messages naming the invariant.
     - Gates: fmt, clippy -D warnings, lib 1164, protocol 201, security 134.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces (DONE 2026-09-01 00:02: verification-only; inventory clean; no code changes)
   - Acceptance Criteria:
     - Functional: Inventory every Rust `pub` function removed or visibility-changed by this plan (the deleted `src/client/file_dialog.rs` exports and any `pub` items touched by the connection extraction); confirm none is a Clay JS API surface (no `deno_core` op, no JS facade, no `api-inventory.toml` entry, no docs page); confirm every remaining public programmatic surface is unchanged. Functions the extraction made internal are `pub(crate)`, per the boundary rule.
     - Performance: No runtime surface change; `cargo run --bin update-doc-registry` (if docs artifacts changed) and registry tests stay green.
@@ -504,6 +504,11 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - `.agents/skills/create-plan/references/clay.md` (Clay JS API task requirements).
   - Test Cases to Write:
     - None new; the existing registry/coverage tests are the gate.
+  - Execution Evidence (2026-09-01 00:02; verification-only, zero code edits):
+    - Removed-pub inventory (task 3): clay::client::file_dialog::{open_folder_dialog, open_markdown_file_dialog, FileDialogResult, FileDialogFilter, markdown_file_dialog_filters} — grep across src/ tests/ src-tauri/src + api-inventory.toml + docs (incl. docs/generated/clay-js-api-registry.json, regenerated in task 3): ZERO live references. Only decision-logs/ and pre-2025 plans mention the names (historical records). Note: authors of the summary say no op/facade/docs page pinned them; the JS API doc pages for client-open-file/folder-dialog were updated in task 3 to point at the Tauri bridge commands (backing_rust = src-tauri/src/commands.rs::pick_path).
+    - Visibility-change inventory (task 5): the extraction created three NEW family-internal items — pub(super) async fn deliver_parse_update, pub(super) async fn write_active_menu_session_closed, pub(super) fn track_pending_viewport_request — strictly more private than pub, no JS surface. No pre-existing pub item was demoted or removed by any plan task.
+    - Remaining-surface check: git log bde058d..HEAD shows zero commits touching src/server/ops* (no deno_core op added/removed), zero touching src-tauri (no capability/permission change), zero touching examples/init.js, zero touching .agents (except maintenance-validation.md pattern, a documented task-3 side effect). Configuration surfaces unchanged — no new configuration APIs were introduced by any task, so nothing to document.
+    - Gate tests (run explicitly, all green WITHOUT edits): clay_js_doc_registry 50/50, clay_js_facade_layout 6/6 (incl. the new d.ts parity test from task 10), primitives_docs 34/34. api-inventory.toml contains 0 file_dialog references.
 
 - [ ] Execute and update the manual test plan (test-plan/)
   - Acceptance Criteria:
