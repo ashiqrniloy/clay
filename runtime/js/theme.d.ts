@@ -51,6 +51,15 @@ export type Appearance = "light" | "dark" | "system";
 export type SetAppearanceOptions = {
     appearance: Appearance;
 };
+export type SetDesignSystemOptions = {
+    specifier: string;
+};
+export type ActiveDesignSystemSummary = {
+    specifier: string;
+    schemaVersion: number;
+    /** Bumped on every successful design-system activation. */
+    generation: number;
+};
 export type SetAppearanceSummary = {
     appearance: Appearance;
     /** Canonical default theme specifier resolved for this appearance, or null
@@ -60,3 +69,4 @@ export type SetAppearanceSummary = {
 export declare function setTheme(options: SetThemeOptions | string): ActiveThemeSummary;
 export declare function setTypography(options: TypographyConfiguration): ActiveTypographySummary;
 export declare function setAppearance(options: SetAppearanceOptions | Appearance): SetAppearanceSummary;
+export declare function setDesignSystem(options: SetDesignSystemOptions | string): ActiveDesignSystemSummary;

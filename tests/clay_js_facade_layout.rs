@@ -203,6 +203,78 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
 ];
 
 #[test]
+fn clay_js_facade_declarations_parity_with_implementations() {
+    // Review P3: the .d.ts must declare every function export the .js
+    // implements, and must not declare functions the .js no longer exports.
+    // The listed-export test above pins the planned API; this one is the
+    // exhaustive drift check across the actual files.
+    for path in fs::read_dir("runtime/js")
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "js"))
+    {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+        let declaration_path = path.with_extension("d.ts");
+        let declarations = fs::read_to_string(&declaration_path)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", declaration_path.display()));
+        let implemented: Vec<&str> = source
+            .lines()
+            .filter_map(|line| {
+                line.strip_prefix("export ")
+                    .and_then(|rest| rest.strip_prefix("async function "))
+                    .or_else(|| {
+                        line.strip_prefix("export ")
+                            .and_then(|rest| rest.strip_prefix("function "))
+                    })
+                    .map(|name| name.split('(').next().unwrap_or(name).trim())
+            })
+            .collect();
+        let implemented_lines: Vec<String> = source
+            .lines()
+            .map(str::to_owned)
+            .filter(|line| line.starts_with("export "))
+            .collect();
+        for name in &implemented {
+            assert!(
+                declarations.contains(&format!("function {name}")),
+                "{} is exported by {} but missing from {}",
+                name,
+                path.display(),
+                declaration_path.display()
+            );
+        }
+        let declared: Vec<&str> = declarations
+            .lines()
+            .filter_map(|line| {
+                line.strip_prefix("export declare ")
+                    .and_then(|rest| rest.strip_prefix("async function "))
+                    .or_else(|| {
+                        line.strip_prefix("export declare ")
+                            .and_then(|rest| rest.strip_prefix("function "))
+                    })
+                    .map(|name| name.split('(').next().unwrap_or(name).trim())
+            })
+            .collect();
+        for name in &declared {
+            let export_line = format!("export function {name}(");
+            let async_export_line = format!("export async function {name}(");
+            assert!(
+                implemented_lines
+                    .iter()
+                    .any(|line| line.starts_with(&export_line)
+                        || line.starts_with(&async_export_line)),
+                "{} is declared by {} but missing from {}",
+                name,
+                declaration_path.display(),
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
 fn clay_js_facade_modules_exist_with_expected_exports() {
     for (path, exports) in FACADE_MODULES {
         let source =
