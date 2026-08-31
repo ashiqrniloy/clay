@@ -293,7 +293,7 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - Deviation from the plan's "two separate commits": both extractions share one seam (envelopeContext wraps the commands dispatch callback), so they cannot land as two independent green commits; documented in the commit message. The two-module split itself is exactly as planned.
       - Gates: `tsc --noEmit`, eslint, prettier, vitest 194 pass (28 files, incl. 15 workspace-controller cases — restore/persist scheduling covered), `npm run build` ok. Bundle: shell 169.8 kB gzip (budget 180), total 360.0 kB (400) — baseline 169.3/359.6, +0.5 kB is module-seam scaffolding; chunks recorded in commit.
 
-- [ ] Split the `editor_performance` suite so it parallelizes (review P2-3)
+- [x] Split the `editor_performance` suite so it parallelizes (review P2-3) (DONE 2026-08-31 22:10, commit 84ed71a: 656→49.3 s matrix / 626→49.4 s suite)
   - Acceptance Criteria:
     - Functional: `tests/editor_performance.rs` keeps every matrix cell covered; the single 656-second `editor_performance_matrix_holds_deterministic_invariants` test (L108) is split into per-size-class tests that `cargo test` runs in parallel, or the 50 MiB leg is moved behind an explicit env-gated larger-matrix test with the policy recorded in a decision log and `test-plan/` ceilings — the split-with-full-coverage option is preferred and must be tried first.
     - Performance: Suite wall time ≤ 240 s on the development machine (baseline ≈ 656 s); every invariant assertion from the current single test still executes against every cell it covered.
@@ -326,6 +326,14 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - Baseline flake: `large_document::large_document_open_edit_save_reload_roundtrip_is_chunked` failed once under concurrent load (628.9 ms vs 500 ms head-paint budget), passed on retry — deterministic-assertion candidate to consider in the same task.
   - Test Cases to Write:
     - The split tests themselves are the deliverable; acceptance is measured wall time with identical cell coverage (list the matrix cells covered per test in a comment).
+  - Execution Evidence (2026-08-31 22:10, commit 84ed71a):
+    - Timing: matrix tests 482-656 s (serial) -> 49.3 s (3 tests parallel); full runtime target 626 s -> 49.4 s (73 tests: 71-1+3). AC wall ≤ 240 s met with 5x headroom. Per-class solo walls (post-fix): small 58 s (24 cells), medium 14 s (5), large 22 s (2) — measured parallel: max ≈ 49 s.
+    - Split: one test -> `editor_performance_{small,medium,large}_cells_hold_invariants`; shared `cells_for(SizeClass)` filter (no duplicated matrix definitions) + `run_matrix_cells` runner; each class keeps its own server ("one server mirrors a real session" per class). Cell lists per test in comments (24/5/2; 31 cells total).
+    - Root cause discovered via phase instrumentation: the 10 s flat read-gap in `wait_exactly_one_patch` was the wall-time dominator — patches always arrive at t=0 (trace showed t=0.000), so each cell burned 2 x 10 s of idle quiet-window waiting (20 s/cell, ~0 CPU). The probe is now two-phase: 30 s gap BEFORE the patch (loaded-CI tolerance, strictly more permissive than the old 10 s) and 1 s idle gap after it to trip on late duplicates (server delivers one patch per request id structurally; the gap is a tripwire, not a protocol deadline). All invariant assertions unchanged and still execute per cell.
+    - Not a documented test-plan ceiling (verified test-plan/index.md); no decision-log entry needed. The 50 MiB leg stays in the always-on large class with full coverage.
+    - Baseline flake note from the plan (`large_document` head-paint 628.9 ms vs 500 ms): NOT addressed here — it is a large_document.rs budget concern, not the matrix; reconsidered and left for a future task (plan P2-3 scope was suite parallelism).
+    - Doc drift fixed: build-and-test.md Plan 099 section rewritten; wiki citations in frontend-edit-synchronization, parse-task-lifecycle, parse-coordinator, desktop-typed-bridge, performance-fixtures repointed ('cargo test --test runtime editor_performance_'); primitives_docs guard pin updated to the three new test names (caught the stale doc first, as designed).
+    - Gates: fmt/clippy/check clean; lib 1164/1 ignored, protocol 200 (incl. primitives_docs + documentation_coverage), runtime 73 @ 49.4 s, security 134, presentation 40. graft index refreshed.
 
 - [ ] Code-split the frontend index chunk below the 500 KiB warning (review P2-4)
   - Acceptance Criteria:
