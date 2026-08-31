@@ -335,7 +335,7 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
     - Doc drift fixed: build-and-test.md Plan 099 section rewritten; wiki citations in frontend-edit-synchronization, parse-task-lifecycle, parse-coordinator, desktop-typed-bridge, performance-fixtures repointed ('cargo test --test runtime editor_performance_'); primitives_docs guard pin updated to the three new test names (caught the stale doc first, as designed).
     - Gates: fmt/clippy/check clean; lib 1164/1 ignored, protocol 200 (incl. primitives_docs + documentation_coverage), runtime 73 @ 49.4 s, security 134, presentation 40. graft index refreshed.
 
-- [ ] Code-split the frontend index chunk below the 500 KiB warning (review P2-4)
+- [x] Code-split the frontend index chunk below the 500 KiB warning (review P2-4) (DONE 2026-08-31 22:35, commit 78e5c74: index 517.98→468.84 kB raw, Vite warning cleared)
   - Acceptance Criteria:
     - Functional: `frontend/vite.config.ts` gains a `manualChunks` (or equivalent rollup) mapping so `@codemirror/*` and `react-aria-components` leave the index chunk into lazy-or-parallel chunks; the app boots identically (router lazy routes already exist) and all Vitest suites pass.
     - Performance: The main index chunk drops below 500 KiB raw (clearing the Vite warning; baseline 517 KiB raw / 165 KiB gzip); gzip totals keep passing `frontend/scripts/bundle-budget.mjs` (shell ≤ 180 kB, total ≤ 400 kB) with improved headroom; record the full before/after chunk table; no new waterfall on first paint (startup chunk count and load order recorded).
@@ -367,6 +367,13 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - 2026-08-31 review §4 P2-4; baseline chunk table from task 1.
   - Test Cases to Write:
     - Existing bundle-budget gate (`frontend/scripts/bundle-budget.mjs` via the frontend check) plus recorded chunk table; Vitest suites green.
+  - Execution Evidence (2026-08-31 22:35, commit 78e5c74):
+    - Inventory first (throwaway `buildEnd`/`generateBundle` hook writing dist/chunk-inventory.json, then deleted): index chunk = react-dom/react-aria/react-router + a @codemirror slice (141K rendered); WorkspacePanes = @codemirror 700K + @lezer + react-aria + react-aria-components; controls/text-field = small react-aria shares; ChatPanel = zod/@ag-ui/rxjs. react-aria-components is NOT statically imported by index.
+    - Split: `manualChunks(id)` returning "codemirror" for `/node_modules/@codemirror/` ids. react-aria-components deliberately left out (config comment + performance.md rationale): a top-level chunk would trip the `bundle-budget.mjs` filename-lane gate (nothing matches its lane regexes -> shell) or inflate startup with lazy-only modules; the index already satisfies the AC without it.
+    - Before/after: index 517.98/165.44 -> 468.84/148.65 kB raw/gz; new codemirror chunk 361.65/117.80; WorkspacePanes 373.92/122.84 -> 61.52/21.43. Vite warning cleared (no chunk > 500 kB).
+    - Budget: shell 169.8 -> 153.4 kB (/180), total 360.0 -> 359.7 kB (/400) — headroom improved as AC requires. Startup module requests 1 -> 2, modulepreload-parallel (index + codemirror) — no first-paint waterfall; startup gzip +~101 kB / editor-open -~101 kB (eager shell statically imports the editor session via PaneTree/workspace-controller, so rollup merges the full vendor share into the startup-parallel chunk) — recorded in performance.md.
+    - Docs: `docs/development/performance.md` gained the chunk table (with date) under the client-budgets section.
+    - Gates: tsc -b + vite build ok, lint, prettier, vitest 194/194, check:budget pass. No CSP change; all chunks 'self'.
 
 - [ ] Add or verify the `runtime/js` `.d.ts` drift check (review P3)
   - Acceptance Criteria:
