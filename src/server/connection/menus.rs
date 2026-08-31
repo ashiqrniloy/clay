@@ -687,3 +687,22 @@ where
     }
     Ok(())
 }
+
+/// A command catalogue is generation-bound: close the active menu session
+/// before replaying the replacement generation's state (the loop's
+/// runtime-state lane); activation also checks the stamp if both events race.
+pub(super) async fn write_active_menu_session_closed<S>(
+    codec: Codec,
+    stream: &mut S,
+    menu_sessions: &mut ServerMenuSessions,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    if let Some(session_id) = menu_sessions.cancel_active() {
+        codec
+            .write_server_message(stream, &ServerMessage::TransientMenuClosed { session_id })
+            .await?;
+    }
+    Ok(())
+}

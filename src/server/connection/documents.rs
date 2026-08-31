@@ -1,14 +1,14 @@
 //! Document family: edit/resync/decorations/open/save/reload/close/status/list,
 //! selection queries, parse-window scheduling. Plan 090 task 2 extraction.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use tokio::{io::AsyncWrite, sync::Mutex};
 
 use crate::{
     perf::{
         budgets::{DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES},
-        metrics::{MetricMetadata, SERVER_EDIT_ACK, global_recorder},
+        metrics::{BRIDGE_PATCH_DELIVERY, MetricMetadata, SERVER_EDIT_ACK, global_recorder},
     },
     protocol::{
         ClientId, DocumentId, DocumentMetadata, DocumentVersion, ParseByteRange, ParseInputEdit,
@@ -18,6 +18,7 @@ use crate::{
     },
 };
 
+use super::PendingViewportPatch;
 use crate::server::connection::{file_operation_failed, teardown_closed_document};
 
 /// Upper bound on parse windows scheduled per viewport request. A tall or
@@ -1103,6 +1104,170 @@ where
     };
     codec.write_server_message(stream, &response).await?;
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+/// Derive authoritative output coverage from the patch's own members — the
+/// union of every member's viewport range, sorted and deduplicated. The
+/// requested (parse-context) range is intentionally not claimed.
+fn finalize_viewport_covered_ranges(patch: &mut crate::protocol::ViewportRenderPatch) {
+    let mut ranges: Vec<(u64, u64)> = patch
+        .decorations
+        .iter()
+        .map(|set| (set.viewport_byte_start, set.viewport_byte_end))
+        .chain(
+            patch
+                .diagnostics
+                .iter()
+                .map(|set| (set.viewport_byte_start, set.viewport_byte_end)),
+        )
+        .chain(patch.folds.iter().filter_map(|set| {
+            let first = set.ranges.first()?;
+            let last = set.ranges.last()?;
+            Some((first.byte_start, last.byte_end))
+        }))
+        .collect();
+    ranges.sort_unstable();
+    ranges.dedup();
+    patch.covered_ranges = ranges
+        .into_iter()
+        .map(|(byte_start, byte_end)| crate::protocol::TextByteRange::new(byte_start, byte_end))
+        .collect();
+}
+
+/// One parse-update lane delivery, moved verbatim from the connection select
+/// loop (2026-08-31 review P1-3): request-scoped updates aggregate into their
+/// pending patch; edit-driven updates keep the per-update frames.
+pub(super) async fn deliver_parse_update<S>(
+    codec: Codec,
+    stream: &mut S,
+    pending_viewport_patches: &mut HashMap<
+        (DocumentId, crate::protocol::ViewportRequestId),
+        PendingViewportPatch,
+    >,
+    update: Option<crate::protocol::IncrementalParseUpdate>,
+    client_id: ClientId,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let Some(update) = update else {
+        return Ok(());
+    };
+    if let Some(request_id) = update.request_id
+        && update.client_id == Some(client_id)
+        && let Some(pending) = pending_viewport_patches.get_mut(&(update.document_id, request_id))
+    {
+        if pending.remaining > 0 {
+            pending.remaining -= 1;
+        }
+        pending.patch.decorations.extend(update.decoration_updates);
+        if let Some(set) = update.diagnostic_update {
+            pending.patch.diagnostics.push(set);
+        }
+        if let Some(set) = update.folding_update {
+            pending.patch.folds.push(set);
+        }
+        pending.patch.trace_id = update.trace_id;
+        if pending.remaining == 0 {
+            let mut patch = pending_viewport_patches
+                .remove(&(update.document_id, request_id))
+                .expect("pending entry checked")
+                .patch;
+            finalize_viewport_covered_ranges(&mut patch);
+            let patch_delivery = global_recorder().scope_with_metadata(
+                BRIDGE_PATCH_DELIVERY,
+                MetricMetadata::document(patch.document_id, patch.document_version)
+                    .with_trace_id(patch.trace_id),
+            );
+            codec
+                .write_server_message(
+                    stream,
+                    &crate::protocol::ServerMessage::ViewportRenderPatch(patch),
+                )
+                .await?;
+            patch_delivery.finish();
+        }
+        return Ok(());
+    }
+    let patch_delivery = global_recorder().scope_with_metadata(
+        BRIDGE_PATCH_DELIVERY,
+        MetricMetadata::document(update.document_id, update.document_version)
+            .with_trace_id(update.trace_id),
+    );
+    // One parse update's chunks ship in a single frame;
+    // single-chunk updates keep the plain DecorationSet wire.
+    let mut chunks = update.decoration_updates;
+    match chunks.len() {
+        0 => {}
+        1 => {
+            let set = chunks.pop().expect("length checked");
+            codec
+                .write_server_message(stream, &crate::protocol::ServerMessage::DecorationSet(set))
+                .await?;
+        }
+        _ => {
+            codec
+                .write_server_message(
+                    stream,
+                    &crate::protocol::ServerMessage::DecorationBatch(chunks),
+                )
+                .await?;
+        }
+    }
+    if let Some(set) = update.diagnostic_update {
+        codec
+            .write_server_message(stream, &crate::protocol::ServerMessage::DiagnosticSet(set))
+            .await?;
+    }
+    if let Some(set) = update.folding_update {
+        // FOLDING_RANGE_PAYLOAD_BUDGET_BYTES enforced at publish.
+        codec
+            .write_server_message(
+                stream,
+                &crate::protocol::ServerMessage::FoldingRangeSet(set),
+            )
+            .await?;
+    }
+    patch_delivery.finish();
+    Ok(())
+}
+
+/// Track one scheduled viewport request: the newest request for a document
+/// supersedes any still-pending older patch before its remaining windows are
+/// even counted (protocol v29 atomic viewport aggregation).
+pub(super) fn track_pending_viewport_request(
+    pending_viewport_patches: &mut HashMap<
+        (DocumentId, crate::protocol::ViewportRequestId),
+        PendingViewportPatch,
+    >,
+    document_id: DocumentId,
+    document_version: DocumentVersion,
+    request_id: crate::protocol::ViewportRequestId,
+    trace_id: Option<crate::protocol::PerformanceTraceId>,
+    scheduled: usize,
+) {
+    pending_viewport_patches.retain(|(pending_document, _), _| *pending_document != document_id);
+    if scheduled > 0 {
+        pending_viewport_patches.insert(
+            (document_id, request_id),
+            PendingViewportPatch {
+                remaining: scheduled,
+                patch: crate::protocol::ViewportRenderPatch {
+                    request_id,
+                    document_id,
+                    document_version,
+                    status: crate::protocol::ViewportRenderStatus::Complete,
+                    reason: None,
+                    covered_ranges: Vec::new(),
+                    decorations: Vec::new(),
+                    diagnostics: Vec::new(),
+                    folds: Vec::new(),
+                    trace_id,
+                },
+            },
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles

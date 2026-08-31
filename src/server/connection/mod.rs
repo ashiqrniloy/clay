@@ -10,15 +10,13 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::perf::metrics::{
-    BRIDGE_PATCH_DELIVERY, MetricMetadata, MetricValue, SERVER_RECEIVE, global_recorder,
-};
+use crate::perf::metrics::{MetricMetadata, MetricValue, SERVER_RECEIVE, global_recorder};
+use crate::protocol::ViewportRenderPatch;
 use crate::protocol::{
     AgentServerMessage, ClientId, ClientMessage, DocumentId, PROTOCOL_VERSION, ProtocolErrorCode,
     RuntimeDiagnostic, ServerMessage, TabCommand, TabId, TabRegistrySnapshot, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
-use crate::protocol::{ViewportRenderPatch, ViewportRenderStatus};
 
 use super::{
     RuntimeGenerationStore, TabServerState,
@@ -129,34 +127,6 @@ struct PendingViewportPatch {
     /// Scheduled parse windows still owed a terminal update.
     remaining: usize,
     patch: ViewportRenderPatch,
-}
-
-/// Derive authoritative output coverage from the patch's own members — the
-/// union of every member's viewport range, sorted and deduplicated. The
-/// requested (parse-context) range is intentionally not claimed.
-fn finalize_viewport_covered_ranges(patch: &mut ViewportRenderPatch) {
-    let mut ranges: Vec<(u64, u64)> = patch
-        .decorations
-        .iter()
-        .map(|set| (set.viewport_byte_start, set.viewport_byte_end))
-        .chain(
-            patch
-                .diagnostics
-                .iter()
-                .map(|set| (set.viewport_byte_start, set.viewport_byte_end)),
-        )
-        .chain(patch.folds.iter().filter_map(|set| {
-            let first = set.ranges.first()?;
-            let last = set.ranges.last()?;
-            Some((first.byte_start, last.byte_end))
-        }))
-        .collect();
-    ranges.sort_unstable();
-    ranges.dedup();
-    patch.covered_ranges = ranges
-        .into_iter()
-        .map(|(byte_start, byte_end)| crate::protocol::TextByteRange::new(byte_start, byte_end))
-        .collect();
 }
 
 fn client_message_trace_id(message: &ClientMessage) -> Option<crate::protocol::PerformanceTraceId> {
@@ -783,14 +753,12 @@ where
                     // A command catalogue is generation-bound. Close it before
                     // replaying the replacement generation's state; activation
                     // also checks the stamp if both events race.
-                    if let Some(session_id) = menu_sessions.cancel_active() {
-                        codec
-                            .write_server_message(
-                                &mut stream,
-                                &ServerMessage::TransientMenuClosed { session_id },
-                            )
-                            .await?;
-                    }
+                    menus::write_active_menu_session_closed(
+                        codec,
+                        &mut stream,
+                        &mut menu_sessions,
+                    )
+                    .await?;
                     // Always send the latest complete snapshot. Lagged receivers
                     // must not replay intermediate generations.
                     if let Some(snapshot) = runtime_generation
@@ -811,84 +779,17 @@ where
             // Plan 060 T4 (P0-3): parse updates arrive only for documents this
             // connection opened, over this connection's bounded subscription.
             update = parse_updates_rx.recv() => {
-                if let Some(update) = update {
-                    // Request-scoped updates aggregate into their pending patch;
-                    // edit-driven updates keep the per-update frames.
-                    if let Some(request_id) = update.request_id
-                        && update.client_id == Some(client_id)
-                        && let Some(pending) =
-                            pending_viewport_patches.get_mut(&(update.document_id, request_id))
-                    {
-                        if pending.remaining > 0 {
-                            pending.remaining -= 1;
-                        }
-                        pending.patch.decorations.extend(update.decoration_updates);
-                        if let Some(set) = update.diagnostic_update {
-                            pending.patch.diagnostics.push(set);
-                        }
-                        if let Some(set) = update.folding_update {
-                            pending.patch.folds.push(set);
-                        }
-                        pending.patch.trace_id = update.trace_id;
-                        if pending.remaining == 0 {
-                            let mut patch = pending_viewport_patches
-                                .remove(&(update.document_id, request_id))
-                                .expect("pending entry checked")
-                                .patch;
-                            finalize_viewport_covered_ranges(&mut patch);
-                            let patch_delivery = global_recorder().scope_with_metadata(
-                                BRIDGE_PATCH_DELIVERY,
-                                MetricMetadata::document(patch.document_id, patch.document_version)
-                                    .with_trace_id(patch.trace_id),
-                            );
-                            codec
-                                .write_server_message(
-                                    &mut stream,
-                                    &ServerMessage::ViewportRenderPatch(patch),
-                                )
-                                .await?;
-                            patch_delivery.finish();
-                        }
-                        continue;
-                    }
-                    let patch_delivery = global_recorder().scope_with_metadata(
-                        BRIDGE_PATCH_DELIVERY,
-                        MetricMetadata::document(update.document_id, update.document_version)
-                            .with_trace_id(update.trace_id),
-                    );
-                    // One parse update's chunks ship in a single frame;
-                    // single-chunk updates keep the plain DecorationSet wire.
-                    let mut chunks = update.decoration_updates;
-                    match chunks.len() {
-                        0 => {}
-                        1 => {
-                            let set = chunks.pop().expect("length checked");
-                            codec
-                                .write_server_message(&mut stream, &ServerMessage::DecorationSet(set))
-                                .await?;
-                        }
-                        _ => {
-                            codec
-                                .write_server_message(&mut stream, &ServerMessage::DecorationBatch(chunks))
-                                .await?;
-                        }
-                    }
-                    if let Some(set) = update.diagnostic_update {
-                        codec
-                            .write_server_message(&mut stream, &ServerMessage::DiagnosticSet(set))
-                            .await?;
-                    }
-                    if let Some(set) = update.folding_update {
-                        // FOLDING_RANGE_PAYLOAD_BUDGET_BYTES enforced at publish.
-                        codec
-                            .write_server_message(
-                                &mut stream,
-                                &ServerMessage::FoldingRangeSet(set),
-                            )
-                            .await?;
-                    }
-                    patch_delivery.finish();
-                }
+                // Request-scoped updates aggregate into their pending patch;
+                // edit-driven updates keep the per-update frames. Family-owned
+                // delivery: documents.rs owns patch aggregation and batching.
+                documents::deliver_parse_update(
+                    codec,
+                    &mut stream,
+                    &mut pending_viewport_patches,
+                    update,
+                    client_id,
+                )
+                .await?;
                 continue;
             }
             diagnostic = parse_diagnostics_rx.recv() => {
@@ -1171,30 +1072,15 @@ where
                 )
                 .await?;
                 // Latest request wins: a newer request for the same document
-                // supersedes any still-pending older patch before its remaining
-                // windows are even counted.
-                pending_viewport_patches
-                    .retain(|(pending_document, _), _| *pending_document != document_id);
-                if scheduled > 0 {
-                    pending_viewport_patches.insert(
-                        (document_id, request_id),
-                        PendingViewportPatch {
-                            remaining: scheduled,
-                            patch: ViewportRenderPatch {
-                                request_id,
-                                document_id,
-                                document_version,
-                                status: ViewportRenderStatus::Complete,
-                                reason: None,
-                                covered_ranges: Vec::new(),
-                                decorations: Vec::new(),
-                                diagnostics: Vec::new(),
-                                folds: Vec::new(),
-                                trace_id,
-                            },
-                        },
-                    );
-                }
+                // supersedes any still-pending older patch (protocol v29).
+                documents::track_pending_viewport_request(
+                    &mut pending_viewport_patches,
+                    document_id,
+                    document_version,
+                    request_id,
+                    trace_id,
+                    scheduled,
+                );
             }
             ClientMessage::OpenDocument {
                 client_id,
