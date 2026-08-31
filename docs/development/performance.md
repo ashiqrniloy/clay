@@ -1073,6 +1073,38 @@ gzip gate (`frontend/scripts/bundle-budget.mjs`, wired into CI).
 Latest measured production build (2026-08-24): shell 161.0 kB gzip,
 total 343.7 kB gzip — within budget, none raised.
 
+### Code-split of the index chunk (plan 105 task 9, review P2-4, 2026-08-31)
+
+`frontend/vite.config.ts` gained a `manualChunks` mapping that pulls all
+`@codemirror/*` modules into one parallel `codemirror` chunk so the index
+chunk clears the Vite 500 KiB warning (517.98
+-> 468.84 kB raw). `react-aria-components` was evaluated and left out of the
+split: the 2026-08-31 module inventory shows it is not statically imported by
+the index chunk (it lives in lazy controls/text-field/WorkspacePanes chunks),
+so a top-level chunk would either count toward the shell budget
+(filename-lane gate in `bundle-budget.mjs`) or drag lazy-only modules into
+startup.
+
+Before/after chunk table (production build, 2026-08-31):
+
+| Chunk                       | Before raw / gz    | After raw / gz      | Lane     |
+| --------------------------- | ------------------ | ------------------- | -------- |
+| index                       | 517.98 / 165.44 kB | 468.84 / 148.65 kB  | shell    |
+| codemirror (new)            | —                  | 361.65 / 117.80 kB  | editor   |
+| WorkspacePanes (editor UI)  | 373.92 / 122.84 kB | 61.52 / 21.43 kB    | editor   |
+| ChatPanel                   | 145.71 / 37.97 kB  | 145.75 / 37.99 kB   | chat     |
+| controls                    | 59.34 / 20.70 kB   | 59.34 / 20.69 kB    | workflow |
+| registry / text-field / etc | unchanged          | unchanged           | —        |
+
+Gate results: `check:budget` shell 153.4 kB (/180, headroom 26.6 kB,
+previously 169.8), total 359.7 kB (/400, previously 360.0). Startup module
+requests: 1 -> 2, both modulepreload-parallel (index + codemirror), so no new
+first-paint waterfall; startup gzip bytes shift +~101 kB because the eager
+shell already imports a codemirror slice (`PaneTree`/`workspace-controller`
+import the editor session statically), which rollup merges with the lazy
+renderer share into the single parallel chunk — editor-open bytes drop by the
+same amount. No CSP change; all chunks load from `'self'`.
+
 ### Editor offset conversion and viewport requests
 
 The keystroke-to-paint rule (no full-document work per edit) is enforced in

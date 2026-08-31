@@ -15,6 +15,21 @@ export default defineConfig({
   build: {
     target: "es2022",
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        // Review P2-4: pull @codemirror/* (a small eager shell slice plus the
+        // whole lazy editor renderer) into one parallel chunk so the index
+        // chunk clears the 500 KiB Vite warning. react-aria-components was
+        // evaluated and left out: the module inventory (2026-08-31) shows it
+        // is not statically imported by the index chunk, and a top-level
+        // chunk would either count toward the shell budget (filename-lane
+        // gate in scripts/bundle-budget.mjs) or drag lazy-only modules into
+        // startup.
+        manualChunks(id: string) {
+          if (id.includes("/node_modules/@codemirror/")) return "codemirror";
+        },
+      },
+    },
   },
   test: {
     environment: "node",
