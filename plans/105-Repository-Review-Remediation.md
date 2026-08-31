@@ -537,6 +537,13 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
   - Test Cases to Write:
     - No new steps unless user-visible behavior emerged; the smoke pass itself is the check.
 
+  - Execution Evidence (2026-09-01 00:20, commit b3dd79d):
+    - Build: `cargo build` on the current branch (binary contains tasks 2-13 changes).
+    - Host preflight: `computer-use-linux doctor` — AT-SPI + window listing OK; `can_send_development_input=false` (no uinput/xdotool/ydotool/wtype), same ceiling as every prior live record.
+    - Launch gate: `scripts/capture-ui-review.sh --fixture ui-review-default` → `review.status=PASS` at `code-reviews/screenshots/2026-09-01-plan105-manual/default/` (900×600 logical, private socket, mode-700 config). Clay-only crop `screenshot-clay.png` retained (welcome state, CLAY/Workspace tab bar, named Open file/Open folder, sanitized status); full-desktop portal PNG containing unrelated user windows deleted per retention policy. AT-SPI names contain no /home paths. Footer `Connected` invisible to AT-SPI = documented WebKitGTK live-region ceiling (Plan 097), not a regression.
+    - Modules recorded: 01 (launch gate PASS; L2-L5/L9-L11 NOT RUN input-blocked, paths unchanged), 04 (E37/E38 automated companions PASS — split editor_performance suite 49.44 s + frontend hot-path 194; live UNRESOLVED), 13 (D20/D21 isolation suites PASS; live UNRESOLVED), 11 (new step Q38 for task-9 chunk-split startup — modulepreload parallel codemirror chunk, index raw 468.84 kB < 500 KiB warning, budgets 153.4/180 + 359.7/400 kB gzip; boot capture of split build), index (Plan 105 record: no user-visible behavior by design; one deliberate change → Q38 steps, not chat-only, per the Code Quality AC).
+    - Parity ledger: Q38 added to performance.budgets.feel manual_steps + verified_manual evidence in docs/development/tauri-react-parity-ledger.json; documentation_coverage 11/11 + protocol 201/201 green.
+
 - [ ] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: The project code wiki is updated after all implementation tasks complete: `docs/wiki/modules/client-file-dialog.md` (dialog path now Tauri-only), connection/server/workspace/syntax/layout/client module pages (family dispatch split, sibling test files), `docs/wiki/modules/react-shell.md` (controller split), and any page referencing deleted files or old module paths; every wiki page stays linked from `docs/wiki/index.md`.
