@@ -410,7 +410,7 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
     - AC mutation verification (both directions, reverted after): rename in .d.ts -> fails at declared->implemented assert naming pair; rename in .js -> fails at implemented->declared.
     - Gates: protocol 201/201, clippy -D warnings, fmt. Note: interim `git checkout` of theme.d.ts during mutation testing reverted the fix (uncommitted at that point) — re-applied before final green; lesson: commit the fix file before mutation trials or use `git stash`-style backups.
 
-- [ ] Audit `std::sync::Mutex` guards held across `.await` (review P3)
+- [x] Audit `std::sync::Mutex` guards held across `.await` (review P3) (DONE 2026-08-31 23:20, commit 326700c: 0 violations; audit doc written)
   - Acceptance Criteria:
     - Functional: Every `std::sync::Mutex` used on async paths (`OutputRouter` stores, `RuntimeDiagnosticStore` in `src/server/connection/mod.rs:63-103`, `WorkspaceState`/`DocumentState`/`StaticSduiState` handles threaded through connection code) is audited: each lock acquisition site is listed with whether its guard can be held across an `.await` (including held-across-`?`/early-return paths); violations are fixed by shrinking scopes or moving to blocking-safe patterns, or documented as safe with the reason (e.g., guard dropped before any `.await`).
     - Performance: No lock added or widened; any scope-shrinking fixes must not add measurable regression to the connection suites.
@@ -436,6 +436,13 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - 2026-08-31 review §4 P3 (second item).
   - Test Cases to Write:
     - None new unless a violation is found and fixed; then the existing connection/stress suites plus one targeted regression test reproducing the fixed hang pattern if feasible.
+  - Execution Evidence (2026-08-31 23:20, commit 326700c):
+    - Result: ZERO violations. No code changed, no locks added/widened, no scope shrinks needed.
+    - Mechanical argument that shrinks the audit surface: every async tree (connection family, config watcher, git refresh, agent daemon, client run_connection, parse sessions) spawns through Send-bound sites (JoinSet::spawn / tokio::spawn); std MutexGuard is !Send, so guard-across-await in those trees is a COMPILE ERROR — rustc is the enforcement. Verified each spawn site by reading it.
+    - Non-Send surfaces only: Deno worker block_on (worker.rs:238-369) + all async op fns (22 total). Manually audited each: the only std locks are three package-service sites in language_server authorize/start_session + packages load_in_package_domain, all `{ ... }` block-scoped returning cloned data, dropped before any .await. documents/workspace/git ops use tokio mutexes (.lock().await by design).
+    - Named stores verified: RuntimeDiagnosticStore::publish (sync OutputRouter::broadcast = try_send loop, no await possible); connection subscribe setup (connection/mod.rs:518-519, statement-scoped std guard); ConnectionOutputSubscriptions::drop (sync Drop); tabs bound_state (statement temporaries); sweep_expired_tabs live_clients std temporary (clone()ed, dropped before the adjacent .lock().await); parse_coordinator inner (sync fns / block-scoped); configuration registry (sync methods only); execute_command branches (CommandExecutor::execute/execute_discovery are SYNC — the final branch borrows a temporary guard with no await, verified signature).
+    - False-positive triage: worker block_on sites don't hold locks into block_on (begin_evaluation takes/drops all locks synchronously); op add_root/discover-root "std_guards" flags were newline-lookahead artifacts (`.lock()` then `.await` on next line = tokio .lock().await).
+    - Evidence file: docs/development/std-mutex-await-audit-2026-08-31.md (methodology + 20-row per-site table). docs/development is the established location for audit notes (taurpc-spike, editor-performance-review, ui-* audits); documentation_coverage + wiki are unaffected.
 
 - [ ] Sweep production-path `unwrap`/`expect` in the refactored files (review P3)
   - Acceptance Criteria:
