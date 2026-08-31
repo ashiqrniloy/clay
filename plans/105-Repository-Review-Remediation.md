@@ -444,7 +444,7 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
     - False-positive triage: worker block_on sites don't hold locks into block_on (begin_evaluation takes/drops all locks synchronously); op add_root/discover-root "std_guards" flags were newline-lookahead artifacts (`.lock()` then `.await` on next line = tokio .lock().await).
     - Evidence file: docs/development/std-mutex-await-audit-2026-08-31.md (methodology + 20-row per-site table). docs/development is the established location for audit notes (taurpc-spike, editor-performance-review, ui-* audits); documentation_coverage + wiki are unaffected.
 
-- [ ] Sweep production-path `unwrap`/`expect` in the refactored files (review P3)
+- [x] Sweep production-path `unwrap`/`expect` in the refactored files (review P3) (DONE 2026-08-31 23:35, commit f6daddd: 10 message-less unwraps -> expects; all prod sites classified)
   - Acceptance Criteria:
     - Functional: In the six files split by the sibling-tests task (now prod modules), every remaining `unwrap`/`expect` in non-test code is either (a) provably unreachable invariant with a comment naming the invariant, or (b) replaced by typed error handling/diagnostics where the value can genuinely be absent; the connection loop and ops modules get first pass, `protocol/mod.rs` (already exemplary at 8 in 3,038 lines) is untouched unless a stray is found.
     - Performance: No hot-path allocation added; error paths replace panics only.
@@ -470,6 +470,13 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - 2026-08-31 review §4 P3 (third item).
   - Test Cases to Write:
     - One test per converted reachable site (feed the absent/invalid input, assert the typed error), only where an existing test doesn't already cover the error path.
+
+  - Execution Evidence (2026-08-31 23:35, commit f6daddd):
+    - Counts (prod ranges only; test spans excluded via brace-matched cfg(test)/windows_tests regions): connection/mod.rs 5 (all lock class), server/mod.rs 6 (all lock class; ~165 more in test spans), workspace/mod.rs 6 prod (3 lock + 3 invariant, messages present; 4 test-hook sites are cfg(test)), syntax/mod.rs 14 (all lock/invariant, messages present), layout/mod.rs 2 (construction invariants, messages present), client/mod.rs 20 (19 lock-class + pipe-busy retry invariant).
+    - Action: the 10 message-less production unwraps became .expect() naming the invariant — all std-mutex-poison class (process-local locks; poison only after a panic-while-holding, which already aborts): cleanup_bound_state, bound_state (connection/mod.rs:402,938); live-client set x3 (server/mod.rs:1637 sweep_expired_tabs, 1700 sweep_live, 1728 LiveClientGuard::drop); listing-cancellation registry x3 (workspace/mod.rs:2880,2902,2913).
+    - No behavior change anywhere: zero reachable panics existed, so nothing was converted to a typed error (the AC's (b) branch never triggered) — classification + annotation only, matching branch (a). protocol/mod.rs remains exemplary (8 in 3,038 lines), untouched.
+    - Kept-as-is notes: workspace/mod.rs:2097 (from_utf8 re-slice of a validated prefix), 1386 (document checked above), 1705 (path index / registry sync), layout 395 (nonzero pane ID), 1615 (comb-ratio bounds), syntax 601 (first-party descriptor conflicts), client 1268 (pipe-busy retry loop invariant) — all carry messages naming the invariant.
+    - Gates: fmt, clippy -D warnings, lib 1164, protocol 201, security 134.
 
 - [ ] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
