@@ -544,7 +544,7 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
     - Modules recorded: 01 (launch gate PASS; L2-L5/L9-L11 NOT RUN input-blocked, paths unchanged), 04 (E37/E38 automated companions PASS — split editor_performance suite 49.44 s + frontend hot-path 194; live UNRESOLVED), 13 (D20/D21 isolation suites PASS; live UNRESOLVED), 11 (new step Q38 for task-9 chunk-split startup — modulepreload parallel codemirror chunk, index raw 468.84 kB < 500 KiB warning, budgets 153.4/180 + 359.7/400 kB gzip; boot capture of split build), index (Plan 105 record: no user-visible behavior by design; one deliberate change → Q38 steps, not chat-only, per the Code Quality AC).
     - Parity ledger: Q38 added to performance.budgets.feel manual_steps + verified_manual evidence in docs/development/tauri-react-parity-ledger.json; documentation_coverage 11/11 + protocol 201/201 green.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation (DONE 2026-09-01 00:35, commit 24b88b3: 18 pages/70 stale test pins fixed; controller split documented; graft refreshed)
   - Acceptance Criteria:
     - Functional: The project code wiki is updated after all implementation tasks complete: `docs/wiki/modules/client-file-dialog.md` (dialog path now Tauri-only), connection/server/workspace/syntax/layout/client module pages (family dispatch split, sibling test files), `docs/wiki/modules/react-shell.md` (controller split), and any page referencing deleted files or old module paths; every wiki page stays linked from `docs/wiki/index.md`.
     - Performance: Wiki updates add no runtime work; they document the performance-relevant changes this plan made (suite timings, chunk table references).
@@ -571,6 +571,16 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - `.agents/skills/create-plan/references/wiki-task.md`
   - Test Cases to Write:
     - Manual wiki review: master index links every page; updated pages match the code they describe (spot-check file paths and line-count claims).
+
+  - Execution Evidence (2026-09-01 00:35, commit 24b88b3):
+    - Stale test pins: task 6 moved test modules to sibling tests.rs; 18 wiki flow/module pages (70 lines) still cited `src/*/mod.rs` as the test home. Mechanically fixed via fn-location map (test fn -> file): only lines whose quoted fns resolve exclusively to a sibling tests.rs got the path swap; mixed lines got per-fn qualified paths. Rescan shows 0 remaining stale pins.
+    - Controller split documented: react-client-bridge.md + desktop-typed-bridge.md now name workspace-envelope.ts (handleEnvelope + EnvelopeContext) and workspace-commands.ts (dispatchClientCommand + CommandContext), controller 962→589 lines, seams + tests wired by workspace-controller.ts.
+    - client-file-dialog.md verified current (task 3 write stands: Tauri invoke → pick_path ashpd → grant feed).
+    - control-center.md: menu-session tracking now in menus.rs (task 5 extraction); pre-105 rot fixed — deleted src/masonry_shell, src/app_driver.rs, src/masonry_sdui.rs source rows replaced with live equivalents (src-tauri bridge + React shell, src/client_commands.rs catalogue home).
+    - end-to-end review page: src/client/file_dialog.rs row removed; dialog implementation text points at the Tauri/pick_path path.
+    - Index links every wiki page (programmatic check: none unlinked). perf text: no stale editor_performance/single-matrix references in wiki.
+    - graft build refreshed (446 files, 6 reparsed; graft/ is git-ignored local cache).
+    - Gates: protocol 201/201.
 
 - [ ] Final verification: full gate set green with recorded deltas
   - Acceptance Criteria:
