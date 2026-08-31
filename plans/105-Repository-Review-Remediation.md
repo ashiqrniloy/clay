@@ -582,7 +582,7 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
     - graft build refreshed (446 files, 6 reparsed; graft/ is git-ignored local cache).
     - Gates: protocol 201/201.
 
-- [ ] Final verification: full gate set green with recorded deltas
+- [x] Final verification: full gate set green with recorded deltas (DONE 2026-09-01 01:25, commits 84b7e8f + final; full gate 3m44.5s vs 10m55.7s baseline)
   - Acceptance Criteria:
     - Functional: Complete `scripts/check.sh` (fmt, check, clippy, all-targets tests, bench compile, audit), frontend lint/format/test/build/bundle-budget, and clay-agent tests all green on Linux.
     - Performance: Recorded deltas against task 1 baseline: `editor_performance` suite wall time (target ≤ 240 s), total test wall time, index chunk raw/gzip (target < 500 KiB raw), bundle budget headroom.
@@ -604,13 +604,41 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - This plan file: mark checkboxes, fill `Compromises Made` and `Further Actions`.
     - References:
       - Task 1 baseline numbers.
+  - Execution Evidence (2026-09-01 01:25, commits 84b7e8f + plan record):
+    - `scripts/check.sh full`: PASSED, 3m44.5s wall (baseline 10m55.7s; runtime-suite split is the difference). Stages: audit, fmt, check, clippy, test --all-targets, bench --no-run (1m33s fresh) all green.
+    - Delta table vs task 1 baseline (cbdca7c):
+      | Metric | Baseline | Final | Delta |
+      |---|---|---|---|
+      | check.sh full wall | 10m55.7s (test stage ≈626s) | 3m44.5s (test ≈64s) | −7m11s |
+      | lib unit tests | 1170 passed | 1164 passed | −6: file_dialog native-backend tests deleted in task 3 |
+      | protocol | 200 | 201 | +1: `.d.ts` parity test (task 10) |
+      | runtime suite | 71 tests @ 624.77s (one load flake) | 73 tests @ 49.87s | −575s; +2 tests from size-class split (task 8); ≤240s target met |
+      | editor_performance | ≈656s (single matrix) | 49.3s | −607s |
+      | index chunk | 517.49 kB raw / 164.96 kB gzip (over Vite 500 KiB warning) | 468.84 kB / 148.65 kB | −48.7 kB raw, warning cleared (task 9) |
+      | frontend budgets | shell 169.3/180, total 359.6/400 | shell 153.4/180, total 359.7/400 | headroom 26.6 kB; startup +≈101 kB codemirror chunk documented |
+      | frontend tests / clay-agent | 194 / 8 | 194 / 8 | stable |
+      | junk files tracked | 9 (tmp/, 5 logs, EOF, test.md, todo.md, concept.md) | 0 | all removed (last: concept.md here) |
+      | `grep 'unsafe' src/` | 31 | 20 | −11 = exactly the deleted file_dialog sites |
+      | cargo audit | 0 vulnerabilities | 0 vulnerabilities | stable (allowed warnings documented) |
+    - Code Quality: `git ls-files` junk check clean; TODO/FIXME grep across src/ + frontend/src/ = 0; graft refreshed (ignored artifact per rules).
+    - Frontend: lint/format/test (28 files, 194)/build (2.76s)/budget all green.
+
   - Test Cases to Write:
     - None new; the full gate set is the check.
 
 ## Compromises Made
 
-- To be filled after tasks are completed and tests pass.
+- Task 5: dispatch-arm extraction reduced `handle_connection_loop` 1,120 → 1,009 lines; the plan's ≤350-line target proved unreachable without restructuring the loop state, so the residual arms stay in `connection/mod.rs` behind the family-module seams. Bounded, revisited only if a new lane lands.
+- Task 6: `server/mod.rs` kept a small inline `windows_tests` module (71 lines) to stay buildable on non-Windows hosts; all Unix-gated tests moved to the sibling `tests.rs`.
+- Task 8: quiet-window fix uses a two-phase timeout (30 s pre-patch / 1 s post) instead of per-cell deterministic timing; wall-clock budgets remain but no longer dominate (656 s → 49.3 s).
+- Task 9: `manualChunks` codemirror split trades ~101 kB more startup gzip (parallel modulepreload chunk) for a sub-500 KiB index; editor-open bytes drop by the same amount. Documented in `docs/development/performance.md`.
+- Task 15: wiki test-path fixes were mechanical (fn-location map); pages citing a mix of production and moved test symbols got per-fn qualified paths instead of full rewrites.
+- Task 16: `concept.md` (root scratch, on the original junk list) was missed by the task 2 sweep and was removed here (84b7e8f).
 
 ## Further Actions
 
-- To be filled after task completion with improvements, rationale, and priority.
+- **P3 — large_document head-paint budget is wall-clock sensitive** (baseline flake: 628.9 ms vs 500 ms under concurrent load; passed on retry). Make it work-count/deterministic or per-size-class budgets in a follow-up plan; not blocking today.
+- **Long-term — native Windows/macOS file pickers** at the `dialog_open_file`/`dialog_open_folder` desktop-bridge seam (Linux ashpd portal ships now; docs updated in task 3).
+- **P3 — residual `handle_connection_loop` extraction** (1,009 lines): revisit only when a new dispatch lane forces the seams open again; current shape is green and reviewed.
+- **P3 — runtime suite still asserts wall-time budgets** (editor_performance small class): if any flake appears after the two-phase timeout change, move to deterministic op-count assertions as for large_document.
+- **Housekeeping — graft CLI 0.15.0** update available (requires agent restart); graft graph itself is refreshed and git-ignored per its rules.
