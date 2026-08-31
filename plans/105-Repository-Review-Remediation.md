@@ -255,7 +255,7 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - Performance: `cargo check --all-targets` 10.1 s → 10.0 s warm (code motion only); full suite runtime leg 624 s (baseline 625-628 s).
       - Gates: fmt, clippy `-D warnings`, lib 1,164, protocol 200, runtime 71, security 134, presentation 40 — all green after the full pass.
 
-- [ ] Split the `workspace-controller.ts` monolith (review P2-2)
+- [x] Split the `workspace-controller.ts` monolith (review P2-2) (DONE 2026-08-31 21:25: envelope + command dispatch extracted to sibling modules with context seams; 962→589-line controller; full frontend gate green)
   - Acceptance Criteria:
     - Functional: `frontend/src/shell/workspace-controller.ts` `createWorkspace` (L101-L926) keeps its public object shape and behavior; `handleEnvelope` (L465-L717) and `dispatchClientCommand` (L253-L372) move into focused modules under `frontend/src/shell/` with explicit parameter types; `workspace-controller.test.ts` and all dependent tests pass unchanged.
     - Performance: No per-message allocation or re-render changes; envelope handling stays O(1) per event with the same notify/persist scheduling; the frontend test suite and build stay green with no bundle regressions (chunks recorded).
@@ -286,6 +286,12 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - 2026-08-31 review §4 P2-2.
   - Test Cases to Write:
     - Existing tests are the parity harness; add one Vitest case only if an extracted seam drops previously-implicit coverage of persist scheduling (verify `workspace-controller.test.ts` covers restore/persist before extraction).
+    - Execution Evidence (2026-08-31 21:25, commit dd28750):
+      - `frontend/src/shell/workspace-envelope.ts` (313 lines): `handleEnvelope` + `eventDocumentId` (which is pure envelope routing; `runtimeDocuments` stayed in the controller where `serialize` uses it). `EnvelopeContext` seam: adapters, runtimes map, tabs store, registryRootsByClient, notify, deliverRootId, ensurePane, dispatchClientCommand callback. Body moved verbatim via context destructure — zero text edits.
+      - `frontend/src/shell/workspace-commands.ts` (166 lines): `dispatchClientCommand` + `sendTabCommand`. `CommandContext` seam: adapters, tabs, notify, setTree, mountRuntime. Only mechanical renames: closure names → `ctx.` members.
+      - `workspace-controller.ts` 962 → 589. Both contexts built ONCE inside `createWorkspace` (no per-message allocation — Performance AC), `handleEnvelope`/`openFileDialog`/`openFolderDialog` become thin wrappers. Same object references the closure already held: no new global state, no Tauri IPC surface change.
+      - Deviation from the plan's "two separate commits": both extractions share one seam (envelopeContext wraps the commands dispatch callback), so they cannot land as two independent green commits; documented in the commit message. The two-module split itself is exactly as planned.
+      - Gates: `tsc --noEmit`, eslint, prettier, vitest 194 pass (28 files, incl. 15 workspace-controller cases — restore/persist scheduling covered), `npm run build` ok. Bundle: shell 169.8 kB gzip (budget 180), total 360.0 kB (400) — baseline 169.3/359.6, +0.5 kB is module-seam scaffolding; chunks recorded in commit.
 
 - [ ] Split the `editor_performance` suite so it parallelizes (review P2-3)
   - Acceptance Criteria:
