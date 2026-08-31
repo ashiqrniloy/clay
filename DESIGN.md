@@ -23,9 +23,16 @@ Clay is an engineering-first desktop editor built for density, precision, and ta
                              ▼
 ┌─────────────────────────────────────────────────────────┐
 │                     Clay UI Shell                       │
-│    (25 Component Kinds, Semantic Roles & Landmarks)     │
+│  (15 Component Kinds, 35 Recipe Surfaces, Landmarks)    │
 └─────────────────────────────────────────────────────────┘
 ```
+
+Surface counts are mechanical: `ComponentKind` (`src/shell/components.rs`)
+defines exactly **15** SDUI component kinds (plus the reserved `table` entry),
+and the recipe matrix (`docs/development/ui-design-system-recipe-matrix.md`)
+style-stamps **35** distinct surfaces total — the 15 kinds, the reserved
+`table` kind, 11 Clay-native internal surfaces, and 8 chrome primitives. It
+never declares "25 component kinds"; that was a pre-Phase 20.5 number.
 
 ---
 
@@ -35,7 +42,7 @@ Clay is an engineering-first desktop editor built for density, precision, and ta
 
 Modern, technical, and restrained neobrutalism designed for distraction-free coding and tool density:
 
-- **Border Radii**: Strict `0px` sharp corners across all 25 component kinds.
+- **Border Radii**: Strict `0px` sharp corners across all 15 component kinds and every recipe-styled surface in the matrix.
 - **Borders**: 1px structural solid borders (`var(--clay-border-subtle)` in rest, `var(--clay-border-strong)` in hover).
 - **Shadows**: Hard, crisp 2px–4px offset box-shadows (`box-shadow: 2px 2px 0px var(--clay-border-strong)`) with zero blur.
 - **Materials**: 100% opaque, solid backgrounds (`backdropBlur == 0px`).

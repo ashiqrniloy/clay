@@ -75,7 +75,7 @@
       "status": "verified",
       "migration_phase": 9,
       "current_owner": [
-        "src/server/js_runtime.rs",
+        "src/server/js_runtime/mod.rs",
         "src/server/configuration.rs",
         "runtime/js/configuration.js"
       ],
@@ -654,8 +654,8 @@
       "status": "verified",
       "migration_phase": 8,
       "current_owner": [
-        "src/packages/record.rs",
-        "src/server/js_runtime.rs",
+        "src/packages/record/mod.rs",
+        "src/server/js_runtime/mod.rs",
         "src/shell/theme.rs"
       ],
       "current_tests": [
@@ -1172,7 +1172,7 @@
       "status": "verified",
       "migration_phase": 6,
       "current_owner": [
-        "src/server/connection.rs",
+        "src/server/connection/mod.rs",
         "src/driver/mod.rs",
         "src/driver/restore.rs",
         "src/masonry_shell/window_tabs.rs"
@@ -1346,7 +1346,7 @@
       "area": "security",
       "status": "verified",
       "migration_phase": 8,
-      "current_owner": ["src/server/js_runtime.rs", "src/packages/record.rs"],
+      "current_owner": ["src/server/js_runtime/mod.rs", "src/packages/record/mod.rs"],
       "current_tests": [
         "tests/runtime_sandbox_harness.rs",
         "tests/rust_visibility_api_mapping.rs"

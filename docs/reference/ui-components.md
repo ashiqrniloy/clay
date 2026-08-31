@@ -106,7 +106,7 @@ Clay is the host authority for UI conformance. Validation runs inside Clay's Rus
 
 - **Contrast / legibility:** active-theme status-chrome token pairs must meet `TEXT_CONTRAST_MIN` (4.5) for text and `UI_CONTRAST_MIN` (3.0) for accent/border/focus UI pairs (`validate_active_theme_contrast`, `src/shell/theme.rs`; `enforce_contrast`, `src/server/ops/theme.rs`). A below-AA theme is not activated.
 - **State-completeness:** `applicable_states(kind)` (`src/shell/components.rs`) is the per-`ComponentKind` interaction-state contract; the SDUI paint path renders every applicable state from tokens (`component_state_palette`).
-- **Payload budgets:** SDUI snapshot ≤ 4096 B, update ≤ 1024 B; runtime `publishTree` tree ≤ 16 KiB / ≤ 128 nodes / ≤ 16 depth / ≤ 4096-char text node (`src/packages/record.rs`, `src/server/ui.rs`, `src/server/ops/sdui.rs`).
+- **Payload budgets:** SDUI snapshot ≤ 4096 B, update ≤ 1024 B; runtime `publishTree` tree ≤ 16 KiB / ≤ 128 nodes / ≤ 16 depth / ≤ 4096-char text node (`src/packages/record/mod.rs`, `src/server/ui.rs`, `src/server/ops/sdui.rs`).
 - **Code-vs-catalog drift:** the `ComponentKind` enum, typed style variables, and `core_theme_value` arms stay in sync with the catalog tables in `components.md` / `tokens.md` (enforced by `tests/package_ui_conformance.rs`).
 - **Author diagnostics:** rejection messages name the rejected value, expected token type, and offending field via `ComponentCatalogError::reject`.
 - **Trust domains:** third-party raw values and oversized payloads are rejected at `assemble_package_record` without reaching the trusted runtime; no conformance op or `clay:*` facade is exposed.

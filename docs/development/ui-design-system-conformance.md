@@ -21,7 +21,7 @@ Clay enables full UI design system replacement purely through declarative data c
 
 ## 2. Package Replacement Verification Matrix
 
-The two reference first-party design systems (`@clay/design-neobrutal` and `@clay/design-glass`) exhibit contrasting visual treatments across all 25 component kinds while adhering to the identical semantic schema:
+The two reference first-party design systems (`@clay/design-neobrutal` and `@clay/design-glass`) exhibit contrasting visual treatments across every recipe-styled surface — 15 SDUI component kinds (`ComponentKind`, `src/shell/components.rs`), the reserved `table` kind, 11 Clay-native internal surfaces, and 8 chrome primitives (35 total, `docs/development/ui-design-system-recipe-matrix.md`) — while adhering to the identical semantic schema:
 
 | Component Kind | Neobrutal Characteristic | Glass Characteristic | Semantic Token Source |
 | --- | --- | --- | --- |

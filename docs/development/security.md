@@ -52,11 +52,44 @@ If a future vulnerability requires an exception, restore an entry here AND in
 
 ## Tauri desktop shell (Phase 11)
 
-The webview is not a general-purpose browser:
+The webview is not a general-purpose browser. Its full CSP, quoted verbatim
+from `src-tauri/tauri.conf.json` (`app.security.csp`):
 
-- CSP is `default-src 'none'` with `script-src 'self'` and the single
-  sanctioned `connect-src ipc: http://ipc.localhost` shim. No remote
-  `http(s)`/`ws` origins.
+```text
+default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';
+img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost
+```
+
+- `default-src 'none'` is the deny-everything base; every functioning origin
+  must be listed explicitly, and anything unlisted (e.g. remote `http(s)`,
+  `ws`, `blob:`, `filesystem:`) is dead by construction.
+- `script-src 'self'` — the webview only ever executes code from the bundled
+  application. There is no `'unsafe-eval'`, no remote script origin, and no
+  inline script authoring path.
+- `style-src 'self' 'unsafe-inline'` — the deliberate, load-bearing exception.
+  Themes, typography, and package UI design systems are resolved at runtime by
+  the Rust theme resolver and applied as `--clay-*` / `--clay-ds-*` CSS
+  custom properties written through `element.style.setProperty`/inline style
+  attributes (`frontend/src/theme/adapter.ts`,
+  `frontend/src/theme/design-system-adapter.ts`). The frontend has no build-time
+  stylesheet per theme/typography/design-system combination — those are data,
+  not code — so dynamic injection must be able to set inline `style`
+  declarations. `'unsafe-inline'` here grants stylesheet property emission
+  only; it does not weaken `script-src`, and no `<style>`/`style` attribute
+  content originates from packages or the network — only from the sanitized,
+  bounded token maps produced by the trusted resolver.
+- `img-src 'self' data:` — images may come from the bundled application or
+  inline `data:` URIs for the planned inert icon-slot primitive, so small
+  glyphs never need filesystem or network asset loading. Remote image origins
+  stay banned; no current code path emits a `data:` URI yet (defensive room,
+  not an active source).
+- `font-src 'self'` — text is rendered with CSS font stacks resolved from the
+  user's local typography configuration (`--clay-font-*` custom properties);
+  fonts can only ever come from the app bundle or locally installed system
+  families. No web-font download, no `data:` fonts.
+- `connect-src ipc: http://ipc.localhost` — the single sanctioned Tauri IPC
+  channel; the webview cannot reach any other network target, and the server
+  connection itself lives in the Rust sidecar, not the webview.
 - Capability `main` grants `core:default` only. Filesystem, shell, process,
   HTTP, dialog, and updater plugins are not compiled and must not appear in
   `tauri.conf.json`.

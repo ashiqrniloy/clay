@@ -31,7 +31,7 @@ Clay enforces a strict four-layer separation of concerns across visual aesthetic
                               ▼
 ┌──────────────────────────────────────────────────────────┐
 │                      Clay UI Shell                       │
-│     (25 Component Kinds, Semantic Roles & Landmarks)     │
+│  (15 Component Kinds, 35 Recipe Surfaces, Landmarks)     │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -57,7 +57,7 @@ Clay ships with two reference first-party UI design system packages:
 
 Modern, technical, and restrained neobrutalism designed for distraction-free coding and high information density:
 
-- **Border Radii**: Strict `0px` sharp corners across all 25 component kinds.
+- **Border Radii**: Strict `0px` sharp corners across all 15 component kinds and every recipe-styled surface in the matrix.
 - **Borders**: 1px structural solid borders (`var(--clay-border-subtle)` in rest, `var(--clay-border-strong)` in hover).
 - **Shadows**: Hard, crisp 2px–4px offset box-shadows (`box-shadow: 2px 2px 0px var(--clay-border-strong)`) with zero blur.
 - **Materials**: 100% opaque, solid backgrounds (`backdropBlur == 0px`).
@@ -143,8 +143,9 @@ Recipe keys are 4-tuples formatted as:
 
 $$\text{component}.\text{variant}.\text{slot}.\text{state}$$
 
-### Component Kinds (All 25 Supported)
-`button`, `textInput`, `dropdown`, `list`, `collapse`, `modal`, `panel`, `label`, `statusItem`, `flex`, `stack`, `overlay`, `portal`, `scroll`, `tab`, `tabBar`, `card`, `badge`, `kbd`, `tooltip`, `popover`, `menu`, `commandCentre`, `chat`, `editor`.
+### Component Kinds (All 15 Implemented + Reserved `table`)
+
+Component kind identifiers are frozen on the `ComponentKind` enum (`src/shell/components.rs`): `editorView`, `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, `statusItem`, `dropdown`, `collapse`, `modal`, `textInput` — plus the reserved `table` entry the recipe matrix carries for future phases. Recipe keys additionally address Clay-native internal surfaces (`chatPanel`, `commandCentre`, `completion`, `editorChrome`, `fileBrowser`, `paneSplitTree`, `settingsPanel`, `statusBar`, `tabBar`, `transientMenu`, `welcome`) and chrome primitives (`badge`, `divider`, `focusRing`, `iconSlot`, `kbd`, `scrim`, `scrollChrome`, `tooltip`); the full 35-surface inventory lives in the recipe matrix, which is authoritative.
 
 ### Semantic Slots
 `root`, `field`, `input`, `label`, `description`, `error`, `trigger`, `popover`, `list`, `item`, `row`, `header`, `body`, `dialog`, `scrim`, `scrollbarTrack`, `scrollbarThumb`, `container`, `gutter`, `activeLine`, `selection`, `matchingBracket`, `findMatch`.

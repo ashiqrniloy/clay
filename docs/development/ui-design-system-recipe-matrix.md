@@ -54,7 +54,9 @@ Properties in recipes are grouped into closed families. Each property is classif
 
 ## Component & Surface Recipe Matrix
 
-### 1. Package-Facing Component Kinds (`src/shell/components.rs`)
+### 1. Package-Facing Component Kinds (`src/shell/components.rs` — 15 kinds, plus the reserved `table` kind; 16 identifiers)
+
+`ComponentKind` (`src/shell/components.rs`) is the complete, frozen list: 15 implemented kinds + `table` reserved. Counts below are mechanical fact, re-checkable with one `awk` against the rows.
 
 | Component Kind | Slot | Variants | Applicable States | React Owner / Headless Primitive | React Aria State Mapping | Allowed Property Families | Layout Impact | Active-Theme Color Role Source | Required Fallback Recipe ID | Accessibility Invariant |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -103,7 +105,7 @@ Properties in recipes are grouped into closed families. Each property is classif
 
 ---
 
-### 2. Clay-Native Internal Surfaces
+### 2. Clay-Native Internal Surfaces (11 surfaces)
 
 | Surface | Slot | Variants | Applicable States | React Owner / Headless Primitive | React Aria State Mapping | Allowed Property Families | Layout Impact | Active-Theme Color Role Source | Required Fallback Recipe ID | Accessibility Invariant |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -151,7 +153,7 @@ Properties in recipes are grouped into closed families. Each property is classif
 
 ---
 
-### 3. Chrome Primitives (`src/shell/primitives.rs`)
+### 3. Chrome Primitives (`src/shell/primitives.rs`; 8 surfaces)
 
 | Chrome Primitive | Slot | Variants | Applicable States | React Owner / Headless Primitive | React Aria State Mapping | Allowed Property Families | Layout Impact | Active-Theme Color Role Source | Required Fallback Recipe ID | Accessibility Invariant |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

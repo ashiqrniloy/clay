@@ -38,7 +38,7 @@ A 3-pane split editor layout with a left workspace tree, central CodeMirror canv
 Restrained Utilitarian Blueprint Neobrutal (Candidate #3 in the Operate-mode grounded system matrix, Seed Key 87634504), raised by the density discipline of technical ruling engines and the strict baseline rhythm of typographic specimen books.
 
 ### FINISH CONDITION
-Unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping package recipe carrying its proven conformance across all 25 component recipes.
+Unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping package recipe carrying its proven conformance across every recipe-styled surface in the matrix (15 component kinds plus the 19 Clay-native internal/chrome surfaces and the reserved `table` kind).
 
 ---
 
