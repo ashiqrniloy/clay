@@ -91,7 +91,7 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
     - Gates after deletion: `scripts/check.sh quick` green (1170 lib tests), `cargo test --test protocol` green (200 tests incl. manual-smoke-documentation and primitive-docs registry checks that parse test-plan/ and docs/).
     - `git ls-files` junk check: clean. `.gitignore` needed no changes (no dead rules).
 
-- [ ] Delete the unreferenced native dialog backends and align the wiki (review P1-1)
+- [x] Delete the unreferenced native dialog backends and align the wiki (review P1-1) (DONE 2026-08-31 17:50: file deleted, docs/wiki/API docs/api-inventory/registry aligned, decision log written, all suites green)
   - Acceptance Criteria:
     - Functional: `src/client/file_dialog.rs` is deleted; `src/client/mod.rs` re-exports of `FileDialogFilter`, `FileDialogResult`, `markdown_file_dialog_filters`, `open_folder_dialog`, `open_markdown_file_dialog` are removed; `cargo check --all-targets` and `clippy -D warnings` stay green; `docs/wiki/modules/client-file-dialog.md` describes the Tauri-side ashpd portal commands (`src-tauri/src/commands.rs`: `dialog_open_file`, `dialog_open_folder`, `tab_open_dialog`) as the only dialog path, matching what the page already claims was decided in Plan 097 Phase 12.
     - Performance: No dialog code remains in the core `clay` crate; dialog latency is unaffected (unchanged code path).
@@ -125,6 +125,12 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
   - Test Cases to Write:
     - Existing gates: no test referenced the deleted functions (verified during review); `cargo check --all-targets` green is the proof.
     - `rg -n 'file_dialog|FileDialogResult|open_folder_dialog|open_markdown_file_dialog' src src-tauri tests` returns no live references.
+  - Execution Evidence (2026-08-31 17:45):
+    - Deleted `src/client/file_dialog.rs` + the `pub mod file_dialog;` declaration and 5-item re-export in `src/client/mod.rs`. `cargo check --all-targets`, clippy `-D warnings`, fmt, and lib tests green immediately; protocol (200), security (134), presentation (40) integration suites green.
+    - Doc alignment scope grew beyond the wiki page (doc-pinning tests + the registry single-source rules forced it): rewrote `docs/wiki/modules/client-file-dialog.md` (Tauri-only dialog path, live chain diagram, stale test/source lists corrected); updated `docs/wiki/index.md` summary; fixed platform claims in `docs/development/launch-and-gui-smoke.md` (platform matrix + Phase 19 lists), `docs/development/windows.md`, `docs/development/file-open-save-reload-workflow.md` (2 tables), `docs/reference/clay-js-api/configuration.md` (2 spots); updated both Clay JS API docs (`backing_rust`/`backing Rust/current owner` now cite `src-tauri/src/commands.rs::dialog_open_file` / `::dialog_open_folder`, `src/client/behavior.rs`, server workspace/protocol paths — all existence-tested by `clay_js_api_inventory`), mirrored in `api-inventory.toml` (`backing_rust` + `current_rust_owner`); regenerated `docs/generated/clay-js-api-registry.json`; updated `tests/manual_smoke_docs.rs` wiki markers ("Shell COM APIs"/"FileDialogResult::Selected(PathBuf)" → "dialog_open_file"/"BridgeState::accept_selected_path").
+    - Honest platform statement in all touched docs: dialogs are portal-backed on Linux (ashpd) today; Windows/macOS native pickers are pending long-term targets at the same Tauri command seam; platforms without a picker get a sanitized `file dialog failed` diagnostic.
+    - 11 `unsafe` uses deleted with the file; remaining `unsafe` in `src/` is the narrow documented libc/env set. `rg 'file_dialog|FileDialogFilter|FileDialogResult|open_folder_dialog|open_markdown_file_dialog' src tests src-tauri/src` → no live references.
+    - Decision log: `decision-logs/2026-08-31-1745-delete-dead-native-dialog-backends.md` (platform policy + alternatives). Pattern folded into `.agents/skills/project-patterns/references/maintenance-validation.md` (wiki-code parity; platform-gated code must be wired or deleted).
 
 - [ ] Fix the documentation-drift batch (review P1-4)
   - Acceptance Criteria:
