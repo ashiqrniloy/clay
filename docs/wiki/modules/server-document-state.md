@@ -132,7 +132,7 @@ The response is an `EditAck` with confirmed version `2`, and the canonical rope 
 - `src/server/document.rs`: `first_client_receives_editable_lease`, `second_client_receives_read_only_access`, `server_rejects_edit_without_current_lease`, and `lease_released_or_retained_on_disconnect_matches_policy` validate lease grant, observer, validation, and release behavior.
 - `src/server/document.rs`: `server_rejects_insert_inside_region_lock`, `server_rejects_delete_overlapping_region_lock`, `server_accepts_edit_outside_region_lock`, `region_lock_range_validation_rejects_invalid_boundaries`, and `region_lock_conflict_reports_range_metadata` validate in-memory lock registration, overlap checks, version preservation on conflict, and protocol-ready rejection metadata.
 - `src/server/connection/mod.rs`: server connection tests validate deferred post-bind initial snapshots, per-tab edit acknowledgements, resync snapshot responses, cross-tab authority denial, and malformed input handling.
-- `src/server/mod.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates that in-memory region locks reject overlapping edits and preserve conflict metadata across the real Unix socket IPC path.
+- `src/server/tests.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates that in-memory region locks reject overlapping edits and preserve conflict metadata across the real Unix socket IPC path.
 - Relevant commands: `cargo fmt`, `cargo test --quiet`, `cargo check --quiet`.
 
 ## Related

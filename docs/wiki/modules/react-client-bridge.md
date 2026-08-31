@@ -24,7 +24,12 @@ bootstrap DTO, an envelope stream, and a request function.
   document events, transient menus, diagnostics, viewport patches, and routed
   client-command requests all reach the owning pane session — there is no
   app-wide document session mirror (`session-singleton.ts` was deleted in Plan
-  099). Requests each have one handler and update pane/tab state.
+  099). Requests each have one handler and update pane/tab state. Plan 105
+  split its dispatch: `workspace-envelope.ts` (`handleEnvelope` + `EnvelopeContext`)
+  for server envelopes, `workspace-commands.ts` (`dispatchClientCommand` +
+  `CommandContext`) for client commands; the controller (589 lines, down from
+  962) keeps session wiring, context adapters, and tests
+  (`workspace-controller.test.ts` covers restore/open routing through the seams).
 
 ## Single-flight bootstrap
 

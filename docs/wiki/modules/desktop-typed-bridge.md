@@ -56,6 +56,11 @@ fields, request completion, package execution, or filesystem authority.
    parser output, or patch completion.
 5. `workspace-controller.ts` routes each document/tab envelope to its owning
    pane session. There is no global frontend document-session mirror.
+   Since Plan 105 the two dispatch families live beside the controller:
+   `workspace-envelope.ts` (`handleEnvelope` over `EnvelopeContext`) owns the
+   server-event lanes and `workspace-commands.ts` (`dispatchClientCommand` over
+   `CommandContext`) owns routed client commands; the controller wires their
+   context adapters and keeps tab/pane state.
 
 ## Viewport patch delivery
 

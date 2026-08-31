@@ -182,7 +182,7 @@ for run in style_runs {
 - `src/masonry_editor.rs`: `live_typography_update_requests_layout_render_and_accessibility`.
 - `src/masonry_sdui.rs`: `ui_size_change_scales_row_hit_and_accessibility_bounds_together`, `package_component_font_role_uses_selected_profile_without_concrete_sizes`.
 - `src/server/ui.rs`: `package_component_font_role_is_semantic_and_text_only`.
-- `src/server/connection/mod.rs`: `live_typography_update_reaches_connection_once` plus bootstrap fifth-message consumption across all connection tests.
+- `src/server/connection/tests.rs`: `live_typography_update_reaches_connection_once` plus bootstrap fifth-message consumption across all connection tests.
 - `src/server/mod.rs`: `typography_defaults_exist_without_init_configuration` (with failed-reload path).
 - `src/server/js_runtime/mod.rs`: `set_typography_replaces_all_profiles_atomically`, `set_typography_failure_preserves_previous_revision`, `typography_configuration_grants_no_additional_authority`, `typography_configuration_rejects_oversized_snapshot`, `invalid_mode_font_role_fails_before_registration_and_keeps_core_fallback`, markdown/parser adapter fontRole assertions.
 - `tests/typography_protocol.rs`: wire/validation, first-party `defaultFontRole` declarations, no language-name rendering branches.

@@ -78,10 +78,10 @@ let response = document.apply_edit(
 - `src/server/document.rs`: `server_rejects_edit_without_current_lease` validates missing/wrong lease rejection.
 - `src/server/document.rs`: `lease_released_or_retained_on_disconnect_matches_policy` validates deterministic lease release behavior.
 - `src/editor/surface/mod.rs`: `read_only_editor_allows_navigation_but_not_mutation` validates observer UI behavior.
-- `src/client/mod.rs`: `read_only_client_queue_does_not_emit_edit_message` validates queue-side authority enforcement.
+- `src/client/tests.rs`: `read_only_client_queue_does_not_emit_edit_message` validates queue-side authority enforcement.
 - `src/server/document.rs`: region-lock tests validate insert/delete conflicts, non-overlapping edits, invalid lock range rejection, and conflict metadata.
 - `src/server/locks.rs`: tests validate range/document/workspace conflict rules and behavior-lock RAII release.
-- `src/server/mod.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates region-lock conflicts across the real Unix socket IPC path.
+- `src/server/tests.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates region-lock conflicts across the real Unix socket IPC path.
 - Relevant commands: `cargo test server --quiet`, `cargo test client --quiet`, `cargo test --quiet`.
 
 ## Related

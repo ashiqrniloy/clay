@@ -163,7 +163,7 @@ Tests: `tests/syntax_grammar.rs` — `plan057_function_suffix_stays_decorated_th
 
 Source: `src/server/syntax/mod.rs` — `replacement_ranges` (shared grid), `decoration_sets_for_ranges` (takes `&[Range<usize>]` instead of single viewport), `parse_sync` computes `affected_ranges` → `replacement_ranges` → passes to `decorations_for_window`.
 
-Tests: `tests/syntax_grammar.rs` — `plan057_newline_keeps_unrelated_short_file_syntax_through_every_state`, `plan057_empty_authoritative_chunk_clears_only_fully_queried_range`, `plan057_utf8_scalar_at_nominal_chunk_boundary_is_never_split`, `plan057_changed_broad_capture_completely_fills_touched_replacement_chunk`; `src/server/syntax/mod.rs` — `replacement_ranges_move_shared_chunk_boundaries_past_utf8_scalars`, `decoration_member_count_does_not_multiply_parse_or_query_invocations`.
+Tests: `tests/syntax_grammar.rs` — `plan057_newline_keeps_unrelated_short_file_syntax_through_every_state`, `plan057_empty_authoritative_chunk_clears_only_fully_queried_range`, `plan057_utf8_scalar_at_nominal_chunk_boundary_is_never_split`, `plan057_changed_broad_capture_completely_fills_touched_replacement_chunk`; `src/server/syntax/tests.rs` — `replacement_ranges_move_shared_chunk_boundaries_past_utf8_scalars`, `decoration_member_count_does_not_multiply_parse_or_query_invocations`.
 
 ### Verification
 

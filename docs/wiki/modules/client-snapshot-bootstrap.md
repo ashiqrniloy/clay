@@ -71,11 +71,11 @@ let widget = clay::masonry_editor::EditorWidget::with_initial_state(state);
 
 ## Tests
 
-- `src/client/mod.rs`: `client_handles_initial_document_message` verifies server messages become `ClientInitialState` with version, access, and default `ActiveTypography` metadata over a generic in-memory async stream.
+- `src/client/tests.rs`: `client_handles_initial_document_message` verifies server messages become `ClientInitialState` with version, access, and default `ActiveTypography` metadata over a generic in-memory async stream.
 - `src/editor/typography.rs`: registry tests cover role/size/revision resolution, equal-revision no-op behavior, and preservation of a generic fallback after a missing named font.
 - `src/masonry_editor.rs`: `live_typography_update_requests_layout_render_and_accessibility` verifies a newer live snapshot changes the widget once and raises one layout invalidation.
 - `src/main.rs`: `connect_retry_reports_last_error` verifies bounded startup retry returns an actionable readiness error with the last categorized connection failure, and `client_mode_falls_back_with_status_when_server_missing` verifies fallback diagnostics include endpoint and error category.
-- `src/client/mod.rs`: behavior-manifest tests verify manifest version/access data is preserved, and `client_receives_runtime_diagnostic_event` verifies runtime diagnostic protocol events reach the client event queue.
+- `src/client/tests.rs`: behavior-manifest tests verify manifest version/access data is preserved, and `client_receives_runtime_diagnostic_event` verifies runtime diagnostic protocol events reach the client event queue.
 - `src/editor/surface/mod.rs`: `editor_load_snapshot_replaces_text_and_resets_caret` verifies snapshot text, metadata, caret, selection, and scroll reset.
 - `src/editor/surface/mod.rs`: `editor_installs_minimal_behavior_manifest` verifies behavior manifest storage without execution.
 - `src/masonry_editor.rs`: `resync_event_replaces_editor_snapshot` verifies later resync snapshots use the same safe loading boundary, and `runtime_diagnostic_updates_status_text` verifies runtime diagnostics become visible GUI status text.

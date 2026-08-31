@@ -13,7 +13,6 @@
 - `src/shell/file_browser.rs`
 - `src/server/command_execution.rs`
 - `src/server/connection/mod.rs`
-- `src/client/file_dialog.rs`
 - `src/editor/surface/mod.rs`
 - `src/editor/buffer.rs`
 - `src/masonry_editor.rs`
@@ -42,7 +41,7 @@ Most of the workflow already maps to generic Clay primitives. The remaining gaps
 
 ### Client UI prompts and selected-file authority
 
-- `documents.clientOpenFileDialog` is a bindable `ClientUiCommand` route. The native client owns the modal prompt; the server owns validation and the selected-file grant.
+- `documents.clientOpenFileDialog` is a bindable `ClientUiCommand` route. The client owns the modal prompt (Tauri dialog bridge → `src-tauri/src/commands.rs::pick_path`, ashpd XDG portal on Linux); the server owns validation and the selected-file grant. The never-compiled native `src/client/file_dialog.rs` backends were deleted in Plan 105 (they were legacy native-client code, not reachable from the Tauri/React client).
 - `FileOpenCapabilityPool` issues single-use tokens for selected-file opens, and `ClientMessage::OpenSelectedFile` is rejected without a valid token.
 - Historical note: the Phase 19 Windows Markdown-file-only backend initially returned `Unsupported` on non-Windows; Phase 20 added Linux portal and macOS `NSOpenPanel` file-open backends while keeping selected-path grant consumption unchanged.
 

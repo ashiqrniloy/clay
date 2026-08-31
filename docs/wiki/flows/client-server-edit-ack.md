@@ -107,22 +107,22 @@ When a workspace file opens or a resync arrives, `ClientEditQueue::update_opened
 
 ## Tests
 
-- `src/client/mod.rs`: `end_to_end_client_receives_initial_snapshot` validates the connected client receives a snapshot during handshake.
-- `src/client/mod.rs`: `end_to_end_client_receives_behavior_manifest` validates manifest delivery before edit emission.
-- `src/client/mod.rs`: `end_to_end_edit_gets_acknowledged` validates queued edit send and ack receipt with a paired socket.
-- `src/client/mod.rs`: `client_ack_advances_confirmed_version` validates ack-driven confirmed-version updates and pending cleanup.
-- `src/client/mod.rs`: `client_keeps_pending_edit_until_ack_or_rejection` validates deterministic pending transaction bookkeeping.
-- `src/client/mod.rs`: `client_requests_resync_after_stale_rejection` validates automatic resync requests after recoverable rejection.
-- `src/client/mod.rs`: `client_applies_resync_snapshot_and_clears_pending_edits` validates Unicode snapshot recovery and pending cleanup.
-- `src/client/mod.rs`: `selected_file_open_request_emits_non_edit_message`, `client_applies_document_opened_snapshot_from_selected_file`, and `client_receives_file_operation_failed_event` validate selected-file request/event handling.
+- `src/client/tests.rs`: `end_to_end_client_receives_initial_snapshot` validates the connected client receives a snapshot during handshake.
+- `src/client/tests.rs`: `end_to_end_client_receives_behavior_manifest` validates manifest delivery before edit emission.
+- `src/client/tests.rs`: `end_to_end_edit_gets_acknowledged` validates queued edit send and ack receipt with a paired socket.
+- `src/client/tests.rs`: `client_ack_advances_confirmed_version` validates ack-driven confirmed-version updates and pending cleanup.
+- `src/client/tests.rs`: `client_keeps_pending_edit_until_ack_or_rejection` validates deterministic pending transaction bookkeeping.
+- `src/client/tests.rs`: `client_requests_resync_after_stale_rejection` validates automatic resync requests after recoverable rejection.
+- `src/client/tests.rs`: `client_applies_resync_snapshot_and_clears_pending_edits` validates Unicode snapshot recovery and pending cleanup.
+- `src/client/tests.rs`: `selected_file_open_request_emits_non_edit_message`, `client_applies_document_opened_snapshot_from_selected_file`, and `client_receives_file_operation_failed_event` validate selected-file request/event handling.
 - `src/masonry_editor.rs`: `resync_event_replaces_editor_snapshot`, `document_opened_event_replaces_editor_snapshot`, and `opened_file_edits_continue_as_deltas` validate the UI-safe snapshot boundary and delta edits after selected-file open.
 - `src/masonry_editor.rs`: status tests validate connected editable, read-only observer, local fallback, and edit-ack version updates.
-- `src/client/mod.rs`: `end_to_end_second_client_gets_independent_welcome_document` validates that a second real-server tab receives its own editable welcome document and distinct document ID.
-- `src/client/mod.rs`: `real_server_end_to_end_edit_gets_acknowledged` validates the same edit/ack path through `IpcServer` on a real Unix socket.
-- `src/client/mod.rs`: `windows_named_pipe_client_receives_initial_snapshot`, `windows_named_pipe_edit_gets_acknowledged`, `windows_second_client_gets_independent_welcome_document`, and `windows_named_pipe_stale_edit_rejected_then_resynced` validate the Windows named-pipe transport.
-- `src/client/mod.rs`: `real_server_end_to_end_stale_edit_rejected_then_resynced` validates stale-version rejection and explicit resync recovery through `IpcServer` on a real Unix socket; the Windows named-pipe stale/resync test exercises the same protocol over the Windows transport.
-- `src/server/mod.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates region-lock conflict metadata across the real Unix socket server path.
-- `src/server/connection/mod.rs`: `server_rejects_edit_with_stale_behavior_version_without_mutating_document` validates behavior-version mismatch rejection before canonical mutation.
+- `src/client/tests.rs`: `end_to_end_second_client_gets_independent_welcome_document` validates that a second real-server tab receives its own editable welcome document and distinct document ID.
+- `src/client/tests.rs`: `real_server_end_to_end_edit_gets_acknowledged` validates the same edit/ack path through `IpcServer` on a real Unix socket.
+- `src/client/tests.rs`: `windows_named_pipe_client_receives_initial_snapshot`, `windows_named_pipe_edit_gets_acknowledged`, `windows_second_client_gets_independent_welcome_document`, and `windows_named_pipe_stale_edit_rejected_then_resynced` validate the Windows named-pipe transport.
+- `src/client/tests.rs`: `real_server_end_to_end_stale_edit_rejected_then_resynced` validates stale-version rejection and explicit resync recovery through `IpcServer` on a real Unix socket; the Windows named-pipe stale/resync test exercises the same protocol over the Windows transport.
+- `src/server/tests.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates region-lock conflict metadata across the real Unix socket server path.
+- `src/server/connection/tests.rs`: `server_rejects_edit_with_stale_behavior_version_without_mutating_document` validates behavior-version mismatch rejection before canonical mutation.
 - `src/server/behavior.rs`: replacement publishing tests validate deterministic manifest version advancement and invalid replacement rollback.
 - `src/ipc.rs`: `smoke_endpoint_is_platform_local_and_unique` validates that managed smoke endpoints are unique and remain platform-local.
 - `src/main.rs`: CLI parser tests validate `server`, `client`, `smoke-gui`, bare auto modes, default endpoint behavior, the shared default endpoint used by foreground server and repeated default clients, extra-argument failures, smoke-owned endpoint selection, config-fixture parsing, and platform endpoint argument parsing; `auto_start_uses_current_exe_without_shell`, `managed_server_command_uses_current_exe_without_shell`, and `managed_server_command_forwards_config_fixture_without_shell` validate shell-free server command construction with direct endpoint/config-fixture arguments; `connect_retry_reports_last_error`, `client_mode_falls_back_with_status_when_server_missing`, and `smoke_mode_fails_if_child_server_exits_before_ready` validate readiness and fallback diagnostics; `connection_event_action_is_dispatched_to_driver` validates that client connection events are wrapped as Masonry actions targeted at the editor widget; `smoke_launch_routes_sdui_events_to_gui` validates that an SDUI snapshot follows the same non-blocking Masonry action bridge.

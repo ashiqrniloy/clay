@@ -65,12 +65,12 @@ if let Some(event) = outcome.edit_event {
 - `src/editor/surface/mod.rs`: `delete_forward_selected_range_emits_delete_operation` validates normalized selected deletion ranges.
 - `src/editor/surface/mod.rs`: `read_only_editor_allows_navigation_but_not_mutation` validates observer UI behavior.
 - `src/editor/surface/mod.rs`: `editor_events_do_not_block_without_ipc_consumer` validates local edits without a sender/manifest.
-- `src/client/mod.rs`: `edit_event_is_enqueued_as_client_edit_message` validates event-to-protocol conversion.
-- `src/client/mod.rs`: `read_only_client_queue_does_not_emit_edit_message` validates queue-side read-only enforcement.
-- `src/client/mod.rs`: `bounded_edit_queue_applies_backpressure` validates bounded queue behavior and pending rollback.
-- `src/client/mod.rs`: `client_hot_path_does_not_await_full_ipc_queue` validates a full queue returns immediately instead of awaiting capacity.
-- `src/client/mod.rs`: `completion_request_is_enqueued_as_non_blocking_message` validates completion request metadata becomes a typed outbound protocol message without edit mutation.
-- `src/client/mod.rs`: `client_keeps_pending_edit_until_ack_or_rejection` validates optimistic base-version assignment and pending state.
+- `src/client/tests.rs`: `edit_event_is_enqueued_as_client_edit_message` validates event-to-protocol conversion.
+- `src/client/tests.rs`: `read_only_client_queue_does_not_emit_edit_message` validates queue-side read-only enforcement.
+- `src/client/tests.rs`: `bounded_edit_queue_applies_backpressure` validates bounded queue behavior and pending rollback.
+- `src/client/tests.rs`: `client_hot_path_does_not_await_full_ipc_queue` validates a full queue returns immediately instead of awaiting capacity.
+- `src/client/tests.rs`: `completion_request_is_enqueued_as_non_blocking_message` validates completion request metadata becomes a typed outbound protocol message without edit mutation.
+- `src/client/tests.rs`: `client_keeps_pending_edit_until_ack_or_rejection` validates optimistic base-version assignment and pending state.
 - Relevant commands: `cargo test editor --quiet`, `cargo test client --quiet`, `cargo test --quiet`.
 
 ## Related
