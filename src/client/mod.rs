@@ -1,12 +1,7 @@
 pub(crate) mod behavior;
-pub mod file_dialog;
 
 pub use behavior::ClientUiCommandRoute;
 pub use behavior::language_intelligence_feature_for_command;
-pub use file_dialog::{
-    FileDialogFilter, FileDialogResult, markdown_file_dialog_filters, open_folder_dialog,
-    open_markdown_file_dialog,
-};
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,

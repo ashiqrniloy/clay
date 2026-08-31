@@ -40,10 +40,10 @@ Selected-file grants are single-file: the server authorizes only the canonical p
 
 | Platform | Backend | Filters | Cancellation |
 |---|---|---|---|
-| Windows | COM `IFileOpenDialog` | `.md`, `.markdown`, `.mdown`, `*.*` | non-error no-op |
-| Linux | xdg-desktop-portal `FileChooser.OpenFile` | glob: `*.md`, `*.markdown`, `*.mdown`, `*` | non-error no-op |
-| macOS | objc2-app-kit `NSOpenPanel` | Markdown extensions, `allowsOtherFileTypes` | non-error no-op |
-| Other | N/A | N/A | returns `Unsupported` diagnostic |
+| Windows | desktop bridge `dialog_open_file` (native picker pending long-term Windows target) | `.md`, `.markdown`, `.mdown`, `*` | non-error no-op |
+| Linux | `dialog_open_file` over the `ashpd` XDG portal (`FileChooser.OpenFile`) | glob: `*.md`, `*.markdown`, `*.mdown`, `*` | non-error no-op |
+| macOS | native picker pending at the same command seam | Markdown extensions, `allowsOtherFileTypes` | non-error no-op |
+| Other | N/A | N/A | sanitized diagnostic |
 
 On unsupported platforms, `clientOpenFileDialog` returns a status diagnostic: `client.file_dialog.not_supported_on_this_platform`. No panic, no crash, no blank dialog.
 
@@ -226,8 +226,8 @@ bindKey("Ctrl+Tab", "editor.clientShowOpenDocuments", { scope: "editor" });
 
 | Capability | Windows | Linux | macOS | Other |
 |---|---|---|---|---|
-| Native file-open dialog | COM `IFileOpenDialog` | xdg-desktop-portal | `NSOpenPanel` | Unsupported diagnostic |
-| Native folder dialog | COM `IFileOpenDialog` | xdg-desktop-portal | `NSOpenPanel` | Unsupported diagnostic |
+| Native file-open dialog | pending at the `dialog_open_file` seam | XDG portal (`ashpd`) | pending at the same command seam | sanitized diagnostic |
+| Native folder dialog | pending at the same command seam | XDG portal (`dialog_open_folder`) | native picker pending at the same command seam | sanitized diagnostic |
 | Atomic save | `MoveFileExW` rename | POSIX atomic rename | POSIX atomic rename | N/A |
 | Markdown filters | extension filter list | portal glob filters | `setAllowedFileTypes` (deprecated) | N/A |
 | All-files fallback | `*.*` | `*` (normalized) | `allowsOtherFileTypes: true` | N/A |

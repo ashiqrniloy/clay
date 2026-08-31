@@ -656,8 +656,8 @@ fn phase19_code_wiki_documents_open_dialog_path() {
 
     for expected in [
         "docs/reference/clay-js-api/documents/client-open-file-dialog.md",
-        "Shell COM APIs",
-        "FileDialogResult::Selected(PathBuf)",
+        "dialog_open_file",
+        "BridgeState::accept_selected_path",
         "Cancellation is a non-error no-op",
         "WorkspaceState::open_selected_file",
     ] {

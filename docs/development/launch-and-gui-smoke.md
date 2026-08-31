@@ -596,8 +596,8 @@ Phase 20 daily-editing verification is Linux-primary (CI and agent-run). Windows
 
 | Capability | Linux | Windows | macOS | Other |
 |---|---|---|---|---|
-| Native file-open dialog | Tauri dialog command (GTK portal on Linux) | Tauri dialog command (Win32) | Tauri dialog command (NSOpenPanel) | selected paths return to the existing server grant paths |
-| Native folder dialog | same Tauri command, directory mode | same | same | selected paths return to the existing server grant paths |
+| Native file-open dialog | Tauri dialog command (`ashpd` XDG portal on Linux; working today) | planned at the same Tauri command seam (long-term Windows target) | planned at the same Tauri command seam (long-term target) | selected paths return to the existing server grant paths; platforms without a native picker report a sanitized diagnostic |
+| Native folder dialog | same Tauri command, `directory=true` (Linux portal) | planned at the same command seam | planned at the same command seam | selected paths return to the existing server grant paths |
 | Clipboard copy/cut/paste | webview/CodeMirror clipboard via explicit commands (`Ctrl+C`/`X`/`V`) | same (`Ctrl`) | same (`Cmd`) | no polling or hot-path reads; no clipboard plugin granted to the webview |
 | Undo / redo | native `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y` | same as Linux | native `Cmd+Z` / `Cmd+Shift+Z` | client inverse-edit stack |
 | IME preedit / commit | WebKitGTK IME (ibus/fcitx when available) → CodeMirror composition | WebView2 IME → CodeMirror | macOS IME → CodeMirror | composition renders locally; commits sync through the ordinary edit path |
@@ -676,7 +676,7 @@ The Phase 19 Windows Markdown open-dialog smoke still documents the Windows nati
 
 Phase 19 starts from this baseline:
 
-- Working today: command-first launch, `smoke-gui`, foreground server/client validation, local optimistic typing, server-owned workspace/file opens for configured roots, the `markdown-mode` fixture that loads `@clay/markdown`, activates `sample.md`/document `1`, publishes representative Markdown decorations, shows inert Markdown status SDUI, the bindable `documents.clientOpenFileDialog` client UI command, native file-open backends on Windows (Shell COM), Linux (xdg-desktop-portal), and macOS (`NSOpenPanel`) that filter for `.md`, `.markdown`, and `.mdown` plus an all-files fallback, explicit selected-file IPC, server single-file grants for files outside configured workspace roots, buffer replacement from the selected-file open response, and live selected-file Markdown activation/decorations/status when `@clay/markdown` is loaded.
+- Working today: command-first launch, `smoke-gui`, foreground server/client validation, local optimistic typing, server-owned workspace/file opens for configured roots, the `markdown-mode` fixture that loads `@clay/markdown`, activates `sample.md`/document `1`, publishes representative Markdown decorations, shows inert Markdown status SDUI, the bindable `documents.clientOpenFileDialog` client UI command, the portal-backed Tauri dialog command on Linux (XDG file-chooser portal via `ashpd`) with fixed `.md`/`.markdown`/`.mdown` filters plus an all-files fallback — Windows and macOS native pickers remain long-term targets at the same command seam — explicit selected-file IPC, server single-file grants for files outside configured workspace roots, buffer replacement from the selected-file open response, and live selected-file Markdown activation/decorations/status when `@clay/markdown` is loaded.
 - Save exists for Phase 9 workspace documents. Phase 20 selected-file save/conflict UX (dirty chrome, `Ctrl+S` → `documents.serverSaveDocument`, recovery menus) is covered in the end-to-end file-browser workflow smoke above; this Phase 19 Windows matrix remains focused on dialog open + edit.
 
 The in-scope manual Windows 11 smoke scenario is edit-only:
@@ -700,7 +700,7 @@ Out of scope for the Phase 19 Windows Markdown open-dialog smoke only: saving th
 
 Performance and security contract: the explicit open-dialog command may perform modal native UI and server file-open work. Ordinary typing, paint, scroll, layout, and text-event paths must remain client-local/non-blocking and must not wait on JavaScript, IPC, file IO, parser work, or full-document serialization. A selected path is an explicit user-mediated open request only; it is not unrestricted client filesystem authority and must not broaden workspace access beyond the selected regular UTF-8 file.
 
-The Phase 19 Windows Markdown file-dialog smoke remains the Windows matrix. On Linux and macOS, `documents.clientOpenFileDialog` opens the native file picker (xdg-desktop-portal / `NSOpenPanel`) and still routes through selected-file capability grants; unsupported platforms report a diagnostic/status without panics. Linux native folder selection remains validated by the `workspace.clientOpenFolderDialog` workflow smoke; macOS folder selection uses the same `NSOpenPanel` backend in directory mode.
+The Phase 19 Windows Markdown file-dialog smoke remains the Windows matrix; its file-picking backend is the desktop bridge's dialog command, which is portal-backed on Linux today and pending native Windows/macOS pickers at the same command seam. `documents.clientOpenFileDialog` still routes through selected-file capability grants; platforms without a responsive picker report a sanitized diagnostic without panics. Linux native folder selection remains validated by the `workspace.clientOpenFolderDialog` workflow smoke, delivered by the same Tauri command in directory mode.
 
 ### Phase 18.11 completion provider smoke
 

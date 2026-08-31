@@ -2089,7 +2089,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "Binding/routing is a local behavior-manifest lookup; dialog/open work happens only after an explicit user command, selected-file opening sends one initial UTF-8 snapshot, Markdown parse/decorations are background and viewport-bounded, and ordinary editing remains delta-based."
 facade_path = "runtime/js/documents.js::clientOpenFileDialog"
-backing_rust = "src/client_commands.rs::EditorClientCommand; src/client/file_dialog.rs::FileDialogResult; src/client/file_dialog.rs::open_markdown_file_dialog"
+backing_rust = "src/client_commands.rs::EditorClientCommand; src-tauri/src/commands.rs::dialog_open_file; src/server/workspace.rs::WorkspaceState::open_selected_file; src/protocol/mod.rs::ClientMessage::OpenSelectedFile"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/documents/client-open-file-dialog.md"
@@ -2097,7 +2097,7 @@ key_bindings = []
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; native dialog execution requires explicit user key routing, selected files are server-validated as single-file grants, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, broad filesystem/workspace authority, or client-side JavaScript authority."
-current_rust_owner = "src/client/file_dialog.rs::open_markdown_file_dialog; src/client/behavior.rs::ClientBehaviorState::route_key; src/server/workspace.rs::WorkspaceState::open_selected_file (native dialog via src-tauri/src/commands.rs::dialog_open_file, frontend/src/bridge/client.ts openFileDialog)"
+current_rust_owner = "src-tauri/src/commands.rs::dialog_open_file (native portal picker); src/client/behavior.rs::ClientBehaviorState::route_key; src/server/workspace.rs::WorkspaceState::open_selected_file (frontend dispatch: frontend/src/shell/workspace-controller.ts -> frontend/src/bridge/client.ts::openFileDialog)"
 registry_public = true
 
 [[api]]
@@ -2711,7 +2711,7 @@ authority = "client-ui-command-id"
 runtime_path = "configuration-bindKey-to-client-ui-command"
 hot_path_policy = "The helper is synchronous and side-effect free; native folder selection runs only after explicit user routing and server workspace root validation is asynchronous action work, never ordinary edit or paint/layout work."
 facade_path = "runtime/js/workspace.js::clientOpenFolderDialog"
-backing_rust = "src/client_commands.rs::EditorClientCommand; src/client/file_dialog.rs::open_folder_dialog; src/server/connection/workspace.rs::ClientMessage::AddSelectedWorkspaceRoot"
+backing_rust = "src/client_commands.rs::EditorClientCommand; src-tauri/src/commands.rs::dialog_open_folder; src/server/connection/workspace.rs::ClientMessage::AddSelectedWorkspaceRoot"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/workspace/client-open-folder-dialog.md"
@@ -2719,7 +2719,7 @@ key_bindings = []
 custom_properties = []
 permissions = []
 security_notes = "Native folder selection requires explicit user routing and the server selected-path capability flow; does not grant filesystem/workspace authority beyond the validated selected folder root, network, shell, extension loading, package manager, AI mutation, WASM, raw Deno ops, native widget, clipboard read/write, or client-side JavaScript authority."
-current_rust_owner = "src/client/file_dialog.rs::open_folder_dialog"
+current_rust_owner = "src-tauri/src/commands.rs::dialog_open_folder; src/client/behavior.rs::ClientBehaviorState::route_key; src/server/connection/workspace.rs::ClientMessage::AddSelectedWorkspaceRoot"
 registry_public = true
 
 [[api]]
