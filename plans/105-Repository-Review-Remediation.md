@@ -375,7 +375,7 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
     - Docs: `docs/development/performance.md` gained the chunk table (with date) under the client-budgets section.
     - Gates: tsc -b + vite build ok, lint, prettier, vitest 194/194, check:budget pass. No CSP change; all chunks 'self'.
 
-- [ ] Add or verify the `runtime/js` `.d.ts` drift check (review P3)
+- [x] Add or verify the `runtime/js` `.d.ts` drift check (review P3) (DONE 2026-08-31 22:55, commit 0cb8ce2: new parity test found real theme.d.ts drift, fixed)
   - Acceptance Criteria:
     - Functional: Either an existing check already fails when a `runtime/js/*.d.ts` declaration drifts from its adjacent `.js` implementation, or a minimal deterministic check is added (extend `tests/clay_js_facade_layout.rs`, which already inventories facade files, or add a script comparing exported names per `.js`/`.d.ts` pair); `cargo test` fails on a deliberately introduced drift (verified by a temporary local mutation), then passes.
     - Performance: Check is static (no V8 runtime); adds ≤ a few seconds to the test suite.
@@ -403,6 +403,12 @@ Scope note: this plan contains **no UI-surface tasks** (no component, panel, tok
       - 2026-08-31 review §4 P3 (first item).
   - Test Cases to Write:
       - Drift detection: temporarily rename one export in a `.d.ts`, confirm the test fails naming the pair, revert.
+  - Execution Evidence (2026-08-31 22:55, commit 0cb8ce2):
+    - New test `clay_js_facade_declarations_parity_with_implementations` in tests/clay_js_facade_layout.rs (protocol suite, +1 to 201): reads every runtime/js/*.js, parses top-level `export [async] function NAME(` lines; asserts the adjacent .d.ts has `export declare function NAME` for every implemented export AND that every declared function exists in the .js (both directions; error names the drifted pair and direction). Static, zero new deps, few ms runtime.
+    - Parser note: name extraction cuts at the first '(' (a first cut used trim_end_matches('('), which left 'authorizeLanguageServer(options) {' whole and false-failed; fixed). Exact line-start matching in both directions avoids substring false positives.
+    - REAL DRIFT FOUND on first run: runtime/js/theme.js exports setDesignSystem (backs op_clay_theme_set_design_system, present in the generated registry + reference docs since Phase 22.4) but theme.d.ts never declared it — the old listed-export test only checked planned names, so this slipped. Fixed: SetDesignSystemOptions / ActiveDesignSystemSummary (specifier, schemaVersion, generation — camelCase serde projection of ActiveDesignSystem, bounded like the other theme summaries) + `export declare function setDesignSystem(options: SetDesignSystemOptions | string): ActiveDesignSystemSummary`.
+    - AC mutation verification (both directions, reverted after): rename in .d.ts -> fails at declared->implemented assert naming pair; rename in .js -> fails at implemented->declared.
+    - Gates: protocol 201/201, clippy -D warnings, fmt. Note: interim `git checkout` of theme.d.ts during mutation testing reverted the fix (uncommitted at that point) — re-applied before final green; lesson: commit the fix file before mutation trials or use `git stash`-style backups.
 
 - [ ] Audit `std::sync::Mutex` guards held across `.await` (review P3)
   - Acceptance Criteria:
