@@ -45,7 +45,7 @@ work away from connection and browser hot paths:
 
 | Concern | Owner | Contract |
 |---|---|---|
-| Canonical document and bounded parser input | `src/server/document.rs` / `src/server/workspace.rs` | Server-owned `DocumentState`/rope; head and chunk responses are UTF-8-safe and bounded by `MAX_CHUNK_BYTES` plus the 256 MiB resident-document budget. |
+| Canonical document and bounded parser input | `src/server/document.rs` / `src/server/workspace/mod.rs` | Server-owned `DocumentState`/rope; head and chunk responses are UTF-8-safe and bounded by `MAX_CHUNK_BYTES` plus the 256 MiB resident-document budget. |
 | Syntax scheduling and parser state | `src/server/parse_coordinator.rs` + `src/server/syntax_session.rs` | One `(generation, document, grammar)` session with one latest-wins mailbox; native handlers use four shared `spawn_blocking` permits; each document owns its parser/tree state; stale output never publishes. |
 | Mode activation | `src/server/js_runtime/mod.rs` + `src/server/connection/documents.rs` | Completed activation manifests are cached per generation and classification input, capped at 64 entries; cache hits avoid generated V8 open evaluation without changing package authority. |
 | Protocol completion | `src/protocol/parse.rs` + `src/server/connection/mod.rs` | `ViewportRenderRequest` receives exactly one `ViewportRenderPatch` with complete/empty/rejected status and output-derived `covered_ranges`; parse context is not falsely claimed. |
