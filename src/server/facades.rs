@@ -36,6 +36,7 @@ const FACADES: &[Facade] = &[
         "clay:configuration",
         include_str!("../../runtime/js/configuration.js"),
     ),
+    Facade::trusted("clay:agent", include_str!("../../runtime/js/agent.js")),
     Facade::public("clay:sdui", include_str!("../../runtime/js/sdui.js")),
     Facade::public("clay:ui", include_str!("../../runtime/js/ui.js")),
     Facade::trusted(
@@ -119,7 +120,7 @@ mod tests {
     #[test]
     fn facade_inventory_is_unique_and_domain_partitioned() {
         let specifiers: HashSet<_> = FACADES.iter().map(|facade| facade.specifier).collect();
-        assert_eq!(specifiers.len(), 23);
+        assert_eq!(specifiers.len(), 24);
         assert_eq!(
             FACADES
                 .iter()

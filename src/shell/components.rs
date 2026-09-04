@@ -40,6 +40,10 @@ pub(crate) enum ComponentKind {
     Modal,
     /// Phase 20.5: single-line editable text field with focus, placeholder, and validation states.
     TextInput,
+    /// Plan 108 task 8: tab strip hosting per-tab children. `items` carry tab
+    /// metadata (id/label/selected); children render as tab panels in order.
+    /// Selection is widget-local (React Aria Tabs), like `dropdown`.
+    TabList,
 }
 
 impl ComponentKind {
@@ -60,6 +64,9 @@ impl ComponentKind {
             "collapse" => Some(Self::Collapse),
             "modal" => Some(Self::Modal),
             "textInput" => Some(Self::TextInput),
+            // Plan 108 task 8: tab strip hosting per-tab children (React Aria
+            // Tabs substrate; selection is widget-local like dropdown).
+            "tabList" => Some(Self::TabList),
             _ => None,
         }
     }
@@ -86,6 +93,7 @@ impl ComponentKind {
             Self::Collapse => "collapse",
             Self::Modal => "modal",
             Self::TextInput => "textInput",
+            Self::TabList => "tabList",
         }
     }
 
@@ -101,6 +109,7 @@ impl ComponentKind {
                 | Self::Collapse
                 | Self::Modal
                 | Self::TextInput
+                | Self::TabList
         )
     }
 }
@@ -223,7 +232,9 @@ pub(crate) fn applicable_states(kind: ComponentKind) -> &'static [InteractionSta
     match kind {
         // Interactive triggers: Rest/Hover/Active/Focus/Disabled (components.md
         // lines 35, 36, 51, 52, 54).
-        Button | List | Dropdown | Collapse | TextInput => &[Rest, Hover, Active, Focus, Disabled],
+        Button | List | Dropdown | Collapse | TextInput | TabList => {
+            &[Rest, Hover, Active, Focus, Disabled]
+        }
         // Chrome containers: state-independent chrome; currently Rest
         // (components.md lines 38, 53).
         Panel | Overlay | Modal => &[Rest],
@@ -459,6 +470,8 @@ mod tests {
             "modal",
             // Phase 20.5: new kind.
             "textInput",
+            // Plan 108 task 8: tab strip hosting per-tab children.
+            "tabList",
         ];
 
         for kind in supported {

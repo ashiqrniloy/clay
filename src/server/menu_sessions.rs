@@ -131,6 +131,10 @@ impl ServerMenuSessions {
         self.active.get_mut(&session_id)
     }
 
+    pub(crate) fn get(&self, session_id: u64) -> Option<&ServerMenuSession> {
+        self.active.get(&session_id)
+    }
+
     /// Removes the session (activation and cancel both consume it).
     pub(crate) fn cancel(&mut self, session_id: u64) -> Option<ServerMenuSession> {
         self.active.remove(&session_id)
@@ -219,6 +223,13 @@ impl ServerMenuSession {
 
     pub(crate) fn agent_picker_mut(&mut self) -> Option<&mut AgentPicker> {
         match &mut self.kind {
+            ServerMenuSessionKind::AgentPicker(picker) => Some(picker),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn agent_picker_ref(&self) -> Option<&AgentPicker> {
+        match &self.kind {
             ServerMenuSessionKind::AgentPicker(picker) => Some(picker),
             _ => None,
         }

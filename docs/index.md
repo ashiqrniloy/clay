@@ -171,6 +171,16 @@ The generated documentation registry must read this section as the explicit incl
 - [defineStack](reference/clay-js-api/sdui/define-stack.md) — `sdui.defineStack`
 - [publishTree](reference/clay-js-api/sdui/publish-tree.md) — `sdui.publishTree`
 - [clientOpenFolderDialog](reference/clay-js-api/workspace/client-open-folder-dialog.md) — `workspace.clientOpenFolderDialog`
+- [compact](reference/clay-js-api/agent/compact.md) — `agent.compact`
+- [searchSessions](reference/clay-js-api/agent/search-sessions.md) — `agent.searchSessions`
+- [setFullAutonomy](reference/clay-js-api/agent/set-full-autonomy.md) — `agent.setFullAutonomy`
+- [resumeRun](reference/clay-js-api/agent/resume-run.md) — `agent.resumeRun`
+- [sessionTree](reference/clay-js-api/agent/session-tree.md) — `agent.sessionTree`
+- [profileRegister](reference/clay-js-api/agent/profile-register.md) — `agent.profileRegister`
+- [skillRegister](reference/clay-js-api/agent/skill-register.md) — `agent.skillRegister`
+- [commandRegister](reference/clay-js-api/agent/command-register.md) — `agent.commandRegister`
+- [commandDispatch](reference/clay-js-api/agent/command-dispatch.md) — `agent.commandDispatch`
+- [knowledgeSetOptions](reference/clay-js-api/agent/knowledge-set-options.md) — `agent.knowledgeSetOptions`
 - [serverAddWorkspaceRoot](reference/clay-js-api/workspace/server-add-workspace-root.md) — `workspace.serverAddWorkspaceRoot`
 - [serverCancelListing](reference/clay-js-api/workspace/server-cancel-listing.md) — `workspace.serverCancelListing`
 - [serverCreateListingCancelToken](reference/clay-js-api/workspace/server-create-listing-cancel-token.md) — `workspace.serverCreateListingCancelToken`

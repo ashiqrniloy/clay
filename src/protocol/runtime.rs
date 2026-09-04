@@ -51,6 +51,10 @@ pub type RuntimeGenerationId = u64;
 pub struct PackageUiSnapshot {
     pub version: u64,
     pub empty_tab: Option<EmptyTabContent>,
+    /// Named pane surfaces (`activation: "pane"`), e.g. the Coding Agent
+    /// split surface. Same wire shape as the empty-tab landing.
+    #[serde(default)]
+    pub surfaces: Vec<EmptyTabContent>,
     pub panels: Vec<PackagePanelContent>,
     pub overlays: Vec<PackageOverlayContent>,
     pub components: Vec<PackageComponentContent>,
@@ -303,6 +307,7 @@ impl PackageUiSnapshot {
             .empty_tab
             .iter()
             .map(|entry| entry.id.as_str())
+            .chain(self.surfaces.iter().map(|entry| entry.id.as_str()))
             .chain(self.panels.iter().map(|entry| entry.id.as_str()))
             .chain(self.overlays.iter().map(|entry| entry.id.as_str()))
             .chain(self.components.iter().map(|entry| entry.id.as_str()))
@@ -331,6 +336,11 @@ impl PackageUiSnapshot {
             .empty_tab
             .iter()
             .map(|entry| entry.component_json.as_str())
+            .chain(
+                self.surfaces
+                    .iter()
+                    .map(|entry| entry.component_json.as_str()),
+            )
             .chain(
                 self.panels
                     .iter()
@@ -362,6 +372,7 @@ impl PackageUiSnapshot {
                 .empty_tab
                 .iter()
                 .flat_map(|entry| &entry.action_targets)
+                .chain(self.surfaces.iter().flat_map(|entry| &entry.action_targets))
                 .chain(self.panels.iter().flat_map(|entry| &entry.action_targets))
                 .chain(self.overlays.iter().flat_map(|entry| &entry.action_targets))
                 .chain(

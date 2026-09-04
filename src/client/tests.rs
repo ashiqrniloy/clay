@@ -3096,56 +3096,26 @@ async fn real_server_restore_sequence_orders_tabs_and_opens_documents() {
         beta.initial_state.workspace_root,
         roots[1].to_string_lossy()
     );
+    // The workspace browser is visible by default: the bind snapshot
+    // carries the root's listing (toggle mechanics are pinned server-side
+    // by deferred_initial_state_waits_for_tab_binding).
     let initial_alpha_browser = loop {
         if let ClientConnectionEvent::SduiSnapshot { tree, .. } = alpha.events.recv().await.unwrap()
         {
             break tree;
         }
     };
-    assert!(initial_alpha_browser.nodes.iter().all(|node| {
-        !matches!(
-            &node.kind,
-            SduiNodeKind::Panel { .. } | SduiNodeKind::List { .. }
-        )
-    }));
-    alpha
-        .edit_queue
-        .enqueue_command_intent(
-            alpha.initial_state.document_id,
-            alpha.initial_state.behavior_manifest.behavior_version,
-            "workspace.toggleFileBrowser".to_string(),
-        )
-        .unwrap();
-    let mut registry_snapshot = None;
-    let alpha_browser = loop {
-        match alpha.events.recv().await.unwrap() {
-            ClientConnectionEvent::SduiSnapshot { tree, .. } => break tree,
-            ClientConnectionEvent::TabRegistry(snapshot) => {
-                if snapshot.tabs.len() == 3 {
-                    registry_snapshot = Some(snapshot);
-                }
-            }
-            ClientConnectionEvent::ServerError { code, message } => {
-                panic!("toggle command failed: {code:?}: {message}")
-            }
-            event => panic!("unexpected toggle event: {event:?}"),
-        }
-    };
-    assert!(alpha_browser.nodes.iter().any(|node| matches!(
+    assert!(initial_alpha_browser.nodes.iter().any(|node| matches!(
         &node.kind,
         SduiNodeKind::List { items } if items.iter().any(|item| item.label == "notes.md")
     )));
 
     // Registry order equals persisted order — no `MoveTo` needed.
-    let snapshot = if let Some(snapshot) = registry_snapshot {
-        snapshot
-    } else {
-        loop {
-            if let ClientConnectionEvent::TabRegistry(snapshot) = alpha.events.recv().await.unwrap()
-                && snapshot.tabs.len() == 3
-            {
-                break snapshot;
-            }
+    let snapshot = loop {
+        if let ClientConnectionEvent::TabRegistry(snapshot) = alpha.events.recv().await.unwrap()
+            && snapshot.tabs.len() == 3
+        {
+            break snapshot;
         }
     };
     let alpha_client = alpha.initial_state.client_id;

@@ -4,8 +4,10 @@
 //! `env_clear`, never a shell string. Node missing is a diagnostic, not a hang.
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,12 +24,27 @@ use crate::protocol::{
     AgentClientCommand, AgentInventory, AgentModelInfo, AgentPickerItem, AgentPickerKind,
     AgentProfileInfo, AgentProviderInfo, AgentSecret, AgentServerMessage, AgentSessionInfo,
     AgentSessionSnapshot, AgentToolPhase, AgentTranscriptEntry, AgentTranscriptKind,
-    AgentWireEvent, TabId, apply_transcript_event,
+    AgentWireEvent, ApprovalRequestKind, TabId, apply_transcript_event,
 };
+use crate::server::agent_picker::AgentSearchHit;
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(5);
 const RPC_TIMEOUT: Duration = Duration::from_secs(30);
 const EVENT_CAPACITY: usize = 256;
+/// How long a pending user-approval request waits for a client answer
+/// before failing closed (deny). Generous: a human is deciding.
+const APPROVAL_WAIT: Duration = Duration::from_secs(300);
+/// Upper bound on one daemon-produced approval request payload.
+const MAX_APPROVAL_PAYLOAD_BYTES: usize = 16 * 1024;
+
+/// Handler for daemon-initiated reverse-RPC requests (document reads/writes
+/// and user-approval asks). Installed once by the server before the first
+/// spawn; package JavaScript never sees this type.
+pub type ReverseRpcHandler = Arc<
+    dyn Fn(String, Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>
+        + Send
+        + Sync,
+>;
 
 #[derive(Debug)]
 pub enum AgentError {
@@ -73,6 +90,34 @@ pub struct AgentHostConfig {
     /// When true, skip spawn and return diagnostics. Used by tests that do not
     /// exercise the child.
     pub inert: bool,
+    /// Server-built MCP allow-list (decision 1758). The daemon validates every
+    /// entry fail-closed (canonical executable, literal argv, explicit env
+    /// names); an empty list connects nothing. Package JS never supplies argv.
+    pub mcp_allow_list: Vec<AgentMcpAllowListEntry>,
+}
+
+/// One allow-listed MCP stdio server. Built by the server (later: config /
+/// approved contribution data) — never from package JavaScript at runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMcpAllowListEntry {
+    pub server_id: String,
+    pub command: String,
+    pub args: Vec<String>,
+    /// Explicit env names and literal values only; never inherited wholesale.
+    pub env: Vec<(String, String)>,
+    pub cwd: Option<String>,
+}
+
+impl AgentMcpAllowListEntry {
+    fn to_json(&self) -> Value {
+        json!({
+            "serverId": self.server_id,
+            "command": self.command,
+            "args": self.args,
+            "env": self.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<std::collections::BTreeMap<_, _>>(),
+            "cwd": self.cwd,
+        })
+    }
 }
 
 impl AgentHostConfig {
@@ -86,6 +131,7 @@ impl AgentHostConfig {
             data_dir,
             inherit_environment: Vec::new(),
             inert: false,
+            mcp_allow_list: Vec::new(),
         }
     }
 }
@@ -109,10 +155,17 @@ struct SessionBook {
     provider: String,
     model: String,
     tab_session: HashMap<TabId, String>,
+    /// Last finished run's context-token counter per session (plan 108
+    /// task 9): the snapshot's context-used-vs-window numerator.
+    context_tokens: HashMap<String, Option<u64>>,
+
     transcripts: HashMap<String, Vec<AgentTranscriptEntry>>,
     running: HashSet<String>,
     cancelled: HashSet<String>,
 }
+
+/// Pending daemon-initiated approval requests, keyed by request id.
+type PendingApprovals = HashMap<String, oneshot::Sender<Result<Value, String>>>;
 
 struct Inner {
     config: AgentHostConfig,
@@ -121,6 +174,16 @@ struct Inner {
     state: Mutex<Option<Running>>,
     secrets: Arc<Mutex<Vec<String>>>,
     book: Arc<Mutex<SessionBook>>,
+    reverse: Mutex<Option<ReverseRpcHandler>>,
+    /// Pending daemon-initiated approval requests, keyed by request id.
+    /// Resolved by `ApprovalResolve`/`AskDecisionResolve`; dropped senders
+    /// and timeouts deny fail-closed.
+    approvals: Arc<Mutex<PendingApprovals>>,
+    approval_seq: AtomicU64,
+    /// Registration RPCs queued while the daemon is not yet running
+    /// (package load entries must never spawn or block on the daemon).
+    /// Drained in order right after the initialize handshake succeeds.
+    pending_registrations: Arc<Mutex<Vec<HostCommand>>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -164,6 +227,123 @@ pub struct AgentHost {
     inner: Arc<Inner>,
 }
 
+static AGENT_HOST_AUTHORITY: std::sync::OnceLock<AgentHostHandle> = std::sync::OnceLock::new();
+
+/// Process-global authority cell for the `agent` JS ops. One clay-agent child
+/// per server means one authority per process; the server installs it at
+/// startup and every JS runtime worker reads the same handle. Unset → ops
+/// fail closed.
+#[derive(Clone)]
+pub struct AgentHostHandle(Arc<AgentHost>);
+
+impl std::fmt::Debug for AgentHostHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AgentHostHandle")
+    }
+}
+
+/// A registration declaration queued before any agent host exists (hostless
+/// runtimes: unit harnesses, embedded workers). Applied to the host when one
+/// installs. `install_global` drains this into the host's own pending queue.
+#[derive(Debug, Clone)]
+pub(crate) struct PackageRegistration {
+    pub method: String,
+    pub params: Value,
+}
+
+static PENDING_PACKAGE_REGISTRATIONS: std::sync::Mutex<Vec<PackageRegistration>> =
+    std::sync::Mutex::new(Vec::new());
+
+const PENDING_REGISTRATION_CAP: usize = 64;
+
+/// Queue a registration declaration with no host attached. Package load
+/// entries never fail just because this runtime has no agent host: the
+/// declaration applies when a host installs (see [`install_global`]).
+pub(crate) fn queue_package_registration(method: &str, params: Value) -> Result<(), AgentError> {
+    let mut pending = PENDING_PACKAGE_REGISTRATIONS
+        .lock()
+        .map_err(|_| AgentError::ServiceStopped)?;
+    if pending.len() >= PENDING_REGISTRATION_CAP {
+        return Err(AgentError::ServiceStopped);
+    }
+    pending.push(PackageRegistration {
+        method: method.to_string(),
+        params,
+    });
+    Ok(())
+}
+
+/// Drain every queued package registration (test/introspection and
+/// install-time handoff).
+pub(crate) fn take_pending_package_registrations() -> Vec<PackageRegistration> {
+    PENDING_PACKAGE_REGISTRATIONS
+        .lock()
+        .map(|mut pending| pending.drain(..).collect())
+        .unwrap_or_default()
+}
+
+impl AgentHostHandle {
+    pub(crate) fn new(host: AgentHost) -> Self {
+        Self(Arc::new(host))
+    }
+
+    /// Install the process-global authority. First install wins; later
+    /// servers in the same process (tests) keep the first handle. Package
+    /// registrations queued while no host existed move into the host's own
+    /// pending queue, preserving order, and apply after its first
+    /// initialize handshake.
+    pub(crate) fn install_global(host: AgentHost) {
+        let handle = Self::new(host.clone());
+        let _ = AGENT_HOST_AUTHORITY.set(handle);
+        // Move anything queued before the host existed into the host's own
+        // pending queue, preserving order; they apply after its first
+        // initialize handshake. No registration op can run before server
+        // construction installs the authority, so one drain after the set
+        // covers every queued entry.
+        let drained = take_pending_package_registrations();
+        if !drained.is_empty()
+            && let Ok(mut pending) = host.inner.pending_registrations.try_lock()
+        {
+            for registration in drained {
+                let (reply_tx, _reply_rx) = oneshot::channel();
+                pending.push(HostCommand::Rpc {
+                    method: registration.method,
+                    params: registration.params,
+                    reply: reply_tx,
+                });
+            }
+        }
+    }
+
+    /// Process-global authority, or a fail-closed error naming the missing
+    /// wiring. Never grants authority by existing.
+    pub(crate) fn global() -> Result<Self, AgentError> {
+        AGENT_HOST_AUTHORITY
+            .get()
+            .cloned()
+            .ok_or(AgentError::ServiceStopped)
+    }
+
+    /// Forward a raw daemon RPC (e.g. `session.setAutonomy`). Errors and
+    /// results are daemon-produced; callers redact before surfacing.
+    pub(crate) async fn rpc(&self, method: &str, params: Value) -> Result<Value, AgentError> {
+        self.0.rpc(method, params).await
+    }
+
+    pub(crate) async fn rpc_or_queue(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, AgentError> {
+        self.0.rpc_or_queue(method, params).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn take_pending_registrations(&self) -> Vec<PackageRegistration> {
+        self.0.take_pending_registrations().await
+    }
+}
+
 impl std::fmt::Debug for AgentHost {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("AgentHost")
@@ -180,6 +360,10 @@ impl AgentHost {
                 state: Mutex::new(None),
                 secrets: Arc::new(Mutex::new(Vec::new())),
                 book: Arc::new(Mutex::new(SessionBook::default())),
+                reverse: Mutex::new(None),
+                approvals: Arc::new(Mutex::new(HashMap::new())),
+                approval_seq: AtomicU64::new(1),
+                pending_registrations: Arc::new(Mutex::new(Vec::new())),
             }),
         }
     }
@@ -191,6 +375,7 @@ impl AgentHost {
             data_dir: PathBuf::new(),
             inherit_environment: Vec::new(),
             inert: true,
+            mcp_allow_list: Vec::new(),
         })
     }
 
@@ -200,6 +385,72 @@ impl AgentHost {
 
     pub fn subscribe(&self) -> broadcast::Receiver<Arc<AgentServerMessage>> {
         self.inner.events.subscribe()
+    }
+
+    /// Install the reverse-RPC handler. Call once before the first spawn.
+    pub fn set_reverse_handler(&self, handler: ReverseRpcHandler) {
+        if let Ok(mut reverse) = self.inner.reverse.try_lock() {
+            *reverse = Some(handler);
+        }
+    }
+
+    /// Surface a daemon-initiated user-approval request to connected clients
+    /// and wait bounded for the answer. Denies fail-closed on timeout or
+    /// missing consumer. `payload_json` is daemon-produced; oversized
+    /// payloads are rejected before any client sees them.
+    pub async fn request_user_approval(
+        &self,
+        kind: ApprovalRequestKind,
+        payload_json: &str,
+    ) -> Result<Value, String> {
+        self.request_user_approval_for(kind, payload_json, APPROVAL_WAIT)
+            .await
+    }
+
+    async fn request_user_approval_for(
+        &self,
+        kind: ApprovalRequestKind,
+        payload_json: &str,
+        wait: Duration,
+    ) -> Result<Value, String> {
+        if payload_json.len() > MAX_APPROVAL_PAYLOAD_BYTES {
+            return Err("approval payload exceeds the wire budget".into());
+        }
+        let request_id = format!(
+            "approval-{}",
+            self.inner.approval_seq.fetch_add(1, Ordering::Relaxed)
+        );
+        let (reply, answer) = oneshot::channel();
+        self.inner
+            .approvals
+            .lock()
+            .await
+            .insert(request_id.clone(), reply);
+        let request = Arc::new(AgentServerMessage::ApprovalRequest {
+            request_id: request_id.clone(),
+            kind,
+            payload_json: payload_json.to_string(),
+        });
+        if self.inner.events.send(request).is_err() {
+            self.inner.approvals.lock().await.remove(&request_id);
+            return Err("no approval consumer is connected".into());
+        }
+        let result = match timeout(wait, answer).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_receiver_gone)) => Err("no approval consumer is connected".into()),
+            Err(_elapsed) => Err("approval request timed out".into()),
+        };
+        self.inner.approvals.lock().await.remove(&request_id);
+        result
+    }
+
+    /// Answer a pending approval request. Returns false for unknown/stale
+    /// ids; the requester sees exactly one answer either way.
+    pub async fn resolve_approval(&self, request_id: &str, result: Result<Value, String>) -> bool {
+        match self.inner.approvals.lock().await.remove(request_id) {
+            Some(reply) => reply.send(result).is_ok(),
+            None => false,
+        }
     }
 
     pub fn dispatch(&self, command: AgentClientCommand) {
@@ -252,9 +503,17 @@ impl AgentHost {
             book.running.insert(session_id.clone());
         }
         let snapshot = self.snapshot_for(&session_id).await;
+        let (provider, model) = {
+            let book = self.inner.book.lock().await;
+            (book.provider.clone(), book.model.clone())
+        };
         self.dispatch(AgentClientCommand::Prompt {
             session_id,
             text: text.to_string(),
+            // Run-scoped book override (plan 108 task 9): a picker switch
+            // between runs applies at the next prompt without a new session.
+            provider: Some(provider),
+            model: Some(model),
         });
         AgentServerMessage::Snapshot(snapshot)
     }
@@ -273,7 +532,31 @@ impl AgentHost {
         diagnostic("agent.cancelled", "cancelled")
     }
 
-    pub async fn resume_tab(&self, tab: TabId, session_id: &str) -> AgentServerMessage {
+    /// Queues a mid-run user message on the tab's session (pi-parity steer,
+    /// plan 108 task 9). User-initiated only: reachable solely through the
+    /// validated chat intent path with the composer's text.
+    pub async fn steer_tab(&self, tab: TabId, text: &str) -> AgentServerMessage {
+        if text.trim().is_empty() || text.len() > AGENT_MAX_PROMPT_BYTES {
+            return diagnostic("agent.steer_rejected", "empty or oversized steer");
+        }
+        let session_id = self.inner.book.lock().await.tab_session.get(&tab).cloned();
+        let Some(session_id) = session_id else {
+            return diagnostic("agent.idle", "no running session");
+        };
+        self.dispatch(AgentClientCommand::Steer {
+            session_id,
+            text: text.to_string(),
+            soft_interrupt: false,
+        });
+        diagnostic("agent.steered", "steered")
+    }
+
+    pub async fn resume_tab(
+        &self,
+        tab: TabId,
+        session_id: &str,
+        entry_id: Option<&str>,
+    ) -> AgentServerMessage {
         self.inner
             .book
             .lock()
@@ -283,12 +566,17 @@ impl AgentHost {
         let loaded = self
             .run(AgentClientCommand::LoadSession {
                 session_id: session_id.to_string(),
+                entry_id: entry_id.map(str::to_string),
             })
             .await;
         if let AgentServerMessage::Snapshot(snapshot) = &loaded {
             let mut book = self.inner.book.lock().await;
             book.transcripts
                 .insert(session_id.to_string(), snapshot.entries.clone());
+            if let Some(tokens) = snapshot.context_tokens {
+                book.context_tokens
+                    .insert(session_id.to_string(), Some(tokens));
+            }
             if !snapshot.profile.is_empty() {
                 book.profile = snapshot.profile.clone();
             }
@@ -303,6 +591,65 @@ impl AgentHost {
             session_id: session_id.to_string(),
         });
         loaded
+    }
+
+    /// Workspace-scoped session search for the picker (plan 108 task 11):
+    /// the query runs against the shared Phase 1 FTS index, scoped to the
+    /// tab's current session workspace (decision 2201). Bounded by `limit`.
+    pub async fn search_sessions(
+        &self,
+        tab: TabId,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<AgentSearchHit>, AgentError> {
+        let session_id = {
+            let book = self.inner.book.lock().await;
+            book.tab_session.get(&tab).cloned()
+        };
+        let Some(session_id) = session_id else {
+            return Ok(Vec::new());
+        };
+        let result = self
+            .rpc(
+                "session.search",
+                json!({ "sessionId": session_id, "query": query, "limit": limit }),
+            )
+            .await?;
+        let Some(hits) = result.get("hits").and_then(Value::as_array) else {
+            return Ok(Vec::new());
+        };
+        Ok(hits
+            .iter()
+            .filter_map(|hit| {
+                let session_id = hit.get("sessionId")?.as_str()?.to_string();
+                let leaf_id = hit
+                    .get("leafId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let updated_at = hit
+                    .get("updatedAt")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let label = hit
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&session_id)
+                    .to_string();
+                let snippet = hit
+                    .get("snippet")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                Some(AgentSearchHit {
+                    session_id,
+                    leaf_id,
+                    updated_at,
+                    label,
+                    snippet,
+                })
+            })
+            .collect())
     }
 
     async fn ensure_tab_session(&self, tab: TabId) -> Option<String> {
@@ -332,6 +679,8 @@ impl AgentHost {
                 profile,
                 provider,
                 model,
+                workspace_root: None,
+                full_autonomy: None,
             })
             .await;
         let AgentServerMessage::Snapshot(snapshot) = created else {
@@ -348,6 +697,15 @@ impl AgentHost {
         Some(snapshot.session_id)
     }
 
+    fn mcp_server_names(&self) -> Vec<String> {
+        self.inner
+            .config
+            .mcp_allow_list
+            .iter()
+            .map(|entry| entry.server_id.clone())
+            .collect()
+    }
+
     async fn snapshot_for(&self, session_id: &str) -> AgentSessionSnapshot {
         let book = self.inner.book.lock().await;
         AgentSessionSnapshot {
@@ -356,11 +714,13 @@ impl AgentHost {
             provider: book.provider.clone(),
             model: book.model.clone(),
             leaf_id: None,
+            context_tokens: book.context_tokens.get(session_id).cloned().flatten(),
             entries: book
                 .transcripts
                 .get(session_id)
                 .cloned()
                 .unwrap_or_default(),
+            mcp_servers: self.mcp_server_names(),
         }
     }
 
@@ -372,7 +732,9 @@ impl AgentHost {
             provider: book.provider.clone(),
             model: book.model.clone(),
             leaf_id: None,
+            context_tokens: None,
             entries: Vec::new(),
+            mcp_servers: self.mcp_server_names(),
         }
     }
 
@@ -437,6 +799,61 @@ impl AgentHost {
         }
     }
 
+    /// Forward a registration RPC, or queue it server-side when the daemon
+    /// is not yet running. Package load entries call this so a load never
+    /// spawns the daemon or waits on its boot: queued declarations are
+    /// applied right after the next successful initialize handshake, before
+    /// any later command (session ordering is FIFO through the actor).
+    pub async fn rpc_or_queue(&self, method: &str, params: Value) -> Result<Value, AgentError> {
+        if self.inner.state.lock().await.is_some() {
+            match self.rpc(method, params.clone()).await {
+                Ok(result) => return Ok(result),
+                // Daemon gone/stale (server dropped, child killed): defer the
+                // declaration exactly like a not-yet-running daemon.
+                Err(AgentError::ServiceStopped) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        self.queue_registration(method, params).await
+    }
+
+    async fn queue_registration(&self, method: &str, params: Value) -> Result<Value, AgentError> {
+        const PENDING_REGISTRATION_CAP: usize = 64;
+        let mut pending = self.inner.pending_registrations.lock().await;
+        if pending.len() >= PENDING_REGISTRATION_CAP {
+            return Err(AgentError::ServiceStopped);
+        }
+        let (reply_tx, _reply_rx) = oneshot::channel();
+        pending.push(HostCommand::Rpc {
+            method: method.to_string(),
+            params,
+            reply: reply_tx,
+        });
+        Ok(json!({ "queued": true }))
+    }
+
+    /// Drain the host's pending registration queue (test/introspection).
+    /// Entries come back as plain declarations.
+    #[cfg(test)]
+    pub(crate) async fn take_pending_registrations(&self) -> Vec<PackageRegistration> {
+        let pending = self.inner.pending_registrations.lock().await;
+        pending
+            .iter()
+            .filter_map(|command| match command {
+                HostCommand::Rpc { method, params, .. } => Some(PackageRegistration {
+                    method: method.clone(),
+                    params: params.clone(),
+                }),
+                HostCommand::Shutdown => None,
+            })
+            .collect()
+    }
+
+    /// Test/introspection accessor: queued registration count.
+    pub async fn pending_registration_len(&self) -> usize {
+        self.inner.pending_registrations.lock().await.len()
+    }
+
     pub async fn run(&self, command: AgentClientCommand) -> AgentServerMessage {
         if self.inner.config.inert {
             return diagnostic("agent.unavailable", "agent host is not started");
@@ -469,18 +886,29 @@ impl AgentHost {
         command: AgentClientCommand,
     ) -> Result<AgentServerMessage, AgentError> {
         match command {
-            AgentClientCommand::Prompt { session_id, text } => {
+            AgentClientCommand::Prompt {
+                session_id,
+                text,
+                provider,
+                model,
+            } => {
                 if text.len() > AGENT_MAX_PROMPT_BYTES {
                     return Ok(diagnostic(
                         "agent.prompt_too_large",
                         "prompt exceeds AGENT_MAX_PROMPT_BYTES",
                     ));
                 }
-                self.rpc(
-                    "session.prompt",
-                    json!({ "sessionId": session_id, "text": text }),
-                )
-                .await?;
+                let mut params = json!({ "sessionId": session_id, "text": text });
+                if let Some(provider) = provider {
+                    params["provider"] = json!(provider);
+                }
+                if let Some(model) = model {
+                    params["model"] = json!(model);
+                }
+                self.rpc("session.prompt", params).await?;
+                // Refreshed snapshot: after a switch the state carries the
+                // session's persisted provider/model so every client tab and
+                // the status row agree.
                 Ok(AgentServerMessage::Snapshot(
                     self.snapshot_for(&session_id).await,
                 ))
@@ -510,19 +938,32 @@ impl AgentHost {
                 profile,
                 provider,
                 model,
+                workspace_root,
+                full_autonomy,
             } => {
-                let result = self
-                    .rpc(
-                        "session.new",
-                        json!({ "profile": profile, "provider": provider, "model": model }),
-                    )
-                    .await?;
+                let mut params = serde_json::Map::new();
+                params.insert("profile".into(), json!(profile));
+                params.insert("provider".into(), json!(provider));
+                params.insert("model".into(), json!(model));
+                if let Some(root) = workspace_root {
+                    params.insert("workspaceRoot".into(), json!(root));
+                }
+                if let Some(enabled) = full_autonomy {
+                    params.insert("fullAutonomy".into(), json!(enabled));
+                }
+                let result = self.rpc("session.new", Value::Object(params)).await?;
                 Ok(AgentServerMessage::Snapshot(snapshot_from_new(&result)))
             }
-            AgentClientCommand::LoadSession { session_id } => {
-                let result = self
-                    .rpc("session.load", json!({ "sessionId": session_id }))
-                    .await?;
+            AgentClientCommand::LoadSession {
+                session_id,
+                entry_id,
+            } => {
+                let mut params = serde_json::Map::new();
+                params.insert("sessionId".into(), json!(session_id));
+                if let Some(entry) = entry_id {
+                    params.insert("entryId".into(), json!(entry));
+                }
+                let result = self.rpc("session.load", Value::Object(params)).await?;
                 Ok(AgentServerMessage::Snapshot(snapshot_from_load(&result)))
             }
             AgentClientCommand::ResumeSession { session_id } => {
@@ -578,6 +1019,189 @@ impl AgentHost {
                     stored: false,
                 })
             }
+            AgentClientCommand::Compact {
+                session_id,
+                strategy,
+            } => {
+                let mut params = serde_json::Map::new();
+                params.insert("sessionId".into(), json!(session_id));
+                if let Some(name) = strategy {
+                    params.insert("strategy".into(), json!(name));
+                }
+                self.rpc("session.compact", Value::Object(params)).await?;
+                Ok(diagnostic("agent.compacted", "compacted"))
+            }
+            AgentClientCommand::SessionTree {
+                session_id,
+                method,
+                entry_id,
+            } => {
+                let rpc_method = match method.as_str() {
+                    "checkout" | "fork" | "clone" | "checkpoint" => method.clone(),
+                    other => return Ok(diagnostic("agent.tree_invalid_method", other)),
+                };
+                let mut params = serde_json::Map::new();
+                params.insert("sessionId".into(), json!(session_id));
+                params.insert("entryId".into(), json!(entry_id));
+                self.rpc(&format!("session.{rpc_method}"), Value::Object(params))
+                    .await?;
+                Ok(diagnostic(
+                    "agent.tree_commanded",
+                    &format!("{rpc_method}:{session_id} at {entry_id}"),
+                ))
+            }
+            AgentClientCommand::SetAutonomy {
+                session_id,
+                enabled,
+            } => {
+                self.rpc(
+                    "session.setAutonomy",
+                    json!({ "sessionId": session_id, "enabled": enabled }),
+                )
+                .await?;
+                Ok(diagnostic(
+                    "agent.autonomy_set",
+                    &format!("{session_id}: {enabled}"),
+                ))
+            }
+            AgentClientCommand::SearchSessions {
+                session_id,
+                query,
+                limit,
+            } => {
+                let mut params = serde_json::Map::new();
+                params.insert("sessionId".into(), json!(session_id));
+                if let Some(q) = query {
+                    params.insert("query".into(), json!(q));
+                }
+                if let Some(l) = limit {
+                    params.insert("limit".into(), json!(l));
+                }
+                let result = self.rpc("session.search", Value::Object(params)).await?;
+                Ok(agent_rpc("agent.search_result", &result))
+            }
+            AgentClientCommand::RunResume {
+                session_id,
+                run_id,
+                decision_json,
+            } => {
+                let decision: Value = serde_json::from_str(&decision_json)
+                    .map_err(|error| AgentError::Rpc(format!("invalid decision JSON: {error}")))?;
+                if !decision.is_object() {
+                    return Err(AgentError::Rpc(
+                        "invalid decision: expected a JSON object".into(),
+                    ));
+                }
+                let result = self
+                    .rpc(
+                        "run.resume",
+                        json!({ "sessionId": session_id, "runId": run_id, "decision": decision }),
+                    )
+                    .await?;
+                Ok(agent_rpc("agent.run_resume_result", &result))
+            }
+            AgentClientCommand::SkillRegister {
+                name,
+                description,
+                instructions,
+                tool_names,
+            } => {
+                let mut params = serde_json::Map::new();
+                params.insert("name".into(), json!(name));
+                if let Some(text) = description {
+                    params.insert("description".into(), json!(text));
+                }
+                if let Some(text) = instructions {
+                    params.insert("instructions".into(), json!(text));
+                }
+                if !tool_names.is_empty() {
+                    params.insert("toolNames".into(), json!(tool_names));
+                }
+                self.rpc("skill.register", Value::Object(params)).await?;
+                Ok(diagnostic("agent.skill_registered", "registered"))
+            }
+            AgentClientCommand::CommandRegister {
+                name,
+                handler,
+                description,
+            } => {
+                let mut params = serde_json::Map::new();
+                params.insert("name".into(), json!(name));
+                if let Some(handler) = handler {
+                    params.insert("handler".into(), json!(handler));
+                }
+                if let Some(text) = description {
+                    params.insert("description".into(), json!(text));
+                }
+                self.rpc("command.register", Value::Object(params)).await?;
+                Ok(diagnostic("agent.command_registered", "registered"))
+            }
+            AgentClientCommand::CommandDispatch {
+                name,
+                session_id,
+                args_json,
+            } => {
+                let args = match args_json {
+                    Some(text) => {
+                        let value: Value = serde_json::from_str(&text).map_err(|error| {
+                            AgentError::Rpc(format!("invalid command args JSON: {error}"))
+                        })?;
+                        if !value.is_object() {
+                            return Err(AgentError::Rpc(
+                                "invalid command args: expected a JSON object".into(),
+                            ));
+                        }
+                        value
+                    }
+                    None => json!({}),
+                };
+                let mut params = serde_json::Map::new();
+                params.insert("name".into(), json!(name));
+                if let Some(session_id) = session_id {
+                    params.insert("sessionId".into(), json!(session_id));
+                }
+                params.insert("args".into(), args);
+                let result = self.rpc("command.dispatch", Value::Object(params)).await?;
+                Ok(agent_rpc("agent.command_result", &result))
+            }
+            AgentClientCommand::ApprovalResolve {
+                request_id,
+                allowed,
+            } => {
+                let delivered = self
+                    .resolve_approval(&request_id, Ok(json!({ "allowed": allowed })))
+                    .await;
+                Ok(diagnostic(
+                    if delivered {
+                        "agent.approval_resolved"
+                    } else {
+                        // Unknown/stale request id: nothing is mutated.
+                        "agent.approval_unknown"
+                    },
+                    &request_id,
+                ))
+            }
+            AgentClientCommand::AskDecisionResolve {
+                request_id,
+                answer_json,
+            } => {
+                let answer: Value = serde_json::from_str(&answer_json)
+                    .map_err(|error| AgentError::Rpc(format!("invalid answer JSON: {error}")))?;
+                if !answer.is_object() {
+                    return Err(AgentError::Rpc(
+                        "invalid answer: expected a JSON object".into(),
+                    ));
+                }
+                let delivered = self.resolve_approval(&request_id, Ok(answer)).await;
+                Ok(diagnostic(
+                    if delivered {
+                        "agent.ask_decision_resolved"
+                    } else {
+                        "agent.approval_unknown"
+                    },
+                    &request_id,
+                ))
+            }
             AgentClientCommand::RegisterProfile {
                 name,
                 description,
@@ -627,7 +1251,7 @@ impl AgentHost {
         })
     }
 
-    async fn rpc(&self, method: &str, params: Value) -> Result<Value, AgentError> {
+    pub async fn rpc(&self, method: &str, params: Value) -> Result<Value, AgentError> {
         let running = self.ensure_running().await?;
         let (reply_tx, reply_rx) = oneshot::channel();
         running
@@ -687,7 +1311,6 @@ impl AgentHost {
                 AgentError::Spawn(error)
             }
         })?;
-        let stdin = child.stdin.take().ok_or(AgentError::MissingPipe)?;
         let stdout = child.stdout.take().ok_or(AgentError::MissingPipe)?;
         if let Some(stderr) = child.stderr.take() {
             tokio::spawn(drain_stderr(stderr));
@@ -697,35 +1320,63 @@ impl AgentHost {
         let events = self.inner.events.clone();
         let secrets = Arc::clone(&self.inner.secrets);
         let book = Arc::clone(&self.inner.book);
+        let reverse = self
+            .inner
+            .reverse
+            .try_lock()
+            .ok()
+            .and_then(|guard| guard.clone());
         tokio::spawn(daemon_actor(
             child,
-            stdin,
             stdout,
             commands_rx,
             events,
             secrets,
             book,
+            reverse,
         ));
 
         let running = Running {
             commands: commands_tx,
         };
         let (reply_tx, reply_rx) = oneshot::channel();
+        let allow_list: Vec<Value> = self
+            .inner
+            .config
+            .mcp_allow_list
+            .iter()
+            .map(AgentMcpAllowListEntry::to_json)
+            .collect();
         running
             .commands
             .send(HostCommand::Rpc {
                 method: "initialize".to_string(),
-                params: json!({ "passphrase": passphrase }),
+                params: json!({ "passphrase": passphrase, "mcpAllowList": allow_list }),
                 reply: reply_tx,
             })
             .await
             .map_err(|_| AgentError::ServiceStopped)?;
         match timeout(INITIALIZE_TIMEOUT, reply_rx).await {
-            Ok(Ok(Ok(_))) => Ok(running),
-            Ok(Ok(Err(error))) => Err(error),
-            Ok(Err(_)) => Err(AgentError::ChildExited),
-            Err(_) => Err(AgentError::Timeout),
+            Ok(Ok(Ok(_))) => {}
+            Ok(Ok(Err(error))) => return Err(error),
+            Ok(Err(_)) => return Err(AgentError::ChildExited),
+            Err(_) => return Err(AgentError::Timeout),
         }
+        // Apply registrations queued while the daemon was down, before any
+        // later command runs (the actor processes the queue in order). A
+        // dropped reply channel is fine: the queueing caller was already
+        // answered, and daemon-side validation still gates every entry.
+        let queued: Vec<HostCommand> = self
+            .inner
+            .pending_registrations
+            .lock()
+            .await
+            .drain(..)
+            .collect();
+        for command in queued {
+            let _ = running.commands.send(command).await;
+        }
+        Ok(running)
     }
 
     pub async fn shutdown(&self) {
@@ -738,13 +1389,28 @@ impl AgentHost {
 
 async fn daemon_actor(
     mut child: Child,
-    mut stdin: ChildStdin,
     stdout: tokio::process::ChildStdout,
     mut commands: mpsc::Receiver<HostCommand>,
     events: broadcast::Sender<Arc<AgentServerMessage>>,
     secrets: Arc<Mutex<Vec<String>>>,
     book: Arc<Mutex<SessionBook>>,
+    reverse: Option<ReverseRpcHandler>,
 ) {
+    let Some(stdin) = child.stdin.take() else {
+        let _ = child.kill().await;
+        return;
+    };
+    // One writer task owns stdin so command frames and reverse-RPC responses
+    // serialize without multi-branch borrows.
+    let (out_tx, mut out_rx) = mpsc::channel::<Value>(64);
+    let writer = tokio::spawn(async move {
+        let mut stdin = stdin;
+        while let Some(frame) = out_rx.recv().await {
+            if write_frame(&mut stdin, &frame).await.is_err() {
+                break;
+            }
+        }
+    });
     let mut reader = BufReader::new(stdout);
     let mut pending: HashMap<u64, oneshot::Sender<Result<Value, AgentError>>> = HashMap::new();
     let next_id = AtomicU64::new(1);
@@ -763,7 +1429,7 @@ async fn daemon_actor(
                             "method": method,
                             "params": params,
                         });
-                        if write_frame(&mut stdin, &frame).await.is_err() {
+                        if out_tx.send(frame).await.is_err() {
                             fail_pending(&mut pending, AgentError::ChildExited);
                             break;
                         }
@@ -775,7 +1441,7 @@ async fn daemon_actor(
                             "method": "shutdown",
                             "params": {},
                         });
-                        let _ = write_frame(&mut stdin, &frame).await;
+                        let _ = out_tx.send(frame).await;
                         break;
                     }
                 }
@@ -793,14 +1459,30 @@ async fn daemon_actor(
                     Ok(_) => {
                         let line = String::from_utf8_lossy(&buf);
                         let secrets_now = secrets.lock().await.clone();
-                        handle_daemon_line(
-                            line.trim(),
-                            &mut pending,
-                            &events,
-                            &secrets_now,
-                            &book,
-                        )
-                        .await;
+                        match route_daemon_line(line.trim(), &secrets_now) {
+                            DaemonLine::Notification(message) => {
+                                {
+                                    let mut book_guard = book.lock().await;
+                                    apply_book_event(&mut book_guard, &message);
+                                }
+                                let _ = events.send(Arc::new(message));
+                            }
+                            DaemonLine::Response(id) => {
+                                complete_pending(line.trim(), &mut pending, id, &secrets_now);
+                            }
+                            DaemonLine::ReverseRequest { id, method, params } => {
+                                let out = out_tx.clone();
+                                tokio::spawn(handle_reverse_request(
+                                    reverse.clone(),
+                                    id,
+                                    method,
+                                    params,
+                                    out,
+                                    Arc::clone(&secrets),
+                                ));
+                            }
+                            DaemonLine::Ignore => {}
+                        }
                     }
                     Err(_) => {
                         fail_pending(&mut pending, AgentError::ChildExited);
@@ -810,34 +1492,58 @@ async fn daemon_actor(
             }
         }
     }
+    drop(out_tx);
+    let _ = writer.await;
     let _ = child.kill().await;
     fail_pending(&mut pending, AgentError::ChildExited);
 }
 
-async fn handle_daemon_line(
-    line: &str,
-    pending: &mut HashMap<u64, oneshot::Sender<Result<Value, AgentError>>>,
-    events: &broadcast::Sender<Arc<AgentServerMessage>>,
-    secrets: &[String],
-    book: &Mutex<SessionBook>,
-) {
+enum DaemonLine {
+    Ignore,
+    Notification(AgentServerMessage),
+    Response(u64),
+    ReverseRequest {
+        id: Value,
+        method: String,
+        params: Value,
+    },
+}
+
+fn route_daemon_line(line: &str, secrets: &[String]) -> DaemonLine {
     if line.is_empty() {
-        return;
+        return DaemonLine::Ignore;
     }
     let Ok(value) = serde_json::from_str::<Value>(line) else {
-        return;
+        return DaemonLine::Ignore;
     };
-    if value.get("method").and_then(Value::as_str) == Some("event") {
-        if let Some(message) = map_event(value.get("params").unwrap_or(&Value::Null), secrets) {
-            apply_book_event(&mut *book.lock().await, &message);
-            let _ = events.send(Arc::new(message));
-        }
-        return;
+    match value.get("method").and_then(Value::as_str) {
+        Some("event") => match map_event(value.get("params").unwrap_or(&Value::Null), secrets) {
+            Some(message) => DaemonLine::Notification(message),
+            None => DaemonLine::Ignore,
+        },
+        Some(method) => DaemonLine::ReverseRequest {
+            id: value.get("id").cloned().unwrap_or(Value::Null),
+            method: method.to_string(),
+            params: value.get("params").cloned().unwrap_or(Value::Null),
+        },
+        None => match value.get("id").and_then(Value::as_u64) {
+            Some(id) => DaemonLine::Response(id),
+            None => DaemonLine::Ignore,
+        },
     }
-    let Some(id) = value.get("id").and_then(Value::as_u64) else {
+}
+
+fn complete_pending(
+    line: &str,
+    pending: &mut HashMap<u64, oneshot::Sender<Result<Value, AgentError>>>,
+    id: u64,
+    secrets: &[String],
+) {
+    let Some(reply) = pending.remove(&id) else {
         return;
     };
-    let Some(reply) = pending.remove(&id) else {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        let _ = reply.send(Err(AgentError::Rpc("invalid daemon response".to_string())));
         return;
     };
     if let Some(error) = value.get("error") {
@@ -849,6 +1555,30 @@ async fn handle_daemon_line(
         return;
     }
     let _ = reply.send(Ok(value.get("result").cloned().unwrap_or(Value::Null)));
+}
+
+async fn handle_reverse_request(
+    reverse: Option<ReverseRpcHandler>,
+    id: Value,
+    method: String,
+    params: Value,
+    out: mpsc::Sender<Value>,
+    secrets: Arc<Mutex<Vec<String>>>,
+) {
+    let result = match reverse {
+        Some(handler) => handler(method, params).await,
+        None => Err("no reverse-RPC handler installed".to_string()),
+    };
+    let secrets = secrets.lock().await.clone();
+    let frame = match result {
+        Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+        Err(message) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": -32000, "message": redact_text(&message, &secrets) },
+        }),
+    };
+    let _ = out.send(frame).await;
 }
 
 fn map_event(params: &Value, secrets: &[String]) -> Option<AgentServerMessage> {
@@ -873,6 +1603,10 @@ fn map_event(params: &Value, secrets: &[String]) -> Option<AgentServerMessage> {
             session_id: session_id.clone(),
             run_id,
             usage: json_usage(event),
+            context_tokens: event
+                .get("usage")
+                .and_then(|usage| usage.get("inputTokens"))
+                .and_then(Value::as_u64),
         },
         "message_delta"
             if json_string(event, &["content", "type"]) == "thinking"
@@ -1168,7 +1902,9 @@ fn snapshot_from_new(value: &Value) -> AgentSessionSnapshot {
             .get("leafId")
             .and_then(Value::as_str)
             .map(str::to_string),
+        context_tokens: value.get("contextTokens").and_then(Value::as_u64),
         entries: Vec::new(),
+        mcp_servers: Vec::new(),
     }
 }
 
@@ -1229,7 +1965,14 @@ fn apply_book_event(book: &mut SessionBook, message: &AgentServerMessage) {
             book.cancelled.remove(session_id);
             book.running.insert(session_id.clone());
         }
-        AgentWireEvent::Finished { .. } | AgentWireEvent::Error { .. } => {
+        AgentWireEvent::Finished { context_tokens, .. } => {
+            book.running.remove(session_id);
+            if context_tokens.is_some() {
+                book.context_tokens
+                    .insert(session_id.clone(), *context_tokens);
+            }
+        }
+        AgentWireEvent::Error { .. } => {
             book.running.remove(session_id);
         }
         _ => {}
@@ -1338,6 +2081,7 @@ fn parse_models(value: &Value) -> Vec<AgentModelInfo> {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
+                context_window: item.get("contextWindow").and_then(Value::as_u64),
             })
         })
         .collect()
@@ -1437,6 +2181,9 @@ fn picker_items(kind: AgentPickerKind, inventory: &AgentInventory) -> Vec<AgentP
                 label: session.profile.clone(),
             })
             .collect(),
+        // Search results are query-driven (FTS), never pre-listed in the
+        // state snapshot.
+        AgentPickerKind::SessionSearch => Vec::new(),
     }
 }
 
@@ -1444,6 +2191,13 @@ fn diagnostic(code: &str, message: &str) -> AgentServerMessage {
     AgentServerMessage::Diagnostic {
         code: code.to_string(),
         message: message.to_string(),
+    }
+}
+
+fn agent_rpc(code: &str, result: &Value) -> AgentServerMessage {
+    AgentServerMessage::AgentRpc {
+        code: code.to_string(),
+        result_json: result.to_string(),
     }
 }
 
@@ -1466,4 +2220,97 @@ fn redact_text(text: &str, secrets: &[String]) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod approval_tests {
+    use super::*;
+    use crate::protocol::ApprovalRequestKind;
+
+    #[tokio::test]
+    async fn approval_resolve_round_trips_to_the_waiting_requester() {
+        let host = AgentHost::inert();
+        let _subscriber = host.subscribe();
+        let waiter = {
+            let host = host.clone();
+            tokio::spawn(async move {
+                host.request_user_approval_for(
+                    ApprovalRequestKind::Mutation,
+                    r#"{"kind":"write"}"#,
+                    Duration::from_secs(5),
+                )
+                .await
+            })
+        };
+        // Let the requester register before resolving.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            host.resolve_approval("approval-1", Ok(json!({ "allowed": true })))
+                .await
+        );
+        let answer = waiter.await.expect("task joins");
+        assert_eq!(answer.expect("allowed"), json!({ "allowed": true }));
+        // One answer only: a second resolve for the same id is stale.
+        assert!(
+            !host
+                .resolve_approval("approval-1", Ok(json!({ "allowed": false })))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn approval_timeout_and_missing_consumer_deny_fail_closed() {
+        let host = AgentHost::inert();
+        // No subscriber: the request fails immediately (no consumer path).
+        let denied = host
+            .request_user_approval_for(
+                ApprovalRequestKind::Mutation,
+                r#"{"kind":"write"}"#,
+                Duration::from_secs(5),
+            )
+            .await
+            .expect_err("no consumer denies");
+        assert!(denied.contains("consumer"));
+        // With a subscriber but no answer: bounded wait denies.
+        let _subscriber = host.subscribe();
+        let denied = host
+            .request_user_approval_for(
+                ApprovalRequestKind::Mutation,
+                r#"{"kind":"write"}"#,
+                Duration::from_millis(20),
+            )
+            .await
+            .expect_err("timeout denies");
+        assert!(denied.contains("timed out"));
+        // A resolution for the expired request is stale, not an error.
+        assert!(
+            !host
+                .resolve_approval("approval-1", Ok(json!({ "allowed": true })))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn approval_reject_reaches_the_daemon_as_a_denial() {
+        let host = AgentHost::inert();
+        let _subscriber = host.subscribe();
+        let waiter = {
+            let host = host.clone();
+            tokio::spawn(async move {
+                host.request_user_approval_for(
+                    ApprovalRequestKind::AskDecision,
+                    r#"{"question":"Which?"}"#,
+                    Duration::from_secs(5),
+                )
+                .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            host.resolve_approval("approval-1", Err("denied by user".into()))
+                .await
+        );
+        let answer = waiter.await.expect("task joins");
+        assert_eq!(answer.expect_err("denied"), "denied by user");
+    }
 }

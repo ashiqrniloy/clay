@@ -2,7 +2,7 @@ import { lazy, Suspense, useSyncExternalStore } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 
 import { ClayButton, ClayText } from "../components";
-import type { PackageUiSnapshot } from "../sdui/types";
+import type { PackageSurface, PackageUiSnapshot } from "../sdui/types";
 import { ClayEditor } from "../editor/ClayEditor";
 import type { SplitNode } from "./split-tree";
 import type { PaneRecord, TabRuntime } from "./workspace-controller";
@@ -19,6 +19,24 @@ const ChatPanel = lazy(async () => {
   return { default: module.ChatPanel };
 });
 
+const CodingAgentPanel = lazy(async () => {
+  const module = await import("../coding-agent/CodingAgentPanel");
+  return { default: module.CodingAgentPanel };
+});
+
+/** Trusted `@clay/coding-agent` pane surface, if the package contributed one. */
+function codingAgentSurface(
+  packageUi: PackageUiSnapshot | null,
+): PackageSurface | null {
+  return (
+    packageUi?.surfaces?.find(
+      (surface) =>
+        surface.provenance.packageName === "@clay/coding-agent" &&
+        surface.provenance.trustDomain === "trusted",
+    ) ?? null
+  );
+}
+
 export interface PaneTreeProps {
   runtime: TabRuntime;
   node: SplitNode;
@@ -28,6 +46,7 @@ export interface PaneTreeProps {
   onOpenPath: (path: string) => void;
   onOpenFile: () => void;
   onOpenFolder: () => void;
+  onLaunchAgent: () => void;
   packageUi: PackageUiSnapshot | null;
   uiVersion: number;
 }
@@ -39,6 +58,8 @@ function PaneContent({
   onOpenPath,
   onOpenFile,
   onOpenFolder,
+  onLaunchAgent,
+  runtime,
 }: {
   pane: PaneRecord;
   packageUi: PackageUiSnapshot | null;
@@ -46,12 +67,56 @@ function PaneContent({
   onOpenPath: (path: string) => void;
   onOpenFile: () => void;
   onOpenFolder: () => void;
+  onLaunchAgent: () => void;
+  runtime: TabRuntime;
 }) {
   const meta = useSyncExternalStore(
     pane.session.store.subscribe,
     pane.session.store.get,
   );
   const empty = !meta?.path && pane.session.snapshotDoc().length === 0;
+  // Coding Agent split surface (plan 108 task 8): launched per pane via the
+  // `coding-agent.profile` command; provenance-exact host rendering like the
+  // chat landing, generic SDUI renderer for every other package.
+  if (
+    runtime.agentSurfaceOpen &&
+    runtime.agentSurfacePaneId === pane.paneId &&
+    packageUi
+  ) {
+    const surface = codingAgentSurface(packageUi);
+    if (surface) {
+      const isBundledAgent =
+        surface.provenance.packageName === "@clay/coding-agent" &&
+        surface.provenance.trustDomain === "trusted";
+      return (
+        <Suspense
+          fallback={
+            <div className={styles.empty} role="status">
+              <ClayText variant="body" muted>
+                Loading package surface…
+              </ClayText>
+            </div>
+          }
+        >
+          {isBundledAgent ? (
+            <CodingAgentPanel
+              surface={surface}
+              uiVersion={uiVersion}
+              workspaceRoot={runtime.workspaceRoot}
+              sdui={runtime.ui.sdui}
+              send={pane.session.request}
+            />
+          ) : (
+            <PackageSurfaceView
+              surface={surface}
+              uiVersion={uiVersion}
+              send={pane.session.request}
+            />
+          )}
+        </Suspense>
+      );
+    }
+  }
   if (empty && packageUi?.emptyTab) {
     // Provenance-exact host rendering for the bundled chat landing
     // (Phase 10). Every other package keeps the inert SDUI renderer.
@@ -88,6 +153,7 @@ function PaneContent({
         <div className={styles.emptyActions}>
           <ClayButton onPress={onOpenFile}>Open file</ClayButton>
           <ClayButton onPress={onOpenFolder}>Open folder</ClayButton>
+          <ClayButton onPress={onLaunchAgent}>Coding Agent</ClayButton>
         </div>
         {meta?.diagnostic ? (
           <div role="alert">
@@ -111,6 +177,7 @@ export function PaneTree({
   onOpenPath,
   onOpenFile,
   onOpenFolder,
+  onLaunchAgent,
   packageUi,
   uiVersion,
 }: PaneTreeProps) {
@@ -132,6 +199,8 @@ export function PaneTree({
             onOpenPath={onOpenPath}
             onOpenFile={onOpenFile}
             onOpenFolder={onOpenFolder}
+            onLaunchAgent={onLaunchAgent}
+            runtime={runtime}
           />
         ) : (
           <div className={styles.empty}>
@@ -164,6 +233,7 @@ export function PaneTree({
           onOpenPath={onOpenPath}
           onOpenFile={onOpenFile}
           onOpenFolder={onOpenFolder}
+          onLaunchAgent={onLaunchAgent}
           packageUi={packageUi}
           uiVersion={uiVersion}
         />
@@ -190,6 +260,7 @@ export function PaneTree({
           onOpenPath={onOpenPath}
           onOpenFile={onOpenFile}
           onOpenFolder={onOpenFolder}
+          onLaunchAgent={onLaunchAgent}
           packageUi={packageUi}
           uiVersion={uiVersion}
         />

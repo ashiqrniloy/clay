@@ -23,6 +23,7 @@ export const KNOWN_COMPONENT_KINDS = [
   "portal",
   "scroll",
   "editorView",
+  "tabList",
   "table",
   "badge",
   "kbd",
@@ -55,6 +56,9 @@ export const KNOWN_SLOT_NAMES = [
   "dialog",
   "track",
   "thumb",
+  "strip",
+  "tab",
+  "panel",
 ] as const;
 
 export type SlotName = (typeof KNOWN_SLOT_NAMES)[number];

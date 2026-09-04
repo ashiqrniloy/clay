@@ -126,4 +126,14 @@ export class TauriClayAgent extends AbstractAgent {
       },
     );
   }
+
+  /** Queues a mid-run user message (pi-parity steer, plan 108 task 9).
+   *  Server-side no-op when no run is active on the tab's session. */
+  steer(text: string) {
+    void sendRequest(chatIntentPayload(this.uiVersion, "chat.steer", text)).catch(
+      () => {
+        // Server unreachable; the disconnect flow owns recovery.
+      },
+    );
+  }
 }

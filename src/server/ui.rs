@@ -196,6 +196,18 @@ impl PackageUiRegistrySnapshot {
         Ok(crate::protocol::PackageUiSnapshot {
             version,
             empty_tab,
+            surfaces: {
+                let mut surfaces: Vec<_> = self
+                    .pane_contents
+                    .iter()
+                    .filter(|entry| entry.activation == "pane")
+                    .collect();
+                surfaces.sort_by(|left, right| left.id.cmp(&right.id));
+                surfaces
+                    .into_iter()
+                    .map(|entry| entry.to_wire(trust_domain(&entry.provenance)))
+                    .collect()
+            },
             panels: self
                 .panels
                 .iter()
@@ -647,11 +659,15 @@ impl PackageUiRegistry {
             UiContributionRule::InvalidPolicy,
             &context,
         )?;
-        if activation != "empty-tab" {
+        // Phase 2 (plan 108 task 8): generic activations. `empty-tab` keeps the
+        // single-winner landing election; `pane` is a named pane surface any
+        // app-like package may present in a working-area pane. The vocabulary
+        // is closed so clients can stay deny-by-default.
+        if activation != "empty-tab" && activation != "pane" {
             return Err(context.error(
                 UiContributionRule::InvalidPolicy,
                 Some(&id),
-                "pane-content activation must be empty-tab",
+                "pane-content activation must be empty-tab or pane",
             ));
         }
         let theme_resolver = self.theme_resolver();
@@ -1770,6 +1786,7 @@ const CLIENT_DIALOG_ACTIONS: &[&str] = &[
     "agent.clientOpenModelPicker",
     "agent.clientOpenProviderSetup",
     "agent.clientOpenSessionPicker",
+    "agent.clientOpenSessionSearchPicker",
 ];
 
 fn validate_registered_actions(
@@ -3028,5 +3045,71 @@ mod tests {
         registry.pane_contents.remove("markdown.entry");
         let restored = registry.snapshot().empty_tab().unwrap().unwrap();
         assert_eq!(restored.id, "other.entry");
+    }
+
+    fn surface_declaration(id: &str, command: &str) -> serde_json::Value {
+        json!({
+            "id": id,
+            "activation": "pane",
+            "actionTargets": [command],
+            "component": {
+                "kind": "panel",
+                "id": format!("{id}.root"),
+                "title": "Agent",
+                "children": [{
+                    "kind": "button",
+                    "id": format!("{id}.launch"),
+                    "label": "Launch",
+                    "action": { "commandId": command }
+                }]
+            }
+        })
+    }
+
+    #[test]
+    fn pane_activation_surface_wires_as_named_surface_and_keeps_empty_tab_election() {
+        let mut registry = PackageUiRegistry::new();
+        let owner = package();
+        let commands = vec!["markdown.openFile".to_string()];
+
+        registry
+            .register_pane_content(
+                &owner,
+                &entry_declaration("markdown.entry", "markdown.openFile"),
+                &commands,
+            )
+            .unwrap();
+        registry
+            .register_pane_content(
+                &owner,
+                &surface_declaration("markdown.surface", "markdown.openFile"),
+                &commands,
+            )
+            .unwrap();
+
+        // The empty-tab election ignores `pane` surfaces entirely.
+        let winner = registry.snapshot().empty_tab().unwrap().unwrap();
+        assert_eq!(winner.id, "markdown.entry");
+
+        // The wire snapshot exposes `pane` surfaces with their targets, and
+        // version-stamped actions against them validate.
+        let wire = registry
+            .snapshot()
+            .wire_snapshot(7, |_| crate::protocol::PackageUiTrustDomain::Trusted)
+            .unwrap();
+        assert_eq!(wire.surfaces.len(), 1);
+        assert_eq!(wire.surfaces[0].id, "markdown.surface");
+        assert_eq!(wire.surfaces[0].package_name, "@clay/markdown");
+        assert!(wire.allows_action(7, "markdown.openFile"));
+        assert!(!wire.allows_action(6, "markdown.openFile"));
+        crate::protocol::PackageUiSnapshot::validate(&wire).unwrap();
+
+        // Unknown activations still fail closed.
+        let mut bad = surface_declaration("markdown.bad", "markdown.openFile");
+        bad["activation"] = json!("agent-surface");
+        let error = registry
+            .register_pane_content(&owner, &bad, &commands)
+            .unwrap_err();
+        assert!(error.message.contains("empty-tab or pane"));
     }
 }

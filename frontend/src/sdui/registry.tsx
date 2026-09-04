@@ -1,5 +1,7 @@
 import { Fragment, useState, type CSSProperties, type ReactNode } from "react";
 
+import { TabList, Tab, Tabs, TabPanel } from "react-aria-components";
+
 import {
   ClayButton,
   ClayCollapse,
@@ -186,6 +188,8 @@ export function PackageComponent({
       );
     case "textInput":
       return <PackageTextInput node={node} uiVersion={uiVersion} send={send} />;
+    case "tabList":
+      return <PackageTabList node={node} uiVersion={uiVersion} send={send} />;
     case "flex":
       return (
         <div
@@ -286,8 +290,63 @@ function PackageTextInput({ node, uiVersion, send }: RegistryProps) {
       onChange={setValue}
       validationState={node.style?.validationState}
       disabled={node.disabled}
+      multiline={node.multiline ?? false}
       onSubmit={submit}
     />
+  );
+}
+
+/**
+ * Catalog `tabList` kind (plan 108 G2): React Aria Tabs over declared items
+ * (tab metadata) + children (tab panels, order-matched). Selection is
+ * widget-local like `dropdown`; no server round-trip.
+ */
+function PackageTabList({ node, uiVersion, send }: RegistryProps) {
+  const items = node.items ?? [];
+  const panels = node.children ?? [];
+  const firstSelected = items.find((item) => item.selected)?.id ?? items[0]?.id;
+  return (
+    <Tabs
+      className={styles.tabs}
+      defaultSelectedKey={firstSelected}
+      isDisabled={node.disabled}
+      {...recipeAttributes("tabList", "root")}
+    >
+      <TabList
+        aria-label={node.title ?? node.label ?? "Package tabs"}
+        className={styles.tabStrip}
+        {...recipeAttributes("tabList", "strip")}
+      >
+        {items.map((item) => (
+          <Tab
+            key={item.id}
+            id={item.id}
+            isDisabled={item.disabled}
+            className={styles.tab}
+            style={componentStyle(node)}
+            {...recipeAttributes("tabList", "tab")}
+          >
+            <ClayText variant="detail" role={role(node)} muted={item.disabled}>
+              {item.label}
+            </ClayText>
+          </Tab>
+        ))}
+      </TabList>
+      {panels.map((panel, index) => (
+        <TabPanel
+          key={panel.id}
+          id={items[index]?.id}
+          className={styles.tabPanel}
+          {...recipeAttributes("tabList", "panel")}
+        >
+          <PackageComponent
+            node={panel}
+            uiVersion={uiVersion}
+            send={send}
+          />
+        </TabPanel>
+      ))}
+    </Tabs>
   );
 }
 

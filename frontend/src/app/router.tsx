@@ -38,7 +38,13 @@ export interface RouterCallbacks {
  */
 export function createAppRouter(
   callbacks: RouterCallbacks,
-  initialPath = "/workspace",
+  initialPath = import.meta.env.DEV
+    ? // DEV fixtures: /?fixture=<id> boots straight into that fixture route
+      // (plain-browser visual/accessibility review without the Tauri webview).
+      (new URLSearchParams(window.location.search).get("fixture")
+        ? `/fixture/${new URLSearchParams(window.location.search).get("fixture")}`
+        : "/workspace")
+    : "/workspace",
 ) {
   const allRoutes: RouteObject[] = [
     {

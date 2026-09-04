@@ -1261,6 +1261,16 @@ impl WorkspaceState {
             .await
     }
 
+    /// Canonical workspace paths of open documents (agent checkpoint capture).
+    pub(crate) fn open_document_canonical_paths(&self) -> Vec<(DocumentId, PathBuf)> {
+        self.documents
+            .iter()
+            .map(|(&document_id, open_document)| {
+                (document_id, open_document.file_state.canonical_path.clone())
+            })
+            .collect()
+    }
+
     pub(crate) fn document_handle(
         &self,
         document_id: DocumentId,
@@ -1268,6 +1278,100 @@ impl WorkspaceState {
         self.documents
             .get(&document_id)
             .map(|open_document| Arc::clone(&open_document.document))
+    }
+
+    /// Open-document lookup by canonical path for read-only agent access
+    /// (Phase 1 reverse RPC). Returns the id without acquiring a lease.
+    pub(crate) fn find_open_document_by_canonical_path(
+        &self,
+        canonical_path: &Path,
+    ) -> Option<DocumentId> {
+        self.path_to_document.get(canonical_path).copied()
+    }
+
+    /// Lowest workspace root id, used as the agent document-op default root.
+    pub(crate) fn first_root_id(&self) -> Option<WorkspaceRootId> {
+        self.roots.keys().copied().min()
+    }
+
+    /// Canonicalized, containment-checked path for an existing file
+    /// (agent reverse-RPC reads and stats).
+    pub(crate) fn contained_existing_path(
+        &self,
+        root_id: WorkspaceRootId,
+        file_path: &Path,
+    ) -> Result<PathBuf, WorkspaceError> {
+        self.canonical_file_state(root_id, file_path)
+            .map(|state| state.canonical_path)
+    }
+
+    /// Canonical path for a workspace-relative or absolute file that may not
+    /// exist yet (agent write of a new file). Containment is enforced against
+    /// the parent directory so a missing leaf cannot smuggle `..` past the
+    /// root check.
+    pub(crate) fn contained_new_file_path(
+        &self,
+        root_id: WorkspaceRootId,
+        file_path: &Path,
+    ) -> Result<PathBuf, WorkspaceError> {
+        let root = self
+            .roots
+            .get(&root_id)
+            .ok_or(WorkspaceError::UnknownRoot { root_id })?;
+        let WorkspaceAuthority::Directory {
+            canonical_path: root_path,
+        } = &root.authority
+        else {
+            return Err(WorkspaceError::OutsideRoot);
+        };
+        let joined = if file_path.is_absolute() {
+            file_path.to_path_buf()
+        } else {
+            root_path.join(file_path)
+        };
+        if !joined.starts_with(root_path) {
+            return Err(WorkspaceError::OutsideRoot);
+        }
+        // Walk up to the nearest existing ancestor so new nested files can be
+        // created; containment is checked against that ancestor's realpath.
+        let mut file_name_parts: Vec<std::ffi::OsString> = Vec::new();
+        let mut probe = joined.clone();
+        let canonical_ancestor = loop {
+            match fs::canonicalize(&probe) {
+                Ok(canonical) => {
+                    break canonical;
+                }
+                Err(_) => {
+                    let name = match probe.file_name() {
+                        Some(name) => name.to_os_string(),
+                        None => {
+                            return Err(WorkspaceError::FileUnavailable {
+                                path: joined.clone(),
+                                source: io::Error::new(io::ErrorKind::NotFound, "invalid path"),
+                            });
+                        }
+                    };
+                    file_name_parts.push(name);
+                    if !probe.pop() {
+                        return Err(WorkspaceError::FileUnavailable {
+                            path: joined.clone(),
+                            source: io::Error::new(io::ErrorKind::NotFound, "root path missing"),
+                        });
+                    }
+                }
+            }
+        };
+        if !canonical_ancestor.starts_with(root_path) {
+            return Err(WorkspaceError::OutsideRoot);
+        }
+        let mut canonical_path = canonical_ancestor;
+        for name in file_name_parts.into_iter().rev() {
+            canonical_path = canonical_path.join(name);
+        }
+        if !canonical_path.starts_with(root_path) {
+            return Err(WorkspaceError::OutsideRoot);
+        }
+        Ok(canonical_path)
     }
 
     /// Canonical path of an open document, used to seed the built-in path
@@ -1394,6 +1498,36 @@ impl WorkspaceState {
             version,
             closed,
         })
+    }
+
+    /// Release one client's access on one document and drop the registry
+    /// entry when no access holders remain (agent save cleanup). Best-effort:
+    /// unknown documents are ignored. Returns `true` when the registry entry
+    /// was removed.
+    pub(crate) async fn release_single_document_access(
+        &mut self,
+        document_id: DocumentId,
+        client_id: ClientId,
+    ) -> bool {
+        let Some(open_document) = self.documents.get(&document_id) else {
+            return false;
+        };
+        open_document
+            .document
+            .lock()
+            .await
+            .release_access(client_id);
+        if open_document.document.lock().await.access_holder_count() > 0 {
+            return false;
+        }
+        let Some(open_document) = self.documents.remove(&document_id) else {
+            return false;
+        };
+        let bytes = open_document.document.lock().await.byte_len() as u64;
+        self.release_document_bytes(bytes);
+        self.path_to_document
+            .remove(&open_document.file_state.canonical_path);
+        true
     }
 
     fn reserve_document_bytes(

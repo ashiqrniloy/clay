@@ -6,13 +6,16 @@ A catalog-composed empty-tab surface: greeting, agent/provider/model buttons,
 Open File, Open Folder, and a focused composer. Chat works with no workspace.
 The package registers the Chat profile (no tools, no sandbox). Chat is
 prompt/response only — it does not isolate filesystem, shell, or network.
-Coding Agent is not a disabled stub here; it appears when
-`@clay/coding-agent` loads in Phase 29.
+The Coding Agent is a separate package: `@clay/coding-agent` registers the
+coding profile and skills, and its split surface supersedes this landing
+when loaded in a later Phase 2 task.
 
 The surface is declared in `clay.contributions.ui.paneContents` and registered
 by `dist/load.js` via `serverRegisterPaneContentContribution`. It uses only
 implemented `ComponentKind` kinds — no native chrome, no client JavaScript, no
-raw CSS.
+raw CSS. The Coding Agent profile/skill registration now ships as
+`@clay/coding-agent`; the agent split surface replaces this landing in a
+later Phase 2 task.
 
 ## Catalog composition
 

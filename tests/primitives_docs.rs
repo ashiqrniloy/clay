@@ -519,14 +519,14 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 86);
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 96);
 
     let facades = read("src/server/facades.rs")
         .lines()
         .filter_map(|line| line.split_once("\"clay:").map(|(_, rest)| rest))
         .filter_map(|rest| rest.split_once('"').map(|(name, _)| format!("clay:{name}")))
         .collect::<BTreeSet<_>>();
-    assert_exact_inventory(marked_section(&plan, "facade-inventory"), &facades, 23);
+    assert_exact_inventory(marked_section(&plan, "facade-inventory"), &facades, 24);
 
     let mut packages = BTreeSet::new();
     for entry in fs::read_dir(root().join("packages")).expect("read packages directory") {
@@ -547,7 +547,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
         }
     }
     let package_section = marked_section(&plan, "package-inventory");
-    assert_exact_inventory(package_section, &packages, 17);
+    assert_exact_inventory(package_section, &packages, 18);
     assert_eq!(package_section.matches("`packages/lsp-shared`").count(), 1);
 }
 

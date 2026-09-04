@@ -495,7 +495,7 @@ impl BridgeState {
         let recorder = global_recorder();
         let enqueue_scope = recorder
             .is_enabled()
-            .then(|| trace_id)
+            .then_some(trace_id)
             .flatten()
             .map(|trace_id| {
                 recorder.scope_with_metadata(

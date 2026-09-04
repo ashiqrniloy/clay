@@ -3118,3 +3118,63 @@ fn data_only_package_service_enables_without_javascript_execution() {
     assert_eq!(enabled.manifest.name, "@vendor/declarative-theme");
     assert!(enabled.manifest.clay.entry.is_none());
 }
+
+#[test]
+fn coding_agent_bundled_manifest_assembles_without_claiming_the_empty_tab() {
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string("packages/coding-agent/package.json")
+            .expect("read coding-agent manifest"),
+    )
+    .expect("coding-agent manifest parses");
+    let record = assemble_package_record(&manifest).expect("@clay/coding-agent record assembles");
+    assert_eq!(record.manifest.name, "@clay/coding-agent");
+    assert_eq!(record.manifest.clay.api_prefix, "coding-agent");
+    assert_eq!(
+        record.manifest.clay.permissions,
+        vec![PackagePermission::CommandRegistration]
+    );
+    // apiDependencies are the documented UI + agent registration APIs;
+    // assembly validates every id against the known-API table, so a
+    // successful assemble proves all ids resolve. The raw manifest pins them
+    // exactly (plan 108 task 8 added the pane-surface registration API).
+    let clay = manifest.get("clay").expect("clay metadata");
+    let dependencies = clay
+        .get("apiDependencies")
+        .and_then(Value::as_array)
+        .expect("apiDependencies array")
+        .iter()
+        .map(|id| id.as_str().expect("string id"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        dependencies,
+        vec![
+            "ui.serverRegisterPaneContentContribution",
+            "agent.profileRegister",
+            "agent.skillRegister"
+        ]
+    );
+    assert!(
+        record
+            .contributions
+            .commands
+            .iter()
+            .any(|command| command.id == "coding-agent.profile"),
+        "chrome identity command is a package command"
+    );
+    // The empty-tab winner stays @clay/chat: the agent claims a `pane`
+    // surface (declared in the raw manifest; runtime-registered by the load
+    // entry — not an assembled-record field), not the empty-tab landing.
+    let pane_contents = clay
+        .get("contributions")
+        .and_then(|contributions| contributions.get("ui"))
+        .and_then(|ui| ui.get("paneContents"))
+        .and_then(Value::as_array)
+        .expect("paneContents array");
+    assert_eq!(pane_contents.len(), 1, "one pane surface declaration");
+    assert_eq!(pane_contents[0]["id"], "coding-agent.surface");
+    assert_eq!(pane_contents[0]["activation"], "pane");
+    assert!(
+        record.contributions.ui_components.is_empty() && record.contributions.ui_panels.is_empty(),
+        "coding-agent must not claim an empty-tab pane"
+    );
+}

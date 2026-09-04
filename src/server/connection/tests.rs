@@ -763,6 +763,100 @@ async fn server_accepts_hello_and_sends_snapshot() {
     server_task.await.unwrap().unwrap();
 }
 
+#[tokio::test]
+async fn handshake_replays_committed_runtime_snapshot_with_pane_surfaces() {
+    let generation = runtime_generation();
+    let snapshot = crate::protocol::RuntimeStateSnapshot {
+        runtime_generation_id: 2,
+        client_id: 0,
+        behavior: BehaviorManifest::minimal_text_editing(2),
+        active_theme: crate::protocol::ActiveTheme {
+            specifier: "@clay/default".into(),
+            overrides: Vec::new(),
+            design_tokens: Vec::new(),
+        },
+        active_typography: crate::protocol::ActiveTypography::default(),
+        active_design_system: crate::shell::design_system::ActiveDesignSystem::core_fallback(2),
+        sdui_tree: crate::server::sdui::default_document_tree(1, 1),
+        package_ui: crate::protocol::PackageUiSnapshot {
+            version: 2,
+            surfaces: vec![crate::protocol::EmptyTabContent {
+                id: "coding-agent.surface".into(),
+                package_name: "@clay/coding-agent".into(),
+                component_json: r#"{"id":"coding-agent.root","kind":"panel","children":[]}"#.into(),
+                action_targets: vec!["coding-agent.profile".into()],
+                provenance: crate::protocol::PackageUiProvenance {
+                    package_name: "@clay/coding-agent".into(),
+                    package_version: "0.1.0".into(),
+                    api_prefix: "coding-agent".into(),
+                    trust_domain: crate::protocol::PackageUiTrustDomain::Trusted,
+                },
+            }],
+            ..Default::default()
+        },
+        documents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    snapshot.validate().expect("handshake fixture snapshot");
+    generation.publish_runtime_snapshot(snapshot).await;
+
+    let (client, server) = duplex(65536);
+    let codec = Codec::default();
+    let document = Arc::new(Mutex::new(DocumentState::new(
+        7,
+        "Hello from server".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    )));
+    let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+    let server_task = tokio::spawn(handle_connection(
+        server,
+        99,
+        document,
+        behavior,
+        workspace_state(),
+        sdui_state(),
+        active_theme_state(),
+        runtime_diagnostics(),
+        generation,
+        parse_coordinator(),
+        language_intelligence_coordinator(),
+        codec,
+    ));
+    let mut client = client;
+    codec
+        .write_client_message(
+            &mut client,
+            &ClientMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                client_name: "test-client".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let mut saw_surface = false;
+    for _ in 0..64 {
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::RuntimeStateSnapshot(snapshot) => {
+                assert_eq!(snapshot.client_id, 99);
+                assert_eq!(snapshot.package_ui.surfaces.len(), 1);
+                assert_eq!(snapshot.package_ui.surfaces[0].id, "coding-agent.surface");
+                saw_surface = true;
+                break;
+            }
+            ServerMessage::FileOpenCapabilityIssued { .. } => break,
+            _ => {}
+        }
+    }
+    assert!(
+        saw_surface,
+        "handshake must replay the committed runtime snapshot so pane surfaces reach a connecting client"
+    );
+
+    drop(client);
+    server_task.await.unwrap().unwrap();
+}
+
 /// Plan 060 T4 test helpers: drain the bootstrap sequence through the
 /// always-terminal capability issue so tests start from a clean cursor.
 async fn drain_bootstrap(client: &mut tokio::io::DuplexStream, codec: Codec) -> String {
@@ -2265,14 +2359,13 @@ async fn path_browser_workspace_open_rebinds_only_bound_tab() {
     let server = super::super::IpcServer::new(super::super::ServerConfig::new(
         crate::ipc::IpcEndpoint::from_argument("path-browser-open-workspace"),
     ));
-    let (tab_snapshot, tab_state) = server
+    let (tab_snapshot, _tab_state) = server
         .create_tab_state(11, root.to_string_lossy().into_owned())
         .await
         .expect("tab state is created");
     let tab_id = tab_snapshot.tabs[0].tab_id;
-    // Make the workspace pane visible so the rebind refresh carries the
-    // file-browser listing (hidden by default in fresh tab state).
-    tab_state.toggle_workspace_pane();
+    // The workspace pane is visible by default in fresh tab state, so the
+    // rebind refresh carries the file-browser listing.
     // A second tab owned by a foreign client must stay untouched by the
     // bound tab's workspace open.
     let (foreign_snapshot, _) = server
@@ -7878,4 +7971,43 @@ fn sdui_command_request_preserves_explicit_arguments() {
         request.arguments,
         serde_json::json!({ "path": "/tmp/a.md", "node_id": "1" })
     );
+}
+
+#[tokio::test]
+async fn agent_surface_commands_project_client_toggle_without_server_state() {
+    // Plan 108 task 8: `coding-agent.profile` / `coding-agent.close` are
+    // user-authorized presentation toggles. The dispatcher answers with the
+    // narrow shell-client request (the client re-parses deny-by-default);
+    // no runtime generation advances and no server state changes.
+    let workspace = workspace_state();
+    let document = document_state();
+    let sdui = sdui_state();
+    let empty_registry = CommandRegistry::new();
+
+    for command_id in ["coding-agent.profile", "coding-agent.close"] {
+        let response = execute_command_intent(
+            CommandExecutionRequest {
+                command_id: command_id.to_string(),
+                arguments: serde_json::Value::Null,
+                target: CommandExecutionTarget::Global,
+                provenance: None,
+                expected_permissions: Vec::new(),
+            },
+            Arc::clone(&workspace),
+            &document,
+            &sdui,
+            1,
+            None,
+            &empty_registry,
+        )
+        .await;
+        assert!(
+            matches!(
+                response,
+                Some(ServerMessage::ShellClientCommandRequest { command_id: ref id })
+                    if id == command_id
+            ),
+            "{command_id} should project one shell-client request"
+        );
+    }
 }

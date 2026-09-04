@@ -19,6 +19,21 @@ const CONFIGURE_ID: &str = "configure";
 const STORE_SECRET_ID: &str = "store_secret";
 const STORE_URL_ID: &str = "store_url";
 const POLL_OAUTH_ID: &str = "poll_oauth";
+const SEARCH_HINT_ID: &str = "search_hint";
+/// Bounded result page for the session-search picker (plan 108 task 11).
+pub(crate) const AGENT_SESSION_SEARCH_LIMIT: u32 = 50;
+
+/// One `session.search` hit projected into the workspace-scoped session
+/// search picker (plan 108 task 11, decision 2201). Carries only transcript
+/// metadata — redacted snippet, never raw tool output.
+#[derive(Debug, Clone)]
+pub struct AgentSearchHit {
+    pub session_id: String,
+    pub leaf_id: Option<String>,
+    pub updated_at: String,
+    pub label: String,
+    pub snippet: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stage {
@@ -37,6 +52,10 @@ pub(crate) struct AgentPicker {
     inventory: AgentPickerInventory,
     package_profiles: Vec<(String, String)>,
     query: String,
+    /// FTS hits for [`AgentPickerKind::SessionSearch`], refreshed by the
+    /// connection on every query change; `filter_items` never re-scores
+    /// them (the index already matched).
+    search_hits: Vec<AgentSearchHit>,
     selected_index: usize,
     provider: Option<String>,
     auth: Option<AgentPickerAuth>,
@@ -61,6 +80,9 @@ pub(crate) enum AgentPickerActivate {
     },
     Resume {
         session_id: String,
+        /// Open at this tree entry (search-result selection, plan 108
+        /// task 11). `None` resumes at the live leaf.
+        entry_id: Option<String>,
     },
     Delete {
         session_id: String,
@@ -85,6 +107,7 @@ impl AgentPicker {
             inventory,
             package_profiles,
             query: String::new(),
+            search_hits: Vec::new(),
             selected_index: 0,
             provider: None,
             auth: None,
@@ -121,6 +144,21 @@ impl AgentPicker {
     pub(crate) fn replace_inventory(&mut self, inventory: AgentPickerInventory) {
         self.inventory = inventory;
         self.selected_index = 0;
+    }
+
+    /// Installs a fresh FTS result page for the session-search picker.
+    pub(crate) fn set_search_hits(&mut self, hits: Vec<AgentSearchHit>) -> TransientMenuSession {
+        self.search_hits = hits;
+        self.selected_index = 0;
+        self.session()
+    }
+
+    pub(crate) fn kind(&self) -> AgentPickerKind {
+        self.kind
+    }
+
+    pub(crate) fn query(&self) -> &str {
+        &self.query
     }
 
     pub(crate) fn enter_oauth(&mut self, login_id: String, user_code: String, uri: String) {
@@ -183,8 +221,27 @@ impl AgentPicker {
                 if secondary {
                     Ok(AgentPickerActivate::Delete { session_id })
                 } else {
-                    Ok(AgentPickerActivate::Resume { session_id })
+                    Ok(AgentPickerActivate::Resume {
+                        session_id,
+                        entry_id: None,
+                    })
                 }
+            }
+            AgentPickerKind::SessionSearch => {
+                if id == SEARCH_HINT_ID || secondary {
+                    return Ok(AgentPickerActivate::StayOpen);
+                }
+                let rest = id.strip_prefix("search:").unwrap_or(id);
+                let (session_id, entry_id) = match rest.split_once('|') {
+                    Some((session_id, entry_id)) => {
+                        (session_id.to_string(), Some(entry_id.to_string()))
+                    }
+                    None => (rest.to_string(), None),
+                };
+                Ok(AgentPickerActivate::Resume {
+                    session_id,
+                    entry_id,
+                })
             }
             AgentPickerKind::ProviderSetup => {
                 self.provider = Some(id.strip_prefix("provider:").unwrap_or(id).to_string());
@@ -273,6 +330,7 @@ impl AgentPicker {
             (AgentPickerKind::Model, _) => "Models",
             (AgentPickerKind::Agent, _) => "Agents",
             (AgentPickerKind::Session, _) => "Sessions",
+            (AgentPickerKind::SessionSearch, _) => "Search sessions (workspace)",
             (AgentPickerKind::ProviderSetup, _) => "Configure provider",
         }
     }
@@ -306,7 +364,12 @@ impl AgentPicker {
                 }
             }
         };
-        filter_items(items, &self.query, matches!(self.stage, Stage::Secret))
+        filter_items(
+            items,
+            &self.query,
+            matches!(self.stage, Stage::Secret)
+                || matches!(self.kind, AgentPickerKind::SessionSearch),
+        )
     }
 
     fn list_items(&self) -> Vec<TransientMenuItem> {
@@ -348,6 +411,34 @@ impl AgentPicker {
                     )
                 })
                 .collect(),
+            AgentPickerKind::SessionSearch => {
+                if self.search_hits.is_empty() {
+                    let hint = if self.query.is_empty() {
+                        "Type to search this workspace's sessions"
+                    } else {
+                        "No matching sessions in this workspace"
+                    };
+                    return vec![item(SEARCH_HINT_ID, hint, "Enter does nothing")];
+                }
+                self.search_hits
+                    .iter()
+                    .map(|hit| {
+                        // leafId rides in the item id: activating resumes the
+                        // session opened at that tree entry (no tree mutation).
+                        let mut id = format!("search:{}", hit.session_id);
+                        if let Some(leaf) = &hit.leaf_id {
+                            id.push('|');
+                            id.push_str(leaf);
+                        }
+                        let detail = if hit.snippet.is_empty() {
+                            hit.updated_at.clone()
+                        } else {
+                            format!("{} · {}", hit.snippet, hit.updated_at)
+                        };
+                        item(&id, &hit.label, &detail)
+                    })
+                    .collect()
+            }
             AgentPickerKind::ProviderSetup => {
                 self.inventory.providers.iter().map(provider_item).collect()
             }
@@ -473,6 +564,7 @@ pub(crate) fn picker_kind_for_command(command_id: &str) -> Option<AgentPickerKin
         "agent.clientOpenAgentPicker" | "chat.openAgentPicker" => Some(AgentPickerKind::Agent),
         "agent.clientOpenProviderSetup" => Some(AgentPickerKind::ProviderSetup),
         "agent.clientOpenSessionPicker" => Some(AgentPickerKind::Session),
+        "agent.clientOpenSessionSearchPicker" => Some(AgentPickerKind::SessionSearch),
         _ => None,
     }
 }
@@ -527,11 +619,13 @@ mod tests {
                     provider: "anthropic".into(),
                     model: "claude".into(),
                     display_name: "Claude".into(),
+                    context_window: None,
                 },
                 AgentModelInfo {
                     provider: "openai".into(),
                     model: "gpt".into(),
                     display_name: "GPT".into(),
+                    context_window: None,
                 },
             ],
             profiles: vec![AgentProfileInfo {
@@ -653,7 +747,8 @@ mod tests {
         assert_eq!(
             picker.activate(false).unwrap(),
             AgentPickerActivate::Resume {
-                session_id: "sess-1".into()
+                session_id: "sess-1".into(),
+                entry_id: None,
             }
         );
         let mut picker = AgentPicker::open(1, AgentPickerKind::Session, inventory(), Vec::new());
@@ -663,5 +758,59 @@ mod tests {
                 session_id: "sess-1".into()
             }
         );
+    }
+
+    #[test]
+    fn session_search_picker_skips_local_filter_and_resumes_at_entry() {
+        // Plan 108 task 11 (decision 2201): the FTS index already matched;
+        // the picker must not re-score hits and activation resumes the
+        // session opened at the matching tree entry.
+        let mut picker =
+            AgentPicker::open(1, AgentPickerKind::SessionSearch, inventory(), Vec::new());
+        picker.set_query("llanowar");
+        picker.set_search_hits(vec![AgentSearchHit {
+            session_id: "s1".into(),
+            leaf_id: Some("entry_9".into()),
+            updated_at: "2026-09-03".into(),
+            label: "coding".into(),
+            snippet: "attack with llanowar elves".into(),
+        }]);
+        // "zzz" would locally filter out every item — hits survive.
+        picker.set_query("zzz");
+        let session = picker.session();
+        assert_eq!(session.items().len(), 1, "FTS hits skip the local filter");
+        let item = &session.items()[0];
+        assert_eq!(item.id, "search:s1|entry_9");
+        assert_eq!(item.label, "coding");
+        assert!(item.detail.as_deref().unwrap_or("").contains("llanowar"));
+
+        // Activating the hit resumes at the entry; secondary (delete) is a
+        // no-op stay-open for search results.
+        let mut picker =
+            AgentPicker::open(1, AgentPickerKind::SessionSearch, inventory(), Vec::new());
+        picker.set_query("q");
+        picker.set_search_hits(vec![AgentSearchHit {
+            session_id: "s1".into(),
+            leaf_id: None,
+            updated_at: "".into(),
+            label: "chat".into(),
+            snippet: String::new(),
+        }]);
+        let activated = picker.activate(false).unwrap();
+        assert_eq!(
+            activated,
+            AgentPickerActivate::Resume {
+                session_id: "s1".into(),
+                entry_id: None,
+            }
+        );
+    }
+
+    #[test]
+    fn session_search_empty_query_shows_hint() {
+        let picker = AgentPicker::open(1, AgentPickerKind::SessionSearch, inventory(), Vec::new());
+        let session = picker.session();
+        assert_eq!(session.items().len(), 1);
+        assert!(session.items()[0].label.contains("Type to search"));
     }
 }

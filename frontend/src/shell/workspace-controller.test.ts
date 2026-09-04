@@ -522,6 +522,98 @@ describe("workspace controller", () => {
     expect(ws.active()?.menu).toBeNull();
   });
 
+  it("closes the transient menu optimistically on cancel and launches the coding agent client-side", async () => {
+    const sent: string[] = [];
+    const ws = createWorkspace({
+      send: async (payload) => {
+        sent.push(payload);
+      },
+    });
+    ws.installBootstrap(bootstrap({ clientId: 1, tabId: 10 }));
+    ws.handleEnvelope({
+      kind: "routed",
+      data: {
+        clientId: 1,
+        tabId: 10,
+        event: {
+          kind: "transientMenuSnapshot",
+          data: {
+            sessionId: "9223372036854775809" as never,
+            prompt: "Command Centre",
+            query: "",
+            items: [],
+            selectedIndex: 0,
+            status: "active",
+            focusPolicy: "modal",
+            origin: "centered",
+          },
+        },
+      },
+    });
+    ws.menuCancel();
+    // Local close is immediate — the UI must not wait on the server.
+    expect(ws.active()?.menu).toBeNull();
+    await Promise.resolve();
+    const cancel = sent.find(
+      (payload) => JSON.parse(payload).family === "menuCancel",
+    );
+    expect(cancel).toBeDefined();
+
+    ws.launchCodingAgent();
+    expect(ws.active()?.agentSurfaceOpen).toBe(true);
+    expect(ws.active()?.agentSurfacePaneId).not.toBeNull();
+  });
+
+  it("exposes global server-first keymaps and dispatches their command intents", async () => {
+    const sent: string[] = [];
+    const ws = createWorkspace({
+      send: async (payload) => {
+        sent.push(payload);
+      },
+    });
+    const manifest = {
+      manifestId: "m",
+      behaviorVersion: 7,
+      commands: [],
+      keymaps: [
+        {
+          commandId: "controlCenter.open",
+          sequence: [
+            { key: { character: "x" }, modifiers: { shift: false, control: true, alt: false, superKey: false } },
+            { key: { character: "p" }, modifiers: { shift: false, control: true, alt: false, superKey: false } },
+          ],
+          context: "Global",
+          routingPolicy: "ServerFirst",
+        },
+        {
+          commandId: "shell.clientSplitPaneVertical",
+          sequence: [
+            { key: { character: "\\" }, modifiers: { shift: false, control: true, alt: false, superKey: false } },
+          ],
+          context: "Global",
+          routingPolicy: "ClientUiCommand",
+        },
+      ],
+    };
+    ws.installBootstrap(bootstrap({ clientId: 1, behaviorManifest: manifest }));
+    const keymaps = ws.serverKeymaps();
+    // serde emits unit-variant enum names as written ("Global",
+    // "ServerFirst") — the filter must match the wire spelling, and the
+    // ClientUiCommand-routed pane chord must stay client-owned.
+    expect(keymaps).toHaveLength(1);
+    expect(keymaps[0]?.commandId).toBe("controlCenter.open");
+
+    expect(ws.dispatchServerCommand("controlCenter.open")).toBe(true);
+    await Promise.resolve();
+    const raw = sent[sent.length - 1];
+    expect(raw).toBeDefined();
+    const payload = JSON.parse(raw as string);
+    expect(payload.family).toBe("commandIntent");
+    expect(payload.payload.commandId).toBe("controlCenter.open");
+    expect(payload.payload.behaviorVersion).toBe(7);
+    expect(typeof payload.payload.documentId).toBe("number");
+  });
+
   it("executes only routed client workflow commands", async () => {
     const dialogs: string[] = [];
     const ws = createWorkspace({

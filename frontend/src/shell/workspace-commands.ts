@@ -117,6 +117,18 @@ export function dispatchClientCommand(
       runtime.settingsOpen = false;
       ctx.notify();
     },
+    // Coding Agent split surface (plan 108 task 8): launch pins the surface
+    // to the active pane; close releases it. Client-local presentation only.
+    "coding-agent.profile": () => {
+      runtime.agentSurfaceOpen = true;
+      runtime.agentSurfacePaneId = runtime.tree.activePaneId;
+      ctx.notify();
+    },
+    "coding-agent.close": () => {
+      runtime.agentSurfaceOpen = false;
+      runtime.agentSurfacePaneId = null;
+      ctx.notify();
+    },
   };
   if (direct[commandId]) {
     direct[commandId]();

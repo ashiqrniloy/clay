@@ -21,7 +21,8 @@
       "commands": [
         { "id": "chat.profile", "displayName": "Chat", "routingPolicy": "server-first" },
         { "id": "chat.submit", "displayName": "Send Message", "routingPolicy": "server-first" },
-        { "id": "chat.cancel", "displayName": "Cancel", "routingPolicy": "server-first" }
+        { "id": "chat.cancel", "displayName": "Cancel", "routingPolicy": "server-first" },
+        { "id": "chat.steer", "displayName": "Steer Agent", "routingPolicy": "server-first" }
       ],
       "ui": {
         "paneContents": [
@@ -34,6 +35,7 @@
               "agent.clientOpenModelPicker",
               "chat.submit",
               "chat.cancel",
+              "chat.steer",
               "documents.clientOpenFileDialog",
               "workspace.clientOpenFolderDialog"
             ],

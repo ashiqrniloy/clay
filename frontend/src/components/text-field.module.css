@@ -158,3 +158,12 @@
   );
   cursor: default;
 }
+
+/* Auto-grow multiline variant (plan 108 G3): growth is presentation-only
+ * and capped here, never in JS. */
+.autoGrow {
+  resize: none;
+  max-height: 40vh;
+  overflow-y: auto;
+  field-sizing: content;
+}

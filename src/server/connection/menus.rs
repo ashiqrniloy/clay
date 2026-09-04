@@ -8,13 +8,16 @@ use tokio::{io::AsyncWrite, sync::Mutex};
 use crate::{
     packages::commands::CommandRegistry,
     protocol::{
-        ClientId, ProtocolErrorCode, ServerMessage, TabId, TabRegistrySnapshot,
+        AgentPickerKind, ClientId, ProtocolErrorCode, ServerMessage, TabId, TabRegistrySnapshot,
         TransientMenuSnapshotData,
         codec::{Codec, CodecError},
     },
     server::{
         agent::AgentHost,
-        agent_picker::{AgentPickerActivate, package_profile_commands, picker_kind_for_command},
+        agent_picker::{
+            AGENT_SESSION_SEARCH_LIMIT, AgentPickerActivate, AgentSearchHit,
+            package_profile_commands, picker_kind_for_command,
+        },
         command_execution::{
             CONTROL_CENTER_COMMAND_ID, CommandExecutionTarget, OPEN_PATH_BROWSER_COMMAND_ID,
         },
@@ -115,6 +118,7 @@ pub(super) async fn open_command_centre_session(
 
 // ---------- coordinator loop handlers (Plan 090 task 2 extraction) ----------
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_menu_query_update<S>(
     codec: Codec,
     stream: &mut S,
@@ -122,6 +126,8 @@ pub(super) async fn handle_menu_query_update<S>(
     client_id: ClientId,
     session_id: u64,
     query: String,
+    agent: Option<&AgentHost>,
+    bound_tab_id: Option<TabId>,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
@@ -157,6 +163,20 @@ where
         },
         None => snapshot,
     };
+    // Session-search picker: the query runs against the shared FTS index
+    // (plan 108 task 11) — the local filter is skipped for this kind.
+    let snapshot = match session_search_snapshot(
+        menu_sessions,
+        session_id,
+        agent,
+        bound_tab_id.unwrap_or(client_id),
+        &query,
+    )
+    .await
+    {
+        Some(snapshot) => snapshot,
+        None => snapshot,
+    };
     codec
         .write_server_message(
             stream,
@@ -172,6 +192,8 @@ pub(super) async fn handle_menu_backspace<S>(
     menu_sessions: &mut ServerMenuSessions,
     client_id: ClientId,
     session_id: u64,
+    agent: Option<&AgentHost>,
+    bound_tab_id: Option<TabId>,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
@@ -202,6 +224,28 @@ where
                 return Ok(());
             }
         },
+        None => snapshot,
+    };
+    // Session-search picker: backspace is a query edit too — re-run FTS so
+    // hits match the shortened query.
+    let query = menu_sessions
+        .get(session_id)
+        .and_then(|session| {
+            session
+                .agent_picker_ref()
+                .map(|picker| picker.query().to_string())
+        })
+        .unwrap_or_default();
+    let snapshot = match session_search_snapshot(
+        menu_sessions,
+        session_id,
+        agent,
+        bound_tab_id.unwrap_or(client_id),
+        &query,
+    )
+    .await
+    {
+        Some(snapshot) => snapshot,
         None => snapshot,
     };
     codec
@@ -600,10 +644,13 @@ where
         }
         AgentPickerActivate::Resume {
             session_id: agent_session,
+            entry_id,
         } => {
             if let Some(host) = host {
                 let tab = bound_tab_id.unwrap_or(client_id);
-                let snapshot = host.resume_tab(tab, &agent_session).await;
+                let snapshot = host
+                    .resume_tab(tab, &agent_session, entry_id.as_deref())
+                    .await;
                 codec
                     .write_server_message(stream, &ServerMessage::Agent(Box::new(snapshot)))
                     .await?;
@@ -631,6 +678,37 @@ where
             push_active_picker(codec, stream, menu_sessions, client_id, session_id).await
         }
     }
+}
+
+/// Session-search picker refresh (plan 108 task 11): re-runs the
+/// workspace-scoped FTS query and installs the bounded hit page. Returns
+/// `None` for every other session kind (or without a host) so callers keep
+/// their locally projected snapshot.
+async fn session_search_snapshot(
+    menu_sessions: &mut ServerMenuSessions,
+    session_id: u64,
+    agent: Option<&AgentHost>,
+    tab: TabId,
+    query: &str,
+) -> Option<crate::shell::transient_menu::TransientMenuSession> {
+    let kind = menu_sessions
+        .get(session_id)
+        .and_then(|session| session.agent_picker_ref().map(|picker| picker.kind()))?;
+    if kind != AgentPickerKind::SessionSearch {
+        return None;
+    }
+    let hits: Vec<AgentSearchHit> = match (agent, query.is_empty()) {
+        (Some(host), false) => host
+            .search_sessions(tab, query, AGENT_SESSION_SEARCH_LIMIT)
+            .await
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    menu_sessions.get_mut(session_id).and_then(|session| {
+        session
+            .agent_picker_mut()
+            .map(|picker| picker.set_search_hits(hits))
+    })
 }
 
 async fn push_active_picker<S>(

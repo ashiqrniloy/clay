@@ -3,6 +3,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use clay::perf::budgets::{
@@ -15,6 +16,8 @@ use clay::protocol::{
     codec::{Codec, CodecError},
 };
 use clay::server::agent::{AgentHost, AgentHostConfig};
+
+use serde_json::{Value, json};
 
 mod common;
 use common::{assert_absent, non_test, read_src};
@@ -45,6 +48,7 @@ fn mock_daemon() -> PathBuf {
         &path,
         r#"#!/usr/bin/env python3
 import json, sys, time
+REG = {}
 for line in sys.stdin:
     msg = json.loads(line)
     ident = msg.get("id")
@@ -54,7 +58,7 @@ for line in sys.stdin:
         print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"ok":True}}), flush=True)
     elif method == "session.prompt":
         sid = params.get("sessionId","")
-        print(json.dumps({"jsonrpc":"2.0","method":"event","params":{"sessionId":sid,"event":{"type":"message_delta","runId":"r1","content":{"type":"text","text":"hi"}}}}), flush=True)
+        print(json.dumps({"jsonrpc":"2.0","method":"event","params":{"sessionId":sid,"event":{"type":"agent_finished","runId":"r1","usage":{"inputTokens":9,"outputTokens":3}}}}), flush=True)
         print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"lastEvent":"agent_finished"}}), flush=True)
     elif method == "session.new":
         print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"sessionId":"s1","profile":params.get("profile"),"provider":params.get("provider"),"model":params.get("model")}}), flush=True)
@@ -63,11 +67,34 @@ for line in sys.stdin:
     elif method == "model.list":
         print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"models":[{"provider":"mock","model":"demo","displayName":"Demo"}]}}), flush=True)
     elif method == "agentProfile.list":
-        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"profiles":[{"name":"chat"}]}}), flush=True)
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"profiles":REG.get("profiles",[])}}, ), flush=True)
+    elif method == "agentProfile.register":
+        profiles = REG.setdefault("profiles", [])
+        profiles.append({"name": params.get("name"), "description": params.get("description"), "tools": params.get("tools", []), "skills": params.get("skills", [])})
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"name":params.get("name"),"registered":True}}), flush=True)
+    elif method == "skill.register":
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"name":params.get("name"),"registered":True}}), flush=True)
+    elif method == "command.register":
+        cmds = REG.setdefault("commands", [])
+        cmds.append({"name": params.get("name"), "handler": params.get("handler")})
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"name":params.get("name"),"registered":True}}), flush=True)
+    elif method == "command.dispatch":
+        cmds = REG.get("commands", [])
+        if any(c.get("name") == params.get("name") for c in cmds):
+            print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"name":params.get("name"),"value":{"dispatched":True}}}), flush=True)
+        else:
+            print(json.dumps({"jsonrpc":"2.0","id":ident,"error":{"code":-32602,"message":"unknown command"}}), flush=True)
     elif method == "session.list":
         print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"sessions":[]}}), flush=True)
     elif method == "session.load":
-        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"sessionId":params.get("sessionId"),"profile":"chat","metadata":{"provider":"mock","model":"demo"},"entries":[{"role":"user","content":{"text":"Hi"}},{"role":"assistant","content":{"text":"hello"}}]}}), flush=True)
+        first_text = "Hi"
+        if params.get("entryId"):
+            first_text = "opened:" + str(params.get("entryId"))
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"sessionId":params.get("sessionId"),"profile":"chat","metadata":{"provider":"mock","model":"demo"},"entries":[{"role":"user","content":{"text":first_text}},{"role":"assistant","content":{"text":"hello"}}]}}), flush=True)
+    elif method == "knowledge.setOptions":
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"workspaceRoot":params.get("workspaceRoot"),"wiki":params.get("wiki")}}), flush=True)
+    elif method == "session.search":
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"hits":[{"sessionId":"s1","leafId":"entry_9","updatedAt":"2026-09-03","label":"chat","snippet":"mock snippet"}],"nextCursor":""}}), flush=True)
     elif method == "credential.put":
         print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"stored":True,"provider":params.get("provider")}}), flush=True)
     elif method == "shutdown":
@@ -120,6 +147,7 @@ fn host_for(program: PathBuf) -> AgentHost {
         data_dir: temp_dir("data"),
         inherit_environment: Vec::new(),
         inert: false,
+        mcp_allow_list: Vec::new(),
     })
 }
 
@@ -128,6 +156,8 @@ fn every_client_command() -> Vec<AgentClientCommand> {
         AgentClientCommand::Prompt {
             session_id: "s1".into(),
             text: "hi".into(),
+            provider: None,
+            model: None,
         },
         AgentClientCommand::Cancel {
             session_id: "s1".into(),
@@ -141,9 +171,19 @@ fn every_client_command() -> Vec<AgentClientCommand> {
             profile: "chat".into(),
             provider: "mock".into(),
             model: "demo".into(),
+            workspace_root: None,
+            full_autonomy: None,
+        },
+        AgentClientCommand::NewSession {
+            profile: "coding".into(),
+            provider: "mock".into(),
+            model: "demo".into(),
+            workspace_root: Some("/tmp/workspace".into()),
+            full_autonomy: Some(true),
         },
         AgentClientCommand::LoadSession {
             session_id: "s1".into(),
+            entry_id: None,
         },
         AgentClientCommand::ResumeSession {
             session_id: "s1".into(),
@@ -173,6 +213,53 @@ fn every_client_command() -> Vec<AgentClientCommand> {
             description: "Chat".into(),
             instructions: "Be brief.".into(),
         },
+        AgentClientCommand::Compact {
+            session_id: "s1".into(),
+            strategy: Some("default".into()),
+        },
+        AgentClientCommand::SetAutonomy {
+            session_id: "s1".into(),
+            enabled: false,
+        },
+        AgentClientCommand::SearchSessions {
+            session_id: "s1".into(),
+            query: Some("flake".into()),
+            limit: Some(10),
+        },
+        AgentClientCommand::RunResume {
+            session_id: "s1".into(),
+            run_id: "r1".into(),
+            decision_json: "{\"kind\":\"approve\"}".into(),
+        },
+        AgentClientCommand::SessionTree {
+            session_id: "s1".into(),
+            method: "checkout".into(),
+            entry_id: "entry-7".into(),
+        },
+        AgentClientCommand::SkillRegister {
+            name: "rust-review".into(),
+            description: Some("Review Rust diffs".into()),
+            instructions: Some("Check borrow errors".into()),
+            tool_names: vec!["read".into(), "edit".into()],
+        },
+        AgentClientCommand::CommandRegister {
+            name: "steer-like".into(),
+            handler: Some("steer".into()),
+            description: Some("Dispatch a steer".into()),
+        },
+        AgentClientCommand::CommandDispatch {
+            name: "steer-like".into(),
+            session_id: Some("s1".into()),
+            args_json: Some("{\"text\":\"go left\"}".into()),
+        },
+        AgentClientCommand::ApprovalResolve {
+            request_id: "approval-1".into(),
+            allowed: true,
+        },
+        AgentClientCommand::AskDecisionResolve {
+            request_id: "approval-2".into(),
+            answer_json: "{\"selectedId\":\"opt-a\"}".into(),
+        },
     ]
 }
 
@@ -188,6 +275,8 @@ fn every_server_message() -> Vec<AgentServerMessage> {
                 kind: clay::protocol::AgentTranscriptKind::User,
                 text: "hi".into(),
             }],
+            mcp_servers: Vec::new(),
+            context_tokens: None,
         }),
         AgentServerMessage::Event {
             session_id: "s1".into(),
@@ -237,6 +326,20 @@ fn every_server_message() -> Vec<AgentServerMessage> {
             provider: "mock".into(),
             name: "apiKey".into(),
             stored: true,
+        },
+        AgentServerMessage::AgentRpc {
+            code: "agent.search_result".into(),
+            result_json: "{\"hits\":[]}".into(),
+        },
+        AgentServerMessage::ApprovalRequest {
+            request_id: "approval-1".into(),
+            kind: clay::protocol::ApprovalRequestKind::Mutation,
+            payload_json: "{\"kind\":\"write\",\"paths\":[\"/tmp/x\"]}".into(),
+        },
+        AgentServerMessage::ApprovalRequest {
+            request_id: "approval-2".into(),
+            kind: clay::protocol::ApprovalRequestKind::AskDecision,
+            payload_json: "{\"question\":\"Which?\",\"options\":[]}".into(),
         },
         AgentServerMessage::Diagnostic {
             code: "agent.node_missing".into(),
@@ -332,22 +435,32 @@ fn truncated_invalid_and_oversized_agent_frames_fail_closed() {
 
 #[test]
 fn package_runtime_cannot_import_a_daemon_handle() {
+    // The boundary is the PACKAGE (third-party) op set and facade allowlist,
+    // not file-level name absence: trusted configuration/first-party packages
+    // legitimately reach the daemon through the Phase 1 `clay:agent` facade.
     let ops_src = read_src("src/server/ops/mod.rs");
+    let package_extension = ops_src
+        .split("clay_runtime_package_extension")
+        .nth(1)
+        .expect("package extension must exist");
     assert_absent(
-        non_test(&ops_src),
-        &["op_clay_agent", "AgentHost", "clay-agent"],
+        package_extension,
+        &["op_clay_agent"],
         "package ops must not talk to the clay-agent pipe",
     );
     let facades_src = read_src("src/server/facades.rs");
     assert!(
-        !non_test(&facades_src).contains("clay:agent"),
-        "clay:agent facade is a later task; this task must not expose a JS daemon handle"
+        facades_src.contains("clay:agent"),
+        "clay:agent facade must be registered for the trusted runtime"
     );
-    let trusted_src = read_src("src/server/js_runtime/mod.rs");
-    assert_absent(
-        non_test(&trusted_src),
-        &["AgentHost", "op_clay_agent"],
-        "package runtimes must not hold AgentHost",
+    assert!(
+        !facades_src.contains("Facade::public(\"clay:agent\")"),
+        "clay:agent facade must stay trusted-only (no third-party daemon access)"
+    );
+    let trusted_src = read_src("src/server/ops/agent.rs");
+    assert!(
+        non_test(&trusted_src).contains("AgentHostHandle::global()"),
+        "agent ops must fail closed when no agent host is wired"
     );
     assert!(
         clay::packages::manifest::RESERVED_CORE_API_DOMAINS.contains(&"agent"),
@@ -368,6 +481,7 @@ async fn missing_node_is_a_diagnostic_not_a_hang() {
         data_dir: temp_dir("missing-node"),
         inherit_environment: Vec::new(),
         inert: false,
+        mcp_allow_list: Vec::new(),
     });
     let started = Instant::now();
     let message = host.run(AgentClientCommand::ListSessions).await;
@@ -389,6 +503,8 @@ async fn mock_daemon_prompt_persists_no_secret_on_ack() {
             profile: "chat".into(),
             provider: "mock".into(),
             model: "demo".into(),
+            workspace_root: None,
+            full_autonomy: None,
         })
         .await;
     let AgentServerMessage::Snapshot(snapshot) = created else {
@@ -401,6 +517,8 @@ async fn mock_daemon_prompt_persists_no_secret_on_ack() {
         .run(AgentClientCommand::Prompt {
             session_id: snapshot.session_id.clone(),
             text: "Hi".into(),
+            provider: None,
+            model: None,
         })
         .await;
     assert!(matches!(prompted, AgentServerMessage::Snapshot(_)));
@@ -411,13 +529,16 @@ async fn mock_daemon_prompt_persists_no_secret_on_ack() {
     .await
     .expect("event")
     .expect("broadcast");
-    assert!(matches!(
-        event.as_ref(),
-        AgentServerMessage::Event {
-            event: AgentWireEvent::MessageDelta { text, .. },
-            ..
-        } if text == "hi"
-    ));
+    // Structured usage (plan 108 task 9): the daemon's agent_finished usage
+    // rides Finished as bounded counters, not just display text.
+    let AgentServerMessage::Event {
+        event: AgentWireEvent::Finished { usage, .. },
+        ..
+    } = event.as_ref()
+    else {
+        panic!("expected Finished event, got {:?}", event.as_ref());
+    };
+    assert_eq!(usage, "9 in / 3 out");
 
     let secret = "sk-testsecretvalue999";
     let ack = host
@@ -452,7 +573,7 @@ async fn unconfigured_prompt_is_instructional_snapshot() {
 #[tokio::test]
 async fn resume_after_daemon_load_restores_bounded_history() {
     let host = host_for(mock_daemon());
-    let loaded = host.resume_tab(3, "s1").await;
+    let loaded = host.resume_tab(3, "s1", None).await;
     match loaded {
         AgentServerMessage::Snapshot(snapshot) => {
             assert_eq!(snapshot.session_id, "s1");
@@ -476,6 +597,8 @@ async fn slow_daemon_submit_does_not_block_caller() {
     host.dispatch(AgentClientCommand::Prompt {
         session_id: "s1".into(),
         text: "Hi".into(),
+        provider: None,
+        model: None,
     });
     assert!(started.elapsed() < Duration::from_millis(KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS));
     host.shutdown().await;
@@ -487,11 +610,13 @@ fn phase25_dependencies_deny_acp_agui_mcp() {
     let agent_pkg = read_src("clay-agent/package.json");
     let agent_readme = read_src("clay-agent/README.md");
     let chat_docs = read_src("packages/chat/docs/index.md");
+    // ACP/AG-UI and retired 0.3 names stay denied everywhere. MCP is a
+    // package-declared bridge allowed only in the clay-agent JS graph, so the
+    // MCP needles are Cargo.toml-only denies (Phase 1).
     for needle in [
         "prism-acp",
         "prism-ag-ui",
         "agentclientprotocol",
-        "@modelcontextprotocol",
         "prism-coding-agent",
         "@arnilo/prism-coding-agent",
     ] {
@@ -504,10 +629,64 @@ fn phase25_dependencies_deny_acp_agui_mcp() {
             "clay-agent/package.json must not depend on {needle}"
         );
     }
-    assert!(agent_readme.contains("0.3.0"));
+    for needle in ["@modelcontextprotocol", "@arnilo/prism-mcp"] {
+        assert!(
+            !cargo.contains(needle),
+            "Cargo.toml must not depend on {needle}"
+        );
+    }
+    assert!(agent_readme.contains("0.4.0"));
     assert!(agent_readme.contains("Upgrade Prism"));
     assert!(agent_readme.contains("no tools and no sandbox"));
     assert!(chat_docs.contains("no tools, no sandbox"));
+    // Phase 0 + Phase 1 (Prism 0.4.0): exact family pins, no retired 0.3
+    // package names.
+    for pin in [
+        "\"@arnilo/prism\": \"0.4.0\"",
+        "\"@arnilo/prism-core\": \"0.4.0\"",
+        "\"@arnilo/prism-providers\": \"0.4.0\"",
+        "\"@arnilo/prism-coding-tools\": \"0.4.0\"",
+        "\"@arnilo/prism-web-tools\": \"0.4.0\"",
+        "\"@arnilo/prism-memory\": \"0.4.0\"",
+        "\"@arnilo/prism-mcp\": \"0.4.0\"",
+        "\"better-sqlite3\": \"12.11.1\"",
+    ] {
+        assert!(
+            agent_pkg.contains(pin),
+            "clay-agent/package.json must pin exactly {pin}"
+        );
+    }
+    let agent_src = [
+        "clay-agent/src/host.ts",
+        "clay-agent/src/providers.ts",
+        "clay-agent/src/main.ts",
+        "clay-agent/src/rpc.ts",
+        "clay-agent/src/redact.ts",
+    ]
+    .map(read_src)
+    .join("\n");
+    for needle in [
+        "@arnilo/prism-credentials-node",
+        "@arnilo/prism-session-store-sqlite",
+        "@arnilo/prism-session-store-codecs",
+        "@arnilo/prism-tool-validator-json-schema",
+        "@arnilo/prism-model-router",
+        "\"@arnilo/prism-provider-",
+    ] {
+        assert!(
+            !agent_pkg.contains(needle),
+            "clay-agent/package.json must not use retired Prism 0.3 name {needle}"
+        );
+        assert!(
+            !agent_src.contains(needle),
+            "clay-agent sources must not import retired Prism 0.3 name {needle}"
+        );
+    }
+    // Family subpaths must be the only @arnilo/prism* import shape.
+    assert!(agent_src.contains("@arnilo/prism-core/credentials/node"));
+    assert!(agent_src.contains("@arnilo/prism-core/sessions/sqlite"));
+    assert!(agent_src.contains("@arnilo/prism-core/validation/json-schema"));
+    assert!(agent_src.contains("@arnilo/prism-providers/openai"));
 }
 
 #[test]
@@ -539,6 +718,7 @@ async fn mock_spawn_creates_owner_only_passphrase_within_budget() {
         data_dir: data_dir.clone(),
         inherit_environment: Vec::new(),
         inert: false,
+        mcp_allow_list: Vec::new(),
     });
     let started = Instant::now();
     let _ = host.run(AgentClientCommand::ListSessions).await;
@@ -546,4 +726,247 @@ async fn mock_spawn_creates_owner_only_passphrase_within_budget() {
     let meta = fs::metadata(data_dir.join("vault.passphrase")).unwrap();
     assert_eq!(meta.permissions().mode() & 0o777, 0o600);
     host.shutdown().await;
+}
+
+#[tokio::test]
+async fn reverse_rpc_document_request_round_trips() {
+    let dir = temp_dir("reverse");
+    let script = dir.join("reverse-agent");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import json, sys
+for line in sys.stdin:
+    msg = json.loads(line)
+    ident = msg.get("id")
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"ok":True}}), flush=True)
+    elif method == "session.new":
+        # Daemon-initiated reverse request: document.read.
+        print(json.dumps({"jsonrpc":"2.0","id":9001,"method":"document.read","params":{"path":"/tmp/ws/x.txt"}}), flush=True)
+        reply = json.loads(sys.stdin.readline())
+        text = (reply.get("result") or {}).get("text", "ERR")
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"sessionId":text,"profile":"p","provider":"pv","model":"m"}}), flush=True)
+"#,
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    let host = host_for(script);
+    host.set_reverse_handler(Arc::new(|method: String, _params: Value| {
+        Box::pin(async move {
+            assert_eq!(method, "document.read");
+            Ok(json!({ "text": "agent-doc-text", "version": 1, "dirty": false, "open": true }))
+        })
+    }));
+    let snapshot = host
+        .run(AgentClientCommand::NewSession {
+            profile: "coding".into(),
+            provider: "mock".into(),
+            model: "demo".into(),
+            workspace_root: None,
+            full_autonomy: None,
+        })
+        .await;
+    match snapshot {
+        AgentServerMessage::Snapshot(snapshot) => {
+            assert_eq!(snapshot.session_id, "agent-doc-text");
+        }
+        other => panic!("expected snapshot, got {other:?}"),
+    }
+    host.shutdown().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn registration_rpc_queues_without_spawning_then_drains_after_initialize() {
+    let host = host_for(mock_daemon());
+    // Package load entries queue while the daemon is down: no spawn, no boot
+    // wait, and the load returns immediately.
+    let queued_skill = host
+        .rpc_or_queue(
+            "skill.register",
+            json!({ "name": "coding-agent.createPlan" }),
+        )
+        .await
+        .expect("queue accepts while daemon is down");
+    assert_eq!(queued_skill, json!({ "queued": true }));
+    let queued_profile = host
+        .rpc_or_queue(
+            "agentProfile.register",
+            json!({
+                "name": "coding",
+                "description": "Workspace coding agent",
+                "tools": ["read", "edit"],
+                "skills": ["coding-agent.createPlan"],
+            }),
+        )
+        .await
+        .expect("queue accepts while daemon is down");
+    assert_eq!(queued_profile, json!({ "queued": true }));
+    assert_eq!(host.pending_registration_len().await, 2);
+
+    // The next command spawns the daemon; queued registrations apply right
+    // after the initialize handshake and before the command itself.
+    let created = host
+        .run(AgentClientCommand::NewSession {
+            profile: "coding".into(),
+            provider: "mock".into(),
+            model: "demo".into(),
+            workspace_root: None,
+            full_autonomy: None,
+        })
+        .await;
+    assert!(matches!(created, AgentServerMessage::Snapshot(_)));
+    assert_eq!(
+        host.pending_registration_len().await,
+        0,
+        "queue must drain after the initialize handshake"
+    );
+
+    // The registrations reached the daemon in order: the profile list now
+    // contains the queued coding profile.
+    let listing = host
+        .rpc("agentProfile.list", json!({}))
+        .await
+        .expect("list");
+    let profiles = listing
+        .get("profiles")
+        .and_then(Value::as_array)
+        .expect("profiles array")
+        .iter()
+        .filter_map(|profile| profile.get("name").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        profiles,
+        vec!["coding"],
+        "queued registration must reach the daemon exactly once"
+    );
+
+    // With the daemon running, registration executes immediately over the
+    // live rpc path (no queue detour: the answer is the daemon's own).
+    let live = host
+        .rpc_or_queue(
+            "agentProfile.register",
+            json!({ "name": "coding-again", "description": "again" }),
+        )
+        .await
+        .expect("live registration reaches the daemon");
+    assert_eq!(
+        live,
+        json!({ "name": "coding-again", "registered": true }),
+        "live path must not report queued"
+    );
+    assert_eq!(host.pending_registration_len().await, 0);
+}
+
+/// Phase 2 command surface (plan 108 task 7): command registrations queue
+/// like other inert declarations while the daemon is down, then apply after
+/// initialize; a live dispatch reaches the daemon's command registry and an
+/// unknown command fails closed with the daemon's typed error.
+#[tokio::test]
+async fn command_registration_queues_then_live_dispatch_reaches_daemon() {
+    let host = host_for(mock_daemon());
+    let queued = host
+        .rpc_or_queue(
+            "command.register",
+            json!({ "name": "/compact", "handler": "compact", "description": "Compact this session." }),
+        )
+        .await
+        .expect("queue accepts while daemon is down");
+    assert_eq!(queued, json!({ "queued": true }));
+    assert_eq!(host.pending_registration_len().await, 1);
+
+    // The next command spawns the daemon and drains the queued registration.
+    let created = host
+        .run(AgentClientCommand::NewSession {
+            profile: "chat".into(),
+            provider: "mock".into(),
+            model: "demo".into(),
+            workspace_root: None,
+            full_autonomy: None,
+        })
+        .await;
+    assert!(matches!(created, AgentServerMessage::Snapshot(_)));
+    assert_eq!(host.pending_registration_len().await, 0);
+
+    // The registered command is dispatchable on the daemon.
+    let listed = host
+        .rpc(
+            "command.dispatch",
+            json!({ "name": "/compact", "args": {} }),
+        )
+        .await
+        .expect("dispatch reaches the daemon");
+    assert!(
+        listed.is_object() || listed.is_null(),
+        "dispatch returns the handler result envelope"
+    );
+
+    // Unknown command: bounded typed failure, not a hang.
+    let unknown = host
+        .rpc("command.dispatch", json!({ "name": "/nope", "args": {} }))
+        .await;
+    assert!(
+        unknown.is_err(),
+        "unknown commands fail closed at the daemon"
+    );
+    assert_eq!(host.pending_registration_len().await, 0);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn session_search_picker_hits_parse_and_selection_opens_at_entry() {
+    // Plan 108 task 11 (decision 2201): the picker's search method parses
+    // the Phase 1 session.search hits verbatim, and activating a result
+    // resumes the tab with the transcript opened at the matching entry
+    // (read-only view — no tree mutation, no implicit context attach).
+    let host = host_for(mock_daemon());
+    // Bind the tab to a session first: the search scope is the tab's
+    // current session workspace (decision 2201).
+    host.resume_tab(3, "s1", None).await;
+    let hits = host
+        .search_sessions(3, "needle", 50)
+        .await
+        .expect("search parses");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].session_id, "s1");
+    assert_eq!(hits[0].leaf_id.as_deref(), Some("entry_9"));
+    assert_eq!(hits[0].label, "chat");
+    assert_eq!(hits[0].snippet, "mock snippet");
+
+    // Selection: resume_tab carries the entry id through session.load.
+    let loaded = host.resume_tab(3, "s1", Some("entry_9")).await;
+    match loaded {
+        AgentServerMessage::Snapshot(snapshot) => {
+            assert!(
+                snapshot.entries[0].text.contains("opened:entry_9"),
+                "the entry id reaches the daemon load"
+            );
+            assert_eq!(snapshot.entries.len(), 2);
+        }
+        other => panic!("expected snapshot, got {other:?}"),
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn knowledge_set_options_forwards_to_daemon() {
+    // Plan 108 task 12: the opt-in wiki configuration reaches the daemon's
+    // knowledge.setOptions; the host passes the workspace root through
+    // verbatim (decision 2156 keeps activation daemon-side and opt-in).
+    let host = host_for(mock_daemon());
+    let result = host
+        .rpc(
+            "knowledge.setOptions",
+            json!({ "workspaceRoot": "/tmp/workspace", "wiki": true }),
+        )
+        .await
+        .expect("knowledge options forward");
+    assert_eq!(
+        result.get("workspaceRoot").and_then(Value::as_str),
+        Some("/tmp/workspace")
+    );
+    assert_eq!(result.get("wiki").and_then(Value::as_bool), Some(true));
 }

@@ -76,6 +76,17 @@ export interface PaneRecord {
   session: DocumentSession;
 }
 
+/** Serialized server `KeyStroke` (protocol `KeyCode` + modifiers). */
+export interface ServerKeyStroke {
+  key: string | { character: string };
+  modifiers: {
+    shift: boolean;
+    control: boolean;
+    alt: boolean;
+    superKey: boolean;
+  };
+}
+
 export interface TabRuntime {
   clientId: number;
   tabId: number | null;
@@ -88,6 +99,9 @@ export interface TabRuntime {
   menu: TransientMenuSnapshotDto | null;
   diagnostic: RuntimeDiagnosticDto | null;
   settingsOpen: boolean;
+  /** Coding Agent split surface (plan 108 task 8): open state + hosting pane. */
+  agentSurfaceOpen: boolean;
+  agentSurfacePaneId: number | null;
 }
 
 export interface PendingClose {
@@ -199,6 +213,8 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       menu: null,
       diagnostic: null,
       settingsOpen: false,
+      agentSurfaceOpen: false,
+      agentSurfacePaneId: null,
     };
     const first = ensurePane(runtime, tree.activePaneId);
     first.session.installInitial(bootstrap);
@@ -449,6 +465,10 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       const runtime = activeRuntime();
       const menu = runtime?.menu;
       if (!runtime || !menu) return;
+      // Close locally first — the UI must never wait on the server round
+      // trip (or its loss) to dismiss a modal the user asked to close.
+      runtime.menu = null;
+      notify();
       void adapters.send(
         JSON.stringify({
           family: "menuCancel",
@@ -456,6 +476,13 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
         }),
         runtime.tabId ?? undefined,
       );
+    },
+    /** Launch the Coding Agent split surface in the active pane (same
+     *  client-routed command the Command Centre activates). */
+    launchCodingAgent() {
+      const runtime = activeRuntime();
+      if (!runtime) return;
+      dispatchClientCommand(commandContext, runtime, "coding-agent.profile");
     },
     requestClose(clientId: number) {
       if (tabs.get().tabs.length <= 1) return;
@@ -567,6 +594,58 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
           runtime,
           "workspace.clientOpenFolderDialog",
         );
+    },
+    /** Global server-first keymaps from the active session's behavior
+     *  manifest — the shell chord matcher resolves these outside editor
+     *  focus (the editor keymap owns them inside `.cm-editor`). */
+    serverKeymaps() {
+      const runtime = activeRuntime();
+      const session = runtime?.panes.get(runtime.tree.activePaneId)?.session;
+      if (!session) return [];
+      const keymaps =
+        (session.behaviorManifest().keymaps as
+          | Array<{
+              commandId: string;
+              sequence: ServerKeyStroke[];
+              context?: unknown;
+              routingPolicy?: unknown;
+            }>
+          | undefined) ?? [];
+      // serde emits unit-variant names as written ("Global",
+      // "ServerFirst"); package strings may use kebab. Normalize all three
+      // spellings before comparing.
+      const normalize = (value: unknown) =>
+        String(value)
+          .toLowerCase()
+          .replace(/[-_]/g, "");
+      return keymaps.filter(
+        (binding) =>
+          normalize(binding.context) === "global" &&
+          normalize(binding.routingPolicy) === "serverfirst",
+      );
+    },
+    /** Send a server-first command intent through the active pane session
+     *  (same lane the editor extension controller uses). Returns false when
+     *  no session can carry it. */
+    dispatchServerCommand(commandId: string) {
+      const runtime = activeRuntime();
+      const session = runtime?.panes.get(runtime.tree.activePaneId)?.session;
+      if (!session) return false;
+      const store = session.store.get();
+      void session.request(
+        JSON.stringify({
+          family: "commandIntent",
+          payload: {
+            clientId: session.clientId(),
+            documentId: store?.documentId ?? 0,
+            behaviorVersion:
+              store?.behaviorVersion ??
+              session.behaviorManifest().behaviorVersion,
+            commandId,
+          },
+        }),
+      );
+      return true;
     },
     serialize,
     emptyLayout,

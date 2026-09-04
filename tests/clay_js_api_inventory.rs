@@ -660,3 +660,71 @@ fn inventory_paths_are_repository_relative() {
         }
     }
 }
+
+#[test]
+fn agent_configuration_options_are_documented_custom_properties_with_decision_defaults() {
+    // Plan 107 task 12 + decisions 2157/2158: autonomy default, compaction
+    // strategy, and OM compactAfterTokens must be documented Clay JS API
+    // custom properties (not hidden config keys), with the decision
+    // defaults stated in the inventory itself.
+    let entries: Vec<_> = inventory_entries()
+        .into_iter()
+        .filter(|entry| entry.get("id").starts_with("agent."))
+        .collect();
+    assert!(!entries.is_empty(), "agent facade entries must exist");
+
+    let autonomy = entries
+        .iter()
+        .find(|entry| entry.get("id") == "agent.setFullAutonomy")
+        .expect("agent.setFullAutonomy entry");
+    let autonomy_properties = custom_property_names(autonomy.get("custom_properties"));
+    assert!(
+        autonomy_properties.contains(&"default".to_string()),
+        "agent.setFullAutonomy must document the autonomy default as a custom property"
+    );
+    assert!(
+        autonomy
+            .get("custom_properties")
+            .contains("default:boolean=false"),
+        "decision 2157: full autonomy defaults to false"
+    );
+
+    let compact = entries
+        .iter()
+        .find(|entry| entry.get("id") == "agent.compact")
+        .expect("agent.compact entry");
+    let compact_properties = custom_property_names(compact.get("custom_properties"));
+    assert!(
+        compact_properties.contains(&"compactAfterTokens".to_string()),
+        "agent.compact must document compactAfterTokens as a custom property"
+    );
+    assert!(
+        compact
+            .get("custom_properties")
+            .contains("compactAfterTokens:number=80000"),
+        "decision 2158: compactAfterTokens default is 80000"
+    );
+    let compact_doc = root().join(compact.get("documentation_path"));
+    assert!(
+        compact_doc.is_file()
+            && fs::read_to_string(&compact_doc)
+                .unwrap()
+                .contains("compactAfterTokens"),
+        "agent.compact docs must document compactAfterTokens"
+    );
+    // The strategy name is an option of agent.compact (documented in Options),
+    // and no separate strategy configuration API exists.
+    assert!(
+        !entries.iter().any(|entry| {
+            let id = entry.get("id");
+            id.contains("strategy") || id.contains("compactionStrategy")
+        }),
+        "compaction strategy is selected via agent.compact's strategy option, not a separate API"
+    );
+    // No hidden configuration keys: the daemon default must match the docs.
+    let compaction_ts = fs::read_to_string(root().join("clay-agent/src/compaction.ts")).unwrap();
+    assert!(
+        compaction_ts.contains("DEFAULT_COMPACT_AFTER_TOKENS = 80_000"),
+        "daemon default compactAfterTokens must stay 80000 (decision 2158)"
+    );
+}

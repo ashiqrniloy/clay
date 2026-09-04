@@ -44,6 +44,7 @@ export function WorkspacePanes({
       onOpenPath={(path) => workspace.openPath(path)}
       onOpenFile={() => workspace.openFileDialog()}
       onOpenFolder={() => workspace.openFolderDialog()}
+      onLaunchAgent={() => workspace.launchCodingAgent()}
     />
   );
   const content =

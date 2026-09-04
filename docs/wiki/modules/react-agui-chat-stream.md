@@ -16,14 +16,14 @@ Rust.
 | Prompt/cancel/session requests | Existing validated bridge path (`session_request`) |
 | Event pipeline (chunk expansion, verification, message/state application) | `AbstractAgent` from `@ag-ui/client` — never duplicated |
 | Custom transport | `frontend/src/agent/TauriClayAgent.ts` (`run()` over the relay) |
-| Presentation binding | `frontend/src/agent/state.ts` + `frontend/src/chat/ChatPanel.tsx` |
+| Presentation binding | `frontend/src/agent/state.ts` + `frontend/src/chat/ChatPanel.tsx` + `frontend/src/coding-agent/CodingAgentPanel.tsx` (plan 108: bounded `tools` rows + cumulative `toolStats` from `clay.toolPhase` CUSTOM events; counts only, never payloads) |
 
 ## Event mapping (Rust adapter)
 
 | Clay wire message | AG-UI output |
 |---|---|
-| `Snapshot(transcript)` | `MESSAGES_SNAPSHOT` (entries → user/assistant/reasoning messages; error/usage entries keep roles with `metadata.clayKind`) + `STATE_SNAPSHOT` (sessionId/profile/provider/model) |
-| `Inventory` | `STATE_SNAPSHOT` (bounded providers/models/profiles/sessions) |
+| `Snapshot(transcript)` | `MESSAGES_SNAPSHOT` (entries → user/assistant/reasoning messages; error/usage entries keep roles with `metadata.clayKind`) + `STATE_SNAPSHOT` (sessionId/profile/provider/model + plan 108 `mcpServers`: server-built allow-list names for the Coding Agent extension strip; `contextTokens` from the last Finished event for the status row) |
+| `Inventory` | `STATE_SNAPSHOT` (bounded providers/models/profiles/sessions; models carry `contextWindow` for context-size-vs-window reporting) |
 | `Event::Started` | `RUN_STARTED {threadId, runId}` |
 | `Event::MessageDelta` | `TEXT_MESSAGE_CHUNK {messageId: clay-text-{runId}, delta}` |
 | `Event::ThinkingDelta` | `REASONING_MESSAGE_CHUNK {messageId: clay-reasoning-{runId}}` |

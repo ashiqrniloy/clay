@@ -60,6 +60,19 @@ export function handleEnvelope(ctx: EnvelopeContext, envelope: BridgeEnvelope) {
       )
     )
       runtime.settingsOpen = false;
+    // Coding Agent surface auto-closes when its package (or surface
+    // contribution) disappears — mirrors the settings panel reset.
+    if (
+      runtime.agentSurfaceOpen &&
+      !snapshot.packageUi.surfaces?.some(
+        (surface) =>
+          surface.provenance.packageName === "@clay/coding-agent" &&
+          surface.provenance.trustDomain === "trusted",
+      )
+    ) {
+      runtime.agentSurfaceOpen = false;
+      runtime.agentSurfacePaneId = null;
+    }
     for (const pane of runtime.panes.values()) {
       const document = snapshot.documents.find(
         (candidate) =>

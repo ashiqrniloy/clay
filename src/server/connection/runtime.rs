@@ -125,6 +125,16 @@ pub(super) async fn execute_command_intent(
         };
     }
 
+    // Phase 2 (plan 108 task 8): Coding Agent surface launch/close. The
+    // intent is user-authorized (Command Centre catalogue entry or a declared
+    // package action target); the toggle itself is client-local, so the
+    // server answers with the shell-client request and mutates nothing.
+    if crate::server::command_execution::is_agent_surface_command(&request.command_id) {
+        return Some(ServerMessage::ShellClientCommandRequest {
+            command_id: request.command_id,
+        });
+    }
+
     if crate::server::command_execution::is_reload_command(&request.command_id) {
         let Some(server) = reload_server else {
             return Some(ServerMessage::Error {
@@ -628,11 +638,16 @@ where
         }
     }
 
-    if intent.command_id == "chat.submit" || intent.command_id == "chat.cancel" {
+    if intent.command_id == "chat.submit"
+        || intent.command_id == "chat.cancel"
+        || intent.command_id == "chat.steer"
+    {
         if let Some(host) = reload_server.map(|server| &server.agent) {
             let tab = bound_tab_id.unwrap_or(client_id);
             let message = if intent.command_id == "chat.cancel" {
                 host.cancel_tab(tab).await
+            } else if intent.command_id == "chat.steer" {
+                host.steer_tab(tab, &intent_text(&intent)).await
             } else {
                 host.begin_prompt(tab, &intent_text(&intent)).await
             };

@@ -1,3 +1,4 @@
+mod agent;
 mod behavior;
 mod commands;
 mod completion;
@@ -46,6 +47,12 @@ use crate::{
 };
 
 use self::{
+    agent::{
+        op_clay_agent_command_dispatch, op_clay_agent_command_register,
+        op_clay_agent_compact_session, op_clay_agent_knowledge_set_options,
+        op_clay_agent_profile_register, op_clay_agent_resume_run, op_clay_agent_search_sessions,
+        op_clay_agent_session_tree, op_clay_agent_set_autonomy, op_clay_agent_skill_register,
+    },
     behavior::{op_clay_behavior_get_active_manifest, op_clay_behavior_list_routes},
     commands::{
         op_clay_commands_execute_command, op_clay_commands_list_commands,
@@ -2007,6 +2014,16 @@ extension!(
     clay_runtime_trusted_extension,
     ops = [
         op_clay_runtime_ping,
+        op_clay_agent_set_autonomy,
+        op_clay_agent_compact_session,
+        op_clay_agent_search_sessions,
+        op_clay_agent_resume_run,
+        op_clay_agent_session_tree,
+        op_clay_agent_profile_register,
+        op_clay_agent_skill_register,
+        op_clay_agent_command_register,
+        op_clay_agent_command_dispatch,
+        op_clay_agent_knowledge_set_options,
         op_clay_runtime_record,
         op_clay_configuration_load_module,
         op_clay_configuration_record_module_error,
@@ -2211,7 +2228,7 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 86);
+        assert_eq!(trusted.len(), 96);
         // 46 = 38 public contribution ops (including folding publication) +
         // the seven shared `editor-control` gated editor ops + the gated
         // programmatic execution op (follow-up round); visibility grants
@@ -2255,6 +2272,16 @@ mod domain_extension_tests {
             "op_clay_packages_list_first_party_specifiers",
             "op_clay_language_server_authorize",
             "op_clay_syntax_set_engine_preference",
+            "op_clay_agent_set_autonomy",
+            "op_clay_agent_compact_session",
+            "op_clay_agent_search_sessions",
+            "op_clay_agent_resume_run",
+            "op_clay_agent_session_tree",
+            "op_clay_agent_profile_register",
+            "op_clay_agent_skill_register",
+            "op_clay_agent_command_register",
+            "op_clay_agent_command_dispatch",
+            "op_clay_agent_knowledge_set_options",
             "op_clay_modes_classify_document",
             "op_clay_modes_activate_major_mode",
             "op_clay_completion_providers_for_trigger",

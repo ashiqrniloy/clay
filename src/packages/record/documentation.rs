@@ -162,7 +162,13 @@ pub(super) fn validate_api_dependency_permissions(
             | "ui.serverRegisterThemeToken"
             | "ui.serverRegisterInputContribution"
             | "ui.serverRegisterUiStateScope"
-            | "ui.serverRegisterPaneContentContribution" => None,
+            | "ui.serverRegisterPaneContentContribution"
+            // Inert daemon-side profile/skill declarations for first-party
+            // agent packages: the daemon validates shape and duplicates
+            // fail-closed, and registration grants no tool execution
+            // authority (session tools stay gated by the acceptance policy).
+            | "agent.profileRegister"
+            | "agent.skillRegister" => None,
             "ui.serverSetLayoutOverride" | "configuration.setPackageOption" => {
                 Some(PackagePermission::PackageConfiguration)
             }

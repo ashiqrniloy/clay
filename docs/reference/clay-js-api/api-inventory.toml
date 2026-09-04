@@ -3477,3 +3477,237 @@ permissions = []
 security_notes = "Bindable client UI command ID only; The numbered family is documented in the page body. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."
 current_rust_owner = "src/client_commands.rs::ShellClientCommand (client-local; tab set executed by the React tab bar and workspace controller, frontend/src/app/layout/tab-bar.tsx; frontend/src/shell/workspace-controller.ts)"
 registry_public = true
+
+# Phase 1: Base Coding Agent Host Uplift — `agent` domain facades. These are
+# the only JS paths that reach the clay-agent daemon; the package (third-party)
+# runtime has no such access.
+
+[[api]]
+id = "agent.compact"
+category = "agent-session-control"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:agent"
+js_export = "compact"
+user_facing_name = "Compact Agent Session"
+authority = "user-intent-forwarding-to-daemon-rpc"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Background/programmatic session control; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/agent.js::compact"
+backing_rust = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionCompact"
+deno_op = "op_clay_agent_compact_session"
+deno_op_path = "src/server/ops/agent.rs::op_clay_agent_compact_session"
+documentation_path = "docs/reference/clay-js-api/agent/compact.md"
+key_bindings = []
+custom_properties = ["compactAfterTokens:number=80000"]
+permissions = ["agent-host"]
+security_notes = "Forwards user intent to the clay-agent daemon through a validated op; the daemon applies the secret redactor to the compaction run. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionCompact"
+registry_public = true
+
+[[api]]
+id = "agent.searchSessions"
+category = "agent-session-search"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:agent"
+js_export = "searchSessions"
+user_facing_name = "Search Agent Sessions"
+authority = "user-intent-forwarding-to-daemon-rpc"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "Background/help/programmatic query; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/agent.js::searchSessions"
+backing_rust = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionSearch"
+deno_op = "op_clay_agent_search_sessions"
+deno_op_path = "src/server/ops/agent.rs::op_clay_agent_search_sessions"
+documentation_path = "docs/reference/clay-js-api/agent/search-sessions.md"
+key_bindings = []
+custom_properties = []
+permissions = ["agent-host"]
+security_notes = "Workspace scoping is server-owned (the daemon filters by the session's stamped workspaceRoot); snippets are redacted daemon-side. Results are transcript metadata for explicit user-facing flows and are never auto-injected into agent context. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionSearch"
+registry_public = true
+
+[[api]]
+id = "agent.setFullAutonomy"
+category = "agent-autonomy"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:agent"
+js_export = "setFullAutonomy"
+user_facing_name = "Set Agent Full Autonomy"
+authority = "user-intent-forwarding-to-daemon-rpc"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "User-action driven control; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/agent.js::setFullAutonomy"
+backing_rust = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionSetAutonomy"
+deno_op = "op_clay_agent_set_autonomy"
+deno_op_path = "src/server/ops/agent.rs::op_clay_agent_set_autonomy"
+documentation_path = "docs/reference/clay-js-api/agent/set-full-autonomy.md"
+key_bindings = []
+custom_properties = ["default:boolean=false"]
+permissions = ["agent-host"]
+security_notes = "Autonomy defaults to false and only the host side can change it; no agent-facing tool can flip this flag. Enabling it skips approval prompts for gated tool calls in that session. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionSetAutonomy"
+registry_public = true
+
+[[api]]
+id = "agent.resumeRun"
+category = "agent-approval-resume"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:agent"
+js_export = "resumeRun"
+user_facing_name = "Resume Suspended Agent Run"
+authority = "user-intent-forwarding-to-daemon-rpc"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "User-decision flow; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/agent.js::resumeRun"
+backing_rust = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::runResume"
+deno_op = "op_clay_agent_resume_run"
+deno_op_path = "src/server/ops/agent.rs::op_clay_agent_resume_run"
+documentation_path = "docs/reference/clay-js-api/agent/resume-run.md"
+key_bindings = []
+custom_properties = []
+permissions = ["agent-host"]
+security_notes = "Forwards the user's decision to the daemon, which validates the decision shape and run-state version fail-closed; stale or malformed resumes have no side effects. Surfaces the pending approval to the user when not resuming programmatically. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::runResume"
+registry_public = true
+
+[[api]]
+id = "agent.sessionTree"
+category = "agent-session-tree"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:agent"
+js_export = "sessionTree"
+user_facing_name = "Navigate Agent Session Tree"
+authority = "user-intent-forwarding-to-daemon-rpc"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "User-driven navigation control; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/agent.js::sessionTree"
+backing_rust = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionCheckout"
+deno_op = "op_clay_agent_session_tree"
+deno_op_path = "src/server/ops/agent.rs::op_clay_agent_session_tree"
+documentation_path = "docs/reference/clay-js-api/agent/session-tree.md"
+key_bindings = []
+custom_properties = []
+permissions = ["agent-host"]
+security_notes = "Checkout first restores server-recorded document checkpoints (buffer-only, lease-respecting) before moving the conversation leaf; abandoned branches are kept, never deleted. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionCheckout"
+registry_public = true
+
+[[api]]
+id = "agent.profileRegister"
+category = "agent-profile-registration"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:agent"
+js_export = "profileRegister"
+user_facing_name = "Register Agent Profile"
+authority = "user-intent-forwarding-to-daemon-rpc"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "One-shot registration during package load; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/agent.js::profileRegister"
+backing_rust = "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::profileRegister"
+deno_op = "op_clay_agent_profile_register"
+deno_op_path = "src/server/ops/agent.rs::op_clay_agent_profile_register"
+documentation_path = "docs/reference/clay-js-api/agent/profile-register.md"
+key_bindings = []
+custom_properties = []
+permissions = ["agent-host"]
+security_notes = "Forwards an inert profile declaration (name, description, instructions, tool names, skill names) to the daemon's validated registry; duplicate profiles and unknown tool or skill ids fail closed at session start, before any provider turn. Tool execution authority stays governed by the acceptance policy, not by registration. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::profileRegister"
+registry_public = true
+
+[[api]]
+id = "agent.skillRegister"
+category = "agent-skill-registration"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:agent"
+js_export = "skillRegister"
+user_facing_name = "Register Agent Skill"
+authority = "user-intent-forwarding-to-daemon-rpc"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "One-shot registration during package load; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/agent.js::skillRegister"
+backing_rust = "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::skillRegister"
+deno_op = "op_clay_agent_skill_register"
+deno_op_path = "src/server/ops/agent.rs::op_clay_agent_skill_register"
+documentation_path = "docs/reference/clay-js-api/agent/skill-register.md"
+key_bindings = []
+custom_properties = []
+permissions = ["agent-host"]
+security_notes = "Forwards an inert skill declaration (name, description, instructions, tool names) to the daemon's validated skill registry; duplicate names fail closed. Skills surface only through the daemon's load_skill progressive-disclosure tool and never execute anything by being registered. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::skillRegister"
+registry_public = true
+
+[[api]]
+id = "agent.commandRegister"
+category = "agent-command-registration"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:agent"
+js_export = "commandRegister"
+user_facing_name = "Register Agent Command"
+authority = "user-intent-forwarding-to-daemon-rpc"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "One-shot registration during package load; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/agent.js::commandRegister"
+backing_rust = "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::commandRegister"
+deno_op = "op_clay_agent_command_register"
+deno_op_path = "src/server/ops/agent.rs::op_clay_agent_command_register"
+documentation_path = "docs/reference/clay-js-api/agent/command-register.md"
+key_bindings = []
+custom_properties = []
+permissions = ["agent-host"]
+security_notes = "Forwards an inert command declaration (name, optional handler name and description) to the daemon's validated command registry; handlers are host-built-in only and can never inject drivers or execute client code. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::commandRegister"
+registry_public = true
+
+[[api]]
+id = "agent.commandDispatch"
+category = "agent-command-dispatch"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:agent"
+js_export = "commandDispatch"
+user_facing_name = "Dispatch Agent Command"
+authority = "user-intent-forwarding-to-daemon-rpc"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "User-initiated command execution only; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/agent.js::commandDispatch"
+backing_rust = "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::commandDispatch"
+deno_op = "op_clay_agent_command_dispatch"
+deno_op_path = "src/server/ops/agent.rs::op_clay_agent_command_dispatch"
+documentation_path = "docs/reference/clay-js-api/agent/command-dispatch.md"
+key_bindings = []
+custom_properties = []
+permissions = ["agent-host"]
+security_notes = "Dispatches a registered daemon command (slash surface) against daemon session state; handlers call daemon session RPCs only and cannot elevate acceptance policy or spawn processes. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::commandDispatch"
+registry_public = true
+
+[[api]]
+id = "agent.knowledgeSetOptions"
+category = "agent-knowledge-options"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:agent"
+js_export = "knowledgeSetOptions"
+user_facing_name = "Set Agent Knowledge Options"
+authority = "user-intent-forwarding-to-daemon-rpc"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "One-shot configuration from workspace init; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/agent.js::knowledgeSetOptions"
+backing_rust = "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::knowledgeSetOptions"
+deno_op = "op_clay_agent_knowledge_set_options"
+deno_op_path = "src/server/ops/agent.rs::op_clay_agent_knowledge_set_options"
+documentation_path = "docs/reference/clay-js-api/agent/knowledge-set-options.md"
+key_bindings = []
+custom_properties = []
+permissions = ["agent-host"]
+security_notes = "Forwards a workspace-scoped configuration intent (opt-in wiki and graft knowledge bases, decision 2156) to the daemon, which owns activation via kernel.load; wiki writes stay inside the workspace .wiki/ tree, the optional qmd binary is never spawned unless explicitly configured, and the graft CLI runs as a host-owned bounded child process (fail-closed resolution, never spawned by package JavaScript). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+current_rust_owner = "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::knowledgeSetOptions"
+registry_public = true

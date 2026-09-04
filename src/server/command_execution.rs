@@ -413,6 +413,14 @@ pub(crate) fn is_chat_command(command_id: &str) -> bool {
     command_id.starts_with("chat.")
 }
 
+/// Coding Agent surface launch/close intents (plan 108 task 8): validated
+/// package commands whose effect is the client-side presentation toggle. The
+/// dispatcher answers with one `ShellClientCommandRequest` the client
+/// re-parses deny-by-default; no server state changes.
+pub(crate) fn is_agent_surface_command(command_id: &str) -> bool {
+    matches!(command_id, "coding-agent.profile" | "coding-agent.close")
+}
+
 /// Bounded appearance values accepted by `settings.setAppearance`.
 const SETTINGS_APPEARANCE_VALUES: &[&str] = &["light", "dark", "system"];
 
@@ -767,6 +775,7 @@ builtin_commands! {
     OPEN_MODEL_PICKER_COMMAND_ID => ("agent.clientOpenModelPicker", "Choose Model", General),
     OPEN_PROVIDER_SETUP_COMMAND_ID => ("agent.clientOpenProviderSetup", "Configure Provider", General),
     OPEN_SESSION_PICKER_COMMAND_ID => ("agent.clientOpenSessionPicker", "Resume Session", General),
+    OPEN_SESSION_SEARCH_PICKER_COMMAND_ID => ("agent.clientOpenSessionSearchPicker", "Search Sessions", General),
     RELOAD_CONFIGURATION_COMMAND_ID => ("runtime.reloadConfiguration", "Reload Configuration and Packages", Reload),
     REFRESH_WORKSPACE_COMMAND_ID => ("workspace.refresh", "Refresh Workspace", General),
     FOCUS_ACTIVE_DOCUMENT_COMMAND_ID => ("document.focus_active", "Focus Active Document", General),

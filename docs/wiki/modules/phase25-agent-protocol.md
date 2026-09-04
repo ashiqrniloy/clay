@@ -25,8 +25,11 @@ this module.
 
 ## How It Works
 
-`PROTOCOL_VERSION` is 24 because a new enum variant changes discriminants.
-Handshake still rejects older servers before any agent frame is decoded.
+`PROTOCOL_VERSION` is 29. Handshake still rejects older servers before any
+agent frame is decoded. Additive agent variants (task 11 setAutonomy/search
+resume; Phase 2 forwarding + approval bridge) ship atomically with the Tauri
+bridge in one binary, so no bump accompanies additive variants — the pin test
+(`phase25_protocol_version_is_pinned`) is the contract.
 
 `AgentClientCommand::CredentialPut` is the only command that carries
 `AgentSecret`. `Debug` for `AgentSecret` always prints `[redacted]`. Acks are
@@ -38,6 +41,17 @@ permission variants; they exist so Phase 29 does not rewrite the wire.
 Payload ceilings live next to the types: `AGENT_MAX_PROMPT_BYTES` (32 KiB),
 `AGENT_MAX_SNAPSHOT_ENTRIES` (200), `AGENT_DAEMON_MAX_LINE_BYTES` (1 MiB).
 Oversized prompts fail as `Diagnostic` before daemon I/O.
+
+Phase 2 additions: `NewSession` carries the daemon-side `workspaceRoot`/
+`fullAutonomy` passthrough; `SkillRegister`/`CommandRegister`/`CommandDispatch`
+forward the daemon skill/command RPCs (dispatch args ride a JSON string like
+`RunResume.decision_json`, daemon-validated fail-closed); and the approval
+bridge pairs `AgentServerMessage::ApprovalRequest { requestId, kind,
+payloadJson }` (AG-UI `clay.approvalRequest` CUSTOM event) with
+`ApprovalResolve`/`AskDecisionResolve` answers. Pending requests live in the
+server-side registry (`PendingApprovals`); timeouts, dropped senders, and
+zero subscribers deny fail-closed, and stale resolves return a diagnostic
+without mutating anything.
 
 ## Code Examples
 

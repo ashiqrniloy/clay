@@ -1,5 +1,13 @@
 import type { ReactNode } from "react";
-import { Modal, ModalOverlay, Dialog, Heading } from "react-aria-components";
+import {
+  Modal,
+  ModalOverlay,
+  Dialog,
+  Heading,
+  Button,
+} from "react-aria-components";
+
+import { ClayText } from "./text";
 
 import styles from "./modal.module.css";
 import { recipeAttributes } from "./recipe-attributes";
@@ -40,6 +48,14 @@ export function ClayModal({ title, open, onClose, children }: ClayModalProps) {
           >
             {title}
           </Heading>
+          <Button
+            slot="close"
+            className={styles.close}
+            aria-label="Close"
+            onPress={onClose}
+          >
+            <ClayText aria-hidden="true">×</ClayText>
+          </Button>
           {children}
         </Dialog>
       </Modal>

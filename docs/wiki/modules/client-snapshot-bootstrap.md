@@ -36,7 +36,7 @@ The production bootstrap expects messages and writes in this order:
 2. One or more `BehaviorManifest` messages, then `ActiveTheme`.
 3. Validated `ActiveTypography`.
 4. Client writes `TabCommand::New { workspace_root }` or `TabCommand::Reclaim { tab_id }`.
-5. Server writes the bound tab's `InitialDocument` and an initial workspace-pane `SduiSnapshot` (editor-only while the per-tab pane is hidden by default; the bounded tree follows `workspace.toggleFileBrowser`).
+5. Server writes the bound tab's `InitialDocument` and an initial workspace-pane `SduiSnapshot` (the per-tab pane is visible by default, so the bounded file-browser tree ships in the bind snapshot; `workspace.toggleFileBrowser` flips it — plan 108 exit-gate fix: the old hidden default swallowed explicit folder opens).
 
 `TabRegistry` replay and the selected-file capability are buffered/installed
 around this bind and then continue through the background event loop. No

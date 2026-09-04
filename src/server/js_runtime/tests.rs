@@ -8877,6 +8877,48 @@ fn chat_load_entry_is_execute_only() {
     );
 }
 
+#[test]
+fn coding_agent_load_entry_registers_skills_before_profile() {
+    let load = fs::read_to_string("packages/coding-agent/dist/load.js")
+        .expect("read coding-agent load entry");
+    assert!(!load.contains("Deno.core"), "no raw ops in package JS");
+    assert!(
+        load.contains("clay:agent"),
+        "profile/skill registration rides the documented facade"
+    );
+    assert!(
+        load.contains("export default loadCodingAgentPackage"),
+        "loadPackage must invoke the package-owned default export"
+    );
+    // Skills resolve fail-closed: the skill registration must precede the
+    // profile that references it, and the slash commands register last.
+    let skill_at = load
+        .find("await skillRegister(")
+        .expect("skill registration call");
+    let profile_at = load
+        .find("await profileRegister(")
+        .expect("profile registration call");
+    let command_at = load
+        .find("await commandRegister(")
+        .expect("command registration call");
+    assert!(
+        skill_at < profile_at && profile_at < command_at,
+        "skills must register before the profile that names them, commands last"
+    );
+    assert!(
+        load.contains("\"/compact\"") && load.contains("\"/open-session-as-fork\""),
+        "the pi-parity slash surface registers with the package"
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string("packages/coding-agent/package.json").unwrap())
+            .unwrap();
+    assert_eq!(manifest["clay"]["apiPrefix"], "coding-agent");
+    assert!(
+        load.contains("repo_search") && load.contains("ask_user_decision"),
+        "the registered tool set is the nine coding tools plus ask_user_decision"
+    );
+}
+
 #[tokio::test]
 async fn third_party_cannot_import_trusted_chat_modules() {
     let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
@@ -10320,4 +10362,292 @@ async fn persisted_preferences_design_system_applied() {
         .active_design_system
         .expect("active design system applied from preferences");
     assert_eq!(ds.specifier, "@clay/core");
+}
+
+#[tokio::test]
+async fn agent_facade_fails_closed_without_an_attached_host() {
+    // No AgentHostHandle::install_global() call in this test process section:
+    // the facade must fail closed with a typed error, not hang or leak authority.
+    let result = ClayJsRuntimeService::default()
+        .evaluate_controlled_module(
+            r#"
+            try {
+              const { compact } = await import("clay:agent");
+              await compact({ sessionId: "s1" });
+              Deno.core.ops.op_clay_runtime_record("unexpected-success");
+            } catch (error) {
+              Deno.core.ops.op_clay_runtime_record(`denied:${String(error).slice(0, 80)}`);
+            }
+            "#,
+        )
+        .await
+        .expect("agent facade denial remains a handled JS error");
+
+    assert!(
+        result
+            .op_records
+            .iter()
+            .any(|record| record.contains("denied:"))
+    );
+}
+
+// ---- Phase 2 @clay/coding-agent: default init.js loading experience ----
+
+/// Registration declarations may sit in the process-global queue (hostless
+/// runtime) or in the installed host's pending queue (a parallel test
+/// installed a global handle). Tests drain both.
+async fn drain_all_pending_registrations() -> Vec<crate::server::agent::PackageRegistration> {
+    let mut drained = crate::server::agent::take_pending_package_registrations();
+    if let Ok(host) = crate::server::agent::AgentHostHandle::global() {
+        drained.extend(host.take_pending_registrations().await);
+    }
+    drained
+}
+
+/// Clean-init drill (plan 108 task 6): a fresh `init.js` whose only statement
+/// is the one-line package load activates the Coding Agent's working defaults
+/// — manifest command + chrome extension point via the real loadPackage path,
+/// skill-then-profile registration declarations (queued hostless; applied
+/// when a host installs). Declarations are content-asserted: concurrent
+/// document-flow tests may queue identical entries at any time.
+#[tokio::test]
+async fn coding_agent_clean_init_one_line_activates_working_defaults() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    // Baseline: drop declarations queued by any earlier test.
+    let _ = drain_all_pending_registrations().await;
+
+    let root = config_fixture("coding-agent-clean-init");
+    fs::write(
+        root.join("init.js"),
+        r#"
+import { loadPackage } from "clay:packages";
+await loadPackage("@clay/coding-agent");
+"#,
+    )
+    .unwrap();
+
+    let service = ClayJsRuntimeService::default();
+    let result = service
+        .load_configuration_from_root(root)
+        .await
+        .expect("one-line init.js must load the Coding Agent");
+    assert!(
+        result.ui_contributions.validate().is_ok(),
+        "contributions from the one-line load must form a valid UI registry"
+    );
+
+    // Manifest command registers with server-first routing (no user plumbing).
+    let commands = service.test_op_state().command_registry_snapshot();
+    let command = commands
+        .iter()
+        .find(|command| command.command_id == "coding-agent.profile")
+        .expect("coding-agent.profile command registers from the manifest");
+    assert_eq!(command.package_name, "@clay/coding-agent");
+    assert_eq!(
+        command.routing_policy,
+        crate::protocol::RoutingPolicy::ServerFirst
+    );
+
+    // Registration declarations queued in contract order: skills before the
+    // profile that names them, five skill tools, ten profile tools, and the
+    // profile referencing exactly the registered skill.
+    let drained = drain_all_pending_registrations().await;
+    let skill_at = drained
+        .iter()
+        .position(|entry| {
+            entry.method == "skill.register"
+                && entry.params["name"] == "coding-agent.createPlan"
+                && entry.params["toolNames"].as_array().map(Vec::len) == Some(5)
+        })
+        .expect("skill declaration queued");
+    let profile_at = drained
+        .iter()
+        .position(|entry| {
+            entry.method == "agentProfile.register"
+                && entry.params["name"] == "coding"
+                && entry.params["skills"] == serde_json::json!(["coding-agent.createPlan"])
+                && entry.params["tools"].as_array().map(Vec::len) == Some(10)
+        })
+        .expect("profile declaration queued");
+    assert!(
+        skill_at < profile_at,
+        "skills must queue before the profile that names them"
+    );
+    // The slash surface queues as inert command declarations after the
+    // profile: nine distinct commands (concurrent document-flow tests may
+    // queue identical duplicates, so count distinct names, not entries).
+    let command_names: std::collections::BTreeSet<String> = drained
+        .iter()
+        .filter(|entry| entry.method == "command.register")
+        .filter_map(|entry| entry.params["name"].as_str().map(str::to_string))
+        .collect();
+    let expected: std::collections::BTreeSet<String> = [
+        "/compact",
+        "/new",
+        "/n",
+        "/branch",
+        "/tree",
+        "/fork",
+        "/clone",
+        "/open-session",
+        "/open-session-as-fork",
+        "/discard",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    assert_eq!(command_names, expected, "ten slash commands queue");
+    let first_command = drained
+        .iter()
+        .find(|entry| entry.method == "command.register")
+        .expect("commands queue");
+    assert_eq!(first_command.params["handler"], "compact");
+    let first_command_at = drained
+        .iter()
+        .position(|entry| entry.method == "command.register")
+        .expect("commands queue");
+    assert!(
+        profile_at < first_command_at,
+        "commands queue after the profile declaration"
+    );
+    // The named pane surface (activation "pane") registers in the UI
+    // registry immediately (a process-local op, no daemon): the wire snapshot
+    // carries it as a named pane surface, never as the empty-tab landing
+    // (which stays @clay/chat).
+    let wire = service
+        .test_op_state()
+        .ui_contributions()
+        .wire_snapshot(1, |_| crate::protocol::PackageUiTrustDomain::Trusted)
+        .unwrap();
+    assert_eq!(
+        wire.surfaces.len(),
+        1,
+        "surface wires as a named pane surface"
+    );
+    assert_eq!(wire.surfaces[0].id, "coding-agent.surface");
+    assert_eq!(wire.surfaces[0].package_name, "@clay/coding-agent");
+    assert!(
+        wire.allows_action(1, "coding-agent.profile"),
+        "surface action targets validate"
+    );
+    assert!(
+        wire.empty_tab.is_none(),
+        "empty-tab landing stays @clay/chat"
+    );
+}
+
+/// Double load in one init.js is idempotent: the generation cache answers the
+/// second call, so the package enables once and the command registers once.
+#[tokio::test]
+async fn coding_agent_double_load_is_idempotent_within_one_generation() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let _ = drain_all_pending_registrations().await;
+
+    let root = config_fixture("coding-agent-double-load");
+    fs::write(
+        root.join("init.js"),
+        r#"
+import { loadPackage } from "clay:packages";
+await loadPackage("@clay/coding-agent");
+await loadPackage("@clay/coding-agent");
+"#,
+    )
+    .unwrap();
+
+    let service = ClayJsRuntimeService::default();
+    service
+        .load_configuration_from_root(root)
+        .await
+        .expect("double load stays idempotent");
+
+    let commands = service
+        .test_op_state()
+        .command_registry_snapshot()
+        .into_iter()
+        .filter(|command| command.package_name == "@clay/coding-agent")
+        .count();
+    // Twelve manifest commands (profile + close + ten slash surface)
+    // register once.
+    assert_eq!(
+        commands, 12,
+        "double load must not duplicate the package commands"
+    );
+}
+
+/// Without the load line the package contributes nothing: no command, no
+/// residue (Chat fallback stays untouched).
+#[tokio::test]
+async fn coding_agent_absent_load_line_leaves_no_residue() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+
+    let root = config_fixture("coding-agent-absent");
+    fs::write(
+        root.join("init.js"),
+        r#"
+import { loadPackage } from "clay:packages";
+await loadPackage("@clay/chat");
+"#,
+    )
+    .unwrap();
+
+    let service = ClayJsRuntimeService::default();
+    service
+        .load_configuration_from_root(root)
+        .await
+        .expect("chat-only init.js must load");
+
+    let commands = service.test_op_state().command_registry_snapshot();
+    assert!(
+        !commands
+            .iter()
+            .any(|command| command.package_name == "@clay/coding-agent"),
+        "no coding-agent command without the load line"
+    );
+}
+
+/// Malformed declarations fail closed with a typed error before entering any
+/// queue, and a valid declaration through the same facade still resolves.
+#[tokio::test]
+async fn coding_agent_malformed_registration_fails_closed_without_queue_corruption() {
+    let service = ClayJsRuntimeService::default();
+    let result = service
+        .evaluate_controlled_module(
+            r#"
+            const { profileRegister, skillRegister } = await import("clay:agent");
+            try {
+              await profileRegister({ description: "no name" });
+              Deno.core.ops.op_clay_runtime_record("unexpected-success");
+            } catch (error) {
+              Deno.core.ops.op_clay_runtime_record(`denied:${String(error).slice(0, 120)}`);
+            }
+            try {
+              await skillRegister({ name: "x", toolNames: [42] });
+              Deno.core.ops.op_clay_runtime_record("unexpected-success");
+            } catch (error) {
+              Deno.core.ops.op_clay_runtime_record(`denied:${String(error).slice(0, 120)}`);
+            }
+            await profileRegister({ name: "coding", tools: ["read"] });
+            Deno.core.ops.op_clay_runtime_record("valid-ok");
+            "#,
+        )
+        .await
+        .expect("malformed registrations stay handled JS errors");
+
+    let denied = result
+        .op_records
+        .iter()
+        .filter(|record| record.starts_with("denied:") && record.contains("agent.invalid_params"))
+        .count();
+    assert_eq!(denied, 2, "both malformed declarations fail closed");
+    assert!(
+        !result
+            .op_records
+            .iter()
+            .any(|record| record.contains("unexpected-success")),
+        "no malformed declaration may report success"
+    );
+    assert!(
+        result.op_records.iter().any(|record| record == "valid-ok"),
+        "a well-shaped declaration still resolves after rejections"
+    );
 }

@@ -1,6 +1,8 @@
 #[doc(hidden)]
 pub mod agent;
 pub mod agent_agui;
+pub(crate) mod agent_checkpoints;
+pub(crate) mod agent_documents;
 pub(crate) mod agent_picker;
 mod behavior;
 pub mod command_execution;
@@ -521,8 +523,10 @@ pub struct RuntimeReloadOutcome {
 pub(crate) struct TabServerState {
     pub(crate) welcome: Arc<Mutex<DocumentState>>,
     pub(crate) workspace: Arc<Mutex<WorkspaceState>>,
-    /// Per-tab shell state. The workspace tree is hidden until the user
-    /// toggles it on; reconnect/reclaim keeps the tab's current choice.
+    /// Per-tab shell state. The workspace tree is visible by default — the
+    /// desktop empty pane offers Open File/Folder and must show the browser
+    /// after an explicit folder open; `workspace.toggleFileBrowser` flips it.
+    /// Reconnect/reclaim keeps the tab's current choice.
     pub(crate) workspace_pane_visible: Arc<AtomicBool>,
 }
 
@@ -537,7 +541,7 @@ impl TabServerState {
                 DocumentAccess::Editable { lease_id: 1 },
             ))),
             workspace: Arc::new(Mutex::new(workspace)),
-            workspace_pane_visible: Arc::new(AtomicBool::new(false)),
+            workspace_pane_visible: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -679,6 +683,15 @@ impl IpcServer {
         let bootstrap_state =
             TabServerState::from_workspace(workspace, Arc::clone(&document_id_allocator));
         let agent = agent::AgentHost::for_server(config.configuration_root.as_deref());
+        agent.set_reverse_handler(agent_documents::document_reverse_handler(
+            Arc::clone(&bootstrap_state.workspace),
+            Arc::new(Mutex::new(agent_checkpoints::AgentCheckpointStore::new())),
+            agent.clone(),
+        ));
+        // Phase 1 `agent` domain: install the process-global RPC authority
+        // for user-facing agent facades (`clay:agent`). Package JS cannot
+        // reach the daemon except through these validated ops.
+        agent::AgentHostHandle::install_global(agent.clone());
 
         Ok(Self {
             config,
@@ -5783,14 +5796,15 @@ mod tab_server_state_tests {
             fs::canonicalize(&root_a).unwrap()
         );
         assert_eq!(beta_root.canonical_path, fs::canonicalize(&root_b).unwrap());
-        assert!(!alpha.workspace_pane_visible());
-        assert!(!beta.workspace_pane_visible());
-        assert!(alpha.toggle_workspace_pane());
+        // Visible by default; the toggle flips each tab independently.
         assert!(alpha.workspace_pane_visible());
-        assert!(!beta.workspace_pane_visible());
-        assert!(beta.toggle_workspace_pane());
         assert!(beta.workspace_pane_visible());
-        assert!(alpha.workspace_pane_visible());
+        assert!(!alpha.toggle_workspace_pane());
+        assert!(!alpha.workspace_pane_visible());
+        assert!(beta.workspace_pane_visible());
+        assert!(!beta.toggle_workspace_pane());
+        assert!(!beta.workspace_pane_visible());
+        assert!(!alpha.workspace_pane_visible());
         assert_ne!(
             alpha.welcome.lock().await.document_id(),
             beta.welcome.lock().await.document_id()

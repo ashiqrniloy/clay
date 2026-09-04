@@ -57,6 +57,32 @@ test("prompt streams mock events, persists, and resumes", async () => {
   resumedHost.close();
 });
 
+test("session.delete removes the record; siblings stay intact", async () => {
+  const dataDir = await tempDir();
+  const host = await ClayAgentHost.create({
+    dataDir,
+    passphrase: "pass-phrase-ok",
+    mock: true,
+    emit: () => {},
+  });
+  await host.handle("agentProfile.register", { name: "chat", instructions: "Be brief." });
+  const make = async () =>
+    (await host.handle("session.new", { profile: "chat", provider: "mock", model: "demo" })) as {
+      sessionId: string;
+    };
+  const doomed = await make();
+  const survivor = await make();
+  const deleted = (await host.handle("session.delete", { sessionId: doomed.sessionId })) as {
+    deleted: boolean;
+  };
+  assert.equal(deleted.deleted, true);
+  const listed = (await host.handle("session.list", {})) as { sessions: Array<{ id: string }> };
+  assert.ok(!listed.sessions.some((s) => s.id === doomed.sessionId));
+  assert.ok(listed.sessions.some((s) => s.id === survivor.sessionId));
+  await assert.rejects(host.handle("session.load", { sessionId: doomed.sessionId }));
+  host.close();
+});
+
 test("cancel aborts an in-flight mock generate", async () => {
   const dataDir = await tempDir();
   const provider: AIProvider = {
@@ -148,4 +174,26 @@ test("daemon process exits non-zero on unreadable vault", async () => {
   child.stdin.end();
   const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
   assert.equal(code, 1);
+});
+
+test("initialize reports prism 0.4.0", async () => {
+  const dataDir = await tempDir();
+  const main = join(dirname(fileURLToPath(import.meta.url)), "../main.js");
+  const child = spawn(process.execPath, [main, "--data-dir", dataDir, "--mock"], { stdio: ["pipe", "pipe", "pipe"] });
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { passphrase: "pass-phrase-ok" } })}\n`);
+  const firstLine = await new Promise<string>((resolve, reject) => {
+    let buffer = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString("utf8");
+      const index = buffer.indexOf("\n");
+      if (index >= 0) resolve(buffer.slice(0, index));
+    });
+    child.on("error", reject);
+  });
+  const parsed = JSON.parse(firstLine) as { result: { ok: boolean; mock: boolean; prism: string } };
+  assert.equal(parsed.result.ok, true);
+  assert.equal(parsed.result.mock, true);
+  assert.equal(parsed.result.prism, "0.4.0");
+  child.kill("SIGTERM");
+  await new Promise<void>((resolve) => child.on("exit", () => resolve()));
 });

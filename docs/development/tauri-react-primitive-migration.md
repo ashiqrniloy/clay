@@ -86,6 +86,8 @@ one matrix area (or cross-cutting section) below:
 | `shell.splits.panes` | Tabs / splits / panes |
 | `tabs.workspaces.persistence` | Tabs / splits / panes + Persistence |
 | `agent.chat.prism` | Agents / Chat |
+| `agent.host.phase1` | Agents / Chat (server-side host; no frontend surface until Phase 2) |
+| `agent.codingAgent.parity` | Agents / Coding Agent (Phase 2 package surface; server authority unchanged) |
 | `accessibility.semantics` | Cross-cutting: accessibility |
 | `security.trust-domains` | Cross-cutting: trust domains |
 

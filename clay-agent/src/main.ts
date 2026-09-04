@@ -48,6 +48,11 @@ async function main(): Promise<void> {
   const secrets = new Set<string>();
 
   const emit = (method: string, params: unknown): void => {
+    if (method === "reverse") {
+      // params is already a complete JSON-RPC frame (daemon-initiated request).
+      write(params);
+      return;
+    }
     write({ jsonrpc: "2.0", method, params });
   };
 
@@ -66,18 +71,26 @@ async function main(): Promise<void> {
     const id = parsed.id ?? null;
     const method = typeof parsed.method === "string" ? parsed.method : "";
     try {
+      if (!method && id !== null && id !== undefined) {
+        // Response to a daemon-initiated reverse request.
+        host?.resolveReverse(id, parsed as { result?: unknown; error?: { code?: number; message?: string } });
+        return;
+      }
       if (method === "initialize") {
         if (host) throw Object.assign(new Error("already initialized"), { rpcCode: -32000 });
         const params = parsed.params && typeof parsed.params === "object" ? (parsed.params as Record<string, unknown>) : {};
         const passphrase = typeof params.passphrase === "string" ? params.passphrase : "";
         if (!passphrase) throw Object.assign(new Error("initialize.passphrase is required"), { rpcCode: -32602 });
         secrets.add(passphrase);
+        // Server-built MCP allow-list (validated fail-closed in host.ts).
+        const mcpAllowList = Array.isArray(params.mcpAllowList) ? params.mcpAllowList : [];
         try {
           host = await ClayAgentHost.create({
             dataDir: args.dataDir,
             passphrase,
             mock: args.mock,
             emit,
+            mcpAllowList,
           });
         } catch (error) {
           stderr.write(`${redactText(error instanceof Error ? error.message : String(error), secrets)}\n`);
@@ -88,11 +101,11 @@ async function main(): Promise<void> {
           });
           process.exit(1);
         }
-        write({ jsonrpc: "2.0", id, result: { ok: true, mock: args.mock, prism: "0.3.0" } });
+        write({ jsonrpc: "2.0", id, result: { ok: true, mock: args.mock, prism: "0.4.0", mcpServers: mcpAllowList.length } });
         return;
       }
       if (method === "shutdown") {
-        host?.close();
+        host?.close(); // kills owned MCP/Obscura children before exit
         write({ jsonrpc: "2.0", id, result: { ok: true } });
         process.exit(0);
       }

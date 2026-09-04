@@ -537,6 +537,10 @@ pub struct RuntimeSnapshotDto {
 pub struct PackageUiSnapshotDto {
     pub version: u64,
     pub empty_tab: Option<PackageSurfaceDto>,
+    /// Named pane surfaces (`activation: "pane"`), e.g. the Coding Agent
+    /// split surface. Dropped before plan 108 — the frontend never saw them.
+    #[serde(default)]
+    pub surfaces: Vec<PackageSurfaceDto>,
     pub panels: Vec<PackagePanelDto>,
     pub overlays: Vec<PackageOverlayDto>,
     pub components: Vec<PackageSurfaceDto>,
@@ -654,9 +658,22 @@ impl PackageUiSnapshotDto {
                 })
             })
             .collect::<Result<_, String>>()?;
+        let surfaces = snapshot
+            .surfaces
+            .into_iter()
+            .map(|entry| -> Result<PackageSurfaceDto, String> {
+                Ok(PackageSurfaceDto {
+                    id: entry.id,
+                    component: parse(&entry.component_json)?,
+                    action_targets: entry.action_targets,
+                    provenance: entry.provenance,
+                })
+            })
+            .collect::<Result<_, String>>()?;
         Ok(Self {
             version: snapshot.version,
             empty_tab,
+            surfaces,
             panels,
             overlays,
             components,
@@ -712,9 +729,9 @@ pub enum BridgeEnvelope {
 mod runtime_projection_tests {
     use super::*;
     use clay::protocol::{
-        ActiveTheme, ActiveTypography, BehaviorManifest, PackagePanelContent, PackageUiProvenance,
-        PackageUiSnapshot, PackageUiTrustDomain, RuntimeStateSnapshot, SduiNode, SduiNodeId,
-        SduiNodeKind,
+        ActiveTheme, ActiveTypography, BehaviorManifest, EmptyTabContent, PackagePanelContent,
+        PackageUiProvenance, PackageUiSnapshot, PackageUiTrustDomain, RuntimeStateSnapshot,
+        SduiNode, SduiNodeId, SduiNodeKind,
     };
 
     #[test]
@@ -742,6 +759,19 @@ mod runtime_projection_tests {
             },
             package_ui: PackageUiSnapshot {
                 version: 3,
+                surfaces: vec![EmptyTabContent {
+                    id: "coding-agent.surface".into(),
+                    package_name: "@clay/coding-agent".into(),
+                    component_json: r#"{"id":"coding-agent.root","kind":"panel","children":[]}"#
+                        .into(),
+                    action_targets: vec!["coding-agent.profile".into()],
+                    provenance: PackageUiProvenance {
+                        package_name: "@clay/coding-agent".into(),
+                        package_version: "0.1.0".into(),
+                        api_prefix: "coding-agent".into(),
+                        trust_domain: PackageUiTrustDomain::Trusted,
+                    },
+                }],
                 panels: vec![PackagePanelContent {
                     id: "settings.surface".into(),
                     slot: "right".into(),
@@ -770,6 +800,16 @@ mod runtime_projection_tests {
         assert_eq!(
             value["data"]["snapshot"]["packageUi"]["panels"][0]["component"]["kind"],
             "panel"
+        );
+        // Named pane surfaces must survive the bridge projection — the
+        // Coding Agent split renders only when `packageUi.surfaces` lands.
+        assert_eq!(
+            value["data"]["snapshot"]["packageUi"]["surfaces"][0]["id"],
+            "coding-agent.surface"
+        );
+        assert_eq!(
+            value["data"]["snapshot"]["packageUi"]["surfaces"][0]["provenance"]["packageName"],
+            "@clay/coding-agent"
         );
         assert!(
             value["data"]["snapshot"]["activeTheme"]

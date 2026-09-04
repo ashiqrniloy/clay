@@ -69,6 +69,24 @@ removal (Phase 12).
 9. `PaneTree.tsx` renders the one winning `empty-tab` package surface when the
    pane has no path/text. No contribution renders the core Open File/Open
    Folder fallback.
+10. Plan 108 task 8 adds named pane surfaces (`activation: "pane"`): the wire
+    snapshot carries them in `PackageUiSnapshot.surfaces` (same shape as the
+    empty-tab landing); the empty-tab election ignores them. Launch/close is a
+    package command (`coding-agent.profile` / `coding-agent.close`) the
+    dispatcher answers with one `ShellClientCommandRequest` the client
+    re-parses deny-by-default (same projection as `settings.open`); the
+    per-tab runtime pins the surface to its hosting pane (`agentSurfaceOpen`
+    + `agentSurfacePaneId`) and auto-closes when the contribution disappears.
+    The bundled `@clay/coding-agent` surface is provenance-exact host
+    rendering (`frontend/src/coding-agent/CodingAgentPanel.tsx`, the
+    ChatPanel/SettingsPanel precedent) — a 50/50 vertical split (left
+    transcript + composer + status row + extension strip, right
+    Files/Memory/Context tabs with selected-box full-content detail); every
+    dynamic value rides the one AG-UI stream, third-party `pane` surfaces
+    render through the unchanged generic SDUI renderer. Two catalog gaps
+    closed generically: `tabList` kind (React Aria Tabs, widget-local
+    selection) and `textInput` `multiline` (native textarea, auto-grow,
+    Enter submits / Shift+Enter newline).
 
 ## Code Example
 
@@ -99,8 +117,9 @@ Packages still author only manifest data:
   explicit base/new versions, inert action intents, existing snapshot/update
   budgets. React projection performs no server validation or package work.
 - **Package UI snapshot**: `src/protocol/runtime.rs`; generation-scoped fixed
-  panels, overlays, components, input routes, and empty-tab content. Protocol
-  version 26 reflects the changed archived shape.
+  panels, overlays, components, input routes, empty-tab content, and (plan
+  108) named `pane` surfaces. Protocol version 26 reflects the changed
+  archived shape.
 - **Panel/component/overlay/input/pane-content contributions**:
   `src/server/ui.rs`; existing manifest and `clay:ui` registration validators.
   No new facade, permission, manifest key, or package setup step.

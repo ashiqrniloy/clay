@@ -200,6 +200,16 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "setPaneFocusPolicy",
         ],
     ),
+    (
+        "runtime/js/agent.js",
+        &[
+            "compact",
+            "searchSessions",
+            "setFullAutonomy",
+            "resumeRun",
+            "sessionTree",
+        ],
+    ),
 ];
 
 #[test]

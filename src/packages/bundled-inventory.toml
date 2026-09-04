@@ -1,6 +1,7 @@
 # Loadable first-party package roots under packages/.
 # Unlisted directories (stray extras) are never trusted.
 root = "chat"
+root = "coding-agent"
 root = "design-glass"
 root = "design-neobrutal"
 root = "git"

@@ -76,7 +76,8 @@ level names — CSS `z-index` cannot accept `modal`.
 | `dropdown` | React Aria `Select` (trigger + hidden `ListBox`) | `combobox`-free single-select: button + `listbox`, arrow/typeahead nav | `selected_index` maps to RAC `selectedKey` |
 | `collapse` | React Aria `Disclosure` | Disclosure button pattern (`aria-expanded`/`aria-controls`) | Toggle emits declared `clay.ui.collapseToggle` intent |
 | `modal` | React Aria `Modal` + `Dialog` | `role="dialog"`, `aria-modal`, focus trap + restore, Escape → declared dismiss intent | Scrim via `paint_scrim` projection; `z.modal` |
-| `textInput` | React Aria `TextField` over native `<input type="text">` | Label/description wiring; validation state → `aria-invalid` + `aria-describedby` | Multiline `textArea` variant is a justified gap below |
+| `textInput` | React Aria `TextField` over native `<input type="text">` | Label/description wiring; validation state → `aria-invalid` + `aria-describedby` | `multiline: true` node field (plan 108 G3) switches to native `<textarea>` with auto-grow |
+| `tabList` | React Aria `Tabs`/`TabList`/`Tab`/`TabPanel` | `items` → tabs, `children` → order-matched panels; widget-local selection like `dropdown`; per-tab interactive states | Plan 108 task 8 (G2) |
 | `table` | **Justified gap (reserved kind)** — target React Aria `Table` when unlocked | n/a until reserved→implemented | No first-party consumer today |
 
 Planned catalog entries (not yet kinds) get targets now so parity work composes
@@ -285,8 +286,8 @@ Packages contribute only validated declarative snapshots; the frontend:
 | Gap | Justification | Target |
 | --- | --- | --- |
 | `table` kind | Reserved in catalog; no first-party consumer | React Aria `Table` when unlocked |
-| Multiline `textArea` composer field | Chat composer needs newline chords; single-line `textInput` cannot host them (Phase 25 review gap) | React Aria `TextField` multiline over native `<textarea>`; generic catalog addition in its own phase |
-| Generic pane-content contribution | Empty-tab landing needs a generic package pane host, not product-named kinds (Phase 25 review gap) | Generic `Package` pane-content variant in its own phase |
+| Multiline `textArea` composer field | Resolved plan 108 G3: `textInput` `multiline: true` (native `<textarea>` + auto-grow) | Shipped; no gap |
+| Generic pane-content contribution | Resolved plan 108 G1: `activation: "pane"` named pane surfaces ride `PackageUiSnapshot.surfaces` | Shipped; no gap |
 | Toast/notifications | Planned, no current consumer driving urgency | Internal overlay + timer now; React Aria `Toast` if needed |
 
 ## UI Design-System Recipe Slot Mappings

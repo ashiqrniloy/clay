@@ -220,6 +220,8 @@ fn client_samples() -> Vec<ClientMessage> {
             command: Box::new(AgentClientCommand::Prompt {
                 session_id: "sess-1".into(),
                 text: "hello agent".into(),
+                provider: None,
+                model: None,
             }),
         },
     ]

@@ -600,8 +600,38 @@ await loadConfigurationModule({
 //   - The chat landing surface is the @clay/chat first-party package, loaded
 //     in packages/first-party.js (section 11): omit that loadPackage line to
 //     get the core Open File/Folder empty tab instead.
-//   - There is deliberately no `agent*`/`chat*`/`provider*` export in
-//     clay:configuration: session setup is interactive and server-owned, and
-//     hidden-key workarounds are rejected by policy.
+//   - Agent host controls ship as the trusted-only `clay:agent` facade
+//     (`agent.compact`, `agent.searchSessions`, `agent.setFullAutonomy`,
+//     `agent.resumeRun`, `agent.sessionTree`). They forward to the agent
+//     daemon's validated RPC and grant no filesystem/network/shell authority
+//     by existing. Provider credentials still live only in the vault; there
+//     is no `agent*`/`provider*` credential or model option in init.js.
+//
+// Commented safe examples (uncomment deliberately; the active part of this
+// file stays copy-safe):
+//
+// import { compact, searchSessions, setFullAutonomy } from "clay:agent";
+//
+// // Full autonomy (decision 2157) defaults to false: gated tool calls
+// // (out-of-workspace writes, shell metacharacters, …) require approval.
+// // Enable only per session, only by explicit user choice:
+// await setFullAutonomy({ sessionId, enabled: false });
+//
+// // Manual compaction. strategy: "default" (local, secret-redacting),
+// // "llm" (provider summary), "om" (observational-memory projection;
+// // the default for OM-attached sessions). compactAfterTokens overrides
+// // the OM auto-compaction threshold for the session (decision 2158
+// // default 80000; positive integer):
+// await compact({ sessionId, strategy: "default" });
+// await compact({ sessionId, strategy: "om", compactAfterTokens: 80_000 });
+//
+// // Workspace-scoped transcript search; hits are metadata, never
+// // auto-injected into agent context:
+// const hits = await searchSessions({ sessionId, query: "flake", limit: 10 });
+//
+// Do not enable full autonomy uncommented in a shared config, do not paste
+// API keys, and do not add Obscura/MCP executable paths here — MCP servers
+// are server-allow-listed (data_dir/mcp.json) and the Obscura binary is
+// host-resolved (CLAY_OBSCURA_BIN or PATH), never a config string.
 //   - LSP tooling setup (`authorizeLanguageServer`) is documented with the
 //     package loads in packages/first-party.js.

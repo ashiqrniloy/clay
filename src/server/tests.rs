@@ -208,6 +208,8 @@ async fn deferred_initial_state_waits_for_tab_binding() {
             .to_string_lossy()
             .into_owned()
     );
+    // The workspace browser is visible by default (the empty pane offers
+    // Open File/Folder and an explicit workspace root must be shown).
     let tree = loop {
         match codec.read_server_message(&mut client).await.unwrap() {
             ServerMessage::SduiSnapshot { tree, .. } => break tree,
@@ -215,7 +217,31 @@ async fn deferred_initial_state_waits_for_tab_binding() {
             message => panic!("expected bound workspace SDUI, got {message:?}"),
         }
     };
-    assert!(tree.nodes.iter().all(|node| {
+    assert!(tree.nodes.iter().any(|node| matches!(
+        &node.kind,
+        SduiNodeKind::List { items } if items.iter().any(|item| item.label == "selected.txt")
+    )));
+
+    codec
+        .write_client_message(
+            &mut client,
+            &ClientMessage::CommandIntent {
+                client_id,
+                document_id,
+                behavior_version,
+                command_id: "workspace.toggleFileBrowser".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let hidden_tree = loop {
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::SduiSnapshot { tree, .. } => break tree,
+            ServerMessage::TabRegistry(_) => {}
+            message => panic!("expected hidden workspace SDUI, got {message:?}"),
+        }
+    };
+    assert!(hidden_tree.nodes.iter().all(|node| {
         !matches!(
             &node.kind,
             SduiNodeKind::Panel { .. } | SduiNodeKind::List { .. }

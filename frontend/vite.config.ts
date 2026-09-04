@@ -27,6 +27,11 @@ export default defineConfig({
         // startup.
         manualChunks(id: string) {
           if (id.includes("/node_modules/@codemirror/")) return "codemirror";
+          // Plan 108 task 8: the shared AG-UI state/relay modules are
+          // chat-lane machinery (one daemon stream); naming the chunk keeps
+          // the filename-lane budget gate from counting them as startup
+          // shell when a second lazy surface (CodingAgentPanel) imports them.
+          if (/[\\/]frontend[\\/]src[\\/]agent[\\/]/.test(id)) return "chat-agent-core";
         },
       },
     },

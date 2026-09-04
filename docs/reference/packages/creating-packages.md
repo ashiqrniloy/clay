@@ -906,10 +906,11 @@ Component catalog status (single source of truth: [`.agents/skills/clay-ui/refer
 | `dropdown` | Implemented/runtime-backed (Phase 20.5) | Single-select drop-down; keyboard nav (ArrowUp/Down/Enter/Space). |
 | `collapse` | Implemented/runtime-backed (Phase 20.5) | Expand/collapse section; Enter/Space toggles. |
 | `modal` | Implemented/runtime-backed (Phase 20.5) | Blocking dialog; Tab focus-trap; `z.modal` stacking. |
-| `textInput` | Implemented/runtime-backed (Phase 20.5) | Single-line editable field; focus ring, placeholder, `style.validationState`/`style.placeholderColor`. |
+| `textInput` | Implemented/runtime-backed (Phase 20.5) | Single-line editable field; focus ring, placeholder, `style.validationState`/`style.placeholderColor`; `multiline: true` grows into a textarea substrate (plan 108 G3). |
+| `tabList` | Implemented/runtime-backed (plan 108 task 8) | Tab strip hosting per-tab children; `items` are tab metadata, `children` are order-matched panels; selection is widget-local. |
 | `table` | Reserved/deferred | Structured rows/columns in a later component-catalog phase. |
 
-Status markers match the `clay-ui` catalog legend: `implemented` (usable now), `reserved` (name locked, validation rejects use until its phase), `planned` (approved for a future UI revamp phase), `internal` (Clay-native surface, not package-facing). `table` is the only reserved kind; no planned package-facing kind remains unimplemented after Phase 20.5. The catalog's "Planned Components (UI Revamp)" table tracks composition-only planned surfaces (tooltip, badge, toast, kbd hint, icon slot) that reuse implemented kinds. `tabs` is implemented as a shell-level (internal, not package-facing) surface: the Phase 22.3 tab bar is a Clay-owned chrome row with token-state cards, not a package-facing `ComponentKind`.
+Status markers match the `clay-ui` catalog legend: `implemented` (usable now), `reserved` (name locked, validation rejects use until its phase), `planned` (approved for a future UI revamp phase), `internal` (Clay-native surface, not package-facing). `table` is the only reserved kind; no planned package-facing kind remains unimplemented after Phase 20.5. The catalog's "Planned Components (UI Revamp)" table tracks composition-only planned surfaces (tooltip, badge, toast, kbd hint, icon slot) that reuse implemented kinds. `tabs` is implemented as a shell-level (internal, not package-facing) surface: the Phase 22.3 tab bar is a Clay-owned chrome row with token-state cards, not a package-facing `ComponentKind`; the plan 108 `tabList` kind is the package-facing tab strip for package component trees.
 
 Packages should not assume these are concrete widget types. They are Clay components validated by `src/shell/components.rs` and rendered through Clay-owned React components.
 
@@ -2609,6 +2610,17 @@ register it from `loadEntry` with `ui.serverRegisterPaneContentContribution`.
 Use only catalog `ComponentKind` values. Action targets must be registered
 commands. No package JavaScript runs on the client
 render/layout/input hot path.
+
+Plan 108 task 8 adds the generic `pane` activation: a named pane surface
+(same declaration shape, `"activation": "pane"`) that a client may present in
+a working-area pane when its launch command runs (the Coding Agent surface is
+the first consumer: `coding-agent.profile` opens it, `coding-agent.close`
+closes it; both answer with one `ShellClientCommandRequest` the client
+re-parses deny-by-default). Surfaces ride `PackageUiSnapshot.surfaces`; the
+empty-tab election ignores them, and the bundled `@clay/coding-agent` surface
+uses the compiled-trusted-presentation precedent (like `ChatPanel` and
+`SettingsPanel`) — third-party `pane` surfaces render through the unchanged
+generic SDUI renderer.
 
 ```js
 import { loadPackage } from "clay:packages";

@@ -121,5 +121,44 @@ describe("CommandCentre", () => {
     expect(families).toContain("menuSelectionMove");
     expect(families).toContain("menuActivate");
     expect(families).toContain("menuCancel");
+    // Escape (React Aria) and the close button both land in menuCancel,
+    // which clears the menu locally without waiting for the server.
+    expect(workspace.active()?.menu).toBeNull();
+  });
+
+  it("closes from the modal close button", async () => {
+    const sent: string[] = [];
+    const workspace = createWorkspace({
+      send: async (payload) => {
+        sent.push(payload);
+      },
+    });
+    workspace.installBootstrap(bootstrap());
+    workspace.handleEnvelope({
+      kind: "routed",
+      data: {
+        clientId: 1,
+        tabId: 10,
+        event: {
+          kind: "transientMenuSnapshot",
+          data: {
+            sessionId: "9223372036854775809" as never,
+            prompt: "Command Centre",
+            query: "",
+            items: [],
+            selectedIndex: 0,
+            status: "active",
+            focusPolicy: "modal",
+            origin: "centered",
+          },
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<CommandCentre workspace={workspace} />);
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(workspace.active()?.menu).toBeNull();
+    const families = sent.map((payload) => JSON.parse(payload).family);
+    expect(families).toContain("menuCancel");
   });
 });

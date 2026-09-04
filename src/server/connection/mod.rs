@@ -1250,6 +1250,8 @@ where
                     client_id,
                     session_id,
                     query,
+                    reload_server.as_ref().map(|server| &server.agent),
+                    bound_tab_id,
                 )
                 .await?;
             }
@@ -1263,6 +1265,8 @@ where
                     &mut menu_sessions,
                     client_id,
                     session_id,
+                    reload_server.as_ref().map(|server| &server.agent),
+                    bound_tab_id,
                 )
                 .await?;
             }
@@ -1565,6 +1569,22 @@ where
     for diagnostic in diagnostics {
         codec
             .write_server_message(stream, &ServerMessage::RuntimeDiagnostic(diagnostic))
+            .await?;
+    }
+
+    // Handshake replay of the committed runtime snapshot (package UI, SDUI
+    // tree, diagnostics). Generation broadcasts only fire on *replacement*;
+    // without this, a client that connects after config load never receives
+    // packageUi and pane surfaces (Coding Agent, Chat empty-tab) stay dead.
+    if let Some(snapshot) = runtime_generation
+        .latest_runtime_snapshot_for(client_id)
+        .await
+    {
+        codec
+            .write_server_message(
+                stream,
+                &ServerMessage::RuntimeStateSnapshot(Box::new(snapshot)),
+            )
             .await?;
     }
 

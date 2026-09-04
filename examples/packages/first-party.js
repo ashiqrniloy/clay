@@ -95,6 +95,7 @@ await loadPackage("@clay/rust");       // code mode + tree-sitter grammar
 await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
 await loadPackage("@clay/chat");       // empty-tab Chat landing
+await loadPackage("@clay/coding-agent"); // Coding Agent split surface (coding-agent.profile)
 await loadPackage("@clay/settings");   // settings panel (theme/appearance UI)
 await loadPackage("@clay/lsp-rust");        // after the grant above
 await loadPackage("@clay/lsp-typescript");

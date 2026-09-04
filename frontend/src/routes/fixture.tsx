@@ -82,6 +82,9 @@ export function FixtureRoute() {
   if (fixtureId === "chat") {
     return <ChatFixture />;
   }
+  if (fixtureId === "coding-agent") {
+    return <CodingAgentFixture />;
+  }
   if (fixtureId === "settings") {
     return (
       <div className={styles.fixture} data-fixture="settings">
@@ -730,6 +733,72 @@ function ChatFixture() {
     </div>
   );
 }
+
+function CodingAgentFixture() {
+  const [params] = useSearchParams();
+  const state = params.get("state") ?? "landing";
+  useEffect(() => {
+    let cancelled = false;
+    void import("../agent/state").then(({ chatAgent }) => {
+      if (cancelled) return;
+      seedChatFixture(chatAgent, state === "landing" ? "landing" : state);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [state]);
+  return (
+    <div className={styles.packageFixture} data-fixture={`coding-agent-${state}`}>
+      <Suspense fallback={<ClayText variant="status">Loading agent…</ClayText>}>
+        <CodingAgentSurfaceLazy surface={codingAgentFixtureSurface} uiVersion={4} workspaceRoot="/tmp/project" />
+      </Suspense>
+    </div>
+  );
+}
+
+const CodingAgentSurfaceLazy = lazy(async () => {
+  const module = await import("../coding-agent/CodingAgentPanel");
+  return { default: module.CodingAgentPanel };
+});
+
+const codingAgentFixtureSurface = {
+  id: "coding-agent.surface",
+  actionTargets: [
+    "coding-agent.profile",
+    "coding-agent.close",
+    "agent.clientOpenModelPicker",
+    "documents.clientOpenFileDialog",
+  ],
+  provenance: {
+    packageName: "@clay/coding-agent",
+    packageVersion: "0.1.0",
+    apiPrefix: "coding-agent",
+    trustDomain: "trusted" as const,
+  },
+  component: {
+    kind: "panel" as const,
+    id: "coding-agent.root",
+    title: "Coding Agent",
+    children: [
+      {
+        kind: "label" as const,
+        id: "coding-agent.transcriptTitle",
+        text: "Coding Agent",
+      },
+      {
+        kind: "label" as const,
+        id: "coding-agent.emptyHint",
+        text: "No conversation yet.",
+      },
+      {
+        kind: "textInput" as const,
+        id: "coding-agent.composer",
+        title: "Message",
+        multiline: true,
+      },
+    ],
+  },
+} as never;
 
 function seedChatFixture(
   chatAgent: {

@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use crate::protocol::{
     AgentInventory, AgentServerMessage, AgentSessionSnapshot, AgentTranscriptEntry,
-    AgentTranscriptKind, AgentWireEvent,
+    AgentTranscriptKind, AgentWireEvent, ApprovalRequestKind,
 };
 /// AG-UI event subset Clay emits. Serde shape matches `BaseEvent` JSON from
 /// `@ag-ui/core` exactly: `"type"` discriminator + camelCase fields.
@@ -99,6 +99,10 @@ fn snapshot_events(snapshot: &AgentSessionSnapshot) -> Vec<AgUiEvent> {
                 "profile": snapshot.profile,
                 "provider": snapshot.provider,
                 "model": snapshot.model,
+                "mcpServers": snapshot.mcp_servers,
+                // Context-used-vs-window numerator (plan 108 task 9):
+                // bounded counter only, never transcript content.
+                "contextTokens": snapshot.context_tokens,
             }),
         },
     ]
@@ -132,6 +136,25 @@ pub fn adapt_agent_message(message: &AgentServerMessage) -> Vec<AgUiEvent> {
         } => vec![AgUiEvent::Custom {
             name: "clay.credentialAck".into(),
             value: serde_json::json!({ "provider": provider, "name": name, "stored": stored }),
+        }],
+        AgentServerMessage::AgentRpc { code, result_json } => vec![AgUiEvent::Custom {
+            name: "clay.agentRpc".into(),
+            value: serde_json::json!({ "code": code, "result": result_json }),
+        }],
+        AgentServerMessage::ApprovalRequest {
+            request_id,
+            kind,
+            payload_json,
+        } => vec![AgUiEvent::Custom {
+            name: "clay.approvalRequest".into(),
+            value: serde_json::json!({
+                "requestId": request_id,
+                "kind": match kind {
+                    ApprovalRequestKind::Mutation => "mutation",
+                    ApprovalRequestKind::AskDecision => "askDecision",
+                },
+                "payload": payload_json,
+            }),
         }],
         AgentServerMessage::Diagnostic { code, message } => vec![AgUiEvent::Custom {
             name: "clay.diagnostic".into(),
@@ -224,6 +247,8 @@ mod tests {
                 AgentTranscriptEntry::new(AgentTranscriptKind::Error, "boom"),
                 AgentTranscriptEntry::new(AgentTranscriptKind::Usage, "12 tokens"),
             ],
+            mcp_servers: Vec::new(),
+            context_tokens: None,
         }
     }
 
@@ -245,6 +270,23 @@ mod tests {
         };
         assert_eq!(snapshot["provider"], "mock");
         assert_eq!(snapshot["model"], "mock-mini");
+        assert_eq!(snapshot["mcpServers"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn state_snapshot_carries_mcp_server_names_for_extension_strip() {
+        // Plan 108 task 8: the extension strip shows the configured MCP
+        // servers. Names only — commands/args/env never reach the client.
+        let mut snapshot = sample_snapshot();
+        snapshot.mcp_servers = vec!["files".into(), "search".into()];
+        let events = snapshot_events(&snapshot);
+        let AgUiEvent::StateSnapshot { snapshot } = &events[1] else {
+            panic!("state snapshot expected");
+        };
+        assert_eq!(
+            snapshot["mcpServers"],
+            serde_json::json!(["files", "search"])
+        );
     }
 
     #[test]
@@ -267,6 +309,7 @@ mod tests {
             session_id: "sess-1".into(),
             run_id: "run-9".into(),
             usage: "12 tokens".into(),
+            context_tokens: Some(12),
         };
         let events: Vec<AgUiEvent> = [&started, &delta, &thinking, &finished]
             .iter()
@@ -338,6 +381,26 @@ mod tests {
     }
 
     #[test]
+    fn approval_request_becomes_one_custom_event_with_no_answer_surface() {
+        let events = adapt_agent_message(&AgentServerMessage::ApprovalRequest {
+            request_id: "approval-7".into(),
+            kind: ApprovalRequestKind::Mutation,
+            payload_json: r#"{"kind":"write"}"#.into(),
+        });
+        let AgUiEvent::Custom { name, value } = &events[0] else {
+            panic!("custom expected");
+        };
+        assert_eq!(name, "clay.approvalRequest");
+        assert_eq!(value["requestId"], "approval-7");
+        assert_eq!(value["kind"], "mutation");
+        // Payload stays opaque daemon-produced JSON; no decision field exists
+        // on the request direction.
+        assert_eq!(value["payload"], r#"{"kind":"write"}"#);
+        assert!(value.get("allowed").is_none());
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
     fn picker_is_dropped_and_inventory_becomes_one_state_snapshot() {
         let picker = adapt_agent_message(&AgentServerMessage::Picker {
             kind: crate::protocol::AgentPickerKind::Model,
@@ -356,6 +419,7 @@ mod tests {
                 provider: "mock".into(),
                 model: "mock-mini".into(),
                 display_name: "Mock Mini".into(),
+                context_window: None,
             }],
             profiles: vec![AgentProfileInfo {
                 name: "chat".into(),
@@ -369,7 +433,28 @@ mod tests {
         };
         let events = adapt_agent_message(&AgentServerMessage::Inventory(inventory));
         assert_eq!(events.len(), 1);
-        assert!(matches!(&events[0], AgUiEvent::StateSnapshot { .. }));
+        let AgUiEvent::StateSnapshot { snapshot } = &events[0] else {
+            panic!("expected state snapshot");
+        };
+        assert_eq!(
+            snapshot["models"][0]["contextWindow"],
+            serde_json::Value::Null
+        );
+
+        // Snapshot events carry the context-used counter (plan 108 task 9).
+        let snapshot = AgentSessionSnapshot {
+            context_tokens: Some(12),
+            ..sample_snapshot()
+        };
+        let events = adapt_agent_message(&AgentServerMessage::Snapshot(snapshot));
+        let state = events
+            .iter()
+            .find_map(|event| match event {
+                AgUiEvent::StateSnapshot { snapshot } => Some(snapshot.clone()),
+                _ => None,
+            })
+            .expect("state snapshot");
+        assert_eq!(state["contextTokens"], 12);
     }
 
     #[test]

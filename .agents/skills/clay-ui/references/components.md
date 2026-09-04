@@ -24,7 +24,8 @@ Declared in `src/shell/components.rs` (`ComponentKind`). Packages compose these;
 | `dropdown` | implemented | Single-select drop-down | Phase 20.5: button-like trigger row; `Role::ComboBox`; keyboard nav (ArrowUp/Down cycles the widget's `selected_index`, Enter/Space confirms); open list painted by `PackageDropdown`; fill via `component_state_color("surface.control", state)` |
 | `collapse` | implemented | Expand/collapse section | Phase 20.5: title row with `clay.ui.collapseToggle` action; `Role::Group`; Enter/Space toggles `PackageCollapse.expanded`; content shown/hidden via a layout clip |
 | `modal` | implemented | Blocking dialog | Phase 20.5: `paint_tooltip_shell` chrome (painted by the overlay host) + title + children; `Role::Dialog`; Tab focus-trap cycles the modal's widget-local focusable descendants; `z.modal` stacking |
-| `textInput` | implemented | Single-line editable text field | Phase 20.5: bordered field, placeholder in `text.muted`, focus ring, validation-state border (`diagnostic.error`/`warning`/`success` or `border.subtle`); `Role::TextInput`; `style.validationState` and `style.placeholderColor` style variables |
+| `textInput` | implemented | Single-line editable text field | Phase 20.5: bordered field, placeholder in `text.muted`, focus ring, validation-state border (`diagnostic.error`/`warning`/`success` or `border.subtle`); `Role::TextInput`; `style.validationState` and `style.placeholderColor` style variables; `multiline: true` node field switches to a growing textarea substrate (Enter submits, Shift+Enter newline; plan 108 G3) |
+| `tabList` | implemented | Tab strip hosting per-tab children | Plan 108 task 8 (G2): `items` carry tab metadata (`id`/`label`/`selected`/`disabled`), `children` render as tab panels in order; selection is widget-local (React Aria Tabs, like `dropdown`), no server round-trip; interactive states per tab |
 | `table` | reserved | Tabular data | Deferred; no first-party package need identified as of Phase 20.5 |
 
 ### Phase 20.4 interaction-state and spacing rhythm notes
@@ -34,6 +35,7 @@ Phase 20.4 restyled the implemented kinds to the minimalist design language usin
 **Interaction states** (derived per-widget from Masonry pointer/focus state; precedence `Disabled` > `Active` > `Hover` > `Focus` > `Rest`):
 - `button`: all five states; `Rest`=`surface.control`, `Hover`=`surface.hover`, `Active`=`surface.active`, `Focus`=`accent.primary` + `paint_focus_ring` (`border.focus`), `Disabled`=`surface.disabled`×`opacity.disabled` with `text.disabled` text and action gated.
 - `list`: per-row `Rest`/`Hover`/`Active`/`Focus` honor `selected` (`surface.selected` vs `surface.list`); `Hover`/`Active` override selection; `Disabled` dims and gates the action.
+- `tabList`: per-tab five-state set (interactive triggers); selected tab uses `surface.selected` with an `accent.primary` underline indicator; `Disabled` tabs dim and gate activation.
 - `label` / `statusItem`: text `text.muted` at `Rest`; `Disabled` → `text.disabled`×`opacity.disabled`; `Focus` paints a focus ring. No fill.
 - `panel` / `overlay`: chrome via `paint_panel_chrome` / `paint_tooltip_shell` (state-independent chrome; collapse/resize affordances route through the primitive, currently `Rest`).
 - `editorView`: chrome is editor-`StyleRegistry`-driven (caret/selection/diagnostics); the scrollbar reflects `Hover`/`Active` from pointer state via `paint_scroll_chrome`. No SDUI state-token fill.

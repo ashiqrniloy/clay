@@ -1,4 +1,5 @@
 import type { KeyboardEventHandler } from "react";
+import { useLayoutEffect, useRef } from "react";
 import {
   TextField as RACTextField,
   Input,
@@ -20,6 +21,8 @@ export interface ClayTextFieldProps {
   disabled?: boolean;
   /** Multiline composer variant (catalog gap; generic kind lands later). */
   multiline?: boolean;
+  /** Multiline auto-grow: height follows content up to the CSS max-height. */
+  autoGrow?: boolean;
   description?: string;
   onSubmit?: (value: string) => void;
   autoFocus?: boolean;
@@ -35,11 +38,21 @@ export function ClayTextField({
   validationState = "none",
   disabled = false,
   multiline = false,
+  autoGrow = false,
   description,
   onSubmit,
   autoFocus = false,
   onKeyDown,
 }: ClayTextFieldProps) {
+  const areaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Auto-grow (plan 108 G3): presentation-only height sync; the cap lives in
+  // CSS (max-height), so this never blocks input or waits on IPC.
+  useLayoutEffect(() => {
+    const element = areaRef.current;
+    if (!autoGrow || !multiline || !element) return;
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }, [autoGrow, multiline, value]);
   const validationClass =
     validationState === "none" ? "" : (styles[validationState] ?? "");
   return (
@@ -60,7 +73,10 @@ export function ClayTextField({
       </Label>
       {multiline ? (
         <TextArea
-          className={`${styles.input} ${validationClass}`}
+          ref={areaRef}
+          className={`${styles.input} ${validationClass} ${
+            autoGrow ? styles.autoGrow : ""
+          }`}
           placeholder={placeholder}
           rows={3}
           autoFocus={autoFocus}

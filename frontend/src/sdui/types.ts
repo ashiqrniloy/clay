@@ -98,12 +98,15 @@ export interface PackageComponentNode {
     | "dropdown"
     | "collapse"
     | "modal"
-    | "textInput";
+    | "textInput"
+    | "tabList";
   title?: string;
   text?: string;
   label?: string;
   direction?: "row" | "column";
   disabled?: boolean;
+  /** `textInput` only: multiline growing composer variant (plan 108 G3). */
+  multiline?: boolean;
   action?: PackageAction;
   items?: PackageListItem[];
   children?: PackageComponentNode[];
@@ -170,6 +173,8 @@ export interface PackageInputRoute {
 export interface PackageUiSnapshot {
   version: number;
   emptyTab: PackageSurface | null;
+  /** Named pane surfaces (`activation: "pane"`), e.g. the Coding Agent split. */
+  surfaces?: PackageSurface[];
   panels: PackagePanel[];
   overlays: PackageOverlay[];
   components: PackageSurface[];

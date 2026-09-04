@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-08-28T12:52:32Z",
+  "updated": "2026-09-03T00:00:00Z",
   "native_client_frozen": true,
   "status_vocabulary": [
     "pending",
@@ -1079,7 +1079,7 @@
         "ViewportRenderPatch"
       ],
       "verified_automated": "tests/performance_budgets.rs::tauri_react_bundle_budgets_are_documented + frontend check:budget",
-      "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence; Q38 (2026-09-01): modulepreload parallel load verified on the post-split build — boot capture code-reviews/screenshots/2026-09-01-plan105-manual/default/, check:budget 153.4/180 + 359.7/400 kB gzip"
+      "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence; Q38 (2026-09-01): modulepreload parallel load verified on the post-split build \u2014 boot capture code-reviews/screenshots/2026-09-01-plan105-manual/default/, check:budget 153.4/180 + 359.7/400 kB gzip"
     },
     {
       "capability_id": "platform.windows",
@@ -1469,6 +1469,137 @@
       ],
       "verified_automated": "package graph/loading/cross-domain/conformance negative suites + Tauri capability denial",
       "verified_manual": "Phase 4-10 retained visual/accessibility review evidence under code-reviews/screenshots/"
+    },
+    {
+      "capability_id": "agent.host.phase1",
+      "title": "Phase 1 agent host: clay:agent facades, autonomy/compaction config, workspace-scoped search and session tree, first-party profile/skill registration, MCP allow-list + Obscura fail-closed",
+      "area": "agent",
+      "status": "verified",
+      "migration_phase": 2,
+      "current_owner": [
+        "clay-agent/src/host.ts",
+        "src/server/ops/agent.rs",
+        "runtime/js/agent.js"
+      ],
+      "current_tests": [
+        "tests/protocol.rs (agent_protocol::*)",
+        "clay-agent/src/__tests__/*.test.ts",
+        "tests/clay_js_api_inventory.rs"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/16-agent-host.md",
+          "steps": [
+            "A1",
+            "A2",
+            "A3",
+            "A4",
+            "A5",
+            "A6",
+            "A7",
+            "A8",
+            "A9",
+            "A10",
+            "A11",
+            "A12",
+            "A13",
+            "A14",
+            "A15",
+            "A16",
+            "A17",
+            "A18",
+            "A19"
+          ]
+        }
+      ],
+      "public_apis": [
+        "agent.compact",
+        "agent.searchSessions",
+        "agent.setFullAutonomy",
+        "agent.resumeRun",
+        "agent.sessionTree",
+        "agent.profileRegister",
+        "agent.skillRegister",
+        "agent.commandRegister",
+        "agent.commandDispatch",
+        "agent.knowledgeSetOptions"
+      ],
+      "protocol_messages": {
+        "client": [],
+        "server": [],
+        "agent": [
+          "AgentRpc",
+          "Diagnostic",
+          "Snapshot",
+          "Event"
+        ]
+      },
+      "target_owner": "unchanged server authority; daemon-owned session runtime; Phase 2 Coding Agent package registers its profile through the facades",
+      "target_tests": "clay-agent node suites + Rust protocol/inventory gates (incl. coding-agent manifest + load-entry contract) + test-plan/16",
+      "verified_automated": "clay-agent suites 49/49; protocol 203/203 incl. agent_protocol gates; inventory coverage gate pins decision 2157/2158 defaults",
+      "verified_manual": "test-plan/16-agent-host.md record (2026-09-02): configuration/doc steps executed; live GUI steps standing procedure (host input ceiling as recorded in prior plans)"
+    },
+    {
+      "capability_id": "agent.codingAgent.parity",
+      "title": "Phase 2 coding agent: pi-parity conformance (prompt/stream ordering, steering, cancel, compaction, session lifecycle, tree/fork/clone, plan files, composer/status/strip surface) with negative checks",
+      "area": "agent",
+      "status": "verified",
+      "migration_phase": 2,
+      "current_owner": [
+        "clay-agent/src/host.ts",
+        "packages/coding-agent/dist/load.js",
+        "frontend/src/coding-agent/CodingAgentPanel.tsx"
+      ],
+      "current_tests": [
+        "clay-agent/src/__tests__/*.test.ts",
+        "frontend/src/coding-agent/CodingAgentPanel.test.tsx",
+        "tests/protocol.rs (agent_protocol::*)"
+      ],
+      "manual_steps": [
+        {
+          "module": "test-plan/17-coding-agent-parity.md",
+          "steps": [
+            "P1",
+            "P2",
+            "P3",
+            "P4",
+            "P5",
+            "P6",
+            "P7",
+            "P8",
+            "P9",
+            "P10",
+            "P11",
+            "P12",
+            "P13",
+            "P14",
+            "P15",
+            "P16",
+            "P17",
+            "P18",
+            "N1",
+            "N2",
+            "N3",
+            "N4",
+            "N5"
+          ]
+        }
+      ],
+      "public_apis": [],
+      "protocol_messages": {
+        "client": [],
+        "server": [],
+        "agent": [
+          "AgentRpc",
+          "Diagnostic",
+          "Snapshot",
+          "Event"
+        ]
+      },
+      "target_owner": "unchanged server authority; daemon-owned session runtime; package surface is client-local presentation",
+      "target_tests": "clay-agent node suites + CodingAgentPanel suites + Rust protocol/inventory gates + test-plan/17",
+      "verified_automated": "clay-agent suites 69/69 (with Obscura e2e); frontend 200/200; protocol suite green; parity checklist automated gates P1-P18/N1-N5 recorded 2026-09-03",
+      "verified_manual": "test-plan/17-coding-agent-parity.md record (2026-09-03): automated mock-provider subset + live fixture pass; real-provider interactive pass standing procedure pending a configured credential (recorded in module known ceilings)"
     }
   ]
 }

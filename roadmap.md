@@ -10,8 +10,12 @@ authoritative for architecture rules that this roadmap inherits.
 Governing decisions already made:
 
 - `decision-logs/2026-08-21-1758-native-prism-host-no-acp-cli-parity.md`:
-  Clay-owned Node `clay-agent` daemon wraps Prism 0.3.0; no ACP/AG-UI as the
-  first-party agent bus; coding agent must reach CLI-parity inside Clay.
+  Clay-owned Node `clay-agent` daemon wraps Prism directly; no ACP/AG-UI as
+  the first-party agent bus; coding agent must reach CLI-parity inside Clay.
+  Its original 0.3.0 pin is superseded by the 0.4.0 migration in Phase 0.
+- `decision-logs/2026-09-02-1440-direct-external-coding-agent-adapters.md`:
+  Claude Code and Antigravity are direct, capability-declared external
+  runtimes with Clay policy bundles, not Prism delegation.
 - `decision-logs/2026-08-21-2152-product-surfaces-are-replaceable-packages.md`:
   product surfaces are replaceable first-party packages; third-party packages
   extend/replace through declared extension points with user approval.
@@ -24,11 +28,13 @@ Governing decisions already made:
 Three layers, strict separation:
 
 1. **`clay-agent` daemon (Clay core, Node ≥ 20).** Hosts `@arnilo/prism`
-   0.3.0 plus the first-party Prism packages. Owns providers, models,
-   credentials (vault + keychain), SQLite persistence, run ledger, tools,
-   compaction strategies, skills, commands, workflows, supervision, and
-   delegation. Packages never spawn or speak to it directly; they use public
-   `agent.*` Clay JS APIs served by the Rust server.
+   0.4.0 plus explicitly selected 0.4 family packages/subpaths. Owns native
+   providers, models, credentials (vault + keychain), SQLite persistence,
+   run ledger, tools, compaction strategies, skills, commands, workflows,
+   supervision, and external-runtime lifecycle/policy projection. It does
+   not proxy vendor authentication or own vendor agent loops. Packages never
+   spawn or speak to it directly; they use public `agent.*` Clay JS APIs
+   served by the Rust server.
 2. **`@clay/coding-agent` (first-party Clay package, "base coding agent").**
    Minimal, pi-coding-agent-parity coding agent: coding tools against Clay
    documents, approvals, sessions, branching, compaction, steering, commands,
@@ -43,44 +49,56 @@ The base agent stays minimal by design (pi-like). All autonomy policy
 agent delegation, memory cadence) lives in `st` or in host-free orchestration
 helpers the daemon exposes generically.
 
-## Prism Capability Review (verified against 0.3.0)
+## Prism Capability Review (verified against 0.4.0)
 
-Review method: full read of `@arnilo/prism@0.3.0` docs surface plus a
-network-free smoke suite (`/tmp/prism-smoke/smoke.mjs`, 37 assertions, all
-passing) exercising the exact seams this roadmap needs.
+Review method: read the 0.4 migration guide, package-consolidation plan, all
+11 published package manifests and export maps, and the relevant family API
+docs in `/home/arn/Projects/prism`; confirm every active package reports
+`0.4.0` from npm. Prism states 0.4 is a package/import migration with no
+persisted-store shape migration. Phase 0 still owns a Clay consumer smoke
+suite because moved symbols and optional-peer behavior must be verified in
+Clay's installed graph.
 
-| Requirement | Prism primitive | Package | Verdict |
+Authoritative sources: Prism `docs/migrate-to-0.4.md`, plan 054, and the 11
+active 0.4 package manifests/export maps. Context7 has no `@arnilo/prism`
+library.
+
+| Requirement | Prism primitive | 0.4 package/import | Verdict |
 | --- | --- | --- | --- |
-| Pi-parity coding tools | `shell`/`read`/`write`/`edit` are documented behavioral ports of pi tools; plus `repo_list`/`repo_search`/`glob`/`delete`/`move`, opt-in `createGitTools`, `coding_check`; host `operations` seams for Clay document authority | `@arnilo/prism-coding-agent` | ✅ smoke-verified |
-| Approvals/sandboxing | `createCodingApprovalPolicy`, `createSandboxCodingComposition`, Docker/native backends, `ExecutionPolicy` | `@arnilo/prism-coding-security` | ✅ smoke-verified |
-| Sessions, branching, persistence | `AgentSession` run/stream/steer/compact/abort/checkout/fork/clone; branching handles; JSONL/SQLite/Postgres stores | `@arnilo/prism`, `@arnilo/prism-session-store-sqlite` | ✅ (SQLite already wired in daemon) |
-| Slash commands | `CommandDefinition` contributions via extension kernel; RPC `command` seam; ACP `available_commands_update` parity; host-opt-in `CommandExecutionContext.drivers` (`startRun`/`startWorkflow`/`steer`) shipped 0.3.2 | `@arnilo/prism` | ✅ drivers available (E3 resolved) |
-| Workflow-type picker ("ask me") | `createAskUserDecisionTool` (blocking) and `suspendAskUserDecision` + `createAskUserDecisionResumeValidator` (durable) | `@arnilo/prism-coding-agent` | ✅ smoke-verified; D1 fixed in 0.3.2 (`allowCustom` defaults `false` in suspend data) |
-| Loop-until-goal orchestration | Bounded DAG workflows (`defineWorkflow`/`runWorkflow`/`resumeWorkflow`/`replayWorkflow`), durable suspend/resume, sagas, `runCodingGoalVerify`; documented bounded iterate-until-done **host-loop pattern** (one `runWorkflow` per iteration, iteration state in inputs, explicit termination predicate + budgets, typed fail-closed `BudgetExhaustedError`, `replayWorkflow` per iteration run id) | `@arnilo/prism-workflows` | ✅ documented + `examples/autonomous-coding-loop.ts` conformance reference (0.3.2, FEATURE-2/6) |
-| Custom per-run loops | `AgentLoopStrategy` escape hatch with `LoopContext`; durable snapshot/restore; `generateValidateReviseLoop` for validated artifacts | `@arnilo/prism` | ✅ smoke-verified |
-| Plan generation | `writeCodingPlanFile`/`parseCodingPlanTodos`, bounded `state.coding` checkpoint metadata; custom `create-plan` skill via skill registry + progressive disclosure | `@arnilo/prism-coding-agent`, `@arnilo/prism` | ✅ |
-| Per-codebase LLM wiki (llm-wiki) | `createWikiExtension`: `/wiki-init`/`/wiki-refresh` (SHA-256 Merkle diff)/`/wiki-lint`; `wiki_search`/`wiki_read_page`/`wiki_record_insight`; OKF v0.2 bundles; `wiki-maintainer`/`wiki-searcher` skills; optional `qmd` hybrid search with catalog fallback | `@arnilo/prism-wiki` 0.0.3 | ✅ adopt as opt-in knowledge base (Phase 2) |
-| Context-graph code search | `createGraftExtension`: pull tools `graft_ask`/`graft_grep`/`graft_callers`/`graft_skeleton`/`graft_map`/`graft_blast`; gated push retrieval packs + first-turn orientation; post-edit blast radius (`graft:dirty`); fail-closed CLI resolution (`cliPath`/`packageRoot`/optional `@nanonets/graft` peer) | `@arnilo/prism-graft` 0.0.1 | ✅ adopt as opt-in search layer (Phase 2) |
-| Sub-agent fan-out (criteria/tests/validation) | `createSupervisor` allow-listed children, per-child models, narrowed permissions, budgets, durable nested approvals | `@arnilo/prism-supervisor` | ✅ smoke-verified |
-| Per-task model selection | `AgentDefinition.model`, `RunOptions.model`, use-case bindings (`resolveUseCaseModel`), governance via `@arnilo/prism-model-router` | `@arnilo/prism` + router | ✅ |
-| External agent delegation (Antigravity) | `createAntigravityCliAgent` + `createAntigravityDelegationTool`; per-run ephemeral MCP server, conversation resume, event projection | `@arnilo/prism-antigravity-agent` | ✅ documented (host owns `agy` auth; not smoke-tested) |
-| Observational memory + auto-compaction | `createObservationalMemory().attach()`: post-run observe/reflect/drop workers with independent models, `compactAfterTokens`, fast model-free compaction strategy | `@arnilo/prism-compaction-observational-memory` | ✅ smoke-verified |
-| Exact-id recall | `createRecallMemoryTool` (`{id}` exact recall + cursor paging), `om:status`/`om:view` command factories | same | ✅ smoke-verified (fail-closed behavior confirmed) |
-| Declarative third-party agents | `AgentDefinition` + `resolveAgentDefinition`/`resolveAgentBundle`, extension kernel `registerAgent`/`registerSkill`/`registerCommand` | `@arnilo/prism` | ✅ smoke-verified; E1 fixed in 0.3.2 (`overrides.model` fallback) |
-| Durable human gates mid-run | `interruptBeforeTool`, `AgentRunLifecycle`/`resumeAgentRun`, pending-decision CAS | `@arnilo/prism` | ✅ documented |
-| MCP tools in agent runs | `@arnilo/prism-mcp` client bridge (bounded, OAuth) | `@arnilo/prism-mcp` | ✅ documented |
-| Web search + content fetch | `web_search`/`web_fetch` via `createObscuraWebTools` (replaceable HTML search profile) + native `obscura_fetch`/`obscura_scrape`; public-HTTP(S)-only, byte/count/timeout caps, untrusted-content labeling; `@arnilo/prism-web-tools` base for direct WebProvider backends | `@arnilo/prism-obscura` 0.3.0, `@arnilo/prism-web-tools` | ✅ adopt Obscura engine (Phase 1–2) |
-| Browser automation + e2e | Obscura engine over a host-installed binary: fail-closed `spawnObscuraProcess`, full advertised MCP surface (`obscura_*` tools), `connectObscuraCdp` managed/external CDP + Playwright `connectOverCDP`; `@arnilo/prism-browser` CDP surface (`browser_evaluate` gated, observe/block/throttle/emulate) and Playwright runs for e2e tests | `@arnilo/prism-obscura`, `@arnilo/prism-browser`, optional `playwright-core` peer | ✅ adopt (Phase 1–2) |
-| Linux desktop use | `@arnilo/prism-computer-use-linux` wraps a host-owned `computer-use-linux` MCP binary; DeviceAdapter deny-by-default admission, opt-in setup tools, mutating calls require approval/ExecutionPolicy, bounded untrusted results | `@arnilo/prism-computer-use-linux` | ✅ adopt as `st` extension capability (Phase 5) |
-| Validation/eval gating | `@arnilo/prism-evals` scorers/datasets/experiments/CI thresholds | `@arnilo/prism-evals` | ✅ documented |
+| Pi-parity coding tools | `shell`/`read`/`write`/`edit`, repository tools, opt-in Git tools, `coding_check`, and host `operations` seams | `@arnilo/prism-coding-tools/agent` | ✅ moved from `prism-coding-agent`; behavior retained |
+| Approvals/sandboxing | `createCodingApprovalPolicy`, sandbox composition, `ExecutionPolicy` | `@arnilo/prism-coding-tools/security` | ✅ moved; security gates stay subpath-local |
+| Sessions, branching, persistence | `AgentSession`; JSONL root export; SQLite/Postgres/NATS adapters | `@arnilo/prism`; `@arnilo/prism-core/sessions/sqlite` | ✅ SQLite remains Clay's store; `better-sqlite3` becomes an explicit optional peer |
+| Commands and durable decisions | `CommandDefinition`, host `CommandDrivers`, `interruptBeforeTool`, lifecycle resume, pending-decision CAS | `@arnilo/prism` | ✅ unchanged root contract |
+| Workflow-type picker and plan files | ask-user decision tools; `writeCodingPlanFile`/`parseCodingPlanTodos`; coding checkpoints | `@arnilo/prism-coding-tools/agent` | ✅ moved; 0.3.2 fixes retained |
+| Loop-until-goal orchestration | workflows, replay, sagas, goal verification, bounded host-loop pattern | `@arnilo/prism-core/runtime/workflows` | ✅ moved from `prism-workflows` |
+| Custom per-run loops and declarative agents | `AgentLoopStrategy`, `generateValidateReviseLoop`, `AgentDefinition`, skill/command/agent registries | `@arnilo/prism` | ✅ unchanged root contract |
+| Wiki and context graph | Wiki commands/tools/skills; Graft tools/push packs/blast radius | `@arnilo/prism-memory/wiki`; `@arnilo/prism-memory/graft` | ✅ moved; Graft optional peer remains fail-closed |
+| Sub-agent fan-out | `createSupervisor`, child models/permissions/budgets, durable nested approvals | `@arnilo/prism-core/runtime/supervisor` | ✅ moved from `prism-supervisor` |
+| Per-task model selection | run/agent model overrides and `resolveUseCaseModel` | `@arnilo/prism`; `@arnilo/prism-core/governance/model-router` | ✅ moved router |
+| External coding-agent delegation | Direct vendor runtime adapters, Clay policy projection, resume, event projection | Claude Code Agent SDK; Antigravity headless CLI | Phase 9–10; no Prism intermediary |
+| Observational memory and recall | observe/reflect/drop workers, fast compaction, exact-id recall, OM commands | `@arnilo/prism-memory/compaction/observational-memory` | ✅ moved from standalone compaction package |
+| LLM compaction | coding LLM compaction strategy | `@arnilo/prism-memory/compaction/llm` | ✅ moved; profile-only `prism-compaction` removed |
+| MCP tools | bounded MCP client/server/OAuth bridge | `@arnilo/prism-mcp` | ✅ package name retained |
+| Web search/fetch | generic providers plus Obscura web tools | `@arnilo/prism-web-tools`; `@arnilo/prism-web-tools/obscura` | ✅ Obscura moved under family subpath |
+| Browser automation/e2e | CDP tools and Obscura/Playwright composition | `@arnilo/prism-web-tools/browser`; `/obscura` | ✅ moved; `playwright-core` stays opt-in |
+| Linux desktop use | deny-by-default computer-use wrapper over host MCP binary | `@arnilo/prism-coding-tools/computer-use-linux` | ✅ moved under coding family |
+| Validation/eval gating | scorers, datasets, experiments, thresholds | `@arnilo/prism-core/governance/evals` | ✅ moved under core governance |
+| Provider adapters | 16 currently wired adapters; `/ai-sdk` exists and stays unused | `@arnilo/prism-providers/<adapter>` | ✅ one family dependency; explicit adapter imports |
+| JSON Schema tool validation | `createJsonSchemaToolArgumentValidator` | `@arnilo/prism-core/validation/json-schema` | ✅ moved under core validation |
+| Node credentials | encrypted vault/keychain resolvers and OIDC | `@arnilo/prism-core/credentials/node` | ✅ moved; keyring dependency remains host-side |
+| Office generation/parsing | documents, sheets, diagrams | `@arnilo/prism-office/{documents,sheets,diagrams}` | ⛔ not adopted: no Clay/`st` requirement |
+| ACP interop | ACP adapter/CLI | `@arnilo/prism-acp-agent` | ⛔ not adopted: first-party bus decision unchanged |
+| AG-UI/A2A/A2UI interop | Prism event adapters/renderers | `@arnilo/prism-ag-ui` | ⛔ not adopted in daemon: Clay keeps its bounded server-owned AG-UI projection |
 
-## Prism Readiness: Defects and Enhancements Required Before Phase 1
+## Prism Readiness: 0.4 Migration and Retained Integration Requirements
 
-**Status: Prism 0.3.2 (plan 050, 2026-08-29) landed the Clay integration
-intake** — D1 fixed, E1/E2/E3/E6 resolved, DOCS-1 integrator contracts
-documented in `docs/workflows.md` / `docs/supervisors.md` /
-`docs/compaction-and-retry.md`. Entries below are the historical record;
-only E4/E5 remain open (optional, workarounds hold).
+**Status: Prism 0.4.0 is published across all 11 active packages.** The cut
+replaces 62 manifests with 11 packages, removes five profile packages, and
+ships no compatibility wrappers. Prism documents this as a package-name and
+import-specifier migration: persisted store schemas do not change. The 0.3.2
+Clay intake remains present in moved code: D1 fixed, E1/E2/E3/E6 resolved,
+and DOCS-1 documented. Entries below are historical behavior requirements to
+re-run after import migration; only E4/E5 remain optional and open.
 
 ### Defects (required)
 
@@ -88,8 +106,9 @@ only E4/E5 remain open (optional, workarounds hold).
   [FIXED in 0.3.2]** `toAskUserDecisionSuspendData` now normalizes via
   `parseAllowCustom` (omitted → `false`; non-boolean fails closed at accept
   time, never at resume time). Verified in the published
-  `@arnilo/prism-coding-agent@0.3.2` dist. Clay's smoke suite still carries
-  the resume round-trip regression without explicit `allowCustom`.
+  `@arnilo/prism-coding-agent@0.3.2` dist and now lives at
+  `@arnilo/prism-coding-tools/agent@0.4.0`. Phase 1 smoke still carries the
+  resume round-trip regression without explicit `allowCustom`.
 
 ### Enhancements (required unless waived per phase)
 
@@ -132,6 +151,28 @@ only E4/E5 remain open (optional, workarounds hold).
   combining supervisor + workflows + OM + goal-verify would freeze the
   intended composition and become Clay's conformance reference.
 
+### 0.4 package-migration constraints
+
+- Clay pins direct Prism dependencies to exact reviewed `0.4.0` versions even
+  though Prism's internal peer window is `^0.4.0`.
+- Replace package names and imports atomically. No runtime path may mix retired
+  0.3 package imports with 0.4 family imports.
+- Import only explicit subpaths. Installing a family package must not activate
+  sibling providers, databases, browsers, parsers, binaries, tools, or agents.
+- Add only peers Clay uses: `better-sqlite3` for SQLite and exact
+  `playwright-core@1.61.0` when Obscura/browser work lands; retain host-owned
+  Graft, Obscura, computer-use-linux, and `agy` resolution. Missing optional
+  capability must stay hidden/fail closed. `@arnilo/prism-web-tools` requires
+  `@arnilo/prism-mcp` as a non-optional peer — install them together in Phase
+  1, not as a first-party agent bus.
+- `@arnilo/prism-memory` includes `pg` as a regular dependency in 0.4.0 even
+  though Clay does not adopt PostgreSQL memory. Accept the family footprint;
+  do not initialize PostgreSQL or add a second memory store. Skip
+  `prism-web-tools/{brave,exa,firecrawl}` and `prism-providers/ai-sdk`.
+- Preserve rollback by keeping the current lockfile available until the 0.4
+  consumer suite passes. Rollback is package/import restoration to exact 0.3
+  pins; no database rollback is expected for this reorganization.
+
 ### Behavioral constraints (accepted, not defects — they shape the design)
 
 - `session.compact()` fails closed while a run is active, so `st` maps one
@@ -147,94 +188,99 @@ only E4/E5 remain open (optional, workarounds hold).
 - Workflows bounds: `maxNodes` default 1,000 — generated phase DAGs are
   comfortably inside limits, and definition `revision` must bump when node
   behavior changes.
-- Antigravity delegation requires the host-owned authenticated `agy` binary;
-  Prism never manages Google credentials. Clay treats it as an optional
-  delegation target that is hidden when `agy` is absent.
+- External coding-agent delegation is core-owned and direct: Prism never
+  manages Claude Code or Google credentials. Clay hides a runtime when its
+  documented SDK/CLI is absent or unauthenticated, and never calls a
+  same-user child sandboxed merely because it has a workspace root.
 
-## Prism Adoption Map (tools, commands, skills by phase)
+## Prism 0.4 Adoption Map (all active packages)
 
-Complete inventory of the 59-package Prism graph against Clay's phases.
-"Tools" = agent ToolDefinitions; "Commands" = registered `/verbs`;
-"Skills" = skill-registry texts loaded via `load_skill`.
+Inventory covers all 11 published 0.4 packages. Family installation and
+subpath adoption are separate: a family can be present while unused subpaths
+remain unimported and inert.
 
-| Phase | Prism package(s) | Adopt | Notes |
+| Active 0.4 package | Clay subpaths/capabilities | Phase | Decision |
 | --- | --- | --- | --- |
-| 1 | `prism` (core) | `AgentSession` run/stream/steer/compact/abort/checkout/fork/clone; skills registry + `load_skill`; `CommandDefinition` dispatch + host-injected `CommandDrivers`; `AgentDefinition`/`registerAgent`; durable runs (`interruptBeforeTool`, `AgentRunLifecycle` resume); `AgentLoopStrategy`, `generateValidateReviseLoop` | Document-authority `operations` seams for read/write/edit |
-| 1 | `prism-coding-agent` | `shell`/`read` (incl. `findText`)/`write`/`edit`/`repo_list`/`repo_search`/`glob`/`delete`/`move`; opt-in `createGitTools`; `coding_check` | Backend registration; agent-facing surface lands Phase 2 |
-| 1 | `prism-coding-security` | `createCodingApprovalPolicy`, `createSandboxCodingComposition` (Docker + native netns backends), `ExecutionPolicy` | Default acceptance policy enforced here |
-| 1 | `prism-compaction` + `compaction-llm` | Default + coding LLM compaction strategies; manual + threshold triggers | |
-| 1 | `prism-compaction-observational-memory` | `createObservationalMemory().attach()`; `recall` tool; `om:status`/`om:view` commands | Attach only; cadence + UI in Phase 7 |
-| 1 | `prism-session-store-sqlite` | Session/branch/checkpoint persistence; Clay-owned workspace metadata + SQLite FTS index | Shared by clay + `st`; no second `st` store |
-| 1 | `prism-mcp` | MCP client bridge for allow-listed package-declared servers | |
-| 1 | `prism-providers` + `provider-*` (16 adapters) | Provider adapters behind pi-parity model/provider switching | Host selection, never ambient |
-| 1 | `prism-obscura` + `web-tools` + `browser` (+ optional `playwright-core`) | Obscura binary lifecycle, CDP, Playwright composition (engine plumbing) | Agent surface in Phase 2; hidden when binary absent |
-| 1 | `prism-document-reader` (optional) | `read` tool `documentReader` slot (PDF/Office) | Adopt if users need spec-file reading |
-| 1 | `prism-work-tools`, `prism`, `tool-validator-json-schema`, `session-store-codecs`, `server` | Internal seams used transitively by the daemon (process env isolation, tool schema validation, codec helpers, RPC handler) | No direct Clay-facing surface |
-| 2 | `prism-coding-agent` | `ask_user_decision` tool + `suspendAskUserDecision` durable path; `writeCodingPlanFile`/`parseCodingPlanTodos`; `state.coding` checkpoints | `/start` picker reuse in Phase 5 |
-| 2 | (Clay-authored via `prism` skill registry) | **Skill:** `create-plan` | Generic principles; project refs split per Phase 5 decision |
-| 2 | `prism-wiki` | **Tools:** `wiki_search`, `wiki_read_page`, `wiki_record_insight`. **Commands:** `/wiki-init`, `/wiki-refresh`, `/wiki-lint`. **Skills:** `wiki-maintainer`, `wiki-searcher` | OKF v0.2; opt-in; `qmd` optional |
-| 2 | `prism-graft` | **Tools:** `graft_ask`, `graft_grep`, `graft_callers`, `graft_skeleton`, `graft_map`, `graft_blast`; push retrieval packs; `graft:dirty` post-edit blast radius | Opt-in; CLI fail-closed |
-| 2 | `prism-obscura` + `web-tools` + `browser` | **Tools:** `web_search`, `web_fetch`, `obscura_fetch`, `obscura_scrape`, full `obscura_*` MCP surface, CDP tools (`browser_observe`, gated `browser_evaluate`, `block_urls`/`unblock_urls`/`throttle`/`emulate`); Playwright e2e runs | Everything Obscura can do |
-| 2 | `prism-caveman`, `prism-impeccable` (optional) | **Skills:** caveman output style, impeccable UI design | Ship as optional toggles, off by default |
-| 5 | `prism-workflows` | `defineWorkflow`/`runWorkflow`/`resumeWorkflow`/`replayWorkflow`, sagas, `runCodingGoalVerify`; documented bounded host-loop pattern + `BudgetExhaustedError` | One `runWorkflow` per iteration |
-| 5 | (Clay-authored) | **Skills:** `create-plan`/`execute-plan` split, generic + `references/` | Project patterns live in execute refs |
-| 5 | `prism-computer-use-linux` | Desktop MCP tools: accessibility tree, screenshots, input synthesis; deny-by-default admission, approvals per acceptance policy | `st` extension only |
-| 6 | `prism-supervisor` | `createSupervisor` isolated children, per-child models, narrowed permissions, durable nested approvals | Test/validation children |
-| 6 | `prism-model-router` | `resolveUseCaseModel` + budgets for per-task routing | Governance optional |
-| 6 | `prism-antigravity-agent` | `createAntigravityCliAgent` + `createAntigravityDelegationTool` | Host owns `agy`; hidden when absent |
-| 6 | `prism-ponytail` | **Skill:** ponytail + `ponytail-review` | Mandatory in every validation pass |
-| 6 | `prism-evals` (optional) | Scorers/datasets as `st` behavior regression gate | Phase 8 if adopted |
-| 7 | `prism-compaction-observational-memory` | Per-task compaction cadence, worker models separate, `compactAfterTokens` 80k default, per-session retention, recall surfaces + OM tab | |
-| 8 | `prism-evals` (optional) | Release gate thresholds | If adopted in Phase 6 |
+| `@arnilo/prism` | Root agent/session/run/tool contracts, extension kernel, skills, commands, durable lifecycle, Node helpers and test conformance exports | 0–1 | **Adopt.** Keep dependency-free root and exact `0.4.0` direct pin. |
+| `@arnilo/prism-core` | Phase 0: `/credentials/node`, `/sessions/sqlite`, `/validation/json-schema`; Phase 1: selected `/runtime/server` helpers and `/sessions/codecs`; Phase 5: `/runtime/workflows`; Phase 6: `/runtime/supervisor`, `/governance/model-router`; optional Phase 8: `/governance/evals` | 0–8 | **Adopt selected subpaths.** Do not use Postgres/NATS, enterprise, policy/OPA, prompts, observability, or work integrations without later demand. |
+| `@arnilo/prism-providers` | Current 16 adapters as `/alibaba`…`/zai` (not `/ai-sdk`) | 0 | **Adopt one family dependency.** Import/register adapters explicitly; no ambient provider activation. Keep Azure/Bedrock/Vertex as host-config stubs until those flows exist. |
+| `@arnilo/prism-coding-tools` | `/agent`, `/security`; optional `/document-reader`; Phase 5 `/computer-use-linux`; optional `/caveman` and `/impeccable`; Phase 6 `/ponytail` | 1–6 | **Adopt selected subpaths.** Skip `/openapi` and `/dev`; parser/persona peers only when used. |
+| `@arnilo/prism-web-tools` | Root `web_search`/`web_fetch`; `/browser`; `/obscura` | 1–2 | **Adopt.** Skip `/brave`, `/exa`, `/firecrawl`. Keep Obscura host-owned and hidden when absent. `prism-mcp` is a required peer of this family; add exact `playwright-core@1.61.0` only when browser/Obscura plumbing lands. |
+| `@arnilo/prism-memory` | `/compaction/llm`, `/compaction/observational-memory`, `/graft`, `/wiki` | 1–7 | **Adopt selected subpaths.** Skip root working/vector memory and `/rag`; installing family does not authorize PostgreSQL, Graft, QMD, or Context7 processes. |
+| `@arnilo/prism-mcp` | Bounded MCP client/server/OAuth bridge for allow-listed package declarations, Obscura, and Clay-exposed tools | 1–6 | **Adopt with Phase 1 web/coding uplift.** Required peer of `prism-web-tools`. No package-spawned daemon or ambient server. |
+| `@arnilo/prism-antigravity-agent` | Prism Antigravity delegation adapter | — | **Do not adopt.** Phase 10 runs the documented `agy` headless protocol directly; host owns authenticated `agy` lifecycle. |
+| `@arnilo/prism-ag-ui` | Prism AG-UI/A2A/A2UI adapter and renderer | — | **Do not adopt in `clay-agent`.** Clay server remains the bounded Prism→AG-UI adapter for React; revisit only if replacing that owned projection is separately approved. |
+| `@arnilo/prism-acp-agent` | ACP adapter and CLI | — | **Do not adopt.** First-party agent bus remains Prism-native; external ACP adapter is post-roadmap. |
+| `@arnilo/prism-office` | `/documents`, `/sheets`, `/diagrams` | — | **Do not adopt.** No coding-agent or `st` requirement justifies office dependencies. |
 
-**Not adopted (explicit):** `acp-agent` + `ag-ui` (ACP/AG-UI rejected as
-first-party bus per the 2026-08-21 decision; revisit only as external-agent
-adapters post-roadmap), `rag` + `memory` (knowledge covered by wiki + graft;
-pgvector stack is server-side scale we don't need), `session-store-postgres`
-+ `session-store-nats` + `enterprise-postgres` (SQLite is sufficient;
-enterprise stores post-roadmap), `policy` standalone (ExecutionPolicy via
-coding-security covers Clay), `obscura`-adjacent `observability-opentelemetry`
-(and `credentials-node` beyond what providers need), `openapi-tools`,
-`prism-all`/`prism-base`/`prism-sdk`/`prism-code` umbrella profiles (Clay
-pins exact packages), `compaction-*` beyond the two strategies named above.
+**Removed 0.4 profiles:** `@arnilo/prism-base`, `prism-code`, `prism-sdk`,
+`prism-all`, and `prism-compaction` have no replacement package. Clay already
+selects capabilities explicitly, so it installs the seven Phase 0/1 families
+without recreating a local umbrella. External-agent adapters remain direct
+vendor integrations in Phases 9–10.
+
+**Retired-name rule:** all standalone 0.3 provider, core/session/governance,
+coding/persona, browser/Obscura, RAG/compaction/Graft/Wiki package names are
+migration references only after Phase 0. New code and roadmap phase plans use
+family subpaths exclusively.
 
 
-
-Change requests were filed in this repo at
+Change requests were filed in the Prism repo at
 `docs/clay-integration-findings.md` (BUG-1/BUG-2, FEATURE-1..6, DOCS-1
-mapping one-to-one to D1/E1–E6 plus docs constraints); **Prism 0.3.2
-(plan 050) landed the intake** — D1, FEATURE-1 (E1), FEATURE-2/6 (E2),
-FEATURE-3 (E3), DOCS-1. This phase is now verification, not upstream
-fixes.
+mapping one-to-one to D1/E1–E6 plus docs constraints); Prism 0.3.2 landed
+the intake. Prism 0.4.0 changes package/import locations, not those contracts.
+Phase 0 therefore verifies moved exports and behavior instead of reopening the
+upstream feature work.
 
-## Phase 0: Prism 0.3.2 Adoption and Verification
+## Phase 0: Prism 0.4.0 Family Migration and Verification
 
 ### Scope
 
-- Bump `clay-agent` dependency pins to the 0.3.2 set (`@arnilo/prism`,
-  `prism-coding-agent`, `prism-workflows@0.3.1`, `prism-supervisor`,
-  `prism-coding-security`, `prism-compaction-observational-memory`;
-  add `prism-wiki@0.0.3`, `prism-graft@0.0.1`, `prism-antigravity-agent`,
-  `prism-obscura`, `prism-web-tools`, `prism-browser`, optional
-  `playwright-core`, and `prism-computer-use-linux`) as one atomic set.
-- Verify against 0.3.2: D1 resume path without explicit `allowCustom`;
-  `overrides.model` declarative resolution; `CommandExecutionContext.drivers`
-  injection; the documented bounded host-loop pattern +
-  `examples/autonomous-coding-loop.ts` as Clay's conformance reference.
-- Remaining optional Prism items: E4 (child event passthrough) and E5
-  (cross-session OM scope) — workarounds hold; pick up by need.
+- Replace the current 22 direct 0.3 dependencies with exact `0.4.0` pins for
+  `@arnilo/prism`, `@arnilo/prism-core`, and `@arnilo/prism-providers` only.
+  Add a direct `better-sqlite3` pin compatible with prism-core's `^12.11.1`
+  optional peer. Drop unused `@arnilo/prism-model-router` (pinned, never
+  wired). Do not add coding/web/memory/MCP/Antigravity families yet.
+- Rewrite existing daemon imports: credentials →
+  `@arnilo/prism-core/credentials/node`; SQLite →
+  `@arnilo/prism-core/sessions/sqlite`; JSON Schema validator →
+  `@arnilo/prism-core/validation/json-schema`; providers →
+  `@arnilo/prism-providers/<adapter>`. Azure/Bedrock/Vertex stay host-config
+  stubs under the new names. Family install activates nothing.
+- Update daemon version reporting, `clay-agent/README.md`, wiki clay-agent
+  pages, and `tests/agent_protocol.rs` (`phase25_dependencies_deny_acp_agui_mcp`
+  still denies ACP/AG-UI/MCP/retired `prism-coding-agent`; README assertion
+  becomes `0.4.0`). Reject every retired 0.3 package name in
+  `clay-agent/package.json`, lockfile, and source imports.
+- Consumer smoke at the new imports: credentials/vault, SQLite round-trip of
+  an existing Clay fixture, JSON Schema validator, explicit provider
+  registration, and isolation (installing the three families does not open
+  Postgres/NATS, browsers, or extra adapters). Keep E4/E5 optional.
 
 ### Exit Gate
 
-- The Clay smoke suite (moved from `/tmp` into `clay-agent/src/__tests__`)
-  passes against the published packages, including the D1 resume path with
-  omitted `allowCustom`.
+- `npm ci`, `npm run build`, and `npm test` pass in `clay-agent`; `npm ls
+  --all` contains only `@arnilo/prism`, `@arnilo/prism-core`, and
+  `@arnilo/prism-providers` from the Prism graph, plus `better-sqlite3`, and
+  no retired package names.
+- Startup reports Prism `0.4.0`; existing SQLite session fixtures open and
+  round-trip without a schema migration; chat/mock flows stay byte-compatible.
+- Rollback drill restores the committed 0.3 package/import set with `npm ci`;
+  no database rollback or compatibility shim is required.
 
 ## Phase 1: Base Coding Agent Host Uplift (`clay-agent`)
 
 ### Scope
 
-- Register `@arnilo/prism-coding-agent` tools with Clay-operation backends:
+- Add exact `0.4.0` pins for `@arnilo/prism-coding-tools`,
+  `@arnilo/prism-web-tools`, `@arnilo/prism-memory`, and `@arnilo/prism-mcp`.
+  `prism-web-tools` requires the `prism-mcp` peer. Narrow
+  `phase25_dependencies_deny_acp_agui_mcp` so ACP/AG-UI and retired 0.3 names
+  stay forbidden while `@arnilo/prism-mcp` / `@modelcontextprotocol/sdk` are
+  allowed as the package-declared MCP bridge. Keep D1 omitted-`allowCustom`
+  resume in the daemon smoke suite at `@arnilo/prism-coding-tools/agent`.
+- Register `@arnilo/prism-coding-tools/agent` tools with Clay-operation
+  backends:
   `read`/`write`/`edit` route through Clay document authority (versions,
   leases, dirty buffers) via the documented `operations` seams per the
   2026-08-21 decision; `shell`/list/search/glob stay workspace-confined.
@@ -245,14 +291,15 @@ fixes.
   existing sandbox/ExecutionPolicy rules. User option: a **full autonomy**
   toggle that lifts the outside-workspace write gate for the session/run;
   off by default.
-- Add compaction strategies (default + coding LLM compaction +
-  observational-memory fast compaction) and daemon RPC to select/per-run
-  override.
+- Add compaction strategies (root default +
+  `@arnilo/prism-memory/compaction/llm` +
+  `@arnilo/prism-memory/compaction/observational-memory`) and daemon RPC to
+  select/per-run override.
 - Add skills registry plumbing and package-contributed skill text
   (progressive disclosure, `load_skill`).
 - Add command dispatch (`CommandDefinition` → daemon RPC) so packages can
   register `/verb` commands; inject host-owned `CommandDrivers`
-  (`startRun`/`startWorkflow`/`steer`, shipped in Prism 0.3.2) so contributed
+  (`startRun`/`startWorkflow`/`steer`, retained in Prism 0.4.0) so contributed
   commands can drive runs/workflows natively.
 - Add durable run support (`interruptBeforeTool`, lifecycle resume) and run
   state RPC for approval surfaces.
@@ -271,14 +318,16 @@ fixes.
   branches both the conversation and the document version tree at E's
   checkpoint — "discard" reverts the files and the conversation together;
   nothing is deleted, the abandoned side just stops being the leaf.
-- Add MCP server wiring from package-declared MCP manifests (allow-listed).
+- Add `@arnilo/prism-mcp` wiring from package-declared MCP manifests
+  (allow-listed). Not a first-party agent bus.
 - **Obscura web/browser engine (host-owned binary).** Daemon lifecycle for
   the host-installed Obscura binary (fail-closed spawn, readiness, group
   close — mirrors `agy` handling); expose its complete advertised MCP
   surface, managed/external CDP (`connectObscuraCdp`), and Playwright
-  `connectOverCDP` composition; optional `playwright-core` peer for browser
-  automation and e2e test runs. All capabilities hidden when the binary is
-  absent.
+  `connectOverCDP` composition. Add exact `playwright-core@1.61.0` when this
+  plumbing lands, not merely because `prism-web-tools` is installed. All
+  capabilities hidden when the binary is absent. Skip `/brave`, `/exa`,
+  `/firecrawl`.
 - Keep mock-mode and existing chat flows byte-compatible.
 
 ### Exit Gate
@@ -286,7 +335,8 @@ fixes.
 - Linux gates pass: `cargo fmt --check`, `cargo check --all-targets`,
   `cargo clippy --all-targets -- -D warnings`, server/daemon tests.
 - A session can run the nine coding tools against an open Clay document with
-  dirty-buffer fidelity, approval prompts, and persisted history.
+  dirty-buffer fidelity, approval prompts, and persisted history. D1 resume
+  without explicit `allowCustom` still passes.
 - Compaction (manual and threshold) runs mid-session; observational memory
   attach works against the daemon store.
 
@@ -315,13 +365,13 @@ fixes.
 - **Knowledge-base options (opt-in, per workspace).** Both load via
   `kernel.load(...)` only when the user enables them; both surface to `st`
   by inheritance (st extends this agent).
-  - `@arnilo/prism-wiki` (llm-wiki): per-codebase `.wiki/` knowledge base —
+  - `@arnilo/prism-memory/wiki` (llm-wiki): per-codebase `.wiki/` knowledge base —
     `/wiki-init`, `/wiki-refresh` (SHA-256 Merkle-diff incremental),
     `/wiki-lint`; `wiki_search`/`wiki_read_page`/`wiki_record_insight` tools;
     OKF v0.2 bundles; `wiki-maintainer`/`wiki-searcher` skills; profiles
     codebase/pkm/hybrid/auto; optional `qmd` CLI for hybrid search with
     catalog fallback when absent.
-  - `@arnilo/prism-graft`: context-graph code search — pull tools
+  - `@arnilo/prism-memory/graft`: context-graph code search — pull tools
     (`graft_ask`/`graft_grep`/`graft_callers`/`graft_skeleton`/`graft_map`/
     `graft_blast`), gated push retrieval packs + first-turn orientation,
     post-edit blast radius (`graft:dirty`). Graft CLI resolved fail-closed
@@ -332,7 +382,8 @@ fixes.
   `web_search` + `web_fetch` through the replaceable HTML search profile;
   native `obscura_fetch`/`obscura_scrape` (public-HTTP(S)-only validation,
   byte/count/timeout caps, `allowEval`-gated expressions, untrusted-content
-  labeling); browser automation through CDP (`prism-browser` surface:
+  labeling); browser automation through CDP
+  (`@arnilo/prism-web-tools/browser` surface:
   observe, `browser_evaluate` policy-gated, block/throttle/emulate); and
   Playwright-driven e2e testing via the CDP composition. Untrusted web
   content never reaches tool-authoritative state without the normal
@@ -423,22 +474,18 @@ pi model. Must land before any third-party package (`st`) is planned.
 
 - **Package CLI (pi verbs).** Top-level commands, not `clay package add`:
   - `clay install npm:@arnilo/st` / `clay install npm:@arnilo/st@1.2.3`
-  - `clay install github:arnilo/st` / `clay install github:arnilo/st@v1.2.3`
   - `clay remove npm:@arnilo/st`
   - `clay list`
   - `clay update` — update Clay itself from the channel that installed it
   - `clay update --extensions` — update installed packages only
   - `clay update --all` — Clay + packages
   - `clay update npm:@arnilo/st` — one package
-- **Two package sources in v1.** No git clone, no local path, no tarball URL,
+- **One package source in v1.** No git clone, no local path, no tarball URL,
   no Clay-owned registry.
   - `npm:<name>` / `npm:@scope/name[@version]` — npm registry. Versioned
     specs are pinned and skipped by `update --extensions` (pi rule). Fetch
     still delegated to an npm-compatible manager (existing 2026-05-08
     decision); Clay does not become a registry.
-  - `github:owner/repo[@tag]` — GitHub **Releases** source tarball or a
-    single `*.tgz` release asset, not `git clone`. Untagged → latest
-    release. Tag is pinned like npm versions.
 - **Install ≠ execute, but install does write the load line.** `clay install`
   fetches, records provenance, and appends an idempotent
   `loadPackage("<name>")` to `~/.config/clay/init.js`. Enable, adopt, revoke,
@@ -446,15 +493,16 @@ pi model. Must land before any third-party package (`st`) is planned.
   inspect|rollback`). Third-party JS still does not run until adopt; a load
   line without adopt is fail-closed. First-party `@clay/*` packages are
   unchanged (bundled, explicit load).
-- **Clay self-distribution (v1).** npm package `@arnilo/clay` only. Homebrew
-  skipped for now (post-roadmap). `clay update` uses the npm channel; no
+- **Clay self-distribution (v1).** npm package `@arnilo/clay` and curl installer only. Homebrew
+  skipped for now (post-roadmap). `clay update` uses the npm channel or running the curl update command; no
   third updater. Unsigned payloads stay rejected (`src-tauri/src/release.rs`).
 - Keep in-app package UI on the same service as the CLI. Do not invent a
   Clay registry or a second package manager.
+- Bundle installation of used binaries. Such as: qmd, graft, obscura, ripgrep etc. Check if host has binaries installed. If not, install with permission. Include any other binaries needed.
 
 ### Exit Gate
 
-- Linux: `clay install npm:<fixture>` / `github:<fixture-release>` round-trip
+- Linux: `clay install npm:<fixture>`  round-trip
   to store + `clay remove` + `clay update --extensions` against pinned vs
   floating specs; lifecycle scripts stay off unless `--allow-scripts`.
 - `clay install` appends `loadPackage` once, never enables, adopts, or
@@ -499,7 +547,7 @@ pi model. Must land before any third-party package (`st`) is planned.
   session index. It uses the same `session.search` surface as the base coding
   agent — never a second session store.
 - **Linux desktop capability (`st` extension only).**
-  `@arnilo/prism-computer-use-linux` over a host-owned
+  `@arnilo/prism-coding-tools/computer-use-linux` over a host-owned
   `computer-use-linux` MCP binary: accessibility-tree observation,
   screenshots, window targeting, input synthesis. DeviceAdapter admission
   stays deny-by-default, setup tools opt-in, mutating calls require
@@ -564,8 +612,9 @@ pi model. Must land before any third-party package (`st`) is planned.
 - `fix` loop: ingest issues → one `create-plan` → walk issues one by one
   with the same per-task execute → test → validate → commit loop, same
   decision gate and end-of-plan surface. Done when every issue is resolved.
-- Orchestrator runs host-side in the daemon per the documented Prism 0.3.2
-  bounded iterate-until-done host-loop pattern: one `runWorkflow` per
+- Orchestrator runs host-side in the daemon with
+  `@arnilo/prism-core/runtime/workflows@0.4.0`, using the retained bounded
+  iterate-until-done host-loop pattern: one `runWorkflow` per
   iteration (task / implement / test / validate), iteration state in
   workflow inputs, explicit termination predicates + budgets with typed
   fail-closed `BudgetExhaustedError`, `replayWorkflow` per iteration run id
@@ -610,8 +659,8 @@ pi model. Must land before any third-party package (`st`) is planned.
   their **whole** frozen suites (not only the failing check). Frozen
   test/validation plans are not rewritten for the feedback task. Bounded
   retry on this append→implement→full-rerun cycle; then ask the user.
-- **Validation always includes ponytail-review.** Not optional. Use Prism's
-  already-shipped ponytail adaptation. Over-engineering review is part of
+- **Validation always includes ponytail-review.** Not optional. Use
+  `@arnilo/prism-coding-tools/ponytail`. Over-engineering review is part of
   every validation pass, alongside AC checks.
 - **Skills `st` ships.** Loop auto-prompts each. Generic `SKILL.md` + project
   `references/` except project execution refs (no generic base):
@@ -621,12 +670,11 @@ pi model. Must land before any third-party package (`st`) is planned.
   - `create-validation-plan` / `execute-validation` (ponytail-review in both)
   - `create-decision-log` — also embedded in create-plan and execute-plan.
 - Planning-time task typing in the roadmap schema (`type`, `model`,
-  `delegate` fields) mapped at execution to: base agent run, specific Prism
-  model, or Antigravity delegation via
-  `createAntigravityDelegationTool`-equivalent wiring behind a feature check
-  for `agy` availability.
-- Optional: Prism evals wired as a release gate for `st` behavior
-  regressions.
+  `delegate` fields) maps here only to a base-agent run or specific Prism
+  model. External-agent execution is deliberately deferred to the direct
+  runtime adapters in Phases 9–10; no Prism Antigravity adapter is added.
+- Optional: `@arnilo/prism-core/governance/evals` wired as a release gate for
+  `st` behavior regressions.
 
 ### Exit Gate
 
@@ -639,15 +687,16 @@ pi model. Must land before any third-party package (`st`) is planned.
   reference; Compromises / Further Actions were surfaced (and optionally
   written onto the workflow roadmap); per-task commits exist only after both
   pass; follow-recorded-principles choice present; per-task model routing
-  with at least two providers/models in one run; Antigravity path proven or
-  proven-absent with a clean skip.
+  with at least two providers/models in one run; and an unavailable external
+  runtime is reported without a silent Prism or model-provider fallback.
 
 ## Phase 7: `st` Memory Cadence and Autonomy Hardening
 
 ### Scope
 
-- Observational memory attached to the `st` orchestrator session and each
-  durable child session: per-task compaction (fast strategy), recall tool
+- `@arnilo/prism-memory/compaction/observational-memory` attached to the `st`
+  orchestrator session and each durable child session: per-task compaction
+  (fast strategy), recall tool
   active, `om:status`/`om:view` surfaces in Clay UI, and the right-pane
   Observational Memory tab (Phase 2 UI spec) shows live observe/reflect/drop
   activity. Defaults: worker models configured separately from the session
@@ -688,6 +737,83 @@ pi model. Must land before any third-party package (`st`) is planned.
   plan all pass; documentation is internally consistent; `st` install/
   remove cycles leave no residue in the base agent.
 
+## Phase 9: External Runtime Contract and Claude Code Delegation
+
+### Scope
+
+- Introduce a direct, core-owned external-runtime boundary beside the native
+  Prism host. Keep it deliberately small: lifecycle (`start`, `prompt`,
+  `cancel`, `resume`, `respond`), normalized bounded events, and a declared
+  capability set. Clay owns the delegation record, policy-bundle fingerprint,
+  process lifecycle, redaction, and UI; the vendor owns its agent loop and
+  conversation context. Do not model a foreign coding agent as a Prism
+  provider, and do not require ACP.
+- Compile one task-scoped Clay policy bundle into each runtime's documented
+  controls: task instructions, translated skills, declared tool policy,
+  Clay MCP server/configuration, workspace, and acceptance policy. Clay MCP
+  tools are an independent tool plane, not agent lifecycle control. Preserve
+  same-user-child authority disclosure; launch without a shell, with bounded
+  I/O, cancellation, and cleanup.
+- Add a Claude Code Agent SDK adapter. Use custom `systemPrompt`,
+  `settingSources: []`, explicit built-in tool selection/disallow rules,
+  explicit skills/agents/hooks, and `strictMcpConfig` with only Clay-declared
+  MCP servers. Mediate `canUseTool` in Clay so an approval can allow, deny,
+  or safely modify the requested input. Preserve vendor/organization safety
+  policy as non-overridable.
+- Extend session/event persistence and AG-UI projection with runtime identity,
+  vendor session identity, capability state, and approval/question state.
+  Raw vendor tool output stays out of FTS and logs by default; credentials
+  remain in vendor-supported authentication stores and never cross an event
+  or UI boundary.
+- Use existing Command Centre picker patterns and capability-driven controls;
+  never add controls that the runtime has not declared. Detailed UI work must
+  follow the mandatory Clay UI skill stack and visual/accessibility review.
+
+### Exit Gate
+
+- A Claude Code fixture proves isolated configuration, Clay prompt/skill/tool
+  projection, strict MCP selection, approval allow/deny/modified-input flow,
+  cancellation, and resumed-session identity. Tests prove denied controls do
+  not execute, unsupported controls do not render, secrets do not reach
+  events/logs, and unavailable/auth-failed SDK state is fail-closed. A
+  separately recorded authenticated manual run verifies the real vendor path.
+
+## Phase 10: Antigravity Delegation and Truthful Control Boundary
+
+### Scope
+
+- Add a direct Antigravity adapter around the documented long-lived headless
+  protocol: `agy --input-format stream-json --output-format stream-json`.
+  Map `init`, `step_update`, and terminal `result` events; preserve the
+  vendor `conversation_id`; support documented model/effort/agent selection,
+  conversation resumption, SIGINT/process-group cancellation, and bounded
+  shutdown. Hide this runtime when `agy` is absent or authentication fails.
+- Generate and load Clay's task policy through Antigravity's documented custom
+  agents, skills, plugins, MCP, sandbox, and permission configuration. Treat
+  this as a vendor-native instruction overlay and policy constraint, not a
+  replacement for Antigravity's base system behavior or a claim that
+  built-in tools are removed.
+- Represent the documented limitation explicitly: headless Antigravity uses
+  permission policy, not Clay's live per-tool approval callback; its stream
+  rejects `control_request` and `control_response`. Do not offer Clay
+  approve/edit/reject controls, do not use `--dangerously-skip-permissions`,
+  and do not claim ACP support. Offer a PTY terminal fallback for users who
+  need the agent's native interactive controls.
+- Keep runtime capability declarations, policy-bundle validation, event-size
+  bounds, transcript redaction, process cleanup, and user-visible failure
+  states shared with Phase 9; vendor-specific event data remains inert and
+  cannot grant Clay filesystem, shell, network, or mutation authority.
+
+### Exit Gate
+
+- With an authenticated `agy` fixture, Clay projects text/tool/result events,
+  resumes the exact conversation, and cancels a running task without a shell
+  leak. Permission-policy denial blocks configured command/MCP cases; the UI
+  never displays unsupported live-approval controls. Missing binary/auth,
+  malformed NDJSON, oversized events, and interrupted sessions fail closed;
+  a PTY fallback test proves native controls remain reachable without screen
+  scraping as a structured adapter.
+
 ## Resolved this iteration (logged 2026-08-30)
 
 1. **`st` identity and channels.** Product `st`. npm `@arnilo/st`. Clay npm
@@ -714,9 +840,9 @@ pi model. Must land before any third-party package (`st`) is planned.
    implements the documented pattern; revisit the primitive only if Prism
    ships it and the host loop shows measured pain (iteration latency, state
    serialization overhead).
-4. **Knowledge bases adopted as opt-in options.** `@arnilo/prism-wiki`
+4. **Knowledge bases adopted as opt-in options.** `@arnilo/prism-memory/wiki`
    (llm-wiki: per-codebase `.wiki/` knowledge base, OKF v0.2, Merkle refresh,
-   `wiki_*` tools) and `@arnilo/prism-graft` (context-graph code search,
+   `wiki_*` tools) and `@arnilo/prism-memory/graft` (context-graph code search,
    pull tools + push retrieval packs + blast radius) load via `kernel.load`
    when enabled; both available to the clay coding agent and inherited by
    `st`. Graft CLI resolves fail-closed and hides when absent; `qmd`
@@ -730,8 +856,9 @@ pi model. Must land before any third-party package (`st`) is planned.
    per session, not per workspace, to start.
 7. **Web/browser via Obscura; desktop via computer-use-linux.** Web search,
    content fetch, CDP browser automation, and Playwright e2e all ride the
-   Obscura engine (`@arnilo/prism-obscura` + `prism-browser` + optional
-   `playwright-core`), host-installed binary, full advertised MCP surface,
+   Obscura engine (`@arnilo/prism-web-tools/obscura` +
+   `@arnilo/prism-web-tools/browser` + optional `playwright-core`),
+   host-installed binary, full advertised MCP surface,
    hidden when absent — for clay and `st` alike. `st` additionally ships the
    `computer-use-linux` extension capability (deny-by-default, approvals per
    the acceptance policy).
@@ -749,6 +876,17 @@ pi model. Must land before any third-party package (`st`) is planned.
    become agent context without explicit user action. `st` adds workflow/run/
    phase/task/checkpoint/status annotations, not another store.
 
+## Resolved this iteration (Prism 0.4.0 draft)
+
+- Replace the 22 clay-agent 0.3 pins with 0.4 family packages. Phase 0
+  migrates the live daemon (`@arnilo/prism`, `@arnilo/prism-core`,
+  `@arnilo/prism-providers` + `better-sqlite3`; drop unused
+  `prism-model-router`). Phase 1 adds `prism-coding-tools`, `prism-web-tools`,
+  `prism-memory`, `prism-mcp`. Do not adopt `prism-antigravity-agent`,
+  `prism-office`, `prism-acp-agent`, or `prism-ag-ui` in the daemon. Phase 10
+  owns direct `agy` integration. Import subpaths explicitly; no 0.3/0.4 mix;
+  no compatibility shims; no persisted-schema migration.
+
 ## Open Decisions (need `decision-logs/` before implementation)
 
 1. ~~`st` package name, registry id, and distribution channel.~~
@@ -761,6 +899,12 @@ pi model. Must land before any third-party package (`st`) is planned.
 5. ~~Observational memory defaults.~~ (Resolved: worker models configured
    separately from the session model; `compactAfterTokens` default 80,000,
    user-configurable; retention per session — not per workspace — to start.)
+6. ~~Prism 0.4.0 family pin set in this draft. Log before Phase 0 is
+   planned.~~ (Resolved: exact `@arnilo/prism@0.4.0`, `prism-core@0.4.0`,
+   `prism-providers@0.4.0` + direct `better-sqlite3@12.11.1`; subpath imports
+   only; `model-router` dropped; coding/web/memory/MCP deferred to Phase 1;
+   Antigravity is a direct Phase 10 adapter, while office/ACP/AG-UI stay out
+   of the daemon. `decision-logs/2026-09-02-0121-prism-0.4.0-clay-agent-family-pins.md`.)
 
 ## Post-Roadmap (not in scope)
 

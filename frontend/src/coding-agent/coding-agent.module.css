@@ -1,0 +1,374 @@
+/* Coding Agent split surface (plan 108 task 8).
+ * Token-only styling, blueprint-grid compartmentalization: 1px grid gaps on
+ * contrasting surfaces, zero corner radius, content types colored by typed
+ * theme tokens. Dynamic recipe variables fall back to core tokens. */
+
+.surface {
+  height: 100%;
+  min-height: 0;
+  background: var(--clay-surface-main);
+  color: var(--clay-text-primary);
+}
+
+.split {
+  height: 100%;
+}
+
+.leftPane,
+.rightPane {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.left,
+.right {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+}
+
+.left {
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto auto;
+}
+
+.right {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.separator {
+  background: var(
+    --clay-ds-coding-agent-default-separator-rest-background-color,
+    var(--clay-border-strong)
+  );
+}
+
+/* ---------- left pane ---------- */
+
+.header {
+  display: grid;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: var(--clay-spacing-md, 16px) var(--clay-spacing-lg, 24px);
+  border-bottom: var(--clay-dimension-border-thin, 2px) solid
+    var(--clay-border-strong);
+}
+
+.transcript {
+  overflow-y: auto;
+  min-height: 0;
+  padding: var(--clay-spacing-md, 16px) var(--clay-spacing-lg, 24px);
+  display: grid;
+  gap: 1px;
+  align-content: start;
+  background: var(--clay-border-hairline);
+  scrollbar-color: var(--clay-surface-scrollbar)
+    var(--clay-surface-scrollbar-track);
+}
+
+/* Uniform-height truncated boxes: fixed 3-line clamp — metadata-driven
+ * truncation with a fixed line count, so height never depends on content. */
+.box {
+  display: grid;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  text-align: left;
+  cursor: pointer;
+  background: var(--clay-surface-panel);
+  color: var(--clay-text-primary);
+  border: 0;
+  border-left: var(--clay-dimension-border-thin, 2px) solid
+    var(--clay-border-hairline);
+  font: inherit;
+}
+
+.box:hover {
+  background: var(--clay-surface-hover);
+}
+
+.box:focus-visible {
+  outline: var(--clay-dimension-border-thin, 2px) solid var(--clay-focus-ring);
+  outline-offset: calc(-1 * var(--clay-dimension-border-thin, 2px));
+}
+
+.box[aria-pressed="true"] {
+  background: var(--clay-surface-selected);
+}
+
+.boxContent {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  height: 4.35em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--clay-font-mono, var(--clay-font-monospace));
+}
+
+.boxLabel {
+  font-size: 0.8em;
+  color: var(--clay-text-muted);
+}
+
+/* Box color by content type — typed tokens only (plan 108 task 8). */
+.box_user {
+  border-left-color: var(--clay-border-strong);
+}
+
+.box_assistant {
+  border-left-color: var(--clay-accent-primary);
+}
+
+.box_reasoning {
+  border-left-color: var(--clay-border-strong);
+  color: var(--clay-text-muted);
+}
+
+.box_usage {
+  border-left-color: var(--clay-text-muted);
+  color: var(--clay-text-muted);
+}
+
+.box_error {
+  border-left-color: var(--clay-diagnostic-error);
+  color: var(--clay-diagnostic-error);
+}
+
+.box_tool {
+  border-left-color: var(--clay-accent-primary);
+  color: var(--clay-text-muted);
+}
+
+.box_skill {
+  border-left-color: var(--clay-accent-primary);
+  color: var(--clay-text-muted);
+}
+
+.empty {
+  margin: auto;
+  padding: var(--clay-spacing-xl, 32px) 0;
+  text-align: center;
+}
+
+.composerArea {
+  border-top: var(--clay-dimension-border-thin, 2px) solid
+    var(--clay-border-strong);
+}
+
+.statusLine {
+  margin: 0;
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-lg, 24px);
+  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+  background: var(--clay-surface-panel);
+}
+
+.completions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  background: var(--clay-border-hairline);
+  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+  max-height: 40%;
+  overflow-y: auto;
+}
+
+.completionRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--clay-spacing-md, 16px);
+  width: 100%;
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-lg, 24px);
+  background: var(--clay-surface-main);
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.completionRow:hover,
+.completionRow[aria-selected="true"] {
+  background: var(--clay-surface-hover);
+}
+
+.completionRow:focus-visible {
+  outline: var(--clay-dimension-border-thin, 2px) solid var(--clay-focus-ring);
+  outline-offset: calc(-1 * var(--clay-dimension-border-thin, 2px));
+}
+
+.completionName {
+  font-family: var(--clay-font-mono, var(--clay-font-monospace));
+  flex: 0 0 auto;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--clay-spacing-sm, 12px);
+  padding: var(--clay-spacing-md, 16px) var(--clay-spacing-lg, 24px);
+}
+
+.composerActions {
+  display: inline-flex;
+  gap: var(--clay-spacing-xs, 8px);
+}
+
+/* ---------- status row + extension strip ---------- */
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--clay-spacing-md, 16px);
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-lg, 24px);
+  border-top: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+  background: var(--clay-surface-panel);
+}
+
+.statusLeft,
+.statusRight {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extensionStrip {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-md, 16px);
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-lg, 24px);
+  border-top: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+  background: var(--clay-surface-panel);
+  overflow: hidden;
+}
+
+/* ---------- right pane ---------- */
+
+.detail {
+  display: grid;
+  gap: var(--clay-spacing-xs, 8px);
+  margin: var(--clay-spacing-sm, 12px);
+  padding: var(--clay-spacing-sm, 12px);
+  border: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-strong);
+  background: var(--clay-surface-panel);
+  max-height: 45%;
+  overflow: hidden;
+}
+
+.detailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--clay-spacing-sm, 12px);
+}
+
+.detailContent {
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--clay-font-mono, var(--clay-font-monospace));
+}
+
+.tabs {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  border-top: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+}
+
+.tabStrip {
+  display: flex;
+  gap: 1px;
+  background: var(--clay-border-hairline);
+  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+}
+
+.tab {
+  flex: 0 0 auto;
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-md, 16px);
+  background: var(--clay-surface-main);
+  color: var(--clay-text-muted);
+  cursor: pointer;
+  border: 0;
+  font: inherit;
+}
+
+.tab:hover {
+  background: var(--clay-surface-hover);
+  color: var(--clay-text-primary);
+}
+
+.tab[data-selected="true"] {
+  background: var(--clay-surface-selected);
+  color: var(--clay-text-primary);
+  box-shadow: inset 0 calc(-1 * var(--clay-dimension-border-thin, 2px)) 0 0
+    var(--clay-accent-primary);
+}
+
+.tab:focus-visible {
+  outline: var(--clay-dimension-border-thin, 2px) solid var(--clay-focus-ring);
+  outline-offset: calc(-1 * var(--clay-dimension-border-thin, 2px));
+}
+
+.tabPanel {
+  min-height: 0;
+  overflow: auto;
+  padding: var(--clay-spacing-md, 16px);
+  background: var(--clay-surface-panel);
+}
+
+.tabEmpty {
+  display: grid;
+  gap: var(--clay-spacing-sm, 12px);
+  justify-items: start;
+}
+
+.contextList {
+  margin: 0;
+  display: grid;
+  gap: 1px;
+  background: var(--clay-border-hairline);
+}
+
+.contextRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--clay-spacing-md, 16px);
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  background: var(--clay-surface-main);
+}
+
+.contextRow dd {
+  margin: 0;
+}
+
+.sessionList {
+  display: grid;
+  gap: var(--clay-spacing-xs, 6px);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sessionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--clay-spacing-sm, 12px);
+  min-height: 24px;
+}

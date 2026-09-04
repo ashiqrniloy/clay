@@ -22,6 +22,7 @@
 }
 
 .dialog {
+  position: relative;
   background: var(
     --clay-ds-modal-default-dialog-rest-background-color,
     var(
@@ -99,4 +100,26 @@
   );
   font-size: var(--clay-text-title-size);
   line-height: var(--clay-text-title-line-height);
+}
+
+.close {
+  position: absolute;
+  top: var(--clay-spacing-sm, 12px);
+  right: var(--clay-spacing-sm, 12px);
+  display: grid;
+  place-items: center;
+  width: var(--clay-dimension-target-min, 32px);
+  height: var(--clay-dimension-target-min, 32px);
+  border: none;
+  border-radius: var(--clay-ds-modal-default-close-rest-border-radius, 0);
+  background: transparent;
+  color: var(
+    --clay-ds-modal-default-close-rest-text-color,
+    var(--clay-text-secondary)
+  );
+  cursor: pointer;
+}
+
+.close:hover {
+  color: var(--clay-text-primary);
 }

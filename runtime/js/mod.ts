@@ -11,6 +11,7 @@ export * as workspace from "./workspace.ts";
 export * as git from "./git.ts";
 export * as behavior from "./behavior.ts";
 export * as application from "./application.ts";
+export * as agent from "./agent.ts";
 export * as sdui from "./sdui.ts";
 export * as ui from "./ui.ts";
 export * as packages from "./packages.ts";

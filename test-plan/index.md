@@ -87,6 +87,8 @@ references) were replaced with current equivalents in modules 01, 04, 07, 10,
 | 13 | [Window splits](13-window-splits.md) | split/close/add-equal/move/resize panes, pane focus policies, per-pane document views + concurrent modes (22.2), Phase 22.8 per-tab multi-document isolation, shell keybinding overrides (per active tab since 22.3), direction-named split aliases (22.7), per-tab persistence cross-check (22.5), pane a11y roles + split/pane announcements (22.6) | `docs/reference/primitives/shell-layout-strategy.md`, `docs/development/accessibility.md` |
 | 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, selected-root tab binding and per-tab workspace/document isolation (22.8), open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), tab a11y (TabList/Tab roles, activate/create/close announcements) + cross-tab grant isolation/denial checks (22.6/22.8), tab-bar overflow scroll (22.7), active-typography geometry and sanitized tab labels (Plan 088), single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/react-tabs-and-splits.md`, `docs/wiki/modules/tabs-and-clients.md`, `docs/development/accessibility.md` |
 | 15 | [UI design systems](15-ui-design-systems.md) | built-in fallback startup, default `@clay/design-neobrutal` selection, `@clay/design-glass` reference system with solid fallbacks, watcher reload switching, invalid/revoked selection recovery with sanitized diagnostics and previous-generation retention, no-adoption security checks, color-authority conformance, restart persistence through `init.js`, 25-component recipe migration, DOM/state continuity, forced-colors/reduced-motion/transparency accessibility fallbacks, and cross-theme recoloring consistency (Plans 102, 103 & 104) | `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `.impeccable/review/plan-104/` |
+| 16 | [Agent host (clay-agent)](16-agent-host.md) | `clay:agent` facade configuration (autonomy default-off 2157, compaction strategies + OM `compactAfterTokens` 2158, workspace-scoped search metadata-only, session tree/checkout/fork/clone/checkpoint), init.js section 12 documentation cross-check, no-credential/no-hidden-key checks, MCP allow-list fail-closed validation, Obscura hidden-when-missing, Chat UI chrome unchanged; coding-tool dirty-buffer/approval/durable-run behavior pinned by automated suites | `clay-agent/README.md`, `docs/wiki/modules/clay-agent.md`, `docs/reference/clay-js-api/agent/`, `examples/init.js` (section 12) |
+| 17 | [Coding agent pi-parity (@clay/coding-agent)](17-coding-agent-parity.md) | Phase 2 pi-parity conformance: prompt→stream→tool ordering, steering, cancel, /compact manual+auto, /new, session list/resume/delete, provider/model switch, /tree+/fork+/clone, session-picker/open-as-fork equivalents, plan-file round-trip, composer growth, Shift+Tab effort cycle, status-row truth, extension strip; negative checks (cross-workspace search invisibility, disabled knowledge bases, secrets, unknown slash command, search-hit context) and stream-latency/UI-responsiveness budgets (plan 108 task 15) | `packages/coding-agent/docs/parity-checklist.md`, `packages/coding-agent/docs/index.md`, `docs/wiki/modules/clay-agent.md`, plan 108 |
 
 ## Coverage matrix (what to run when)
 
@@ -123,6 +125,7 @@ references) were replaced with current equivalents in modules 01, 04, 07, 10,
 | Plan 102 UI design systems (selection, switching, fallback/revocation recovery) | 15, 02 (C16–C18 watcher reload), 09 (adoption/revocation), 11 (switch latency) |
 | Plan 098 chunked document loading | 01 (L23–L24), 03 (F48–F52), 11 (Q34–Q37) |
 | Plan 099 server-authoritative editor performance and manual matrix | 01 (L25–L26), 03 (F53–F54), 04 (E37–E38), 08 (S33–S34), 11 (M1–M7), 13 (D20–D21), 14 (T77–T78); deep reference: `docs/development/performance.md` |
+| Agent host configuration surfaces (`clay:agent` facades, autonomy/compaction defaults, init.js agent section, MCP/Obscura fail-closed wiring) | 16, 02 (C24 raw-op denial still applies) |
 
 ## Plan 097 Phase 9 Linux execution record (2026-08-23)
 
@@ -356,3 +359,19 @@ of chat-only.
 No manual test step was deleted or weakened. Ledger coverage: Q38 added to
 `performance.budgets.feel` (`docs/development/tauri-react-parity-ledger.json`)
 with verification evidence; `tests/documentation_coverage.rs` passes.
+
+## Plan 107 Phase 1 agent host execution record (2026-09-02)
+
+Plan 107 tasks 1–13 shipped the Phase 1 agent host without a Chat UI change:
+configuration surfaces are the `clay:agent` facades and `examples/init.js`
+section 12. New module [16](16-agent-host.md) (steps A1–A19) covers the
+user-visible configuration; coding-tool dirty-buffer/approval/search-isolation
+behavior is pinned by the automated suites cited in that module, not manual
+steps. Chat UI chrome is recorded as unchanged (A1).
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 16 A1–A4 (config/docs cross-check) | PASS | `node --check examples/init.js` clean; canonical-example doc-registry tests green; inventory coverage gate pins `default:boolean=false` (2157) and `compactAfterTokens:number=80000` (2158); no credential/hidden-key surfaces added |
+| 16 A5–A15 (autonomy/compaction/search/tree/checkpoints) | PASS automated | clay-agent suites 49/49 incl. approval default-off, OM settings-provider override, workspace-scoped search with no context injection, checkpoint restore fail-closed |
+| 16 A16–A19 (MCP/Obscura fail-closed) | PASS automated | Empty/non-canonical allow-list rejection, missing-binary-hidden, no-vendor-imports tests; Rust `phase25_dependencies_deny_acp_agui_mcp` green |
+| Live GUI steps | NOT RUN (host ceiling, per index records) | Same no-input-backend ceiling documented for Plans 097/099/105; no Phase 1 manual step requires driving Chat (Phase 2 UI) |

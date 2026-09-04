@@ -18,6 +18,21 @@ export interface ChatStatus {
   status: string | null;
 }
 
+/** One bounded tool-activity row for the Coding Agent transcript strip. */
+export interface ToolActivityRow {
+  /** Stable id: toolCallId + phase. */
+  id: string;
+  name: string;
+  phase: string;
+}
+
+/** Cumulative tool counters for the Coding Agent Context tab (counts only). */
+export interface ToolStats {
+  total: number;
+  skills: number;
+  files: number;
+}
+
 interface ChatAgentModule {
   readonly agent: TauriClayAgent;
   /** Subscribe to versioned notifications for useSyncExternalStore. */
@@ -40,6 +55,10 @@ export interface ChatSnapshot {
   status: ChatStatus;
   /** Agent/conversation state from STATE_SNAPSHOT events. */
   state: Record<string, unknown>;
+  /** Rolling recent tool activity (last 8 phases), Coding Agent strip. */
+  tools: ToolActivityRow[];
+  /** Cumulative tool counters (plan 108 task 8); never content. */
+  toolStats: ToolStats;
 }
 
 function createChatAgent(): ChatAgentModule {
@@ -47,10 +66,14 @@ function createChatAgent(): ChatAgentModule {
   let version = 0;
   const listeners = new Set<() => void>();
   let status: ChatStatus = { streaming: false, status: null };
+  let tools: ToolActivityRow[] = [];
+  let toolStats: ToolStats = { total: 0, skills: 0, files: 0 };
   let snapshot: ChatSnapshot = {
     messages: [],
     state: {},
     status,
+    tools,
+    toolStats,
   };
 
   /** Rebuilds the immutable snapshot synchronously after any mutation. */
@@ -59,6 +82,8 @@ function createChatAgent(): ChatAgentModule {
       messages: [...agent.messages],
       state: { ...agent.state },
       status,
+      tools: [...tools],
+      toolStats: { ...toolStats },
     };
   };
 
@@ -113,6 +138,34 @@ function createChatAgent(): ChatAgentModule {
       }
       case "CUSTOM": {
         const name = (event as { name?: string }).name;
+        if (name === "clay.toolPhase") {
+          // Plan 108 task 8: bounded tool-activity rows (names + phase only,
+          // never payloads) for the Coding Agent transcript strip and the
+          // Context tab's category counts.
+          const value = (
+            event as { value?: { name?: string; phase?: string; toolCallId?: string } }
+          ).value;
+          if (value?.name && value.phase && value.toolCallId) {
+            const row: ToolActivityRow = {
+              id: `${value.toolCallId}:${value.phase}`,
+              name: String(value.name),
+              phase: String(value.phase),
+            };
+            tools = [...tools.filter((existing) => existing.id !== row.id), row].slice(-8);
+            toolStats = {
+              total: toolStats.total + 1,
+              skills:
+                toolStats.skills + (row.name === "load_skill" ? 1 : 0),
+              files:
+                toolStats.files +
+                (["read", "glob", "repo_search", "repo_list"].includes(row.name)
+                  ? 1
+                  : 0),
+            };
+            notify();
+          }
+          break;
+        }
         if (name === "clay.diagnostic") {
           const value = (
             event as { value?: { code?: string; message?: string } }
@@ -130,6 +183,7 @@ function createChatAgent(): ChatAgentModule {
       }
       case "RUN_STARTED": {
         status = { ...status, streaming: true };
+        tools = [];
         notify();
         break;
       }
