@@ -2062,7 +2062,7 @@ fn configuration_api_documents_phase22_8_workspace_surface_without_new_keys() {
         );
     }
 
-    let example = std::fs::read_to_string(root.join("examples/init.js"))
+    let example = std::fs::read_to_string(root.join("examples/config/init.js"))
         .expect("read canonical init.js example");
     assert_eq!(
         example
@@ -2082,7 +2082,7 @@ fn configuration_api_documents_phase22_8_workspace_surface_without_new_keys() {
 #[test]
 fn canonical_example_covers_theme_typography_and_modular_configuration() {
     let root = repository_root();
-    let example = std::fs::read_to_string(root.join("examples/init.js"))
+    let example = std::fs::read_to_string(root.join("examples/config/init.js"))
         .expect("read canonical init.js example");
 
     for import in [
@@ -2241,7 +2241,7 @@ fn plan099_configuration_surface_keeps_editor_performance_controls_host_owned() 
 #[test]
 fn phase28_canonical_example_lists_all_bindable_editor_commands() {
     let root = repository_root();
-    let example = std::fs::read_to_string(root.join("examples/init.js"))
+    let example = std::fs::read_to_string(root.join("examples/config/init.js"))
         .expect("read canonical init.js example");
 
     for (command, binding) in [
@@ -2300,7 +2300,7 @@ fn canonical_example_cross_checks_editor_layout_options_against_inventory() {
     // prose. The example documents each option exactly once, the enum values
     // match the inventory entry, and the configuration guide names the API.
     let root = repository_root();
-    let example = std::fs::read_to_string(root.join("examples/init.js"))
+    let example = std::fs::read_to_string(root.join("examples/config/init.js"))
         .expect("read canonical init.js example");
 
     // The example must document the option names and the bounded enum in the
@@ -2371,7 +2371,7 @@ fn canonical_example_cross_checks_remaining_configuration_options_against_invent
     // api-inventory.toml custom_properties, not prose: each surface is
     // documented exactly once and the inventory lists the same options.
     let root = repository_root();
-    let example = std::fs::read_to_string(root.join("examples/init.js"))
+    let example = std::fs::read_to_string(root.join("examples/config/init.js"))
         .expect("read canonical init.js example");
     let registry = ClayJsApiRegistry::from_docs(&root).expect("build registry from docs");
 
@@ -2537,9 +2537,9 @@ fn canonical_example_active_configuration_is_copy_safe() {
     let root = repository_root();
     let mut scanned = Vec::new();
     for relative in [
-        "examples/init.js",
-        "examples/packages/first-party.js",
-        "examples/packages/third-party.js",
+        "examples/config/init.js",
+        "examples/config/packages/first-party.js",
+        "examples/config/packages/third-party.js",
     ] {
         let text = std::fs::read_to_string(root.join(relative))
             .unwrap_or_else(|e| panic!("read {relative}: {e}"));

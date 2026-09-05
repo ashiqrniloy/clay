@@ -93,11 +93,17 @@ impl ControlCenter {
         Self::open_catalogue(&catalogue, session_id)
     }
 
-    /// Replaces the filter query and returns the filtered session. Filtering
-    /// resets the selection to index 0 (the item set changed).
+    /// Replaces the filter query and returns the filtered session. A
+    /// genuinely changed filter resets the selection to index 0 (the item
+    /// set changed); an unchanged query keeps it — the webview flushes the
+    /// same draft on Enter before activating, and that flush must not
+    /// clobber the arrow-selected item.
     pub(crate) fn set_query(&mut self, query: impl Into<String>) -> TransientMenuSession {
-        self.query = query.into();
-        self.selected_index = 0;
+        let query = query.into();
+        if query != self.query {
+            self.selected_index = 0;
+        }
+        self.query = query;
         self.session()
     }
 
@@ -545,6 +551,43 @@ mod tests {
             request.target,
             CommandExecutionTarget::ActiveDocument { document_id: 1 }
         );
+    }
+
+    #[test]
+    fn unchanged_query_keeps_arrow_selection_flush_before_activate() {
+        // The webview flush pattern re-sends the same draft via menuQuery
+        // right before menuActivate; that flush must not clobber the
+        // arrow-selected item. A genuinely changed query still resets.
+        let mut registry = CommandRegistry::new();
+        register_command(
+            &mut registry,
+            "markdown.togglePreview",
+            "Toggle Preview",
+            RoutingPolicy::ServerFirst,
+            vec![PackagePermission::ParseDocument],
+            Vec::new(),
+        );
+        register_command(
+            &mut registry,
+            "markdown.toggleList",
+            "Toggle List",
+            RoutingPolicy::ServerFirst,
+            vec![PackagePermission::ParseDocument],
+            Vec::new(),
+        );
+
+        let mut center = ControlCenter::open(&registry, 4);
+        center.set_query("toggle");
+        let session = center.move_selection(1);
+        assert_eq!(session.selected_index(), 1);
+        let session = center.set_query("toggle");
+        assert_eq!(
+            session.selected_index(),
+            1,
+            "flush of the unchanged draft must keep the selected item"
+        );
+        let session = center.set_query("toggleList");
+        assert_eq!(session.selected_index(), 0);
     }
 
     #[test]

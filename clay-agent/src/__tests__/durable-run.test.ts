@@ -98,6 +98,8 @@ async function codingFixture(): Promise<Fixture> {
     provider: "mock",
     model: "demo",
     workspaceRoot: "/ws",
+    // These tests exercise the opt-in suspend-on-tool-gate mechanism.
+    fullAutonomy: false,
   })) as { sessionId: string };
   return { host, reads: () => reads, sessionId: created.sessionId };
 }

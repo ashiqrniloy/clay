@@ -19,6 +19,28 @@ async function tempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "clay-agent-"));
 }
 
+test("built-in Chat profile exists on a fresh host", async () => {
+  const dataDir = await tempDir();
+  const host = await ClayAgentHost.create({
+    dataDir,
+    passphrase: "pass-phrase-ok",
+    mock: true,
+    emit: () => {},
+  });
+  const listed = (await host.handle("agentProfile.list", {})) as {
+    profiles: Array<{ name: string }>;
+  };
+  assert.ok(listed.profiles.some((profile) => profile.name === "Chat"));
+  // The server's ensure_tab_session default profile must be creatable
+  // without any package registration.
+  const created = (await host.handle("session.new", {
+    profile: "Chat",
+    provider: "mock",
+    model: "demo",
+  })) as { sessionId: string };
+  assert.ok(created.sessionId.length > 0);
+});
+
 test("prompt streams mock events, persists, and resumes", async () => {
   const dataDir = await tempDir();
   const events: unknown[] = [];

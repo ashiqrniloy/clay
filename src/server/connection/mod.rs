@@ -850,12 +850,25 @@ where
                 }
             } => {
                 if let Some(Ok(payload)) = agent_event {
-                    codec
-                        .write_server_message(
-                            &mut stream,
-                            &ServerMessage::Agent(Box::new((*payload).clone())),
-                        )
-                        .await?;
+                    // An oversized agent event (e.g. a multi-megabyte tool
+                    // result) must not kill the webview connection with a
+                    // codec FrameTooLarge: skip the frame and surface a
+                    // diagnostic instead. The transcript recovers from the
+                    // next snapshot; the daemon already clamps at source.
+                    let agent_message = ServerMessage::Agent(Box::new((*payload).clone()));
+                    if codec.encode_server_message(&agent_message).is_err() {
+                        let _ = codec
+                            .write_server_message(
+                                &mut stream,
+                                &ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::warning(
+                                    "agent.frame_too_large",
+                                    "Clay dropped an oversized agent event for this view; the run continued.",
+                                )),
+                            )
+                            .await;
+                        continue;
+                    }
+                    codec.write_server_message(&mut stream, &agent_message).await?;
                 }
                 continue;
             }

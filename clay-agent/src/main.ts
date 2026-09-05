@@ -53,7 +53,26 @@ async function main(): Promise<void> {
       write(params);
       return;
     }
-    write({ jsonrpc: "2.0", method, params });
+    try {
+      write({ jsonrpc: "2.0", method, params });
+    } catch (error) {
+      if (!(error instanceof FrameTooLargeError)) throw error;
+      // One oversized event (e.g. a multi-megabyte tool result) must never
+      // kill the run: degrade to an error event the server can surface.
+      const sessionId = (params as { sessionId?: string } | undefined)?.sessionId ?? "";
+      write({
+        jsonrpc: "2.0",
+        method,
+        params: {
+          sessionId,
+          event: {
+            type: "error",
+            message:
+              "Clay dropped an oversized agent event (JSON-RPC frame cap); the run continued without it. Narrow the tool output (e.g. repo_search path/outputMode) and retry.",
+          },
+        },
+      });
+    }
   };
 
   const handleLine = async (line: string): Promise<void> => {

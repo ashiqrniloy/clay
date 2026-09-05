@@ -18,12 +18,6 @@ import { pipeRelay } from "./events";
 import { sendRequest } from "../bridge/client";
 
 const RUN_TERMINAL = new Set(["RUN_FINISHED", "RUN_ERROR"]);
-/** Events that may precede this run's RUN_STARTED on the shared relay. */
-const PRE_RUN_NOISE = new Set([
-  "STATE_SNAPSHOT",
-  "MESSAGES_SNAPSHOT",
-  "CUSTOM",
-]);
 
 export interface ChatIntentContext {
   /** Current package UI version for intent validation. */
@@ -57,12 +51,20 @@ function chatIntentPayload(
   });
 }
 
+type AgentSender = (payload: string) => Promise<void>;
+
 export class TauriClayAgent extends AbstractAgent {
   private pendingPrompt: string | null = null;
   private uiVersion = 0;
+  private sender: AgentSender = sendRequest;
 
   setUiVersion(uiVersion: number) {
     this.uiVersion = uiVersion;
+  }
+
+  /** Pane-scoped sender (stamps tab id). Falls back to the process sendRequest. */
+  setSender(sender: AgentSender) {
+    this.sender = sender;
   }
 
   /** Queues composer text for the next `runAgent()` call. */
@@ -91,14 +93,16 @@ export class TauriClayAgent extends AbstractAgent {
           if (!started) {
             if (event.type === "RUN_STARTED") {
               started = true;
-            } else if (
-              PRE_RUN_NOISE.has(event.type) ||
-              // Cancelled before the daemon opened the run.
-              (event.type === "CUSTOM" &&
-                (event as { name?: string }).name === "clay.diagnostic")
-            ) {
+            } else if (event.type === "RUN_ERROR") {
+              subscriber.next(event);
+              subscriber.complete();
+              return;
+            } else {
+              // Snapshots/diagnostics/dup noise before this run's start.
               return;
             }
+          } else if (event.type === "RUN_STARTED") {
+            return;
           }
           subscriber.next(event);
           if (RUN_TERMINAL.has(event.type)) {
@@ -110,7 +114,7 @@ export class TauriClayAgent extends AbstractAgent {
         },
       });
       // Fire the validated server intent; streaming arrives over the relay.
-      void sendRequest(
+      void this.sender(
         chatIntentPayload(uiVersion, "chat.submit", prompt),
       ).catch((error) => {
         if (!subscriber.closed) subscriber.error(error);
@@ -120,7 +124,7 @@ export class TauriClayAgent extends AbstractAgent {
   }
 
   override abortRun() {
-    void sendRequest(chatIntentPayload(this.uiVersion, "chat.cancel")).catch(
+    void this.sender(chatIntentPayload(this.uiVersion, "chat.cancel")).catch(
       () => {
         // Server unreachable; the disconnect flow owns recovery.
       },
@@ -130,7 +134,7 @@ export class TauriClayAgent extends AbstractAgent {
   /** Queues a mid-run user message (pi-parity steer, plan 108 task 9).
    *  Server-side no-op when no run is active on the tab's session. */
   steer(text: string) {
-    void sendRequest(chatIntentPayload(this.uiVersion, "chat.steer", text)).catch(
+    void this.sender(chatIntentPayload(this.uiVersion, "chat.steer", text)).catch(
       () => {
         // Server unreachable; the disconnect flow owns recovery.
       },

@@ -10,7 +10,12 @@ use super::{ClientMessage, ServerMessage};
 const LENGTH_PREFIX_BYTES: usize = 4;
 
 /// Default maximum IPC frame size for Phase 4 protocol messages.
-pub const DEFAULT_MAX_FRAME_SIZE: usize = 1024 * 1024;
+/// 16 MiB: the UI lane to webviews. Read-side allocation is actual frame
+/// size (never the cap), so the ceiling costs nothing until a genuinely
+/// large frame (e.g. a multi-megabyte tool-result mirror) arrives. Kept
+/// below the daemon lane's 64 MiB so the webview never parses a
+/// multi-second JSON blob the transcript would truncate anyway.
+pub const DEFAULT_MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Codec {

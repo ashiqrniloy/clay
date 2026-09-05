@@ -3,7 +3,7 @@
 ## Source
 
 - `src/protocol/{runtime,sdui}.rs`
-- `src/server/ui.rs`, `src/server/mod.rs`
+- `src/server/ui.rs`, `src/server/mod.rs`, `src/server/connection/runtime.rs`
 - `src-tauri/src/bridge/{dto,session,forwarder}.rs`
 - `frontend/src/sdui/{types,state,actions,renderer,registry}.ts*`
 - `frontend/src/packages/PackageWorkspace.tsx`
@@ -74,7 +74,11 @@ removal (Phase 12).
     empty-tab landing); the empty-tab election ignores them. Launch/close is a
     package command (`coding-agent.profile` / `coding-agent.close`) the
     dispatcher answers with one `ShellClientCommandRequest` the client
-    re-parses deny-by-default (same projection as `settings.open`); the
+    re-parses deny-by-default (same projection as `settings.open`);
+    launching (`coding-agent.profile`) also sets the book's active
+    profile to `coding` server-side (`select_picker(Agent)`) so prompts
+    from the surface run with the coding tools instead of the profile-less
+    "Chat" default; the
     per-tab runtime pins the surface to its hosting pane (`agentSurfaceOpen`
     + `agentSurfacePaneId`) and auto-closes when the contribution disappears.
     The bundled `@clay/coding-agent` surface is provenance-exact host
@@ -83,7 +87,10 @@ removal (Phase 12).
     transcript + composer + status row + extension strip, right
     Files/Memory/Context tabs with selected-box full-content detail); every
     dynamic value rides the one AG-UI stream, third-party `pane` surfaces
-    render through the unchanged generic SDUI renderer. Two catalog gaps
+    render through the unchanged generic SDUI renderer. Its host-owned
+    `chat.submit`/`chat.cancel`/`chat.steer` controls bypass static-tree
+    source validation and are authorized by the bound tab session; they are
+    not arbitrary package actions. Two catalog gaps
     closed generically: `tabList` kind (React Aria Tabs, widget-local
     selection) and `textInput` `multiline` (native textarea, auto-grow,
     Enter submits / Shift+Enter newline).

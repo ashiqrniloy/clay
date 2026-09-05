@@ -1,9 +1,9 @@
 // ============================================================================
-// Clay canonical example configuration — examples/packages/first-party.js
+// Clay canonical example configuration — examples/config/packages/first-party.js
 // ============================================================================
 //
 // First-party package configuration: language-server grants + explicit
-// @clay/* package loads. Loaded from examples/init.js (section 11) via:
+// @clay/* package loads. Loaded from examples/config/init.js (section 11) via:
 //
 //   await loadConfigurationModule({ path: "./packages/first-party.js", optional: true });
 //

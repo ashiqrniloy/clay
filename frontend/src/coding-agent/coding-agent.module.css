@@ -156,6 +156,16 @@
     var(--clay-border-strong);
 }
 
+.approvalStrip {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-sm, 12px);
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-lg, 24px);
+  border-bottom: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+  background: var(--clay-surface-panel);
+}
+
 .statusLine {
   margin: 0;
   padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-lg, 24px);

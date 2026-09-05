@@ -84,6 +84,25 @@ fn transcript_entry_message(index: usize, entry: &AgentTranscriptEntry) -> Value
 }
 
 fn snapshot_events(snapshot: &AgentSessionSnapshot) -> Vec<AgUiEvent> {
+    let state = AgUiEvent::StateSnapshot {
+        snapshot: serde_json::json!({
+            "sessionId": snapshot.session_id,
+            "profile": snapshot.profile,
+            "provider": snapshot.provider,
+            "model": snapshot.model,
+            "mcpServers": snapshot.mcp_servers,
+            // Context-used-vs-window numerator (plan 108 task 9):
+            // bounded counter only, never transcript content.
+            "contextTokens": snapshot.context_tokens,
+        }),
+    };
+    // Book snapshots (empty session id — published by provider/model/profile
+    // switches) carry no transcript: emitting a MessagesSnapshot here would
+    // replace the live transcript with an empty list and visually wipe the
+    // conversation on every picker selection.
+    if snapshot.session_id.is_empty() {
+        return vec![state];
+    }
     vec![
         AgUiEvent::MessagesSnapshot {
             messages: snapshot
@@ -93,28 +112,22 @@ fn snapshot_events(snapshot: &AgentSessionSnapshot) -> Vec<AgUiEvent> {
                 .map(|(index, entry)| transcript_entry_message(index, entry))
                 .collect(),
         },
-        AgUiEvent::StateSnapshot {
-            snapshot: serde_json::json!({
-                "sessionId": snapshot.session_id,
-                "profile": snapshot.profile,
-                "provider": snapshot.provider,
-                "model": snapshot.model,
-                "mcpServers": snapshot.mcp_servers,
-                // Context-used-vs-window numerator (plan 108 task 9):
-                // bounded counter only, never transcript content.
-                "contextTokens": snapshot.context_tokens,
-            }),
-        },
+        state,
     ]
 }
 
 fn inventory_state(inventory: &AgentInventory) -> Value {
     // Arrays are already bounded server-side; pass them through as plain data.
+    // provider/model carry the current book selection so a freshly mounted
+    // webview immediately knows the configured pair (STATE_SNAPSHOT merge
+    // keeps them until changed).
     serde_json::json!({
         "providers": inventory.providers,
         "models": inventory.models,
         "profiles": inventory.profiles,
         "sessions": inventory.sessions,
+        "provider": inventory.provider,
+        "model": inventory.model,
     })
 }
 
@@ -198,13 +211,16 @@ fn adapt_wire_event(session_id: &str, event: &AgentWireEvent) -> Vec<AgUiEvent> 
             }),
         }],
         AgentWireEvent::Permission {
+            session_id,
+            run_id,
             request_id,
             tool_name,
             allowed,
-            ..
         } => vec![AgUiEvent::Custom {
             name: "clay.permissionRequest".into(),
             value: serde_json::json!({
+                "sessionId": session_id,
+                "runId": run_id,
                 "requestId": request_id,
                 "toolName": tool_name,
                 "allowed": allowed,
@@ -271,6 +287,18 @@ mod tests {
         assert_eq!(snapshot["provider"], "mock");
         assert_eq!(snapshot["model"], "mock-mini");
         assert_eq!(snapshot["mcpServers"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn book_snapshot_without_session_emits_state_only() {
+        // Book snapshots (provider/model/profile switches) carry no transcript;
+        // a MessagesSnapshot here would wipe the live transcript on every
+        // picker selection.
+        let mut snapshot = sample_snapshot();
+        snapshot.session_id = String::new();
+        let events = snapshot_events(&snapshot);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], AgUiEvent::StateSnapshot { .. }));
     }
 
     #[test]
@@ -430,6 +458,8 @@ mod tests {
                 profile: "chat".into(),
                 updated_at: "2026-08-23T00:00:00Z".into(),
             }],
+            provider: "mock".into(),
+            model: "mock-mini".into(),
         };
         let events = adapt_agent_message(&AgentServerMessage::Inventory(inventory));
         assert_eq!(events.len(), 1);

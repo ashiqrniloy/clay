@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -44,7 +44,7 @@ import {
   providerTextDelta,
   redactAgentEvent,
   resolveActiveSkills,
-  resumeAgentRun,
+  resumeAgentRunStream,
 } from "@arnilo/prism";
 import {
   createKeychainCredentialStore,
@@ -63,7 +63,7 @@ import {
 import type { SettingsProvider } from "@arnilo/prism";
 import type { AgentIdentity } from "@arnilo/prism";
 import { ownershipFromIdentity } from "@arnilo/prism";
-import { CODING_TOOL_NAMES, buildCodingTools } from "./coding-tools.js";
+import { CODING_TOOL_NAMES, buildCodingTools, normalizeToolCaps, type RepositoryToolCaps } from "./coding-tools.js";
 import { connectAllowListedMcpServers, MAX_MCP_SERVERS, type ConnectedMcpServers } from "./mcp.js";
 import { resolveObscuraBinary, spawnObscuraHarness, type ObscuraHarness } from "./obscura.js";
 import {
@@ -193,6 +193,9 @@ interface LiveSession {
   readonly observationalMemory: boolean;
   /** Live tools for this session (empty for Chat without OM). */
   readonly tools: ToolDefinition[];
+  /** Last durable-run suspension: expectedVersion source for run.resume
+   *  when the client omits it, plus the pending approval ids. */
+  suspension?: { runId: string; version: number };
 }
 
 /** In-flight LLM branch-summary refinements: sessionId → branch point id. */
@@ -200,6 +203,24 @@ interface LiveSession {
 /** Persist the live book's provider/model onto the session record (plan 108
  *  task 9): a picker switch mid-session survives daemon restart and resume.
  *  Best-effort — a store without appendSession skips persistence. */
+/** Load user-configured repository scan caps from tool-caps.json in the
+ *  agent data dir (beside book.json). Missing file = defaults; malformed
+ *  file = warn and fall back to defaults (never blocks daemon boot). */
+async function loadToolCaps(
+  dataDir: string,
+): Promise<{ caps: RepositoryToolCaps; file: string }> {
+  const file = join(dataDir, "tool-caps.json");
+  try {
+    const raw = JSON.parse(await readFile(file, "utf8"));
+    return { caps: normalizeToolCaps(raw), file };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      console.error(`[tool-caps] ignoring malformed ${file}: ${String(error)}`);
+    }
+    return { caps: {}, file };
+  }
+}
+
 async function persistProviderModel(
   persistence: SqlitePersistence,
   sessionId: string,
@@ -314,6 +335,13 @@ export class ClayAgentHost {
    *  extension API carries no session key on `getEntries`. Upgrade path:
    *  thread sessionId through the prism extension options when it grows one. */
   private activeGraftSessionId: string | undefined;
+  /** Prism ollama ships no catalog; host must call listOllamaModels. */
+  private ollamaDiscoveryAttempted = false;
+  /** User-configured repository scan caps (tool-caps.json beside book.json;
+   *  decision 2026-09-05). Empty = Prism defaults. */
+  private readonly toolCaps: RepositoryToolCaps;
+  /** Caps file path cited in truncation errors. */
+  private readonly capsFile: string;
 
   private constructor(
     readonly dataDir: string,
@@ -325,9 +353,12 @@ export class ClayAgentHost {
     private readonly omConfig: HostOptions["observationalMemory"],
     private readonly mcpAllowList: readonly unknown[],
     resolveObscura: () => string | undefined,
+    toolCaps: { caps: RepositoryToolCaps; file: string },
   ) {
     this.redactor = createSecretRedactor([]);
     this.resolveObscura = resolveObscura;
+    this.toolCaps = toolCaps.caps;
+    this.capsFile = toolCaps.file;
   }
 
   static async create(options: HostOptions): Promise<ClayAgentHost> {
@@ -354,6 +385,13 @@ export class ClayAgentHost {
       fileMode: 0o600,
     });
     const kernel = createExtensionKernel({ errorPolicy: "throw" });
+    // Built-in plain-chat profile: the server's `ensure_tab_session` defaults
+    // to "Chat" when the book has no profile, so a definition must always
+    // exist even before any package registers richer profiles.
+    kernel.registries.agents.register("Chat", {
+      name: "Chat",
+      description: "Plain conversation without coding tools",
+    });
     if (options.mock) {
       kernel.registries.providers.register(
         options.mockProvider ?? createMockProvider([providerTextDelta("Hello"), providerDone()]),
@@ -378,6 +416,7 @@ export class ClayAgentHost {
       options.observationalMemory,
       Array.isArray(options.mcpAllowList) ? options.mcpAllowList : [],
       options.resolveObscuraBinary ?? resolveObscuraBinary,
+      await loadToolCaps(options.dataDir),
     );
     const mockProvider = kernel.registries.providers.get("mock");
     registerCompactionStrategies(kernel, {
@@ -587,7 +626,9 @@ export class ClayAgentHost {
     const modelId = reqString(params, "model");
     const id = optString(params, "id") ?? randomUUID();
     const workspaceRoot = optString(params, "workspaceRoot") ?? process.cwd();
-    const fullAutonomy = params.fullAutonomy === true;
+    // Approvals are opt-out by default (user decision 2026-09-05): tool
+    // calls auto-approve unless a caller explicitly disables autonomy.
+    const fullAutonomy = params.fullAutonomy !== false;
     const observationalMemory = this.resolveOmFlag(profile, params.observationalMemory);
     // Capabilities activate on the first session that declares coding tools
     // (never on import, never for Chat-only initialize).
@@ -613,6 +654,7 @@ export class ClayAgentHost {
         provider,
         model: modelId,
         observationalMemory,
+        fullAutonomy,
         // Stable workspace identity for workspace-scoped search (decision 2201).
         [SESSION_SEARCH_WORKSPACE_METADATA_KEY]: workspaceRoot,
       },
@@ -663,6 +705,18 @@ export class ClayAgentHost {
       runLedger: this.persistence,
       redactor: this.redactor,
       validator: createJsonSchemaToolArgumentValidator(),
+      // Coding-run ceilings: Prism's defaults (2min wall, 16 turns, 8 tool
+      // rounds) abort real tool-using runs on slow cloud models mid-stream.
+      // Under Prism's hard caps (30min wall / 1M input / 250k output).
+      limits: {
+        maxTurns: 32,
+        maxToolRounds: 16,
+        maxToolCalls: 64,
+        maxWallTimeMs: 15 * 60_000,
+        maxInputTokens: 200_000,
+        maxOutputTokens: 100_000,
+        maxTotalTokens: 300_000,
+      },
       // Host-verified identity default for every session and resumed run: the
       // daemon is the trust boundary that owns the workspace root and
       // acceptance policy, so it vouches for its own runs. Durable tool
@@ -809,6 +863,8 @@ export class ClayAgentHost {
       workspaceRoot: options.workspaceRoot,
       request: (method, params) => this.request(method, params),
       fullAutonomy: () => this.live.get(sessionId)?.fullAutonomy ?? options.fullAutonomy,
+      toolCaps: this.toolCaps,
+      capsFile: this.capsFile,
       approve: (action) =>
         this.request("approval.request", {
           action: { kind: action.kind, operation: action.operation, paths: action.paths, command: action.command },
@@ -908,7 +964,7 @@ export class ClayAgentHost {
     const observationalMemory = this.resolveOmFlag(profile, metadata.observationalMemory);
     const created = this.createSession(sessionId, profile, provider, model, {
       workspaceRoot: process.cwd(),
-      fullAutonomy: false,
+      fullAutonomy: metadata.fullAutonomy !== false,
       observationalMemory,
     });
     const live: LiveSession = {
@@ -986,9 +1042,9 @@ export class ClayAgentHost {
       if (!this.kernel.registries.providers.get(provider)) {
         throw rpcError(-32000, `Unknown provider: ${provider}`);
       }
-      if (this.kernel.registries.models.get(provider, model) === undefined && overModel !== undefined) {
-        throw rpcError(-32000, `Unknown model: ${provider}/${model}`);
-      }
+      // Model ids pass through: the discovery catalog is convenience, not
+      // authority — the provider rejects genuinely unknown ids at call time.
+      // (The book may reference a model discovery has not listed yet.)
       if (provider !== live.provider || model !== live.model) {
         live = this.recreateSessionModel(live, sessionId, provider, model);
         await persistProviderModel(this.persistence, sessionId, provider, model);
@@ -1035,12 +1091,18 @@ export class ClayAgentHost {
       sessionId,
       lastEvent: lastType,
       ...(suspended
-        ? {
-            status: "suspended" as const,
-            runId: suspended.runId,
-            version: suspended.version,
-            interruption: suspended.interruption,
-          }
+        ? (() => {
+            // Stash the suspension version: run.resume callers (approval UI)
+            // may omit expectedVersion and rely on this stash.
+            const liveSession = this.live.get(sessionId);
+            if (liveSession) liveSession.suspension = { runId: suspended.runId, version: suspended.version };
+            return {
+              status: "suspended" as const,
+              runId: suspended.runId,
+              version: suspended.version,
+              interruption: suspended.interruption,
+            };
+          })()
         : { status: lastType === "agent_finished" ? ("succeeded" as const) : ("aborted" as const) }),
     };
   }
@@ -1049,10 +1111,14 @@ export class ClayAgentHost {
   private durableRunState(live: LiveSession): AgentRunStateOptions | undefined {
     const coding = live.tools.some((tool) => (CODING_TOOL_NAMES as readonly string[]).includes(tool.name));
     if (!coding) return undefined;
+    // Tool-approval interrupts are opt-in via autonomy: full autonomy
+    // (the default) auto-approves every tool call and streams through;
+    // turning autonomy off (session.setAutonomy / NewSession param)
+    // re-arms the suspend-on-tool-gate flow for callers that want it.
     return {
       checkpoints: this.persistence.checkpoints,
       definitionRevision: RUN_STATE_REVISION,
-      interruptBeforeTool: true,
+      interruptBeforeTool: !live.fullAutonomy,
     };
   }
 
@@ -1294,8 +1360,16 @@ export class ClayAgentHost {
   private async runResume(params: Record<string, unknown>): Promise<unknown> {
     const sessionId = reqString(params, "sessionId");
     const runId = reqString(params, "runId");
-    const expectedVersion = params.expectedVersion;
-    if (typeof expectedVersion !== "number" || !Number.isSafeInteger(expectedVersion) || expectedVersion <= 0) {
+    // expectedVersion is optional: the approval UI may omit it, in which
+    // case the version stashed at suspension time applies. A supplied
+    // version still wins (fail-closed optimistic concurrency). The stash
+    // lookup never creates a session — validation below still precedes I/O.
+    const suppliedVersion = params.expectedVersion;
+    const expectedVersion =
+      typeof suppliedVersion === "number" && Number.isSafeInteger(suppliedVersion) && suppliedVersion > 0
+        ? suppliedVersion
+        : this.live.get(sessionId)?.suspension?.version;
+    if (expectedVersion === undefined) {
       throw rpcError(-32602, "params.expectedVersion must be a positive integer");
     }
     const decision = optString(params, "decision");
@@ -1307,25 +1381,47 @@ export class ClayAgentHost {
       throw rpcError(-32602, `unknown decision: ${decision}`);
     }
     const live = await this.ensureLive(sessionId);
+    live.suspension = undefined;
     const resume: AgentRunResume = { expectedVersion, ...(decisions ? { decisions } : { decision }) };
     try {
-      const result = await resumeAgentRun(live.agent, { runId, sessionId }, resume, {
-        checkpoints: this.persistence.checkpoints,
-        definitionRevision: RUN_STATE_REVISION,
-        ownership: this.runOwnership(),
-      });
-      const suspended = result.status === "suspended" && result.runState !== undefined;
-      return {
-        sessionId,
-        runId,
-        ...(suspended && result.runState
-          ? {
-              status: "suspended",
-              version: result.runState.version,
-              interruption: result.runState.interruption,
-            }
-          : { status: result.status }),
-      };
+      // Stream the resumed run like sessionPrompt: clients repaint the
+      // transcript from these events; the RPC reply only reports final
+      // status. Without this the continuation ran invisibly.
+      let lastType: string | undefined;
+      let suspended:
+        | { runId: string; interruption: AgentRunInterruption; version: number }
+        | undefined;
+      for await (const event of resumeAgentRunStream(
+        live.agent,
+        { runId, sessionId },
+        resume,
+        {
+          checkpoints: this.persistence.checkpoints,
+          definitionRevision: RUN_STATE_REVISION,
+          ownership: this.runOwnership(),
+        },
+      )) {
+        lastType = event.type;
+        if (event.type === "agent_suspended") {
+          // Re-arm the stash: chained approvals resume from here.
+          suspended = { runId: event.runId, interruption: event.interruption, version: event.version };
+          live.suspension = { runId, version: event.version };
+        }
+        this.emit("event", { sessionId, event: redactAgentEvent(event, this.redactor) satisfies AgentEvent });
+      }
+      return suspended
+        ? {
+            sessionId,
+            runId,
+            status: "suspended" as const,
+            version: suspended.version,
+            interruption: suspended.interruption,
+          }
+        : {
+            sessionId,
+            runId,
+            status: lastType === "agent_finished" ? ("succeeded" as const) : ("aborted" as const),
+          };
     } catch (error) {
       throw rpcError(-32000, error instanceof Error ? error.message : String(error));
     }
@@ -1408,7 +1504,10 @@ export class ClayAgentHost {
     return { id, configured, present: Boolean(this.kernel.registries.providers.get(id) || methods.length) };
   }
 
-  private modelList(): unknown {
+  private async modelList(): Promise<unknown> {
+    if (!this.ollamaDiscoveryAttempted && this.kernel.registries.providers.get("ollama")) {
+      await this.refreshOllamaModels();
+    }
     return {
       models: this.kernel.registries.models.list().map((model) => ({
         provider: model.provider,
@@ -1449,7 +1548,38 @@ export class ClayAgentHost {
         // Encrypted vault already persisted; keychain is best-effort.
       }
     }
+    if (provider === "ollama") {
+      this.ollamaDiscoveryAttempted = false;
+      await this.refreshOllamaModels();
+    }
     return { provider, name, stored: true };
+  }
+
+  private async refreshOllamaModels(): Promise<void> {
+    if (this.ollamaDiscoveryAttempted) return;
+    if (!this.kernel.registries.providers.get("ollama")) {
+      this.ollamaDiscoveryAttempted = true;
+      return;
+    }
+    const apiKey = await this.vault.get({ name: "apiKey", provider: "ollama" });
+    const base = await this.vault.get({ name: "baseUrl", provider: "ollama" });
+    if (!apiKey && !base) return;
+    this.ollamaDiscoveryAttempted = true;
+    try {
+      const { listOllamaModels } = await import("@arnilo/prism-providers/ollama");
+      const models = await listOllamaModels({
+        apiKey: apiKey?.value,
+        baseUrl: base?.value,
+        signal: AbortSignal.timeout(3000),
+      });
+      for (const model of models) {
+        if (this.kernel.registries.models.get(model.provider, model.model) === undefined) {
+          this.kernel.registries.models.register(model);
+        }
+      }
+    } catch {
+      // Best-effort: local daemon down or cloud unreachable.
+    }
   }
 
   private defaultCredentialName(provider: string): string {
@@ -1550,6 +1680,7 @@ export class ClayAgentHost {
       ...(skills ? { skills } : {}),
     };
     this.kernel.registries.agents.register(name, def);
+    process.stderr.write(`agentProfile.register '${name}' applied\n`);
     if (params.observationalMemory === true) this.omProfiles.add(name);
     else if (params.observationalMemory === false) this.omProfiles.delete(name);
     return { name, registered: true, observationalMemory: this.omProfiles.has(name) };

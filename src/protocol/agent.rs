@@ -11,7 +11,10 @@ pub const AGENT_MAX_PROMPT_BYTES: usize = 32 * 1024;
 /// Server-authoritative transcript projection cap (matches clay-agent load).
 pub const AGENT_MAX_SNAPSHOT_ENTRIES: usize = 200;
 /// Daemon NDJSON line ceiling; same 1 MiB as the Clay codec / clay-agent.
-pub const AGENT_DAEMON_MAX_LINE_BYTES: usize = 1024 * 1024;
+// Matches the daemon-side frame cap (clay-agent/src/rpc.ts, 64 MiB): a local
+// trusted stdio lane carrying Prism tool-result mirrors, whose per-tool
+// output ceilings default to 64 MiB.
+pub const AGENT_DAEMON_MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
 /// One inbound MessageDelta / ThinkingDelta text slice.
 pub const AGENT_DELTA_MAX_TEXT_BYTES: usize = 8 * 1024;
 /// One retained transcript entry after coalescing deltas.
@@ -406,6 +409,10 @@ pub struct AgentInventory {
     pub models: Vec<AgentModelInfo>,
     pub profiles: Vec<AgentProfileInfo>,
     pub sessions: Vec<AgentSessionInfo>,
+    /// Current book selection so a freshly mounted webview learns the
+    /// configured provider/model without waiting for a picker event.
+    pub provider: String,
+    pub model: String,
 }
 
 #[derive(

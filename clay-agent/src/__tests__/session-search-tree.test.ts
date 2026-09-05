@@ -249,19 +249,20 @@ test("session.checkpoint captures via reverse RPC; restore failure fails checkou
   host.close();
 });
 
-test("session.setAutonomy toggles full autonomy; default stays false", async () => {
+test("session.setAutonomy toggles full autonomy; default stays true", async () => {
   const { host, sessionId } = await chatHost("ok");
-  assert.equal(host.sessionAutonomy(sessionId), false);
-  const enabled = (await host.handle("session.setAutonomy", { sessionId, enabled: true })) as {
+  // Approvals are opt-out by default (user decision 2026-09-05).
+  assert.equal(host.sessionAutonomy(sessionId), true);
+  const disabled = (await host.handle("session.setAutonomy", { sessionId, enabled: false })) as {
     sessionId: string;
     fullAutonomy: boolean;
   };
-  assert.deepEqual(enabled, { sessionId, fullAutonomy: true });
-  assert.equal(host.sessionAutonomy(sessionId), true);
-  const disabled = (await host.handle("session.setAutonomy", { sessionId, enabled: false })) as {
+  assert.deepEqual(disabled, { sessionId, fullAutonomy: false });
+  assert.equal(host.sessionAutonomy(sessionId), false);
+  const enabled = (await host.handle("session.setAutonomy", { sessionId, enabled: true })) as {
     fullAutonomy: boolean;
   };
-  assert.equal(disabled.fullAutonomy, false);
+  assert.equal(enabled.fullAutonomy, true);
   await assert.rejects(
     () => host.handle("session.setAutonomy", { sessionId, enabled: "yes" }),
     /enabled must be a boolean/,

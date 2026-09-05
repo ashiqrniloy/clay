@@ -5,7 +5,7 @@ Clay configuration is JavaScript loaded from `~/.config/clay/init.js`. The confi
 ## Configuration Entry Point
 
 - Default file: `~/.config/clay/init.js`
-- Canonical example: the `examples/` tree in the Clay repository (`init.js` base config plus `packages/first-party.js` and `packages/third-party.js` modules) demonstrates every supported configuration surface with all documented options annotated; copy the whole tree (`cp -r examples/. ~/.config/clay/`) and adjust. Plans that add configuration surfaces must keep it current.
+- Canonical example: the `examples/config/` tree in the Clay repository (`init.js` base config plus `packages/first-party.js` and `packages/third-party.js` modules plus `agent/tool-caps.json` coding-agent caps) demonstrates every supported configuration surface with all documented options annotated; copy the whole tree (`cp -r examples/config/. ~/.config/clay/`) and adjust. Plans that add configuration surfaces must keep it current.
 - The file is loaded by Clay's server-side JavaScript runtime during server startup or explicit configuration reload work.
 - Phase 13 runtime-backs this entry point on the server: it evaluates supported local configuration JavaScript through documented `clay:*` facades while still never executing JavaScript in the Rust client.
 - `init.js` may load other local configuration files through [`loadConfigurationModule`](configuration/load-configuration-module.md) so users can keep settings modular.

@@ -314,6 +314,8 @@ fn every_server_message() -> Vec<AgentServerMessage> {
             models: vec![],
             profiles: vec![],
             sessions: vec![],
+            provider: String::new(),
+            model: String::new(),
         }),
         AgentServerMessage::Picker {
             kind: AgentPickerKind::Agent,
@@ -350,7 +352,7 @@ fn every_server_message() -> Vec<AgentServerMessage> {
 
 #[test]
 fn phase25_protocol_version_is_pinned() {
-    assert_eq!(PROTOCOL_VERSION, 29);
+    assert_eq!(PROTOCOL_VERSION, 30);
 }
 
 #[test]

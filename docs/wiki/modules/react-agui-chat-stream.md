@@ -22,7 +22,7 @@ Rust.
 
 | Clay wire message | AG-UI output |
 |---|---|
-| `Snapshot(transcript)` | `MESSAGES_SNAPSHOT` (entries → user/assistant/reasoning messages; error/usage entries keep roles with `metadata.clayKind`) + `STATE_SNAPSHOT` (sessionId/profile/provider/model + plan 108 `mcpServers`: server-built allow-list names for the Coding Agent extension strip; `contextTokens` from the last Finished event for the status row) |
+| `Snapshot(transcript)` | `MESSAGES_SNAPSHOT` (entries → user/assistant/reasoning messages; error/usage entries keep roles with `metadata.clayKind`) + `STATE_SNAPSHOT` (sessionId/profile/provider/model + plan 108 `mcpServers`: server-built allow-list names for the Coding Agent extension strip; `contextTokens` from the last Finished event for the status row). Book snapshots (empty `sessionId`, published on provider/model/profile switches) emit `STATE_SNAPSHOT` only — a messages snapshot there would wipe the live transcript on every picker selection. |
 | `Inventory` | `STATE_SNAPSHOT` (bounded providers/models/profiles/sessions; models carry `contextWindow` for context-size-vs-window reporting) |
 | `Event::Started` | `RUN_STARTED {threadId, runId}` |
 | `Event::MessageDelta` | `TEXT_MESSAGE_CHUNK {messageId: clay-text-{runId}, delta}` |

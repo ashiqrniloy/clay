@@ -74,16 +74,22 @@ fn validate_registration_shape(method: &str, params: &Value) -> Result<(), JsErr
 /// this runtime has no agent subsystem.
 async fn agent_registration_rpc(method: &str, params: Value) -> Result<String, JsErrorBox> {
     validate_registration_shape(method, &params)?;
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     match crate::server::agent::AgentHostHandle::global() {
         Ok(host) => {
-            let result = host
-                .rpc_or_queue(method, params)
-                .await
+            let result = host.rpc_or_queue(method, params).await;
+            eprintln!("[agent-reg] {method} '{name}' host=live -> {result:?}");
+            let result = result
                 .map_err(|error| JsErrorBox::generic(format!("agent.rpc_failed: {error}")))?;
             serde_json::to_string(&result)
                 .map_err(|error| JsErrorBox::generic(format!("agent.encode_failed: {error}")))
         }
         Err(_) => {
+            eprintln!("[agent-reg] {method} '{name}' host=absent -> queued");
             crate::server::agent::queue_package_registration(method, params)
                 .map_err(|error| JsErrorBox::generic(format!("agent.rpc_failed: {error}")))?;
             Ok(r#"{"queued":true}"#.to_string())

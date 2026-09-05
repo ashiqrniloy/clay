@@ -8848,7 +8848,7 @@ async fn settings_package_registers_catalog_only_panel() {
 
 #[test]
 fn first_party_example_loads_chat_with_one_uncommented_line() {
-    let source = fs::read_to_string("examples/packages/first-party.js").unwrap();
+    let source = fs::read_to_string("examples/config/packages/first-party.js").unwrap();
     assert!(
         source.contains(r#"await loadPackage("@clay/chat");"#),
         "canonical first-party module must opt into Chat with one uncommented load"

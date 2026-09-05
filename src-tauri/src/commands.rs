@@ -149,7 +149,14 @@ pub async fn session_request(
     payload: String,
     tab_id: Option<u64>,
 ) -> Result<(), BridgeError> {
-    bridge.request_on(tab_id, &payload)
+    let result = bridge.request_on(tab_id, &payload);
+    if let Err(error) = &result {
+        eprintln!(
+            "[bridge] session_request failed: {error} :: {}",
+            &payload.chars().take(160).collect::<String>()
+        );
+    }
+    result
 }
 
 #[tauri::command]

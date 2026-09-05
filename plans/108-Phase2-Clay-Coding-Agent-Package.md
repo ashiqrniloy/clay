@@ -1814,6 +1814,122 @@ OM live activity (Phase 7), cross-session memory scope (E5, post-roadmap).
       matcher matched nothing — values are now normalized
       (case/kebab-insensitive) before comparing and the test pins the wire
       spelling.
+    - Model select + send dead (2026-09-04 second manual pass, fixed at
+      the root the same day): three stacked defects. (1) The Command
+      Centre/picker `menuQuery` flush-before-`menuActivate` pattern (the
+      webview re-sends the draft on every Enter) reset `selected_index`
+      to 0 server-side, so Enter activated item 0 of the filtered list
+      ("List Active Modes") instead of the arrow-selected "Choose
+      Model" — the model picker never opened and retries produced
+      `menu.unknown_session` "no active menu session" noise. Fixed:
+      `ControlCenter::set_query`/`AgentPicker::set_query` keep the
+      selection when the query is unchanged (tests added). (2) Opening a
+      picker from the palette wrote `TransientMenuClosed` before building
+      the replacement (first Ollama model discovery can take seconds), so
+      the modal vanished-then-reappeared and read as a dead button;
+      `handle_menu_activate` now swaps atomically (build replacement, then
+      closed+snapshot). (3) `publish_book_snapshot` adapted as
+      `MessagesSnapshot` with an empty transcript — every provider/model
+      switch visually wiped the live transcript; book snapshots (empty
+      session id) now emit `STATE_SNAPSHOT` only (test added), and
+      launching the coding surface (`coding-agent.profile`) sets the
+      book profile to `coding` so prompts run with the coding tools
+      instead of the profile-less "Chat" default. Verified end-to-end
+      with a throwaway live probe: filter+arrow+Enter opens the picker,
+      selection lands (`agent.picker_selected`), the book snapshot
+      broadcasts provider/model, and `chat.submit` creates a coding-profile
+      session and streams the run (the probe's live prompt failed only
+      on the user's Ollama key returning 401 from the cloud — provider
+      credential, not Clay).
+    - Send still dead in the live desktop (2026-09-04/05 third manual
+      pass, fixed at the root): instrumented live probes proved the
+      webview intent reached the server, but `ensure_tab_session`'s
+      `NewSession` failed with `Unknown agent: Chat` — no package ever
+      registers a `Chat` profile, so the server's empty-book default
+      profile never existed on the daemon (and daemon-side agent
+      definitions are in-memory, so every daemon restart re-derives them
+      from the drained registration queue). Fixes: the daemon registers a
+      built-in minimal `Chat` agent profile at kernel creation (daemon
+      test added); daemon stderr now passes through to the server log
+      instead of being drained silently; `ensure_tab_session` logs which
+      None branch fired; package registration RPCs log queue-vs-live;
+      the agent-run sdui arm logs command+result kind. Also fixed this
+      round: `begin_prompt` publishes its snapshot/diagnostics on the
+      event bus (the codec reply alone could miss the relay), the agent
+      transport uses the pane-scoped sender (tab-stamped) and drops
+      duplicate `RUN_STARTED`, and `chatAgent` subscribes to the AG-UI
+      pipeline's own message/state changes so run-scoped transcript
+      mutations repaint the panel. Verified live end-to-end: provider
+      select → model select → `coding-agent.profile` → `chat.submit`
+      creates a coding session and streams model deltas. Known gap closed
+      same day: the book's profile/provider/model trio persists to
+      `book.json` in the daemon data dir on every picker selection and
+      reloads at server boot (test added); the daemon data dir resolves to
+      `<config-root>/agent` (~/.config/clay/agent) instead of the temp
+      dir; `session.prompt` passes unlisted model ids through (the
+      discovery catalog is convenience, not authority); the daemon
+      registers a built-in `Chat` profile so the empty-book default always
+      resolves. Verified live: fresh server boot + bare `chat.submit`
+      (zero picker interaction) creates a coding session with the
+      persisted ollama/glm-5.3 selection and streams the run; sessions
+      live in the persistent SQLite and resume through the existing
+      session picker after restart.
+    - Streaming tool call failure surfacing (2026-09-05): opencode-go/
+      mimo-v2.5 tool-call turns failed with Prism's
+      `ProviderTransportError("incomplete_delta")` — root cause is in
+      `@arnilo/prism` `reconstructToolCallDeltas`, which overwrites
+      captured tool-call id/name with the `null` values OpenAI-compatible
+      continuation chunks carry (raw SSE capture proved identity arrives
+      in the first fragment; `openai-compatible.js` accumulates it
+      null-safely, `provider-events.js` does not) — reported upstream,
+      no Clay-side workaround. Clay defect fixed alongside: the daemon
+      nests error details under `event.error.message`, but the wire
+      mapper read `event.message` and emitted a literal `"error"`, so
+      the panel showed a generic message and looked stuck; the mapper
+      now prefers `error.message` and the real text reaches
+      RUN_ERROR → panel status.
+    - Tool-approval suspension surfacing (2026-09-05): durable coding runs
+      suspend on side-effect tool gates (`agent_suspended` with
+      `pendingDecisions`), but the wire mapper had no arm for it — the
+      event fell into the catch-all and clients saw a spurious Started,
+      leaving the composer stuck on "Streaming" forever. Fixed the full
+      loop: mapper maps `agent_suspended` → Permission (first approvalId,
+      toolName; non-approval suspensions close the AG-UI run); AG-UI
+      `clay.permissionRequest` now carries sessionId/runId; state.ts
+      captures pendingApproval (cleared on run start/settle); the panel
+      renders an Allow/Deny strip dispatching RunResume; the Rust bridge
+      forwards expectedVersion/decision/decisions; the daemon stashes the
+      suspension version (expectedVersion optional), re-arms on chained
+      suspensions, and streams the resumed run via resumeAgentRunStream
+      so the continuation is visible. Verified live end-to-end (suspend →
+      Permission → approve → tool executed → Finished). Also raised
+      agent-wide run ceilings (Prism defaults abort real coding runs at
+      2min wall / 16 turns): 32 turns, 16 tool rounds, 64 tool calls,
+      15min wall, 200k/100k/300k tokens — under Prism hard caps.
+    - Approvals opt-out by default (user decision 2026-09-05): all tool
+      calls auto-approve. `fullAutonomy` defaults on (NewSession omits
+      the param → on; explicit `fullAutonomy: false` opts back in), is
+      persisted in session metadata and restored on resume, and now
+      also drives the durable-run gate (`interruptBeforeTool:
+      !fullAutonomy`) — previously hardcoded on. The whole suspension
+      mechanism (wire Permission event, panel Allow/Deny strip,
+      run.resume streaming) stays intact and is reachable through
+      `session.setAutonomy` or the NewSession param. Daemon tests
+      updated to the new default; verified live: a tool-forcing run
+      streams straight to Finished with no Permission event.
+    - Repo scan caps user-configurable + wall-hit errors (user request
+      2026-09-05): the earlier "repository appears to be empty" report
+      traced to repo_search burning its 10k-entry scan budget inside
+      target/ (53GB build dir, not in Prism's default exclude list) and
+      the model misreading the truncation notice as ground truth. Two
+      changes: (1) caps/exclude are user-configurable via
+      ~/.config/clay/agent/tool-caps.json (keys: exclude, maxEntries,
+      maxFiles, maxDepth, maxResults, maxScanBytes, maxMatches; loaded at
+      daemon boot, malformed files warn and fall back to defaults);
+      (2) repo_list/repo_search/glob truncation results now return an
+      error naming the cap, the caps file, and the Prism hard ceiling so
+      the user learns how to raise it. Verified: tiny-cap test forces
+      the wall and asserts the remedy message.
   - Acceptance Criteria:
     - Functional: All exit-gate drills pass and are recorded: pi-parity
       checklist (task above); tree/discard drill (branch from earlier entry

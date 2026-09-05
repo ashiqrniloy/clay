@@ -1,9 +1,9 @@
 // ============================================================================
-// Clay canonical example configuration — examples/packages/third-party.js
+// Clay canonical example configuration — examples/config/packages/third-party.js
 // ============================================================================
 //
 // Template for third-party package configuration. Loaded from
-// examples/init.js (section 11) via:
+// examples/config/init.js (section 11) via:
 //
 //   await loadConfigurationModule({ path: "./packages/third-party.js", optional: true });
 //

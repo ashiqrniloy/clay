@@ -284,11 +284,21 @@ workflows (`startWorkflow` driver errors until then), Phase 6 supervisors.
 node clay-agent/dist/main.js --data-dir DIR [--mock]
 ```
 
-First request:
+The data dir defaults to `<configuration-root>/agent` (the user's
+`~/.config/clay/agent`), falling back to the system temp dir only when no
+config root exists. It holds `sessions.sqlite`, `credentials.vault`,
+`vault.passphrase`, and `book.json` (the server-side persisted
+provider/model/profile selection, reloaded at server boot so a configured
+book survives restarts). First request:
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"passphrase":"…"}}
 ```
+
+The daemon also registers a built-in minimal `Chat` agent profile at boot —
+the server's `ensure_tab_session` default profile must always resolve —
+and `session.prompt` passes unlisted model ids through (the discovery
+catalog is convenience, not authority; the provider rejects bad ids).
 
 ## Security
 

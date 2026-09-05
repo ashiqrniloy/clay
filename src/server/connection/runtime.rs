@@ -10,11 +10,11 @@ use crate::{
     packages::commands::CommandRegistry,
     perf::budgets::{COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES},
     protocol::{
-        BehaviorManifest, ClientId, CompletionProvenance, CompletionRequest, CompletionResultSet,
-        CompletionStatus, CompletionTrigger, DocumentId, LanguageIntelligenceFeature,
-        LanguageIntelligencePayload, LanguageIntelligenceResult, LanguageIntelligenceStatus,
-        ProtocolErrorCode, SduiActionArgument, SduiActionIntent, SduiActionSource, SduiActionValue,
-        ServerMessage, TabId,
+        AgentServerMessage, BehaviorManifest, ClientId, CompletionProvenance, CompletionRequest,
+        CompletionResultSet, CompletionStatus, CompletionTrigger, DocumentId,
+        LanguageIntelligenceFeature, LanguageIntelligencePayload, LanguageIntelligenceResult,
+        LanguageIntelligenceStatus, ProtocolErrorCode, SduiActionArgument, SduiActionIntent,
+        SduiActionSource, SduiActionValue, ServerMessage, TabId,
         codec::{Codec, CodecError},
         completion::estimated_result_payload_bytes,
     },
@@ -128,8 +128,19 @@ pub(super) async fn execute_command_intent(
     // Phase 2 (plan 108 task 8): Coding Agent surface launch/close. The
     // intent is user-authorized (Command Centre catalogue entry or a declared
     // package action target); the toggle itself is client-local, so the
-    // server answers with the shell-client request and mutates nothing.
+    // server answers with the shell-client request. Launching the surface
+    // also makes its profile the book's active profile: prompts from the
+    // surface must run with the coding tools, not the profile-less default
+    // ("Chat"). Close leaves the book alone.
     if crate::server::command_execution::is_agent_surface_command(&request.command_id) {
+        if request.command_id == "coding-agent.profile"
+            && let Some(server) = reload_server
+        {
+            server
+                .agent
+                .select_picker(crate::protocol::AgentPickerKind::Agent, "agent:coding")
+                .await;
+        }
         return Some(ServerMessage::ShellClientCommandRequest {
             command_id: request.command_id,
         });
@@ -311,6 +322,12 @@ fn intent_text(intent: &SduiActionIntent) -> String {
             _ => None,
         })
         .unwrap_or_default()
+}
+
+/// Host-owned agent controls have no static SDUI node: their host-rendered
+/// composer is authorized by the active tab session below.
+fn is_agent_run_action(command_id: &str) -> bool {
+    matches!(command_id, "chat.submit" | "chat.cancel" | "chat.steer")
 }
 
 pub(super) fn sdui_command_request(intent: &SduiActionIntent) -> CommandExecutionRequest {
@@ -620,7 +637,7 @@ where
                 .package_ui
                 .allows_action(ui_version, &intent.command_id)
         });
-    if !package_action {
+    if !package_action && !is_agent_run_action(&intent.command_id) {
         let validation_response = {
             let state = sdui.lock().await;
             if state.cloned_tree_or_default().ui_version != ui_version {
@@ -638,10 +655,7 @@ where
         }
     }
 
-    if intent.command_id == "chat.submit"
-        || intent.command_id == "chat.cancel"
-        || intent.command_id == "chat.steer"
-    {
+    if is_agent_run_action(&intent.command_id) {
         if let Some(host) = reload_server.map(|server| &server.agent) {
             let tab = bound_tab_id.unwrap_or(client_id);
             let message = if intent.command_id == "chat.cancel" {
@@ -651,6 +665,18 @@ where
             } else {
                 host.begin_prompt(tab, &intent_text(&intent)).await
             };
+            eprintln!(
+                "[agent] sdui {} from client {client_id} tab {tab:?} -> {}",
+                intent.command_id,
+                match &message {
+                    AgentServerMessage::Snapshot(_) => "snapshot".to_string(),
+                    AgentServerMessage::Event { .. } => "event".to_string(),
+                    AgentServerMessage::Inventory(_) => "inventory".to_string(),
+                    AgentServerMessage::Picker { .. } => "picker".to_string(),
+                    AgentServerMessage::Diagnostic { code, .. } => format!("diag:{code}"),
+                    _ => "other".to_string(),
+                }
+            );
             codec
                 .write_server_message(stream, &ServerMessage::Agent(Box::new(message)))
                 .await?;
@@ -1163,5 +1189,36 @@ mod tests {
             &manifest,
             "runtime.reloadConfiguration"
         ));
+    }
+
+    #[test]
+    fn host_agent_actions_do_not_require_a_static_sdui_node() {
+        assert!(is_agent_run_action("chat.submit"));
+        assert!(is_agent_run_action("chat.cancel"));
+        assert!(is_agent_run_action("chat.steer"));
+        assert!(!is_agent_run_action("shell.run"));
+    }
+
+    #[test]
+    fn chat_submit_webview_payload_deserializes_with_prompt_text() {
+        let json = r#"{
+            "family":"sduiAction",
+            "payload":{
+                "clientId":0,
+                "uiVersion":4,
+                "intent":{
+                    "commandId":"chat.submit",
+                    "source":{"button":{"nodeId":1}},
+                    "arguments":[{"name":"value","value":{"string":"hello"}}]
+                }
+            }
+        }"#;
+        let message: crate::protocol::ClientMessage =
+            serde_json::from_str(json).expect("webview chat.submit payload");
+        let crate::protocol::ClientMessage::SduiAction { intent, .. } = message else {
+            panic!("expected sduiAction");
+        };
+        assert_eq!(intent.command_id, "chat.submit");
+        assert_eq!(intent_text(&intent), "hello");
     }
 }

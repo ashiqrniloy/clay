@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { ClayList, ClayModal, ClayText, ClayTextField } from "../components";
 import type { WorkspaceController } from "../shell/workspace-controller";
@@ -11,6 +11,15 @@ export function CommandCentre({
   workspace: WorkspaceController;
 }) {
   const menu = workspace.active()?.menu ?? null;
+  const stageKey = `${String(menu?.sessionId ?? "")}:${menu?.prompt ?? ""}`;
+  const [stage, setStage] = useState(stageKey);
+  const [draft, setDraft] = useState(menu?.query ?? "");
+  // Secret snapshots mask query as bullets. Binding that string would clobber
+  // the typed key, so draft only resets on a new session/stage.
+  if (stage !== stageKey) {
+    setStage(stageKey);
+    setDraft(menu?.query ?? "");
+  }
   const items = useMemo(
     () =>
       (menu?.items ?? []).map((item) => ({
@@ -29,17 +38,25 @@ export function CommandCentre({
       : menu.items.length === 0
         ? "No results"
         : null;
+  const flushAndActivate = (secondary = false) => {
+    workspace.menuQuery(draft);
+    workspace.menuActivate(secondary);
+  };
+  const secretPrompt = /api key|hidden|base url/i.test(menu.prompt);
 
   return (
     <ClayModal title={menu.prompt} open onClose={() => workspace.menuCancel()}>
       <div className={styles.surface} data-testid="command-centre">
         <ClayTextField
-          label={menu.origin === "centered" ? "Search" : menu.prompt}
-          value={menu.query}
-          onChange={(query) => workspace.menuQuery(query)}
+          label={secretPrompt || menu.origin !== "centered" ? menu.prompt : "Search"}
+          value={draft}
+          onChange={(query) => {
+            setDraft(query);
+            workspace.menuQuery(query);
+          }}
           autoFocus
           onKeyDown={(event) => {
-            if (event.key === "Backspace") {
+            if (event.key === "Backspace" && draft.length === 0) {
               event.preventDefault();
               workspace.menuBackspace();
             } else if (event.key === "ArrowDown") {
@@ -50,7 +67,7 @@ export function CommandCentre({
               workspace.menuMove(-1);
             } else if (event.key === "Enter") {
               event.preventDefault();
-              workspace.menuActivate(event.altKey);
+              flushAndActivate(event.altKey);
             }
           }}
         />
@@ -63,7 +80,7 @@ export function CommandCentre({
               const index = menu.items.findIndex((item) => item.id === id);
               if (index >= 0) workspace.menuMove(index - menu.selectedIndex);
             }}
-            onAction={() => workspace.menuActivate(false)}
+            onAction={() => flushAndActivate(false)}
           />
         ) : (
           <div className={styles.empty} role="status">

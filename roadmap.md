@@ -464,6 +464,14 @@ vertically: two equal panes (50/50, user-resizable, ratio-clamped).
   resumes it without implicitly attaching its transcript to the current run.
 - Deleting/disabling the package leaves the daemon and chat fully functional.
 
+### Phase 2.1 Prism update
+### Phase 2.2 Implementation review, refactor
+### Phase 2.3 UX update
+- Model and provider selection configuration has to be available in the / command
+- Setting reasoning effort for models. Is it supported in Prism?
+- Image support
+- 
+
 ## Phase 3: Package Installation, Update, and Clay Distribution
 
 Fix the existing `clay package add` path (pnpm-only store, parsed-but-unused

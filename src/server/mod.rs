@@ -464,6 +464,15 @@ impl RuntimeGenerationStore {
     }
 }
 
+/// Daemon data location fallback: when the server was started without an
+/// explicit configuration root, keep agent state (sessions, credentials,
+/// book) under the user's default config root when it exists, instead of
+/// dropping it in the temp dir.
+fn effective_agent_root() -> Option<PathBuf> {
+    let root = ConfigurationRuntime::default_config_root()?;
+    root.join("init.js").is_file().then_some(root)
+}
+
 fn shell_command_catalogue() -> Vec<RegisteredCommand> {
     crate::client_commands::SHELL_CLIENT_COMMAND_CATALOGUE
         .iter()
@@ -682,7 +691,13 @@ impl IpcServer {
         let document_id_allocator = Arc::new(AtomicU64::new(1));
         let bootstrap_state =
             TabServerState::from_workspace(workspace, Arc::clone(&document_id_allocator));
-        let agent = agent::AgentHost::for_server(config.configuration_root.as_deref());
+        let agent = agent::AgentHost::for_server(
+            config
+                .configuration_root
+                .clone()
+                .or_else(effective_agent_root)
+                .as_deref(),
+        );
         agent.set_reverse_handler(agent_documents::document_reverse_handler(
             Arc::clone(&bootstrap_state.workspace),
             Arc::new(Mutex::new(agent_checkpoints::AgentCheckpointStore::new())),
@@ -2898,7 +2913,7 @@ await loadPackage("@clay/typescript");"#,
             std::process::id()
         ));
         fs::create_dir(&root).unwrap();
-        let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+        let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/config");
         for entry in fs::read_dir(&examples).unwrap() {
             let entry = entry.unwrap();
             let target = root.join(entry.file_name());
@@ -2979,6 +2994,7 @@ await loadPackage("@clay/typescript");"#,
                 | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::RuntimeStateSnapshot(_)
                 | ServerMessage::TabRegistry(_)
                 | ServerMessage::FileOpenCapabilityIssued { .. } => {}
                 message => panic!("expected handshake message, got {message:?}"),
@@ -2994,6 +3010,7 @@ await loadPackage("@clay/typescript");"#,
                 | ServerMessage::EditorLayoutOverride(_)
                 | ServerMessage::ShellPreferences(_)
                 | ServerMessage::RuntimeDiagnostic(_)
+                | ServerMessage::RuntimeStateSnapshot(_)
                 | ServerMessage::TabRegistry(_) => {}
                 message => panic!("expected handshake message, got {message:?}"),
             }
@@ -3013,14 +3030,16 @@ await loadPackage("@clay/typescript");"#,
         loop {
             match codec.read_server_message(client).await.unwrap() {
                 ServerMessage::InitialDocument { .. } => break,
-                ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
+                ServerMessage::SduiSnapshot { .. }
+                | ServerMessage::RuntimeStateSnapshot(_)
+                | ServerMessage::TabRegistry(_) => {}
                 message => panic!("expected InitialDocument, got {message:?}"),
             }
         }
         loop {
             match codec.read_server_message(client).await.unwrap() {
                 ServerMessage::TabRegistry(_) => break,
-                ServerMessage::SduiSnapshot { .. } => {}
+                ServerMessage::SduiSnapshot { .. } | ServerMessage::RuntimeStateSnapshot(_) => {}
                 message => panic!("expected tab registry after bind, got {message:?}"),
             }
         }

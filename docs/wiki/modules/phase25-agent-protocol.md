@@ -25,10 +25,10 @@ this module.
 
 ## How It Works
 
-`PROTOCOL_VERSION` is 29. Handshake still rejects older servers before any
-agent frame is decoded. Additive agent variants (task 11 setAutonomy/search
-resume; Phase 2 forwarding + approval bridge) ship atomically with the Tauri
-bridge in one binary, so no bump accompanies additive variants — the pin test
+`PROTOCOL_VERSION` is 30. Handshake still rejects older servers before any
+agent frame is decoded. Version 30 adds the selected `provider` and `model`
+to `AgentInventory`, letting a freshly mounted host-rendered agent surface
+learn the current book selection from `listSessions`. The pin test
 (`phase25_protocol_version_is_pinned`) is the contract.
 
 `AgentClientCommand::CredentialPut` is the only command that carries

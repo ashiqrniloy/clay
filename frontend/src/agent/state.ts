@@ -39,6 +39,8 @@ interface ChatAgentModule {
   subscribe(listener: () => void): () => void;
   getVersion(): number;
   getSnapshot(): ChatSnapshot;
+  /** Optimistic clear after the panel dispatches a resume decision. */
+  clearPendingApproval(): void;
   /** Starts relay processing; call once per surface mount. */
   start(): () => void;
   /** DEV-only fixture seam (no-op outside dev builds). */
@@ -59,6 +61,14 @@ export interface ChatSnapshot {
   tools: ToolActivityRow[];
   /** Cumulative tool counters (plan 108 task 8); never content. */
   toolStats: ToolStats;
+  /** Pending tool approval from a suspended durable run; cleared when the
+   *  resumed run starts or the run settles. */
+  pendingApproval: {
+    sessionId: string;
+    runId: string;
+    requestId: string;
+    toolName: string;
+  } | null;
 }
 
 function createChatAgent(): ChatAgentModule {
@@ -68,12 +78,14 @@ function createChatAgent(): ChatAgentModule {
   let status: ChatStatus = { streaming: false, status: null };
   let tools: ToolActivityRow[] = [];
   let toolStats: ToolStats = { total: 0, skills: 0, files: 0 };
+  let pendingApproval: ChatSnapshot["pendingApproval"] = null;
   let snapshot: ChatSnapshot = {
     messages: [],
     state: {},
     status,
     tools,
     toolStats,
+    pendingApproval,
   };
 
   /** Rebuilds the immutable snapshot synchronously after any mutation. */
@@ -84,6 +96,7 @@ function createChatAgent(): ChatAgentModule {
       status,
       tools: [...tools],
       toolStats: { ...toolStats },
+      pendingApproval,
     };
   };
 
@@ -97,6 +110,14 @@ function createChatAgent(): ChatAgentModule {
     rebuild();
     notifyListeners();
   };
+
+  // Run-pipeline mutations (chunks, finished snapshot) live on AbstractAgent.
+  // Without this, the panel only paints applyOutOfRun snapshots and looks idle
+  // while the run is actually streaming.
+  agent.subscribe({
+    onMessagesChanged: () => notify(),
+    onStateChanged: () => notify(),
+  });
 
   function errorStatusFromMessages(): string | null {
     // Native parity: last Error entry wins; otherwise no sticky status.
@@ -130,9 +151,12 @@ function createChatAgent(): ChatAgentModule {
         break;
       }
       case "STATE_SNAPSHOT": {
-        agent.setState(
-          (event as unknown as { snapshot: Record<string, unknown> }).snapshot,
-        );
+        const incoming = (event as unknown as { snapshot: Record<string, unknown> })
+          .snapshot;
+        const current = (agent.state ?? {}) as Record<string, unknown>;
+        // Inventory snapshots omit provider/model. Replace would wipe a
+        // picker selection and leave the composer stuck on "no provider".
+        agent.setState({ ...current, ...incoming });
         notify();
         break;
       }
@@ -166,12 +190,29 @@ function createChatAgent(): ChatAgentModule {
           }
           break;
         }
+        if (name === "clay.permissionRequest") {
+          // Durable-run tool approval (plan 108): the run suspended on a
+          // side-effect gate. Surface it for the Allow/Deny strip; cleared
+          // when the resumed run starts or the run settles.
+          const value = (
+            event as { value?: { sessionId?: string; runId?: string; requestId?: string; toolName?: string } }
+          ).value;
+          if (value?.sessionId && value.runId && value.requestId && value.toolName) {
+            pendingApproval = {
+              sessionId: value.sessionId,
+              runId: value.runId,
+              requestId: value.requestId,
+              toolName: value.toolName,
+            };
+            notify();
+          }
+          break;
+        }
         if (name === "clay.diagnostic") {
           const value = (
             event as { value?: { code?: string; message?: string } }
           ).value;
           const message = value?.message ?? "";
-          if (message === "empty prompt") break;
           if (value?.code === "agent.cancelled" || message === "cancelled") {
             status = { streaming: false, status: null };
           } else {
@@ -184,6 +225,7 @@ function createChatAgent(): ChatAgentModule {
       case "RUN_STARTED": {
         status = { ...status, streaming: true };
         tools = [];
+        pendingApproval = null;
         notify();
         break;
       }
@@ -197,6 +239,7 @@ function createChatAgent(): ChatAgentModule {
           streaming: false,
           status: failure ?? errorStatusFromMessages(),
         };
+        pendingApproval = null;
         notify();
         break;
       }
@@ -213,6 +256,12 @@ function createChatAgent(): ChatAgentModule {
     },
     getVersion: () => version,
     getSnapshot: () => snapshot,
+    /** Optimistic clear after the panel dispatches a resume decision. */
+    clearPendingApproval() {
+      if (!pendingApproval) return;
+      pendingApproval = null;
+      notify();
+    },
     /** DEV-only visual-fixture seam: seed transcript/status without a server. */
     seedForDev(input: {
       messages?: Message[];

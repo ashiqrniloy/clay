@@ -157,6 +157,9 @@ export function CodingAgentPanel({
   useEffect(() => {
     chatAgent.agent.setUiVersion(uiVersion);
   }, [uiVersion]);
+  useEffect(() => {
+    if (send) chatAgent.agent.setSender(send);
+  }, [send]);
   useEffect(() => chatAgent.start(), []);
   useEffect(() => {
     void sendRequest(agentCommandPayload({ listSessions: {} }));
@@ -344,6 +347,27 @@ export function CodingAgentPanel({
   );
 
   const toolStats = snapshot.toolStats;
+  // Tool approval (durable runs): Allow/Deny strip for suspended runs.
+  const pendingApproval = snapshot.pendingApproval;
+  const resolveApproval = useCallback(
+    (outcome: "allow_once" | "reject_once") => {
+      if (!pendingApproval) return;
+      void sendRequest(
+        agentCommandPayload({
+          runResume: {
+            sessionId: pendingApproval.sessionId,
+            runId: pendingApproval.runId,
+            decisionJson: JSON.stringify({
+              decisions: [{ approvalId: pendingApproval.requestId, outcome }],
+            }),
+          },
+        }),
+      );
+      // Optimistic clear; the resumed run re-announces via RUN_STARTED.
+      chatAgent.clearPendingApproval();
+    },
+    [pendingApproval],
+  );
   // Session list/resume (plan 108 task 9): the same bounded listSessions
   // inventory Chat uses; Resume rebinds this tab's session server-side.
   const sessions = Array.isArray(snapshot.state["sessions"])
@@ -420,6 +444,15 @@ export function CodingAgentPanel({
             </div>
 
             <footer className={styles.composerArea}>
+              {pendingApproval && (
+                <div className={styles.approvalStrip} role="alertdialog" aria-label="Tool approval">
+                  <ClayText variant="caption">
+                    Tool “{pendingApproval.toolName}” needs approval
+                  </ClayText>
+                  <ClayButton onPress={() => resolveApproval("allow_once")}>Allow</ClayButton>
+                  <ClayButton onPress={() => resolveApproval("reject_once")}>Deny</ClayButton>
+                </div>
+              )}
               <p className={styles.statusLine} role="status">
                 <ClayText variant="status">
                   {streaming ? "Streaming" : (snapshot.status.status ?? "Ready")}

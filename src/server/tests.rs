@@ -174,6 +174,7 @@ async fn deferred_initial_state_waits_for_tab_binding() {
             | ServerMessage::EditorLayoutOverride(_)
             | ServerMessage::ShellPreferences(_)
             | ServerMessage::RuntimeDiagnostic(_)
+            | ServerMessage::RuntimeStateSnapshot(_)
             | ServerMessage::TabRegistry(_) => {}
             message => panic!("unexpected pre-bind message: {message:?}"),
         }
@@ -197,7 +198,9 @@ async fn deferred_initial_state_waits_for_tab_binding() {
                 workspace_root,
                 ..
             } => break (document_id, workspace_root),
-            ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
+            ServerMessage::SduiSnapshot { .. }
+            | ServerMessage::RuntimeStateSnapshot(_)
+            | ServerMessage::TabRegistry(_) => {}
             message => panic!("expected bound InitialDocument, got {message:?}"),
         }
     };
@@ -462,7 +465,8 @@ async fn real_server_end_to_end_region_locked_edit_rejected() {
             | ServerMessage::DecorationSet(_)
             | ServerMessage::DecorationBatch(_)
             | ServerMessage::DiagnosticSet(_)
-            | ServerMessage::FoldingRangeSet(_) => {}
+            | ServerMessage::FoldingRangeSet(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => {}
             message => panic!("expected file-open capability, got {message:?}"),
         }
     }
@@ -502,7 +506,8 @@ async fn real_server_end_to_end_region_locked_edit_rejected() {
             | ServerMessage::DecorationSet(_)
             | ServerMessage::DecorationBatch(_)
             | ServerMessage::DiagnosticSet(_)
-            | ServerMessage::FoldingRangeSet(_) => {}
+            | ServerMessage::FoldingRangeSet(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => {}
             message => panic!("expected editable InitialDocument, got {message:?}"),
         }
     };
@@ -720,6 +725,7 @@ async fn server_listener_accepts_client_hello() {
             | ServerMessage::EditorLayoutOverride(_)
             | ServerMessage::ShellPreferences(_)
             | ServerMessage::RuntimeDiagnostic(_)
+            | ServerMessage::RuntimeStateSnapshot(_)
             | ServerMessage::TabRegistry(_) => {}
             message => panic!("expected handshake message, got {message:?}"),
         }
@@ -742,7 +748,9 @@ async fn server_listener_accepts_client_hello() {
                 access: DocumentAccess::Editable { lease_id: 1 },
                 ..
             } => break,
-            ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
+            ServerMessage::SduiSnapshot { .. }
+            | ServerMessage::RuntimeStateSnapshot(_)
+            | ServerMessage::TabRegistry(_) => {}
             message => panic!("expected InitialDocument, got {message:?}"),
         }
     }

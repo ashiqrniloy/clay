@@ -5,7 +5,7 @@
  * outside-workspace reads free, outside-workspace mutations need approval
  * unless full autonomy is enabled for the session.
  */
-import type { ExecutionAction, ExecutionDecision, ExecutionPolicy, ToolDefinition } from "@arnilo/prism";
+import type { ExecutionAction, ExecutionDecision, ExecutionPolicy, JsonObject, ToolDefinition, ToolExecutionContext, ToolResult } from "@arnilo/prism";
 import {
   createAskUserDecisionTool,
   createCodingTools,
@@ -17,6 +17,90 @@ import {
   evaluateCommandRules,
 } from "@arnilo/prism-coding-tools/security";
 import { createClayDocumentOps, type ReverseRequest } from "./document-ops.js";
+
+/** Repository scan caps user-configurable via tool-caps.json (decision
+ *  2026-09-05): partial overrides over Prism defaults, clamped to Prism's
+ *  hard caps by resolveRepositoryLimits. Keys mirror Prism option names. */
+export interface RepositoryToolCaps {
+  readonly exclude?: readonly string[];
+  readonly maxEntries?: number;
+  readonly maxFiles?: number;
+  readonly maxDepth?: number;
+  readonly maxResults?: number;
+  readonly maxScanBytes?: number;
+  readonly maxMatches?: number;
+}
+
+const BASE_REPO_EXCLUDE = Object.freeze([".git", "node_modules", "dist", "target"]);
+
+/** truncatedBy value → config key + Prism hard cap, for wall-hit errors. */
+const CAP_REMEDY: Record<string, { key: string; hard: number }> = {
+  entries: { key: "maxEntries", hard: 100_000 },
+  files: { key: "maxFiles", hard: 100_000 },
+  depth: { key: "maxDepth", hard: 128 },
+  results: { key: "maxResults", hard: 10_000 },
+  bytes: { key: "maxScanBytes", hard: 1_073_741_824 },
+  matches: { key: "maxMatches", hard: 10_000 },
+  time: { key: "maxTimeMs", hard: 3_600_000 },
+};
+
+/** Repo tools whose truncation metadata must surface as a user-visible
+ *  error naming the remedy. */
+const REPO_TOOL_NAMES = new Set(["repo_list", "repo_search", "glob"]);
+
+/** Translate Prism truncation metadata into an error result that tells the
+ *  user which cap was hit, where to raise it, and the hard ceiling. */
+function withCapErrors(tools: ToolDefinition[], capsFile: string | undefined): ToolDefinition[] {
+  if (!capsFile) return tools;
+  return tools.map((tool) => {
+    if (!REPO_TOOL_NAMES.has(tool.name)) return tool;
+    const execute = tool.execute.bind(tool);
+    return {
+      ...tool,
+      execute: async (args: JsonObject, context: ToolExecutionContext): Promise<ToolResult> => {
+        const result = await execute(args, context);
+        const metadata = result?.metadata as { truncated?: boolean; truncatedBy?: string } | undefined;
+        const by = metadata?.truncated ? metadata.truncatedBy : undefined;
+        const remedy = by !== undefined && by !== "" ? CAP_REMEDY[by] : undefined;
+        if (!remedy) return result;
+        const message =
+          `Clay hit a repository scan cap (${remedy.key}). ` +
+          `Raise it by adding {"${remedy.key}": <n>} to ${capsFile} ` +
+          `(hard ceiling ${remedy.hard.toLocaleString("en-US")}) and restarting Clay.`;
+        return {
+          ...result,
+          content: [...(result.content ?? []), { type: "text", text: message }],
+          error: { message },
+        };
+      },
+    };
+  });
+}
+
+/** Validate + normalize a parsed tool-caps.json document. Unknown keys are
+ *  dropped; malformed values are rejected so the caller can warn and fall
+ *  back to defaults instead of passing junk into Prism. */
+export function normalizeToolCaps(raw: unknown): RepositoryToolCaps {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (key === "exclude") {
+      if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
+        out.exclude = Object.freeze([...value]);
+      }
+      continue;
+    }
+    if (
+      ["maxEntries", "maxFiles", "maxDepth", "maxResults", "maxScanBytes", "maxMatches"].includes(key) &&
+      typeof value === "number" &&
+      Number.isInteger(value) &&
+      value > 0
+    ) {
+      out[key] = value;
+    }
+  }
+  return out as RepositoryToolCaps;
+}
 
 /** Mirrors Prism's internal mutating-kind table (delete/move included). */
 function isMutatingKind(kind: string): boolean {
@@ -136,6 +220,10 @@ export interface CodingToolsOptions {
   readonly request: ReverseRequest;
   /** Live full-autonomy flag for the session. */
   readonly fullAutonomy: () => boolean;
+  /** User-configured repository scan caps (tool-caps.json). */
+  readonly toolCaps?: RepositoryToolCaps;
+  /** Caps file path, cited in truncation errors so users can raise caps. */
+  readonly capsFile?: string;
   /** Host approval callback (optional; omission fails closed out-of-root). */
   readonly approve?: (action: ExecutionAction) => boolean | Promise<boolean>;
   /** Host ask callback for ask_user_decision (optional; omit to skip tool). */
@@ -154,12 +242,25 @@ export function buildCodingTools(options: CodingToolsOptions): ToolDefinition[] 
     fullAutonomy: options.fullAutonomy,
     ...(options.approve ? { approve: options.approve } : {}),
   });
-  const tools = [...createCodingTools(options.workspaceRoot, {
-    executionPolicy: policy,
-    read: { operations: ops.read },
-    write: { operations: ops.write },
-    edit: { operations: ops.edit },
-  })];
+  const tools = withCapErrors(
+    [
+      ...createCodingTools(options.workspaceRoot, {
+        executionPolicy: policy,
+        // Defaults exclude build trees so the scan budget reaches real
+        // sources; tool-caps.json overrides caps/exclude per user config.
+        repository: {
+          exclude: [...(options.toolCaps?.exclude ?? BASE_REPO_EXCLUDE)],
+          ...Object.fromEntries(
+            Object.entries(options.toolCaps ?? {}).filter(([k]) => k !== "exclude"),
+          ),
+        },
+        read: { operations: ops.read },
+        write: { operations: ops.write },
+        edit: { operations: ops.edit },
+      }),
+    ],
+    options.capsFile,
+  );
   if (options.ask) {
     tools.push(createAskUserDecisionTool({ ask: options.ask }));
   }

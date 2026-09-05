@@ -118,8 +118,19 @@ impl AgentPicker {
     }
 
     pub(crate) fn set_query(&mut self, query: impl Into<String>) -> TransientMenuSession {
-        self.query = query.into();
-        self.selected_index = 0;
+        let incoming = query.into();
+        let merged = if self.stage == Stage::Secret {
+            merge_secret_query(&self.query, &incoming)
+        } else {
+            incoming
+        };
+        // Only a genuinely changed filter resets the selection: the webview
+        // flushes the same draft on Enter before activating, and that flush
+        // must not clobber the arrow-selected item.
+        if merged != self.query {
+            self.selected_index = 0;
+        }
+        self.query = merged;
         self.session()
     }
 
@@ -244,10 +255,15 @@ impl AgentPicker {
                 })
             }
             AgentPickerKind::ProviderSetup => {
-                self.provider = Some(id.strip_prefix("provider:").unwrap_or(id).to_string());
+                let provider = id.strip_prefix("provider:").unwrap_or(id).to_string();
+                self.provider = Some(provider.clone());
                 self.stage = Stage::AuthMethods;
                 self.query.clear();
                 self.selected_index = 0;
+                let auth = self.provider_auth(&provider);
+                if auth.len() == 1 {
+                    return self.activate_auth(&format!("auth:{}", auth[0].kind));
+                }
                 Ok(AgentPickerActivate::StayOpen)
             }
         }
@@ -367,7 +383,7 @@ impl AgentPicker {
         filter_items(
             items,
             &self.query,
-            matches!(self.stage, Stage::Secret)
+            !matches!(self.stage, Stage::List)
                 || matches!(self.kind, AgentPickerKind::SessionSearch),
         )
     }
@@ -537,6 +553,18 @@ fn item(id: &str, label: &str, detail: &str) -> TransientMenuItem {
         .with_accessibility_label(label)
 }
 
+/// Secret-stage query is bullet-masked on the wire. The client sends that
+/// masked value plus newly typed characters; recover the real secret by
+/// treating a leading run of `•` as a length prefix into the current value.
+fn merge_secret_query(current: &str, incoming: &str) -> String {
+    let bullets = incoming.chars().take_while(|ch| *ch == '•').count();
+    let suffix: String = incoming.chars().skip(bullets).collect();
+    let prefix: String = current.chars().take(bullets).collect();
+    let mut next = prefix;
+    next.push_str(&suffix);
+    next
+}
+
 fn filter_items(items: Vec<TransientMenuItem>, query: &str, skip: bool) -> Vec<TransientMenuItem> {
     if skip || query.is_empty() {
         return items;
@@ -679,6 +707,83 @@ mod tests {
             }
             other => panic!("expected put, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn secret_query_from_masked_snapshot_appends_typed_suffix() {
+        assert_eq!(merge_secret_query("sk", "••x"), "skx");
+        assert_eq!(merge_secret_query("sk", "••"), "sk");
+        assert_eq!(merge_secret_query("sk", "new"), "new");
+        assert_eq!(merge_secret_query("", "a"), "a");
+    }
+
+    #[test]
+    fn unchanged_query_keeps_arrow_selection_flush_before_activate() {
+        // The webview flush pattern re-sends the same draft via menuQuery
+        // right before menuActivate; that flush must not clobber the
+        // arrow-selected model. A genuinely changed query still resets.
+        let mut inventory = inventory();
+        inventory.providers[1].configured = true;
+        let mut picker = AgentPicker::open(1, AgentPickerKind::Model, inventory, Vec::new());
+        let session = picker.move_selection(1);
+        assert_eq!(session.selected_index(), 1);
+        let session = picker.set_query("");
+        assert_eq!(
+            session.selected_index(),
+            1,
+            "flush of the unchanged draft must keep the selected model"
+        );
+        let session = picker.set_query("claude");
+        assert_eq!(session.selected_index(), 0);
+    }
+
+    #[test]
+    fn leftover_filter_query_does_not_hide_auth_methods() {
+        let mut picker =
+            AgentPicker::open(1, AgentPickerKind::ProviderSetup, inventory(), Vec::new());
+        picker.set_query("openai");
+        assert_eq!(
+            picker.activate(false).unwrap(),
+            AgentPickerActivate::StayOpen
+        );
+        picker.set_query("openai");
+        let labels: Vec<_> = picker
+            .session()
+            .items()
+            .iter()
+            .map(|item| item.label.clone())
+            .collect();
+        assert!(
+            labels.iter().any(|label| label == "API key"),
+            "auth methods must stay visible when a leftover list filter arrives: {labels:?}"
+        );
+        assert!(
+            labels.iter().any(|label| label == "Base URL"),
+            "url method must stay visible: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn single_auth_provider_opens_secret_stage() {
+        let mut inventory = inventory();
+        inventory.providers.push(AgentPickerProvider {
+            id: "opencode-go".into(),
+            configured: false,
+            auth: vec![AgentPickerAuth {
+                kind: "api_key".into(),
+                name: "API key".into(),
+                credential_name: "apiKey".into(),
+            }],
+        });
+        let mut picker =
+            AgentPicker::open(1, AgentPickerKind::ProviderSetup, inventory, Vec::new());
+        picker.set_query("opencode-go");
+        assert_eq!(
+            picker.activate(false).unwrap(),
+            AgentPickerActivate::StayOpen
+        );
+        assert_eq!(picker.session().prompt(), "API key (hidden)");
+        assert_eq!(picker.session().items()[0].id, STORE_SECRET_ID);
     }
 
     #[test]

@@ -1,9 +1,12 @@
-export const MAX_FRAME_BYTES = 1024 * 1024;
+// Local trusted lane (daemon stdio): cap bounds memory, not trust. Prism's
+// per-tool output ceilings default to 64 MiB (shell stdout, search scan, git
+// patch), so 64 MiB here means the wire never binds before Prism's caps do.
+export const MAX_FRAME_BYTES = 64 * 1024 * 1024;
 
 export class FrameTooLargeError extends Error {
   readonly code = "frame_too_large";
   constructor() {
-    super("JSON-RPC frame exceeds 1 MiB");
+    super("JSON-RPC frame exceeds 64 MiB");
     this.name = "FrameTooLargeError";
   }
 }

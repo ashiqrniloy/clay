@@ -81,7 +81,11 @@ pub use textobjects::*;
 /// atomic `ViewportRenderRequest`/`ViewportRenderPatch` pair: one bounded
 /// patch envelope (with covered ranges, ordered decoration/diagnostic/fold
 /// members, and a complete/empty/rejected status) answers each request id.
-pub const PROTOCOL_VERSION: u32 = 29;
+/// Version 30 adds the current book selection (`provider`, `model`) to
+/// `AgentInventory` so a freshly mounted webview learns the configured
+/// pair from the `listSessions` inventory snapshot instead of waiting for
+/// a picker event.
+pub const PROTOCOL_VERSION: u32 = 30;
 
 pub type PerformanceTraceId = u64;
 
@@ -2127,6 +2131,14 @@ pub struct RuntimeDiagnostic {
 }
 
 impl RuntimeDiagnostic {
+    pub fn info(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Info,
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
     pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             severity: DiagnosticSeverity::Error,

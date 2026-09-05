@@ -444,16 +444,16 @@ where
             .await
         }
         Ok(ServerMenuActivateOutcome::Dispatch(activation)) => {
-            menu_sessions.cancel(session_id);
-            codec
-                .write_server_message(stream, &ServerMessage::TransientMenuClosed { session_id })
-                .await?;
             match activation {
                 ServerMenuActivation::Command(request) => {
                     // Selecting "Browse Filesystem" from the Control Center
                     // opens the Path Browser through the same shared helper
-                    // as its keybinding (the closed Control Center frame was
-                    // already pushed above).
+                    // as its keybinding. The swap is ATOMIC: the replacement
+                    // session is built first (its inventory can take
+                    // seconds), and only then is the old session reported
+                    // closed ahead of the new snapshot — the modal must never
+                    // vanish-then-reappear, because that gap reads as "the
+                    // button did nothing" and invites racing retries.
                     if request.command_id == OPEN_PATH_BROWSER_COMMAND_ID
                         || picker_kind_for_command(&request.command_id).is_some()
                     {
@@ -489,6 +489,13 @@ where
                                     .await?;
                             }
                             Err(message) => {
+                                menu_sessions.cancel(session_id);
+                                codec
+                                    .write_server_message(
+                                        stream,
+                                        &ServerMessage::TransientMenuClosed { session_id },
+                                    )
+                                    .await?;
                                 codec
                                     .write_server_message(
                                         stream,
@@ -507,6 +514,13 @@ where
                     // built-ins resolve via executor fallback. The menu's
                     // own generation stamp already rejected stale sessions,
                     // so the service snapshot is consistent.
+                    menu_sessions.cancel(session_id);
+                    codec
+                        .write_server_message(
+                            stream,
+                            &ServerMessage::TransientMenuClosed { session_id },
+                        )
+                        .await?;
                     let (trusted, third_party) = runtime_generation
                         .current()
                         .await
@@ -528,6 +542,13 @@ where
                     }
                 }
                 ServerMenuActivation::ShellClientCommand(command_id) => {
+                    menu_sessions.cancel(session_id);
+                    codec
+                        .write_server_message(
+                            stream,
+                            &ServerMessage::TransientMenuClosed { session_id },
+                        )
+                        .await?;
                     codec
                         .write_server_message(
                             stream,
@@ -588,7 +609,48 @@ where
             secret,
         } => {
             if let Some(host) = host {
-                let _ = host.put_credential(&provider, &name, &secret).await;
+                if let Err(error) = host.put_credential(&provider, &name, &secret).await {
+                    codec
+                        .write_server_message(
+                            stream,
+                            &ServerMessage::RuntimeDiagnostic(
+                                crate::protocol::RuntimeDiagnostic::error(
+                                    "agent.credential_put_failed",
+                                    error.to_string(),
+                                ),
+                            ),
+                        )
+                        .await?;
+                    return push_active_picker(codec, stream, menu_sessions, client_id, session_id)
+                        .await;
+                }
+                host.select_picker(crate::protocol::AgentPickerKind::Provider, &provider)
+                    .await;
+                let models = host
+                    .picker_inventory()
+                    .await
+                    .models
+                    .iter()
+                    .filter(|model| model.provider == provider)
+                    .count();
+                let message = if models > 0 {
+                    format!("{provider} configured — {models} model(s) available")
+                } else {
+                    format!(
+                        "{provider} API key stored; no models discovered yet — pick a model after it appears"
+                    )
+                };
+                codec
+                    .write_server_message(
+                        stream,
+                        &ServerMessage::RuntimeDiagnostic(
+                            crate::protocol::RuntimeDiagnostic::info(
+                                "agent.credential_stored",
+                                message,
+                            ),
+                        ),
+                    )
+                    .await?;
             }
             menu_sessions.cancel(session_id);
             codec
@@ -635,6 +697,34 @@ where
         AgentPickerActivate::Select { kind, id } => {
             if let Some(host) = host {
                 host.select_picker(kind, &id).await;
+                // Visible confirmation: without this, choosing a model or
+                // provider just closes the modal with no shell-visible
+                // change (silent-success reads as a dead button).
+                let bare = id
+                    .strip_prefix("provider:")
+                    .or_else(|| id.strip_prefix("model:"))
+                    .or_else(|| id.strip_prefix("agent:"))
+                    .unwrap_or(&id);
+                let subject = match kind {
+                    crate::protocol::AgentPickerKind::Provider => {
+                        format!("Provider {bare} selected")
+                    }
+                    crate::protocol::AgentPickerKind::Model => {
+                        format!("Model {bare} selected")
+                    }
+                    _ => format!("{bare} selected"),
+                };
+                codec
+                    .write_server_message(
+                        stream,
+                        &ServerMessage::RuntimeDiagnostic(
+                            crate::protocol::RuntimeDiagnostic::info(
+                                "agent.picker_selected",
+                                subject,
+                            ),
+                        ),
+                    )
+                    .await?;
             }
             menu_sessions.cancel(session_id);
             codec

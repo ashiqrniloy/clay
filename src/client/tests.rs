@@ -2216,6 +2216,7 @@ async fn real_server_end_to_end_edit_gets_acknowledged() {
     while matches!(
         event,
         ClientConnectionEvent::SduiSnapshot { .. }
+            | ClientConnectionEvent::RuntimeStateSnapshot(_)
             | ClientConnectionEvent::CaretStyleOverride(_)
             | ClientConnectionEvent::EditorLayoutOverride(_)
             | ClientConnectionEvent::ShellPreferences(_)
@@ -2535,7 +2536,8 @@ async fn windows_named_pipe_stale_edit_rejected_then_resynced() {
             | ServerMessage::DecorationSet(_)
             | ServerMessage::DecorationBatch(_)
             | ServerMessage::DiagnosticSet(_)
-            | ServerMessage::FoldingRangeSet(_) => {}
+            | ServerMessage::FoldingRangeSet(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => {}
             message => panic!("expected file-open capability, got {message:?}"),
         }
     }
@@ -2576,7 +2578,8 @@ async fn windows_named_pipe_stale_edit_rejected_then_resynced() {
             | ServerMessage::DecorationSet(_)
             | ServerMessage::DecorationBatch(_)
             | ServerMessage::DiagnosticSet(_)
-            | ServerMessage::FoldingRangeSet(_) => {}
+            | ServerMessage::FoldingRangeSet(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => {}
             message => panic!("expected editable InitialDocument, got {message:?}"),
         }
     };
@@ -2620,7 +2623,8 @@ async fn windows_named_pipe_stale_edit_rejected_then_resynced() {
             | ServerMessage::DecorationSet(_)
             | ServerMessage::DecorationBatch(_)
             | ServerMessage::DiagnosticSet(_)
-            | ServerMessage::FoldingRangeSet(_) => continue,
+            | ServerMessage::FoldingRangeSet(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => continue,
             message => panic!("expected EditRejected, got {message:?}"),
         }
     };
@@ -2677,7 +2681,8 @@ async fn windows_named_pipe_stale_edit_rejected_then_resynced() {
             | ServerMessage::DecorationSet(_)
             | ServerMessage::DecorationBatch(_)
             | ServerMessage::DiagnosticSet(_)
-            | ServerMessage::FoldingRangeSet(_) => {}
+            | ServerMessage::FoldingRangeSet(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => {}
             message => panic!("expected ResyncSnapshot, got {message:?}"),
         }
     }
@@ -2819,7 +2824,8 @@ async fn real_server_tab_close_ends_connection_and_removes_registry_entry() {
             | ServerMessage::CaretStyleOverride(_)
             | ServerMessage::EditorLayoutOverride(_)
             | ServerMessage::ShellPreferences(_)
-            | ServerMessage::RuntimeDiagnostic(_) => {}
+            | ServerMessage::RuntimeDiagnostic(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => {}
             message => panic!("expected registry replay, got {message:?}"),
         }
     };
@@ -3033,7 +3039,8 @@ async fn real_server_tab_move_commands_reorder_broadcast_and_reject() {
             | ServerMessage::CaretStyleOverride(_)
             | ServerMessage::EditorLayoutOverride(_)
             | ServerMessage::ShellPreferences(_)
-            | ServerMessage::RuntimeDiagnostic(_) => {}
+            | ServerMessage::RuntimeDiagnostic(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => {}
             message => panic!("expected registry replay, got {message:?}"),
         }
     };
@@ -3412,7 +3419,8 @@ async fn real_server_end_to_end_stale_edit_rejected_then_resynced() {
             | ServerMessage::DecorationSet(_)
             | ServerMessage::DecorationBatch(_)
             | ServerMessage::DiagnosticSet(_)
-            | ServerMessage::FoldingRangeSet(_) => {}
+            | ServerMessage::FoldingRangeSet(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => {}
             message => panic!("expected file-open capability, got {message:?}"),
         }
     }
@@ -3453,7 +3461,8 @@ async fn real_server_end_to_end_stale_edit_rejected_then_resynced() {
             | ServerMessage::DecorationSet(_)
             | ServerMessage::DecorationBatch(_)
             | ServerMessage::DiagnosticSet(_)
-            | ServerMessage::FoldingRangeSet(_) => {}
+            | ServerMessage::FoldingRangeSet(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => {}
             message => panic!("expected editable InitialDocument, got {message:?}"),
         }
     };
@@ -3497,7 +3506,8 @@ async fn real_server_end_to_end_stale_edit_rejected_then_resynced() {
             | ServerMessage::DecorationSet(_)
             | ServerMessage::DecorationBatch(_)
             | ServerMessage::DiagnosticSet(_)
-            | ServerMessage::FoldingRangeSet(_) => continue,
+            | ServerMessage::FoldingRangeSet(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => continue,
             message => panic!("expected EditRejected, got {message:?}"),
         }
     };
@@ -3554,7 +3564,8 @@ async fn real_server_end_to_end_stale_edit_rejected_then_resynced() {
             | ServerMessage::DecorationSet(_)
             | ServerMessage::DecorationBatch(_)
             | ServerMessage::DiagnosticSet(_)
-            | ServerMessage::FoldingRangeSet(_) => {}
+            | ServerMessage::FoldingRangeSet(_)
+            | ServerMessage::RuntimeStateSnapshot(_) => {}
             message => panic!("expected ResyncSnapshot, got {message:?}"),
         }
     }

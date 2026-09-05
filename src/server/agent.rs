@@ -353,13 +353,14 @@ impl std::fmt::Debug for AgentHost {
 impl AgentHost {
     pub fn new(config: AgentHostConfig) -> Self {
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
+        let book = load_persisted_book(&config.data_dir);
         Self {
             inner: Arc::new(Inner {
                 config,
                 events,
                 state: Mutex::new(None),
                 secrets: Arc::new(Mutex::new(Vec::new())),
-                book: Arc::new(Mutex::new(SessionBook::default())),
+                book: Arc::new(Mutex::new(book)),
                 reverse: Mutex::new(None),
                 approvals: Arc::new(Mutex::new(HashMap::new())),
                 approval_seq: AtomicU64::new(1),
@@ -462,37 +463,94 @@ impl AgentHost {
     }
 
     pub(crate) async fn select_picker(&self, kind: AgentPickerKind, id: &str) {
-        let mut book = self.inner.book.lock().await;
-        match kind {
-            AgentPickerKind::Provider => {
-                book.provider = id.strip_prefix("provider:").unwrap_or(id).to_string();
-            }
-            AgentPickerKind::Model => {
-                let rest = id.strip_prefix("model:").unwrap_or(id);
-                if let Some((provider, model)) = rest.split_once('/') {
-                    book.provider = provider.to_string();
-                    book.model = model.to_string();
+        {
+            let mut book = self.inner.book.lock().await;
+            match kind {
+                AgentPickerKind::Provider => {
+                    book.provider = id.strip_prefix("provider:").unwrap_or(id).to_string();
                 }
+                AgentPickerKind::Model => {
+                    let rest = id.strip_prefix("model:").unwrap_or(id);
+                    if let Some((provider, model)) = rest.split_once('/') {
+                        book.provider = provider.to_string();
+                        book.model = model.to_string();
+                    }
+                }
+                AgentPickerKind::Agent => {
+                    book.profile = id.strip_prefix("agent:").unwrap_or(id).to_string();
+                }
+                _ => {}
             }
-            AgentPickerKind::Agent => {
-                book.profile = id.strip_prefix("agent:").unwrap_or(id).to_string();
-            }
-            _ => {}
         }
+        if matches!(kind, AgentPickerKind::Provider) {
+            self.ensure_default_model().await;
+        }
+        self.persist_book_selection().await;
+        self.publish_book_snapshot().await;
+    }
+
+    /// Best-effort persistence of the profile/provider/model trio so a
+    /// configured book survives server restarts (see load_persisted_book).
+    async fn persist_book_selection(&self) {
+        if self.inner.config.inert {
+            return;
+        }
+        let data_dir = self.inner.config.data_dir.clone();
+        let book = self.inner.book.lock().await;
+        persist_book(&data_dir, &book);
+    }
+
+    async fn ensure_default_model(&self) {
+        let provider = self.inner.book.lock().await.provider.clone();
+        if provider.is_empty() {
+            return;
+        }
+        let current = self.inner.book.lock().await.model.clone();
+        let inventory = self.picker_inventory().await;
+        if !current.is_empty()
+            && inventory
+                .models
+                .iter()
+                .any(|model| model.provider == provider && model.model == current)
+        {
+            return;
+        }
+        if let Some(model) = inventory
+            .models
+            .iter()
+            .find(|model| model.provider == provider)
+        {
+            self.inner.book.lock().await.model = model.model.clone();
+        }
+    }
+
+    async fn publish_book_snapshot(&self) {
+        let snapshot = self.unconfigured_snapshot().await;
+        let _ = self
+            .inner
+            .events
+            .send(Arc::new(AgentServerMessage::Snapshot(snapshot)));
+    }
+
+    fn emit_agent(&self, message: AgentServerMessage) -> AgentServerMessage {
+        let _ = self.inner.events.send(Arc::new(message.clone()));
+        message
     }
 
     pub async fn begin_prompt(&self, tab: TabId, text: &str) -> AgentServerMessage {
         if text.trim().is_empty() {
-            return diagnostic("agent.empty_prompt", "empty prompt");
+            return self.emit_agent(diagnostic("agent.empty_prompt", "empty prompt"));
         }
         if text.len() > AGENT_MAX_PROMPT_BYTES {
-            return diagnostic(
+            return self.emit_agent(diagnostic(
                 "agent.prompt_too_large",
                 "prompt exceeds AGENT_MAX_PROMPT_BYTES",
-            );
+            ));
         }
         let Some(session_id) = self.ensure_tab_session(tab).await else {
-            return AgentServerMessage::Snapshot(self.unconfigured_snapshot().await);
+            return self.emit_agent(AgentServerMessage::Snapshot(
+                self.unconfigured_snapshot().await,
+            ));
         };
         {
             let mut book = self.inner.book.lock().await;
@@ -515,7 +573,7 @@ impl AgentHost {
             provider: Some(provider),
             model: Some(model),
         });
-        AgentServerMessage::Snapshot(snapshot)
+        self.emit_agent(AgentServerMessage::Snapshot(snapshot))
     }
 
     pub(crate) async fn cancel_tab(&self, tab: TabId) -> AgentServerMessage {
@@ -659,6 +717,10 @@ impl AgentHost {
                 return Some(session_id.clone());
             }
             if book.provider.is_empty() || book.model.is_empty() {
+                eprintln!(
+                    "[agent] ensure_tab_session({tab:?}): empty book (provider='{}' model='{}')",
+                    book.provider, book.model
+                );
                 return None;
             }
         }
@@ -684,9 +746,11 @@ impl AgentHost {
             })
             .await;
         let AgentServerMessage::Snapshot(snapshot) = created else {
+            eprintln!("[agent] ensure_tab_session({tab:?}): NewSession failed -> {created:?}");
             return None;
         };
         if snapshot.session_id.is_empty() {
+            eprintln!("[agent] ensure_tab_session({tab:?}): NewSession returned empty session id");
             return None;
         }
         let mut book = self.inner.book.lock().await;
@@ -751,14 +815,23 @@ impl AgentHost {
         name: &str,
         secret: &str,
     ) -> Result<(), AgentError> {
-        let _ = self
+        let message = self
             .run(AgentClientCommand::CredentialPut {
                 provider: provider.to_string(),
                 name: name.to_string(),
                 secret: AgentSecret(secret.to_string()),
             })
             .await;
-        Ok(())
+        let failed = match &message {
+            AgentServerMessage::CredentialAck { stored: true, .. } => None,
+            AgentServerMessage::Diagnostic { message, .. } => Some(message.clone()),
+            _ => Some("credential.put failed".to_string()),
+        };
+        let _ = self.inner.events.send(Arc::new(message));
+        match failed {
+            Some(message) => Err(AgentError::Rpc(message)),
+            None => Ok(()),
+        }
     }
 
     pub(crate) async fn start_oauth(&self, provider: &str) -> Result<AgentOauthStart, AgentError> {
@@ -1092,12 +1165,18 @@ impl AgentHost {
                         "invalid decision: expected a JSON object".into(),
                     ));
                 }
-                let result = self
-                    .rpc(
-                        "run.resume",
-                        json!({ "sessionId": session_id, "runId": run_id, "decision": decision }),
-                    )
-                    .await?;
+                // Fail-closed passthrough: the daemon re-validates every
+                // field. expectedVersion may be omitted — the daemon then
+                // applies its stashed suspension version.
+                let mut params = serde_json::Map::new();
+                params.insert("sessionId".into(), json!(session_id));
+                params.insert("runId".into(), json!(run_id));
+                for key in ["expectedVersion", "decision", "decisions"] {
+                    if let Some(value) = decision.get(key) {
+                        params.insert(key.into(), value.clone());
+                    }
+                }
+                let result = self.rpc("run.resume", Value::Object(params)).await?;
                 Ok(agent_rpc("agent.run_resume_result", &result))
             }
             AgentClientCommand::SkillRegister {
@@ -1223,6 +1302,10 @@ impl AgentHost {
 
     async fn inventory(&self) -> Result<AgentInventory, AgentError> {
         let rich = self.inventory_rich().await?;
+        let (provider, model) = {
+            let book = self.inner.book.lock().await;
+            (book.provider.clone(), book.model.clone())
+        };
         Ok(AgentInventory {
             providers: rich
                 .providers
@@ -1235,6 +1318,8 @@ impl AgentHost {
             models: rich.models,
             profiles: rich.profiles,
             sessions: rich.sessions,
+            provider,
+            model,
         })
     }
 
@@ -1453,8 +1538,20 @@ async fn daemon_actor(
                         break;
                     }
                     Ok(len) if len > AGENT_DAEMON_MAX_LINE_BYTES || buf.len() > AGENT_DAEMON_MAX_LINE_BYTES => {
-                        fail_pending(&mut pending, AgentError::FrameTooLarge { len: buf.len() });
-                        break;
+                        // A single oversized frame must not kill the daemon
+                        // connection (that strands every in-flight run):
+                        // drop the frame, surface a diagnostic, keep reading.
+                        buf.clear();
+                        let _ = events.send(Arc::new(AgentServerMessage::Event {
+                            session_id: String::new(),
+                            event: AgentWireEvent::Error {
+                                session_id: String::new(),
+                                message: format!(
+                                    "Clay dropped an oversized daemon frame ({} bytes > cap {}); the run continued.",
+                                    len, AGENT_DAEMON_MAX_LINE_BYTES
+                                ),
+                            },
+                        }));
                     }
                     Ok(_) => {
                         let line = String::from_utf8_lossy(&buf);
@@ -1673,16 +1770,60 @@ fn map_event(params: &Value, secrets: &[String]) -> Option<AgentServerMessage> {
             allowed: event.get("allowed").and_then(Value::as_bool),
         },
         "event_subscriber_overflow" => AgentWireEvent::Overflow,
-        "error" => AgentWireEvent::Error {
-            session_id: session_id.clone(),
-            message: redact_text(
-                event
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("error"),
-                secrets,
-            ),
-        },
+        // Durable-run suspension (tool approval): surface the pending
+        // approval as Permission (request_id = first pending approvalId)
+        // so the panel can render Allow/Deny and resume the run. Without
+        // this arm the suspension fell into the catch-all below and the
+        // client saw a spurious Started, leaving the run "streaming"
+        // forever. Suspensions without a client-resumable approval close
+        // the AG-UI run instead of parking it.
+        "agent_suspended" => {
+            let pending = event
+                .get("interruption")
+                .and_then(|interruption| interruption.get("pendingDecisions"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let tool_name = event
+                .get("interruption")
+                .and_then(|interruption| interruption.get("toolName"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let approval = pending
+                .first()
+                .and_then(|decision| decision.get("approvalId"))
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            match approval {
+                Some(approval_id) if !tool_name.is_empty() => AgentWireEvent::Permission {
+                    session_id: session_id.clone(),
+                    run_id,
+                    request_id: approval_id,
+                    tool_name: tool_name.to_string(),
+                    allowed: None,
+                },
+                _ => AgentWireEvent::Finished {
+                    session_id: session_id.clone(),
+                    run_id,
+                    usage: String::new(),
+                    context_tokens: None,
+                },
+            }
+        }
+        // Prism error events nest the details under `error`: {error: {name,
+        // message, code}}; a top-level `message` string is the legacy shape.
+        "error" => {
+            let detail = event
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .or_else(|| event.get("message").and_then(Value::as_str))
+                .unwrap_or("error");
+            AgentWireEvent::Error {
+                session_id: session_id.clone(),
+                message: redact_text(detail, secrets),
+            }
+        }
         _ => AgentWireEvent::Started {
             session_id: session_id.clone(),
             run_id,
@@ -1736,6 +1877,9 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr) {
         .ok()
         .is_some_and(|n| n > 0)
     {
+        // Passthrough: daemon-side diagnostics belong in the server log
+        // (draining silently hid boot/registration failures).
+        eprint!("[daemon] {}", String::from_utf8_lossy(&buf));
         buf.clear();
     }
 }
@@ -1951,6 +2095,48 @@ fn snapshot_from_load(value: &Value) -> AgentSessionSnapshot {
             .collect();
     }
     snapshot
+}
+
+/// Persisted book selection: survives server restarts so a configured
+/// provider/model/profile does not need re-picking. Best-effort JSON next
+/// to the daemon data (sessions/credentials live there too).
+fn book_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("book.json")
+}
+
+fn load_persisted_book(data_dir: &Path) -> SessionBook {
+    let mut book = SessionBook::default();
+    let Ok(raw) = std::fs::read_to_string(book_path(data_dir)) else {
+        return book;
+    };
+    match serde_json::from_str::<Value>(&raw) {
+        Ok(value) => {
+            if let Some(field) = value.get("provider").and_then(Value::as_str) {
+                book.provider = field.to_string();
+            }
+            if let Some(field) = value.get("model").and_then(Value::as_str) {
+                book.model = field.to_string();
+            }
+            if let Some(field) = value.get("profile").and_then(Value::as_str) {
+                book.profile = field.to_string();
+            }
+        }
+        Err(error) => {
+            eprintln!("[agent] book.json unreadable: {error}");
+        }
+    }
+    book
+}
+
+fn persist_book(data_dir: &Path, book: &SessionBook) {
+    let payload = json!({
+        "provider": book.provider,
+        "model": book.model,
+        "profile": book.profile,
+    });
+    if let Err(error) = std::fs::write(book_path(data_dir), payload.to_string()) {
+        eprintln!("[agent] book.json write failed: {error}");
+    }
 }
 
 fn apply_book_event(book: &mut SessionBook, message: &AgentServerMessage) {
@@ -2312,5 +2498,39 @@ mod approval_tests {
         );
         let answer = waiter.await.expect("task joins");
         assert_eq!(answer.expect_err("denied"), "denied by user");
+    }
+
+    #[tokio::test]
+    async fn book_selection_survives_host_recreation() {
+        let dir = std::env::temp_dir().join(format!("clay-book-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create data dir");
+        let config = AgentHostConfig {
+            program: std::path::PathBuf::new(),
+            args: Vec::new(),
+            data_dir: dir.clone(),
+            inherit_environment: Vec::new(),
+            inert: false,
+            mcp_allow_list: Vec::new(),
+        };
+        let host = AgentHost::new(config.clone());
+        host.select_picker(AgentPickerKind::Model, "model:ollama/glm-5.3")
+            .await;
+        host.select_picker(AgentPickerKind::Agent, "agent:coding")
+            .await;
+        drop(host);
+        assert!(dir.join("book.json").is_file(), "book.json written");
+
+        let restored = AgentHost::new(config);
+        let book = restored.inner.book.lock().await;
+        assert_eq!(book.provider, "ollama");
+        assert_eq!(book.model, "glm-5.3");
+        assert_eq!(book.profile, "coding");
+
+        // Garbage book.json falls back to defaults without panicking.
+        std::fs::write(dir.join("book.json"), "not json").expect("write garbage");
+        let clean = load_persisted_book(&dir);
+        assert_eq!(clean.provider, "");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

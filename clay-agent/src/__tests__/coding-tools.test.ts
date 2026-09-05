@@ -8,7 +8,7 @@ import {
   toAskUserDecisionSuspendData,
   validateAskUserDecisionResume,
 } from "@arnilo/prism-coding-tools/agent";
-import { buildCodingTools, createClayAcceptancePolicy } from "../coding-tools.js";
+import { buildCodingTools, createClayAcceptancePolicy, normalizeToolCaps } from "../coding-tools.js";
 import { ClayAgentHost } from "../host.js";
 
 async function tempDir(): Promise<string> {
@@ -105,6 +105,48 @@ test("buildCodingTools registers the nine tools plus ask_user_decision", () => {
     ask: async () => ({ selectedId: "a" }),
   });
   assert.ok(withAsk.map((tool) => tool.name).includes("ask_user_decision"));
+});
+
+test("tool caps from toolCaps flow into repo tools; truncation surfaces a remedy error", async () => {
+  const capsFile = join(await tempDir(), "tool-caps.json");
+  const wsRoot = await tempDir();
+  // Three-file tree against maxEntries 2: the walk must truncate, proving
+  // the user cap flowed into the tool and the remedy error fires.
+  await writeFile(join(wsRoot, "a.txt"), "needle\n");
+  await writeFile(join(wsRoot, "b.txt"), "other\n");
+  await writeFile(join(wsRoot, "c.txt"), "more\n");
+  const tools = buildCodingTools({
+    workspaceRoot: wsRoot,
+    request: async () => {
+      throw new Error("unused");
+    },
+    fullAutonomy: () => true,
+    toolCaps: { maxEntries: 2, maxMatches: 1 },
+    capsFile,
+  });
+  const search = tools.find((tool) => tool.name === "repo_search");
+  assert.ok(search, "repo_search present");
+  // maxEntries 2 forces a wall-hit on the real workspace walk; the result
+  // must carry an error naming the caps file, the key, and the hard ceiling.
+  const result = await search.execute({ query: "x" }, context());
+  assert.ok(result?.error, "truncation must produce an error");
+  assert.match(result.error.message, /maxEntries/);
+  assert.match(result.error.message, new RegExp(capsFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(result.error.message, /100,000/);
+  // Content still carries the original result text plus the remedy line.
+  const last = (result.content?.at(-1) as { text?: string } | undefined)?.text ?? "";
+  assert.match(last, /repository scan cap/);
+});
+
+test("normalizeToolCaps drops malformed entries and keeps valid ones", () => {
+  assert.deepEqual(normalizeToolCaps({ maxEntries: 5000, maxFiles: -1, bogus: 3, exclude: ["a", 4] }), {
+    maxEntries: 5000,
+  });
+  assert.deepEqual(normalizeToolCaps("junk"), {});
+  assert.deepEqual(normalizeToolCaps({ maxScanBytes: 1_048_576, exclude: ["target"] }), {
+    maxScanBytes: 1_048_576,
+    exclude: ["target"],
+  });
 });
 
 test("read returns the dirty buffer of an open document, not disk bytes", async () => {

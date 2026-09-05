@@ -53,11 +53,20 @@ Round Trip](transient-menu-round-trip.md):
   produced session carries the live query and selection. Arrow intents
   (`MenuSelectionMove`) never mutate server state locally.
 - **Filter**. `MenuQueryUpdate` → `set_query` (clamped at the store choke
-  point); the snapshot echoes the query (no optimistic client echo).
+  point); the snapshot echoes the query (no optimistic client echo). An
+  unchanged query keeps `selected_index` — the webview flushes the same
+  draft via `menuQuery` right before `menuActivate` on Enter, and that
+  flush must not clobber the arrow-selected item; only a genuinely
+  changed filter resets the selection to 0.
 - **Lifecycle**. Tab switch cancels the session (`cancel_active` + explicit
   closed message); reopen replaces; a local menu opening enqueues
   `MenuCancel` from the pane view; disconnect drops the loop-local store.
   Stale ids get the bounded `menu.unknown_session` diagnostic, never a
+  disconnect. Picker/path-browser activations swap ATOMICALLY: the
+  replacement session is built first (its inventory can take seconds on
+  first model discovery), and only then is the old session reported
+  closed ahead of the new snapshot — the modal never vanishes-then-
+  reappears mid-transition.
   panic or disconnect.
 
 ## Phase 24.2: Command execution mode

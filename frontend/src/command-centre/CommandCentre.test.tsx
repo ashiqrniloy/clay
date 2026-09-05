@@ -161,4 +161,66 @@ describe("CommandCentre", () => {
     const families = sent.map((payload) => JSON.parse(payload).family);
     expect(families).toContain("menuCancel");
   });
+
+  it("keeps a typed API key when the snapshot query is masked and flushes it on Enter",
+    async () => {
+      const sent: string[] = [];
+      const workspace = createWorkspace({
+        send: async (payload) => {
+          sent.push(payload);
+        },
+      });
+      workspace.installBootstrap(bootstrap());
+      const snapshot = {
+        sessionId: "9223372036854775809" as never,
+        prompt: "API key (hidden)",
+        query: "",
+        items: [
+          {
+            id: "store_secret",
+            label: "Store API key",
+            detail: "Value is hidden. Enter stores it.",
+            accessibilityLabel: "Store API key",
+          },
+        ],
+        selectedIndex: 0,
+        status: "active" as const,
+        focusPolicy: "modal" as const,
+        origin: "centered" as const,
+      };
+      workspace.handleEnvelope({
+        kind: "routed",
+        data: {
+          clientId: 1,
+          tabId: 10,
+          event: { kind: "transientMenuSnapshot", data: snapshot },
+        },
+      });
+      const user = userEvent.setup();
+      render(<CommandCentre workspace={workspace} />);
+      const field = screen.getByRole("textbox", { name: "API key (hidden)" });
+      await user.type(field, "sk-test-key");
+      workspace.handleEnvelope({
+        kind: "routed",
+        data: {
+          clientId: 1,
+          tabId: 10,
+          event: {
+            kind: "transientMenuSnapshot",
+            data: { ...snapshot, query: "•".repeat(11) },
+          },
+        },
+      });
+      expect(field).toHaveValue("sk-test-key");
+      await user.keyboard("{Enter}");
+      const queries = sent
+        .map((payload) => JSON.parse(payload) as { family: string; payload: { query?: string } })
+        .filter((payload) => payload.family === "menuQueryUpdate")
+        .map((payload) => payload.payload.query);
+      expect(queries.at(-1)).toBe("sk-test-key");
+      expect(sent.map((payload) => JSON.parse(payload).family)).toContain(
+        "menuActivate",
+      );
+    },
+  );
 });

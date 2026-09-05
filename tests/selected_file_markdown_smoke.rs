@@ -88,14 +88,16 @@ async fn run_smoke(endpoint: &IpcEndpoint, selected: &Path) {
     loop {
         match read_message(&codec, &mut stream).await {
             ServerMessage::InitialDocument { .. } => break,
-            ServerMessage::SduiSnapshot { .. } | ServerMessage::TabRegistry(_) => {}
+            ServerMessage::SduiSnapshot { .. }
+            | ServerMessage::RuntimeStateSnapshot(_)
+            | ServerMessage::TabRegistry(_) => {}
             message => panic!("expected deferred InitialDocument, got {message:?}"),
         }
     }
     loop {
         match read_message(&codec, &mut stream).await {
             ServerMessage::TabRegistry(_) => break,
-            ServerMessage::SduiSnapshot { .. } => {}
+            ServerMessage::SduiSnapshot { .. } | ServerMessage::RuntimeStateSnapshot(_) => {}
             message => panic!("expected post-bind registry, got {message:?}"),
         }
     }
@@ -182,6 +184,7 @@ where
             | ServerMessage::SduiSnapshot { .. }
             | ServerMessage::ShellPreferences(_)
             | ServerMessage::RuntimeDiagnostic(_)
+            | ServerMessage::RuntimeStateSnapshot(_)
             | ServerMessage::BehaviorManifest(_)
             | ServerMessage::TabRegistry(_) => continue,
             message => panic!("expected FileOpenCapabilityIssued, got {message:?}"),

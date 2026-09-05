@@ -1,10 +1,10 @@
 // ============================================================================
-// Clay canonical example configuration — examples/init.js
+// Clay canonical example configuration — examples/config/init.js
 // ============================================================================
 //
 // Copy the whole tree to your configuration root and adjust it:
 //
-//   cp -r examples/. ~/.config/clay/
+//   cp -r examples/config/. ~/.config/clay/
 //
 // The example is split into three modules that mirror the three components of
 // a real configuration:
