@@ -1,0 +1,2 @@
+    Checking clay v0.1.0 (/home/arn/Projects/clay)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.17s

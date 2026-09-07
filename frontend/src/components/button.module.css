@@ -280,3 +280,20 @@
   );
   cursor: default;
 }
+
+/* Icon-only composition (Plan 112 Task 7): the 16px glyph sits inside a
+ * ≥24px CSS hit target (WCAG 2.2 minimum target size) using spacing tokens;
+ * width/height stay equal so focus rings and hover fills stay square. */
+.iconButton {
+  min-inline-size: calc(var(--clay-dimension-icon-size, 16px) + var(--clay-spacing-xs, 8px) * 2);
+  min-block-size: calc(var(--clay-dimension-icon-size, 16px) + var(--clay-spacing-xs, 8px) * 2);
+  padding: var(--clay-spacing-xxs, 4px);
+  justify-content: center;
+}
+
+/* Visible-label fallback when the icon key resolves to no geometry:
+ * never a blank control. */
+.iconButtonFallbackLabel {
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-body-size, 13px);
+}

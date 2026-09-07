@@ -1,6 +1,7 @@
 import { EditorState } from "@codemirror/state";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, act } from "@testing-library/react";
+import { cleanup, render, screen, act, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import type { BootstrapDto } from "../bridge/types";
 import { editorPerformance, PERFORMANCE_STAGE } from "../editor/performance";
@@ -126,6 +127,42 @@ describe("editor lifecycle", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     expect(screen.getByText(/seed-full/)).toBeInTheDocument();
+  });
+
+  it("migrated action row invokes exact handlers and keeps Open as text (plan 112 T8)", async () => {
+    const user = userEvent.setup();
+    const sent: string[] = [];
+    const session = createDocumentSession({
+      send: (payload: string) => {
+        sent.push(payload);
+        return Promise.resolve();
+      },
+    });
+    session.installInitial(bootstrap);
+    render(<ClayEditor session={session} />);
+
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save.querySelector("svg")).not.toBeNull();
+    const reload = screen.getByRole("button", { name: "Reload" });
+    expect(reload.querySelector("svg")).not.toBeNull();
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.querySelector("svg")).not.toBeNull();
+    // Open stays a labeled text action (discovery/destination label).
+    const open = screen.getByRole("button", { name: "Open" });
+    expect(open.querySelector("svg")).toBeNull();
+    expect(open.textContent).toContain("Open");
+
+    await user.click(save);
+    await user.click(reload);
+    fireEvent.click(close);
+    const families = sent
+      .map((payload) => JSON.parse(payload) as { family?: string })
+      .map((message) => message.family);
+    expect(families.filter((f) => f === "saveDocument")).toHaveLength(1);
+    expect(families.filter((f) => f === "reloadDocument")).toHaveLength(1);
+    expect(families.filter((f) => f === "closeDocument")).toHaveLength(1);
+    // Save is disabled while not editable; it was enabled here, so this
+    // guards the disabled condition indirectly via the single-shot sends.
   });
 
   it("does not reconfigure read-only on unrelated metadata updates", () => {

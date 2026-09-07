@@ -20,8 +20,8 @@ pub mod session;
 
 pub use agent::{AgentRelay, AgentStreamEvent};
 pub use dto::{
-    BootstrapDto, BridgeEnvelope, DesignSystemSnapshotDto, RuntimeSnapshotDto, ThemeSnapshotDto,
-    TypographySnapshotDto,
+    BootstrapDto, BridgeEnvelope, DesignSystemSnapshotDto, IconPackSnapshotDto, RuntimeSnapshotDto,
+    ThemeSnapshotDto, TypographySnapshotDto,
 };
 pub use errors::BridgeError;
 pub use session::BridgeState;

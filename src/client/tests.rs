@@ -1887,6 +1887,7 @@ fn sample_runtime_snapshot(
         active_design_system: crate::shell::design_system::ActiveDesignSystem::core_fallback(
             generation,
         ),
+        active_icon_pack: None,
         ui_choices: crate::protocol::UiChoicesSnapshot::default(),
         sdui_tree: SduiTree {
             ui_version: generation,
@@ -1895,6 +1896,7 @@ fn sample_runtime_snapshot(
                 SduiNodeId(1),
                 SduiNodeKind::Label {
                     text: format!("gen-{generation}"),
+                    icon: None,
                 },
             )],
         },

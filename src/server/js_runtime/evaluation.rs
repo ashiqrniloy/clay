@@ -157,6 +157,16 @@ pub(super) fn apply_persisted_preferences(
             "preferences: designSystem `{specifier}` rejected: {error}"
         ));
     }
+    if let Some(specifier) = &prefs.icon_pack
+        && let Err(error) = crate::server::ops::theme::apply_icon_pack(op_state, specifier)
+    {
+        // Sanitized diagnostic; previous valid generation is preserved and
+        // the bundled Regular subset stays active for any missing selection
+        // (Plan 112 task 5, state table rows 6/7).
+        op_state.record(format!(
+            "preferences: iconPack `{specifier}` rejected: {error}"
+        ));
+    }
 }
 
 pub(super) async fn evaluate_js_parse_handler(

@@ -791,6 +791,7 @@ await publishTree(
       defineLabel({ text: "Markdown preview ready" }),
       defineButton({
         label: "Toggle Preview",
+        icon: "preview.toggle",
         action: {
           commandId: "markdown.togglePreview",
           arguments: { source: "preview-button" },
@@ -802,6 +803,8 @@ await publishTree(
 ```
 
 The current `clay:sdui` helpers publish bounded inert node trees through server validation. They do not create client widgets directly, run client-side JavaScript, own pane slots, or define the future package layout contract.
+
+**Semantic icon references (Plan 112):** `defineLabel`, `defineButton`, `defineList` (and list items), plus the manifest `label`/`button`/`list`/`statusItem` component kinds accept an optional `icon` string resolved by the host against the user's active icon pack. Runtime trees accept **core semantic keys only** (`action.close`, `file.folder`, `git.branch`, `preview.toggle`, …); package-owned namespace keys are validated at record time for component contributions. Icons are inert decoration: the text label always carries the full meaning on its own, an unknown key renders an empty decorative slot (never a broken glyph), and icons never add action authority.
 
 `clay:ui` inventory targets for the shell/layout contract include:
 
@@ -1425,6 +1428,17 @@ Package recipe keys must use the canonical, CSS-consumed slot names (plan 110 ta
   }
 }
 ```
+
+### Icon-pack declarations (`clay.contributions.iconPack`, Plan 112)
+
+Packages contribute icon styles via `clay.contributions.iconPack` in `package.json`: bounded, host-validated vector geometry keyed by semantic names (`action.close`, `file.folder`, package-namespaced keys like `vendor.custom-close`). Clay owns rendering; icons render with `fill="currentColor"` so the active theme stays the sole color authority.
+
+See [Icon Packs](../icon-packs.md) and [theme.setIconPack](../clay-js-api/theme/set-icon-pack.md) for the full specification, geometry schema, budgets, and lifecycle table.
+
+- **Inert Manifest Data Only:** geometry is structured JSON (schema version, viewBox, 1–8 absolute `M|L|C|Q|H|V|A|Z` paths, optional per-path opacity) validated at record, shell, and wire boundaries. Raw SVG/XML, CSS, URLs, scripts, events, filters, and unsupported attributes are rejected fail-closed.
+- **Key Rules:** core semantic keys resolve only from compiled-inventory first-party `@clay/*` packs; third-party packs use their own namespace prefix. Unknown or missing keys fall back to the bundled default subset — controls are never blank.
+- **Payload Budget:** ≤ 2048 bytes per icon, ≤ 64 KiB per pack, ≤ 64 icons (`ICON_PACK_PAYLOAD_BUDGET_BYTES`), checked at record assembly.
+- **Load ≠ Select:** enabling a package never changes the icon style; activation is explicit via `setIconPack` (or the persisted `iconPack` preference), and the selection op is unreachable from package runtime code.
 
 ### Phase 20.3 authoring contract: layout primitives, split interaction, and layout intents
 

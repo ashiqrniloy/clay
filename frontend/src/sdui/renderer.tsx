@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 
-import { ClayButton, ClayList, ClayText } from "../components";
+import { ClayButton, ClayIcon, ClayList, ClayText } from "../components";
 import { sduiActionPayload, type IntentSender } from "./actions";
 import type { SduiActionIntent } from "./types";
 import type { SduiState } from "./state";
@@ -40,11 +40,17 @@ export function SduiRenderer({
       );
     }
     if ("label" in kind) {
-      return <ClayText variant="body">{kind.label.text}</ClayText>;
+      return (
+        <ClayText variant="body">
+          {kind.label.icon && <ClayIcon name={kind.label.icon} />}
+          {kind.label.text}
+        </ClayText>
+      );
     }
     if ("button" in kind) {
       return (
         <ClayButton onPress={() => dispatch(kind.button.action)}>
+          {kind.button.icon && <ClayIcon name={kind.button.icon} />}
           {kind.button.label}
         </ClayButton>
       );
@@ -57,6 +63,7 @@ export function SduiRenderer({
             id: item.id,
             title: item.label,
             detail: item.detail ?? undefined,
+            icon: item.icon ?? undefined,
             disabled: item.action == null,
           }))}
           onAction={(itemId) => {

@@ -149,9 +149,11 @@ impl RuntimeTreeBuilder {
             },
             "label" => SduiNodeKind::Label {
                 text: bounded_text(object, "text")?.to_string(),
+                icon: convert_icon_reference(object.get("icon"))?,
             },
             "button" => SduiNodeKind::Button {
                 label: bounded_text(object, "label")?.to_string(),
+                icon: convert_icon_reference(object.get("icon"))?,
                 action: self.convert_action(
                     required_object(object, "action")?,
                     SduiActionSource::Button { node_id: id },
@@ -272,6 +274,7 @@ impl RuntimeTreeBuilder {
                     id: item_id.clone(),
                     label: bounded_text(object, "label")?.to_string(),
                     detail: bounded_optional_string(object.get("detail"))?,
+                    icon: convert_icon_reference(object.get("icon"))?,
                     action: match object.get("action") {
                         Some(Value::Null) | None => None,
                         Some(Value::Object(action)) => Some(self.convert_action(
@@ -409,6 +412,24 @@ fn bounded_optional_string(value: Option<&Value>) -> Result<Option<String>, JsEr
     }
 }
 
+/// Optional semantic icon reference on label/button/list-item nodes. Runtime
+/// trees carry no declaring-package identity, so core keys only; package
+/// component declarations validate their own namespaces at record time
+/// (Plan 112 task 3).
+fn convert_icon_reference(value: Option<&Value>) -> Result<Option<String>, JsErrorBox> {
+    match value {
+        Some(Value::Null) | None => Ok(None),
+        Some(Value::String(reference)) => {
+            crate::shell::icons::validate_core_icon_reference(reference)
+                .map_err(|error| sdui_error(format!("sdui.invalid_icon: {}", error.message)))?;
+            Ok(Some(reference.clone()))
+        }
+        Some(_) => Err(sdui_error(
+            "sdui.invalid_icon: icon references must be strings",
+        )),
+    }
+}
+
 fn action_value(value: &Value) -> Result<SduiActionValue, JsErrorBox> {
     match value {
         Value::String(value) => Ok(SduiActionValue::String(value.clone())),
@@ -447,6 +468,46 @@ mod tests {
 
     fn convert(tree_json: &str) -> Result<SduiTree, JsErrorBox> {
         runtime_tree_from_json(tree_json, Vec::new(), 1)
+    }
+
+    #[test]
+    fn runtime_tree_accepts_core_icon_references() {
+        let tree_json = r#"{
+            "kind": "list",
+            "items": [{
+                "id": "row",
+                "label": "Row",
+                "icon": "action.close"
+            }]
+        }"#;
+        let tree = convert(tree_json).expect("core icon reference accepted");
+        let SduiNodeKind::List { items } = &tree.nodes[0].kind else {
+            panic!("expected list");
+        };
+        assert_eq!(items[0].icon.as_deref(), Some("action.close"));
+    }
+
+    #[test]
+    fn runtime_tree_rejects_non_core_icon_references() {
+        // Package-owned keys are unavailable in runtime trees: the builder
+        // carries no declaring-package identity.
+        let tree_json = r#"{
+            "kind": "button",
+            "label": "Go",
+            "icon": "markdown.eye",
+            "action": { "commandId": "demo.go" }
+        }"#;
+        let error = convert(tree_json).expect_err("non-core icon reference rejected");
+        assert!(error.to_string().contains("core semantic keys"));
+
+        // Non-string and hostile shapes rejected.
+        let tree_json = r#"{
+            "kind": "label",
+            "text": "x",
+            "icon": { "svg": "<script/>" }
+        }"#;
+        let error = convert(tree_json).expect_err("non-string icon rejected");
+        assert!(error.to_string().contains("must be strings"));
     }
 
     #[test]

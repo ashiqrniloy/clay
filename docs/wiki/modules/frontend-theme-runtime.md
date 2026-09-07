@@ -84,3 +84,8 @@ stores with one coherent install order**:
 - [UI Design System Runtime](ui-design-system-runtime.md) — recipe schema, fallback engine, and Plan 102 activation lifecycle.
 - [React Shell, Component Registry, and Theme Runtime](react-shell.md).
 - Theme tokens reference: `docs/reference/primitives/tokens.md`.
+
+Plan 112: icon rendering consumes the same installed core tokens directly
+(`--clay-text-icon`, `--clay-dimension-icon-size`, `--clay-opacity-disabled`)
+without waiting for tokens.css fallbacks; the icon size token acts as a floor
+with `max(…, 1em)` typography scaling. See [Icon Pack Runtime](icon-pack-runtime.md).

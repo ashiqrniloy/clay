@@ -401,3 +401,12 @@ had no pending syntax work; this run did not establish document sessions.
 ## Plan 103 Tab Bar Recipe & Design-System Cross-Reference (2026-08-30)
 
 Tab bar container, card slots, card labels, close affordance, and dirty indicators consume `--clay-ds-tab-bar-*` recipe variables. Tab switching, selection state, and active workspace binding remain host-owned and unaffected by design-system switching. See [Module 15](15-ui-design-systems.md) for full design-system switching checks.
+
+## Plan 112 cross-reference (2026-09-07)
+
+Tab-strip glyphs migrated to the shared icon primitives: per-tab close uses
+`action.close` and the new-tab button uses `action.new` via ClayIcon, with
+accessible names preserved (`Close ${label}`, `New tab`); the empty-state
+"New tab" discovery button keeps visible text. Steps:
+[18 — Icon packs](18-icon-packs.md) (ICON-02, ICON-08, ICON-09, executed
+2026-09-07).

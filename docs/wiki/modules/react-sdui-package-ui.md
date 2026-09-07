@@ -189,6 +189,7 @@ cd frontend && npx vitest run && npm run build && npm run check:budget
 - [UI Design System Runtime](ui-design-system-runtime.md) — Plan 101 inert UI design-system recipe schema and fallback engine.
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [Slot-Aware Package UI](slot-aware-package-ui.md)
+- [Icon Pack Runtime](icon-pack-runtime.md) (optional `icon` semantic references on labels/buttons/list items; core keys at runtime, package-owned keys at record time)
 - [Third-Party Runtime Authority](third-party-runtime-authority.md)
 - [React Shell](react-shell.md)
 - [Desktop Typed Bridge](desktop-typed-bridge.md)

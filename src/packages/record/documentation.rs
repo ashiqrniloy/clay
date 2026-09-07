@@ -5,7 +5,8 @@ use serde_json::Value;
 
 use crate::packages::permissions::PackagePermission;
 use crate::perf::budgets::{
-    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES,
+    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, ICON_PACK_PAYLOAD_BUDGET_BYTES,
+    UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES,
 };
 
 pub(super) fn parse_docs_metadata(
@@ -71,6 +72,18 @@ pub(super) fn parse_performance_metadata(
         (
             UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES,
             "UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES",
+        )
+    } else if raw_manifest
+        .get("clay")
+        .and_then(|c| c.get("contributions"))
+        .and_then(|c| c.get("iconPack"))
+        .is_some()
+    {
+        // Icon packs ship the geometry inline (single manifest source of
+        // truth); their estimatedManifestBytes covers the 21-key duotone set.
+        (
+            ICON_PACK_PAYLOAD_BUDGET_BYTES,
+            "ICON_PACK_PAYLOAD_BUDGET_BYTES",
         )
     } else {
         (

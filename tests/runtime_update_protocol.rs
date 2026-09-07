@@ -18,6 +18,7 @@ fn valid_snapshot(generation: u64, client_id: u64) -> RuntimeStateSnapshot {
         },
         active_typography: ActiveTypography::default(),
         active_design_system: clay::protocol::ActiveDesignSystem::core_fallback(generation),
+        active_icon_pack: None,
         ui_choices: clay::protocol::UiChoicesSnapshot::default(),
         sdui_tree: SduiTree {
             ui_version: 1,
@@ -26,6 +27,7 @@ fn valid_snapshot(generation: u64, client_id: u64) -> RuntimeStateSnapshot {
                 SduiNodeId(1),
                 SduiNodeKind::Label {
                     text: "runtime".to_string(),
+                    icon: None,
                 },
             )],
         },
@@ -124,4 +126,175 @@ fn runtime_snapshot_payload_reports_diff_review_threshold_under_hard_ceiling() {
         "representative snapshot {payload} should remain under the 768 KiB diff-review threshold"
     );
     assert_eq!(RUNTIME_STATE_INSTALL_DIFF_REVIEW_P95_MS, 16);
+}
+
+#[test]
+fn runtime_snapshot_carries_bounded_active_icon_pack_and_round_trips() {
+    use clay::shell::icons::{IconGeometry, IconPath, IconPathCommand};
+    use std::collections::BTreeMap;
+
+    let mut icons = BTreeMap::new();
+    icons.insert(
+        "action.close".to_string(),
+        IconGeometry {
+            view_box: [0.0, 0.0, 24.0, 24.0],
+            paths: vec![IconPath {
+                commands: vec![
+                    IconPathCommand::MoveTo([4.0, 4.0]),
+                    IconPathCommand::LineTo([20.0, 20.0]),
+                    IconPathCommand::LineTo([4.0, 20.0]),
+                    IconPathCommand::LineTo([20.0, 4.0]),
+                    IconPathCommand::ClosePath,
+                ],
+                opacity: None,
+            }],
+        },
+    );
+    let pack = clay::protocol::ActiveIconPack {
+        specifier: "@clay/icons-phosphor-regular".to_string(),
+        schema_version: 1,
+        generation: 5,
+        provenance: clay::protocol::DesignSystemProvenance {
+            package_name: "@clay/icons-phosphor-regular".to_string(),
+            package_version: "2.0.8".to_string(),
+            api_prefix: "icons-phosphor-regular".to_string(),
+            trust_domain: clay::protocol::PackageUiTrustDomain::Trusted,
+        },
+        icons,
+    };
+    pack.validate().expect("fixture pack");
+
+    let mut snapshot = valid_snapshot(5, 3);
+    snapshot.active_icon_pack = Some(pack);
+    snapshot
+        .validate()
+        .expect("snapshot with bounded pack validates");
+
+    // Wire round-trip preserves exact identity, provenance, and geometry.
+    let codec = Codec::default();
+    let message = ServerMessage::RuntimeStateSnapshot(Box::new(snapshot.clone()));
+    let frame = codec.encode_server_message(&message).unwrap();
+    assert_eq!(codec.decode_server_message(&frame).unwrap(), message);
+
+    // The duotone-style layered path serializes to the canonical d-string
+    // contract shape with opacity preserved.
+    let pack = snapshot.active_icon_pack.as_ref().unwrap();
+    let geometry = &pack.icons["action.close"];
+    let json = serde_json::to_value(geometry).unwrap();
+    assert_eq!(json["viewBox"], serde_json::json!([0.0, 0.0, 24.0, 24.0]));
+    assert_eq!(json["paths"][0]["d"], "M 4,4 L 20,20 L 4,20 L 20,4 Z");
+    assert!(json["paths"][0].get("opacity").is_none());
+    assert_eq!(pack.specifier, "@clay/icons-phosphor-regular");
+    assert_eq!(pack.provenance.api_prefix, "icons-phosphor-regular");
+    assert_eq!(pack.generation, 5);
+}
+
+#[test]
+fn runtime_snapshot_rejects_invalid_active_icon_packs() {
+    use clay::shell::icons::{IconGeometry, IconPath, IconPathCommand};
+    use std::collections::BTreeMap;
+
+    let mut snapshot = valid_snapshot(6, 3);
+    let mut icons = BTreeMap::new();
+    icons.insert(
+        "action.close".to_string(),
+        IconGeometry {
+            view_box: [0.0, 0.0, 24.0, 24.0],
+            paths: vec![IconPath {
+                commands: vec![IconPathCommand::LineTo([20.0, 20.0])],
+                opacity: None,
+            }],
+        },
+    );
+    snapshot.active_icon_pack = Some(clay::protocol::ActiveIconPack {
+        specifier: "@clay/icons-phosphor-regular".to_string(),
+        schema_version: 1,
+        generation: 6,
+        provenance: clay::protocol::DesignSystemProvenance {
+            package_name: "@clay/icons-phosphor-regular".to_string(),
+            package_version: "2.0.8".to_string(),
+            api_prefix: "icons-phosphor-regular".to_string(),
+            trust_domain: clay::protocol::PackageUiTrustDomain::Trusted,
+        },
+        icons,
+    });
+
+    // Malformed geometry (path not starting with M) is rejected pre-install.
+    assert!(snapshot.validate().is_err());
+
+    // Unsupported schema versions are rejected (stale/unknown packs).
+    let mut stale = snapshot.clone();
+    let pack = stale.active_icon_pack.as_mut().unwrap();
+    pack.schema_version = 99;
+    assert!(stale.validate().is_err());
+
+    // Unknown specifiers are structurally invalid.
+    let mut anonymous = snapshot.clone();
+    anonymous.active_icon_pack.as_mut().unwrap().specifier = "  ".to_string();
+    assert!(anonymous.validate().is_err());
+
+    // Excessive per-icon payload is rejected before wire publication. Reuse
+    // the valid close glyph from the round-trip fixture as the base.
+    let mut oversized = valid_snapshot(6, 3);
+    let mut oversized_icons = BTreeMap::new();
+    oversized_icons.insert(
+        "action.close".to_string(),
+        IconGeometry {
+            view_box: [0.0, 0.0, 24.0, 24.0],
+            paths: vec![IconPath {
+                commands: vec![
+                    IconPathCommand::MoveTo([4.0, 4.0]),
+                    IconPathCommand::LineTo([20.0, 20.0]),
+                    IconPathCommand::ClosePath,
+                ],
+                opacity: None,
+            }],
+        },
+    );
+    let pack = &mut oversized_icons;
+    pack.insert(
+        "git.branch".to_string(),
+        IconGeometry {
+            view_box: [0.0, 0.0, 24.0, 24.0],
+            paths: vec![IconPath {
+                commands: (0..512)
+                    .map(|i| {
+                        let x = i as f32 * 0.05;
+                        if i == 0 {
+                            IconPathCommand::MoveTo([x, x + 1.0])
+                        } else {
+                            IconPathCommand::LineTo([x, x + 1.0])
+                        }
+                    })
+                    .collect(),
+                opacity: None,
+            }],
+        },
+    );
+    oversized.active_icon_pack = Some(clay::protocol::ActiveIconPack {
+        specifier: "@clay/icons-phosphor-regular".to_string(),
+        schema_version: 1,
+        generation: 6,
+        provenance: clay::protocol::DesignSystemProvenance {
+            package_name: "@clay/icons-phosphor-regular".to_string(),
+            package_version: "2.0.8".to_string(),
+            api_prefix: "icons-phosphor-regular".to_string(),
+            trust_domain: clay::protocol::PackageUiTrustDomain::Trusted,
+        },
+        icons: std::mem::take(pack),
+    });
+    let error = oversized
+        .active_icon_pack
+        .as_ref()
+        .unwrap()
+        .validate()
+        .expect_err("512-command glyph exceeds the per-icon payload budget");
+    assert!(
+        matches!(
+            error,
+            clay::shell::icons::IconPackValidationError::GeometryTooLarge { .. }
+        ),
+        "unexpected error variant: {error:?}"
+    );
+    assert!(oversized.validate().is_err());
 }

@@ -79,9 +79,13 @@ pub enum SduiNodeKind {
     },
     Label {
         text: String,
+        /// Optional semantic icon reference (Plan 112).
+        icon: Option<String>,
     },
     Button {
         label: String,
+        /// Optional semantic icon reference (Plan 112).
+        icon: Option<String>,
         action: SduiActionIntent,
     },
     List {
@@ -115,6 +119,10 @@ pub struct SduiListItem {
     pub id: String,
     pub label: String,
     pub detail: Option<String>,
+    /// Optional semantic icon reference (core key or package-prefixed key).
+    /// Hosts resolve it against the active icon pack; absence renders text only.
+    #[serde(default)]
+    pub icon: Option<String>,
     pub action: Option<SduiActionIntent>,
 }
 
@@ -312,12 +320,14 @@ pub(crate) fn representative_sdui_tree() -> SduiTree {
                 label_id,
                 SduiNodeKind::Label {
                     text: "Document 7 · version 3".to_string(),
+                    icon: None,
                 },
             ),
             SduiNode::new(
                 button_id,
                 SduiNodeKind::Button {
                     label: "Refresh".to_string(),
+                    icon: None,
                     action: SduiActionIntent::command(
                         "workspace.refresh",
                         SduiActionSource::Button { node_id: button_id },
@@ -331,6 +341,7 @@ pub(crate) fn representative_sdui_tree() -> SduiTree {
                         id: "active-document".to_string(),
                         label: "Document 7".to_string(),
                         detail: Some("Server-generated editor view".to_string()),
+                        icon: None,
                         action: Some(SduiActionIntent::command(
                             "document.open_recent",
                             SduiActionSource::ListItem {
@@ -364,6 +375,7 @@ pub(crate) fn representative_panel_update() -> SduiTreeUpdate {
                 SduiNodeId(4),
                 SduiNodeKind::Label {
                     text: "Document 7 · version 4".to_string(),
+                    icon: None,
                 },
             ),
         }],
@@ -424,12 +436,14 @@ mod tests {
                     label_id,
                     SduiNodeKind::Label {
                         text: "Open files".to_string(),
+                        icon: None,
                     },
                 ),
                 SduiNode::new(
                     button_id,
                     SduiNodeKind::Button {
                         label: "Refresh".to_string(),
+                        icon: None,
                         action: button_action,
                     },
                 ),
@@ -440,6 +454,7 @@ mod tests {
                             id: "recent-main".to_string(),
                             label: "main.rs".to_string(),
                             detail: Some("src/main.rs".to_string()),
+                            icon: None,
                             action: Some(list_action),
                         }],
                     },
@@ -512,6 +527,7 @@ mod tests {
             node_id,
             SduiNodeKind::Button {
                 label: "Refresh".to_string(),
+                icon: None,
                 action: intent.clone(),
             },
         );
@@ -528,6 +544,7 @@ mod tests {
             SduiNodeId(3),
             SduiNodeKind::Label {
                 text: "Updated".to_string(),
+                icon: None,
             },
         );
 

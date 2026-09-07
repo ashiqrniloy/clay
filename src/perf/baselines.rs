@@ -227,12 +227,14 @@ pub fn representative_sdui_tree() -> SduiTree {
                 label_id,
                 SduiNodeKind::Label {
                     text: "Document 7 · version 3".to_string(),
+                    icon: None,
                 },
             ),
             SduiNode::new(
                 button_id,
                 SduiNodeKind::Button {
                     label: "Refresh".to_string(),
+                    icon: None,
                     action: SduiActionIntent::command(
                         "workspace.refresh",
                         SduiActionSource::Button { node_id: button_id },
@@ -246,6 +248,7 @@ pub fn representative_sdui_tree() -> SduiTree {
                         id: "active-document".to_string(),
                         label: "Document 7".to_string(),
                         detail: Some("Server-generated editor view".to_string()),
+                        icon: None,
                         action: Some(SduiActionIntent::command(
                             "document.open_recent",
                             SduiActionSource::ListItem {
@@ -278,6 +281,7 @@ pub fn representative_panel_update() -> SduiTreeUpdate {
                 SduiNodeId(4),
                 SduiNodeKind::Label {
                     text: "Document 7 · version 4".to_string(),
+                    icon: None,
                 },
             ),
         }],

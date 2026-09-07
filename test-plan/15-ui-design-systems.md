@@ -115,3 +115,12 @@ Task 14 also added the `ui-review-design-neobrutal-light` / `ui-review-design-gl
 | UI-DS-24 | PASS automated | `enumerate_ui_choices` e2e asserts themes enumerated from enabled package records (sorted, snapshot-delivered); settings-panel test asserts the dropdown renders from the snapshot |
 | UI-DS-25 | PASS automated | Persistence e2e asserts appearance survives restart: `persist_settings_change` writes the pref, startup `apply_persisted_preferences` re-applies it; real-app init.js restart persistence in UI-DS-10 |
 | UI-DS-26 | PARTIAL | Fixture-layer: `.impeccable/reviews/110-final/` CDP captures show clearly visible Neobrutal/Glass differences on dark+light themes. Real-app package activation (`ui-review-design-neobrutal`, `ui-review-design-glass`): **UNRESOLVED — blocked by the task-18 pre-existing reload deadlock** (see record below) |
+
+## Plan 112 cross-reference (2026-09-07)
+
+Icon packs are independent of theme, appearance, and design-system selection:
+all four resolve concurrently, pack swaps preserve the other three axes, and
+icons render solely with active-theme color roles (`fill=currentColor`, no
+package palettes). Icon-slot CSS consumes core tokens only. Independence
+steps: [18 — Icon packs](18-icon-packs.md) (ICON-03, ICON-04, ICON-12,
+executed 2026-09-07).

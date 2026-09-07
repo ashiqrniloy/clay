@@ -6,7 +6,8 @@ use crate::packages::permissions::{
     PackagePermission, PermissionValidationError, is_prohibited_authority, parse_permission,
 };
 use crate::perf::budgets::{
-    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES,
+    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, ICON_PACK_PAYLOAD_BUDGET_BYTES,
+    UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -331,6 +332,15 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
         .is_some()
     {
         UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES
+    } else if value
+        .get("clay")
+        .and_then(|c| c.get("contributions"))
+        .and_then(|c| c.get("iconPack"))
+        .is_some()
+    {
+        // Icon packs normalize well under this bound even at the full 21-key
+        // duotone set (Plan 112 task 3).
+        ICON_PACK_PAYLOAD_BUDGET_BYTES
     } else {
         BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES
     };

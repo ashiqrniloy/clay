@@ -222,6 +222,7 @@ fn client_samples() -> Vec<ClientMessage> {
                 text: "hello agent".into(),
                 provider: None,
                 model: None,
+                thinking_level: None,
             }),
         },
     ]
@@ -310,6 +311,7 @@ fn server_samples() -> Vec<ServerMessage> {
                     clay::protocol::SduiNodeId(1),
                     SduiNodeKind::Label {
                         text: "ready".into(),
+                        icon: None,
                     },
                 )],
             },
@@ -946,6 +948,8 @@ fn runtime_snapshot_dto_with_active_design_system_round_trip() {
         },
         active_typography: ActiveTypography::default(),
         active_design_system: ActiveDesignSystem::core_fallback(5),
+        active_icon_pack: None,
+        ui_choices: Default::default(),
         sdui_tree: SduiTree {
             ui_version: 5,
             root_id: SduiNodeId(1),
@@ -953,6 +957,7 @@ fn runtime_snapshot_dto_with_active_design_system_round_trip() {
                 SduiNodeId(1),
                 SduiNodeKind::Label {
                     text: "Ready".into(),
+                    icon: None,
                 },
             )],
         },
@@ -999,4 +1004,121 @@ fn runtime_snapshot_dto_with_active_design_system_round_trip() {
             .get("button.primary.root.rest.backgroundColor")
             .is_some()
     );
+}
+
+#[test]
+fn runtime_snapshot_dto_with_active_icon_pack_round_trips_and_rejects_invalid() {
+    use clay::protocol::{
+        ActiveDesignSystem, ActiveIconPack, ActiveTheme, ActiveTypography, BehaviorManifest,
+        DesignSystemProvenance, PackageUiTrustDomain, RuntimeStateSnapshot, SduiNode, SduiNodeId,
+        SduiNodeKind, SduiTree,
+    };
+    use clay::shell::icons::{IconGeometry, IconPath, IconPathCommand};
+    use clay_desktop_lib::bridge::{IconPackSnapshotDto, RuntimeSnapshotDto};
+    use std::collections::BTreeMap;
+
+    let build_pack = |generation: u64| ActiveIconPack {
+        specifier: "@clay/icons-phosphor-duotone".to_string(),
+        schema_version: 1,
+        generation,
+        provenance: DesignSystemProvenance {
+            package_name: "@clay/icons-phosphor-duotone".to_string(),
+            package_version: "2.0.8".to_string(),
+            api_prefix: "icons-phosphor-duotone".to_string(),
+            trust_domain: PackageUiTrustDomain::Trusted,
+        },
+        icons: BTreeMap::from([(
+            "action.close".to_string(),
+            IconGeometry {
+                view_box: [0.0, 0.0, 24.0, 24.0],
+                paths: vec![
+                    IconPath {
+                        commands: vec![
+                            IconPathCommand::MoveTo([4.0, 4.0]),
+                            IconPathCommand::LineTo([20.0, 20.0]),
+                            IconPathCommand::ClosePath,
+                        ],
+                        opacity: None,
+                    },
+                    // Duotone shade layer at 0.2 opacity survives the wire.
+                    IconPath {
+                        commands: vec![
+                            IconPathCommand::MoveTo([2.0, 2.0]),
+                            IconPathCommand::LineTo([6.0, 6.0]),
+                            IconPathCommand::ClosePath,
+                        ],
+                        opacity: Some(0.2),
+                    },
+                ],
+            },
+        )]),
+    };
+
+    let build_snapshot = |pack: ActiveIconPack| RuntimeStateSnapshot {
+        runtime_generation_id: pack.generation,
+        client_id: 3,
+        behavior: BehaviorManifest::minimal_text_editing(pack.generation),
+        active_theme: ActiveTheme {
+            specifier: "@clay/default".into(),
+            overrides: Vec::new(),
+            design_tokens: Vec::new(),
+        },
+        active_typography: ActiveTypography::default(),
+        active_design_system: ActiveDesignSystem::core_fallback(pack.generation),
+        active_icon_pack: Some(pack),
+        sdui_tree: SduiTree {
+            ui_version: 1,
+            root_id: SduiNodeId(1),
+            nodes: vec![SduiNode::new(
+                SduiNodeId(1),
+                SduiNodeKind::Label {
+                    text: "Ready".into(),
+                    icon: None,
+                },
+            )],
+        },
+        package_ui: Default::default(),
+        ui_choices: Default::default(),
+        documents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+
+    // Valid pack: full identity, provenance, and bounded geometry reach the
+    // webview envelope in canonical d-string form.
+    let dto =
+        RuntimeSnapshotDto::resolve(build_snapshot(build_pack(7))).expect("valid pack projects");
+    let active = dto.active_icon_pack.as_ref().expect("pack present");
+    assert_eq!(active.specifier, "@clay/icons-phosphor-duotone");
+    assert_eq!(active.generation, 7);
+    assert_eq!(
+        active.provenance.trust_domain,
+        PackageUiTrustDomain::Trusted
+    );
+    let geometry = &active.icons["action.close"];
+    assert_eq!(geometry.view_box, [0.0, 0.0, 24.0, 24.0]);
+    assert_eq!(geometry.paths[0].d, "M 4,4 L 20,20 Z");
+    // f32 0.2 widened losslessly to f64 is not the f64 literal 0.2.
+    assert!((geometry.paths[1].opacity.unwrap() - 0.2).abs() < 1e-6);
+
+    let json = serde_json::to_value(&dto).unwrap();
+    assert_eq!(
+        json["activeIconPack"]["icons"]["action.close"]["paths"][1]["d"],
+        "M 2,2 L 6,6 Z"
+    );
+    // f32 opacity widens losslessly to f64 (0.2_f32 != 0.2_f64 literal).
+    let opacity = json["activeIconPack"]["icons"]["action.close"]["paths"][1]["opacity"]
+        .as_f64()
+        .unwrap();
+    assert!((opacity - 0.2).abs() < 1e-6);
+    // Re-serialization is byte-stable (lossless identity, no hidden churn).
+    let reparsed = serde_json::from_value::<serde_json::Value>(json.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&reparsed).unwrap(), json);
+
+    // Malformed geometry fails closed: the whole snapshot is rejected, so the
+    // webview retains its last authorized state.
+    let mut malformed = build_pack(8);
+    malformed.icons.clear();
+    let error = IconPackSnapshotDto::resolve(&malformed).expect_err("empty pack rejected");
+    assert!(error.contains("icon pack validation failed"));
+    assert!(RuntimeSnapshotDto::resolve(build_snapshot(malformed)).is_err());
 }

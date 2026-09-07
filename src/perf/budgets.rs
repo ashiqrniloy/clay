@@ -110,6 +110,15 @@ pub const CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES: usize = 8192;
 /// Maximum payload budget for one inert UI design-system contribution declaration (Plan 101).
 pub const UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES: usize = 64 * 1024;
 
+/// One bounded, normalized icon glyph's path payload (Plan 112 task 3). Checked
+/// against the raw path-data length before any command expansion so a hostile
+/// contribution cannot force unbounded allocation.
+pub const ICON_GEOMETRY_PAYLOAD_BUDGET_BYTES: usize = 2048;
+/// Maximum payload budget for one inert icon-pack contribution declaration
+/// (Plan 112 task 3). Mirrors the UI design-system budget precedent; the full
+/// 21-key Phosphor duotone set normalizes well under this bound.
+pub const ICON_PACK_PAYLOAD_BUDGET_BYTES: usize = 64 * 1024;
+
 // Runtime SDUI `publishTree` budgets. A package- or config-published tree is
 // untrusted input parsed into a `serde_json::Value` and then converted into a
 // `SduiTree`; these bounds reject a malicious or runaway huge tree before it

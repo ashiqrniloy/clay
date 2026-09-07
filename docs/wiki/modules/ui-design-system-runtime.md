@@ -286,3 +286,9 @@ Public documentation:
 - Conformance report: [`docs/development/ui-design-system-conformance.md`](../../development/ui-design-system-conformance.md)
 - Recipe matrix: [`docs/development/ui-design-system-recipe-matrix.md`](../../development/ui-design-system-recipe-matrix.md)
 - Package creation guide: [`docs/reference/packages/creating-packages.md`](../../reference/packages/creating-packages.md)
+
+Plan 112: icon packs reuse this module's selection lifecycle end to end —
+`setIconPack` mirrors `setDesignSystem` resolution, generation-commit
+revalidation, revocation fallback, DTO projection, and idempotent frontend
+install, while icons stay consumers of theme color roles (never contributors).
+See [Icon Pack Runtime](icon-pack-runtime.md).

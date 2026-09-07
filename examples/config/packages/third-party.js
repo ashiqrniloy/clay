@@ -29,6 +29,12 @@ import { loadPackage } from "clay:packages";
 // await loadPackage("@vendor/my-package");
 // await loadPackage("github:user/repo");
 
+// Third-party icon packs follow load-then-select (the icon style itself is
+// chosen by setIconPack in init.js section 2; loading alone changes nothing):
+//   await loadPackage("@vendor/outline-icons");
+//   // then in init.js (or a module imported here):
+//   // setIconPack("@vendor/outline-icons");
+
 // Language-server grants for third-party packages follow the same
 // grant-before-loadPackage ordering as first-party packages:
 //

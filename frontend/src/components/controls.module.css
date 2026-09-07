@@ -358,3 +358,12 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
+/* Dropdown trigger indicator (Plan 112 Task 7): shared disclosure.down glyph
+ * inherits the trigger's text color via currentColor. */
+.selectIndicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--clay-text-icon, currentColor);
+}

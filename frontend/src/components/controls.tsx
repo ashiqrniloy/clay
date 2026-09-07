@@ -14,6 +14,7 @@ import {
 
 import styles from "./controls.module.css";
 import { recipeAttributes } from "./recipe-attributes";
+import { ClayIcon } from "./icon";
 
 // ---------------------------------------------------------------- dropdown
 
@@ -64,7 +65,13 @@ export function ClayDropdown({
         {...recipeAttributes("dropdown", "trigger")}
       >
         <SelectValue>{selected?.label ?? label}</SelectValue>
-        <span aria-hidden="true">▾</span>
+        <span
+          aria-hidden="true"
+          className={styles.selectIndicator}
+          {...recipeAttributes("dropdown", "indicator")}
+        >
+          <ClayIcon name="disclosure.down" />
+        </span>
       </Button>
       <Popover
         className={styles.popover}
@@ -115,6 +122,8 @@ export interface ListItem {
   title: string;
   detail?: string;
   disabled?: boolean;
+  /** Semantic icon key resolved against the active icon pack (Plan 112). */
+  icon?: string;
 }
 
 export interface ClayListProps {
@@ -161,7 +170,10 @@ export function ClayList({
           isDisabled={item.disabled}
           {...recipeAttributes("list", "row")}
         >
-          <span {...recipeAttributes("list", "rowTitle")}>{item.title}</span>
+          <span {...recipeAttributes("list", "rowTitle")}>
+            {item.icon && <ClayIcon name={item.icon} />}
+            {item.title}
+          </span>
           {item.detail && (
             <span
               className={styles.rowDetail}
@@ -209,7 +221,7 @@ export function ClayCollapse({
           className={`${styles.collapseChevron} ${expanded ? styles.collapseChevronExpanded : ""}`}
           {...recipeAttributes("collapse", "chevron")}
         >
-          ▸
+          <ClayIcon name="disclosure.right" />
         </span>
       </button>
       {expanded && (

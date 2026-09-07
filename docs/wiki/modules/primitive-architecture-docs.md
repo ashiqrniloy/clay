@@ -74,6 +74,7 @@ assert!(index.contains("reference/primitives/markdown-mode-requirements.md"));
 - [Behavior Manifests](behavior-manifests.md)
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [Clay JS Documentation Registry](clay-js-doc-registry.md)
+- [Icon Pack Runtime](icon-pack-runtime.md) (Plan 112 React realization of the icon-slot/tooltip-shell primitive gaps: ClayIcon, ClayIconButton, ClayTooltip)
 - `plans/016-Phase16-Mode-and-Package-Primitive-Architecture-Analysis.md`
 - `.agents/skills/project-patterns/references/package-distribution.md`
 - `.agents/skills/project-patterns/references/behavior-manifests.md`

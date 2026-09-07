@@ -23,6 +23,7 @@ use crate::protocol::{
     DocumentId, DocumentVersion, RuntimeDiagnostic, SduiTree,
 };
 pub use crate::shell::design_system::{ActiveDesignSystem, DesignSystemProvenance};
+pub use crate::shell::icons::ActiveIconPack;
 
 /// Monotonic runtime-generation identity shared by server contributions and
 /// client snapshots. Independently monotonic behavior/document versions remain
@@ -264,6 +265,12 @@ pub struct RuntimeStateSnapshot {
     pub active_typography: ActiveTypography,
     #[serde(default = "default_active_design_system")]
     pub active_design_system: ActiveDesignSystem,
+    /// Resolved active icon pack (Plan 112 task 6). `None` means the host
+    /// fallback subset (bundled Regular geometry, zero package execution) is
+    /// active. Additive + defaulted so older clients ignore it; skipped on
+    /// the wire while no explicit pack is selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_icon_pack: Option<ActiveIconPack>,
     /// Installable Settings selections (plan 110 task 10).
     #[serde(default)]
     pub ui_choices: UiChoicesSnapshot,
@@ -366,6 +373,7 @@ pub enum RuntimeStateSnapshotValidationError {
     InvalidPackageUi,
     TooManyUiChoices,
     InvalidUiChoice,
+    InvalidIconPack,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -473,6 +481,11 @@ impl RuntimeStateSnapshot {
         self.active_design_system
             .validate()
             .map_err(|_| RuntimeStateSnapshotValidationError::InvalidDesignSystem)?;
+        if let Some(icon_pack) = &self.active_icon_pack {
+            icon_pack
+                .validate()
+                .map_err(|_| RuntimeStateSnapshotValidationError::InvalidIconPack)?;
+        }
         if self.behavior.manifest_id.trim().is_empty() {
             return Err(RuntimeStateSnapshotValidationError::EmptyBehaviorManifestId);
         }

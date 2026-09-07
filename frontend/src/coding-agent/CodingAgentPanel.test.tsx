@@ -732,6 +732,111 @@ describe("CodingAgentPanel", () => {
     }
   });
 
+  it("composer icon actions: submit-Send, disabled gates, and Close intent (plan 112 T8)", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const send = screen.getByRole("button", { name: "Send" });
+    // Icon-only composition: glyph inside, native submit semantics kept.
+    expect(send.querySelector("svg")).not.toBeNull();
+    expect(send).toHaveAttribute("type", "submit");
+    // Empty draft gates activation.
+    expect(send).toHaveProperty("disabled", true);
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.querySelector("svg")).not.toBeNull();
+    fireEvent.click(close);
+    await waitFor(() => {
+      expect(sendRequest).toHaveBeenCalledWith(
+        expect.stringContaining("coding-agent.close"),
+      );
+    });
+  });
+
+  it("recent sessions compact Resume into distinct icon actions (plan 112 T8)", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: {
+          provider: "mock",
+          model: "mini",
+          sessions: [{ id: "abcdef123456" }, { id: "ffff00001111" }],
+        },
+        clientId: 1,
+      } as never);
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+      // Distinct accessible names per row; glyphs not text labels.
+      const first = await screen.findByRole("button", {
+        name: "Resume abcdef123456",
+      });
+      const second = await screen.findByRole("button", {
+        name: "Resume ffff00001111",
+      });
+      expect(first.querySelector("svg")).not.toBeNull();
+      expect(second.querySelector("svg")).not.toBeNull();
+      // Empty-state discovery actions keep their visible labels.
+      expect(screen.getByRole("button", { name: "Open file" }).textContent).toContain("Open file");
+      expect(screen.getByRole("button", { name: "Resume session" }).textContent).toContain("Resume session");
+      expect(screen.getByRole("button", { name: "Search sessions…" }).textContent).toContain("Search sessions…");
+      fireEvent.click(first);
+      await waitFor(() => {
+        expect(sendRequest).toHaveBeenCalledWith(
+          expect.stringContaining("abcdef123456"),
+        );
+      });
+    } finally {
+      release();
+    }
+  });
+
+  it("agent tab labels and approval actions keep text; no icon takeover (plan 112 T8)", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    for (const tab of ["Files", "Memory", "Context"]) {
+      const tabNode = screen.getByRole("tab", { name: tab });
+      expect(tabNode.querySelector("svg")).toBeNull();
+    }
+    // Permission prompt (approval strip) keeps text buttons — no icon-only
+    // Allow/Deny. Approval arrives as clay.permissionRequest (plan 108).
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "CUSTOM",
+        name: "clay.permissionRequest",
+        value: {
+          sessionId: "s1",
+          runId: "r1",
+          requestId: "req1",
+          toolName: "write",
+        },
+        clientId: 1,
+      } as never);
+      const allow = await screen.findByRole("button", { name: "Allow" });
+      expect(allow.querySelector("svg")).toBeNull();
+      expect(allow.textContent).toContain("Allow");
+    } finally {
+      release();
+    }
+  });
+
   it("Files tab (plan 109 I6): shows the empty state and no workspace tree until a file is selected", () => {
     render(
       <CodingAgentPanel

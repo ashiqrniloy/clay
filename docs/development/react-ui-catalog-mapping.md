@@ -43,6 +43,9 @@ SDUI, and split-tree rows; they do not rename kinds or tokens.
 | dropdown / list / collapse | `frontend/src/components/controls.tsx` |
 | modal + scrim | `frontend/src/components/modal.tsx` |
 | badge / kbd / divider | `frontend/src/components/chrome.tsx` |
+| icon slot (Plan 112) | `frontend/src/components/icon.tsx` (`ClayIcon`, `useIconGeometry`) + `icon.module.css`; bounded pack geometry via `state/icon-store.ts`, bundled Regular fallback via `icons/fallback.generated.ts` |
+| icon-only button (Plan 112) | `frontend/src/components/button.tsx` `ClayIconButton`: required accessible label, tooltip on hover/focus, ≥24px hit target, visible-label fallback when the key has no geometry |
+| tooltip (Plan 112) | `frontend/src/components/tooltip.tsx` (`ClayTooltip` over React Aria `TooltipTrigger`/`Tooltip`) + `tooltip.module.css` (consumes `tooltip.default.root.rest` recipe) |
 | DEV fixtures | `frontend/src/routes/fixture.tsx` (`/fixture/states`, `/fixture/controls`, `/fixture/editor`, `/fixture/splits`, `/fixture/intelligence`, `/fixture/package-ui`, `/fixture/command-centre`, `/fixture/command-centre-empty`, `/fixture/path-browser`, `/fixture/settings`, `/fixture/chat`) |
 | pane split tree | `frontend/src/shell/{split-tree.ts,PaneTree.tsx,WorkspacePanes.tsx}` |
 | window tabs + persist | `frontend/src/shell/{tab-store,persist,workspace-controller}.ts` |
@@ -81,11 +84,12 @@ level names — CSS `z-index` cannot accept `modal`.
 | `table` | **Justified gap (reserved kind)** — target React Aria `Table` when unlocked | n/a until reserved→implemented | No first-party consumer today |
 
 Planned catalog entries (not yet kinds) get targets now so parity work composes
-instead of improvising: Tooltip → React Aria `Tooltip`+`TooltipTrigger`;
-badge/tag → native `<span>` with badge tokens (`status`/`note`);
-kbd hint → native `<kbd>` with kbd tokens; icon slot → inline SVG `aria-hidden`
-or `<img alt>` at `dimension.icon.size`; toast/notification → internal overlay +
-timer on `z.overlay` (React Aria `Toast` if product need lands).
+instead of improvising: Tooltip → implemented (React Aria `Tooltip`+
+`TooltipTrigger`, Plan 112); badge/tag → native `<span>` with badge tokens
+(`status`/`note`); kbd hint → native `<kbd>` with kbd tokens; icon slot →
+implemented (inline `currentColor` SVG at `dimension.icon.size`, `aria-hidden`
+or `role="img"`, Plan 112); toast/notification → internal overlay + timer on
+`z.overlay` (React Aria `Toast` if product need lands).
 
 ## Clay-native surfaces and chrome primitives
 
@@ -106,8 +110,9 @@ timer on `z.overlay` (React Aria `Toast` if product need lands).
 | `paint_focus_ring` | `:focus-visible` outline from `border.focus`/`focus.ring` | Never `outline: none` without replacement |
 | `paint_panel_chrome` | `Panel` chrome styles | Region/complementary naming |
 | `paint_scroll_chrome` | `scrollbar-color`/`scrollbar-width` + `::-webkit-scrollbar` styles | Native scrollbar keeps keyboard/AT behavior free |
-| `paint_badge` / `paint_kbd_hint` / `paint_icon_slot` | Badge / `<kbd>` / icon components above | Status/note/kbd/img roles as listed |
-| `paint_tooltip_shell` | Shared tooltip surface styles | Tooltip pattern (hover+focus trigger) |
+| `paint_badge` / `paint_kbd_hint` | Badge / `<kbd>` components above | Status/note/kbd roles as listed |
+| `paint_icon_slot` (Plan 112) | `ClayIcon` (`frontend/src/components/icon.tsx`): inline `currentColor` SVG, token-sized | Decorative `aria-hidden` default; `role="img"` + single name only when labelled; never focusable |
+| `paint_tooltip_shell` (Plan 112) | `ClayTooltip` (`frontend/src/components/tooltip.tsx`) | Tooltip pattern: hover **and** keyboard-focus trigger, Escape/blur dismiss, `aria-describedby` wiring |
 | `paint_scrim` | Full-window scrim div behind centered dialog | Dialog backdrop, inert background (`aria-hidden`) |
 | Editor chrome (gutter, active line, indent guides, bracket match, folds, scrollbar, diagnostics) | CodeMirror extensions (`@codemirror/view` gutter/highlighter, `@codemirror/language` foldGutter, `matchBrackets`) themed from StyleRegistry projection | CM accessibility; fold chevrons are gutter buttons with expanded/collapsed state |
 

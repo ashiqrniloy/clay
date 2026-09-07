@@ -182,6 +182,7 @@ export const COMPONENT_CSS_OWNERSHIP: Record<string, string[]> = {
   fileBrowser: ["packages/package-workspace.module.css"],
   settingsPanel: ["settings/settings-panel.module.css"],
   divider: ["components/chrome.module.css"],
+  tooltip: ["components/tooltip.module.css"],
 };
 
 export interface UnconsumedPropertyViolation {

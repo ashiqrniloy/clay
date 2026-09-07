@@ -32,6 +32,8 @@ import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   ClayButton,
   ClayDropdown,
+  ClayIcon,
+  ClayIconButton,
   ClayTabStrip,
   ClayText,
   ClayTextField,
@@ -742,23 +744,25 @@ export function CodingAgentPanel({
                 />
                 <span className={styles.composerActions}>
                   {streaming ? (
-                    <ClayButton onPress={() => chatAgent.agent.abortRun()}>
-                      Cancel
-                    </ClayButton>
+                    <ClayIconButton
+                      icon="generation.stop"
+                      label="Stop"
+                      onPress={() => chatAgent.agent.abortRun()}
+                    />
                   ) : (
-                    <ClayButton
+                    <ClayIconButton
+                      icon="message.send"
+                      label="Send"
                       type="submit"
-                      disabled={!configured || !draft.trim()}
-                    >
-                      Send
-                    </ClayButton>
+                      isDisabled={!configured || !draft.trim()}
+                    />
                   )}
-                  <ClayButton
+                  <ClayIconButton
+                    icon="action.close"
+                    label="Close"
                     variant="muted"
                     onPress={() => sendIntent("coding-agent.close")}
-                  >
-                    Close
-                  </ClayButton>
+                  />
                 </span>
               </form>
             </footer>
@@ -935,6 +939,7 @@ function SessionInfoTab({
           {selected.label}
         </ClayText>
         <ClayButton variant="muted" onPress={onBack}>
+          <ClayIcon name="navigation.back" />
           Back
         </ClayButton>
       </div>
@@ -1000,7 +1005,9 @@ function FilesTab({
                 <ClayText variant="detail" muted>
                   {String(record["id"]).slice(0, 12)}
                 </ClayText>
-                <ClayButton
+                <ClayIconButton
+                  icon="session.resume"
+                  label={`Resume ${String(record["id"])}`}
                   variant="muted"
                   onPress={() =>
                     void sendRequest(
@@ -1009,9 +1016,7 @@ function FilesTab({
                       }),
                     )
                   }
-                >
-                  Resume
-                </ClayButton>
+                />
               </li>
             ))}
           </ul>
@@ -1316,6 +1321,7 @@ function ContextTab({
               setRequestedItem(null);
             }}
           >
+            <ClayIcon name="navigation.back" />
             Back
           </ClayButton>
         </div>
@@ -1324,6 +1330,7 @@ function ContextTab({
             <ClayText variant="detail">{shownDetail.title}</ClayText>
             <BoundedText text={shownDetail.content ?? ""} />
             <ClayButton variant="muted" onPress={() => setRequestedItem(null)}>
+              <ClayIcon name="navigation.back" />
               Back to list
             </ClayButton>
           </div>

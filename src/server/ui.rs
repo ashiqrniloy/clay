@@ -1511,12 +1511,49 @@ impl From<&ClayPackageManifest> for UiContributionProvenance {
     }
 }
 
+/// Validate an optional semantic icon reference on a package component or
+/// component list item (Plan 112 task 3). Only button, label, list, and
+/// statusItem kinds accept icons; references must be core keys or the
+/// declaring package's apiPrefix namespace.
+fn validate_component_icon(
+    value: Option<&Value>,
+    kind: crate::shell::components::ComponentKind,
+    api_prefix: &str,
+) -> Result<Option<String>, String> {
+    let Some(reference) = value else {
+        return Ok(None);
+    };
+    if reference.is_null() {
+        return Ok(None);
+    }
+    let Value::String(reference) = reference else {
+        return Err("component icon references must be strings".to_string());
+    };
+    let icon_kind_allowed = matches!(
+        kind,
+        crate::shell::components::ComponentKind::Button
+            | crate::shell::components::ComponentKind::Label
+            | crate::shell::components::ComponentKind::List
+            | crate::shell::components::ComponentKind::StatusItem
+    );
+    if !icon_kind_allowed {
+        return Err(format!(
+            "semantic icons are only supported by button, label, list, and statusItem components (got kind `{}`)",
+            kind.as_str()
+        ));
+    }
+    crate::shell::icons::validate_icon_reference(reference, api_prefix)
+        .map_err(|error| error.message)?;
+    Ok(Some(reference.clone()))
+}
+
 struct ComponentValidationContext<'a> {
     package: &'a ClayPackageManifest,
     registered_command_ids: &'a [String],
     theme_resolver: &'a ThemeTokenResolver,
     seen_ids: BTreeSet<String>,
     action_targets: Vec<String>,
+    icon_references: Vec<String>,
     component_count: usize,
     style_variable_count: usize,
 }
@@ -1533,6 +1570,7 @@ impl<'a> ComponentValidationContext<'a> {
             theme_resolver,
             seen_ids: BTreeSet::new(),
             action_targets: Vec::new(),
+            icon_references: Vec::new(),
             component_count: 0,
             style_variable_count: 0,
         }
@@ -1566,6 +1604,18 @@ impl<'a> ComponentValidationContext<'a> {
         })?;
         let id = package_owned_string(object, "id", self.package, UiContributionRule::InvalidId)?;
         let context = UiDiagnosticContext::from_package(self.package, Some(id.clone()));
+        if let Some(icon) = validate_component_icon(
+            object.get("icon"),
+            component_kind,
+            self.package.clay.api_prefix.as_str(),
+        )
+        .map_err(|message| {
+            context.error(UiContributionRule::InvalidComponent, Some(&id), message)
+        })? {
+            // Record validated references so conflicts/diagnostics can identify
+            // icon consumers without re-parsing declarations.
+            self.icon_references.push(icon);
+        }
         if !self.seen_ids.insert(id.clone()) {
             return Err(context.error(
                 UiContributionRule::DuplicateId,
@@ -1631,6 +1681,16 @@ impl<'a> ComponentValidationContext<'a> {
                         "component list items must be objects",
                     )
                 })?;
+                if let Some(icon) = validate_component_icon(
+                    item_object.get("icon"),
+                    component_kind,
+                    self.package.clay.api_prefix.as_str(),
+                )
+                .map_err(|message| {
+                    context.error(UiContributionRule::InvalidComponent, Some(&id), message)
+                })? {
+                    self.icon_references.push(icon);
+                }
                 if let Some(action) = item_object.get("action").and_then(Value::as_object) {
                     let command_id = required_str(
                         action,
@@ -2165,6 +2225,94 @@ mod tests {
             }
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn component_icon_references_validate_namespace_and_kind() {
+        let mut registry = PackageUiRegistry::new();
+        let package = package();
+        let commands = vec!["markdown.togglePreview".to_string()];
+
+        // Core key and own-prefix keys accepted on supported kinds.
+        let component = registry
+            .register_component(
+                &package,
+                &json!({
+                    "kind": "button",
+                    "id": "markdown.preview.toggle",
+                    "label": "Toggle",
+                    "icon": "preview.toggle",
+                    "action": { "commandId": "markdown.togglePreview" }
+                }),
+                &commands,
+            )
+            .expect("core icon reference accepted");
+        assert_eq!(component.root_kind, "button");
+
+        registry
+            .register_component(
+                &package,
+                &json!({
+                    "kind": "label",
+                    "id": "markdown.preview.eye",
+                    "text": "Preview",
+                    "icon": "markdown.eye"
+                }),
+                &commands,
+            )
+            .expect("own-prefix icon reference accepted");
+
+        // Impersonating another package's namespace rejected.
+        let error = registry
+            .register_component(
+                &package,
+                &json!({
+                    "kind": "label",
+                    "id": "markdown.preview.steal",
+                    "text": "Steal",
+                    "icon": "git.branch.steal"
+                }),
+                &commands,
+            )
+            .unwrap_err();
+        assert!(error.message.contains("namespace"));
+
+        // Icons on unsupported kinds rejected.
+        let error = registry
+            .register_component(
+                &package,
+                &json!({
+                    "kind": "flex",
+                    "id": "markdown.preview.layout",
+                    "direction": "row",
+                    "icon": "preview.toggle",
+                    "children": []
+                }),
+                &commands,
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .message
+                .contains("only supported by button, label, list, and statusItem")
+        );
+
+        // List item icons accepted through the items loop.
+        registry
+            .register_component(
+                &package,
+                &json!({
+                    "kind": "list",
+                    "id": "markdown.preview.rows",
+                    "items": [{
+                        "id": "row",
+                        "label": "Row",
+                        "icon": "file.file"
+                    }]
+                }),
+                &commands,
+            )
+            .expect("list item icon reference accepted");
     }
 
     #[test]

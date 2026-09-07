@@ -23,7 +23,7 @@ import {
   type ConnectionState,
 } from "../state/connection-store";
 import { workspace } from "../shell/workspace-singleton";
-import { designSystemStore, themeStore } from "../state/stores";
+import { designSystemStore, iconStore, themeStore } from "../state/stores";
 
 const connectionStore = createConnectionStore();
 
@@ -76,11 +76,15 @@ export function useClaySession(): SessionHandle {
             designSystemStore.setDesignSystem(
               envelope.data.snapshot.activeDesignSystem,
             );
+            iconStore.setIconPack(
+              envelope.data.snapshot.activeIconPack ?? null,
+            );
             workspace.handleEnvelope(envelope);
             return;
           }
           if (envelope.kind === "disconnected") {
             designSystemStore.resetToFallback();
+            iconStore.resetToFallback();
             workspace.handleEnvelope(envelope);
             const remaining = workspace
               .getSnapshot()
@@ -103,6 +107,7 @@ export function useClaySession(): SessionHandle {
           themeStore.setTheme(bootstrap.activeTheme);
           themeStore.setTypography(bootstrap.activeTypography);
           designSystemStore.setDesignSystem(bootstrap.activeDesignSystem);
+          iconStore.setIconPack(bootstrap.activeIconPack ?? null);
           workspace.installBootstrap(bootstrap);
           connectionStore.set({ phase: "ready", bootstrap });
           void workspace.restore();

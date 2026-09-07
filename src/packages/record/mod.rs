@@ -25,6 +25,7 @@ use crate::protocol::{
 // ── Contribution descriptors ─────────────────────────────────────────────────
 mod behavior;
 mod documentation;
+mod icons;
 mod language;
 mod theme;
 mod ui;
@@ -542,6 +543,33 @@ pub struct PackageContributions {
     pub package_options: Vec<PackageOptionContributionDescriptor>,
     /// Inert UI design-system declaration (Plan 101).
     pub ui_design_system: Option<UiDesignSystemContributionDescriptor>,
+    /// Inert bounded icon-pack geometry declaration (Plan 112).
+    pub icon_pack: Option<IconPackContributionDescriptor>,
+}
+
+/// Inert descriptor for a package's bounded icon-pack contribution (Plan 112).
+/// Geometry is parsed into [`crate::shell::icons::IconGeometry`] at record
+/// time; runtime never re-parses path data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IconPackContributionDescriptor {
+    /// Human-readable pack display name.
+    pub display_name: String,
+    /// Schema version (must be 1).
+    pub schema_version: u32,
+    /// Bounded validated glyphs.
+    pub icons: Vec<IconDescriptor>,
+    /// Estimated bounded payload size in bytes.
+    pub estimated_payload_bytes: usize,
+}
+
+/// One validated glyph inside an icon pack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IconDescriptor {
+    /// Semantic key: a reserved core key (first-party packs only) or
+    /// `<apiPrefix>.<key>`.
+    pub key: String,
+    /// Parsed, bounds-checked geometry.
+    pub geometry: crate::shell::icons::IconGeometry,
 }
 
 // ── Documentation and performance metadata ───────────────────────────────────
@@ -895,6 +923,10 @@ fn parse_contributions(
         Some(v) => theme::parse_ui_design_system_contribution(v, api_prefix, ctx)?,
         None => None,
     };
+    let icon_pack = match map.get("iconPack") {
+        Some(v) => icons::parse_icon_pack_contribution(v, api_prefix, ctx)?,
+        None => None,
+    };
 
     Ok(PackageContributions {
         mode_patterns,
@@ -919,6 +951,7 @@ fn parse_contributions(
         layout_overrides,
         package_options,
         ui_design_system,
+        icon_pack,
     })
 }
 
@@ -1089,8 +1122,10 @@ impl ErrorContext {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
+    use crate::perf::budgets::ICON_GEOMETRY_PAYLOAD_BUDGET_BYTES;
 
     fn full_markdown_fixture() -> Value {
         json!({
@@ -1541,6 +1576,188 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
         assert!(err.message.contains("raw colors or CSS"));
+    }
+
+    #[test]
+    fn icon_pack_contribution_parses_and_round_trips() {
+        let fixture = minimal_manifest_value(json!({
+            "docs": "./docs/index.md",
+            "contributions": {
+                "iconPack": {
+                    "schemaVersion": 1,
+                    "displayName": "Test Regular",
+                    "icons": [
+                        {
+                            "key": "demo.close",
+                            "viewBox": [0.0, 0.0, 256.0, 256.0],
+                            "paths": [
+                                { "d": "M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31Z" },
+                                { "d": "M10,10L20,20Z", "opacity": 0.2 }
+                            ]
+                        },
+                        {
+                            "key": "demo.sparkle",
+                            "viewBox": [0.0, 0.0, 24.0, 24.0],
+                            "paths": [{ "d": "M0,0L24,24Z" }]
+                        }
+                    ]
+                }
+            }
+        }));
+        // @demo/pkg is not first-party; `demo.sparkle` uses its own namespace.
+        let record = assemble_package_record(&fixture).expect("assembles package record");
+        let pack = record
+            .contributions
+            .icon_pack
+            .expect("icon_pack descriptor present");
+        assert_eq!(pack.display_name, "Test Regular");
+        assert_eq!(pack.schema_version, 1);
+        assert_eq!(pack.icons.len(), 2);
+        assert_eq!(pack.icons[0].key, "demo.close");
+        // Duotone-style second layer preserved with opacity.
+        assert_eq!(pack.icons[0].geometry.paths.len(), 2);
+        assert_eq!(pack.icons[0].geometry.paths[1].opacity, Some(0.2));
+        assert!(pack.estimated_payload_bytes > 0);
+    }
+
+    #[test]
+    fn icon_pack_core_keys_reserved_to_first_party() {
+        // @demo/pkg is third-party: bare core keys rejected.
+        let fixture = minimal_manifest_value(json!({
+            "contributions": {
+                "iconPack": {
+                    "schemaVersion": 1,
+                    "displayName": "Hostile",
+                    "icons": [{
+                        "key": "action.close",
+                        "viewBox": [0.0, 0.0, 24.0, 24.0],
+                        "paths": [{ "d": "M0,0L1,1Z" }]
+                    }]
+                }
+            }
+        }));
+        let err = assemble_package_record(&fixture).unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("reserved to first-party"));
+
+        // Impersonating another package's namespace is rejected too.
+        let fixture = minimal_manifest_value(json!({
+            "contributions": {
+                "iconPack": {
+                    "schemaVersion": 1,
+                    "displayName": "Hostile",
+                    "icons": [{
+                        "key": "otherpkg.thing",
+                        "viewBox": [0.0, 0.0, 24.0, 24.0],
+                        "paths": [{ "d": "M0,0L1,1Z" }]
+                    }]
+                }
+            }
+        }));
+        let err = assemble_package_record(&fixture).unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+        assert!(err.message.contains("namespace"));
+
+        // First-party names may declare core keys.
+        let mut first_party = minimal_manifest_value(json!({
+            "docs": "./docs/index.md",
+            "contributions": {
+                "iconPack": {
+                    "schemaVersion": 1,
+                    "displayName": "First Party",
+                    "icons": [{
+                        "key": "action.close",
+                        "viewBox": [0.0, 0.0, 24.0, 24.0],
+                        "paths": [{ "d": "M0,0L1,1Z" }]
+                    }]
+                }
+            }
+        }));
+        first_party["name"] = json!("@clay/icons-test");
+        let record = assemble_package_record(&first_party).expect("first-party core keys accepted");
+        assert_eq!(record.contributions.icon_pack.expect("pack").icons.len(), 1);
+    }
+
+    #[test]
+    fn icon_pack_rejects_hostile_and_out_of_bounds_geometry() {
+        let base = |icons: Value| {
+            minimal_manifest_value(json!({
+                "contributions": {
+                    "iconPack": {
+                        "schemaVersion": 1,
+                        "displayName": "Test",
+                        "icons": icons
+                    }
+                }
+            }))
+        };
+        let valid_icon = json!({
+            "key": "demo.icon",
+            "viewBox": [0.0, 0.0, 24.0, 24.0],
+            "paths": [{ "d": "M0,0L1,1Z" }]
+        });
+
+        // Duplicate keys rejected.
+        let err = assemble_package_record(&base(json!([
+            { "key": "demo.icon", "viewBox": [0.0, 0.0, 24.0, 24.0], "paths": [{ "d": "M0,0L1,1Z" }] },
+            { "key": "demo.icon", "viewBox": [0.0, 0.0, 24.0, 24.0], "paths": [{ "d": "M0,0L1,1Z" }] }
+        ])))
+        .unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::DuplicateContributionId);
+
+        // Unsupported schema version rejected.
+        let err = assemble_package_record(&minimal_manifest_value(json!({
+            "contributions": {
+                "iconPack": {
+                    "schemaVersion": 2,
+                    "displayName": "Test",
+                    "icons": [{ "key": "demo.icon", "viewBox": [0.0, 0.0, 24.0, 24.0], "paths": [{ "d": "M0,0L1,1Z" }] }]
+                }
+            }
+        })))
+        .unwrap_err();
+        assert!(err.message.contains("schemaVersion"));
+
+        // Truncated path command rejected.
+        let err = assemble_package_record(&base(json!([
+            { "key": "demo.icon", "viewBox": [0.0, 0.0, 24.0, 24.0], "paths": [{ "d": "M0,0L5" }] }
+        ])))
+        .unwrap_err();
+        assert!(err.message.contains("malformed path data"));
+
+        // Per-path byte budget enforced before parsing.
+        let long_d = format!("M{}", "0".repeat(ICON_GEOMETRY_PAYLOAD_BUDGET_BYTES + 1));
+        let err = assemble_package_record(&base(json!([
+            { "key": "demo.icon", "viewBox": [0.0, 0.0, 24.0, 24.0], "paths": [{ "d": long_d }] }
+        ])))
+        .unwrap_err();
+        assert_eq!(err.rule, PackageRecordRule::PayloadBudgetExceeded);
+
+        // Hostile raw-SVG/CSS/URL fields rejected structurally.
+        for hostile in ["svg", "href", "style", "class", "fill", "url", "callback"] {
+            let mut hostile_icon = valid_icon.clone();
+            hostile_icon
+                .as_object_mut()
+                .expect("object")
+                .insert(hostile.to_string(), json!("javascript:alert(1)"));
+            let err = assemble_package_record(&base(json!([hostile_icon]))).unwrap_err();
+            assert!(
+                err.message.contains("bounded normalized geometry"),
+                "expected structural rejection for {hostile}"
+            );
+        }
+
+        // Invalid numeric ranges rejected (opacity, viewBox side).
+        let err = assemble_package_record(&base(json!([
+            { "key": "demo.icon", "viewBox": [0.0, 0.0, 24.0, 24.0], "paths": [{ "d": "M0,0L1,1Z", "opacity": 1.5 }] }
+        ])))
+        .unwrap_err();
+        assert!(err.message.contains("opacity"));
+        let err = assemble_package_record(&base(json!([
+            { "key": "demo.icon", "viewBox": [0.0, 0.0, 600.0, 24.0], "paths": [{ "d": "M0,0L1,1Z" }] }
+        ])))
+        .unwrap_err();
+        assert!(err.message.contains("viewBox"));
     }
 
     fn minimal_manifest_value(clay_extras: Value) -> Value {

@@ -1,0 +1,48 @@
+Diff in /home/arn/Projects/clay/src/server/ops/theme.rs:979:
+ 
+         // All four resolved concurrently and independently.
+         assert_eq!(clay_state.appearance(), Appearance::Dark);
+[31m-        assert_eq!(clay_state.active_theme().unwrap().specifier, theme.specifier);
+(B[m         assert_eq!(
+[32m+            clay_state.active_theme().unwrap().specifier,
+(B[m[32m+            theme.specifier
+(B[m[32m+        );
+(B[m[32m+        assert_eq!(
+(B[m             clay_state.active_design_system().unwrap().specifier,
+             design.specifier
+         );
+Diff in /home/arn/Projects/clay/src/server/ops/theme.rs:996:
+         // and actually switches geometry (duotone shade layer disappears).
+         let regular = apply_icon_pack(&clay_state, "@clay/icons-phosphor-regular")
+             .expect("regular pack selects");
+[31m-        assert!(duotone.icons["action.close"].paths.len() > regular.icons["action.close"].paths.len());
+(B[m[32m+        assert!(
+(B[m[32m+            duotone.icons["action.close"].paths.len() > regular.icons["action.close"].paths.len()
+(B[m[32m+        );
+(B[m         assert_eq!(clay_state.appearance(), Appearance::Dark);
+[31m-        assert_eq!(clay_state.active_theme().unwrap().specifier, theme.specifier);
+(B[m         assert_eq!(
+[32m+            clay_state.active_theme().unwrap().specifier,
+(B[m[32m+            theme.specifier
+(B[m[32m+        );
+(B[m[32m+        assert_eq!(
+(B[m             clay_state.active_design_system().unwrap().specifier,
+             design.specifier
+         );
+Diff in /home/arn/Projects/clay/src/server/ops/theme.rs:1008:
+         let error = apply_icon_pack(&clay_state, "@vendor/never-loaded-icons")
+             .expect_err("unknown pack rejected");
+         assert!(error.to_string().contains("theme.load_failed"));
+[31m-        assert_eq!(clay_state.active_icon_pack().unwrap().specifier, regular.specifier);
+(B[m[31m-        assert_eq!(clay_state.active_theme().unwrap().specifier, theme.specifier);
+(B[m[32m+        assert_eq!(
+(B[m[32m+            clay_state.active_icon_pack().unwrap().specifier,
+(B[m[32m+            regular.specifier
+(B[m[32m+        );
+(B[m[32m+        assert_eq!(
+(B[m[32m+            clay_state.active_theme().unwrap().specifier,
+(B[m[32m+            theme.specifier
+(B[m[32m+        );
+(B[m         assert_eq!(
+             clay_state.active_design_system().unwrap().specifier,
+             design.specifier

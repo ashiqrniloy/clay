@@ -4,6 +4,7 @@ pub(crate) mod components;
 pub mod design_system;
 pub(crate) mod file_browser;
 pub(crate) mod fuzzy;
+pub mod icons;
 pub(crate) mod layout;
 pub(crate) mod layout_persist;
 pub(crate) mod package_ui;

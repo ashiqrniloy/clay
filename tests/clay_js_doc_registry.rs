@@ -2101,7 +2101,7 @@ fn canonical_example_covers_theme_typography_and_modular_configuration() {
 
     for import in [
         r#"import { loadConfigurationModule, getConfigurationState, setPackageOption } from "clay:configuration";"#,
-        r#"import { setTheme, setTypography, setAppearance, setDesignSystem } from "clay:theme";"#,
+        r#"import { setTheme, setTypography, setAppearance, setDesignSystem, setIconPack } from "clay:theme";"#,
         r#"import { clientSetCursorStyle } from "clay:editor";"#,
         r#"import { clientSetEditorLayout } from "clay:editor";"#,
         r#"import { bindKey, unbindKey } from "clay:keybindings";"#,
@@ -2136,6 +2136,50 @@ fn canonical_example_covers_theme_typography_and_modular_configuration() {
         example.matches("setDesignSystem(").count(),
         1,
         "canonical example must document setDesignSystem selection exactly once"
+    );
+    // Plan 112: icon-pack selection is documented once with an active bundled
+    // Regular selection (offline-safe), a commented Duotone alternative and
+    // object form, load-≠-select and fallback annotations, and the commented
+    // third-party load+select template in packages/third-party.js.
+    assert_eq!(
+        example
+            .matches("setIconPack(\"@clay/icons-phosphor-regular\");")
+            .count(),
+        1,
+        "canonical example must keep one active recommended Regular icon selection"
+    );
+    assert_eq!(
+        example
+            .matches("// setIconPack(\"@clay/icons-phosphor-duotone\");")
+            .count(),
+        1,
+        "canonical example must keep the Duotone alternative commented"
+    );
+    assert_eq!(
+        example.matches("// setIconPack({ specifier:").count(),
+        1,
+        "canonical example must show the object form as a commented alternative"
+    );
+    for marker in [
+        "Load ≠ select",
+        "never go blank",
+        "callers cannot change it",
+        "wins over this call on every reload",
+    ] {
+        assert!(
+            example.contains(marker),
+            "canonical example icon comments must cover {marker}"
+        );
+    }
+    let third_party_example =
+        std::fs::read_to_string(root.join("examples/config/packages/third-party.js"))
+            .expect("read canonical third-party package template");
+    assert_eq!(
+        third_party_example
+            .matches("await loadPackage(\"@vendor/outline-icons\");")
+            .count(),
+        1,
+        "third-party template must keep one commented icon-pack load example"
     );
     for marker in [
         "@clay/core baseline",

@@ -112,7 +112,8 @@ use self::{
     shell::op_clay_shell_set_pane_focus_policy,
     syntax::{op_clay_syntax_register_syntax_grammar, op_clay_syntax_set_engine_preference},
     theme::{
-        op_clay_theme_set_appearance, op_clay_theme_set_design_system, op_clay_theme_set_theme,
+        op_clay_theme_set_appearance, op_clay_theme_set_design_system, op_clay_theme_set_icon_pack,
+        op_clay_theme_set_theme,
     },
     typography::op_clay_theme_set_typography,
     ui::{
@@ -269,6 +270,9 @@ pub(crate) struct ClayOpState {
     active_typography: Mutex<Option<crate::protocol::ActiveTypography>>,
     /// Phase 102 resolved active UI design-system snapshot from `setDesignSystem`.
     active_design_system: Mutex<Option<crate::shell::design_system::ActiveDesignSystem>>,
+    /// Plan 112 resolved active icon-pack snapshot from `setIconPack`.
+    /// `None` = bundled Regular safety subset (host fallback) is active.
+    active_icon_pack: Mutex<Option<crate::shell::icons::ActiveIconPack>>,
     /// Phase 20.6 bounded appearance preference (`light` | `dark` | `system`).
     /// Selects the canonical default theme only when no explicit `setTheme` ran.
     appearance: Mutex<crate::protocol::Appearance>,
@@ -277,6 +281,8 @@ pub(crate) struct ClayOpState {
     explicit_theme_active: std::sync::atomic::AtomicBool,
     /// Whether the user explicitly called `setDesignSystem`.
     explicit_design_system_active: std::sync::atomic::AtomicBool,
+    /// Whether the user explicitly called `setIconPack` (Plan 112).
+    explicit_icon_pack_active: std::sync::atomic::AtomicBool,
     runtime_context: Mutex<ClayRuntimeContext>,
     // Shared PackageService for loadPackage resolution. Bundled packages are
     // seeded from CARGO_MANIFEST_DIR/packages; user-installed packages are
@@ -371,9 +377,11 @@ impl ClayOpState {
             active_theme: Mutex::new(None),
             active_typography: Mutex::new(None),
             active_design_system: Mutex::new(None),
+            active_icon_pack: Mutex::new(None),
             appearance: Mutex::new(crate::protocol::Appearance::default()),
             explicit_theme_active: std::sync::atomic::AtomicBool::new(false),
             explicit_design_system_active: std::sync::atomic::AtomicBool::new(false),
+            explicit_icon_pack_active: std::sync::atomic::AtomicBool::new(false),
             runtime_context: Mutex::new(ClayRuntimeContext {
                 workspace,
                 runtime_document_id,
@@ -1625,15 +1633,43 @@ impl ClayOpState {
             .clone()
     }
 
-    /// Phase 102: mark that the user explicitly selected a design system via `setDesignSystem`.
-    pub(super) fn set_explicit_design_system_active(&self, value: bool) {
-        self.explicit_design_system_active
+    /// Plan 112: record the active icon pack resolved by `setIconPack`.
+    pub(super) fn set_active_icon_pack(&self, pack: crate::shell::icons::ActiveIconPack) {
+        *self
+            .active_icon_pack
+            .lock()
+            .expect("Clay runtime op state mutex poisoned") = Some(pack);
+    }
+
+    /// Take the active icon-pack snapshot out of this evaluation. `None`
+    /// means no explicit selection ran (bundled Regular subset active).
+    pub(crate) fn active_icon_pack(&self) -> Option<crate::shell::icons::ActiveIconPack> {
+        self.active_icon_pack
+            .lock()
+            .expect("Clay runtime op state mutex poisoned")
+            .clone()
+    }
+
+    /// Plan 112: mark that the user explicitly selected an icon pack via `setIconPack`.
+    pub(super) fn set_explicit_icon_pack_active(&self, value: bool) {
+        self.explicit_icon_pack_active
             .store(value, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn explicit_icon_pack_active(&self) -> bool {
+        self.explicit_icon_pack_active
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub(crate) fn explicit_design_system_active(&self) -> bool {
         self.explicit_design_system_active
             .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Phase 102: mark that the user explicitly selected a design system via `setDesignSystem`.
+    pub(super) fn set_explicit_design_system_active(&self, value: bool) {
+        self.explicit_design_system_active
+            .store(value, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub(crate) fn completion_providers(
@@ -2034,6 +2070,7 @@ extension!(
         op_clay_shell_set_pane_focus_policy,
         op_clay_theme_set_appearance,
         op_clay_theme_set_design_system,
+        op_clay_theme_set_icon_pack,
         op_clay_theme_set_theme,
         op_clay_theme_set_typography,
         op_clay_ui_register_pane_content_contribution,
@@ -2228,7 +2265,7 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 96);
+        assert_eq!(trusted.len(), 97);
         // 46 = 38 public contribution ops (including folding publication) +
         // the seven shared `editor-control` gated editor ops + the gated
         // programmatic execution op (follow-up round); visibility grants
@@ -2247,6 +2284,7 @@ mod domain_extension_tests {
             "op_clay_shell_set_pane_focus_policy",
             "op_clay_theme_set_appearance",
             "op_clay_theme_set_design_system",
+            "op_clay_theme_set_icon_pack",
             "op_clay_theme_set_theme",
             "op_clay_theme_set_typography",
             "op_clay_documents_open_document",

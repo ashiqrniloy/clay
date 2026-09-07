@@ -39,6 +39,8 @@ pub(crate) struct ClayRuntimeEvaluation {
     pub(crate) active_typography: Option<crate::protocol::ActiveTypography>,
     /// Phase 102 resolved active UI design-system snapshot from `setDesignSystem`.
     pub(crate) active_design_system: Option<crate::shell::design_system::ActiveDesignSystem>,
+    /// Plan 112 resolved active icon-pack snapshot from `setIconPack`.
+    pub(crate) active_icon_pack: Option<crate::shell::icons::ActiveIconPack>,
     /// Warnings emitted by optional configuration-module imports. These are
     /// drained from the configuration runtime before the evaluation is
     /// returned so reload callers can retain and report them.

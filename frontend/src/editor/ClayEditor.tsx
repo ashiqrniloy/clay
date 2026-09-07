@@ -6,7 +6,7 @@ import {
   useSyncExternalStore,
 } from "react";
 
-import { ClayButton, ClayText } from "../components";
+import { ClayButton, ClayIconButton, ClayText } from "../components";
 import { accessIsEditable } from "../state/document-store";
 import { tabLabel } from "../shell/tab-store";
 import { createEditor, setReadOnly } from "./create-editor";
@@ -145,17 +145,24 @@ export function ClayEditor({ session, onOpenPath }: ClayEditorProps) {
           </ClayText>
         </div>
         <div className={styles.actions}>
-          <ClayButton
+          <ClayIconButton
+            icon="document.save"
+            label="Save"
             variant="primary"
             isDisabled={!editable}
             onPress={() => session.save()}
-          >
-            Save
-          </ClayButton>
-          <ClayButton onPress={() => session.reload(false)}>Reload</ClayButton>
-          <ClayButton variant="muted" onPress={() => session.close(meta.dirty)}>
-            Close
-          </ClayButton>
+          />
+          <ClayIconButton
+            icon="document.reload"
+            label="Reload"
+            onPress={() => session.reload(false)}
+          />
+          <ClayIconButton
+            icon="action.close"
+            label="Close"
+            variant="muted"
+            onPress={() => session.close(meta.dirty)}
+          />
           <input
             className={styles.path}
             aria-label="Open path"

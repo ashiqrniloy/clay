@@ -28,6 +28,8 @@ export const KNOWN_COMPONENT_KINDS = [
   "badge",
   "kbd",
   "divider",
+  "iconSlot",
+  "tooltip",
 ] as const;
 
 export type ComponentKind = (typeof KNOWN_COMPONENT_KINDS)[number];

@@ -1092,6 +1092,7 @@ mod tests {
             },
             active_typography: ActiveTypography::default(),
             active_design_system: crate::shell::design_system::ActiveDesignSystem::core_fallback(2),
+            active_icon_pack: None,
             sdui_tree: representative_sdui_tree(),
             package_ui: PackageUiSnapshot {
                 version: 2,
@@ -1171,6 +1172,7 @@ mod tests {
             },
             active_typography: ActiveTypography::default(),
             active_design_system: crate::shell::design_system::ActiveDesignSystem::core_fallback(2),
+            active_icon_pack: None,
             sdui_tree: representative_sdui_tree(),
             package_ui: PackageUiSnapshot::default(),
             documents: Vec::new(),

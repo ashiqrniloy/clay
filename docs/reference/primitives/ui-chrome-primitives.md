@@ -76,6 +76,8 @@ Phase 28 extends editor data without adding package-facing chrome primitives:
 | `paint_badge` | Badge/tag with label and interaction states | `surface.badge`, `text.badge`, `radius.xs`, `spacing.badge`, `typography.detail`/`caption` | `status` or `note` |
 | `paint_kbd_hint` | Keyboard shortcut hint | `surface.kbd`, `text.kbd`, `border.kbd`, `radius.xs`, `dimension.kbd.height`, `typography.caption` | `kbd` (via label) |
 | `paint_icon_slot` | Standardized icon placeholder | `dimension.icon.size`, `text.icon`, `opacity.disabled` | `img` or `presentation` |
+
+Plan 112 realized this contract in the React client: `ClayIcon` renders bounded pack geometry with the bundled Regular subset as zero-config fallback, `ClayIconButton` composes icon + tooltip + required accessible name, and `theme.setIconPack` activates user-selected packs. See [Icon Packs](../icon-packs.md) and the [React UI catalog mapping](../development/react-ui-catalog-mapping.md).
 | `paint_tooltip_shell` | Tooltip background/border | `surface.tooltip`, `text.tooltip`, `border.hairline`, `dimension.border.hairline`, `radius.sm`, `elevation.overlay`, `z.tooltip`, `spacing.tooltip`, `typography.body` | `tooltip` |
 | `paint_scrim` (Phase 24.4) | Full-window dim behind centered Command Centre | `surface.scrim`, `opacity.scrim` | modal `Dialog` backdrop |
 | `tab_card_chrome` (Phase 22.3) | Tab card background/text with interaction states and selection | `list_row_fill_color`/`disabled_text_color` state mapping, `surface.list`, `surface.selected`, `surface.hover`, `surface.active`, `text.disabled`, `opacity.disabled` | informational `Tab` under the shell `TabList` (virtual node, not a widget) |

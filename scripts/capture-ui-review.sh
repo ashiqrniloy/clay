@@ -64,7 +64,7 @@ while (($#)); do
 done
 
 case "$fixture" in
-    ui-review-default|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-design-system|ui-review-design-system-light|ui-review-design-neobrutal|ui-review-design-neobrutal-light|ui-review-design-glass|ui-review-design-glass-light|ui-review-large-typography|ui-review-completion|ui-review-command-centre|ui-review-rust|ui-review-coding-agent) ;;
+    ui-review-default|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-design-system|ui-review-design-system-light|ui-review-design-neobrutal|ui-review-design-neobrutal-light|ui-review-design-glass|ui-review-design-glass-light|ui-review-large-typography|ui-review-completion|ui-review-command-centre|ui-review-rust|ui-review-coding-agent|ui-review-icons-regular-light|ui-review-icons-duotone-dark|ui-review-icons-fallback-large) ;;
     *)
         echo "unknown --fixture: ${fixture:-<missing>}" >&2
         usage >&2
@@ -130,6 +130,10 @@ unresolved() {
     local reason=$1
     if [[ -n "${latest_dump:-}" && -s "$latest_dump" ]]; then
         cp "$latest_dump" "$output/accessibility.partial.txt"
+    fi
+    # Retain the isolated server log so unresolved reviews carry failure evidence.
+    if [[ -n "${root:-}" && -s "$root/server.log" ]]; then
+        cp "$root/server.log" "$output/server.partial.log" 2>/dev/null || true
     fi
     if [[ "$fixture" == ui-review-rust && -f "$root/portal_capture.py" ]]; then
         local toggled_output
@@ -359,13 +363,13 @@ if [[ "$fixture" == ui-review-rust ]]; then
     cp "$repo/tests/fixtures/lsp/rust/Cargo.toml" "$workspace/Cargo.toml"
     cp "$repo/tests/fixtures/lsp/rust/Cargo.lock" "$workspace/Cargo.lock"
     cp "$repo/tests/fixtures/lsp/rust/src/main.rs" "$workspace/src/main.rs"
-elif [[ "$fixture" == ui-review-loading || "$fixture" == ui-review-design-system || "$fixture" == ui-review-design-system-light ]]; then
+elif [[ "$fixture" == ui-review-loading || "$fixture" == ui-review-design-system || "$fixture" == ui-review-design-system-light || "$fixture" == ui-review-icons-regular-light || "$fixture" == ui-review-icons-duotone-dark || "$fixture" == ui-review-icons-fallback-large ]]; then
     printf 'Fixture document\n' > "$workspace/loading.txt"
 fi
 
 document_name=""
 case "$fixture" in
-    ui-review-loading|ui-review-design-system|ui-review-design-system-light) document_name=loading.txt ;;
+    ui-review-loading|ui-review-design-system|ui-review-design-system-light|ui-review-icons-regular-light|ui-review-icons-duotone-dark|ui-review-icons-fallback-large) document_name=loading.txt ;;
     ui-review-completion) document_name=review.rs ;;
     ui-review-rust) document_name=src/main.rs ;;
 esac
@@ -603,6 +607,16 @@ RuntimeStateSnapshot=PASS
 active_design_system=@clay/design-glass
 sdui_panel=Frosted Glass Reference System
 sdui_states=enabled,disabled
+EOF
+        ;;
+    ui-review-icons-regular-light|ui-review-icons-duotone-dark|ui-review-icons-fallback-large)
+        wait_for_tree 'Icon Pack Review' || unresolved "icon-pack SDUI tree did not appear"
+        cat > "$output/runtime-tree.txt" <<EOF
+RuntimeStateSnapshot=PASS
+fixture=$fixture
+sdui_panel=Icon Pack Review
+sdui_icons=git.branch,status.success,preview.toggle,file.folder,file.file
+editor_action_row=save,reload,close (icon buttons) + open (text)
 EOF
         ;;
     ui-review-recovery)

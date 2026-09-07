@@ -4,6 +4,7 @@ import {
   ClayButton,
   ClayCollapse,
   ClayDropdown,
+  ClayIcon,
   ClayList,
   ClayModal,
   ClayTabStrip,
@@ -109,6 +110,7 @@ export function PackageComponent({
           disabled={node.disabled}
           style={style}
         >
+          {node.icon && <ClayIcon name={node.icon} />}
           {node.text ?? node.label ?? ""}
         </ClayText>
       );
@@ -137,6 +139,7 @@ export function PackageComponent({
           }}
           style={style}
         >
+          {node.icon && <ClayIcon name={node.icon} />}
           {node.label ?? node.title ?? "Action"}
         </ClayButton>
       );
@@ -149,6 +152,7 @@ export function PackageComponent({
             title: item.label,
             detail: item.detail,
             disabled: item.disabled || !item.action,
+            icon: item.icon,
           }))}
           selectedId={(node.items ?? []).find((item) => item.selected)?.id}
           onAction={(itemId) => {

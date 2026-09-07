@@ -1,4 +1,5 @@
 import { createDesignSystemStore } from "./design-system-store";
+import { createIconStore } from "./icon-store";
 import { createThemeStore } from "./theme-store";
 
 function safeCreate<T>(create: () => T, fallback: T): T {
@@ -28,3 +29,6 @@ export const designSystemStore = safeCreate(
     } as unknown as CSSStyleDeclaration,
   }),
 );
+
+/** Icon pack runtime singleton; holds bounded active geometry (no DOM writes). */
+export const iconStore = createIconStore();

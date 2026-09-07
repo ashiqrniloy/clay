@@ -60,6 +60,14 @@ export type ActiveDesignSystemSummary = {
     /** Bumped on every successful design-system activation. */
     generation: number;
 };
+export type SetIconPackOptions = {
+    specifier: string;
+};
+export type SetIconPackSummary = {
+    pack: string;
+    iconCount: number;
+    schemaVersion: number;
+};
 export type SetAppearanceSummary = {
     appearance: Appearance;
     /** Canonical default theme specifier resolved for this appearance, or null
@@ -70,3 +78,8 @@ export declare function setTheme(options: SetThemeOptions | string): ActiveTheme
 export declare function setTypography(options: TypographyConfiguration): ActiveTypographySummary;
 export declare function setAppearance(options: SetAppearanceOptions | Appearance): SetAppearanceSummary;
 export declare function setDesignSystem(options: SetDesignSystemOptions | string): ActiveDesignSystemSummary;
+/** Plan 112: select the active icon pack. Load ≠ select — the pack must already
+ * be registered via `loadPackage` (bundled first-party packs excepted, which
+ * resolve from the compiled inventory without executing anything). Selection is
+ * a user-global appearance authority: package runtime callers cannot reach it. */
+export declare function setIconPack(options: SetIconPackOptions | string): SetIconPackSummary;

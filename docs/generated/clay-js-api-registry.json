@@ -4594,6 +4594,40 @@
       "async": false
     },
     {
+      "id": "theme.setIconPack",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/theme/set-icon-pack.md",
+      "js_module": "clay:theme",
+      "js_export": "setIconPack",
+      "js_facade": "runtime/js/theme.js::setIconPack",
+      "backing_rust": "src/server/ops/theme.rs::op_clay_theme_set_icon_pack; src/server/ops/theme.rs::apply_icon_pack; src/shell/icons.rs::ActiveIconPack::from_record",
+      "deno_op": "op_clay_theme_set_icon_pack",
+      "deno_op_path": "src/server/ops/theme.rs::op_clay_theme_set_icon_pack",
+      "name": "setIconPack",
+      "user_facing_name": "Set Icon Pack",
+      "summary": "Explicitly activate an icon pack (a first-party `@clay/icons-*` pack or one enabled package's `iconPack` contribution) for UI glyph rendering; icons ride the active theme's text color and never carry their own colors.",
+      "owner": "server",
+      "phase": "Phase 112",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "specifier",
+          "type": "string",
+          "default": "required",
+          "description": "Name of one icon-pack contributor: a bundled first-party `@clay/icons-*` package or an already-enabled package record that declares a `clay.contributions.iconPack`."
+        }
+      ],
+      "security": "Selects inert, bounded vector-geometry data only: paths are host-validated against a bounded schema (schema version, path/coordinate/command limits, absolute commands, no raw SVG, CSS, URLs, scripts, or events) and render through the host's own SVG pipeline with `fill=\"currentColor\"`, so the active theme stays the sole color authority. Bundled `@clay/*` packs resolve from the compiled inventory without executing anything; third-party specifiers must already be enabled package records — selection never installs, adopts, or promotes trust. Package runtime callers cannot reach this op: it is registered only in the trusted runtime extension. On failure or later package revocation the previously valid pack is preserved and a sanitized diagnostic surfaces; missing or failed selections fall back to the bundled default subset. Does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.",
+      "agent_guidance": "Use the bundled default (no `setIconPack` call at all) unless the user asks for a specific icon pack; zero configuration renders the bundled Regular subset. Never suggest raw SVG markup, package-owned colors, or icon packs from untrusted packages. If the selected pack is later removed or revoked, Clay keeps working controls with the bundled fallback and surfaces a sanitized diagnostic on the next reload.",
+      "lookup_tags": ["theme", "icons", "icon-pack", "ui", "init", "fallback"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "theme.setTheme",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/theme/set-theme.md",

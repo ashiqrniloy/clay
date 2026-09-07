@@ -1,3 +1,5 @@
+#[path = "../icon_packages.rs"]
+mod icon_packages;
 #[path = "../package_ui_conformance.rs"]
 mod package_ui_conformance;
 #[path = "../theme_packages.rs"]

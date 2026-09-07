@@ -519,7 +519,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 96);
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 97);
 
     let facades = read("src/server/facades.rs")
         .lines()
@@ -547,7 +547,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
         }
     }
     let package_section = marked_section(&plan, "package-inventory");
-    assert_exact_inventory(package_section, &packages, 18);
+    assert_exact_inventory(package_section, &packages, 20);
     assert_eq!(package_section.matches("`packages/lsp-shared`").count(), 1);
 }
 
@@ -703,13 +703,8 @@ fn component_catalog_status_partition_is_current() {
     }
 
     // Composition-only planned surfaces stay planned (no premature promotion).
-    for component in [
-        "Tooltip",
-        "Badge / tag",
-        "Toast / notification",
-        "`kbd` hint",
-        "Icon slot",
-    ] {
+    // Plan 112 promoted Tooltip and Icon slot to implemented.
+    for component in ["Badge / tag", "Toast / notification", "`kbd` hint"] {
         let row_marker = format!("| {component} | planned |");
         assert!(
             components.contains(&row_marker),
@@ -722,6 +717,20 @@ fn component_catalog_status_partition_is_current() {
         components.contains("| Tabs | implemented |"),
         "Tabs must be marked implemented after Phase 22.3"
     );
+
+    // Plan 112 promoted Tooltip and Icon slot from planned to implemented
+    // (shared ClayIcon renderer + ClayTooltip composition).
+    for component in ["Tooltip", "Icon slot"] {
+        let row_marker = format!("| {component} | implemented |");
+        assert!(
+            components.contains(&row_marker),
+            "Plan 112-promoted surface {component} must be cataloged implemented"
+        );
+        assert!(
+            !components.contains(&format!("| {component} | planned |")),
+            "Plan 112-promoted surface {component} must no longer be planned"
+        );
+    }
 
     // Phase 20.3 Split divider and Phase 20.5 promoted composition surfaces are implemented.
     assert!(

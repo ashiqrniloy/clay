@@ -47,7 +47,7 @@ The package manifest declares inert contribution metadata for:
 - Priority-0 `markdown.keywords` static text items plus `#`/`[`/`` ` `` trigger metadata through generic completion primitives.
 - Preview, heading, and list key routing metadata.
 - Client-first predictable list continuation and pair handling installed through `buildCodeEditingManifest`; fenced-code metadata remains available to the background parser.
-- A Markdown preview/status SDUI region with inert mode, parse, decoration, highlighting-policy, and preview labels plus a `markdown.togglePreview` button action.
+- A Markdown preview/status SDUI region with inert mode, parse, decoration, highlighting-policy, and preview labels plus a `markdown.togglePreview` button action (the button and the enabled-preview status label carry the `preview.toggle` semantic icon reference; the label text remains the sole truth when the key resolves to no geometry).
 - Tier 1 native Markdown syntax decoration through the package query and vocabulary styleMap; the manifest no longer declares `parser.js` as the default decoration contribution.
 - A registered Tier 3 `markdown-it`/scanner fallback adapter that can still produce viewport-bounded legacy-compatible spans when no native handler is selected.
 

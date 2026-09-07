@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Tabs, TabList, Tab, TabPanel } from "react-aria-components";
 
 import { ClayButton } from "./button";
+import { ClayIcon } from "./icon";
 import { ClayText } from "./text";
 import { recipeAttributes } from "./recipe-attributes";
 import styles from "./tab-strip.module.css";
@@ -120,7 +121,7 @@ export function ClayTabStrip({
                     onClose(tab.id);
                   }}
                 >
-                  ×
+                  <ClayIcon name="action.close" />
                 </button>
               ) : null}
             </Tab>
@@ -129,7 +130,7 @@ export function ClayTabStrip({
         {actions}
         {onNew ? (
           <ClayButton variant="muted" onPress={onNew} aria-label="New tab">
-            +
+            <ClayIcon name="action.new" />
           </ClayButton>
         ) : null}
       </div>

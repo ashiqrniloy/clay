@@ -1,3 +1,4 @@
+import type { IconPackSnapshot } from "../icons/types";
 import type {
   ThemeSnapshot,
   TypographySnapshot,
@@ -25,13 +26,15 @@ export interface SduiListItem {
   id: string;
   label: string;
   detail: string | null;
+  /** Semantic icon reference resolved against the active icon pack. */
+  icon?: string | null;
   action: SduiActionIntent | null;
 }
 
 export type SduiNodeKind =
   | { panel: { title: string; children: SduiNodeId[] } }
-  | { label: { text: string } }
-  | { button: { label: string; action: SduiActionIntent } }
+  | { label: { text: string; icon?: string | null } }
+  | { button: { label: string; icon?: string | null; action: SduiActionIntent } }
   | { list: { items: SduiListItem[] } }
   | {
       editorView: {
@@ -76,6 +79,8 @@ export interface PackageListItem {
   id: string;
   label: string;
   detail?: string;
+  /** Semantic icon reference resolved against the active icon pack. */
+  icon?: string;
   action?: PackageAction;
   selected?: boolean;
   disabled?: boolean;
@@ -103,6 +108,8 @@ export interface PackageComponentNode {
   title?: string;
   text?: string;
   label?: string;
+  /** Semantic icon reference (button/label/list/statusItem kinds only). */
+  icon?: string;
   direction?: "row" | "column";
   disabled?: boolean;
   /** `textInput` only: multiline growing composer variant (plan 108 G3). */
@@ -187,6 +194,8 @@ export interface RuntimeSnapshot {
   activeTheme: ThemeSnapshot;
   activeTypography: TypographySnapshot;
   activeDesignSystem: DesignSystemSnapshot;
+  /** Resolved active icon pack; absent = host fallback subset active. */
+  activeIconPack?: IconPackSnapshot | null;
   /** Server-enumerated Settings selections (plan 110 task 10). */
   uiChoices?: UiChoicesSnapshot;
   sduiTree: SduiTree;

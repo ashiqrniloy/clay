@@ -74,6 +74,7 @@ fn server_with_document_and_registry(
         active_design_system: Arc::new(Mutex::new(
             crate::shell::design_system::ActiveDesignSystem::core_fallback(0),
         )),
+        active_icon_pack: Arc::new(Mutex::new(None)),
         runtime_diagnostics: Arc::new(Mutex::new(
             super::connection::RuntimeDiagnosticStore::default(),
         )),

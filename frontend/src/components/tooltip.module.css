@@ -1,0 +1,65 @@
+/* Clay tooltip — `paint_tooltip_shell` React projection (Plan 112 Task 7).
+ * Consumes the shipped `tooltip.default.root.rest` design-system recipe
+ * (both reference packages) with core-token fallbacks. Typography from the
+ * semantic body variant; z-order from `z.tooltip`. */
+
+.tooltip {
+  box-sizing: border-box;
+  max-inline-size: 20rem;
+  background: var(
+    --clay-ds-tooltip-default-root-rest-background-color,
+    var(--clay-surface-tooltip)
+  );
+  color: var(
+    --clay-ds-tooltip-default-root-rest-text-color,
+    var(--clay-text-tooltip)
+  );
+  border: var(
+      --clay-ds-tooltip-default-root-rest-border-width,
+      var(--clay-dimension-border-hairline, 1px)
+    )
+    var(--clay-ds-tooltip-default-root-rest-border-style, solid)
+    var(
+      --clay-ds-tooltip-default-root-rest-border-color,
+      var(--clay-border-hairline)
+    );
+  border-radius: var(
+    --clay-ds-tooltip-default-root-rest-border-radius,
+    var(--clay-radius-sm, 4px)
+  );
+  padding: var(
+    --clay-ds-tooltip-default-root-rest-padding,
+    var(--clay-spacing-tooltip, 8px)
+  );
+  box-shadow: var(--clay-ds-tooltip-default-root-rest-shadow, none);
+  backdrop-filter: blur(
+    var(--clay-ds-tooltip-default-root-rest-backdrop-blur, 0px)
+  );
+
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-body-size, 13px);
+  line-height: var(--clay-text-body-line-height, 1.2);
+  word-break: break-word;
+
+  z-index: var(--clay-z-tooltip, 50);
+  outline: none;
+  pointer-events: none;
+
+  /* Entry: fade only (no positional animation); global reduced-motion
+   * preferences collapse this to zero duration. */
+  opacity: 1;
+  transition: opacity var(--clay-motion-fast, 100ms) ease-out;
+}
+
+.tooltip[data-entering] {
+  opacity: 0;
+}
+
+@media (forced-colors: active) {
+  .tooltip {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+  }
+}

@@ -2838,6 +2838,29 @@ current_rust_owner = "src/server/ops/theme.rs::op_clay_theme_set_design_system"
 registry_public = true
 
 [[api]]
+id = "theme.setIconPack"
+category = "theme"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:theme"
+js_export = "setIconPack"
+user_facing_name = "Set Icon Pack"
+authority = "inert-bounded-icon-geometry-active-theme-color-sourcing"
+runtime_path = "init-js-op-to-active-icon-pack-snapshot-generation-stamped-wire"
+hot_path_policy = "Configuration-time only; one bounded ActiveIconPack snapshot is validated and generation-stamped, shipped inside the runtime state snapshot only on pack change, and cached client-side. Paint, keypress, scroll, and pointer paths run no JavaScript, IPC, filesystem, package resolution, or server IPC work."
+facade_path = "runtime/js/theme.js::setIconPack"
+backing_rust = "src/server/ops/theme.rs::op_clay_theme_set_icon_pack; src/server/ops/theme.rs::apply_icon_pack; src/shell/icons.rs::ActiveIconPack::from_record"
+deno_op = "op_clay_theme_set_icon_pack"
+deno_op_path = "src/server/ops/theme.rs::op_clay_theme_set_icon_pack"
+documentation_path = "docs/reference/clay-js-api/theme/set-icon-pack.md"
+key_bindings = []
+custom_properties = ["specifier:string=required"]
+permissions = []
+security_notes = "Selects inert bounded vector-geometry data validated server-side (schema version, path/coordinate/command bounds, absolute commands only; no raw SVG, CSS, URLs, scripts, or events) rendered host-side with fill=currentColor so the active theme stays the sole color authority. @clay/* packs resolve from the compiled inventory without executing anything; third-party specifiers must already be enabled records - selection never installs, adopts, or promotes trust, and the op is registered only in the trusted runtime extension so package callers cannot hijack the user-global selection. On failure or revocation the previous valid pack is preserved and a sanitized diagnostic surfaces; missing keys fall back to the bundled default subset. Does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority."
+current_rust_owner = "src/server/ops/theme.rs::op_clay_theme_set_icon_pack"
+registry_public = true
+
+[[api]]
 id = "settings.setDesignSystem"
 category = "theme"
 visibility = "public"

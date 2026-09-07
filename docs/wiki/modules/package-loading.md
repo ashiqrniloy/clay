@@ -141,6 +141,7 @@ Relevant tests:
 
 ## Related
 
+- [Icon Pack Runtime](icon-pack-runtime.md) (iconPack contribution parsing follows the theme-record pattern; provenance-gated core keys)
 - [Package Primitive Gate](package-primitive-gate.md)
 - [Mode Registry](mode-registry.md)
 - [Command Registry](command-registry.md)

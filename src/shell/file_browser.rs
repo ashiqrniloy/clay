@@ -171,7 +171,13 @@ impl FileBrowserState {
             let directory = self.current_directory.to_string_lossy().replace('\\', "/");
             format!("{workspace_title} · {}", sanitize_browser_label(&directory))
         };
-        let title_label = SduiNode::new(title_label_id, SduiNodeKind::Label { text: title });
+        let title_label = SduiNode::new(
+            title_label_id,
+            SduiNodeKind::Label {
+                text: title,
+                icon: None,
+            },
+        );
 
         let mut list_items: Vec<SduiListItem> = Vec::new();
         if let Some(parent) = self.current_directory.parent() {
@@ -326,6 +332,17 @@ impl FileBrowserEntry {
         }
     }
 
+    /// Semantic icon key from server metadata — never name/slash heuristics.
+    /// `Other` carries no icon; the text label is the sole signal.
+    fn semantic_icon(&self) -> Option<&'static str> {
+        match self.kind {
+            FileBrowserEntryKind::Directory => Some("file.folder"),
+            FileBrowserEntryKind::File => Some("file.file"),
+            FileBrowserEntryKind::Symlink => Some("file.symlink"),
+            FileBrowserEntryKind::Other => None,
+        }
+    }
+
     fn to_sdui_list_item(&self, list_node_id: SduiNodeId) -> SduiListItem {
         let relative = self.relative_path.to_string_lossy().to_string();
         let command_id = match self.kind {
@@ -353,6 +370,7 @@ impl FileBrowserEntry {
             id: self.name.clone(),
             label: self.display_label(),
             detail: self.child_count.map(|count| format!("{count} items")),
+            icon: self.semantic_icon().map(str::to_string),
             action: Some(action),
         }
     }
@@ -391,8 +409,9 @@ fn parent_directory_item(
     let relative = parent.to_string_lossy().to_string();
     SduiListItem {
         id: "..".to_string(),
-        label: "../".to_string(),
-        detail: Some("parent".to_string()),
+        label: "Parent folder".to_string(),
+        detail: None,
+        icon: Some("navigation.up".to_string()),
         action: Some(SduiActionIntent {
             command_id: OPEN_DIRECTORY_COMMAND_ID.to_string(),
             source: SduiActionSource::ListItem {
@@ -490,7 +509,7 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::Label { text } => Some(text.as_str()),
+                SduiNodeKind::Label { text, icon: _ } => Some(text.as_str()),
                 _ => None,
             })
             .expect("workspace header label");
@@ -509,7 +528,7 @@ mod tests {
             .nodes
             .into_iter()
             .find_map(|node| match node.kind {
-                SduiNodeKind::Label { text } => Some(text),
+                SduiNodeKind::Label { text, icon: _ } => Some(text),
                 _ => None,
             })
             .unwrap();
@@ -692,6 +711,65 @@ mod tests {
     }
 
     #[test]
+    fn file_browser_rows_carry_semantic_kind_icons_and_parent_up_icon() {
+        let root = temp_workspace("browser-semantic-icons");
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("src/main.rs"), root.join("src/link.rs")).unwrap();
+        }
+
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        let browser =
+            FileBrowserState::from_workspace_at(&workspace, root_id, PathBuf::from("src")).unwrap();
+        let tree = browser.to_sdui_tree(1u64, 1u64);
+
+        let list = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::List { items } => Some(items.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        let parent = list
+            .iter()
+            .find(|item| item.label == "Parent folder")
+            .unwrap();
+        assert_eq!(parent.icon.as_deref(), Some("navigation.up"));
+        assert_eq!(parent.id, "..");
+
+        let file = list.iter().find(|item| item.label == "main.rs").unwrap();
+        assert_eq!(file.icon.as_deref(), Some("file.file"));
+        assert!(file.action.is_some());
+
+        #[cfg(unix)]
+        {
+            let link = list.iter().find(|item| item.label == "link.rs").unwrap();
+            assert_eq!(link.icon.as_deref(), Some("file.symlink"));
+        }
+
+        // Directory rows carry the folder icon (root listing).
+        let root_browser = FileBrowserState::from_workspace(&workspace, root_id).unwrap();
+        let root_tree = root_browser.to_sdui_tree(1u64, 1u64);
+        let root_list = root_tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::List { items } => Some(items.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let dir = root_list.iter().find(|item| item.label == "src/").unwrap();
+        assert_eq!(dir.icon.as_deref(), Some("file.folder"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn file_browser_nested_file_row_source_id_matches_declared_item_id() {
         let root = temp_workspace("browser-nested-source-id");
         fs::create_dir(root.join("src")).unwrap();
@@ -752,7 +830,7 @@ mod tests {
                 _ => None,
             })
             .unwrap();
-        assert!(list.iter().any(|item| item.label == "../"));
+        assert!(list.iter().any(|item| item.label == "Parent folder"));
         let item = list
             .iter()
             .find(|item| item.label == "main.rs")

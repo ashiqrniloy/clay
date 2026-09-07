@@ -47,6 +47,9 @@ pub struct BootstrapDto {
     pub active_theme: ThemeSnapshotDto,
     pub active_typography: TypographySnapshotDto,
     pub active_design_system: DesignSystemSnapshotDto,
+    /// Resolved active icon pack at bootstrap; `None` = host fallback subset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_icon_pack: Option<IconPackSnapshotDto>,
 }
 
 /// Resolved theme projection consumed by the frontend theme adapter.
@@ -516,6 +519,78 @@ impl DesignSystemSnapshotDto {
     }
 }
 
+/// Resolved active icon-pack projection consumed by the frontend icon store
+/// (Plan 112 task 6). Geometry is the canonical bounded d-string contract
+/// shape; the webview never sees parsed command internals.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IconPackSnapshotDto {
+    pub specifier: String,
+    pub schema_version: u32,
+    pub generation: u64,
+    pub provenance: DesignSystemProvenanceDto,
+    pub icons: BTreeMap<String, IconGeometryDto>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IconGeometryDto {
+    pub view_box: [f64; 4],
+    pub paths: Vec<IconPathDto>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IconPathDto {
+    pub d: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+}
+
+impl IconPackSnapshotDto {
+    /// Validate before publication and project defensively; an invalid pack
+    /// snapshot is rejected (never silently truncated) so the webview keeps
+    /// its last authorized state.
+    pub fn resolve(active: &clay::shell::icons::ActiveIconPack) -> Result<Self, String> {
+        active
+            .validate()
+            .map_err(|error| format!("icon pack validation failed: {error}"))?;
+        let icons = active
+            .icons
+            .iter()
+            .map(|(key, geometry)| {
+                let paths = geometry
+                    .paths
+                    .iter()
+                    .map(|path| IconPathDto {
+                        d: path.to_d(),
+                        opacity: path.opacity.map(f64::from),
+                    })
+                    .collect();
+                let view_box = [
+                    f64::from(geometry.view_box[0]),
+                    f64::from(geometry.view_box[1]),
+                    f64::from(geometry.view_box[2]),
+                    f64::from(geometry.view_box[3]),
+                ];
+                Ok((key.clone(), IconGeometryDto { view_box, paths }))
+            })
+            .collect::<Result<BTreeMap<_, _>, String>>()?;
+        Ok(Self {
+            specifier: active.specifier.clone(),
+            schema_version: active.schema_version,
+            generation: active.generation,
+            provenance: DesignSystemProvenanceDto {
+                package_name: active.provenance.package_name.clone(),
+                package_version: active.provenance.package_version.clone(),
+                api_prefix: active.provenance.api_prefix.clone(),
+                trust_domain: active.provenance.trust_domain,
+            },
+            icons,
+        })
+    }
+}
+
 /// Safe atomic runtime-generation projection. Raw theme overrides and JSON
 /// component strings are resolved/parsed in Rust before the webview observes it.
 #[derive(Clone, Serialize, Debug, PartialEq)]
@@ -526,6 +601,9 @@ pub struct RuntimeSnapshotDto {
     pub active_theme: ThemeSnapshotDto,
     pub active_typography: TypographySnapshotDto,
     pub active_design_system: DesignSystemSnapshotDto,
+    /// Resolved active icon pack; `None` = host fallback subset active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_icon_pack: Option<IconPackSnapshotDto>,
     /// Server-enumerated Settings selections (plan 110 task 10); passed
     /// through untouched — the bridge owns no package inventory.
     pub ui_choices: clay::protocol::UiChoicesSnapshot,
@@ -596,6 +674,11 @@ impl RuntimeSnapshotDto {
             )?,
             active_typography: TypographySnapshotDto::from(&snapshot.active_typography),
             active_design_system: DesignSystemSnapshotDto::resolve(&snapshot.active_design_system)?,
+            active_icon_pack: snapshot
+                .active_icon_pack
+                .as_ref()
+                .map(IconPackSnapshotDto::resolve)
+                .transpose()?,
             ui_choices: snapshot.ui_choices,
             sdui_tree: snapshot.sdui_tree,
             package_ui: PackageUiSnapshotDto::parse(snapshot.package_ui)?,
@@ -751,6 +834,7 @@ mod runtime_projection_tests {
             },
             active_typography: ActiveTypography::default(),
             active_design_system: ActiveDesignSystem::core_fallback(3),
+            active_icon_pack: None,
             ui_choices: clay::protocol::UiChoicesSnapshot::default(),
             sdui_tree: SduiTree {
                 ui_version: 3,
@@ -759,6 +843,7 @@ mod runtime_projection_tests {
                     SduiNodeId(1),
                     SduiNodeKind::Label {
                         text: "Ready".into(),
+                        icon: None,
                     },
                 )],
             },

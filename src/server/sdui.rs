@@ -280,12 +280,14 @@ pub(crate) fn default_document_tree(
                 STATUS_LABEL_ID,
                 SduiNodeKind::Label {
                     text: format!("Document {document_id} · version {document_version}"),
+                    icon: None,
                 },
             ),
             SduiNode::new(
                 REFRESH_BUTTON_ID,
                 SduiNodeKind::Button {
                     label: "Refresh".to_string(),
+                    icon: None,
                     action: refresh_action,
                 },
             ),
@@ -296,6 +298,7 @@ pub(crate) fn default_document_tree(
                         id: "active-document".to_string(),
                         label: format!("Document {document_id}"),
                         detail: Some("Server-generated editor view".to_string()),
+                        icon: None,
                         action: Some(recent_action),
                     }],
                 },

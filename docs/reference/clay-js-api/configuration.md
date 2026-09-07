@@ -62,6 +62,24 @@ Selection resolves only during configuration evaluation and is validated against
 
 For interactive changes, [`settings.setDesignSystem`](settings/set-design-system.md) validates the specifier, persists the `designSystem` preference in `~/.config/clay/preferences.json` (accepted values: `@clay/core` or a bundled `@clay/design-*` contributor), and reloads the runtime; the persisted choice wins over an equivalent `init.js` call because preference apply runs after `init.js` evaluation on every reload.
 
+## Plan 112 icon-pack selection configuration
+
+[`theme.setIconPack`](theme/set-icon-pack.md) selects the active icon pack in one line over an already-loaded package record or a bundled first-party pack:
+
+```js
+import { loadPackage } from "clay:packages";
+import { setIconPack } from "clay:theme";
+
+await loadPackage("@clay/icons-phosphor-regular");
+setIconPack("@clay/icons-phosphor-regular");
+```
+
+- **Zero configuration is a supported default:** with no icon lines at all, the bundled Regular safety subset renders every core semantic key — no selection, snapshot, or package load is required.
+- **Load ≠ select:** `loadPackage` registers a package and never changes the icon style; only `setIconPack` (or the persisted `iconPack` preference) selects. Loading both first-party packs in either order without an explicit selection changes nothing. Selecting an unloaded third-party pack fails closed with `theme.load_failed` and the bundled fallback stays active.
+- **Persistence and reload:** a validated selection persists as the `iconPack` preference and re-applies after `init.js` evaluation on every reload (restart reproduces the selection); an invalid or revoked pack on a later reload preserves the last valid generation, records a sanitized diagnostic, and falls back to the bundled subset. Re-loading unchanged configuration re-executes nothing and re-sends no icon state.
+- **Independence:** icon selection is independent of theme, appearance, typography, and design-system selections — all resolve concurrently and swapping one preserves the others.
+- **Security:** selection resolves only during configuration evaluation against the package service's enabled records (bundled `@clay/*` packs resolve from the compiled inventory without executing anything); the selection op is registered in the trusted runtime extension only, so package callers cannot change the user-global selection. Icons are inert bounded geometry colored by the active theme — no raw SVG, CSS, colors, or renderer authority.
+
 ## Phase 18.17 range diagnostics configuration review
 
 Phase 18.17 reviewed range diagnostics and syntax-error highlighting and did **not** promote a new user-facing diagnostic toggle, squiggle geometry setting, per-severity preference, or `clay:configuration` API. Default outcome: syntax-error publication follows the active syntax engine; severity colors come from the active theme.

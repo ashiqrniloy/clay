@@ -504,6 +504,8 @@ struct RuntimeGenerationCandidate {
     active_typography: crate::protocol::ActiveTypography,
     expected_design_system: crate::shell::design_system::ActiveDesignSystem,
     active_design_system: crate::shell::design_system::ActiveDesignSystem,
+    expected_icon_pack: Option<crate::shell::icons::ActiveIconPack>,
+    active_icon_pack: Option<crate::shell::icons::ActiveIconPack>,
     open_documents: Vec<workspace::OpenDocumentRefresh>,
     runtime_snapshot: RuntimeStateSnapshot,
 }
@@ -589,6 +591,9 @@ pub struct IpcServer {
     active_theme: Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
     /// Phase 102 resolved active UI design-system snapshot.
     active_design_system: Arc<Mutex<crate::shell::design_system::ActiveDesignSystem>>,
+    /// Plan 112 resolved active icon-pack snapshot. `None` = bundled Regular
+    /// safety subset (host fallback) is active.
+    active_icon_pack: Arc<Mutex<Option<crate::shell::icons::ActiveIconPack>>>,
     runtime_diagnostics: Arc<Mutex<connection::RuntimeDiagnosticStore>>,
     /// Active-connection ceiling: each accepted connection must hold one
     /// permit for its lifetime; excess connections are refused at accept time
@@ -730,6 +735,7 @@ impl IpcServer {
             active_design_system: Arc::new(Mutex::new(
                 crate::shell::design_system::ActiveDesignSystem::core_fallback(0),
             )),
+            active_icon_pack: Arc::new(Mutex::new(None)),
             runtime_diagnostics: Arc::new(
                 Mutex::new(connection::RuntimeDiagnosticStore::default()),
             ),
@@ -1332,6 +1338,44 @@ impl IpcServer {
             }
         };
         active_design_system.generation = generation_id;
+        // Plan 112 (state table rows 6/7/13): resolve the active icon pack for
+        // this generation. A freshly selected pack must still be enabled with
+        // its iconPack contribution intact; a previously active pack that lost
+        // its record (disable/remove/revoke) falls back to the bundled Regular
+        // subset. The generation stamp makes stale snapshots rejectable.
+        let expected_icon_pack = self.active_icon_pack.lock().await.clone();
+        let mut active_icon_pack = if let Some(selected) = evaluation.active_icon_pack.clone() {
+            let icon_pack_valid = {
+                let packages = service
+                    .package_service()
+                    .lock()
+                    .expect("package service mutex poisoned");
+                packages.enabled_records().any(|r| {
+                    r.manifest.name == selected.provenance.package_name
+                        && r.manifest.version == selected.provenance.package_version
+                        && r.contributions.icon_pack.is_some()
+                })
+            };
+            icon_pack_valid.then_some(selected)
+        } else if let Some(previous) = expected_icon_pack.clone() {
+            let icon_pack_valid = {
+                let packages = service
+                    .package_service()
+                    .lock()
+                    .expect("package service mutex poisoned");
+                packages.enabled_records().any(|r| {
+                    r.manifest.name == previous.provenance.package_name
+                        && r.manifest.version == previous.provenance.package_version
+                        && r.contributions.icon_pack.is_some()
+                })
+            };
+            icon_pack_valid.then_some(previous)
+        } else {
+            None
+        };
+        if let Some(active_icon_pack) = active_icon_pack.as_mut() {
+            active_icon_pack.generation = generation_id;
+        }
         let mut runtime_diagnostics = self.runtime_diagnostics.lock().await.snapshot();
         let package_ui = {
             let packages = service
@@ -1385,6 +1429,7 @@ impl IpcServer {
             active_theme.clone(),
             active_typography.clone(),
             active_design_system.clone(),
+            active_icon_pack.clone(),
             sdui.cloned_tree_or_default(),
             &open_documents,
             evaluation.published_decoration_set.clone(),
@@ -1425,6 +1470,8 @@ impl IpcServer {
             active_typography,
             expected_design_system,
             active_design_system,
+            expected_icon_pack,
+            active_icon_pack,
             open_documents,
             runtime_snapshot,
         })
@@ -1476,11 +1523,13 @@ impl IpcServer {
         let mut active_theme = self.active_theme.lock().await;
         let mut active_typography = self.runtime_generation.typography.current.lock().await;
         let mut active_design_system = self.active_design_system.lock().await;
+        let mut active_icon_pack = self.active_icon_pack.lock().await;
         if *behavior != candidate.expected_behavior
             || *sdui != candidate.expected_sdui
             || *active_theme != candidate.expected_theme
             || *active_typography != candidate.expected_typography
             || *active_design_system != candidate.expected_design_system
+            || *active_icon_pack != candidate.expected_icon_pack
         {
             return Err(runtime_candidate_error(
                 "runtime.active_state_conflict",
@@ -1529,6 +1578,7 @@ impl IpcServer {
         *active_theme = candidate.active_theme;
         *active_typography = candidate.active_typography.clone();
         *active_design_system = candidate.active_design_system;
+        *active_icon_pack = candidate.active_icon_pack;
         self.runtime_generation
             .swap(candidate.generation.clone())
             .await;
@@ -1905,6 +1955,7 @@ fn build_runtime_state_snapshot(
     active_theme: crate::protocol::ActiveTheme,
     active_typography: crate::protocol::ActiveTypography,
     active_design_system: crate::shell::design_system::ActiveDesignSystem,
+    active_icon_pack: Option<crate::shell::icons::ActiveIconPack>,
     sdui_tree: crate::protocol::SduiTree,
     open_documents: &[workspace::OpenDocumentRefresh],
     published_decorations: Option<crate::protocol::DecorationSet>,
@@ -1948,6 +1999,7 @@ fn build_runtime_state_snapshot(
         active_theme,
         active_typography,
         active_design_system,
+        active_icon_pack,
         sdui_tree,
         package_ui,
         documents,
@@ -2599,6 +2651,7 @@ mod runtime_outputs_tests {
             active_theme: None,
             active_typography: None,
             active_design_system: None,
+            active_icon_pack: None,
             configuration_diagnostics: Vec::new(),
         };
 
@@ -2644,6 +2697,7 @@ mod runtime_outputs_tests {
             active_theme: None,
             active_typography: None,
             active_design_system: None,
+            active_icon_pack: None,
             configuration_diagnostics: Vec::new(),
         };
 
@@ -2691,6 +2745,7 @@ mod runtime_outputs_tests {
             active_theme: None,
             active_typography: None,
             active_design_system: None,
+            active_icon_pack: None,
             configuration_diagnostics: Vec::new(),
         };
 
@@ -2737,6 +2792,7 @@ mod runtime_outputs_tests {
             active_theme: None,
             active_typography: None,
             active_design_system: None,
+            active_icon_pack: None,
             configuration_diagnostics: Vec::new(),
         };
 
@@ -4679,6 +4735,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             active_design_system: crate::shell::design_system::ActiveDesignSystem::core_fallback(
                 generation,
             ),
+            active_icon_pack: None,
             sdui_tree: default_document_tree(1, 1),
             package_ui: crate::protocol::PackageUiSnapshot {
                 version: generation,

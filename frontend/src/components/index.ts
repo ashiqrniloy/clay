@@ -24,6 +24,9 @@ export {
   type ClayTabStripProps,
 } from "./tab-strip";
 export { ClayBadge, ClayKbd, ClayDivider } from "./chrome";
+export { ClayIcon, useIconGeometry, type ClayIconProps } from "./icon";
+export { ClayTooltip, type ClayTooltipProps } from "./tooltip";
+export { ClayIconButton, type ClayIconButtonProps } from "./button";
 export {
   recipeAttributes,
   type ComponentKind,

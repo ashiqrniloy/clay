@@ -147,3 +147,12 @@ switching, fallback, and recovery steps live in
 2026-08-30). Note finding F-2 there: after a failed watcher reload, later
 `init.js` changes stop triggering reloads until restart — C16–C18 should be
 re-verified after that fix.
+
+## Plan 112 cross-reference (2026-09-07)
+
+`setIconPack` follows the `setDesignSystem` configuration pattern: load ≠
+select, user-global selection, watcher reload re-applies or fails closed with
+a bounded sanitized diagnostic, and the canonical example carries an active
+Regular selection with commented Duotone/object-form alternatives. Zero-config
+(no icon lines) keeps the bundled fallback subset. Selection/recovery steps:
+[18 — Icon packs](18-icon-packs.md) (ICON-01…ICON-06, executed 2026-09-07).

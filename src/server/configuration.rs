@@ -23,7 +23,13 @@ const PACKAGE_OPTION_SOURCES: &[&str] =
 /// validated at load and persist time so a corrupted/manually-edited file falls
 /// back safely without granting authority.
 const PREFERENCES_PAYLOAD_BUDGET_BYTES: usize = 8 * 1024;
-const PREFERENCES_KEYS: &[&str] = &["theme", "appearance", "typography", "designSystem"];
+const PREFERENCES_KEYS: &[&str] = &[
+    "theme",
+    "appearance",
+    "typography",
+    "designSystem",
+    "iconPack",
+];
 const PREFERENCES_APPEARANCE_VALUES: &[&str] = &["light", "dark", "system"];
 const PANEL_VISIBILITY_VALUES: &[&str] = &["visible", "hidden", "collapsed"];
 const PANEL_SLOT_VALUES: &[&str] = &["left", "right", "top", "bottom"];
@@ -380,6 +386,10 @@ impl ConfigurationRuntime {
                     Ok(specifier) => prefs.design_system = Some(specifier),
                     Err(reason) => prefs.diagnostics.push(reason),
                 },
+                "iconPack" => match validate_preference_icon_pack(field) {
+                    Ok(specifier) => prefs.icon_pack = Some(specifier),
+                    Err(reason) => prefs.diagnostics.push(reason),
+                },
                 _ => unreachable!("PREFERENCES_KEYS bounds the match"),
             }
         }
@@ -409,6 +419,9 @@ impl ConfigurationRuntime {
             "designSystem" => validate_preference_design_system(&value)
                 .map(|specifier| prefs.design_system = Some(specifier))
                 .map_err(ConfigurationError::InvalidPackageOption)?,
+            "iconPack" => validate_preference_icon_pack(&value)
+                .map(|specifier| prefs.icon_pack = Some(specifier))
+                .map_err(ConfigurationError::InvalidPackageOption)?,
             _ => {
                 return Err(ConfigurationError::InvalidPackageOption(format!(
                     "preferences key `{key}` is not recognized"
@@ -433,6 +446,7 @@ impl ConfigurationRuntime {
             "appearance": prefs.appearance.map(crate::protocol::Appearance::as_str),
             "typography": prefs.typography,
             "designSystem": prefs.design_system,
+            "iconPack": prefs.icon_pack,
         });
         let bytes = serde_json::to_vec(&object).map_err(|error| {
             ConfigurationError::InvalidPackageOption(format!(
@@ -800,7 +814,24 @@ pub(crate) struct PersistedPreferences {
     pub(crate) appearance: Option<crate::protocol::Appearance>,
     pub(crate) typography: Option<Value>,
     pub(crate) design_system: Option<String>,
+    pub(crate) icon_pack: Option<String>,
     pub(crate) diagnostics: Vec<String>,
+}
+
+/// Validate a persisted `iconPack` value: non-empty string specifier. Unlike
+/// the theme key, arbitrary specifiers are allowed: the selection is
+/// re-validated against enabled records at every commit, and a revoked/removed
+/// pack deterministically falls back to the bundled Regular subset (Plan 112
+/// task 5, state table row 7).
+fn validate_preference_icon_pack(value: &Value) -> Result<String, String> {
+    let specifier = value
+        .as_str()
+        .ok_or_else(|| "preferences.json `iconPack` must be a string; dropping".to_string())?;
+    let trimmed = specifier.trim();
+    if trimmed.is_empty() {
+        return Err("preferences.json `iconPack` must not be empty; dropping".to_string());
+    }
+    Ok(trimmed.to_string())
 }
 
 /// Validate a persisted `design_system` value: non-empty string specifier.
@@ -881,6 +912,38 @@ mod tests {
         fs::create_dir_all(&root).expect("create temp config root");
         fs::write(root.join("init.js"), "// test init\n").expect("write init.js");
         ConfigurationRuntime::from_config_root(&root).expect("create configuration runtime")
+    }
+
+    #[test]
+    fn icon_pack_preference_persists_survives_reload_and_drops_garbage() {
+        let runtime = runtime();
+        let prefs = runtime
+            .persist_preference("iconPack", json!("@clay/icons-phosphor-duotone"))
+            .expect("valid specifier persists");
+        assert_eq!(
+            prefs.icon_pack.as_deref(),
+            Some("@clay/icons-phosphor-duotone")
+        );
+
+        // Reload merges the persisted key.
+        let reloaded = runtime.load_preferences();
+        assert_eq!(
+            reloaded.icon_pack.as_deref(),
+            Some("@clay/icons-phosphor-duotone")
+        );
+        assert!(reloaded.diagnostics.is_empty());
+
+        // Hostile/garbage values reject and never break startup or corrupt
+        // the persisted file.
+        let error = runtime
+            .persist_preference("iconPack", json!(42))
+            .expect_err("non-string rejected");
+        assert!(error.to_string().contains("iconPack"));
+
+        let error = runtime
+            .persist_preference("iconPack", json!("   "))
+            .expect_err("empty specifier rejected");
+        assert!(error.to_string().contains("iconPack"));
     }
 
     #[test]

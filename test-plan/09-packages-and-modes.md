@@ -241,3 +241,13 @@ properties and active theme color roles with zero raw CSS injection or color
 leaks. Adoption, revocation-fallback, component recipe migration, and
 color-authority steps: [15 — UI design systems](15-ui-design-systems.md)
 (UI-DS-01…UI-DS-15, executed 2026-08-30).
+
+## Plan 112 cross-reference (2026-09-07)
+
+Icon packs are a new inert package contribution kind (`clay.contributions.iconPack`):
+bounded host-validated vector geometry parsed at record time, core semantic
+keys reserved for first-party inventory packs, third-party packs limited to
+own-prefixed keys, and load ≠ select enforced (selection never installs or
+grants authority). Git/markdown packages use semantic icon references with
+text labels carrying full meaning. Steps: [18 — Icon packs](18-icon-packs.md)
+(ICON-05, ICON-06, ICON-07, executed 2026-09-07).

@@ -26,6 +26,7 @@ import type {
   TypographySnapshot,
   DesignSystemSnapshot,
 } from "../theme/types";
+import type { IconPackSnapshot } from "../icons/types";
 import type { RuntimeSnapshot } from "../sdui/types";
 export type {
   ThemeSnapshot,
@@ -108,6 +109,8 @@ export interface BootstrapDto {
   activeTheme: ThemeSnapshot;
   activeTypography: TypographySnapshot;
   activeDesignSystem: DesignSystemSnapshot;
+  /** Resolved active icon pack; absent = host fallback subset active. */
+  activeIconPack?: IconPackSnapshot | null;
 }
 
 // ------------------------------------------------------------ envelopes

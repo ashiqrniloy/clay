@@ -377,6 +377,10 @@ impl BridgeState {
                 &clay::shell::design_system::ActiveDesignSystem::core_fallback(generation),
             )
             .map_err(BridgeError::invalid_request)?,
+            // Like the design system above, pack identity arrives with the
+            // first RuntimeStateSnapshot; bootstrap starts from the host
+            // fallback (no explicit pack).
+            active_icon_pack: None,
             initial_document: InitialDocumentDto::from_initial_state(&initial_state),
             behavior_manifest: initial_state.behavior_manifest.clone(),
         };

@@ -484,6 +484,7 @@ pub(super) fn harvest_op_state_evaluation(op_state: &Arc<ClayOpState>) -> ClayRu
         active_theme,
         active_typography: op_state.active_typography(),
         active_design_system: op_state.active_design_system(),
+        active_icon_pack: op_state.active_icon_pack(),
         configuration_diagnostics: Vec::new(),
     }
 }

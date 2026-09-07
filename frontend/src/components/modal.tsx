@@ -7,8 +7,7 @@ import {
   Button,
 } from "react-aria-components";
 
-import { ClayText } from "./text";
-
+import { ClayIcon } from "./icon";
 import styles from "./modal.module.css";
 import { recipeAttributes } from "./recipe-attributes";
 
@@ -54,7 +53,7 @@ export function ClayModal({ title, open, onClose, children }: ClayModalProps) {
             aria-label="Close"
             onPress={onClose}
           >
-            <ClayText aria-hidden="true">×</ClayText>
+            <ClayIcon name="action.close" />
           </Button>
           {children}
         </Dialog>

@@ -70,7 +70,7 @@ import { loadConfigurationModule, getConfigurationState, setPackageOption } from
 // setTheme selects a loaded first-party theme package by specifier. The theme
 // owns colors, text styles (including diagnostic styles), and component
 // tokens. Themes never execute user code or accept raw CSS.
-import { setTheme, setTypography, setAppearance, setDesignSystem } from "clay:theme";
+import { setTheme, setTypography, setAppearance, setDesignSystem, setIconPack } from "clay:theme";
 
 setTheme("@clay/theme-gruvbox-material-dark");
 // setTheme("@clay/theme-gruvbox-material-light");
@@ -104,6 +104,38 @@ setTheme("@clay/theme-gruvbox-material-dark");
 // the choice in preferences.json and wins over this call on every reload.
 // A missing, revoked, or invalid selection keeps the previous working
 // generation, records a diagnostic, and never blocks startup.
+
+// setIconPack selects the UI icon style — bounded, host-validated vector
+// geometry keyed by semantic names (action.close, document.save, git.branch,
+// …). Icons render with fill="currentColor" from the active theme, so packs
+// ship shapes only and the theme stays the sole color authority. Icon
+// selection is independent of theme, appearance, typography, and design
+// system; all resolve concurrently and swapping one preserves the others.
+//
+// Options (one call, string or { specifier } object form):
+//   specifier  string  name of one icon-pack contributor. Allowed values:
+//     "@clay/icons-phosphor-regular"  bundled default: clean monochrome
+//                                     outlines (also the zero-config default)
+//     "@clay/icons-phosphor-duotone"  bundled alternative: stronger two-layer
+//                                     silhouettes (shade layers at 20% opacity)
+//     any enabled third-party package declaring clay.contributions.iconPack
+//
+// Ownership: user-global selection resolved only during configuration
+// evaluation. The op lives in the trusted runtime extension only, so package
+// callers cannot change it; a validated selection persists as the `iconPack`
+// preference and wins over this call on every reload (restart reproduces it).
+//
+// Load ≠ select: bundled @clay/* packs resolve from the compiled inventory
+// without executing anything — no loadPackage needed. Third-party packs must
+// be loaded first (see packages/third-party.js for the adoption path):
+//   await loadPackage("@vendor/outline-icons");
+//   setIconPack("@vendor/outline-icons");
+// Selecting an unloaded pack fails closed (theme.load_failed), the previous
+// valid pack is preserved, and unknown or missing keys always fall back to
+// the bundled subset — controls keep their labels and never go blank.
+setIconPack("@clay/icons-phosphor-regular"); // recommended; same as zero-config default
+// setIconPack("@clay/icons-phosphor-duotone"); // bundled alternative style
+// setIconPack({ specifier: "@clay/icons-phosphor-duotone" }); // object form
 
 // ----------------------------------------------------------------------------
 // 3. Typography + ligatures — clay:theme setTypography

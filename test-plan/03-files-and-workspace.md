@@ -262,3 +262,11 @@ WebKitGTK target can be controlled.
 
 Do not convert harness `editor.open`/`editor.ready` bootstrap values into F53
 latency evidence; the run recorded no `bridge.patch_delivery` or parser stage.
+
+## Plan 112 cross-reference (2026-09-07)
+
+File-browser rows carry semantic kind icons (folder/file/symlink from
+`file_browser.rs` SDUI projection, `navigation.up` for the parent row) rendered
+by the shared ClayIcon primitive from the active icon pack; labels and
+keyboard behavior are unchanged. Steps: [18 — Icon packs](18-icon-packs.md)
+(ICON-02, ICON-07, ICON-10, executed 2026-09-07).

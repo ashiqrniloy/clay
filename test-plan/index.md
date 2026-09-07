@@ -121,6 +121,7 @@ completion). Executed on a freshly rebuilt Linux build:
 | 15 | [UI design systems](15-ui-design-systems.md) | built-in fallback startup, default `@clay/design-neobrutal` selection, `@clay/design-glass` reference system with solid fallbacks, watcher reload switching, Settings-panel + command-surface design-system selection with server-enumerated theme/DS choices and appearance persistence (plan 110), invalid/revoked selection recovery with sanitized diagnostics and previous-generation retention, no-adoption security checks, color-authority conformance, restart persistence through `init.js`, 25-component recipe migration, DOM/state continuity, forced-colors/reduced-motion/transparency accessibility fallbacks, and cross-theme recoloring consistency (Plans 102, 103 & 104) | `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/clay-js-api/settings/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `.impeccable/review/plan-104/` |
 | 16 | [Agent host (clay-agent)](16-agent-host.md) | `clay:agent` facade configuration (autonomy default-off 2157, compaction strategies + OM `compactAfterTokens` 2158, workspace-scoped search metadata-only, session tree/checkout/fork/clone/checkpoint), init.js section 12 documentation cross-check, no-credential/no-hidden-key checks, MCP allow-list fail-closed validation, Obscura hidden-when-missing, Chat UI chrome unchanged; coding-tool dirty-buffer/approval/durable-run behavior pinned by automated suites | `clay-agent/README.md`, `docs/wiki/modules/clay-agent.md`, `docs/reference/clay-js-api/agent/`, `examples/init.js` (section 12) |
 | 17 | [Coding agent pi-parity (@clay/coding-agent)](17-coding-agent-parity.md) | Phase 2 pi-parity conformance: prompt→stream→tool ordering, steering, cancel, /compact manual+auto, /new, session list/resume/delete, provider/model switch, /tree+/fork+/clone, session-picker/open-as-fork equivalents, plan-file round-trip, composer growth, Shift+Tab effort cycle, status-row truth, extension strip; negative checks (cross-workspace search invisibility, disabled knowledge bases, secrets, unknown slash command, search-hit context) and stream-latency/UI-responsiveness budgets (plan 108 task 15); plan 109 C1–C20 + C-N1–N4: per-tab workspace binding + per-workspace model auto-load, /model + dropdown, effort control + rebinding, full chronological transcript (tools/skills/thinking/steer), Files-tab editor view + Ctrl+B tree toggle, context inspector drawer + compaction reflection, OM activity + worker-model retention, /resume restore, Session Info auto-select, real git branch + truthful extension strip + daemon-sourced slash completion, and negative checks (cross-workspace session leakage, unconfigured-provider filtering, redaction, fail-closed effort) | `packages/coding-agent/docs/parity-checklist.md`, `packages/coding-agent/docs/index.md`, `docs/wiki/modules/clay-agent.md`, plan 108 |
+| 18 | [Icon packs (Plan 112)](18-icon-packs.md) | zero-config bundled Regular fallback, `setIconPack` Regular/Duotone selection (load ≠ select), watcher swap/fail-closed break + restore recovery, unloaded/unknown selection bounded diagnostics, third-party own-prefix + hostile-fixture rejection (live adoption blocked: no pnpm), file-browser/git/markdown semantic icons, icon-only control contract (names, tooltips, hit targets, retained text labels), AT-SPI a11y pass, no-network inlined-geometry rendering, responsive/large-typography scaling and pack-swap feel | `docs/reference/clay-js-api/theme/set-icon-pack.md`, `docs/reference/icon-packs.md`, `test-plan/artifacts/112-icons/` |
 
 ## Coverage matrix (what to run when)
 
@@ -132,6 +133,7 @@ completion). Executed on a freshly rebuilt Linux build:
 | Typography / font features | 07 |
 | Protocol / IPC / connection | 01, 03, 04 |
 | Configuration surface / init.js APIs | 02, 10 + the module of the feature configured |
+| Icon packs / `setIconPack` / icon-only controls / semantic icon references | 18, 02 (selection persistence), 09 (package trust), 15 (theme/DS independence) |
 | Syntax / grammar / decorations | 08 |
 | Package loading / modes / trust boundary | 09, 02 |
 | File IO / save / dialogs | 03 |
@@ -408,3 +410,26 @@ steps. Chat UI chrome is recorded as unchanged (A1).
 | 16 A5–A15 (autonomy/compaction/search/tree/checkpoints) | PASS automated | clay-agent suites 49/49 incl. approval default-off, OM settings-provider override, workspace-scoped search with no context injection, checkpoint restore fail-closed |
 | 16 A16–A19 (MCP/Obscura fail-closed) | PASS automated | Empty/non-canonical allow-list rejection, missing-binary-hidden, no-vendor-imports tests; Rust `phase25_dependencies_deny_acp_agui_mcp` green |
 | Live GUI steps | NOT RUN (host ceiling, per index records) | Same no-input-backend ceiling documented for Plans 097/099/105; no Phase 1 manual step requires driving Chat (Phase 2 UI) |
+
+## Plan 112 icon-pack execution record (2026-09-07)
+
+Plan 112 tasks 1–15 shipped configurable icon packs (module
+[18](18-icon-packs.md), steps ICON-01–ICON-12): two first-party packages
+(`@clay/icons-phosphor-regular` recommended default,
+`@clay/icons-phosphor-duotone`), a zero-config bundled fallback subset,
+user-global `setIconPack` selection (load ≠ select, trusted-extension-only
+op), semantic icon references on SDUI/package surfaces, and the icon-only
+control contract. Visual captures (`test-plan/artifacts/112-icons/visual/`)
+and isolated example-config launches (`example-launch/`) were executed live.
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 18 ICON-01–ICON-05, ICON-07–ICON-12 | PASS | `test-plan/artifacts/112-icons/` (`visual/` 4 captures, `example-launch/` default/duotone/unloaded/recovery, `automated/` gates) |
+| 18 ICON-06 (third-party adoption, live) | UNRESOLVED | `pnpm` absent on host; identical fail-closed path covered by unloaded/unknown legs and task 5/13 fixture suites |
+| 18 ICON-08 (hover/focus tooltips, live) | UNRESOLVED | No input-synthesis backend (keyboard/pointer); AT-SPI names + jsdom tooltip/focus suites cover structure |
+
+Existing modules keep their steps unchanged; affected cross-references were
+added to modules 02, 03, 09, 14, 15, and 17. No manual test step was deleted
+or weakened. The task 15 performance observation (bounded server logs, no
+reload loops) and the one-run transient first-reload `theme.load_failed`
+flake are recorded in module 18's ceilings section.

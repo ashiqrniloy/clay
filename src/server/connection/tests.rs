@@ -794,7 +794,7 @@ async fn workspace_directory_action_sends_refreshed_file_browser_snapshot() {
             _ => None,
         })
         .unwrap();
-    assert!(labels.iter().any(|label| label == "../"));
+    assert!(labels.iter().any(|label| label == "Parent folder"));
     assert!(labels.iter().any(|label| label == "main.rs"));
 
     let _ = fs::remove_dir_all(root);
@@ -944,6 +944,7 @@ async fn handshake_replays_committed_runtime_snapshot_with_pane_surfaces() {
         },
         active_typography: crate::protocol::ActiveTypography::default(),
         active_design_system: crate::shell::design_system::ActiveDesignSystem::core_fallback(2),
+        active_icon_pack: None,
         ui_choices: crate::protocol::UiChoicesSnapshot::default(),
         sdui_tree: crate::server::sdui::default_document_tree(1, 1),
         package_ui: crate::protocol::PackageUiSnapshot {

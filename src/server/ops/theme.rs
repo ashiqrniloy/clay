@@ -426,6 +426,88 @@ pub(super) fn op_clay_theme_set_design_system(
     .map_err(|_| JsErrorBox::generic("theme.invalid_request: serialization failed"))
 }
 
+/// Resolve the user-selected icon pack (Plan 112 task 5). Mirrors
+/// `apply_design_system` except that third-party specifiers are never enabled
+/// by selection: load ≠ select (state table rows 4/5). Returns the resolved
+/// active snapshot; on rejection the previously active pack is preserved
+/// untouched.
+pub(crate) fn apply_icon_pack(
+    clay_state: &std::sync::Arc<ClayOpState>,
+    specifier: &str,
+) -> Result<crate::shell::icons::ActiveIconPack, JsErrorBox> {
+    let trimmed = specifier.trim();
+    if trimmed.is_empty() {
+        return Err(JsErrorBox::generic(
+            "theme.invalid_request: setIconPack requires a non-empty `specifier`",
+        ));
+    }
+
+    let record = if trimmed.starts_with("@clay/") {
+        // Bundled first-party packs resolve through the compiled inventory
+        // without executing anything (inert data). Held-lock resolution only:
+        // the public helper would re-lock the same non-reentrant mutex
+        // (plan 110 task 18 deadlock precedent).
+        let mut service = clay_state
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned");
+        super::packages::ensure_first_party_record_locked(&mut service, trimmed)?.0
+    } else {
+        // Adopted third-party pack: selection requires the record to already
+        // be enabled through the ordinary load/adoption path. Selection never
+        // installs, adopts, or promotes trust.
+        let service = clay_state
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned");
+        service
+            .enabled_records()
+            .find(|r| r.manifest.name == trimmed)
+            .cloned()
+            .ok_or_else(|| {
+                JsErrorBox::generic(format!(
+                    "theme.load_failed: icon pack `{trimmed}` is not loaded; call loadPackage first"
+                ))
+            })?
+    };
+
+    let active = crate::shell::icons::ActiveIconPack::from_record(trimmed, 0, &record)
+        .map_err(JsErrorBox::generic)?;
+    clay_state.set_active_icon_pack(active.clone());
+    clay_state.set_explicit_icon_pack_active(true);
+    Ok(active)
+}
+
+/// `setIconPack` Clay JS op (Plan 112 task 5). Resolves `specifier` against
+/// already-registered package records (`clay.contributions.iconPack`) and
+/// atomically installs the active icon-pack snapshot. Package callers cannot
+/// reach this op: it is registered only in the trusted runtime extension
+/// (user-global appearance authority, same class as `setDesignSystem`).
+#[op2]
+#[string]
+pub(crate) fn op_clay_theme_set_icon_pack(
+    state: &mut OpState,
+    #[string] request_json: String,
+) -> Result<String, JsErrorBox> {
+    let request: Value = serde_json::from_str(&request_json).map_err(|_| {
+        JsErrorBox::generic("theme.invalid_request: setIconPack requires { specifier: string }")
+    })?;
+    let Some(specifier) = request.get("specifier").and_then(Value::as_str) else {
+        return Err(JsErrorBox::generic(
+            "theme.invalid_request: setIconPack requires a `specifier` string",
+        ));
+    };
+    let clay_state = state.borrow::<std::sync::Arc<ClayOpState>>();
+    let active = apply_icon_pack(clay_state, specifier)?;
+    let icon_count = active.icons.len();
+    serde_json::to_string(&json!({
+        "pack": active.specifier,
+        "iconCount": icon_count,
+        "schemaVersion": active.schema_version,
+    }))
+    .map_err(|_| JsErrorBox::generic("theme.invalid_request: serialization failed"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -691,5 +773,260 @@ mod tests {
         assert_eq!(input_recipe.border_width, 1.0);
 
         let _ = std::fs::remove_dir_all(fixture_dir);
+    }
+
+    /// Adopt a third-party icon-pack fixture through the ordinary
+    /// install/authorize/approve path (Plan 112 task 5). Returns the fixture
+    /// dir so callers can clean it up.
+    fn adopt_icon_pack_fixture(clay_state: &std::sync::Arc<ClayOpState>, manifest: &str) {
+        let fixture_src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/icon-packs/third-party")
+            .join(manifest)
+            .join("package.json");
+        let package_json: Value =
+            serde_json::from_str(&std::fs::read_to_string(&fixture_src).unwrap())
+                .expect("fixture manifest parses");
+        let package_name = package_json["name"]
+            .as_str()
+            .expect("fixture name")
+            .to_string();
+        let fixture_dir = std::env::temp_dir().join(format!(
+            "clay-test-icon-pack-{}-{}",
+            manifest,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(fixture_dir.join("dist")).unwrap();
+        std::fs::create_dir_all(fixture_dir.join("docs")).unwrap();
+        std::fs::write(fixture_dir.join("dist/index.js"), "// noop").unwrap();
+        std::fs::write(fixture_dir.join("dist/load.js"), "// noop").unwrap();
+        std::fs::write(fixture_dir.join("docs/index.md"), "# fixture").unwrap();
+        let mut service = clay_state.package_service().lock().unwrap();
+        service
+            .install_from_value_at_root_with_spec(
+                package_json,
+                fixture_dir,
+                &format!("local:{manifest}"),
+            )
+            .expect("fixture installs");
+        service
+            .authorize_package(
+                &package_name,
+                vec![],
+                crate::packages::authorization::RuntimeProfile::Restricted,
+                "test",
+            )
+            .expect("fixture authorizes");
+        service
+            .approve_package(&package_name, "cli")
+            .expect("fixture approves");
+    }
+
+    #[test]
+    fn apply_icon_pack_selects_bundled_packs_independently_of_load_order() {
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+        // Zero-config: Regular resolves straight from the compiled inventory
+        // with no prior loadPackage and no init.js icon lines.
+        let regular = apply_icon_pack(&clay_state, "@clay/icons-phosphor-regular")
+            .expect("bundled Regular selects");
+        assert_eq!(regular.specifier, "@clay/icons-phosphor-regular");
+        assert_eq!(regular.icons.len(), 21);
+        assert_eq!(regular.schema_version, 1);
+        assert!(clay_state.explicit_icon_pack_active());
+
+        // Load ≠ select: loading Duotone does not change the active pack.
+        {
+            let mut service = clay_state.package_service().lock().unwrap();
+            super::super::packages::ensure_first_party_record_locked(
+                &mut service,
+                "@clay/icons-phosphor-duotone",
+            )
+            .expect("duotone registers");
+        }
+        assert_eq!(
+            clay_state.active_icon_pack().unwrap().specifier,
+            "@clay/icons-phosphor-regular",
+            "load must not select"
+        );
+
+        // Explicit switch to Duotone: geometry actually differs (duotone
+        // shade layer at opacity 0.2).
+        let duotone = apply_icon_pack(&clay_state, "@clay/icons-phosphor-duotone")
+            .expect("bundled Duotone selects");
+        assert_eq!(duotone.icons.len(), 21);
+        assert!(
+            duotone.icons["action.close"].paths.len() > regular.icons["action.close"].paths.len()
+        );
+
+        // Idempotent re-selection does not regress state.
+        let again = apply_icon_pack(&clay_state, "@clay/icons-phosphor-duotone")
+            .expect("idempotent re-selection");
+        assert_eq!(again.specifier, duotone.specifier);
+
+        // Switch back to Regular.
+        let back =
+            apply_icon_pack(&clay_state, "@clay/icons-phosphor-regular").expect("switch back");
+        assert_eq!(back.specifier, "@clay/icons-phosphor-regular");
+    }
+
+    #[test]
+    fn apply_icon_pack_rejects_bad_specifiers_and_preserves_state() {
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+        let initial = apply_icon_pack(&clay_state, "@clay/icons-phosphor-regular")
+            .expect("initial selection");
+
+        for (specifier, expected_error) in [
+            ("   ", "theme.invalid_request"),
+            ("@clay/git", "theme.invalid_icon_pack"),
+            ("@clay/nonexistent-pack", "packages.not_installed"),
+            ("@vendor/never-loaded-icons", "theme.load_failed"),
+        ] {
+            let error = apply_icon_pack(&clay_state, specifier).expect_err(specifier);
+            assert!(
+                error.to_string().contains(expected_error),
+                "{specifier}: expected {expected_error}, got {error}"
+            );
+            assert_eq!(
+                clay_state.active_icon_pack().unwrap().specifier,
+                initial.specifier,
+                "failed selection of {specifier} must preserve the active pack"
+            );
+        }
+    }
+
+    #[test]
+    fn apply_icon_pack_requires_prior_enable_for_third_party_and_revocation_falls_back() {
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+        adopt_icon_pack_fixture(&clay_state, "valid-partial");
+
+        // Installed + approved but not yet enabled: selection must not adopt
+        // or enable (load ≠ select).
+        let error = apply_icon_pack(&clay_state, "@vendor/partial-icons")
+            .expect_err("selection must not enable");
+        assert!(error.to_string().contains("theme.load_failed"));
+
+        // Ordinary enable path (loadPackage equivalent), then explicit selection.
+        {
+            let mut service = clay_state.package_service().lock().unwrap();
+            service.enable("@vendor/partial-icons").expect("enable");
+        }
+        let active = apply_icon_pack(&clay_state, "@vendor/partial-icons")
+            .expect("enabled third-party pack selects");
+        assert_eq!(active.provenance.package_name, "@vendor/partial-icons");
+        assert_eq!(
+            active.provenance.trust_domain,
+            crate::protocol::PackageUiTrustDomain::ThirdParty
+        );
+        assert_eq!(active.icons.len(), 2);
+        // Own-namespace keys only: no core-key grant ever comes from adoption.
+        assert!(active.icons.contains_key("vendor.custom-close"));
+        assert!(!active.icons.contains_key("action.close"));
+
+        // Revocation while active: the op re-resolves from enabled records, so
+        // a disabled/revoked pack can no longer be selected; the previously
+        // active snapshot is preserved untouched until the next commit swaps
+        // in the bundled Regular fallback (state table row 7).
+        {
+            let mut service = clay_state.package_service().lock().unwrap();
+            service.disable("@vendor/partial-icons").expect("disable");
+        }
+        let error = apply_icon_pack(&clay_state, "@vendor/partial-icons")
+            .expect_err("revoked pack rejects");
+        assert!(error.to_string().contains("theme.load_failed"));
+        assert_eq!(
+            clay_state.active_icon_pack().unwrap().specifier,
+            "@vendor/partial-icons"
+        );
+    }
+
+    #[test]
+    fn apply_icon_pack_rejects_hostile_fixture_at_record_time() {
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+        // The hostile fixture (core-key impersonation + raw `svg` field) fails
+        // at record assembly inside the ordinary adoption path, before any
+        // enable or selection can reach it.
+        let fixture_src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/icon-packs/third-party/hostile/package.json");
+        let package_json: Value =
+            serde_json::from_str(&std::fs::read_to_string(&fixture_src).unwrap())
+                .expect("fixture manifest parses");
+        let error = crate::packages::record::assemble_package_record(&package_json)
+            .expect_err("hostile manifest must fail record assembly");
+        assert!(error.message.contains("bounded normalized geometry"));
+
+        // And selection rejects a not-installed hostile specifier outright.
+        let error = apply_icon_pack(&clay_state, "@vendor/hostile-icons")
+            .expect_err("hostile pack cannot select");
+        assert!(error.to_string().contains("theme.load_failed"));
+    }
+
+    #[test]
+    fn icon_pack_matrix_coexists_with_theme_and_design_system_selections() {
+        // Plan 112 task 10 matrix: pack selection is independent of theme,
+        // appearance, and design-system selection, and pack changes never
+        // disturb the other resolved states.
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+
+        apply_appearance(&clay_state, Appearance::Dark, false);
+        let theme = apply_theme(&clay_state, "@clay/theme-gruvbox-material-dark")
+            .expect("dark theme selects");
+        let design = apply_design_system(&clay_state, "@clay/design-glass")
+            .expect("glass design system selects");
+        let duotone = apply_icon_pack(&clay_state, "@clay/icons-phosphor-duotone")
+            .expect("duotone pack selects");
+
+        // All four resolved concurrently and independently.
+        assert_eq!(clay_state.appearance(), Appearance::Dark);
+        assert_eq!(
+            clay_state.active_theme().unwrap().specifier,
+            theme.specifier
+        );
+        assert_eq!(
+            clay_state.active_design_system().unwrap().specifier,
+            design.specifier
+        );
+        assert_eq!(
+            clay_state.active_icon_pack().unwrap().specifier,
+            duotone.specifier
+        );
+        assert!(clay_state.explicit_theme_active());
+        assert!(clay_state.explicit_design_system_active());
+        assert!(clay_state.explicit_icon_pack_active());
+
+        // Pack swap keeps theme/design-system/appearance selections untouched
+        // and actually switches geometry (duotone shade layer disappears).
+        let regular = apply_icon_pack(&clay_state, "@clay/icons-phosphor-regular")
+            .expect("regular pack selects");
+        assert!(
+            duotone.icons["action.close"].paths.len() > regular.icons["action.close"].paths.len()
+        );
+        assert_eq!(clay_state.appearance(), Appearance::Dark);
+        assert_eq!(
+            clay_state.active_theme().unwrap().specifier,
+            theme.specifier
+        );
+        assert_eq!(
+            clay_state.active_design_system().unwrap().specifier,
+            design.specifier
+        );
+
+        // A failed pack selection also preserves the other resolved states.
+        let error = apply_icon_pack(&clay_state, "@vendor/never-loaded-icons")
+            .expect_err("unknown pack rejected");
+        assert!(error.to_string().contains("theme.load_failed"));
+        assert_eq!(
+            clay_state.active_icon_pack().unwrap().specifier,
+            regular.specifier
+        );
+        assert_eq!(
+            clay_state.active_theme().unwrap().specifier,
+            theme.specifier
+        );
+        assert_eq!(
+            clay_state.active_design_system().unwrap().specifier,
+            design.specifier
+        );
     }
 }
