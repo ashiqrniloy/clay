@@ -679,20 +679,20 @@ fn phase25_dependencies_deny_acp_agui_mcp() {
             "clay-agent/package.json must not depend directly on {needle}"
         );
     }
-    assert!(agent_readme.contains("0.5.0"));
+    assert!(agent_readme.contains("0.5.1"));
     assert!(agent_readme.contains("Upgrade Prism"));
     assert!(agent_readme.contains("no tools and no sandbox"));
     assert!(chat_docs.contains("no tools, no sandbox"));
-    // Phase 0 + Phase 1 (Prism 0.5.0): exact family pins, no retired 0.3
-    // package names.
+    // Phase 0 + Phase 1 (Prism 0.5.x, live pins 0.5.1): exact family pins,
+    // no retired 0.3 package names.
     for pin in [
-        "\"@arnilo/prism\": \"0.5.0\"",
-        "\"@arnilo/prism-core\": \"0.5.0\"",
-        "\"@arnilo/prism-providers\": \"0.5.0\"",
-        "\"@arnilo/prism-coding-tools\": \"0.5.0\"",
-        "\"@arnilo/prism-web-tools\": \"0.5.0\"",
-        "\"@arnilo/prism-memory\": \"0.5.0\"",
-        "\"@arnilo/prism-mcp\": \"0.5.0\"",
+        "\"@arnilo/prism\": \"0.5.1\"",
+        "\"@arnilo/prism-core\": \"0.5.1\"",
+        "\"@arnilo/prism-providers\": \"0.5.1\"",
+        "\"@arnilo/prism-coding-tools\": \"0.5.1\"",
+        "\"@arnilo/prism-web-tools\": \"0.5.1\"",
+        "\"@arnilo/prism-memory\": \"0.5.1\"",
+        "\"@arnilo/prism-mcp\": \"0.5.1\"",
         "\"better-sqlite3\": \"13.0.3\"",
     ] {
         assert!(
@@ -700,6 +700,13 @@ fn phase25_dependencies_deny_acp_agui_mcp() {
             "clay-agent/package.json must pin exactly {pin}"
         );
     }
+    // Prism 0.5.1 kernel construction (decision 2026-09-07-2149): the host
+    // session-cache stopgap from decision 1325 must not return — the kernel
+    // fills options.sessionId/cacheKey and default cache breakpoints.
+    assert!(
+        !read_src("clay-agent/src/host.ts").contains("createSessionCachePolicy"),
+        "clay-agent/src/host.ts must not register createSessionCachePolicy"
+    );
     let agent_src = [
         "clay-agent/src/host.ts",
         "clay-agent/src/providers.ts",

@@ -27,7 +27,7 @@
 
 ## Overview
 
-`clay-agent` is Clay’s Node >= 20 child process that hosts Prism 0.4.0. It is
+`clay-agent` is Clay’s Node >= 20 child process that hosts Prism 0.5.1. It is
 **not** a Clay JS package and is not loaded by Deno. `AgentHost` in
 `src/server/agent.rs` lazy-spawns one daemon per server. Package JS cannot
 spawn or speak to it.
@@ -38,14 +38,14 @@ spawn or speak to it.
 - SQLite session store under `--data-dir/sessions.sqlite`.
 - Encrypted credential vault under `--data-dir/credentials.vault`; OS keychain
   when the secret service answers. No plaintext fallback.
-- Load first-party Prism 0.4.0 provider packages through the extension kernel
+- Load first-party Prism 0.5.1 provider packages through the extension kernel
   with a stored credential resolver (never `process.env`). Imports use family
   subpaths only: `@arnilo/prism` (agent/kernel API),
   `@arnilo/prism-core/{credentials/node,sessions/sqlite,validation/json-schema}`,
   `@arnilo/prism-memory/compaction/{observational-memory,llm}`, and
-  `@arnilo/prism-providers/<adapter>`. All seven 0.4.0 family pins are exact
+  `@arnilo/prism-providers/<adapter>`. All seven 0.5.1 family pins are exact
   (`prism`, `prism-core`, `prism-providers`, `coding-tools`, `web-tools`,
-  `memory`, `mcp`) plus direct `better-sqlite3@12.11.1` for the SQLite subpath
+  `memory`, `mcp`) plus direct `better-sqlite3@13.0.3` for the SQLite subpath
   and `playwright-core@1.61.0` for CDP composition. The unused 0.3
   `prism-model-router` dependency was dropped with the consolidation; retired
   0.3 package names are denied by `agent_protocol::phase25_dependencies_deny_acp_agui_mcp`.
@@ -151,7 +151,10 @@ workflows (`startWorkflow` driver errors until then), Phase 6 supervisors.
 6. `session.compact` runs Prism `session.compact()`; an active run fails closed.
    Named strategies: `default`, `llm`, `om`. OM attaches only on opt-in
    (`observationalMemory: true`); worker models come from host config, not the
-   session model; `compactAfterTokens` default 80000 (2158). A positive
+   session model; `compactAfterTokens` default 80000 (2158). OM workers
+   derive their own kernel correlation id (`om:{attached session id}`, plan
+   113: asserted on worker generate options); LLM compaction reuses the
+   agent session id so summaries hit the same prompt cache. A positive
    `compactAfterTokens` on `session.compact` overrides the OM auto-compaction
    threshold for that session via the OM settings provider.
 7. `skill.register`/`skill.list` keep a kernel skill registry (duplicate names

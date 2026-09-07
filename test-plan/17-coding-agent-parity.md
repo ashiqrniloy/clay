@@ -167,6 +167,36 @@ this host; the mock-provider automated suites pin the same code paths.
 | Live surface-state walk (attempt 2, 2026-09-06) | PARTIAL / BLOCKED | Launch + AT-SPI welcome-state inspection PASS; Ctrl+B toggle verified live via portal keyboard. Surface-internal states (dropdowns, transcript boxes, four tabs, /resume picker, theme variants) UNRESOLVED: portal clicks into WebKitGTK land focus-only (no activation via click/Enter/Space), window bounds drift across calls (x=8..-1205 for one window), welcome-state Coding Agent button unreachable once an editor tab opens, Ctrl+X Ctrl+P chord not delivered via portal keyboard. Blocker is synthetic-input reliability, not app a11y (full webview subtree confirmed in AT-SPI). Follow-up: AT-SPI perform_action activation + pinned window; manual click completes the matrix for a human runner. |
 | Live surface-state walk (attempt 3, 2026-09-06, human-in-the-loop + AT-SPI do_action) | PASS with 3 live findings | Method: human runner drove pointer/keyboard (WebKitGTK button activation is not reachable via synthetic input), agent drove tab switching via AT-SPI `do_action(0)` (page-tab selection works; button `press` remains inert), and captured a 2 s frame loop over the interaction window. Artifacts: `artifacts/109-coding-agent/live-walk/` (18 screenshots). PASS legs: welcome dark theme (welcome-dark.png); panel default unconfigured guidance (agent-default-unconfigured.png); four-tab strip per-tab empty states with correct SELECTED tracking (files-empty/memory-empty/context-empty/session-info-empty.png); R1 composer slash completion from daemon registry — `/ /model /resume /compact /new /n` with full descriptions (slash-completion-popup.png), inline hint bar while typing `/mode` (slash-completion-model-hint-configured.png), Control Centre command list with `server-first — @clay/coding-agent@0.1.0` routing labels (control-centre-daemon-commands.png); /model provider picker with configured/not-configured labels (provider-picker*.png) and live model switching `opencode-go/grok-4.5` → `opencode-go/mimo-v2.5` reflected in the status row chip; full chronological transcript with user/thinking/assistant/usage box kinds (transcript-files-pane.png, memory-tab-workers.png); streaming state with Cancel + 'Steer the agent, or wait' composer (streaming-state-cancel.png) and usage segment `3844 in / 56 out` in the status row; Memory tab Observation/Reflection worker dropdowns 'Not set (workers off)' + helper text (memory-tab-workers.png); Session Info auto-select on card click with per-kind detail (user kind session-info-user-detail.png, assistant kind session-info-assistant-detail.png) and Back affordance; narrow 760 px layout holds the split with graceful tab-strip truncation (narrow-760-with-sdui-error.png). LIVE FINDINGS (defect candidates, evidence in live-walk/): (1) Context tab stays on 'Loading context…' indefinitely after a completed run (context-stuck-loading.png, ~6 s+ across frames 72/75) — session.context response never renders; (2) Files-tab 'Resume session' button dispatch surfaces `invalid SDUI message: UnknownActionCommand("agent.clientOpenSessionPicker")` in the status bar and no picker opens (narrow-760-with-sdui-error.png bottom bar) — the button intent path rejects where the composer `/resume` intercept is expected to work; (3) status row shows `git —` although the tab workspace is a real git repo on `feature/coding-agent` — R2 branch readout did not populate live even after a completed run. Also noted: in-header Model dropdown never renders even when configured (selection works only via the /model Command-Centre flow), consistent with the AG-UI snapshot carrying no models list; effort dropdown correctly absent while the selected models declare no thinking levels. Theme variants (core/neobrutal/glass × dark/light) remain UNRESOLVED live (would require app restart per theme; design-system fixtures cover them via automated gates). |
 
+## Plan 113 steps (Prism 0.5.1 kernel construction, 2026-09-07)
+
+Steps C21–C23 cover the Prism 0.5.1 adoption (plan 113): the host
+`createSessionCachePolicy` stopgap from decision 1325 is deleted and
+request construction is kernel-owned (decision 2026-09-07-2149).
+Automated legs cite the pinning suites; the live OpenCode Go legs keep
+the standing credential blocker.
+
+| # | Action | Expected | Automated leg |
+|---|--------|----------|---------------|
+| C21 | OpenCode Go first prompt with **no** host request policy | `options.sessionId`/`options.cacheKey` filled by the kernel from the session id; gateway never sees a missing session key → no `MissingSessionID` | request-construction.test (sessionId/cacheKey fills without host policy); agent_protocol deny: `createSessionCachePolicy` absent from `host.ts` |
+| C22 | OM-attached OpenCode Go session: worker turns (observe → reflect) | Worker generate options carry kernel-derived `om:{session.id}` correlation; no 400 from the gateway | om.test drill (`om:`-prefixed worker `options.sessionId` assert) |
+| C23 | Effort still snaps/wires after `RunOptions.thinkingLevel` | Prompt-level level resolves kernel-side: family wire field stamped (`output_config.effort` / `reasoning_effort` / `thinkingLevel`), out-of-set snaps to the declared ladder, invalid input rejected fail-closed, non-reasoning models untouched | thinking-level suites (I4, now through the kernel path); request-construction.test |
+
+## Plan 113 execution record (Linux, 2026-09-07)
+
+Build: plan 113 working tree on Prism 0.5.1 pins (seven families exact
+0.5.1). Automated gates: cargo fmt/check/clippy clean; `cargo test
+--test protocol` 208 pass (incl. the new `createSessionCachePolicy`
+deny and `initialize reports prism 0.5.1`); clay-agent 101 pass / 1
+skip (new request-construction.test × 3, om `om:` correlation assert,
+thinking-level suites green through the kernel path). Doc-registry
+gates green (protocol `doc` 148, lib `doc` 107).
+
+| Legs | Status | Evidence |
+|------|--------|----------|
+| C21/C22/C23 automated legs | PASS (automated) | citations in the table above |
+| C21/C22 live OpenCode Go legs | UNRESOLVED | standing manual step — no provider credential on this host (same blocker as the plan 109 real-provider legs); retry after credential setup |
+| C23 live effort leg (Shift+Tab / dropdown) | UNRESOLVED | same standing credential/GUI blocker; wire-path covered by the automated kernel suites |
+
 ## Plan 112 cross-reference (2026-09-07)
 
 Coding-agent surfaces gained icon-only composer actions (Send `message.send`

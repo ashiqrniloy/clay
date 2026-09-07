@@ -35,7 +35,6 @@ import {
   createMockProvider,
   createProviderResolver,
   createSecretRedactor,
-  createSessionCachePolicy,
   createSessionEntry,
   createSkillRegistry,
   DEFAULT_SESSION_SEARCH_LIMIT,
@@ -46,7 +45,6 @@ import {
   redactAgentEvent,
   resolveActiveSkills,
   resumeAgentRunStream,
-  applyThinkingLevelForModel,
   parseThinkingLevel,
   thinkingLevelsForModel,
 } from "@arnilo/prism";
@@ -821,11 +819,8 @@ export class ClayAgentHost {
       // mediated write fails closed with ERR_PRISM_TOOL_EFFECT_CONFLICT,
       // including post-resume turns where run options don't reach the context.
       identity: this.runIdentity(),
-      // Session-correlation policy (Prism: hosts decide which request
-      // policies are active). Injects options.sessionId/cacheKey so
-      // provider adapters can send their session headers — OpenCode Go's
-      // gateway hard-400s without `x-opencode-session`.
-      providerRequestPolicies: createSessionCachePolicy(),
+      // No providerRequestPolicies — Prism 0.5.1 kernel fills session/cache
+      // keys (decision 2026-09-07-2149).
       ...(def.instructions !== undefined ? { instructions: def.instructions } : {}),
       ...(def.systemPrompt !== undefined ? { systemPrompt: def.systemPrompt } : {}),
       ...(runTools.length > 0 ? { tools: runTools } : {}),
@@ -1614,24 +1609,19 @@ export class ClayAgentHost {
       : undefined;
     // Plan 109 I4: per-run portable thinking level. Fail-closed at this
     // boundary — Prism `parseThinkingLevel` rejects empty/non-string input;
-    // opaque non-empty strings pass through (forward-compat). The model-aware
-    // adapter resolves the compat family, snaps to the model's declared set,
-    // and merges the patch; non-reasoning models get their options unchanged.
+    // opaque non-empty strings pass through (forward-compat). Prism 0.5.1
+    // resolves the compat family and snaps to the model's declared set
+    // kernel-side; non-reasoning models get no compat invented.
     const rawLevel = params.thinkingLevel;
-    let providerOptions: RunOptions["providerOptions"];
+    let thinkingLevel: string | undefined;
     if (rawLevel !== undefined) {
       const level = parseThinkingLevel(rawLevel);
       if (level === undefined) {
         throw rpcError(-32602, "thinkingLevel must be a non-empty string");
       }
-      const model = this.kernel.registries.models.get(live.provider, live.model) ?? {
-        provider: live.provider,
-        model: live.model,
-      };
       // Opaque non-empty strings pass through for forward-compatible
       // provider fields; known levels carry as the portable union.
-      const resolved = typeof level === "string" ? level : level.opaque;
-      providerOptions = applyThinkingLevelForModel(undefined, resolved, model);
+      thinkingLevel = typeof level === "string" ? level : level.opaque;
     }
     const runState = this.durableRunState(live);
     // stream() (not subscribe()+run()) — durable runs keep the subscription
@@ -1646,7 +1636,7 @@ export class ClayAgentHost {
       identity: this.runIdentity(),
       ...(compaction ? { compaction } : {}),
       ...(runState ? { runState } : {}),
-      ...(providerOptions ? { providerOptions } : {}),
+      ...(thinkingLevel ? { thinkingLevel } : {}),
     });
     let lastType: string | undefined;
     let suspended:
@@ -1895,9 +1885,6 @@ export class ClayAgentHost {
         providerSource: createProviderResolver(this.kernel.registries.providers),
         store: createMemorySessionStore(),
         redactor: this.redactor,
-        // Same session-correlation requirement as the main agent (e.g.
-        // OpenCode Go gateway requires x-opencode-session).
-        providerRequestPolicies: createSessionCachePolicy(),
       });
       const workerSession = worker.createSession();
       const result = await workerSession.run(
@@ -2134,7 +2121,7 @@ export class ClayAgentHost {
           ? { contextWindow: model.limits.contextWindow }
           : {}),
         // Plan 109 I4: declared portable thinking levels (ascending), from
-        // Prism 0.5.0 registry metadata — no provider call. Omitted for
+        // Prism registry metadata — no provider call. Omitted for
         // non-reasoning / undeclared models.
         ...(thinkingLevelsForModel(model)
           ? { thinkingLevels: thinkingLevelsForModel(model) }

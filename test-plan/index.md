@@ -161,6 +161,7 @@ completion). Executed on a freshly rebuilt Linux build:
 | Plan 099 server-authoritative editor performance and manual matrix | 01 (L25–L26), 03 (F53–F54), 04 (E37–E38), 08 (S33–S34), 11 (M1–M7), 13 (D20–D21), 14 (T77–T78); deep reference: `docs/development/performance.md` |
 | Agent host configuration surfaces (`clay:agent` facades, autonomy/compaction defaults, init.js agent section, MCP/Obscura fail-closed wiring) | 16, 02 (C24 raw-op denial still applies) |
 | Plan 109 coding-agent defects/UX + Prism 0.5.0 (I2–I10, R1–R3) | 17 (C1–C20, C-N1–N4), 16 (host config), 10 (effort + file-browser bindings), 14 (per-tab workspace binding), 01 (launch gate) |
+| Plan 113 Prism 0.5.1 kernel request construction (host stopgap deleted, `RunOptions.thinkingLevel`) | 17 (C21–C23), 16 (0.5.1 pins via agent_protocol pin asserts) |
 
 ## Plan 097 Phase 9 Linux execution record (2026-08-23)
 

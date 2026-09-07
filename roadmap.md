@@ -13,7 +13,8 @@ Governing decisions already made:
   Clay-owned Node `clay-agent` daemon wraps Prism directly; no ACP/AG-UI as
   the first-party agent bus; coding agent must reach CLI-parity inside Clay.
   Its original 0.3.0 pin was superseded by the 0.4.0 migration in Phase 0;
-  live pins move to exact `0.5.0` in Phase 2.1 (`plans/109`).
+  live pins moved to exact `0.5.0` in Phase 2.1 (`plans/109`) and to
+  `0.5.1` in plan 113.
 - `decision-logs/2026-09-02-1440-direct-external-coding-agent-adapters.md`:
   Claude Code and Antigravity are direct, capability-declared external
   runtimes with Clay policy bundles, not Prism delegation.
@@ -29,7 +30,7 @@ Governing decisions already made:
 Three layers, strict separation:
 
 1. **`clay-agent` daemon (Clay core, Node ≥ 20).** Hosts `@arnilo/prism`
-   0.5.0 plus explicitly selected 0.5 family packages/subpaths. Owns native
+   0.5.1 plus explicitly selected 0.5 family packages/subpaths. Owns native
    providers, models, credentials (vault + keychain), SQLite persistence,
    run ledger, tools, compaction strategies, skills, commands, workflows,
    supervision, and external-runtime lifecycle/policy projection. It does
@@ -50,7 +51,7 @@ The base agent stays minimal by design (pi-like). All autonomy policy
 agent delegation, memory cadence) lives in `st` or in host-free orchestration
 helpers the daemon exposes generically.
 
-## Prism Capability Review (0.4.0 historical; live pins are 0.5.0)
+## Prism Capability Review (0.4.0 historical; live pins are 0.5.1)
 
 Review method for the 0.4 cut: read the 0.4 migration guide,
 package-consolidation plan, all then-11 published package manifests and
@@ -59,8 +60,11 @@ Prism 0.4 was a package/import migration with no persisted-store shape
 migration. Phase 0 owned the Clay consumer smoke for that cut.
 
 **Live pins (Phase 2.1 / plan 109):** Prism 0.5.0 lockstep, released
-2026-09-06. Authoritative sources: `/home/arn/Projects/prism/docs/migrate-to-0.5.md`,
-`CHANGELOG.md` `[0.5.0]`, `docs/thinking-and-reasoning.md`, `docs/mcp-tools.md`.
+2026-09-06; bumped to exact **0.5.1** (additive, 2026-09-07) by plan 113.
+Authoritative sources: `/home/arn/Projects/prism/docs/migrate-to-0.5.md`
+(§8 covers 0.5.1), `CHANGELOG.md` `[0.5.0]`/`[0.5.1]`,
+`docs/thinking-and-reasoning.md`, `docs/mcp-tools.md`,
+`docs/provider-request-policies.md`.
 Package names and 0.4 subpaths stay valid. Breaking host surface: 27 dead
 exports removed, MCP TypeScript SDK v2 modular (`@modelcontextprotocol/client`
 + `/server` 2.0.0, 2026-07-28), two thinking-effort wire moves, child-env
@@ -240,7 +244,16 @@ Prism 0.5.0 is a lockstep cut: all publishable manifests move `0.4.x` →
 `0.5.0`, internal ranges `^0.4.0` → `^0.5.0`. Clay live-pins the seven
 adopted families at exact `0.5.0` plus `better-sqlite3@13.0.3`. Plan:
 `plans/109-Phase2.1-Coding-Agent-Defects-and-UX-Improvements.md`. Decision
-log: write during that plan (same class as `2026-09-02-0121`).
+log: `2026-09-06-0432`.
+
+**Prism 0.5.1 increment (live, plan 113, log `2026-09-07-2149`):** exact
+`0.5.1` seven-family pins; kernel fills `options.sessionId`/`cacheKey` and
+default cache breakpoints, so Clay deletes the `createSessionCachePolicy()`
+stopgap from both `createAgent` sites (closes the 1325 follow-up); per-prompt
+effort moves to `RunOptions.thinkingLevel` on `session.stream`;
+`parseThinkingLevel`/`thinkingLevelsForModel` stay; no Clay `cache.mode`
+knob; no `applyDefaultProviderRequestOptions` (no raw `provider.generate`
+site in clay-agent).
 
 Host-visible 0.5 work Clay must do:
 
@@ -954,7 +967,7 @@ pi model. Must land before any third-party package (`st`) is planned.
   `prism-office`, `prism-acp-agent`, or `prism-ag-ui` in the daemon. Phase 10
   owns direct `agy` integration. Import subpaths explicitly; no 0.3/0.4 mix;
   no compatibility shims; no persisted-schema migration.
-  **Live pins:** superseded by 0.5.0 in Phase 2.1; 0.4 family/subpath rules
+  **Live pins:** superseded by 0.5.x in Phase 2.1; 0.4 family/subpath rules
   stay.
 
 ## Resolved this iteration (Prism 0.5.0 / Phase 2.1)
@@ -965,6 +978,10 @@ pi model. Must land before any third-party package (`st`) is planned.
   `/hyper` and `/commandcode` loads. No office/ACP/AG-UI; antigravity
   package removed upstream (Phase 10 still direct `agy`). No persisted
   schema migration. Plan 109 owns the cut. Pin decision log is a 109 task.
+- Prism 0.5.1 increment (plan 113): exact `0.5.1` pins; host
+  `createSessionCachePolicy()` stopgap deleted — kernel constructs
+  session/cache keys, default cache breakpoints, and thinking-level run
+  options. Log `2026-09-07-2149`.
 
 ## Open Decisions (need `decision-logs/` before implementation)
 
@@ -984,11 +1001,18 @@ pi model. Must land before any third-party package (`st`) is planned.
    only; `model-router` dropped; coding/web/memory/MCP deferred to Phase 1;
    Antigravity is a direct Phase 10 adapter, while office/ACP/AG-UI stay out
    of the daemon. `decision-logs/2026-09-02-0121-prism-0.4.0-clay-agent-family-pins.md`.)
-7. **Prism 0.5.0 family pin set.** Directed for Phase 2.1 (`plans/109`).
+7. ~~**Prism 0.5.0 family pin set.** Directed for Phase 2.1 (`plans/109`).
    Log before the pin bump, same shape as 0121: exact `0.5.0` seven-family
    pins + `better-sqlite3@13.0.3`; MCP via `prism-mcp` public API only;
    hyper/commandcode explicit; no office/ACP/AG-UI. User directed the
-   adoption; the log is a plan-109 task.
+   adoption; the log is a plan-109 task.~~ (Resolved:
+   `decision-logs/2026-09-06-0432-prism-0.5.0-clay-agent-family-pins.md`.)
+8. ~~**Prism 0.5.1 family pin set + stopgap deletion.** Exact `0.5.1`
+   seven-family pins; delete `createSessionCachePolicy()` from both
+   `createAgent` sites once kernel constructs session/cache keys; effort via
+   `RunOptions.thinkingLevel`.~~ (Resolved:
+   `decision-logs/2026-09-07-2149-prism-0.5.1-clay-agent-family-pins.md`;
+   plan 113 executes.)
 
 ## Post-Roadmap (not in scope)
 

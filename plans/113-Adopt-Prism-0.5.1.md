@@ -118,7 +118,7 @@ policy):
 
 ## Tasks
 
-- [ ] Record the Prism 0.5.1 clay-agent pin set in `decision-logs/`
+- [x] Record the Prism 0.5.1 clay-agent pin set in `decision-logs/`
   - Acceptance Criteria:
     - Functional: A new decision log states the 0.5.1 pin set (seven
       families at exact `0.5.1` + `better-sqlite3@13.0.3`; drop the
@@ -162,8 +162,22 @@ policy):
       - `decision-logs/2026-09-07-1325-prism-provider-mandatory-wire-requirements.md`
   - Test Cases to Write:
     - None. Decision logs are not executed.
+  - Completion (2026-09-07):
+    - Log written: `decision-logs/2026-09-07-2149-prism-0.5.1-clay-agent-family-pins.md`
+      (status approved; closes the 1325 stopgap follow-up; records exact
+      0.5.1 seven-family pins + `better-sqlite3@13.0.3`, stopgap deletion,
+      `RunOptions.thinkingLevel`, no `cache.mode` knob, no
+      `applyDefaultProviderRequestOptions`, office/ACP/AG-UI excluded).
+    - `.agents/skills/project-patterns/references/agent-host.md`: live pins
+      → `0.5.1`; stopgap sentence replaced with the kernel-construction
+      rule; decision list adds `2026-09-07-2149`, marks 0432 superseded for
+      live pins.
+    - `roadmap.md`: governing-decisions note, Product Shape daemon bullet,
+      capability-review header/live-pins paragraph, new 0.5.1 increment
+      paragraph in the lockstep section, Resolved-this-iteration bullet,
+      open decision 7 resolved + new item 8 resolved (`2026-09-07-2149`).
 
-- [ ] Bump clay-agent family pins to exact 0.5.1
+- [x] Bump clay-agent family pins to exact 0.5.1
   - Acceptance Criteria:
     - Functional: All seven `@arnilo/prism*` dependencies are exact
       `"0.5.1"`. `initialize` reports `prism: "0.5.1"`. Lockfile
@@ -219,8 +233,29 @@ policy):
       `{ ok: true, prism: "0.5.1" }`
     - `phase25_dependencies_deny_acp_agui_mcp`: exact `"0.5.1"` pins;
       no retired 0.3 names; no SDK modules in clay-agent package.json
+  - Completion (2026-09-07):
+    - `clay-agent/package.json`: description + seven families → exact
+      `0.5.1`; `better-sqlite3@13.0.3` / `playwright-core@1.61.0`
+      unchanged; lockfile regenerated via `npm install` (registry
+      `@arnilo/prism@0.5.1` confirmed).
+    - Version strings: `main.ts` initialize → `prism: "0.5.1"`;
+      `host.test.ts` test name + assertion; `providers.ts` comment;
+      `host.ts` comment version-neutral; `thinking-level.test.ts`
+      comment → `0.5.x`; README header + Pins section → `0.5.1`;
+      `tests/agent_protocol.rs` README assert + seven pin needles →
+      `0.5.1`.
+    - Gates: `npm run build` + `npm test` → 97 pass / 1 skip (same as
+      0.5.0 baseline); `cargo fmt --check` clean;
+      `cargo test --test protocol` → 208 pass. Note: `agent_protocol.rs`
+      runs as a module of the `protocol` suite (`autotests = false`),
+      not as its own target.
+    - Pre-existing gate fixes (unrelated drift, blocked the suite on
+      clean HEAD): parity ledger `agent.codingAgent.parity` was missing
+      module-17 steps C1–C20 (plan 109 steps never recorded) and
+      Phase 112 `theme.setIconPack` had no ledger row — both added to
+      `docs/development/tauri-react-parity-ledger.json`.
 
-- [ ] Drop host session-cache policy; pass `RunOptions.thinkingLevel`
+- [x] Drop host session-cache policy; pass `RunOptions.thinkingLevel`
   - Acceptance Criteria:
     - Functional: Neither `createAgent` site sets
       `providerRequestPolicies`. `session.prompt` with a valid
@@ -309,8 +344,23 @@ policy):
       with `thinkingLevel` on the run (Anthropic `output_config.effort`,
       xAI `reasoning_effort`, Google `thinkingLevel`, snap, fail-closed,
       non-reasoning no-op).
+  - Completion (2026-09-07):
+    - `host.ts`: both `providerRequestPolicies: createSessionCachePolicy()`
+      lines removed (main `createAgent` keeps a one-line breadcrumb
+      pointing at decision 2149); `sessionPrompt` resolves the level via
+      `parseThinkingLevel` (fail-closed `-32602` kept) and passes
+      `thinkingLevel` on `session.stream` — the model lookup +
+      `applyThinkingLevelForModel` hand-merge block is gone; imports drop
+      `createSessionCachePolicy` + `applyThinkingLevelForModel`, keep
+      `parseThinkingLevel` + `thinkingLevelsForModel`. No
+      `applyDefaultProviderRequestOptions` (no raw generate site).
+    - Verified against installed 0.5.1 types: `RunOptions.thinkingLevel?: string`
+      (`contracts-protocol.d.ts:79`, overrides `AgentConfig.thinkingLevel`).
+    - Gates: `npm test` 97 pass / 1 skip (thinking wire-field cases green
+      through the kernel path); `cargo test --test protocol agent_protocol`
+      20 pass.
 
-- [ ] Add kernel-construction tests and deny the stopgap
+- [x] Add kernel-construction tests and deny the stopgap
   - Acceptance Criteria:
     - Functional: A capturing mock prompt with **no** host policy
       yields `options.sessionId === session.id` and
@@ -372,8 +422,28 @@ policy):
     - `host.ts does not mention createSessionCachePolicy`
     - `OM worker sessionId is om:{id}` (if capturable; else document
       as covered by Prism 066 + OM suite green)
+  - Completion (2026-09-07):
+    - New `clay-agent/src/__tests__/request-construction.test.ts`
+      (capturing-mock harness in the thinking-level style): kernel fills
+      `options.sessionId`/`cacheKey` = session id with no host policy;
+      `cache.kind: "cache_control"` model gets `cacheRetention: "short"`
+      + breakpoints `[{location: "system_prompt"},
+      {location: "last_stable_message"}]`; uncached model gets no cache
+      patch. Verified against `provider-request-policy.js`
+      (`applyDefaultProviderRequestOptions` semantics).
+    - `om.test.ts`: routing provider gained an optional request capture
+      (on the top-level `mockProvider` — workers resolve the registry
+      provider, not the OM config instances); the activity drill asserts
+      a captured worker request with `om:`-prefixed `options.sessionId`.
+    - `tests/agent_protocol.rs`: deny
+      `createSessionCachePolicy` in `clay-agent/src/host.ts` next to the
+      0.5.1 pin asserts (host.ts breadcrumb comment reworded so the deny
+      matches bare identifier only).
+    - Gates: clay-agent `npm test` 101 tests / 100 pass / 1 pre-existing
+      skip; `cargo fmt --check` clean; `cargo test --test protocol`
+      208 pass.
 
-- [ ] Verify every Clay Prism functionality on 0.5.1
+- [x] Verify every Clay Prism functionality on 0.5.1
   - Acceptance Criteria:
     - Functional: Full `clay-agent` `npm test` green (chat/mock,
       thinking, OM, compaction, coding tools, durable run, skills/
@@ -421,8 +491,27 @@ policy):
         `obscura.ts`, `document-ops.ts`, `providers.ts`
   - Test Cases to Write:
     - None new beyond task 4. This task is the existing-suite gate.
+  - Completion (2026-09-07):
+    - `clay-agent && npm test`: 101 tests / 100 pass / 1 pre-existing
+      skip — full matrix green: chat/mock, thinking wire fields + snap +
+      fail-closed, OM activity drill (incl. `om:` correlation from task
+      4), llm/om compaction, coding tools + leases + suspend/resume
+      durability, skills/commands, session search/tree/discard/fork/clone,
+      MCP v2 import deny + stdio allow-list fail-closed, Obscura
+      fail-closed, wiki, graft, keychain, context/document ops, vault
+      redaction, `initialize reports prism 0.5.1`.
+    - Linux gates: `cargo fmt --check` clean, `cargo check --all-targets`
+      clean, `cargo clippy --all-targets -- -D warnings` clean,
+      `cargo test --test protocol` 208 pass (pin asserts, SDK/MCP-SDK/
+      ACP/AG-UI/office denials, `agent_io_stays_off_paint_and_keypress`,
+      createSessionCachePolicy deny).
+    - Hygiene: no `0.5.0` left in clay-agent src/package/README/
+      agent_protocol.rs; identity still set on `createAgent` (host.ts
+      L821), `stream` (L1636), and command drivers (L2589); MCP only via
+      `@arnilo/prism-mcp`.
+    - No 0.5.1 type or runtime break found — no extra fixes needed.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: No new `clay:agent` export. Per-prompt
       `thinkingLevel` stays the existing RPC/AG-UI field, not a new
@@ -462,8 +551,18 @@ policy):
   - Test Cases to Write:
     - Existing registry/inventory tests still pass (`cargo test`
       doc-registry gates). No new API pages.
+  - Completion (2026-09-07) — verification only, no code changed:
+    - Grep: no `applyThinkingLevelForModel`, `createSessionCachePolicy`,
+      or `0.5.0` anywhere in `docs/reference/clay-js-api/` or
+      `frontend/src/agent/` — no doc updates needed.
+    - No new `clay:agent` export; `TauriClayAgent.sendPrompt(text,
+      thinkingLevel?)` (TauriClayAgent.ts L36/L80) and
+      `intent_thinking_level` (runtime.rs L342) unchanged as the
+      existing transport for per-prompt effort.
+    - Gates: `cargo test --test protocol doc` 148 pass (doc-registry),
+      `cargo test --lib doc` 107 pass.
 
-- [ ] Create or verify Clay configuration APIs
+- [x] Create or verify Clay configuration APIs
   - Acceptance Criteria:
     - Functional: No new `init.js` option for cache mode, session
       policies, or thinking defaults. Existing `clay:agent` compact /
@@ -499,8 +598,18 @@ policy):
   - Test Cases to Write:
     - None. `node --check examples/config/init.js` remains green as a
       non-regression if touched; do not touch.
+  - Completion (2026-09-07) — verification only, no code changed:
+    - Grep: no `cacheMode`/`providerCache`/`cache.mode`/
+      `providerRequestPolic*`/`cacheKey` config keys in `examples/config/`,
+      `frontend/src/agent/`, or `docs/reference/clay-js-api/agent/` —
+      only the per-prompt `thinkingLevel` transport arg (correct:
+      prompt-level, not init.js).
+    - `examples/config/init.js` untouched; `node --check` green.
+    - No config-eval surface changed in this plan (host.ts edits were
+      kernel wiring, not config); compact/autonomy/search/tree/knowledge
+      APIs unchanged and covered by the task 5 suite green.
 
-- [ ] Execute and update the manual test plan (`test-plan/`)
+- [x] Execute and update the manual test plan (`test-plan/`)
   - Acceptance Criteria:
     - Functional: Run `test-plan/16-agent-host.md` and
       `test-plan/17-coding-agent-parity.md` steps that cover prompt,
@@ -548,8 +657,23 @@ policy):
       MissingSessionID
     - Manual C22: OM-attached OpenCode Go worker turn → no 400
     - Manual C4 still: Shift+Tab / dropdown effort reaches the run
+  - Completion (2026-09-07):
+    - `test-plan/17-coding-agent-parity.md`: new "Plan 113 steps"
+      section — C21 (kernel sessionId/cacheKey fills with no host
+      policy; no MissingSessionID), C22 (OM worker `om:{session.id}`
+      correlation, no 400), C23 (effort snaps/wires through
+      `RunOptions.thinkingLevel`) with automated-leg citations;
+      "Plan 113 execution record" documents the 0.5.1 gates (protocol
+      208, clay-agent 101/1 skip, doc-registry) and records the live
+      OpenCode Go legs UNRESOLVED under the standing no-credential
+      blocker (plan 109 precedent). No existing steps weakened; plan
+      109 record left as history.
+    - `test-plan/index.md`: coverage-matrix row for plan 113
+      (module 17 C21–C23 + module 16 pin asserts).
+    - `test-plan/16-agent-host.md` cites no 0.5.0 pin claim — no edit
+      needed.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: `docs/wiki/modules/clay-agent.md` describes Prism
       **0.5.1**, kernel request construction, no host session-cache
@@ -585,6 +709,19 @@ policy):
   - Test Cases to Write:
     - Manual wiki review: index links clay-agent page; page matches
       host.ts after the cut.
+  - Completion (2026-09-07):
+    - `docs/wiki/modules/clay-agent.md`: Prism 0.5.1 overview + seven
+      0.5.1 exact family pins + `better-sqlite3@13.0.3`; How-It-Works
+      item 5 documents kernel request construction (no host request
+      policies, `createSessionCachePolicy` deleted + denied, kernel
+      sessionId/cacheKey fills + default short breakpoints for
+      `cache_control` models, `RunOptions.thinkingLevel` with
+      fail-closed host validation, `ERR_PRISM_PROVIDER_REQUIREMENT`
+      fail-fast, correlation ids ≠ secrets); item 6 documents OM
+      `om:{session id}` worker correlation + LLM compaction session-id
+      reuse. No stale 0.4.0/12.11.1 text remains.
+    - `docs/wiki/index.md`: clay-agent blurb updated to Prism 0.5.1
+      pins + kernel-owned request construction; page link intact.
 
 ## Compromises Made
 

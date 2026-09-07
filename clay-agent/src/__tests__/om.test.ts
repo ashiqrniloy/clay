@@ -46,13 +46,17 @@ interface OmActivityView {
  * the eligible entry id / observation id out of the prompt (the worker
  * prompts render as `[<id>] …` lines).
  */
-function routingProvider(): AIProvider {
+function routingProvider(
+  capture?: (request: { options?: { sessionId?: string } }) => void,
+): AIProvider {
   return {
     id: "mock",
     async *generate(request: {
       messages?: unknown;
       tools?: ReadonlyArray<{ name?: string }>;
+      options?: { sessionId?: string };
     }): AsyncGenerator<ProviderEvent> {
+      capture?.(request);
       const toolNames = (request.tools ?? [])
         .map((tool) => tool.name)
         .join(",");
@@ -101,11 +105,15 @@ function routingProvider(): AIProvider {
 
 async function hostWithOm() {
   const dataDir = await mkdtemp(join(tmpdir(), "clay-agent-om-"));
+  // Plan 113: workers resolve the registry provider — the top-level
+  // mockProvider — so capture there to assert the kernel's om:
+  // correlation ids.
+  const workerRequests: Array<{ options?: { sessionId?: string } }> = [];
   const host = await ClayAgentHost.create({
     dataDir,
     passphrase: "pass-phrase-ok",
     mock: true,
-    mockProvider: routingProvider(),
+    mockProvider: routingProvider((r) => workerRequests.push(r)),
     emit: () => {},
     // Tiny worker thresholds so one short run drives the full
     // observe → reflect → drop pipeline; the deterministic lowest-relevance
@@ -137,11 +145,11 @@ async function hostWithOm() {
       reflection: { provider: "mock", model: "demo" },
     },
   });
-  return { host, sessionId: created.sessionId };
+  return { host, sessionId: created.sessionId, workerRequests };
 }
 
 test("om activity drill: observe → reflect → drop all surface (drops included)", async () => {
-  const { host, sessionId } = await hostWithOm();
+  const { host, sessionId, workerRequests } = await hostWithOm();
   try {
     await host.handle("session.prompt", { sessionId, text: "hello" });
     // Give the post-run worker flush a beat to settle.
@@ -168,6 +176,17 @@ test("om activity drill: observe → reflect → drop all surface (drops include
     const drop = view.activity.find((row) => row.kind === "drop");
     assert.ok(drop, "dropped-observation row missing (must be visible)");
     assert.match(drop.summary, /Dropped \d+ observation/);
+
+    // Plan 113: kernel-derived OM worker correlation (decision
+    // 2026-09-07-2149) — worker generate options carry om:{session.id}.
+    // The capture also holds the bare-session main prompt, so assert
+    // existence of an om:-prefixed request rather than uniformity.
+    assert.ok(
+      workerRequests.some((request) => /^om:/.test(request.options?.sessionId ?? "")),
+      `expected an om:-prefixed worker request, got: ${JSON.stringify(
+        workerRequests.map((request) => request.options?.sessionId),
+      )}`,
+    );
   } finally {
     await host.handle("session.delete", { sessionId });
   }

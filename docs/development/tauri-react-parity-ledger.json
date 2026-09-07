@@ -767,7 +767,8 @@
         "theme.setAppearance",
         "theme.setTypography",
         "theme.setDesignSystem",
-        "settings.setDesignSystem"
+        "settings.setDesignSystem",
+        "theme.setIconPack"
       ],
       "protocol_messages": {
         "client": [],
@@ -1582,7 +1583,27 @@
             "N2",
             "N3",
             "N4",
-            "N5"
+            "N5",
+            "C1",
+            "C2",
+            "C3",
+            "C4",
+            "C5",
+            "C6",
+            "C7",
+            "C8",
+            "C9",
+            "C10",
+            "C11",
+            "C12",
+            "C13",
+            "C14",
+            "C15",
+            "C16",
+            "C17",
+            "C18",
+            "C19",
+            "C20"
           ]
         }
       ],

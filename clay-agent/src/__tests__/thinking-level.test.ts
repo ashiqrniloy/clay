@@ -2,7 +2,7 @@
 //
 // The daemon accepts `session.prompt.thinkingLevel`, fail-closes empty /
 // non-string values (Prism `parseThinkingLevel`), applies the model-aware
-// Prism 0.5.0 mapping (`applyThinkingLevelForModel`: family + snap + merge
+// Prism 0.5.x mapping (`applyThinkingLevelForModel`: family + snap + merge
 // in one call), and exposes declared levels via `model.list.thinkingLevels`
 // (Prism `thinkingLevelsForModel`). Wire-field assertions use a capturing
 // mock provider so the per-run `providerOptions.compat` patch is visible
