@@ -1436,7 +1436,7 @@ pub fn core_design_system_fallbacks() -> BTreeMap<RecipeKey, ResolvedComponentRe
         let (bg, fg, border) = match variant {
             "primary" => ("accent.primary", "surface.main", "accent.primary"),
             "danger" => ("diagnostic.error", "surface.main", "diagnostic.error"),
-            "muted" => ("surface.panel", "text.muted", "border.subtle"),
+            "muted" => ("transparent", "text.muted", "border.subtle"),
             _ => ("surface.control", "text.primary", "border.subtle"),
         };
 
@@ -1611,7 +1611,9 @@ pub fn core_design_system_fallbacks() -> BTreeMap<RecipeKey, ResolvedComponentRe
     map.insert(
         RecipeKey::new("textInput", "default", "input", RecipeState::Rest),
         ResolvedComponentRecipe {
-            background_color: ThemeColorRef("surface.control".to_string()),
+            // Fields sit darker than button control fills so inputs read as
+            // recessed wells (plan 110 task 9 baseline hierarchy).
+            background_color: ThemeColorRef("surface.main".to_string()),
             background_opacity: 1.0,
             text_color: ThemeColorRef("text.primary".to_string()),
             border_color: ThemeColorRef("border.subtle".to_string()),
@@ -1753,7 +1755,7 @@ pub fn core_design_system_fallbacks() -> BTreeMap<RecipeKey, ResolvedComponentRe
 
     // 5. Remaining component kind fallbacks (root rest + primary slots)
     let standard_components = [
-        ("dropdown", "surface.control", "border.subtle", 1.0),
+        ("dropdown", "surface.main", "border.subtle", 1.0),
         ("checkbox", "surface.control", "border.subtle", 1.0),
         ("switch", "surface.control", "border.subtle", 1.0),
         ("slider", "surface.control", "border.subtle", 1.0),

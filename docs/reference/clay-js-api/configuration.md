@@ -60,6 +60,8 @@ setDesignSystem("@clay/design-glass");
 
 Selection resolves only during configuration evaluation and is validated against the package service's enabled records before the candidate generation commits: reload swaps atomically, an invalid or revoked selection preserves the previous generation and records a `theme.load_failed` diagnostic, and re-delivering an identical generation causes no frontend DOM writes. Selection installs nothing and grants no package, filesystem, network, shell, extension, raw-op, or client-side JavaScript authority; recipe data stays inert and color authority remains with the active theme.
 
+For interactive changes, [`settings.setDesignSystem`](settings/set-design-system.md) validates the specifier, persists the `designSystem` preference in `~/.config/clay/preferences.json` (accepted values: `@clay/core` or a bundled `@clay/design-*` contributor), and reloads the runtime; the persisted choice wins over an equivalent `init.js` call because preference apply runs after `init.js` evaluation on every reload.
+
 ## Phase 18.17 range diagnostics configuration review
 
 Phase 18.17 reviewed range diagnostics and syntax-error highlighting and did **not** promote a new user-facing diagnostic toggle, squiggle geometry setting, per-severity preference, or `clay:configuration` API. Default outcome: syntax-error publication follows the active syntax engine; severity colors come from the active theme.
@@ -840,7 +842,7 @@ User-visible Phase 18.12 configuration surfaces:
 | Surface | Status | API / mechanism | Notes |
 |---|---|---|---|
 | Fuzzy-open key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in server-first command `workspace.openFuzzyFile`; no default chord exists in Rust, so fuzzy open is only reachable when `init.js` binds a key or another Clay-owned action opens it |
-| File-browser toggle key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | The canonical `init.js` example binds `Ctrl+B` to `workspace.toggleFileBrowser`; the command is validated by `CommandExecutor` and flips visibility only for the calling tab |
+| File-browser toggle key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | `Ctrl+B` ships as the Global default chord for `workspace.toggleFileBrowser` (plan 109 I6); the command is validated by `CommandExecutor`, is rebindable via `bindKey`, and flips visibility only for the calling tab |
 | Native folder picker binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md), `workspace.clientOpenFolderDialog` | Bind a key to the fixed client UI command id; native selection still goes through selected-path capability and server root validation |
 | Copy current selection binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md), `editor.clientCopySelection` | Bind an alternate key to copy the current native editor selection |
 | File open/reveal commands | runtime-backed command APIs | [`commands.serverOpenFile`](commands/server-open-file.md), [`commands.serverRevealInTree`](commands/server-reveal-in-tree.md), [`commands.serverExecuteCommand`](commands/server-execute-command.md) | Open and reveal route through server workspace APIs, root-relative paths, selected-file grants, and open-document metadata validation |
@@ -979,7 +981,7 @@ Plan 060 reviewed every user-visible behavior changed by the comprehensive remed
 | Adopt, inspect, revoke, or roll back a third-party package/replacement | `clay package adopt\|inspect\|revoke\|rollback` host CLI, never package JavaScript |
 | Approve a fixed language-server contribution for known roots | [`language-server.authorizeLanguageServer`](language-server/authorize-language-server.md), before `loadPackage` seals authority |
 | Bind built-in/package commands | [`keybindings.bindKey`](keybindings/bind-key.md) |
-| Select theme, typography, or validated syntax tier | [`setTheme`](theme/set-theme.md), [`setTypography`](theme/set-typography.md), [`setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md) |
+| Select theme, typography, design system, or validated syntax tier | [`setTheme`](theme/set-theme.md), [`setTypography`](theme/set-typography.md), [`setDesignSystem`](theme/set-design-system.md) ([`settings.setDesignSystem`](settings/set-design-system.md) for persisted UI changes), [`setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md) |
 | Set approved package UI defaults | [`setPackageOption`](configuration/set-package-option.md) and [`serverSetLayoutOverride`](ui/server-set-layout-override.md) |
 | Compose local configuration | [`loadConfigurationModule`](configuration/load-configuration-module.md), confined beneath `~/.config/clay/` |
 
@@ -1014,19 +1016,19 @@ Configuration values for theme, appearance, and typography resolve in a single d
 
 | Rank | Source | Origin | Wins over |
 |------|--------|--------|-----------|
-| 1 (highest) | `ui-session` | `~/.config/clay/preferences.json`, written by `settings.setTheme` / `settings.setAppearance` / `settings.setTypography` (validated complete typography JSON) | everything below |
-| 2 | `init-js` | `~/.config/clay/init.js` calls to `setTheme` / `setAppearance` / `setTypography` | package / canonical defaults |
+| 1 (highest) | `ui-session` | `~/.config/clay/preferences.json`, written by `settings.setTheme` / `settings.setAppearance` / `settings.setDesignSystem` / `settings.setTypography` (validated complete typography JSON) | everything below |
+| 2 | `init-js` | `~/.config/clay/init.js` calls to `setTheme` / `setAppearance` / `setDesignSystem` / `setTypography` | package / canonical defaults |
 | 3 (lowest) | canonical / package default | appearance-derived Modus default (`System` → dark → `@clay/theme-modus-vivendi`; `Light` → `@clay/theme-modus-operandi`), or the Clay core default | — |
 
 On every startup and reload, `init.js` evaluates first; persisted `ui-session` preferences apply immediately after so a UI choice always overrides the equivalent `init.js` call. An explicit `setTheme` always wins over the appearance-derived canonical default. Absent preference fields are no-ops: `init.js` (or the canonical default) stays in effect.
 
 ### Persistence store
 
-`~/.config/clay/preferences.json` is a closed JSON object with at most three keys: `theme` (a bundled first-party `@clay/theme-*` specifier), `appearance` (`light` | `dark` | `system`), and `typography` (the `setTypography` payload). The file is bounded (8 KiB), validated at load and persist time, and authority-rejecting (no raw ops, CSS, callbacks, client JavaScript, or state values). A corrupted, oversized, or manually-edited file is dropped field-by-field with a diagnostic so startup never breaks and no authority is granted. The `setPackageOption` source taxonomy is extended with `ui-session` to label these persisted values.
+`~/.config/clay/preferences.json` is a closed JSON object with at most four keys: `theme` (a bundled first-party `@clay/theme-*` specifier), `appearance` (`light` | `dark` | `system`), `designSystem` (`@clay/core` or a bundled `@clay/design-*` `uiDesignSystem` contributor), and `typography` (the `setTypography` payload). The file is bounded (8 KiB), validated at load and persist time, and authority-rejecting (no raw ops, CSS, callbacks, client JavaScript, or state values). A corrupted, oversized, or manually-edited file is dropped field-by-field with a diagnostic so startup never breaks and no authority is granted. The `setPackageOption` source taxonomy is extended with `ui-session` to label these persisted values.
 
 ### Settings command flow
 
-`settings.setTheme` / `settings.setAppearance` validate the value, merge it into `preferences.json` (atomic tmp + rename), and reload the runtime. `settings.setTypography` parses and fully revalidates the complete typography JSON argument (`arguments.typography`) before persisting and reloading. `settings.reset` clears the store and reloads. `settings.open` / `settings.close` validate and acknowledge without persistence. A corrupted, oversized, or manually-edited `preferences.json` is dropped field-by-field (or wholesale when unreadable/oversized/not an object) with a diagnostic at load time so startup never breaks, and every persisted value is revalidated at persist time before the atomic write; the next reload applies the store immediately after `init.js` evaluation so a UI choice always overrides the equivalent `init.js` call.
+`settings.setTheme` / `settings.setAppearance` / `settings.setDesignSystem` validate the value, merge it into `preferences.json` (atomic tmp + rename), and reload the runtime (`settings.setDesignSystem` accepts `@clay/core` or a bundled `@clay/design-*` contributor and persists the `designSystem` preference; see [`settings.setDesignSystem`](clay-js-api/settings/set-design-system.md)). `settings.setTypography` parses and fully revalidates the complete typography JSON argument (`arguments.typography`) before persisting and reloading. `settings.reset` clears the store and reloads. `settings.open` / `settings.close` validate and acknowledge without persistence. A corrupted, oversized, or manually-edited `preferences.json` is dropped field-by-field (or wholesale when unreadable/oversized/not an object) with a diagnostic at load time so startup never breaks, and every persisted value is revalidated at persist time before the atomic write; the next reload applies the store immediately after `init.js` evaluation so a UI choice always overrides the equivalent `init.js` call.
 
 ### Example
 

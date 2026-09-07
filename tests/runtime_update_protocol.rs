@@ -18,6 +18,7 @@ fn valid_snapshot(generation: u64, client_id: u64) -> RuntimeStateSnapshot {
         },
         active_typography: ActiveTypography::default(),
         active_design_system: clay::protocol::ActiveDesignSystem::core_fallback(generation),
+        ui_choices: clay::protocol::UiChoicesSnapshot::default(),
         sdui_tree: SduiTree {
             ui_version: 1,
             root_id: SduiNodeId(1),

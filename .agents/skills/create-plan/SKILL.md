@@ -28,7 +28,7 @@ Create or update actionable, numbered, documentation-backed implementation plans
 8. Load project-specific plan requirements deterministically:
    - Read `.agents/skills/create-plan/references/default.md` if it exists.
    - Read `.agents/skills/create-plan/references/<git-root-basename>.md` if it exists.
-   - Apply all loaded requirements before finalizing tasks.
+   - Apply all loaded requirements before finalizing tasks. For the Clay project this includes, whenever a plan touches a user-facing configuration surface, both the example-config maintenance task and a separate example-config live launch-test task that starts the real app against a copy of `examples/config/init.js` and verifies it still works end to end.
 9. If `.agents/skills/project-wiki/` exists, include exactly one final code-wiki task after implementation/verification and project-specific maintenance tasks. Use `.agents/skills/create-plan/references/wiki-task.md` when present.
 10. Write the plan using the structure below.
 

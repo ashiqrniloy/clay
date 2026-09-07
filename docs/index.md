@@ -143,6 +143,7 @@ The generated documentation registry must read this section as the explicit incl
 - [setAppearance](reference/clay-js-api/theme/set-appearance.md) — `theme.setAppearance`
 - [setTypography](reference/clay-js-api/theme/set-typography.md) — `theme.setTypography`
 - [setDesignSystem](reference/clay-js-api/theme/set-design-system.md) — `theme.setDesignSystem`
+- [settings.setDesignSystem](reference/clay-js-api/settings/set-design-system.md) — `settings.setDesignSystem`
 - [completionTriggerCharactersFromEditorRules](reference/clay-js-api/completion/completion-trigger-characters-from-editor-rules.md) — `completion.completionTriggerCharactersFromEditorRules`
 - [serverListCompletionProvidersForTrigger](reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md) — `completion.serverListCompletionProvidersForTrigger`
 - [serverDisableCompletion](reference/clay-js-api/completion/server-disable-completion.md) — `completion.serverDisableCompletion`

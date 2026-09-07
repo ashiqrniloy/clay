@@ -1,0 +1,254 @@
+{
+  "settings": [
+    {
+      "role": "RootWebArea",
+      "name": "Clay",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "main",
+      "name": "Clay workspace",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "CLAY",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "tablist",
+      "name": "Window tabs",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "complementary",
+      "name": "Settings",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "/fixture/settings",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "CLAY",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "tab",
+      "name": "Workspace",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "Settings",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "button",
+      "name": "Close",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "button",
+      "name": "Theme",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "button",
+      "name": "Typography",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "button",
+      "name": "Apply typography",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "button",
+      "name": "Reset preferences",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "/fixture/settings",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "Disconnected",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "Workspace",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Settings",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "Close",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "Theme",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "button",
+      "name": "Theme Theme",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "button",
+      "name": "Design system Design system",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "button",
+      "name": "System Appearance",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "Typography",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "Apply typography",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "Reset preferences",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Disconnected",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Workspace",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Close",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Theme",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Typography",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Apply typography",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Reset preferences",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "Theme",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "Design system",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "StaticText",
+      "name": "System",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Theme",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Design system",
+      "focused": false,
+      "disabled": false
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "System",
+      "focused": false,
+      "disabled": false
+    }
+  ],
+  "settings-tab-order": [
+    "BUTTON:Close",
+    "BUTTON:Theme▸",
+    "BUTTON:Theme",
+    "BUTTON:Design system",
+    "BUTTON:Appearance",
+    "BUTTON:Typography▸",
+    "BUTTON:Apply typography",
+    "BUTTON:Reset preferences"
+  ],
+  "settings-first-focus": {
+    "tag": "DIV",
+    "name": "Workspace",
+    "outline": "solid",
+    "outlineWidth": "2px"
+  }
+}

@@ -427,6 +427,10 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "shell.clientTabClose"
             | "shell.clientTabMoveLeft"
             | "shell.clientTabMoveRight"
+            // Plan 109 I4: reasoning-effort cycle on the coding-agent
+            // surface — the panel consumes it client-side (composer chord
+            // + dropdown), like the editor's client commands.
+            | "coding-agent.clientCycleEffort"
     )
 }
 
@@ -516,6 +520,7 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
             | "shell.clientTabClose"
             | "shell.clientTabMoveLeft"
             | "shell.clientTabMoveRight"
+            | "coding-agent.clientCycleEffort"
     ) {
         Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
     } else if crate::client_commands::EditorClientCommand::from_command_id(command_id).is_some() {
@@ -920,6 +925,20 @@ mod tests {
                 "{command} must pass the bindKey validation gate"
             );
         }
+    }
+
+    #[test]
+    fn coding_agent_effort_cycle_is_bindable_and_client_ui_routed() {
+        // Plan 109 I4: `coding-agent.clientCycleEffort` binds via bindKey
+        // (default package keyRouting Shift+Tab) and executes client-side
+        // on the coding-agent surface like the editor client commands.
+        assert!(is_runtime_bindable_command(
+            "coding-agent.clientCycleEffort"
+        ));
+        assert_eq!(
+            command_routing_policy("coding-agent.clientCycleEffort").unwrap(),
+            RoutingPolicy::ClientUiCommand
+        );
     }
 
     #[test]

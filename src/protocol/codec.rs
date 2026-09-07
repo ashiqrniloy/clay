@@ -291,7 +291,7 @@ mod tests {
             LanguageIntelligenceStatus, LockOwner, PROTOCOL_VERSION, PackageUiSnapshot,
             RegionLockConflict, RuntimeDiagnostic, RuntimeStateSnapshot, SduiActionIntent,
             SduiActionSource, SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
-            SduiTreeUpdate, ServerMessage, bounded_document_chunk_bytes,
+            SduiTreeUpdate, ServerMessage, UiChoicesSnapshot, bounded_document_chunk_bytes,
             representative_panel_update, representative_sdui_tree,
         },
     };
@@ -1110,6 +1110,7 @@ mod tests {
                 "runtime.reload_succeeded",
                 "Configuration reloaded.",
             )],
+            ui_choices: UiChoicesSnapshot::default(),
         };
         snapshot.validate().expect("fixture snapshot is valid");
         let message = ServerMessage::RuntimeStateSnapshot(Box::new(snapshot));
@@ -1174,6 +1175,7 @@ mod tests {
             package_ui: PackageUiSnapshot::default(),
             documents: Vec::new(),
             diagnostics: Vec::new(),
+            ui_choices: UiChoicesSnapshot::default(),
         };
         let message = ServerMessage::RuntimeStateSnapshot(Box::new(snapshot.clone()));
         let error = codec.encode_server_message(&message).unwrap_err();

@@ -537,6 +537,7 @@ pub const RESERVED_CORE_API_DOMAINS: &[&str] = &[
     "packages",
     "parse",
     "runtime",
+    "settings",
     "sdui",
     "shell",
     "syntax",

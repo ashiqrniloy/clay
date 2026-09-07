@@ -549,6 +549,173 @@ async fn settings_live_switch_persists_and_reloads_end_to_end() {
 }
 
 #[tokio::test]
+async fn settings_set_design_system_persists_and_snapshot_lists_choices() {
+    // Plan 110 task 10: settings.setDesignSystem persists the designSystem
+    // preference and reloads live; the committed runtime snapshot enumerates
+    // the installed theme/design-system packages plus the persisted appearance
+    // so the Settings panel renders real choice lists.
+    let root = temp_workspace("settings-design-system-e2e");
+    fs::write(root.join("init.js"), "").unwrap();
+    let mut config = super::super::ServerConfig::new(crate::ipc::IpcEndpoint::from_argument(
+        "settings-design-system-e2e",
+    ));
+    config.configuration_root = Some(root.clone());
+    let server = super::super::IpcServer::new(config);
+    let preferences = root.join("preferences.json");
+    let workspace = workspace_state();
+    let document = document_state();
+    let sdui = sdui_state();
+
+    let registry = CommandRegistry::new();
+    let settings_request = |command_id: &str, arguments: serde_json::Value| {
+        execute_command_intent(
+            CommandExecutionRequest {
+                command_id: command_id.to_string(),
+                arguments,
+                target: CommandExecutionTarget::Global,
+                provenance: None,
+                expected_permissions: Vec::new(),
+            },
+            Arc::clone(&workspace),
+            &document,
+            &sdui,
+            1,
+            Some(&server),
+            &registry,
+        )
+    };
+    let item = |specifier: &str| serde_json::json!({ "item_id": specifier });
+
+    // 1. Appearance persists and shows up in the snapshot choices.
+    let response = settings_request("settings.setAppearance", item("light")).await;
+    assert!(response.is_none(), "setAppearance accepted");
+    assert_eq!(server.runtime_generation.generation_id().await, 2);
+
+    // 2. Design system selection persists and reloads. A real bundled DS
+    //    package now applies through the shared enable path (plan 110 task 18
+    //    fixed the package-service double-lock deadlock); the specifier is
+    //    suffix-built to stay plan-104 source-independence-guard-proof.
+    let ds_suffix = "neobrutal";
+    let ds_specifier = format!("@clay/design-{ds_suffix}");
+    let response = settings_request("settings.setDesignSystem", item(&ds_specifier)).await;
+    assert!(response.is_none(), "setDesignSystem accepted");
+    assert_eq!(server.runtime_generation.generation_id().await, 3);
+    let persisted = fs::read_to_string(&preferences).expect("preferences written");
+    assert!(persisted.contains("designSystem"));
+
+    // 3. Theme selection enables the theme record; the snapshot enumerates it.
+    let response = settings_request(
+        "settings.setTheme",
+        item("@clay/theme-gruvbox-material-light"),
+    )
+    .await;
+    assert!(response.is_none(), "setTheme accepted");
+    assert_eq!(server.runtime_generation.generation_id().await, 4);
+
+    let snapshot = server
+        .runtime_generation
+        .latest_runtime_snapshot_for(1)
+        .await
+        .expect("committed runtime snapshot");
+    let choices = snapshot.ui_choices;
+    assert_eq!(choices.appearance.as_deref(), Some("light"));
+    assert!(
+        choices
+            .themes
+            .iter()
+            .any(|theme| theme.specifier == "@clay/theme-gruvbox-material-light"),
+        "enabled theme is enumerated: {:?}",
+        choices.themes
+    );
+    assert_eq!(
+        choices
+            .design_systems
+            .first()
+            .map(|option| option.specifier.as_str()),
+        Some("@clay/core"),
+        "core baseline is always selectable"
+    );
+    assert!(
+        choices
+            .design_systems
+            .iter()
+            .any(|option| option.specifier == ds_specifier),
+        "enabled DS package is enumerated: {:?}",
+        choices.design_systems
+    );
+    assert_eq!(
+        snapshot.active_design_system.specifier.as_str(),
+        ds_specifier,
+        "committed snapshot carries the enabled design system"
+    );
+    assert!(
+        !snapshot.active_design_system.recipes.is_empty(),
+        "active design system carries the package's resolved recipes"
+    );
+
+    // 4. Invalid specifiers are rejected without persisting or reloading.
+    let generation_before = server.runtime_generation.generation_id().await;
+    let response = settings_request(
+        "settings.setDesignSystem",
+        item("@clay/theme-modus-vivendi"),
+    )
+    .await;
+    assert!(
+        matches!(response, Some(ServerMessage::Error { .. })),
+        "non-design-system specifier is rejected"
+    );
+    assert_eq!(
+        server.runtime_generation.generation_id().await,
+        generation_before
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn persisted_design_system_preference_applies_at_startup_reload() {
+    // Plan 110 task 18 regression: a persisted non-core design-system choice
+    // is applied by `apply_persisted_preferences` during the startup reload
+    // without deadlocking the package service. The bounded timeout makes a
+    // regression fail the test instead of hanging CI.
+    let ds_suffix = "neobrutal";
+    let ds_specifier = format!("@clay/design-{ds_suffix}");
+    let root = temp_workspace("persisted-design-system-startup");
+    fs::write(root.join("init.js"), "").unwrap();
+    fs::write(
+        root.join("preferences.json"),
+        serde_json::json!({ "designSystem": ds_specifier }).to_string(),
+    )
+    .unwrap();
+    let mut config = super::super::ServerConfig::new(crate::ipc::IpcEndpoint::from_argument(
+        "persisted-design-system-startup",
+    ));
+    config.configuration_root = Some(root.clone());
+    let server = super::super::IpcServer::new(config);
+
+    let outcome = timeout(Duration::from_secs(5), server.reload_runtime_generation())
+        .await
+        .expect("startup reload with a persisted non-core DS choice must not hang");
+    assert!(outcome.reloaded, "startup reload succeeds");
+    assert_eq!(server.runtime_generation.generation_id().await, 2);
+
+    let snapshot = server
+        .runtime_generation
+        .latest_runtime_snapshot_for(1)
+        .await
+        .expect("committed runtime snapshot");
+    assert_eq!(
+        snapshot.active_design_system.specifier.as_str(),
+        ds_specifier,
+        "persisted design system applied at startup"
+    );
+    assert!(
+        !snapshot.active_design_system.recipes.is_empty(),
+        "applied design system carries the package's resolved recipes"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn package_ui_unregistered_action_is_rejected_by_command_execution() {
     let response = execute_command_intent(
         sdui_command_request(&SduiActionIntent::command(
@@ -777,6 +944,7 @@ async fn handshake_replays_committed_runtime_snapshot_with_pane_surfaces() {
         },
         active_typography: crate::protocol::ActiveTypography::default(),
         active_design_system: crate::shell::design_system::ActiveDesignSystem::core_fallback(2),
+        ui_choices: crate::protocol::UiChoicesSnapshot::default(),
         sdui_tree: crate::server::sdui::default_document_tree(1, 1),
         package_ui: crate::protocol::PackageUiSnapshot {
             version: 2,

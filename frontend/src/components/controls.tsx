@@ -2,6 +2,8 @@ import { useState, type ReactNode } from "react";
 import {
   ListBox,
   ListBoxItem,
+  Section,
+  Header,
   Select,
   SelectValue,
   Button,
@@ -21,9 +23,17 @@ export interface DropdownOption {
   disabled?: boolean;
 }
 
+export interface DropdownGroup {
+  label: string;
+  options: DropdownOption[];
+}
+
 export interface ClayDropdownProps {
   label: string;
   options: DropdownOption[];
+  /** Optional provider-style grouping (plan 109 I3): rendered as labeled
+   *  sections; `options` is ignored when `groups` is present. */
+  groups?: DropdownGroup[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   disabled?: boolean;
@@ -33,11 +43,15 @@ export interface ClayDropdownProps {
 export function ClayDropdown({
   label,
   options,
+  groups,
   selectedId,
   onSelect,
   disabled = false,
 }: ClayDropdownProps) {
-  const selected = options.find((option) => option.id === selectedId);
+  const selected = options.find((option) => option.id === selectedId) ??
+    groups?.flatMap((group) => group.options).find(
+      (option) => option.id === selectedId,
+    );
   return (
     <Select
       aria-label={label}
@@ -60,17 +74,34 @@ export function ClayDropdown({
           className={styles.listBox}
           {...recipeAttributes("dropdown", "list")}
         >
-          {options.map((option) => (
-            <ListBoxItem
-              key={option.id}
-              id={option.id}
-              className={styles.listRow}
-              isDisabled={option.disabled}
-              {...recipeAttributes("dropdown", "item")}
-            >
-              {option.label}
-            </ListBoxItem>
-          ))}
+          {groups
+            ? groups.map((group) => (
+                <Section key={group.label} id={group.label} className={styles.listSection}>
+                  <Header className={styles.listSectionHeader}>{group.label}</Header>
+                  {group.options.map((option) => (
+                    <ListBoxItem
+                      key={option.id}
+                      id={option.id}
+                      className={styles.listRow}
+                      isDisabled={option.disabled}
+                      {...recipeAttributes("dropdown", "item")}
+                    >
+                      {option.label}
+                    </ListBoxItem>
+                  ))}
+                </Section>
+              ))
+            : options.map((option) => (
+                <ListBoxItem
+                  key={option.id}
+                  id={option.id}
+                  className={styles.listRow}
+                  isDisabled={option.disabled}
+                  {...recipeAttributes("dropdown", "item")}
+                >
+                  {option.label}
+                </ListBoxItem>
+              ))}
         </ListBox>
       </Popover>
     </Select>

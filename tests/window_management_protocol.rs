@@ -10,7 +10,7 @@
 use clay::protocol::{
     BehaviorManifest, ClientMessage, KeyBindingContext, KeyBindingRule, KeyCode, KeyModifiers,
     KeyStroke, PROTOCOL_VERSION, RoutingPolicy, ServerMessage, TabCommand, TabEntry,
-    TabRegistrySnapshot, codec::Codec,
+    TabRegistrySnapshot, codec::Codec, codec::DEFAULT_MAX_FRAME_SIZE,
 };
 
 fn registry_snapshot() -> TabRegistrySnapshot {
@@ -205,15 +205,32 @@ fn malformed_tab_frames_are_rejected_without_panic() {
         "declared/actual length mismatch must fail closed"
     );
 
-    // Declared length beyond the frame ceiling is rejected before read.
+    // Declared length beyond the frame ceiling is rejected before read. The
+    // ceiling is `DEFAULT_MAX_FRAME_SIZE` (16 MiB, `src/protocol/codec.rs`) —
+    // the single source of truth, not a duplicated guess.
     let mut oversize = vec![0; 4];
-    oversize[..4].copy_from_slice(&(1024 * 1024 + 1u32).to_be_bytes());
+    oversize[..4].copy_from_slice(&((DEFAULT_MAX_FRAME_SIZE as u32) + 1).to_be_bytes());
     assert!(
         matches!(
             codec.decode_server_message(&oversize),
             Err(clay::protocol::codec::CodecError::FrameTooLarge { .. })
         ),
         "oversize declared length must fail closed"
+    );
+
+    // At exactly the ceiling the prefix gate passes and the frame fails on
+    // declared/actual mismatch instead — rejection is strictly above the
+    // ceiling, and the 4-byte buffer proves no allocation proportional to
+    // the declared length ever happens.
+    let mut at_ceiling = vec![0; 4];
+    at_ceiling[..4].copy_from_slice(&(DEFAULT_MAX_FRAME_SIZE as u32).to_be_bytes());
+    assert!(
+        matches!(
+            codec.decode_server_message(&at_ceiling),
+            Err(clay::protocol::codec::CodecError::LengthMismatch { declared, .. })
+                if declared == DEFAULT_MAX_FRAME_SIZE
+        ),
+        "at-ceiling declaration must still fail closed without allocating"
     );
 
     // Corrupt payload bytes with a valid length: validated deserialization

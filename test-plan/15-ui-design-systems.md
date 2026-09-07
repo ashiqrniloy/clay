@@ -3,8 +3,9 @@
 End-to-end activation, switching, recovery, component/surface recipe migration,
 conformance testing, package security, and accessibility fallbacks for package-contributed UI design systems.
 
-- **API reference:** `docs/reference/clay-js-api/theme/set-design-system.md`
+- **API reference:** `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/clay-js-api/settings/set-design-system.md`
 - **Configuration semantics:** `docs/reference/clay-js-api/configuration.md`
+- **Plan 110 artifacts:** `test-plan/artifacts/110-ui-design-systems/`
 - **Public specification:** `docs/reference/ui-design-systems.md`
 - **Recipe matrix:** `docs/development/ui-design-system-recipe-matrix.md`
 - **CSS Audit:** `docs/development/ui-design-system-css-audit.md`
@@ -38,6 +39,12 @@ conformance testing, package security, and accessibility fallbacks for package-c
 | UI-DS-18 | **Plan 104 Package-Only Replacement & Source Independence:** Verify zero host branching on package specifiers | Host components and styles contain zero `if (ds === "@clay/design-glass")` checks; all styling is driven strictly via generic `--clay-ds-*` variables |
 | UI-DS-19 | **Plan 104 DOM & State Continuity:** Switch between Neobrutal and Glass while typing in text field / editor | Zero React component unmounting; active focus, scroll position, and input buffers are preserved continuously across switches |
 | UI-DS-20 | **Plan 104 Validation & Package Security Hardening:** Test out-of-bounds parameters and unauthorized capability requests | Rejected at parse/enable time for blur > 32px, duration > 1000ms, border-width > 8px, saturation > 2.0, or raw color injections; third-party packages request 0 permissions and 0 renderer capabilities |
+| UI-DS-21 | **Plan 110 Settings-driven selection:** Open the Settings panel and switch the *Design system* dropdown (Core baseline ↔ bundled design package) | Dropdown enumerates the server-provided `ui_choices.design_systems` list (Core baseline always first, then bundled contributors); switching restyles the whole shell in one visible swap with zero component remounting, preserved focus, and an advanced `runtime_generation_id` |
+| UI-DS-22 | **Plan 110 Command-centre selection:** Run `settings.setDesignSystem` through the command surface with a valid specifier | Same whole-shell restyle as the Settings dropdown; the command persists the `designSystem` preference and the next snapshot reports the new active design system |
+| UI-DS-23 | **Plan 110 Invalid specifier surface:** Send `settings.setDesignSystem` with `@clay/design-unknown` (or any non-design specifier) | Command rejected with an `InvalidArguments` diagnostic before any persistence; no reload is triggered; previous generation retained; nothing installed or enabled |
+| UI-DS-24 | **Plan 110 Server-enumerated theme list:** Open the Settings *Theme* dropdown | Lists installed `@clay/theme-*` packages enumerated from the server snapshot (`ui_choices.themes`, sorted) instead of any hardcoded client list |
+| UI-DS-25 | **Plan 110 Appearance persistence:** Set *Appearance* to `dark` via Settings, fully quit Clay, relaunch | Appearance preference survives restart: persisted in `preferences.json`, re-applied at startup, snapshot reports the persisted variant |
+| UI-DS-26 | **Plan 110 Visible DS × theme differences:** Compare Neobrutal vs Glass on dark and light themes | Clearly distinguishable geometry/materials per design system (0px radii + hard offset shadows vs frosted translucency + specular highlights) under both themes; theme owns colors, DS owns geometry |
 
 ---
 
@@ -55,6 +62,26 @@ Full review artifacts saved under `.impeccable/review/plan-104/` (generated with
 | `loading` | `.impeccable/review/plan-104/loading/` | PASS | Host-published "Loading review" panel with migrated `--clay-ds-panel-*` variables delivered via RuntimeStateSnapshot. |
 | `error` | `.impeccable/review/plan-104/error/` | PASS | Valid startup followed by reload-time invalid theme selection: client stays connected on last valid generation, status bar displays sanitized `JavaScript runtime evaluation failed.` with zero leaked paths. |
 | `recovery` | `.impeccable/review/plan-104/recovery/` | PASS | Server stopped after connection: alert role `Session lost` with `Reconnect session` button, clean non-broken layout. |
+
+---
+
+## Plan 110 manual-test-plan execution record (2026-09-06, task 14)
+
+Executed against a freshly rebuilt `target/debug/clay` + `clay-desktop` (the run initially reproduced a client `ArchivedSduiTree` rkyv deserialization failure caused by a stale mixed build — rebuilding both binaries fixed it; keep `cargo build --bins -p clay-desktop` before captures).
+
+Artifacts: `test-plan/artifacts/110-ui-design-systems/` (real-app portal screenshots cropped to the Clay window — the capture script now waits for fixture SDUI trees and never retains full-desktop captures with unrelated host windows).
+
+| Fixture | Result | Evidence/notes |
+| --- | --- | --- |
+| ui-review-default | PASS | Clean workspace shell, welcome actions, status bar |
+| ui-review-design-system | PASS | Explicit `@clay/core` activation (dark): SDUI panel, primary/enabled/disabled states render through core baseline recipes |
+| ui-review-design-system-light | PASS | Explicit `@clay/core` activation (light): same recipes under the light theme, theme-owned colors |
+| ui-review-error | PASS | Reload-time invalid selection: client stays connected on the previous generation; sanitized `JavaScript runtime evaluation failed.` diagnostic |
+| ui-review-design-neobrutal | UNRESOLVED | Blocked by the plan-110 task-18 pre-existing defect: `setDesignSystem("@clay/design-neobrutal")` inside `init.js` evaluation during a live reload deadlocks the JS runtime, so the fixture SDUI tree never appears (`@clay/core` applies instantly — same root cause as the task-10 bisection). Retry after task 18 lands |
+| ui-review-design-glass | UNRESOLVED | Same task-18 deadlock |
+| Settings/command-centre interactive switching | UNRESOLVED | Documented host ceiling (no `/dev/uinput`, no xdotool/ydotool, no Wayland portal input path); switching logic is pinned by the automated tests listed under UI-DS-21/22 |
+
+Task 14 also added the `ui-review-design-neobrutal-light` / `ui-review-design-glass-light` capture fixtures plus SDUI-tree waits and window cropping to `scripts/capture-ui-review.sh` so the full DS × theme matrix can be captured once task 18 unblocks package activation. No existing step was weakened.
 
 ---
 
@@ -82,3 +109,9 @@ Full review artifacts saved under `.impeccable/review/plan-104/` (generated with
 | UI-DS-18 | PASS automated | `plan104_source_independence_guard_rejects_package_name_branching` passed |
 | UI-DS-19 | PASS automated | `frontend/src/test/design-system-conformance.test.tsx` proves DOM/state continuity across switches |
 | UI-DS-20 | PASS automated | `plan104_malicious_and_out_of_bounds_design_system_values_are_rejected` and `plan104_third_party_design_system_security_and_authority_isolation` passed |
+| UI-DS-21 | PASS automated | `settings-panel-choices.test.tsx` proves dropdown renders from server snapshot, switch re-renders without remount, focus preserved; `settings_set_design_system_persists_and_snapshot_lists_choices` pins persist/reload/active_design_system. Interactive keyboard leg UNRESOLVED (host input ceiling below) |
+| UI-DS-22 | PASS automated | Validator allowlist tests (`settings_set_design_system_accepts_core_and_bundled_contributors`, `_rejects_unknown_and_non_design_specifiers`) + persistence e2e; command-centre interactive leg UNRESOLVED (host input ceiling) |
+| UI-DS-23 | PASS automated | Rejection e2e: invalid specifier rejected without reload; real-app sanitized-diagnostic surface captured in `ui-review-error` |
+| UI-DS-24 | PASS automated | `enumerate_ui_choices` e2e asserts themes enumerated from enabled package records (sorted, snapshot-delivered); settings-panel test asserts the dropdown renders from the snapshot |
+| UI-DS-25 | PASS automated | Persistence e2e asserts appearance survives restart: `persist_settings_change` writes the pref, startup `apply_persisted_preferences` re-applies it; real-app init.js restart persistence in UI-DS-10 |
+| UI-DS-26 | PARTIAL | Fixture-layer: `.impeccable/reviews/110-final/` CDP captures show clearly visible Neobrutal/Glass differences on dark+light themes. Real-app package activation (`ui-review-design-neobrutal`, `ui-review-design-glass`): **UNRESOLVED — blocked by the task-18 pre-existing reload deadlock** (see record below) |

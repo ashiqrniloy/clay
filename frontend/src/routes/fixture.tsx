@@ -141,6 +141,13 @@ export function FixtureRoute() {
         placeholder="Type here"
         description="Token-driven validation states"
       />
+      <ClayTextField
+        label="Workspace"
+        value={text}
+        onChange={setText}
+        validationState="error"
+        description="Value is not a valid workspace path"
+      />
       <ClayDropdown
         label="Density"
         options={[
@@ -748,9 +755,16 @@ function CodingAgentFixture() {
     };
   }, [state]);
   return (
-    <div className={styles.packageFixture} data-fixture={`coding-agent-${state}`}>
+    <div
+      className={styles.packageFixture}
+      data-fixture={`coding-agent-${state}`}
+    >
       <Suspense fallback={<ClayText variant="status">Loading agent…</ClayText>}>
-        <CodingAgentSurfaceLazy surface={codingAgentFixtureSurface} uiVersion={4} workspaceRoot="/tmp/project" />
+        <CodingAgentSurfaceLazy
+          surface={codingAgentFixtureSurface}
+          uiVersion={4}
+          workspaceRoot="/tmp/project"
+        />
       </Suspense>
     </div>
   );

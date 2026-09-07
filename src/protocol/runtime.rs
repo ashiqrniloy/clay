@@ -16,6 +16,7 @@
 
 use crate::perf::budgets::{
     RUNTIME_STATE_SNAPSHOT_MAX_DIAGNOSTICS, RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS,
+    RUNTIME_STATE_SNAPSHOT_MAX_UI_CHOICES,
 };
 use crate::protocol::{
     ActiveTheme, ActiveTypography, BehaviorManifest, ClientId, DecorationSet, DiagnosticSet,
@@ -263,6 +264,9 @@ pub struct RuntimeStateSnapshot {
     pub active_typography: ActiveTypography,
     #[serde(default = "default_active_design_system")]
     pub active_design_system: ActiveDesignSystem,
+    /// Installable Settings selections (plan 110 task 10).
+    #[serde(default)]
+    pub ui_choices: UiChoicesSnapshot,
     pub sdui_tree: SduiTree,
     pub package_ui: PackageUiSnapshot,
     pub documents: Vec<DocumentRuntimeRenderState>,
@@ -271,6 +275,80 @@ pub struct RuntimeStateSnapshot {
 
 fn default_active_design_system() -> ActiveDesignSystem {
     ActiveDesignSystem::core_fallback(0)
+}
+
+/// One installable UI choice (plan 110 task 10): a specifier plus an optional
+/// host-declared label. Theme packages carry no display name, so the client
+/// derives labels from the specifier when `display_name` is `None`.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct UiChoiceOption {
+    pub specifier: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+/// Server-enumerated Settings selections (plan 110 task 10): installed theme
+/// packages, enabled UI design systems, and the persisted appearance. The
+/// server owns enumeration from the enabled package inventory; the client
+/// never scans packages. Additive + defaulted so older clients ignore it.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UiChoicesSnapshot {
+    pub themes: Vec<UiChoiceOption>,
+    pub design_systems: Vec<UiChoiceOption>,
+    /// Persisted light/dark/system preference, when one is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<String>,
+}
+
+impl UiChoicesSnapshot {
+    /// Bounded option lists and non-empty bounded strings.
+    fn validate(&self) -> Result<(), RuntimeStateSnapshotValidationError> {
+        if self.themes.len() > RUNTIME_STATE_SNAPSHOT_MAX_UI_CHOICES
+            || self.design_systems.len() > RUNTIME_STATE_SNAPSHOT_MAX_UI_CHOICES
+        {
+            return Err(RuntimeStateSnapshotValidationError::TooManyUiChoices);
+        }
+        for option in self.themes.iter().chain(&self.design_systems) {
+            if option.specifier.is_empty()
+                || option.specifier.len() > 256
+                || option
+                    .display_name
+                    .as_ref()
+                    .is_some_and(|name| name.len() > 256)
+            {
+                return Err(RuntimeStateSnapshotValidationError::InvalidUiChoice);
+            }
+        }
+        if let Some(appearance) = &self.appearance
+            && !matches!(appearance.as_str(), "light" | "dark" | "system")
+        {
+            return Err(RuntimeStateSnapshotValidationError::InvalidUiChoice);
+        }
+        Ok(())
+    }
 }
 
 /// Why a runtime snapshot failed validation before install or fan-out.
@@ -286,6 +364,8 @@ pub enum RuntimeStateSnapshotValidationError {
     BehaviorManifestDocumentMismatch { document_id: DocumentId },
     TooManyRuntimeDiagnostics { count: usize, max: usize },
     InvalidPackageUi,
+    TooManyUiChoices,
+    InvalidUiChoice,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -413,6 +493,9 @@ impl RuntimeStateSnapshot {
         self.package_ui
             .validate()
             .map_err(|_| RuntimeStateSnapshotValidationError::InvalidPackageUi)?;
+        self.ui_choices
+            .validate()
+            .map_err(|_| RuntimeStateSnapshotValidationError::InvalidUiChoice)?;
 
         let mut seen = Vec::with_capacity(self.documents.len());
         for document in &self.documents {

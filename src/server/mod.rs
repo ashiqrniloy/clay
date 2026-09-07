@@ -691,6 +691,7 @@ impl IpcServer {
         let document_id_allocator = Arc::new(AtomicU64::new(1));
         let bootstrap_state =
             TabServerState::from_workspace(workspace, Arc::clone(&document_id_allocator));
+        let tab_registry = Arc::new(Mutex::new(tab_registry::TabRegistry::new()));
         let agent = agent::AgentHost::for_server(
             config
                 .configuration_root
@@ -703,6 +704,10 @@ impl IpcServer {
             Arc::new(Mutex::new(agent_checkpoints::AgentCheckpointStore::new())),
             agent.clone(),
         ));
+        // Plan 109 I1: the agent host reads each tab's current workspace
+        // root from the registry so agent sessions bind to the tab's
+        // workspace (and rebind when it changes), never the launch cwd.
+        agent.set_tab_registry(Arc::clone(&tab_registry));
         // Phase 1 `agent` domain: install the process-global RPC authority
         // for user-facing agent facades (`clay:agent`). Package JS cannot
         // reach the daemon except through these validated ops.
@@ -741,7 +746,7 @@ impl IpcServer {
             reload_attempt: Arc::new(Mutex::new(())),
             next_client_id: Arc::new(AtomicU64::new(1)),
             live_clients: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-            tab_registry: Arc::new(Mutex::new(tab_registry::TabRegistry::new())),
+            tab_registry,
             tab_registry_tx: broadcast::channel(
                 crate::perf::budgets::RUNTIME_STATE_BROADCAST_CAPACITY,
             )
@@ -1386,6 +1391,7 @@ impl IpcServer {
             evaluation.published_diagnostic_set.clone(),
             runtime_diagnostics,
             package_ui,
+            self.enumerate_ui_choices(&service),
         )?;
         // Fail closed before commit when the complete snapshot cannot fit one
         // bounded IPC frame. Partial/live mutation must not begin.
@@ -1905,6 +1911,7 @@ fn build_runtime_state_snapshot(
     published_diagnostics: Option<crate::protocol::DiagnosticSet>,
     diagnostics: Vec<RuntimeDiagnostic>,
     package_ui: crate::protocol::PackageUiSnapshot,
+    ui_choices: crate::protocol::UiChoicesSnapshot,
 ) -> Result<RuntimeStateSnapshot, RuntimeDiagnostic> {
     let documents = open_documents
         .iter()
@@ -1945,6 +1952,7 @@ fn build_runtime_state_snapshot(
         package_ui,
         documents,
         diagnostics,
+        ui_choices,
     };
     snapshot.validate().map_err(|_| {
         runtime_candidate_error(
@@ -1957,6 +1965,67 @@ fn build_runtime_state_snapshot(
 
 fn runtime_candidate_error(code: &'static str, message: &'static str) -> RuntimeDiagnostic {
     RuntimeDiagnostic::error(code, message)
+}
+
+impl IpcServer {
+    /// Plan 110 task 10: enumerate installable Settings selections from the
+    /// enabled package inventory plus the persisted appearance preference —
+    /// one inventory pass, no new scan, so the Settings dropdowns render from
+    /// the snapshot the client already receives. Deterministic (sorted) so
+    /// snapshot equality stays stable across reloads.
+    fn enumerate_ui_choices(
+        &self,
+        service: &ClayJsRuntimeService,
+    ) -> crate::protocol::UiChoicesSnapshot {
+        let option =
+            |record: &crate::packages::record::PackageRecord| crate::protocol::UiChoiceOption {
+                specifier: record.manifest.name.clone(),
+                display_name: record
+                    .contributions
+                    .ui_design_system
+                    .as_ref()
+                    .map(|ds| ds.display_name.clone()),
+            };
+        let package_service = service
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned");
+        let records: Vec<&crate::packages::record::PackageRecord> =
+            package_service.enabled_records().collect();
+        let mut themes: Vec<_> = records
+            .iter()
+            .filter(|record| record.manifest.name.starts_with("@clay/theme-"))
+            .map(|record| option(record))
+            .collect();
+        let mut design_systems: Vec<_> = records
+            .iter()
+            .filter(|record| record.contributions.ui_design_system.is_some())
+            .map(|record| option(record))
+            .collect();
+        themes.sort_by(|a, b| a.specifier.cmp(&b.specifier));
+        design_systems.sort_by(|a, b| a.specifier.cmp(&b.specifier));
+        // The built-in core baseline is always selectable and never a record.
+        design_systems.insert(
+            0,
+            crate::protocol::UiChoiceOption {
+                specifier: "@clay/core".to_string(),
+                display_name: Some("Core baseline".to_string()),
+            },
+        );
+        let appearance = self
+            .effective_configuration_root()
+            .and_then(|root| {
+                crate::server::configuration::ConfigurationRuntime::from_config_root(&root).ok()
+            })
+            .map(|runtime| runtime.load_preferences().appearance)
+            .and_then(|appearance| appearance)
+            .map(|appearance| appearance.as_str().to_string());
+        crate::protocol::UiChoicesSnapshot {
+            themes,
+            design_systems,
+            appearance,
+        }
+    }
 }
 
 /// Outcome of applying a [`js_runtime::ClayRuntimeEvaluation`]'s shared
@@ -2846,6 +2915,7 @@ await loadPackage("@clay/typescript");"#,
             "settings.open",
             "settings.close",
             "settings.setTheme",
+            "settings.setDesignSystem",
             "settings.setAppearance",
             "settings.setTypography",
             "settings.reset",
@@ -4616,6 +4686,7 @@ Deno.core.ops.op_clay_runtime_record("idempotent");"#,
             },
             documents: Vec::new(),
             diagnostics: Vec::new(),
+            ui_choices: crate::protocol::UiChoicesSnapshot::default(),
         };
         snapshot.validate().expect("sample snapshot");
         snapshot

@@ -193,13 +193,16 @@ export function formatTransformPreset(preset: string): string | null {
  */
 export function variableToCssValue(
   value: DesignSystemVariableValue,
+  key = "",
 ): string | null {
   switch (value.type) {
     case "theme-color-role":
       return formatColorRole(value.value);
     case "dimension":
+      // Negative outline-offset is valid CSS (draws the outline inward);
+      // every other dimension is a size and stays non-negative.
       return Number.isFinite(value.value) &&
-        value.value >= 0 &&
+        value.value >= (key.endsWith(".outlineOffset") ? -8192 : 0) &&
         value.value <= 8192
         ? `${value.value}px`
         : null;
@@ -282,7 +285,7 @@ export function designSystemCssVariables(
 
   for (const [key, value] of Object.entries(snapshot.variables)) {
     const cssName = recipeVariableToCssName(key);
-    const cssVal = variableToCssValue(value);
+    const cssVal = variableToCssValue(value, key);
     if (cssVal === null) {
       throw new Error(
         `Invalid design system variable value for \`${key}\`: ${JSON.stringify(value)}`,

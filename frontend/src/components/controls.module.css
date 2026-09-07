@@ -14,7 +14,7 @@
   width: 100%;
   background: var(
     --clay-ds-dropdown-default-trigger-rest-background-color,
-    var(--clay-surface-control)
+    var(--clay-surface-main)
   );
   color: var(
     --clay-ds-dropdown-default-trigger-rest-text-color,
@@ -129,49 +129,23 @@
 .popover {
   background: var(
     --clay-ds-dropdown-default-popover-rest-background-color,
-    var(
-      --clay-ds-dropdown-default-surface-rest-background-color,
-      var(--clay-surface-overlay)
-    )
+    var(--clay-surface-overlay)
   );
   border: var(
       --clay-ds-dropdown-default-popover-rest-border-width,
-      var(
-        --clay-ds-dropdown-default-surface-rest-border-width,
-        var(--clay-dimension-border-hairline, 1px)
-      )
+      var(--clay-dimension-border-hairline, 1px)
     )
-    var(
-      --clay-ds-dropdown-default-popover-rest-border-style,
-      var(--clay-ds-dropdown-default-surface-rest-border-style, solid)
-    )
+    var(--clay-ds-dropdown-default-popover-rest-border-style, solid)
     var(
       --clay-ds-dropdown-default-popover-rest-border-color,
-      var(
-        --clay-ds-dropdown-default-surface-rest-border-color,
-        var(--clay-border-hairline)
-      )
+      var(--clay-border-hairline)
     );
-  border-radius: var(
-    --clay-ds-dropdown-default-popover-rest-border-radius,
-    var(--clay-ds-dropdown-default-surface-rest-border-radius, 0)
-  );
-  box-shadow: var(
-    --clay-ds-dropdown-default-popover-rest-shadow,
-    var(--clay-ds-dropdown-default-surface-rest-shadow, none)
-  );
+  border-radius: var(--clay-ds-dropdown-default-popover-rest-border-radius, 0);
+  box-shadow: var(--clay-ds-dropdown-default-popover-rest-shadow, none);
   backdrop-filter: blur(
-      var(
-        --clay-ds-dropdown-default-popover-rest-backdrop-blur,
-        var(--clay-ds-dropdown-default-surface-rest-backdrop-blur, 0px)
-      )
+      var(--clay-ds-dropdown-default-popover-rest-backdrop-blur, 0px)
     )
-    saturate(
-      var(
-        --clay-ds-dropdown-default-popover-rest-backdrop-saturate,
-        var(--clay-ds-dropdown-default-surface-rest-backdrop-saturate, 1)
-      )
-    );
+    saturate(var(--clay-ds-dropdown-default-popover-rest-backdrop-saturate, 1));
   min-width: 160px;
   max-height: 320px;
   overflow-y: auto;
@@ -188,149 +162,83 @@
 .listRow {
   display: flex;
   flex-direction: column;
-  gap: var(
-    --clay-ds-list-default-row-rest-gap,
-    var(--clay-ds-list-default-item-rest-gap, 2px)
-  );
+  gap: var(--clay-ds-list-default-row-rest-gap, 2px);
   background: var(
     --clay-ds-list-default-row-rest-background-color,
-    var(
-      --clay-ds-list-default-item-rest-background-color,
-      var(--clay-surface-list)
-    )
+    transparent
   );
   color: var(
     --clay-ds-list-default-row-rest-text-color,
-    var(--clay-ds-list-default-item-rest-text-color, var(--clay-text-primary))
+    var(--clay-text-primary)
   );
   border-bottom: var(
       --clay-ds-list-default-row-rest-border-width,
-      var(
-        --clay-ds-list-default-item-rest-border-width,
-        var(--clay-dimension-border-hairline, 1px)
-      )
+      var(--clay-dimension-border-hairline, 1px)
     )
-    var(
-      --clay-ds-list-default-row-rest-border-style,
-      var(--clay-ds-list-default-item-rest-border-style, solid)
-    )
+    var(--clay-ds-list-default-row-rest-border-style, solid)
     var(
       --clay-ds-list-default-row-rest-border-color,
-      var(
-        --clay-ds-list-default-item-rest-border-color,
-        var(--clay-border-hairline)
-      )
+      var(--clay-border-hairline)
     );
-  border-radius: var(
-    --clay-ds-list-default-row-rest-border-radius,
-    var(--clay-ds-list-default-item-rest-border-radius, 0)
-  );
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius, 0);
   padding: var(
     --clay-ds-list-default-row-rest-padding,
-    var(
-      --clay-ds-list-default-item-rest-padding,
-      var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px)
-    )
+    var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px)
   );
   cursor: pointer;
-  box-shadow: var(
-    --clay-ds-list-default-row-rest-shadow,
-    var(--clay-ds-list-default-item-rest-shadow, none)
-  );
+  box-shadow: var(--clay-ds-list-default-row-rest-shadow, none);
   transition:
     background-color
       var(
         --clay-ds-list-default-row-rest-transition-duration,
-        var(
-          --clay-ds-list-default-item-rest-transition-duration,
-          var(--clay-motion-fast, 100ms)
-        )
+        var(--clay-motion-fast, 100ms)
       )
-      var(
-        --clay-ds-list-default-row-rest-transition-timing,
-        var(--clay-ds-list-default-item-rest-transition-timing, linear)
-      ),
+      var(--clay-ds-list-default-row-rest-transition-timing, linear),
     color
       var(
         --clay-ds-list-default-row-rest-transition-duration,
-        var(
-          --clay-ds-list-default-item-rest-transition-duration,
-          var(--clay-motion-fast, 100ms)
-        )
+        var(--clay-motion-fast, 100ms)
       )
-      var(
-        --clay-ds-list-default-row-rest-transition-timing,
-        var(--clay-ds-list-default-item-rest-transition-timing, linear)
-      );
+      var(--clay-ds-list-default-row-rest-transition-timing, linear);
 }
 
 .listRow[data-hovered] {
   background: var(
     --clay-ds-list-default-row-hover-background-color,
-    var(
-      --clay-ds-list-default-item-hover-background-color,
-      var(--clay-surface-hover)
-    )
+    var(--clay-surface-hover)
   );
   color: var(
     --clay-ds-list-default-row-hover-text-color,
-    var(--clay-ds-list-default-item-hover-text-color, var(--clay-text-primary))
+    var(--clay-text-primary)
   );
 }
 .listRow[data-pressed] {
   background: var(
     --clay-ds-list-default-row-active-background-color,
-    var(
-      --clay-ds-list-default-item-active-background-color,
-      var(--clay-surface-active)
-    )
+    var(--clay-surface-active)
   );
 }
 .listRow[data-focused],
 .listRow:focus-visible {
-  outline: var(
-      --clay-ds-list-default-row-focus-outline-width,
-      var(--clay-ds-list-default-item-focus-outline-width, 2px)
-    )
-    var(
-      --clay-ds-list-default-row-focus-outline-style,
-      var(--clay-ds-list-default-item-focus-outline-style, solid)
-    )
-    var(
-      --clay-ds-list-default-row-focus-outline-color,
-      var(
-        --clay-ds-list-default-item-focus-outline-color,
-        var(--clay-focus-ring)
-      )
-    );
-  outline-offset: var(
-    --clay-ds-list-default-row-focus-outline-offset,
-    var(--clay-ds-list-default-item-focus-outline-offset, -2px)
-  );
+  outline: var(--clay-ds-list-default-row-focus-outline-width, 2px)
+    var(--clay-ds-list-default-row-focus-outline-style, solid)
+    var(--clay-ds-list-default-row-focus-outline-color, var(--clay-focus-ring));
+  outline-offset: var(--clay-ds-list-default-row-focus-outline-offset, -2px);
 }
 .listRow[data-selected] {
   background: var(
     --clay-ds-list-default-row-selected-background-color,
-    var(
-      --clay-ds-list-default-item-selected-background-color,
-      var(--clay-surface-selected)
-    )
+    var(--clay-surface-selected)
   );
 }
 .listRow[data-disabled] {
   color: var(
     --clay-ds-list-default-row-disabled-text-color,
-    var(
-      --clay-ds-list-default-item-disabled-text-color,
-      var(--clay-text-disabled)
-    )
+    var(--clay-text-disabled)
   );
   opacity: var(
     --clay-ds-list-default-row-disabled-opacity,
-    var(
-      --clay-ds-list-default-item-disabled-opacity,
-      var(--clay-opacity-disabled)
-    )
+    var(--clay-opacity-disabled)
   );
   cursor: default;
 }
@@ -434,4 +342,19 @@
     --clay-ds-collapse-default-body-rest-padding,
     var(--clay-spacing-sm, 12px)
   );
+}
+
+/* Dropdown grouped sections (plan 109 I3): provider-group headers. */
+.listSection {
+  display: contents;
+}
+
+.listSectionHeader {
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  font-family: inherit;
+  font-size: var(--clay-text-caption-size);
+  font-weight: 600;
+  color: var(--clay-text-muted, var(--clay-text-secondary));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }

@@ -569,11 +569,14 @@ fn design_neobrutal_bundled_package_validates_as_inert_data() {
         "design system must not contain hsl() colors"
     );
 
-    // Parse declaration and verify Neobrutal 90-degree corner geometry
+    // Parse declaration and verify Neobrutal geometry, borders, shadows, and legibility invariants
     let decl: clay::shell::design_system::UiDesignSystemDeclaration =
         serde_json::from_str(decl_str).expect("declaration_json must deserialize cleanly");
     assert_eq!(decl.schema_version, 1);
 
+    // Plan 110 Task 7 Conformance:
+    // 1. Neobrutal 90-degree corner geometry: border_radius must be 0.0 everywhere.
+    // 2. Zero backdrop blur anywhere.
     for (key, recipe) in &decl.recipes {
         if let Some(radius) = recipe.border_radius {
             assert_eq!(
@@ -581,7 +584,182 @@ fn design_neobrutal_bundled_package_validates_as_inert_data() {
                 "Neobrutal recipe {key} must have border_radius 0.0, got {radius}"
             );
         }
+        assert_eq!(
+            recipe.backdrop_blur.unwrap_or(0.0),
+            0.0,
+            "Neobrutal recipe {key} must not apply backdrop blur"
+        );
     }
+
+    // 3. 2px structural borders at rest on interactive kinds using the ink role (text.primary)
+    let interactive_rest_keys = [
+        "button.default.root.rest",
+        "button.primary.root.rest",
+        "button.muted.root.rest",
+        "button.danger.root.rest",
+        "textInput.default.input.rest",
+        "dropdown.default.root.rest",
+        "dropdown.default.trigger.rest",
+        "card.default.root.rest",
+        "tab.default.item.rest",
+        "kbd.default.root.rest",
+        "badge.default.root.rest",
+        "popover.default.root.rest",
+        "menu.default.root.rest",
+        "modal.default.dialog.rest",
+    ];
+    for key_str in interactive_rest_keys {
+        let key = clay::shell::design_system::RecipeKey::parse(key_str)
+            .unwrap_or_else(|e| panic!("failed to parse key {key_str}: {e}"));
+        let recipe = decl
+            .recipes
+            .get(&key)
+            .unwrap_or_else(|| panic!("missing interactive recipe {key_str}"));
+        let width = recipe
+            .border_width
+            .unwrap_or_else(|| panic!("interactive recipe {key_str} must declare border_width"));
+        assert!(
+            width >= 2.0,
+            "interactive recipe {key_str} must have rest border_width >= 2.0, got {width}"
+        );
+        let border_color = recipe
+            .border_color
+            .as_ref()
+            .unwrap_or_else(|| panic!("interactive recipe {key_str} must declare border_color"));
+        assert_eq!(
+            border_color.as_str(),
+            "text.primary",
+            "interactive recipe {key_str} must use ink role text.primary for high-contrast border"
+        );
+    }
+
+    // 4. Hard offset shadows at rest: ink color (text.primary), blur == 0, rest offset >= 3
+    let shadowed_rest_keys = [
+        "button.default.root.rest",
+        "button.primary.root.rest",
+        "button.muted.root.rest",
+        "button.danger.root.rest",
+        "textInput.default.input.rest",
+        "dropdown.default.root.rest",
+        "dropdown.default.trigger.rest",
+        "card.default.root.rest",
+        "kbd.default.root.rest",
+        "tooltip.default.root.rest",
+        "popover.default.root.rest",
+        "menu.default.root.rest",
+        "modal.default.dialog.rest",
+        "commandCentre.default.root.rest",
+    ];
+    for key_str in shadowed_rest_keys {
+        let key = clay::shell::design_system::RecipeKey::parse(key_str)
+            .unwrap_or_else(|e| panic!("failed to parse key {key_str}: {e}"));
+        let recipe = decl
+            .recipes
+            .get(&key)
+            .unwrap_or_else(|| panic!("missing shadowed recipe {key_str}"));
+        let shadows = recipe
+            .shadow
+            .as_ref()
+            .unwrap_or_else(|| panic!("recipe {key_str} must declare shadow"));
+        assert!(
+            !shadows.is_empty(),
+            "recipe {key_str} shadow list must not be empty"
+        );
+        for (idx, shadow) in shadows.iter().enumerate() {
+            assert_eq!(
+                shadow.blur, 0.0,
+                "recipe {key_str} shadow[{idx}] blur must be 0.0"
+            );
+            assert_eq!(
+                shadow.color_role.as_str(),
+                "text.primary",
+                "recipe {key_str} shadow[{idx}] color_role must be text.primary (ink)"
+            );
+            assert!(
+                shadow.x >= 3.0 && shadow.y >= 3.0,
+                "recipe {key_str} shadow[{idx}] offsets must be >= 3.0, got ({}, {})",
+                shadow.x,
+                shadow.y
+            );
+        }
+    }
+
+    // 5. List row styling: solid surface.control fill at rest (never transparent), 2px ink border
+    let list_row_rest_key = clay::shell::design_system::RecipeKey::parse("list.default.row.rest")
+        .expect("list.default.row.rest parses");
+    let list_row_rest = decl
+        .recipes
+        .get(&list_row_rest_key)
+        .expect("list.default.row.rest must exist");
+    assert_ne!(
+        list_row_rest.background_color.as_ref().map(|c| c.as_str()),
+        Some("transparent"),
+        "list.default.row.rest background must not be transparent"
+    );
+    assert_eq!(
+        list_row_rest.background_color.as_ref().map(|c| c.as_str()),
+        Some("surface.control"),
+        "list.default.row.rest background must be solid surface.control"
+    );
+    assert_eq!(
+        list_row_rest.border_width,
+        Some(2.0),
+        "list.default.row.rest border_width must be 2.0"
+    );
+
+    // 6. Selected list row: solid surface.selected fill, 2px ink border
+    let list_row_selected_key =
+        clay::shell::design_system::RecipeKey::parse("list.default.row.selected")
+            .expect("list.default.row.selected parses");
+    let list_row_selected = decl
+        .recipes
+        .get(&list_row_selected_key)
+        .expect("list.default.row.selected must exist");
+    assert_eq!(
+        list_row_selected
+            .background_color
+            .as_ref()
+            .map(|c| c.as_str()),
+        Some("surface.selected"),
+        "list.default.row.selected background must be solid surface.selected"
+    );
+    assert_eq!(
+        list_row_selected.border_width,
+        Some(2.0),
+        "list.default.row.selected border_width must be 2.0"
+    );
+    assert_eq!(
+        list_row_selected.border_color.as_ref().map(|c| c.as_str()),
+        Some("text.primary"),
+        "list.default.row.selected border_color must be text.primary"
+    );
+
+    // 7. Interactive button tactile feedback: hover lift + active press shift
+    let btn_hover_key = clay::shell::design_system::RecipeKey::parse("button.default.root.hover")
+        .expect("button.default.root.hover parses");
+    let btn_hover = decl
+        .recipes
+        .get(&btn_hover_key)
+        .expect("button.default.root.hover must exist");
+    assert_eq!(
+        btn_hover.transform_preset,
+        Some(clay::shell::design_system::TransformPreset::HoverLift)
+    );
+    let hover_shadow = &btn_hover.shadow.as_ref().expect("hover shadow")[0];
+    assert_eq!((hover_shadow.x, hover_shadow.y), (4.0, 4.0));
+
+    let btn_active_key = clay::shell::design_system::RecipeKey::parse("button.default.root.active")
+        .expect("button.default.root.active parses");
+    let btn_active = decl
+        .recipes
+        .get(&btn_active_key)
+        .expect("button.default.root.active must exist");
+    assert_eq!(
+        btn_active.transform_preset,
+        Some(clay::shell::design_system::TransformPreset::PressShiftDown)
+    );
+    let active_shadow = &btn_active.shadow.as_ref().expect("active shadow")[0];
+    assert_eq!((active_shadow.x, active_shadow.y), (1.0, 1.0));
 }
 
 #[test]

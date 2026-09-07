@@ -146,11 +146,11 @@ setTypography({
   ui: { families: ["system-ui"], size: 13 },
   hierarchy: {
     display: 1.5,
-    title: 14 / 12,
+    title: 15 / 13,
     section: 13 / 12,
     body: 1,
     status: 1,
-    detail: 10 / 12,
+    detail: 12 / 13,
     caption: 0.75,
   },
 });

@@ -6,6 +6,8 @@ import type { PackageSurface, PackageUiSnapshot } from "../sdui/types";
 import { ClayEditor } from "../editor/ClayEditor";
 import type { SplitNode } from "./split-tree";
 import type { PaneRecord, TabRuntime } from "./workspace-controller";
+import type { ServerKeyStroke } from "./workspace-controller";
+import type { EffortChord } from "../coding-agent/CodingAgentPanel";
 
 import styles from "./pane-tree.module.css";
 
@@ -51,6 +53,32 @@ export interface PaneTreeProps {
   uiVersion: number;
 }
 
+/** Plan 109 I4: the coding-agent surface's effort-cycle chord, read from
+ *  the pane session's behavior manifest so `bindKey` overrides apply.
+ *  Default `Shift+Tab` when unbound. */
+function effortChordOf(pane: {
+  session: { behaviorManifest(): { keymaps?: unknown } };
+}): EffortChord | null {
+  const keymaps =
+    (pane.session.behaviorManifest().keymaps as
+      | Array<{ commandId: string; sequence?: ServerKeyStroke[] }>
+      | undefined) ?? [];
+  const binding = keymaps.find(
+    (entry) => entry.commandId === "coding-agent.clientCycleEffort",
+  );
+  const stroke = binding?.sequence?.at(-1);
+  if (!stroke) return { shift: true, ctrl: false, alt: false, meta: false, key: "Tab" };
+  const raw = typeof stroke.key === "string" ? stroke.key : stroke.key.character;
+  if (raw.length === 0) return null;
+  return {
+    shift: stroke.modifiers.shift,
+    ctrl: stroke.modifiers.control,
+    alt: stroke.modifiers.alt,
+    meta: stroke.modifiers.superKey,
+    key: raw,
+  };
+}
+
 function PaneContent({
   pane,
   packageUi,
@@ -69,6 +97,8 @@ function PaneContent({
   onOpenFolder: () => void;
   onLaunchAgent: () => void;
   runtime: TabRuntime;
+  /** Plan 109 I4: effective effort-cycle chord from the manifest. */
+  effortChord: EffortChord | null;
 }) {
   const meta = useSyncExternalStore(
     pane.session.store.subscribe,
@@ -103,8 +133,9 @@ function PaneContent({
               surface={surface}
               uiVersion={uiVersion}
               workspaceRoot={runtime.workspaceRoot}
-              sdui={runtime.ui.sdui}
+              session={pane.session}
               send={pane.session.request}
+              effortChord={effortChordOf(pane)}
             />
           ) : (
             <PackageSurfaceView
@@ -188,6 +219,7 @@ export function PaneTree({
       <section
         className={`${styles.pane} ${active ? styles.active : ""}`}
         data-testid={`pane-${node.paneId}`}
+        data-clay-ds="paneSplitTree.pane"
         aria-label={`Pane ${node.paneId}`}
         onMouseDown={() => onFocus(node.paneId)}
       >
@@ -201,6 +233,7 @@ export function PaneTree({
             onOpenFolder={onOpenFolder}
             onLaunchAgent={onLaunchAgent}
             runtime={runtime}
+            effortChord={pane ? effortChordOf(pane) : null}
           />
         ) : (
           <div className={styles.empty}>
@@ -216,7 +249,7 @@ export function PaneTree({
   const orientation =
     node.orientation === "horizontal" ? "horizontal" : "vertical";
   return (
-    <Group orientation={orientation} className={styles.group}>
+    <Group orientation={orientation} className={styles.group} data-clay-ds="paneSplitTree.group">
       <Panel
         id={`split-${path.join("") || "root"}-a`}
         defaultSize={`${Math.round(node.ratio * 100)}%`}
@@ -240,10 +273,17 @@ export function PaneTree({
       </Panel>
       <Separator
         className={styles.separator}
+        data-clay-ds="paneSplitTree.handle"
         style={
           orientation === "horizontal"
-            ? { width: "var(--clay-dimension-border-thin, 2px)" }
-            : { height: "var(--clay-dimension-border-thin, 2px)" }
+            ? {
+                width:
+                  "var(--clay-ds-pane-split-tree-default-handle-rest-border-width, var(--clay-dimension-border-thin, 2px))",
+              }
+            : {
+                height:
+                  "var(--clay-ds-pane-split-tree-default-handle-rest-border-width, var(--clay-dimension-border-thin, 2px))",
+              }
         }
       />
       <Panel

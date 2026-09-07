@@ -3730,6 +3730,40 @@
       "async": true
     },
     {
+      "id": "settings.setDesignSystem",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/settings/set-design-system.md",
+      "js_module": "clay:settings",
+      "js_export": "setDesignSystem",
+      "js_facade": "packages/settings/dist/load.js::setDesignSystem",
+      "backing_rust": "src/server/command_execution.rs::execute_settings; src/server/connection/runtime.rs::persist_settings_change; src/server/js_runtime/evaluation.rs::apply_persisted_preferences; src/server/ops/theme.rs::apply_design_system",
+      "deno_op": "op_clay_commands_execute_command",
+      "deno_op_path": "src/server/ops/commands.rs::op_clay_commands_execute_command",
+      "name": "setDesignSystem",
+      "user_facing_name": "Set Design System",
+      "summary": "Settings-panel command that activates a UI design system (`@clay/core` baseline or a bundled `@clay/design-*` contributor) and persists the choice in `preferences.json` so it survives restarts.",
+      "owner": "server",
+      "phase": "Phase 22.4",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "specifier",
+          "type": "string",
+          "default": "required",
+          "description": "`@clay/core` (built-in baseline) or the name of one bundled package that contributes a `uiDesignSystem` (`@clay/design-neobrutal`, `@clay/design-glass`). Also accepts `item_id` from dropdown action payloads."
+        }
+      ],
+      "security": "Validates the specifier server-side and persists an inert preference only: activation applies through the same inert-recipe path as theme.setDesignSystem (recipes reference theme color roles by name and never contain concrete colors, so no raw CSS or color authority exists) and the reload re-validates the stored value through apply_design_system, preserving the previous valid design system on failure. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package manager, WASM, client-side JavaScript, raw Deno ops, raw CSS, or renderer callback authority, and never promotes package trust by naming a specifier.",
+      "agent_guidance": "Use `settings.setDesignSystem` (or the Settings panel \"Design system\" dropdown) when the user changes the design system interactively; the persisted choice reapplies on every reload. Use `theme.setDesignSystem` from init.js for declarative startup configuration. Never suggest raw CSS or untrusted design-system packages.",
+      "lookup_tags": ["settings", "design-system", "preferences", "theme", "recipes", "panel", "core", "fallback"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "shell.clientAddEqualPane",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-add-equal-pane.md",

@@ -146,11 +146,63 @@ const neobrutalSnapshot: DesignSystemSnapshot = {
       value: "solid",
     },
     "textInput.default.root.rest.borderRadius": { type: "radius", value: 0 },
+    "textInput.default.input.focus.outlineColor": {
+      type: "theme-color-role",
+      value: "focus.ring",
+    },
+    "textInput.default.input.focus.outlineWidth": {
+      type: "border-width",
+      value: 2,
+    },
+    "textInput.default.input.focus.outlineOffset": {
+      type: "border-width",
+      value: 1,
+    },
+    "textInput.default.input.focus.outlineStyle": {
+      type: "outline-style",
+      value: "solid",
+    },
     "modal.default.dialog.rest.borderRadius": { type: "radius", value: 0 },
     "modal.default.dialog.rest.borderWidth": { type: "border-width", value: 2 },
     "modal.default.dialog.rest.backdropBlur": {
       type: "backdrop-blur",
       value: 0,
+    },
+    "shell.default.root.rest.backgroundColor": {
+      type: "theme-color-role",
+      value: "surface.main",
+    },
+    "statusBar.default.root.rest.backgroundColor": {
+      type: "theme-color-role",
+      value: "surface.panel",
+    },
+    "statusBar.default.root.rest.borderWidth": {
+      type: "border-width",
+      value: 2,
+    },
+    "paneSplitTree.default.pane.rest.borderRadius": {
+      type: "radius",
+      value: 0,
+    },
+    "paneSplitTree.default.pane.rest.backgroundColor": {
+      type: "theme-color-role",
+      value: "surface.main",
+    },
+    "paneSplitTree.default.handle.rest.backgroundColor": {
+      type: "theme-color-role",
+      value: "border.strong",
+    },
+    "paneSplitTree.default.handle.rest.borderWidth": {
+      type: "border-width",
+      value: 4,
+    },
+    "tab.default.item.rest.borderRadius": {
+      type: "radius",
+      value: 0,
+    },
+    "tab.default.item.rest.backgroundColor": {
+      type: "theme-color-role",
+      value: "surface.control",
     },
   },
 };
@@ -290,11 +342,63 @@ const glassSnapshot: DesignSystemSnapshot = {
       value: "solid",
     },
     "textInput.default.root.rest.borderRadius": { type: "radius", value: 6 },
+    "textInput.default.input.focus.outlineColor": {
+      type: "theme-color-role",
+      value: "focus.ring",
+    },
+    "textInput.default.input.focus.outlineWidth": {
+      type: "border-width",
+      value: 2,
+    },
+    "textInput.default.input.focus.outlineOffset": {
+      type: "border-width",
+      value: 1,
+    },
+    "textInput.default.input.focus.outlineStyle": {
+      type: "outline-style",
+      value: "solid",
+    },
     "modal.default.dialog.rest.borderRadius": { type: "radius", value: 14 },
     "modal.default.dialog.rest.borderWidth": { type: "border-width", value: 1 },
     "modal.default.dialog.rest.backdropBlur": {
       type: "backdrop-blur",
       value: 24,
+    },
+    "shell.default.root.rest.backgroundColor": {
+      type: "theme-color-role",
+      value: "surface.panel",
+    },
+    "statusBar.default.root.rest.backgroundColor": {
+      type: "theme-color-role",
+      value: "surface.overlay",
+    },
+    "statusBar.default.root.rest.borderWidth": {
+      type: "border-width",
+      value: 1,
+    },
+    "paneSplitTree.default.pane.rest.borderRadius": {
+      type: "radius",
+      value: 8,
+    },
+    "paneSplitTree.default.pane.rest.backgroundColor": {
+      type: "theme-color-role",
+      value: "surface.control",
+    },
+    "paneSplitTree.default.handle.rest.backgroundColor": {
+      type: "theme-color-role",
+      value: "border.subtle",
+    },
+    "paneSplitTree.default.handle.rest.borderWidth": {
+      type: "border-width",
+      value: 1,
+    },
+    "tab.default.item.rest.borderRadius": {
+      type: "radius",
+      value: 6,
+    },
+    "tab.default.item.rest.backgroundColor": {
+      type: "theme-color-role",
+      value: "surface.panel",
     },
   },
 };
@@ -576,6 +680,18 @@ describe("UI Design System Conformance & Replacement Invariants", () => {
     expect(
       neobrutalMap["--clay-ds-button-default-root-rest-outline-style"],
     ).toBe("solid");
+    expect(
+      neobrutalMap["--clay-ds-text-input-default-input-focus-outline-color"],
+    ).toBe("var(--clay-focus-ring)");
+    expect(
+      neobrutalMap["--clay-ds-text-input-default-input-focus-outline-width"],
+    ).toBe("2px");
+    expect(
+      neobrutalMap["--clay-ds-text-input-default-input-focus-outline-offset"],
+    ).toBe("1px");
+    expect(
+      neobrutalMap["--clay-ds-text-input-default-input-focus-outline-style"],
+    ).toBe("solid");
 
     // Check focus outline variables on Glass
     const glassVars = designSystemCssVariables(glassSnapshot);
@@ -590,5 +706,214 @@ describe("UI Design System Conformance & Replacement Invariants", () => {
     expect(glassMap["--clay-ds-button-default-root-rest-outline-style"]).toBe(
       "solid",
     );
+    expect(
+      glassMap["--clay-ds-text-input-default-input-focus-outline-color"],
+    ).toBe("var(--clay-focus-ring)");
+    expect(
+      glassMap["--clay-ds-text-input-default-input-focus-outline-width"],
+    ).toBe("2px");
+    expect(
+      glassMap["--clay-ds-text-input-default-input-focus-outline-offset"],
+    ).toBe("1px");
+    expect(
+      glassMap["--clay-ds-text-input-default-input-focus-outline-style"],
+    ).toBe("solid");
+  });
+
+  it("verifies text-field receives focus and sets focus attributes matching button focus patterns", async () => {
+    const user = userEvent.setup();
+    render(
+      <ClayTextField
+        label="Test Input"
+        value=""
+        onChange={() => {}}
+      />,
+    );
+
+    const input = screen.getByLabelText("Test Input");
+    expect(input).not.toHaveFocus();
+    await user.click(input);
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("data-focused", "true");
+  });
+
+  it("verifies switching design systems dynamically updates shell, status bar, and pane computed styles while splits fixture is mounted", () => {
+    const rootEl = document.createElement("div");
+    document.body.appendChild(rootEl);
+    const store = createDesignSystemStore(rootEl);
+
+    // Initial state: Neobrutal active
+    store.setDesignSystem(neobrutalSnapshot);
+    const neobrutalVars = designSystemCssVariables(neobrutalSnapshot);
+    installDesignSystemVariables(rootEl.style, neobrutalVars);
+
+    // Render a fixture with shell, status bar, tabs, and split panes
+    render(
+      <div data-testid="splits-host" style={{ height: "100%" }}>
+        <div data-testid="shell-surface" style={{ background: "var(--clay-ds-shell-default-root-rest-background-color)" }}>
+          <div
+            data-testid="tab-item"
+            style={{
+              borderRadius: "var(--clay-ds-tab-default-item-rest-border-radius)",
+              background: "var(--clay-ds-tab-default-item-rest-background-color)",
+            }}
+          >
+            Tab 1
+          </div>
+          <footer
+            data-testid="status-bar"
+            style={{
+              background: "var(--clay-ds-status-bar-default-root-rest-background-color)",
+              borderTopWidth: "var(--clay-ds-status-bar-default-root-rest-border-width)",
+            }}
+          >
+            Status
+          </footer>
+          <div
+            data-testid="split-group"
+            style={{ background: "var(--clay-ds-pane-split-tree-default-group-rest-background-color)" }}
+          >
+            <div
+              data-testid="split-pane"
+              style={{
+                borderRadius: "var(--clay-ds-pane-split-tree-default-pane-rest-border-radius)",
+                background: "var(--clay-ds-pane-split-tree-default-pane-rest-background-color)",
+              }}
+            >
+              Pane 1
+            </div>
+            <div
+              data-testid="split-handle"
+              style={{
+                width: "var(--clay-ds-pane-split-tree-default-handle-rest-width)",
+                background: "var(--clay-ds-pane-split-tree-default-handle-rest-background-color)",
+              }}
+            />
+          </div>
+        </div>
+      </div>,
+      { container: rootEl },
+    );
+
+    // Check Neobrutal variables installed on rootEl
+    const neobrutalMap = Object.fromEntries(neobrutalVars);
+    expect(neobrutalMap["--clay-ds-shell-default-root-rest-background-color"]).toBe(
+      "var(--clay-surface-main)",
+    );
+    expect(neobrutalMap["--clay-ds-status-bar-default-root-rest-border-width"]).toBe(
+      "2px",
+    );
+    expect(neobrutalMap["--clay-ds-tab-default-item-rest-border-radius"]).toBe(
+      "0px",
+    );
+    expect(neobrutalMap["--clay-ds-tab-default-item-rest-background-color"]).toBe(
+      "var(--clay-surface-control)",
+    );
+    expect(neobrutalMap["--clay-ds-pane-split-tree-default-pane-rest-border-radius"]).toBe(
+      "0px",
+    );
+    expect(neobrutalMap["--clay-ds-pane-split-tree-default-handle-rest-border-width"]).toBe(
+      "4px",
+    );
+
+    expect(rootEl.style.getPropertyValue("--clay-ds-shell-default-root-rest-background-color")).toBe(
+      "var(--clay-surface-main)",
+    );
+    expect(rootEl.style.getPropertyValue("--clay-ds-status-bar-default-root-rest-border-width")).toBe(
+      "2px",
+    );
+    expect(rootEl.style.getPropertyValue("--clay-ds-tab-default-item-rest-border-radius")).toBe(
+      "0px",
+    );
+    expect(rootEl.style.getPropertyValue("--clay-ds-pane-split-tree-default-pane-rest-border-radius")).toBe(
+      "0px",
+    );
+    expect(rootEl.style.getPropertyValue("--clay-ds-pane-split-tree-default-handle-rest-border-width")).toBe(
+      "4px",
+    );
+
+    // Switch to Glass
+    store.setDesignSystem(glassSnapshot);
+    const glassVars = designSystemCssVariables(glassSnapshot);
+    installDesignSystemVariables(rootEl.style, glassVars);
+
+    // Check Glass variables installed on rootEl
+    const glassMap = Object.fromEntries(glassVars);
+    expect(glassMap["--clay-ds-shell-default-root-rest-background-color"]).toBe(
+      "var(--clay-surface-panel)",
+    );
+    expect(glassMap["--clay-ds-status-bar-default-root-rest-border-width"]).toBe(
+      "1px",
+    );
+    expect(glassMap["--clay-ds-tab-default-item-rest-border-radius"]).toBe(
+      "6px",
+    );
+    expect(glassMap["--clay-ds-tab-default-item-rest-background-color"]).toBe(
+      "var(--clay-surface-panel)",
+    );
+    expect(glassMap["--clay-ds-pane-split-tree-default-pane-rest-border-radius"]).toBe(
+      "8px",
+    );
+    expect(glassMap["--clay-ds-pane-split-tree-default-handle-rest-border-width"]).toBe(
+      "1px",
+    );
+
+    expect(rootEl.style.getPropertyValue("--clay-ds-shell-default-root-rest-background-color")).toBe(
+      "var(--clay-surface-panel)",
+    );
+    expect(rootEl.style.getPropertyValue("--clay-ds-status-bar-default-root-rest-border-width")).toBe(
+      "1px",
+    );
+    expect(rootEl.style.getPropertyValue("--clay-ds-tab-default-item-rest-border-radius")).toBe(
+      "6px",
+    );
+    expect(rootEl.style.getPropertyValue("--clay-ds-pane-split-tree-default-pane-rest-border-radius")).toBe(
+      "8px",
+    );
+    expect(rootEl.style.getPropertyValue("--clay-ds-pane-split-tree-default-handle-rest-border-width")).toBe(
+      "1px",
+    );
+
+    document.body.removeChild(rootEl);
+  });
+
+  it("proves reduced-transparency emulation yields opaque glass surfaces and disables backdrop-filter", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const testDir = path.dirname(fileURLToPath(import.meta.url));
+    const globalCss = fs.readFileSync(
+      path.resolve(testDir, "../styles/global.css"),
+      "utf8",
+    );
+    expect(globalCss).toContain("@media (prefers-reduced-transparency: reduce)");
+    expect(globalCss).toMatch(
+      /\[data-clay-material="glass"\][\s\S]*?backdrop-filter:\s*none\s*!important/,
+    );
+    expect(globalCss).toMatch(
+      /\[data-clay-material="glass"\][\s\S]*?background:\s*var\(--clay-surface-overlay\)\s*!important/,
+    );
+
+    const rootEl = document.createElement("div");
+    rootEl.setAttribute("data-clay-material", "glass");
+    rootEl.style.setProperty("--clay-surface-overlay", "#1a1a1a");
+
+    const styleTag = document.createElement("style");
+    styleTag.textContent = `
+      @media (prefers-reduced-transparency: reduce) {
+        [data-clay-material="glass"] {
+          backdrop-filter: none !important;
+          -webkit-backdrop-filter: none !important;
+          background: var(--clay-surface-overlay) !important;
+        }
+      }
+    `;
+    document.head.appendChild(styleTag);
+    document.body.appendChild(rootEl);
+
+    expect(rootEl).toHaveAttribute("data-clay-material", "glass");
+
+    document.head.removeChild(styleTag);
+    document.body.removeChild(rootEl);
   });
 });

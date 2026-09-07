@@ -7,8 +7,19 @@
   height: 100%;
   min-height: 0;
   background: var(
-    --clay-ds-editor-default-root-rest-background-color,
-    var(--clay-surface-main)
+    --clay-ds-editor-default-container-rest-background-color,
+    var(
+      --clay-ds-editor-default-root-rest-background-color,
+      var(--clay-surface-main)
+    )
+  );
+  color: var(
+    --clay-ds-editor-default-container-rest-text-color,
+    var(--clay-text-primary)
+  );
+  border-radius: var(
+    --clay-ds-editor-default-container-rest-border-radius,
+    0
   );
 }
 
@@ -96,20 +107,23 @@
 
 .canvas :global(.cm-gutters) {
   background: var(
-    --clay-ds-editor-default-gutters-rest-background-color,
+    --clay-ds-editor-default-gutter-rest-background-color,
     var(--clay-surface-panel)
   );
   color: var(
-    --clay-ds-editor-default-gutters-rest-text-color,
+    --clay-ds-editor-default-gutter-rest-text-color,
     var(--clay-text-muted)
   );
   border-right: var(
-      --clay-ds-editor-default-gutters-rest-border-width,
+      --clay-ds-editor-default-gutter-rest-border-width,
       var(--clay-dimension-border-hairline, 1px)
     )
-    solid
     var(
-      --clay-ds-editor-default-gutters-rest-border-color,
+      --clay-ds-editor-default-gutter-rest-border-style,
+      solid
+    )
+    var(
+      --clay-ds-editor-default-gutter-rest-border-color,
       var(--clay-border-hairline)
     );
 }
@@ -119,6 +133,47 @@
   background: var(
     --clay-ds-editor-default-active-line-rest-background-color,
     var(--clay-surface-hover)
+  );
+  border: var(
+    --clay-ds-editor-default-active-line-rest-border-width,
+    0
+  ) var(
+    --clay-ds-editor-default-active-line-rest-border-style,
+    none
+  );
+}
+
+.canvas :global(.cm-selectionBackground),
+.canvas :global(.cm-content ::selection) {
+  background: var(
+    --clay-ds-editor-default-selection-rest-background-color,
+    var(--clay-surface-active)
+  ) !important;
+}
+
+.canvas :global(.cm-matchingBracket) {
+  border: var(
+      --clay-ds-editor-default-matching-bracket-rest-border-width,
+      1px
+    )
+    var(
+      --clay-ds-editor-default-matching-bracket-rest-border-style,
+      solid
+    )
+    var(
+      --clay-ds-editor-default-matching-bracket-rest-border-color,
+      var(--clay-border-strong)
+    );
+  border-radius: var(
+    --clay-ds-editor-default-matching-bracket-rest-border-radius,
+    0
+  );
+}
+
+.canvas :global(.cm-searchMatch) {
+  background: var(
+    --clay-ds-editor-default-find-match-rest-background-color,
+    var(--clay-accent-primary)
   );
 }
 

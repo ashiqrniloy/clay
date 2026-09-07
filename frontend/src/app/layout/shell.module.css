@@ -65,25 +65,43 @@
   align-items: center;
   gap: var(--clay-spacing-sm, 12px);
   border-top: var(
-      --clay-ds-shell-default-footer-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
+      --clay-ds-status-bar-default-root-rest-border-width,
+      var(
+        --clay-ds-shell-default-footer-rest-border-width,
+        var(--clay-dimension-border-hairline, 1px)
+      )
     )
-    var(--clay-ds-shell-default-footer-rest-border-style, solid)
     var(
-      --clay-ds-shell-default-footer-rest-border-color,
-      var(--clay-border-hairline)
+      --clay-ds-status-bar-default-root-rest-border-style,
+      var(--clay-ds-shell-default-footer-rest-border-style, solid)
+    )
+    var(
+      --clay-ds-status-bar-default-root-rest-border-color,
+      var(
+        --clay-ds-shell-default-footer-rest-border-color,
+        var(--clay-border-hairline)
+      )
     );
   background: var(
-    --clay-ds-shell-default-footer-rest-background-color,
-    var(--clay-surface-panel)
+    --clay-ds-status-bar-default-root-rest-background-color,
+    var(
+      --clay-ds-shell-default-footer-rest-background-color,
+      var(--clay-surface-panel)
+    )
   );
   color: var(
-    --clay-ds-shell-default-footer-rest-text-color,
-    var(--clay-text-muted)
+    --clay-ds-status-bar-default-root-rest-text-color,
+    var(
+      --clay-ds-shell-default-footer-rest-text-color,
+      var(--clay-text-muted)
+    )
   );
   padding: var(
-    --clay-ds-shell-default-footer-rest-padding,
-    var(--clay-spacing-xxs, 4px) var(--clay-spacing-sm, 12px)
+    --clay-ds-status-bar-default-root-rest-padding,
+    var(
+      --clay-ds-shell-default-footer-rest-padding,
+      var(--clay-spacing-xxs, 4px) var(--clay-spacing-sm, 12px)
+    )
   );
   font-size: var(--clay-text-status-size);
 }

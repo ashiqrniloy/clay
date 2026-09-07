@@ -138,7 +138,11 @@ pub(super) async fn execute_command_intent(
         {
             server
                 .agent
-                .select_picker(crate::protocol::AgentPickerKind::Agent, "agent:coding")
+                .select_picker(
+                    crate::protocol::AgentPickerKind::Agent,
+                    "agent:coding",
+                    None,
+                )
                 .await;
         }
         return Some(ServerMessage::ShellClientCommandRequest {
@@ -268,6 +272,15 @@ pub(super) async fn persist_settings_change(
                 .map(|_| true)
                 .map_err(|error| format!("settings.setAppearance persistence failed: {error}"))?
         }
+        "settings.setDesignSystem" => {
+            let value = settings_value(arguments).ok_or_else(|| {
+                "settings.setDesignSystem requires an item_id/specifier argument".to_string()
+            })?;
+            runtime
+                .persist_preference("designSystem", serde_json::Value::String(value))
+                .map(|_| true)
+                .map_err(|error| format!("settings.setDesignSystem persistence failed: {error}"))?
+        }
         "settings.setTypography" => {
             let raw = arguments
                 .as_object()
@@ -322,6 +335,19 @@ fn intent_text(intent: &SduiActionIntent) -> String {
             _ => None,
         })
         .unwrap_or_default()
+}
+
+/// Optional plan 109 I4 argument: the prompt's portable thinking level.
+/// Absent/non-string keeps the session's current effort.
+fn intent_thinking_level(intent: &SduiActionIntent) -> Option<String> {
+    intent
+        .arguments
+        .iter()
+        .find(|argument| argument.name == "thinkingLevel")
+        .and_then(|argument| match &argument.value {
+            SduiActionValue::String(level) => Some(level.clone()),
+            _ => None,
+        })
 }
 
 /// Host-owned agent controls have no static SDUI node: their host-rendered
@@ -637,7 +663,27 @@ where
                 .package_ui
                 .allows_action(ui_version, &intent.command_id)
         });
-    if !package_action && !is_agent_run_action(&intent.command_id) {
+    // Plan 109 review fix: panel-rendered (non-SDUI) surfaces send client
+    // intents through the same action lane. Two classes must bypass SDUI-tree
+    // validation: (1) Command Centre picker opens — the picker branch below
+    // answers with a server-scoped TransientMenuSnapshot (composer /model and
+    // /resume intercepts + the Files-tab Resume session button);
+    // (2) client-UI commands the command lane already trusts (native file /
+    // folder dialogs) — they answer with a ShellClientCommandRequest that the
+    // shell dispatches locally. Without this, the panel buttons surfaced
+    // `invalid SDUI message: UnknownActionCommand(...)` and no picker opened.
+    let manifest_client_ui = {
+        let document_id = document.lock().await.document_id();
+        manifest_allows_client_ui(
+            behavior.lock().await.manifest_for(document_id),
+            &intent.command_id,
+        )
+    };
+    if !package_action
+        && !is_agent_run_action(&intent.command_id)
+        && picker_kind_for_command(&intent.command_id).is_none()
+        && !manifest_client_ui
+    {
         let validation_response = {
             let state = sdui.lock().await;
             if state.cloned_tree_or_default().ui_version != ui_version {
@@ -663,7 +709,12 @@ where
             } else if intent.command_id == "chat.steer" {
                 host.steer_tab(tab, &intent_text(&intent)).await
             } else {
-                host.begin_prompt(tab, &intent_text(&intent)).await
+                host.begin_prompt_with_effort(
+                    tab,
+                    &intent_text(&intent),
+                    intent_thinking_level(&intent),
+                )
+                .await
             };
             eprintln!(
                 "[agent] sdui {} from client {client_id} tab {tab:?} -> {}",
@@ -1220,5 +1271,54 @@ mod tests {
         };
         assert_eq!(intent.command_id, "chat.submit");
         assert_eq!(intent_text(&intent), "hello");
+    }
+
+    #[test]
+    fn chat_submit_intent_carries_optional_thinking_level() {
+        // Plan 109 I4: the prompt's portable thinking level rides the
+        // intent as a second named argument; absent keeps the current
+        // effort, non-string arguments are ignored (the daemon fail-closes
+        // empty/non-string level strings at its boundary).
+        let with_level = r#"{
+            "family":"sduiAction",
+            "payload":{
+                "clientId":0,
+                "uiVersion":4,
+                "intent":{
+                    "commandId":"chat.submit",
+                    "source":{"button":{"nodeId":1}},
+                    "arguments":[
+                        {"name":"value","value":{"string":"hello"}},
+                        {"name":"thinkingLevel","value":{"string":"high"}}
+                    ]
+                }
+            }
+        }"#;
+        let message: crate::protocol::ClientMessage =
+            serde_json::from_str(with_level).expect("webview chat.submit payload");
+        let crate::protocol::ClientMessage::SduiAction { intent, .. } = message else {
+            panic!("expected sduiAction");
+        };
+        assert_eq!(intent_text(&intent), "hello");
+        assert_eq!(intent_thinking_level(&intent).as_deref(), Some("high"));
+
+        let without_level = r#"{
+            "family":"sduiAction",
+            "payload":{
+                "clientId":0,
+                "uiVersion":4,
+                "intent":{
+                    "commandId":"chat.submit",
+                    "source":{"button":{"nodeId":1}},
+                    "arguments":[{"name":"value","value":{"string":"hello"}}]
+                }
+            }
+        }"#;
+        let message: crate::protocol::ClientMessage =
+            serde_json::from_str(without_level).expect("webview chat.submit payload");
+        let crate::protocol::ClientMessage::SduiAction { intent, .. } = message else {
+            panic!("expected sduiAction");
+        };
+        assert_eq!(intent_thinking_level(&intent), None);
     }
 }

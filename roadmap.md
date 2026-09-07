@@ -12,7 +12,8 @@ Governing decisions already made:
 - `decision-logs/2026-08-21-1758-native-prism-host-no-acp-cli-parity.md`:
   Clay-owned Node `clay-agent` daemon wraps Prism directly; no ACP/AG-UI as
   the first-party agent bus; coding agent must reach CLI-parity inside Clay.
-  Its original 0.3.0 pin is superseded by the 0.4.0 migration in Phase 0.
+  Its original 0.3.0 pin was superseded by the 0.4.0 migration in Phase 0;
+  live pins move to exact `0.5.0` in Phase 2.1 (`plans/109`).
 - `decision-logs/2026-09-02-1440-direct-external-coding-agent-adapters.md`:
   Claude Code and Antigravity are direct, capability-declared external
   runtimes with Clay policy bundles, not Prism delegation.
@@ -28,7 +29,7 @@ Governing decisions already made:
 Three layers, strict separation:
 
 1. **`clay-agent` daemon (Clay core, Node ≥ 20).** Hosts `@arnilo/prism`
-   0.4.0 plus explicitly selected 0.4 family packages/subpaths. Owns native
+   0.5.0 plus explicitly selected 0.5 family packages/subpaths. Owns native
    providers, models, credentials (vault + keychain), SQLite persistence,
    run ledger, tools, compaction strategies, skills, commands, workflows,
    supervision, and external-runtime lifecycle/policy projection. It does
@@ -49,19 +50,28 @@ The base agent stays minimal by design (pi-like). All autonomy policy
 agent delegation, memory cadence) lives in `st` or in host-free orchestration
 helpers the daemon exposes generically.
 
-## Prism Capability Review (verified against 0.4.0)
+## Prism Capability Review (0.4.0 historical; live pins are 0.5.0)
 
-Review method: read the 0.4 migration guide, package-consolidation plan, all
-11 published package manifests and export maps, and the relevant family API
-docs in `/home/arn/Projects/prism`; confirm every active package reports
-`0.4.0` from npm. Prism states 0.4 is a package/import migration with no
-persisted-store shape migration. Phase 0 still owns a Clay consumer smoke
-suite because moved symbols and optional-peer behavior must be verified in
-Clay's installed graph.
+Review method for the 0.4 cut: read the 0.4 migration guide,
+package-consolidation plan, all then-11 published package manifests and
+export maps, and the relevant family API docs in `/home/arn/Projects/prism`.
+Prism 0.4 was a package/import migration with no persisted-store shape
+migration. Phase 0 owned the Clay consumer smoke for that cut.
 
-Authoritative sources: Prism `docs/migrate-to-0.4.md`, plan 054, and the 11
-active 0.4 package manifests/export maps. Context7 has no `@arnilo/prism`
-library.
+**Live pins (Phase 2.1 / plan 109):** Prism 0.5.0 lockstep, released
+2026-09-06. Authoritative sources: `/home/arn/Projects/prism/docs/migrate-to-0.5.md`,
+`CHANGELOG.md` `[0.5.0]`, `docs/thinking-and-reasoning.md`, `docs/mcp-tools.md`.
+Package names and 0.4 subpaths stay valid. Breaking host surface: 27 dead
+exports removed, MCP TypeScript SDK v2 modular (`@modelcontextprotocol/client`
++ `/server` 2.0.0, 2026-07-28), two thinking-effort wire moves, child-env
+allow-list, keyring 2 locked-store errors, `better-sqlite3` 12 → 13. No
+persisted-schema migration. Publishable families are 10 (`prism-antigravity-agent`
+workspace removed in 0.5 — Clay already did not adopt it). Context7 has no
+`@arnilo/prism` library.
+
+0.4 table below remains the capability map. 0.5 deltas that Clay must honor
+are in the following rows and in **Prism 0.5.0 lockstep (live)** after the
+0.4 adoption map.
 
 | Requirement | Prism primitive | 0.4 package/import | Verdict |
 | --- | --- | --- | --- |
@@ -78,12 +88,12 @@ library.
 | External coding-agent delegation | Direct vendor runtime adapters, Clay policy projection, resume, event projection | Claude Code Agent SDK; Antigravity headless CLI | Phase 9–10; no Prism intermediary |
 | Observational memory and recall | observe/reflect/drop workers, fast compaction, exact-id recall, OM commands | `@arnilo/prism-memory/compaction/observational-memory` | ✅ moved from standalone compaction package |
 | LLM compaction | coding LLM compaction strategy | `@arnilo/prism-memory/compaction/llm` | ✅ moved; profile-only `prism-compaction` removed |
-| MCP tools | bounded MCP client/server/OAuth bridge | `@arnilo/prism-mcp` | ✅ package name retained |
+| MCP tools | bounded MCP client/server/OAuth bridge; 0.5 hosts the 2026-07-28 spec through modular SDK v2 (`@modelcontextprotocol/client` + `/server` 2.0.0). Clay uses `connectMcpTools` only — no direct SDK import | `@arnilo/prism-mcp` | ✅ package name retained; 0.5 transport is SDK v2 |
 | Web search/fetch | generic providers plus Obscura web tools | `@arnilo/prism-web-tools`; `@arnilo/prism-web-tools/obscura` | ✅ Obscura moved under family subpath |
 | Browser automation/e2e | CDP tools and Obscura/Playwright composition | `@arnilo/prism-web-tools/browser`; `/obscura` | ✅ moved; `playwright-core` stays opt-in |
 | Linux desktop use | deny-by-default computer-use wrapper over host MCP binary | `@arnilo/prism-coding-tools/computer-use-linux` | ✅ moved under coding family |
 | Validation/eval gating | scorers, datasets, experiments, thresholds | `@arnilo/prism-core/governance/evals` | ✅ moved under core governance |
-| Provider adapters | 16 currently wired adapters; `/ai-sdk` exists and stays unused | `@arnilo/prism-providers/<adapter>` | ✅ one family dependency; explicit adapter imports |
+| Provider adapters | 18 first-party adapters in 0.5 (`/hyper`, `/commandcode` added in 0.4.1/0.5); `/ai-sdk` exists and stays unused | `@arnilo/prism-providers/<adapter>` | ✅ one family dependency; explicit adapter imports, including hyper/commandcode in Phase 2.1 |
 | JSON Schema tool validation | `createJsonSchemaToolArgumentValidator` | `@arnilo/prism-core/validation/json-schema` | ✅ moved under core validation |
 | Node credentials | encrypted vault/keychain resolvers and OIDC | `@arnilo/prism-core/credentials/node` | ✅ moved; keyring dependency remains host-side |
 | Office generation/parsing | documents, sheets, diagrams | `@arnilo/prism-office/{documents,sheets,diagrams}` | ⛔ not adopted: no Clay/`st` requirement |
@@ -224,6 +234,34 @@ coding/persona, browser/Obscura, RAG/compaction/Graft/Wiki package names are
 migration references only after Phase 0. New code and roadmap phase plans use
 family subpaths exclusively.
 
+## Prism 0.5.0 lockstep (live pins, Phase 2.1)
+
+Prism 0.5.0 is a lockstep cut: all publishable manifests move `0.4.x` →
+`0.5.0`, internal ranges `^0.4.0` → `^0.5.0`. Clay live-pins the seven
+adopted families at exact `0.5.0` plus `better-sqlite3@13.0.3`. Plan:
+`plans/109-Phase2.1-Coding-Agent-Defects-and-UX-Improvements.md`. Decision
+log: write during that plan (same class as `2026-09-02-0121`).
+
+Host-visible 0.5 work Clay must do:
+
+- **Thinking:** use `applyThinkingLevelForModel`; pickers read
+  `capabilities.thinkingLevels`; Anthropic body field is
+  `output_config.effort`; xAI sends `reasoning_effort`; Google family is
+  real (0.4 silent no-op is fixed). This unblocks coding-agent effort UI.
+- **MCP:** `@arnilo/prism-mcp` keeps `connectMcpTools`. Transitive SDK is
+  `@modelcontextprotocol/client` + `/server` `2.0.0` (not monolithic
+  `@modelcontextprotocol/sdk` 1.30.0). Spec target 2026-07-28. Clay source
+  must not import SDK modules. Child stdio env is allow-listed — do not
+  rely on ambient `process.env`. Draft MCP tasks stay unadvertised.
+- **Peers:** `better-sqlite3` 13.0.3; keyring 2 typed locked-store errors
+  (not empty vault). No sqlite schema migration.
+- **Adapters:** load `/hyper` and `/commandcode` explicitly with the other
+  providers. Azure/Bedrock/Vertex stay stubs. Skip office, ACP, AG-UI in
+  the daemon. `prism-antigravity-agent` is gone upstream; Phase 10 stays
+  direct `agy`.
+- **Dead exports:** do not import the 27 removed symbols in
+  `docs/migrate-to-0.5.md` §3.
+- Rollback = exact 0.4.x pins; nothing persisted changes.
 
 Change requests were filed in the Prism repo at
 `docs/clay-integration-findings.md` (BUG-1/BUG-2, FEATURE-1..6, DOCS-1
@@ -276,8 +314,11 @@ upstream feature work.
   `@arnilo/prism-web-tools`, `@arnilo/prism-memory`, and `@arnilo/prism-mcp`.
   `prism-web-tools` requires the `prism-mcp` peer. Narrow
   `phase25_dependencies_deny_acp_agui_mcp` so ACP/AG-UI and retired 0.3 names
-  stay forbidden while `@arnilo/prism-mcp` / `@modelcontextprotocol/sdk` are
-  allowed as the package-declared MCP bridge. Keep D1 omitted-`allowCustom`
+  stay forbidden while `@arnilo/prism-mcp` is allowed as the
+  package-declared MCP bridge (Phase 1 used `@modelcontextprotocol/sdk`
+  1.30.0 transitively; Phase 2.1 / Prism 0.5 replaces that with modular
+  `@modelcontextprotocol/client` + `/server` 2.0.0 — still not a Cargo.toml
+  or clay-agent direct SDK import). Keep D1 omitted-`allowCustom`
   resume in the daemon smoke suite at `@arnilo/prism-coding-tools/agent`.
 - Register `@arnilo/prism-coding-tools/agent` tools with Clay-operation
   backends:
@@ -464,13 +505,32 @@ vertically: two equal panes (50/50, user-resizable, ratio-clamped).
   resumes it without implicitly attaching its transcript to the current run.
 - Deleting/disabling the package leaves the daemon and chat fully functional.
 
-### Phase 2.1 Prism update
-### Phase 2.2 Implementation review, refactor
-### Phase 2.3 UX update
-- Model and provider selection configuration has to be available in the / command
-- Setting reasoning effort for models. Is it supported in Prism?
-- Image support
-- 
+### Phase 2.1 Defects, UX, and Prism 0.5.0 (`plans/109`)
+
+Mid-execution: I1–I3 landed (workspace bind, per-workspace model auto-load,
+`/model` + dropdown). Remaining work in plan 109, in this order:
+
+- Adopt Prism 0.5.0 lockstep in `clay-agent` (pins, MCP SDK v2, sqlite 13,
+  keyring 2, hyper/commandcode, thinking adapter). Log the pin set.
+- I4 reasoning effort: yes, supported in Prism 0.5.0 via
+  `applyThinkingLevelForModel` + declared `thinkingLevels` (0.4.0 blocked
+  this). UI dropdown + configurable `Shift+Tab`.
+- Remaining original UX: full transcript (I5), Files-as-editor-view (I6),
+  Context drawer (I7), OM activity + worker models (I8), `/resume` (I9),
+  Session Info as fourth right-pane tab (I10), R1–R5. Bind UI to plan 110
+  (`ClayTabStrip`, recipe consumption). Phase 2's three-tab chrome is the
+  108 ship; 109 adds Session Info and stops duplicating the workspace tree.
+- Image support: still deferred (not in plan 109).
+
+### Phase 2.2 Prism update
+
+Absorbed into Phase 2.1 / plan 109 (Prism 0.5.0 lockstep). Do not schedule
+a second Prism-update phase for 0.5.0.
+
+### Phase 2.3 Implementation review, refactor
+
+Unchanged: post-2.1 review after plan 109 closes.
+
 
 ## Phase 3: Package Installation, Update, and Clay Distribution
 
@@ -621,7 +681,7 @@ pi model. Must land before any third-party package (`st`) is planned.
   with the same per-task execute → test → validate → commit loop, same
   decision gate and end-of-plan surface. Done when every issue is resolved.
 - Orchestrator runs host-side in the daemon with
-  `@arnilo/prism-core/runtime/workflows@0.4.0`, using the retained bounded
+  `@arnilo/prism-core/runtime/workflows@0.5.0`, using the retained bounded
   iterate-until-done host-loop pattern: one `runWorkflow` per
   iteration (task / implement / test / validate), iteration state in
   workflow inputs, explicit termination predicates + budgets with typed
@@ -894,6 +954,17 @@ pi model. Must land before any third-party package (`st`) is planned.
   `prism-office`, `prism-acp-agent`, or `prism-ag-ui` in the daemon. Phase 10
   owns direct `agy` integration. Import subpaths explicitly; no 0.3/0.4 mix;
   no compatibility shims; no persisted-schema migration.
+  **Live pins:** superseded by 0.5.0 in Phase 2.1; 0.4 family/subpath rules
+  stay.
+
+## Resolved this iteration (Prism 0.5.0 / Phase 2.1)
+
+- Lockstep exact `@arnilo/prism*@0.5.0` for the seven adopted families +
+  `better-sqlite3@13.0.3`. MCP 2026-07-28 via prism-mcp / SDK v2 modules.
+  Thinking effort is model-aware (`applyThinkingLevelForModel`). Explicit
+  `/hyper` and `/commandcode` loads. No office/ACP/AG-UI; antigravity
+  package removed upstream (Phase 10 still direct `agy`). No persisted
+  schema migration. Plan 109 owns the cut. Pin decision log is a 109 task.
 
 ## Open Decisions (need `decision-logs/` before implementation)
 
@@ -913,6 +984,11 @@ pi model. Must land before any third-party package (`st`) is planned.
    only; `model-router` dropped; coding/web/memory/MCP deferred to Phase 1;
    Antigravity is a direct Phase 10 adapter, while office/ACP/AG-UI stay out
    of the daemon. `decision-logs/2026-09-02-0121-prism-0.4.0-clay-agent-family-pins.md`.)
+7. **Prism 0.5.0 family pin set.** Directed for Phase 2.1 (`plans/109`).
+   Log before the pin bump, same shape as 0121: exact `0.5.0` seven-family
+   pins + `better-sqlite3@13.0.3`; MCP via `prism-mcp` public API only;
+   hyper/commandcode explicit; no office/ACP/AG-UI. User directed the
+   adoption; the log is a plan-109 task.
 
 ## Post-Roadmap (not in scope)
 

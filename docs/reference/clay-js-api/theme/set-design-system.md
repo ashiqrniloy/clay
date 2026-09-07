@@ -41,7 +41,7 @@ Explicitly activate a UI design system for component recipes: the built-in `@cla
 
 ## When to use
 
-Use from `~/.config/clay/init.js` (or a local configuration module) to select the component recipe set at startup, or from a package's own configuration to activate its contributed design system.
+Use from `~/.config/clay/init.js` (or a local configuration module) to select the component recipe set at startup, or from a package's own configuration to activate its contributed design system. For interactive changes that persist across restarts, use the Settings panel's "Design system" dropdown or the [`settings.setDesignSystem`](../settings/set-design-system.md) command, which validates the specifier, persists the `designSystem` preference, and reapplies it on every reload.
 
 ## JavaScript usage
 

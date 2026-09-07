@@ -7,22 +7,30 @@ import {
   ClayText,
   ClayTextField,
 } from "../components";
-import { themeStore } from "../state/stores";
+import { designSystemStore, themeStore } from "../state/stores";
 import {
   packageIntent,
   sduiActionPayload,
   type IntentSender,
 } from "../sdui/actions";
+import type { UiChoiceOption } from "../sdui/types";
 import type { TypographySnapshot } from "../theme/types";
 
 import styles from "./settings-panel.module.css";
 
-const THEMES = [
-  ["@clay/theme-modus-operandi", "Modus Operandi"],
-  ["@clay/theme-modus-vivendi", "Modus Vivendi"],
-  ["@clay/theme-gruvbox-material-light", "Gruvbox Material Light"],
-  ["@clay/theme-gruvbox-material-dark", "Gruvbox Material Dark"],
-] as const;
+/** Server snapshots carry no label for theme packages; derive one from the
+ * short name (`@clay/theme-modus-operandi` → "Modus Operandi"). */
+function choiceLabel(option: UiChoiceOption): string {
+  if (option.displayName) return option.displayName;
+  const short = option.specifier
+    .replace("@clay/theme-", "")
+    .replace("@clay/design-", "")
+    .replace("@clay/", "");
+  return short
+    .split("-")
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+}
 
 function initialValues(typography: TypographySnapshot | null) {
   return {
@@ -47,8 +55,26 @@ export function SettingsPanel({
   send: IntentSender;
 }) {
   const theme = useSyncExternalStore(themeStore.subscribe, themeStore.get);
+  const designSystem = useSyncExternalStore(
+    designSystemStore.subscribe,
+    designSystemStore.get,
+  );
+  const choices = theme.uiChoices;
+  const themeOptions = (choices?.themes ?? []).map((option) => ({
+    id: option.specifier,
+    label: choiceLabel(option),
+  }));
+  const designSystemOptions = (choices?.designSystems ?? []).map((option) => ({
+    id: option.specifier,
+    label: choiceLabel(option),
+  }));
   const [values, setValues] = useState(() => initialValues(theme.typography));
-  const [appearance, setAppearance] = useState("system");
+  // Hydrated from the persisted preference carried by the runtime snapshot;
+  // local override takes over after the user picks (panel remounts on open).
+  const [appearanceOverride, setAppearanceOverride] = useState<string | null>(
+    null,
+  );
+  const appearance = appearanceOverride ?? choices?.appearance ?? "system";
   const [error, setError] = useState<string | null>(null);
   const set = (key: keyof typeof values) => (value: string) =>
     setValues((current) => ({ ...current, [key]: value }));
@@ -71,7 +97,11 @@ export function SettingsPanel({
     );
 
   return (
-    <aside className={styles.panel} aria-label="Settings">
+    <aside
+      className={styles.panel}
+      data-clay-ds="settingsPanel.panel"
+      aria-label="Settings"
+    >
       <div className={styles.heading}>
         <ClayText variant="title">Settings</ClayText>
         <ClayButton
@@ -86,9 +116,15 @@ export function SettingsPanel({
           <div className={styles.fields}>
             <ClayDropdown
               label="Theme"
-              options={THEMES.map(([id, label]) => ({ id, label }))}
+              options={themeOptions}
               selectedId={theme.theme?.specifier ?? null}
               onSelect={(id) => void intent("settings.setTheme", id)}
+            />
+            <ClayDropdown
+              label="Design system"
+              options={designSystemOptions}
+              selectedId={designSystem.designSystem?.specifier ?? "@clay/core"}
+              onSelect={(id) => void intent("settings.setDesignSystem", id)}
             />
             <ClayDropdown
               label="Appearance"
@@ -99,7 +135,7 @@ export function SettingsPanel({
               ]}
               selectedId={appearance}
               onSelect={(id) => {
-                setAppearance(id);
+                setAppearanceOverride(id);
                 void intent("settings.setAppearance", id);
               }}
             />

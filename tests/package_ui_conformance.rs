@@ -1000,7 +1000,9 @@ fn plan103_css_module_literal_deny_scan() {
     );
 }
 
-/// Plan 103 Task 6: Every core design system fallback has an installed CSS fallback definition in tokens.css.
+/// Plan 103 / Plan 110: Every core design system fallback for actively consumed components
+/// has an installed CSS fallback definition in tokens.css. Speculative unconsumed fallbacks
+/// are prohibited by Plan 110 Task 3 to prevent dead fallback drift.
 #[test]
 fn plan103_fallback_recipes_have_tokens_css_definitions() {
     use clay::shell::design_system::core_design_system_fallbacks;
@@ -1022,8 +1024,32 @@ fn plan103_fallback_recipes_have_tokens_css_definitions() {
         out
     }
 
+    // Unconsumed speculative component kinds deleted from tokens.css by Plan 110 Task 3.
+    // As later tasks consume them in CSS, they gain tokens.css definitions.
+    let unconsumed_components = [
+        "checkbox",
+        "switch",
+        "slider",
+        "label",
+        "progressBar",
+        "table",
+        "tree",
+        "flex",
+        "grid",
+        "scroll",
+        "tooltip",
+        "welcome",
+        "transientMenu",
+        "completion",
+        "editorChrome",
+        "chatPanel",
+    ];
+
     let fallbacks = core_design_system_fallbacks();
     for key in fallbacks.keys() {
+        if unconsumed_components.contains(&key.component.as_str()) {
+            continue;
+        }
         let kebab = to_kebab_case(&key.component);
         let comp_prefix = format!("--clay-ds-{}", kebab);
         assert!(
@@ -1193,6 +1219,68 @@ fn plan104_design_system_packages_cover_all_25_components_and_enforce_color_auth
             "{specifier} contains raw hsl() color literal"
         );
     }
+}
+
+/// Plan 110 Task 2: Cross-package recipe key consistency assertion.
+/// Both first-party design system packages (@clay/design-neobrutal and @clay/design-glass)
+/// must declare mutually consistent recipe keys (exact same set of component.variant.slot.state keys)
+/// so neither package drifts or has missing slots/states relative to the other.
+#[test]
+fn plan110_design_system_packages_mutual_recipe_key_consistency() {
+    use clay::shell::design_system::{RecipeKey, UiDesignSystemDeclaration};
+    use std::collections::BTreeSet;
+
+    let load_keys = |dir: &str, specifier: &str| -> BTreeSet<String> {
+        let manifest_path = format!("{}/packages/{}/package.json", manifest_dir(), dir);
+        let text = fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|err| panic!("read {specifier} manifest: {err}"));
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|err| panic!("parse {specifier} manifest: {err}"));
+
+        let record = assemble_package_record(&value).unwrap_or_else(|err| {
+            panic!("{specifier} must assemble as valid package record: {err:?}")
+        });
+
+        let ds = record
+            .contributions
+            .ui_design_system
+            .as_ref()
+            .unwrap_or_else(|| panic!("{specifier} must contribute uiDesignSystem"));
+
+        let decl: UiDesignSystemDeclaration =
+            serde_json::from_str(&ds.declaration_json).expect("declaration parses cleanly");
+
+        decl.recipes
+            .keys()
+            .map(|key: &RecipeKey| key.to_key_string())
+            .collect()
+    };
+
+    let neobrutal_keys = load_keys("design-neobrutal", "@clay/design-neobrutal");
+    let glass_keys = load_keys("design-glass", "@clay/design-glass");
+
+    assert_eq!(
+        neobrutal_keys.len(),
+        142,
+        "Expected exactly 142 declared recipes in @clay/design-neobrutal baseline"
+    );
+    assert_eq!(
+        glass_keys.len(),
+        142,
+        "Expected exactly 142 declared recipes in @clay/design-glass baseline"
+    );
+
+    let missing_in_glass: Vec<_> = neobrutal_keys.difference(&glass_keys).collect();
+    let missing_in_neobrutal: Vec<_> = glass_keys.difference(&neobrutal_keys).collect();
+
+    assert!(
+        missing_in_glass.is_empty(),
+        "@clay/design-glass is missing recipe keys declared in @clay/design-neobrutal: {missing_in_glass:#?}"
+    );
+    assert!(
+        missing_in_neobrutal.is_empty(),
+        "@clay/design-neobrutal is missing recipe keys declared in @clay/design-glass: {missing_in_neobrutal:#?}"
+    );
 }
 
 /// Plan 104 Task 6: Design system validation hardening. Malicious and out-of-bounds

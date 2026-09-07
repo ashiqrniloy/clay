@@ -89,13 +89,19 @@ setTheme("@clay/theme-gruvbox-material-dark");
 // component recipes (geometry, materials, shadows, borders, motion) layered
 // on top of the active theme. Content themes supply every concrete UI/editor
 // color; recipes map semantic color roles and cannot declare raw CSS or colors.
+// Allowed values (validated by the server; anything else fails closed):
+//   "@clay/core"               built-in core baseline recipes (no package needed)
+//   "@clay/design-neobrutal"   default restrained neobrutal recipes
+//   "@clay/design-glass"       luminous frosted glass reference recipes
 // Bundled restrained Neobrutal recipes (@clay/design-neobrutal) are the default
 // design system (0px radii, 1px structural borders, 2px hard offset shadows);
 // omission keeps the built-in @clay/core baseline, so no call is needed by default.
 // To try a non-default system, install and adopt its package first
 // (selection itself installs nothing and grants no new package authority),
-// then uncomment exactly one line (e.g. Glass reference system):
-// setDesignSystem("@clay/design-glass");
+// then uncomment exactly one line:
+// setDesignSystem("@clay/design-glass");     // glass reference
+// An interactive switch (Settings panel or settings.setDesignSystem) persists
+// the choice in preferences.json and wins over this call on every reload.
 // A missing, revoked, or invalid selection keeps the previous working
 // generation, records a diagnostic, and never blocks startup.
 
@@ -137,11 +143,11 @@ setTypography({
   // Each ratio is finite, > 0, and <= 4; these values preserve Clay defaults.
   hierarchy: {
     display: 1.5,
-    title: 14 / 12,
+    title: 15 / 13,
     section: 13 / 12,
     body: 1,
     status: 1,
-    detail: 10 / 12,
+    detail: 12 / 13,
     caption: 0.75,
   },
 });
@@ -251,7 +257,12 @@ clientSetEditorLayout({ wrapPolicy: "column", columnCap: 72 });
 //                  (clientShowOpenDocuments opens on the focused pane and
 //                  lists every pane's open documents since Phase 22.2)
 //   Workspace:     workspace.toggleFileBrowser  Ctrl+B
-//                  (hidden by default; visibility is per tab)
+//                  (ships by default since plan 109 I6; visibility is
+//                  per tab; tree lives only in the left workspace tab)
+//   Coding agent:  coding-agent.clientCycleEffort  Shift+Tab
+//                  (ships from the @clay/coding-agent package manifest;
+//                  cycles the session model's declared reasoning-effort
+//                  levels from the composer — plan 109 I4)
 //
 // Bindable shell command IDs (Phase 22.1 window splits + Phase 22.4 tabs; all
 // ship with default chords, so no bindKey is needed unless you want different
@@ -434,7 +445,9 @@ bindKey({
 
 // Single form — one binding per call (batch tables work for these too):
 bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
-bindKey("Ctrl+B", "workspace.toggleFileBrowser", { scope: "editor" });
+// Plan 109 I6: Ctrl+B ships as a Global default for the file-browser toggle,
+// so this re-declaration is an idempotent no-op kept as the reference.
+bindKey("Ctrl+B", "workspace.toggleFileBrowser", { scope: "global" });
 
 // Text objects + smart select ship with NO default bindings by design —
 // bound here as single-form examples (single strokes and multi-stroke
@@ -450,6 +463,11 @@ bindKey("Alt+R", "editor.clientSmartSelect.shrink", { scope: "editor" });
 // if desired. Last binding for a chord wins:
 // bindKey("Alt+W", "workspace.toggleFileBrowser", { scope: "editor" });
 // unbindKey("Ctrl+B", { scope: "editor" });  // or remove the default example binding
+
+// Coding agent effort cycle (plan 109 I4): Shift+Tab ships from the
+// package manifest, so no active bindKey is needed. To rebind the
+// composer's effort-cycle chord, uncomment:
+// bindKey("Ctrl+M", "coding-agent.clientCycleEffort", { scope: "global" });
 
 // Rebinding a shipped default (example: "add equal pane" on a different
 // chord; scope "global" matches the shipped default context):

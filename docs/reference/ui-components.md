@@ -92,6 +92,12 @@ Phase 28 keeps editor intelligence outside the package component catalog:
 See [Creating Clay Packages — Phase 28 authoring contract](packages/creating-packages.md#phase-28-authoring-contract-editor-commands-folding-decoration-intent-and-inlay-hints)
 and the [UI Chrome Primitives](primitives/ui-chrome-primitives.md) reference.
 
+## Plan 110 unified tab-strip primitive and design-system selector
+
+- **`ClayTabStrip` catalog primitive** (`frontend/src/components/tab-strip.tsx`, plan 108 G2 + plan 110 task 5): one React Aria `Tabs` implementation shared by the shell window tab bar (`frontend/src/app/layout/tab-bar.tsx`), the SDUI `PackageTabList` registry entry, and `CodingAgentPanel`. Closed recipe attributes (`tabList.root`/`strip`/`tab`/`panel`); visual styling flows through the `tab.default.item.*` and `tabBar.default.root.rest` design-system recipes. Packages rendering tab UI must use the `tabList` SDUI kind — never custom tab strips.
+- **Design-system selector UI** (plan 110 task 10): the Settings panel renders *Theme* and *Design system* dropdowns from the server-enumerated `ui_choices` snapshot (`themes` from installed `@clay/theme-*` records, `design_systems` with Core baseline first), plus an *Appearance* selector hydrated from the persisted preference. Switching sends `settings.setDesignSystem`, which persists the choice and reloads the runtime — whole-shell restyle with no component remount. See [`settings.setDesignSystem`](clay-js-api/settings/set-design-system.md) and [`theme.setDesignSystem`](clay-js-api/theme/set-design-system.md).
+- **Authoring contract:** design-system package authors document keys against the canonical slot list and consumption-tested contract in [Creating Clay Packages — UI Design-System declarations](packages/creating-packages.md#ui-design-system-declarations-claycontributionsuidesignsystem-plans-101104).
+
 ## Reference Documents
 
 - [UI Design Systems](ui-design-systems.md) — Plan 101/102/103 public specification for typed UI design-system recipe contributions, property domains, state mapping, deterministic fallbacks, accessibility layers, and programmatic activation.

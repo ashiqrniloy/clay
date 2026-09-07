@@ -35,6 +35,7 @@ import {
   createMockProvider,
   createProviderResolver,
   createSecretRedactor,
+  createSessionCachePolicy,
   createSessionEntry,
   createSkillRegistry,
   DEFAULT_SESSION_SEARCH_LIMIT,
@@ -45,6 +46,9 @@ import {
   redactAgentEvent,
   resolveActiveSkills,
   resumeAgentRunStream,
+  applyThinkingLevelForModel,
+  parseThinkingLevel,
+  thinkingLevelsForModel,
 } from "@arnilo/prism";
 import {
   createKeychainCredentialStore,
@@ -52,6 +56,7 @@ import {
   openEncryptedCredentialStore,
   type EncryptedCredentialStore,
   type KeychainCredentialStore,
+  CredentialStoreLockedError,
 } from "@arnilo/prism-core/credentials/node";
 import { createSqlitePersistence, type SqlitePersistence } from "@arnilo/prism-core/sessions/sqlite";
 import { createJsonSchemaToolArgumentValidator } from "@arnilo/prism-core/validation/json-schema";
@@ -60,7 +65,7 @@ import {
   createObservationalMemory,
   createRecallMemoryTool,
 } from "@arnilo/prism-memory/compaction/observational-memory";
-import type { SettingsProvider } from "@arnilo/prism";
+import type { SettingsProvider, SystemPromptConfig } from "@arnilo/prism";
 import type { AgentIdentity } from "@arnilo/prism";
 import { ownershipFromIdentity } from "@arnilo/prism";
 import { CODING_TOOL_NAMES, buildCodingTools, normalizeToolCaps, type RepositoryToolCaps } from "./coding-tools.js";
@@ -91,6 +96,18 @@ import {
 /** Per-session OM auto-compaction threshold override (2158 default 80000).
  *  Only meaningful for OM-attached sessions. */
 const omCompactAfterTokens = new Map<string, number>();
+/** Plan 109 I8: per-session OM worker models (may differ from the session
+ *  model; retained per session in record metadata, per workspace in the
+ *  server book). Absent fields fall back to the host-global config. */
+interface OmWorkerSelection {
+  readonly provider: string;
+  readonly model: string;
+}
+interface OmWorkerModels {
+  observation?: OmWorkerSelection;
+  reflection?: OmWorkerSelection;
+}
+const omWorkerModels = new Map<string, OmWorkerModels>();
 
 /** Graft pull-tool names registered by the @arnilo/prism-memory/graft
  *  extension (tools.js); the package does not export the list. */
@@ -147,7 +164,20 @@ const RUN_STATE_REVISION = "clay-agent.1";
 /** Bounded branch-summary text (plan 108 task 10) and in-place tree render. */
 const MAX_BRANCH_SUMMARY_BYTES = 2_048;
 const MAX_TREE_RENDER_BYTES = 8_192;
+// Plan 109 I7 context inspector: bounded previews, bounded items per
+// category, and item content capped at the transcript entry budget.
+const MAX_CONTEXT_ITEMS = 200;
+const MAX_CONTEXT_PREVIEW_CHARS = 160;
+const MAX_CONTEXT_ITEM_BYTES = 32 * 1024;
 const MAX_TREE_RENDER_ENTRIES = 60;
+// Plan 109 I8 Observational Memory tab: bounded activity rows and summaries.
+const MAX_OM_ACTIVITY_ROWS = 200;
+/** Plan 109 R1: bounded completion surface (commands and description
+ *  lengths) — names + descriptions only, never handlers or arg shapes. */
+const MAX_COMPLETION_COMMANDS = 64;
+const MAX_COMPLETION_NAME_CHARS = 48;
+const MAX_COMPLETION_DESCRIPTION_CHARS = 96;
+const MAX_OM_SUMMARY_CHARS = 160;
 
 export type EmitFn = (method: string, params: unknown) => void;
 
@@ -156,6 +186,12 @@ export interface HostOptions {
   readonly passphrase: string;
   readonly mock?: boolean;
   readonly mockProvider?: AIProvider;
+  /** Test/extension seam (plan 109 I4): register extra model configs
+   *  (capabilities/compat) on the kernel's model registry. */
+  readonly registerModels?: (registries: ExtensionKernel["registries"]) => void;
+  /** Test seam (plan 109 I7): register extra agent definitions (profiles
+   *  with system prompts) after the built-in Chat profile. */
+  readonly registerAgents?: (registries: ExtensionKernel["registries"]) => void;
   readonly emit?: EmitFn;
   /**
    * Server-built MCP allow-list (decision 1758). Absent/empty connects
@@ -163,6 +199,8 @@ export interface HostOptions {
    * literal argv, explicit env names).
    */
   readonly mcpAllowList?: readonly unknown[];
+  /** Test seam: replace keychain store construction (default Prism node keychain). */
+  readonly createKeychain?: () => KeychainCredentialStore;
   /** Test seam: replace Obscura binary resolution. */
   readonly resolveObscuraBinary?: () => string | undefined;
   /** Worker models stay off the session model (2158). Omit to skip workers. */
@@ -175,6 +213,18 @@ export interface HostOptions {
     readonly reflection?: {
       readonly provider: AIProvider;
       readonly model?: ModelConfig;
+      /** Reflection trigger: uncovered-observation token budget. */
+      readonly observationTokens?: number;
+    };
+    /** Dropper config passthrough (plan 109 I8): `policy: "lowest-relevance"`
+     *  drops deterministically without a model call; the default "model"
+     *  policy resolves like the other workers (per-session selection may
+     *  name it, else it skips). */
+    readonly dropper?: {
+      readonly provider?: AIProvider;
+      readonly model?: ModelConfig;
+      readonly targetTokens?: number;
+      readonly policy?: "model" | "lowest-relevance";
     };
     readonly compactAfterTokens?: number;
   };
@@ -193,12 +243,36 @@ interface LiveSession {
   readonly observationalMemory: boolean;
   /** Live tools for this session (empty for Chat without OM). */
   readonly tools: ToolDefinition[];
+  /** Definition-owned system prompt config (plan 109 I7 context
+   *  inspector); `undefined` = the profile contributes no explicit prompt. */
+  readonly systemPrompt?: SystemPromptConfig;
   /** Last durable-run suspension: expectedVersion source for run.resume
    *  when the client omits it, plus the pending approval ids. */
   suspension?: { runId: string; version: number };
 }
 
 /** In-flight LLM branch-summary refinements: sessionId → branch point id. */
+
+const KEYCHAIN_PROBE_REQUEST = { name: "clay-probe", provider: "clay-probe" } as const;
+
+/** Prism 0.5 keychain health check: `list()` is unsupported on keychain
+ *  stores, so probe via `get` of a sentinel credential — missing = fine
+ *  (`undefined`), locked/denied = typed `CredentialStoreLockedError` (fail
+ *  closed: a locked keychain is not an empty vault), unavailable backend =
+ *  degrade to vault-only. Injectable candidate factory for tests. */
+export async function resolveKeychain(
+  createCandidate: () => KeychainCredentialStore = () =>
+    createKeychainCredentialStore({ service: KEYCHAIN_SERVICE }),
+): Promise<KeychainCredentialStore | undefined> {
+  const candidate = createCandidate();
+  try {
+    await candidate.get(KEYCHAIN_PROBE_REQUEST);
+    return candidate;
+  } catch (error) {
+    if (error instanceof CredentialStoreLockedError) throw error;
+    return undefined;
+  }
+}
 
 /** Persist the live book's provider/model onto the session record (plan 108
  *  task 9): a picker switch mid-session survives daemon restart and resume.
@@ -368,14 +442,9 @@ export class ClayAgentHost {
       path: vaultPath,
       getPassphrase: () => options.passphrase,
     });
-    let keychain: KeychainCredentialStore | undefined;
-    try {
-      const candidate = createKeychainCredentialStore({ service: KEYCHAIN_SERVICE });
-      await candidate.list();
-      keychain = candidate;
-    } catch {
-      keychain = undefined;
-    }
+    // Locked/denied keychain fails closed at boot (resolveKeychain throws
+    // CredentialStoreLockedError); unavailable degenerates to vault-only.
+    const keychain = await resolveKeychain(options.createKeychain);
     const resolver = createExplicitCredentialResolver([
       { name: "vault", resolver: createStoredCredentialResolver(vault) },
       ...(keychain ? [{ name: "keychain" as const, resolver: createStoredCredentialResolver(keychain) }] : []),
@@ -419,6 +488,8 @@ export class ClayAgentHost {
       await loadToolCaps(options.dataDir),
     );
     const mockProvider = kernel.registries.providers.get("mock");
+    options.registerModels?.(kernel.registries);
+    options.registerAgents?.(kernel.registries);
     registerCompactionStrategies(kernel, {
       secrets: [],
       ...(mockProvider ? { llm: { provider: mockProvider, model: { provider: "mock", model: "demo" } } } : {}),
@@ -538,6 +609,16 @@ export class ClayAgentHost {
         return this.sessionList(asRecord(params ?? {}));
       case "session.load":
         return this.sessionLoad(asRecord(params));
+      // Plan 109 I7: live context inspector — categorized, bounded,
+      // redacted. `{ sessionId }` lists categories; `{ sessionId, itemId }`
+      // returns one item's full redacted content.
+      case "session.context":
+        return this.sessionContext(asRecord(params));
+      // Plan 109 I8: OM worker-model selection + observer activity log.
+      case "session.om.set":
+        return this.sessionOmSet(asRecord(params));
+      case "session.om.activity":
+        return this.sessionOmActivity(asRecord(params));
       case "session.resume":
         return this.sessionResume(asRecord(params));
       case "session.delete":
@@ -554,6 +635,9 @@ export class ClayAgentHost {
         return this.sessionSetAutonomy(asRecord(params));
       case "session.search":
         return this.sessionSearch(asRecord(params));
+      // Plan 109 I9: workspace-scoped resumable session list (/resume).
+      case "session.resumable":
+        return this.sessionResumable(asRecord(params));
       case "session.checkout":
         return this.sessionCheckout(asRecord(params));
       case "session.fork":
@@ -592,6 +676,8 @@ export class ClayAgentHost {
         return this.commandRegister(asRecord(params));
       case "command.dispatch":
         return this.commandDispatch(asRecord(params));
+      case "environment.list":
+        return this.environmentList();
       case "knowledge.setOptions":
         return this.knowledgeSetOptions(asRecord(params));
       default:
@@ -630,6 +716,10 @@ export class ClayAgentHost {
     // calls auto-approve unless a caller explicitly disables autonomy.
     const fullAutonomy = params.fullAutonomy !== false;
     const observationalMemory = this.resolveOmFlag(profile, params.observationalMemory);
+    // Plan 109 I8: per-session OM worker models (each may differ from the
+    // session model; `null` clears a previously-set selection).
+    const omWorkers = this.parseOmWorkers(params.observationalMemoryWorkers);
+    if (omWorkers) omWorkerModels.set(id, omWorkers);
     // Capabilities activate on the first session that declares coding tools
     // (never on import, never for Chat-only initialize).
     const wantsCoding = this.profileWantsCodingTools(profile);
@@ -657,11 +747,13 @@ export class ClayAgentHost {
         fullAutonomy,
         // Stable workspace identity for workspace-scoped search (decision 2201).
         [SESSION_SEARCH_WORKSPACE_METADATA_KEY]: workspaceRoot,
+        ...(omWorkers ? { omWorkers } : {}),
       },
     });
     this.live.set(id, {
       session: created.session,
       agent: created.agent,
+      systemPrompt: created.systemPrompt,
       profile,
       provider,
       model: modelId,
@@ -688,7 +780,12 @@ export class ClayAgentHost {
     provider: string,
     modelId: string,
     options: { workspaceRoot: string; fullAutonomy: boolean; observationalMemory: boolean },
-  ): { session: AgentSession; agent: Agent; tools: ToolDefinition[] } {
+  ): {
+    session: AgentSession;
+    agent: Agent;
+    tools: ToolDefinition[];
+    systemPrompt?: SystemPromptConfig;
+  } {
     const def = this.kernel.registries.agents.resolve(profile);
     if (!this.kernel.registries.providers.get(provider)) throw rpcError(-32000, `Unknown provider: ${provider}`);
     const tools = this.sessionTools(def, id, options);
@@ -724,6 +821,11 @@ export class ClayAgentHost {
       // mediated write fails closed with ERR_PRISM_TOOL_EFFECT_CONFLICT,
       // including post-resume turns where run options don't reach the context.
       identity: this.runIdentity(),
+      // Session-correlation policy (Prism: hosts decide which request
+      // policies are active). Injects options.sessionId/cacheKey so
+      // provider adapters can send their session headers — OpenCode Go's
+      // gateway hard-400s without `x-opencode-session`.
+      providerRequestPolicies: createSessionCachePolicy(),
       ...(def.instructions !== undefined ? { instructions: def.instructions } : {}),
       ...(def.systemPrompt !== undefined ? { systemPrompt: def.systemPrompt } : {}),
       ...(runTools.length > 0 ? { tools: runTools } : {}),
@@ -731,7 +833,7 @@ export class ClayAgentHost {
     });
     let session = agent.createSession({ id });
     if (options.observationalMemory) session = this.attachOm(session, model);
-    return { session, agent, tools: runTools };
+    return { session, agent, tools: runTools, systemPrompt: def.systemPrompt };
   }
 
   /** Rebuild the live session's agent with a new provider/model config
@@ -744,13 +846,18 @@ export class ClayAgentHost {
     provider: string,
     modelId: string,
   ): LiveSession {
-    const leafId = live.session.leafId;
     const recreated = this.createSession(sessionId, live.profile, provider, modelId, {
       workspaceRoot: live.workspaceRoot,
       fullAutonomy: live.fullAutonomy,
       observationalMemory: live.observationalMemory,
     });
-    const session = recreated.agent.createSession({ id: sessionId, ...(leafId ? { leafId } : {}) });
+    // The created session is already bound to the branch's current leaf
+    // (the leaf this recreate carries over), and it is the OM-attached
+    // proxy when Observational Memory is on — the Observer's post-run
+    // flush and context provider must survive model switches. The prior
+    // raw `agent.createSession` here silently detached OM after any
+    // mid-session model switch (plan 109 I8 fix).
+    const session = recreated.session;
     live.session = session;
     live.agent = recreated.agent;
     live.provider = provider;
@@ -801,9 +908,53 @@ export class ClayAgentHost {
     ];
   }
 
+  /** Plan 109 I8: resolve a per-session OM worker config. The selection's
+   *  provider instance must be registered — an unknown provider fails
+   *  closed (worker omitted, `requireExplicitModel` skips it) and never
+   *  silently falls back to the session model (decision 2158). */
+  private omWorkerConfig(
+    sessionId: string,
+    worker: "observation" | "reflection",
+  ):
+    | {
+        provider: AIProvider;
+        model?: ModelConfig;
+        messageTokens?: number;
+        observationTokens?: number;
+      }
+    | undefined {
+    const selection = omWorkerModels.get(sessionId)?.[worker];
+    // Host-global worker config (thresholds + default provider instance);
+    // the union narrows per worker below.
+    const global: {
+      provider: AIProvider;
+      model?: ModelConfig;
+      messageTokens?: number;
+      observationTokens?: number;
+    } | undefined =
+      worker === "observation"
+        ? this.omConfig?.observation
+        : this.omConfig?.reflection;
+    if (selection) {
+      const provider = this.kernel.registries.providers.get(selection.provider);
+      if (!provider) return undefined;
+      // Per-session selection: the registered provider instance + the
+      // selected model; thresholds still come from the host config.
+      return {
+        provider,
+        model: { provider: selection.provider, model: selection.model },
+        ...(global?.messageTokens !== undefined ? { messageTokens: global.messageTokens } : {}),
+        ...(global?.observationTokens !== undefined
+          ? { observationTokens: global.observationTokens }
+          : {}),
+      };
+    }
+    return global ? { ...global } : undefined;
+  }
+
   private attachOm(session: AgentSession, model: ModelConfig): AgentSession {
-    const observation = this.omConfig?.observation;
-    const reflection = this.omConfig?.reflection;
+    const observation = this.omWorkerConfig(session.id, "observation");
+    const reflection = this.omWorkerConfig(session.id, "reflection");
     const om = createObservationalMemory({
       ...(observation
         ? {
@@ -819,6 +970,21 @@ export class ClayAgentHost {
             reflection: {
               provider: reflection.provider,
               ...(reflection.model ? { model: reflection.model } : {}),
+              ...(reflection.observationTokens !== undefined
+                ? { observationTokens: reflection.observationTokens }
+                : {}),
+            },
+          }
+        : {}),
+      ...(this.omConfig?.dropper
+        ? {
+            dropper: {
+              ...(this.omConfig.dropper.provider ? { provider: this.omConfig.dropper.provider } : {}),
+              ...(this.omConfig.dropper.model ? { model: this.omConfig.dropper.model } : {}),
+              ...(this.omConfig.dropper.targetTokens !== undefined
+                ? { targetTokens: this.omConfig.dropper.targetTokens }
+                : {}),
+              ...(this.omConfig.dropper.policy ? { policy: this.omConfig.dropper.policy } : {}),
             },
           }
         : {}),
@@ -944,6 +1110,395 @@ export class ClayAgentHost {
     };
   }
 
+  /**
+   * Plan 109 I7: live context inspector over the active session branch.
+   * Active context = the branch chain from the latest `kind: "compaction"`
+   * entry onward (compacted-away items leave the list; the summary item
+   * stays) — a branch checkout rebinds `entries()` to the checked-out
+   * branch, so the same derivation restores the earlier context. Builds
+   * on demand (never on keystroke/paint paths), redacted through the
+   * session redactor, previews and content bounded.
+   */
+  private async sessionContext(params: Record<string, unknown>): Promise<unknown> {
+    const sessionId = reqString(params, "sessionId");
+    const live = this.live.get(sessionId);
+    if (!live) throw rpcError(-32000, `Unknown session: ${sessionId}`);
+    const entries = await live.session.entries();
+    const itemId = optString(params, "itemId");
+    if (itemId) {
+      const item = this.contextItem(live, entries, itemId);
+      if (!item) throw rpcError(-32000, `Unknown context item: ${itemId}`);
+      return { sessionId, itemId, ...item };
+    }
+    return {
+      sessionId,
+      // Cheap invalidation version: every entry append (run finished,
+      // compaction, steer, skill row) bumps it; the client refetches when
+      // its transcript length changes.
+      version: entries.length,
+      categories: this.contextCategories(live, entries),
+    };
+  }
+
+  /** Active-context slice: from the latest compaction entry onward. */
+  private activeContextEntries(entries: readonly SessionEntry[]): readonly SessionEntry[] {
+    let boundary = -1;
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      if (entries[index]?.kind === "compaction") {
+        boundary = index;
+        break;
+      }
+    }
+    return boundary === -1 ? entries : entries.slice(boundary);
+  }
+
+  /**
+   * Categorized active context. One category model feeds counts and items
+   * (the item list is capped; `count` stays the real number so the client
+   * can show "…and N more").
+   */
+  private contextCategories(
+    live: LiveSession,
+    entries: readonly SessionEntry[],
+  ): Array<{ kind: string; label: string; count: number; items: Array<ContextItemRef> }> {
+    const system: ContextItemRef[] = [];
+    const user: ContextItemRef[] = [];
+    const skills: ContextItemRef[] = [];
+    const tools: ContextItemRef[] = [];
+    const thinking: ContextItemRef[] = [];
+    const agent: ContextItemRef[] = [];
+    const summaries: ContextItemRef[] = [];
+    // Definition-owned system prompt (not transcript content).
+    for (const [index, contribution] of systemPromptContributions(live.systemPrompt).entries()) {
+      system.push({
+        id: `system-prompt-${index}`,
+        title: `System prompt (${contribution.id})`,
+        preview: clipUtf8(contribution.text, MAX_CONTEXT_PREVIEW_CHARS),
+      });
+    }
+    for (const entry of this.activeContextEntries(entries)) {
+      const redacted = this.redactor.redact(entry);
+      if (redacted.kind === "summary" || redacted.kind === "compaction") {
+        summaries.push({
+          id: redacted.id,
+          title: "Compaction summary",
+          preview: clipUtf8(redacted.summary ?? "", MAX_CONTEXT_PREVIEW_CHARS),
+        });
+        continue;
+      }
+      if (redacted.kind === "message" && redacted.message) {
+        const message = redacted.message;
+        message.content.forEach((block, index) => {
+          const blockId = `${redacted.id}#${index}`;
+          if (block.type === "thinking") {
+            thinking.push({
+              id: blockId,
+              title: "Thinking",
+              preview: clipUtf8(block.text, MAX_CONTEXT_PREVIEW_CHARS),
+            });
+            return;
+          }
+          if (block.type === "tool_call") {
+            // Loaded skills ride the same transcript as tool calls: a
+            // `load_skill` call feeds both the skill and tool categories
+            // (skill tool-execution events are not persisted as entries).
+            if (block.name === "load_skill") {
+              const skillName =
+                typeof (block.arguments as Record<string, unknown> | undefined)?.name === "string"
+                  ? ((block.arguments as Record<string, unknown>).name as string)
+                  : "unknown";
+              skills.push({
+                id: blockId,
+                title: `load_skill: ${skillName}`,
+                preview: clipUtf8(JSON.stringify(block.arguments), MAX_CONTEXT_PREVIEW_CHARS),
+              });
+            }
+            tools.push({
+              id: blockId,
+              title: `tool call: ${block.name}`,
+              preview: clipUtf8(JSON.stringify(block.arguments), MAX_CONTEXT_PREVIEW_CHARS),
+            });
+            return;
+          }
+          if (block.type === "tool_result") {
+            tools.push({
+              id: blockId,
+              title: `tool output: ${block.name}`,
+              preview: clipUtf8(
+                block.error ? `error: ${block.error.message ?? ""}` : JSON.stringify(block.result ?? null),
+                MAX_CONTEXT_PREVIEW_CHARS,
+              ),
+            });
+            return;
+          }
+          if (block.type !== "text" || !block.text) return;
+          if (message.role === "user") {
+            user.push({ id: blockId, title: "User prompt", preview: clipUtf8(block.text, MAX_CONTEXT_PREVIEW_CHARS) });
+          } else if (message.role === "assistant") {
+            agent.push({ id: blockId, title: "Agent message", preview: clipUtf8(block.text, MAX_CONTEXT_PREVIEW_CHARS) });
+          }
+        });
+        continue;
+      }
+      // Loaded skills: load_skill tool calls are persisted as tool events.
+      if (redacted.kind === "event" && redacted.event) {
+        const event = redacted.event as Record<string, unknown>;
+        if (
+          event.type === "tool_execution_started" &&
+          typeof event.call === "object" && event.call !== null &&
+          (event.call as Record<string, unknown>).name === "load_skill"
+        ) {
+          const call = (event.call as Record<string, unknown>).arguments as Record<string, unknown> | undefined;
+          const name = typeof call?.name === "string" ? call.name : "unknown";
+          skills.push({
+            id: redacted.id,
+            title: `load_skill: ${name}`,
+            preview: clipUtf8(JSON.stringify(call ?? {}), MAX_CONTEXT_PREVIEW_CHARS),
+          });
+        }
+      }
+    }
+    const build = (kind: string, label: string, items: ContextItemRef[]) => ({
+      kind,
+      label,
+      count: items.length,
+      items: items.slice(-MAX_CONTEXT_ITEMS),
+    });
+    return [
+      build("systemPrompt", "System prompt", system),
+      build("userMessage", "User prompts", user),
+      build("skill", "Skills loaded", skills),
+      build("toolOutput", "Tool calls + outputs", tools),
+      build("thinking", "Thinking", thinking),
+      build("agentMessage", "Agent messages", agent),
+      build("compactionSummary", "Compaction summaries", summaries),
+    ];
+  }
+
+  /** One context item's full redacted content for the drawer detail. */
+  private contextItem(
+    live: LiveSession,
+    entries: readonly SessionEntry[],
+    itemId: string,
+  ): { kind: string; title: string; content: string } | undefined {
+    // System-prompt items live outside the transcript.
+    if (itemId.startsWith("system-prompt-")) {
+      const index = Number(itemId.slice("system-prompt-".length));
+      const contribution = systemPromptContributions(live.systemPrompt)[index];
+      if (!contribution) return undefined;
+      return {
+        kind: "systemPrompt",
+        title: `System prompt (${contribution.id})`,
+        content: clipUtf8(contribution.text, MAX_CONTEXT_ITEM_BYTES),
+      };
+    }
+    const [entryId, blockIndex] = itemId.split("#");
+    const entry = this.activeContextEntries(entries).find((candidate) => candidate.id === entryId);
+    if (!entry) return undefined;
+    const redacted = this.redactor.redact(entry);
+    const clip = (text: string) => clipUtf8(text, MAX_CONTEXT_ITEM_BYTES);
+    if (redacted.kind === "summary" || redacted.kind === "compaction") {
+      return { kind: "compactionSummary", title: "Compaction summary", content: clip(redacted.summary ?? "") };
+    }
+    if (redacted.kind === "event" && redacted.event) {
+      const event = redacted.event as Record<string, unknown>;
+      if (event.type === "tool_execution_started" && typeof event.call === "object" && event.call !== null) {
+        return {
+          kind: "skill",
+          title: "load_skill",
+          content: clip(JSON.stringify((event.call as Record<string, unknown>).arguments ?? {})),
+        };
+      }
+      return undefined;
+    }
+    if (redacted.kind !== "message" || !redacted.message) return undefined;
+    const index = Number(blockIndex);
+    const block = Number.isInteger(index) ? redacted.message.content[index] : undefined;
+    if (!block) return undefined;
+    if (block.type === "thinking") {
+      return { kind: "thinking", title: "Thinking", content: clip(block.text) };
+    }
+    if (block.type === "tool_call") {
+      return {
+        kind: "toolOutput",
+        title: `tool call: ${block.name}`,
+        content: clip(JSON.stringify({ name: block.name, arguments: block.arguments })),
+      };
+    }
+    if (block.type === "tool_result") {
+      return {
+        kind: "toolOutput",
+        title: `tool output: ${block.name}`,
+        content: clip(
+          block.error ? `error: ${block.error.message ?? JSON.stringify(block.error)}` : JSON.stringify(block.result ?? null),
+        ),
+      };
+    }
+    if (block.type === "text") {
+      const kind = redacted.message.role === "user" ? "userMessage" : "agentMessage";
+      const title = redacted.message.role === "user" ? "User prompt" : "Agent message";
+      return { kind, title, content: clip(block.text) };
+    }
+    return undefined;
+  }
+
+  /** Plan 109 I8: validate an OM worker selection payload from session.new
+   *  / session.om.set. Each worker is `{ provider, model }` (both
+   *  non-empty strings) or `null` to clear; unknown shapes fail closed. */
+  private parseOmWorkers(raw: unknown): OmWorkerModels | undefined {
+    if (raw === undefined) return undefined;
+    if (raw === null) return {};
+    if (typeof raw !== "object" || Array.isArray(raw)) {
+      throw rpcError(-32602, "observationalMemoryWorkers must be an object");
+    }
+    const value = raw as Record<string, unknown>;
+    const one = (input: unknown, name: string): OmWorkerSelection | null | undefined => {
+      if (input === undefined) return undefined;
+      if (input === null) return null;
+      if (typeof input !== "object" || Array.isArray(input)) {
+        throw rpcError(-32602, `${name} must be { provider, model } or null`);
+      }
+      const worker = input as Record<string, unknown>;
+      if (typeof worker.provider !== "string" || worker.provider.trim() === "" ||
+          typeof worker.model !== "string" || worker.model.trim() === "") {
+        throw rpcError(-32602, `${name}.provider and ${name}.model must be non-empty strings`);
+      }
+      return { provider: worker.provider, model: worker.model };
+    };
+    const observation = one(value.observation, "observation");
+    const reflection = one(value.reflection, "reflection");
+    const out: OmWorkerModels = {};
+    if (observation === null) out.observation = undefined;
+    else if (observation !== undefined) out.observation = observation;
+    if (reflection === null) out.reflection = undefined;
+    else if (reflection !== undefined) out.reflection = reflection;
+    return out;
+  }
+
+  /** Plan 109 I8: set per-session OM worker models. Selections are
+   *  validated against the provider registry (unknown provider fails
+   *  closed), persisted into the session record metadata, and applied by
+   *  re-attaching OM (worker rebuild keeps the leaf). `requireExplicitModel`
+   *  stays true: cleared/unset workers skip — never the session model. */
+  private async sessionOmSet(params: Record<string, unknown>): Promise<unknown> {
+    const sessionId = reqString(params, "sessionId");
+    const workers = this.parseOmWorkers(params.workers);
+    if (!workers) throw rpcError(-32602, "workers must be an object");
+    for (const worker of [workers.observation, workers.reflection]) {
+      if (worker && !this.kernel.registries.providers.get(worker.provider)) {
+        throw rpcError(-32000, `Unknown OM worker provider: ${worker.provider}`);
+      }
+    }
+    const existing = omWorkerModels.get(sessionId) ?? {};
+    omWorkerModels.set(sessionId, { ...existing, ...workers });
+    await this.persistOmWorkers(sessionId);
+    // Re-attach so the new workers apply immediately (next run); the
+    // rebuild preserves the leaf and is the same mechanism as a
+    // mid-session model switch.
+    const live = this.live.get(sessionId);
+    if (live?.observationalMemory) {
+      this.recreateSessionModel(live, sessionId, live.provider, live.model);
+    }
+    const stored = omWorkerModels.get(sessionId) ?? {};
+    return {
+      sessionId,
+      observation: stored.observation ?? null,
+      reflection: stored.reflection ?? null,
+    };
+  }
+
+  /** Best-effort persistence of per-session OM worker models (same
+   *  advisory pattern as persistProviderModel). */
+  private async persistOmWorkers(sessionId: string): Promise<void> {
+    if (typeof this.persistence.appendSession !== "function") return;
+    try {
+      const page = await this.persistence.querySessions({ id: sessionId, tenantId: TENANT, limit: 1 });
+      const record = page.items[0];
+      if (!record) return;
+      const stored = omWorkerModels.get(sessionId);
+      const metadata = {
+        ...((record.metadata ?? {}) as Record<string, unknown>),
+        omWorkers: stored ?? {},
+      };
+      await this.persistence.appendSession({
+        ...record,
+        metadata,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      // Metadata persistence is advisory; the live selection still applies.
+    }
+  }
+
+  /** Plan 109 I8: the Observational Memory tab's read model — current
+   *  worker selection plus the bounded observer activity log (recorded
+   *  observations with fact summaries, reflections, drops, compaction
+   *  folds) derived from the session's branch entries at completion
+   *  boundaries (fetched on tab open / transcript change, never polled). */
+  private async sessionOmActivity(params: Record<string, unknown>): Promise<unknown> {
+    const sessionId = reqString(params, "sessionId");
+    const live = this.live.get(sessionId);
+    const stored = omWorkerModels.get(sessionId) ?? {};
+    const activity: Array<{ id: string; kind: string; summary: string }> = [];
+    if (live?.observationalMemory) {
+      for (const entry of await live.session.entries()) {
+        const data = entry.data as Record<string, unknown> | undefined;
+        if (!data) continue;
+        const type = typeof data.type === "string" ? data.type : undefined;
+        if (type === "om.observations.recorded" && Array.isArray(data.observations)) {
+          for (const observation of data.observations as Array<Record<string, unknown>>) {
+            if (typeof observation.content !== "string") continue;
+            activity.push({
+              id: `${entry.id}#${String(observation.id ?? activity.length)}`,
+              kind: "observation",
+              summary: this.omActivitySummary(observation.content),
+            });
+            if (activity.length >= MAX_OM_ACTIVITY_ROWS) break;
+          }
+        } else if (type === "om.reflections.recorded" && Array.isArray(data.reflections)) {
+          for (const reflection of data.reflections as Array<Record<string, unknown>>) {
+            if (typeof reflection.content !== "string") continue;
+            activity.push({
+              id: `${entry.id}#${String(reflection.id ?? activity.length)}`,
+              kind: "reflection",
+              summary: this.omActivitySummary(reflection.content),
+            });
+            if (activity.length >= MAX_OM_ACTIVITY_ROWS) break;
+          }
+        } else if (type === "om.observations.dropped" && Array.isArray(data.observationIds)) {
+          const ids = (data.observationIds as unknown[]).filter((id): id is string => typeof id === "string");
+          if (ids.length > 0) {
+            activity.push({
+              id: `${entry.id}#dropped`,
+              kind: "drop",
+              summary: `Dropped ${ids.length} observation${ids.length === 1 ? "" : "s"}`,
+            });
+          }
+        } else if (type === "om.folded") {
+          activity.push({
+            id: `${entry.id}#folded`,
+            kind: "fold",
+            summary: "Compaction folded memory into the summary",
+          });
+        }
+        if (activity.length >= MAX_OM_ACTIVITY_ROWS) break;
+      }
+    }
+    return {
+      sessionId,
+      attached: Boolean(live?.observationalMemory),
+      observation: stored.observation ?? null,
+      reflection: stored.reflection ?? null,
+      activity,
+    };
+  }
+
+  /** One-line fact summary: redacted, bounded, first line only. */
+  private omActivitySummary(text: string): string {
+    const firstLine = text.split("\n", 1)[0] ?? text;
+    return clipUtf8(this.redactor.redact(firstLine), MAX_OM_SUMMARY_CHARS);
+  }
+
   private async sessionResume(params: Record<string, unknown>): Promise<unknown> {
     const sessionId = reqString(params, "sessionId");
     const live = await this.ensureLive(sessionId);
@@ -962,6 +1517,8 @@ export class ClayAgentHost {
     const model = typeof metadata.model === "string" ? metadata.model : undefined;
     if (!profile || !provider || !model) throw rpcError(-32000, `Session ${sessionId} is missing profile/provider/model`);
     const observationalMemory = this.resolveOmFlag(profile, metadata.observationalMemory);
+    const restoredWorkers = this.parseOmWorkers(metadata.omWorkers);
+    if (restoredWorkers) omWorkerModels.set(sessionId, restoredWorkers);
     const created = this.createSession(sessionId, profile, provider, model, {
       workspaceRoot: process.cwd(),
       fullAutonomy: metadata.fullAutonomy !== false,
@@ -970,6 +1527,7 @@ export class ClayAgentHost {
     const live: LiveSession = {
       session: created.session,
       agent: created.agent,
+      systemPrompt: created.systemPrompt,
       profile,
       provider,
       model,
@@ -1054,6 +1612,27 @@ export class ClayAgentHost {
     const compaction = compactionName
       ? { strategy: this.resolveCompaction(compactionName, live), secrets: [...this.secrets] }
       : undefined;
+    // Plan 109 I4: per-run portable thinking level. Fail-closed at this
+    // boundary — Prism `parseThinkingLevel` rejects empty/non-string input;
+    // opaque non-empty strings pass through (forward-compat). The model-aware
+    // adapter resolves the compat family, snaps to the model's declared set,
+    // and merges the patch; non-reasoning models get their options unchanged.
+    const rawLevel = params.thinkingLevel;
+    let providerOptions: RunOptions["providerOptions"];
+    if (rawLevel !== undefined) {
+      const level = parseThinkingLevel(rawLevel);
+      if (level === undefined) {
+        throw rpcError(-32602, "thinkingLevel must be a non-empty string");
+      }
+      const model = this.kernel.registries.models.get(live.provider, live.model) ?? {
+        provider: live.provider,
+        model: live.model,
+      };
+      // Opaque non-empty strings pass through for forward-compatible
+      // provider fields; known levels carry as the portable union.
+      const resolved = typeof level === "string" ? level : level.opaque;
+      providerOptions = applyThinkingLevelForModel(undefined, resolved, model);
+    }
     const runState = this.durableRunState(live);
     // stream() (not subscribe()+run()) — durable runs keep the subscription
     // open past settlement, so only stream() both drains and resolves.
@@ -1067,6 +1646,7 @@ export class ClayAgentHost {
       identity: this.runIdentity(),
       ...(compaction ? { compaction } : {}),
       ...(runState ? { runState } : {}),
+      ...(providerOptions ? { providerOptions } : {}),
     });
     let lastType: string | undefined;
     let suspended:
@@ -1215,6 +1795,38 @@ export class ClayAgentHost {
     };
   }
 
+  /** Plan 109 I9: workspace-scoped resumable session list backing the
+   *  /resume picker — one surface shared by the slash command and the
+   *  panel affordance. Fail-closed: requires an explicit workspaceRoot
+   *  (this surface never lists across workspaces); the root arrives from
+   *  the server's tab registry, never from webview input. Most-recent
+   *  first (store ordering), bounded, safe display fields only (same
+   *  redaction posture as session.search). */
+  private async sessionResumable(params: Record<string, unknown>): Promise<unknown> {
+    const workspaceRoot = reqString(params, "workspaceRoot");
+    const limitRaw = typeof params.limit === "number" && Number.isSafeInteger(params.limit) ? params.limit : undefined;
+    const limit = limitRaw ? Math.min(MAX_SESSION_SEARCH_LIMIT, Math.max(1, limitRaw)) : DEFAULT_SESSION_SEARCH_LIMIT;
+    if (!this.persistence.searchSessions) {
+      throw rpcError(-32000, "session store does not support search");
+    }
+    const page = await this.persistence.searchSessions({
+      tenantId: TENANT,
+      workspaceRoot,
+      limit,
+    });
+    return {
+      sessions: page.items.map((hit) => ({
+        sessionId: hit.sessionId,
+        updatedAt: hit.updatedAt,
+        label: hit.label,
+        summary: hit.summary,
+        ...(hit.snippet !== undefined ? { snippet: this.redactor.redact(hit.snippet) } : {}),
+        metadata: hit.metadata,
+      })),
+      nextCursor: page.nextCursor,
+    };
+  }
+
   /** Checkout the conversation leaf AND restore the document checkpoint
    *  recorded at that entry (decision 2200): server restores document
    *  versions first, then the session history rebuilds. Fails closed if the
@@ -1283,6 +1895,9 @@ export class ClayAgentHost {
         providerSource: createProviderResolver(this.kernel.registries.providers),
         store: createMemorySessionStore(),
         redactor: this.redactor,
+        // Same session-correlation requirement as the main agent (e.g.
+        // OpenCode Go gateway requires x-opencode-session).
+        providerRequestPolicies: createSessionCachePolicy(),
       });
       const workerSession = worker.createSession();
       const result = await workerSession.run(
@@ -1517,6 +2132,12 @@ export class ClayAgentHost {
         // context-used-vs-window without a package-specific channel.
         ...(model.limits?.contextWindow !== undefined
           ? { contextWindow: model.limits.contextWindow }
+          : {}),
+        // Plan 109 I4: declared portable thinking levels (ascending), from
+        // Prism 0.5.0 registry metadata — no provider call. Omitted for
+        // non-reasoning / undeclared models.
+        ...(thinkingLevelsForModel(model)
+          ? { thinkingLevels: thinkingLevelsForModel(model) }
           : {}),
       })),
     };
@@ -1759,6 +2380,33 @@ export class ClayAgentHost {
   private registeredCommand(name: string): CommandDefinition | undefined {
     const registry = this.kernel.registries.commands;
     return registry.get(name) ?? registry.get(name.slice(1));
+  }
+
+  /** Plan 109 R1/R3: the composer completion's single source — the
+   *  daemon's registered commands (names normalized to `/name`) — plus
+   *  the loaded opt-in extensions for the status strip. Registered
+   *  post-boot (init.js) commands appear on the next fetch; the Rust
+   *  server caches per daemon generation and invalidates on
+   *  command.register / knowledge.setOptions. */
+  private environmentList(): JsonObject {
+    const commands: JsonObject[] = [];
+    for (const command of this.kernel.registries.commands.list()) {
+      if (commands.length >= MAX_COMPLETION_COMMANDS) break;
+      const raw = typeof command.name === "string" ? command.name : "";
+      if (!raw) continue;
+      const name = (raw.startsWith("/") ? raw : `/${raw}`).slice(
+        0,
+        MAX_COMPLETION_NAME_CHARS,
+      );
+      const description = (
+        typeof command.description === "string" ? command.description : ""
+      ).slice(0, MAX_COMPLETION_DESCRIPTION_CHARS);
+      commands.push({ name, description });
+    }
+    const extensions: string[] = [];
+    if (this.wiki) extensions.push(this.wiki.loaded.name.slice(0, 48));
+    if (this.graft) extensions.push(this.graft.loaded.name.slice(0, 48));
+    return { commands, extensions };
   }
 
   private async commandDispatch(params: Record<string, unknown>): Promise<unknown> {
@@ -2328,6 +2976,27 @@ function branchTextForPrompt(
     current = entry.parentId;
   }
   return lines.join("\n");
+}
+
+/** Plan 109 I7: normalize the definition's system prompt config into
+ *  contributions for the context inspector (`false` = disabled, absent =
+ *  no explicit prompt). */
+function systemPromptContributions(config: SystemPromptConfig | undefined): Array<{
+  id: string;
+  text: string;
+}> {
+  if (!config) return [];
+  const list = Array.isArray(config) ? config : [config];
+  return list
+    .filter((entry): entry is { id: string; text: string } => typeof entry?.text === "string")
+    .map((entry, index) => ({ id: entry.id || `prompt-${index}`, text: entry.text }));
+}
+
+/** Wire shape of one bounded context-inspector item reference. */
+interface ContextItemRef {
+  id: string;
+  title: string;
+  preview: string;
 }
 
 function clipUtf8(text: string, maxBytes: number): string {

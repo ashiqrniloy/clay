@@ -78,7 +78,10 @@
     --clay-ds-button-muted-root-rest-text-color,
     var(--clay-text-muted)
   );
-  border-color: var(--clay-ds-button-muted-root-rest-border-color, transparent);
+  border-color: var(
+    --clay-ds-button-muted-root-rest-border-color,
+    var(--clay-border-subtle)
+  );
   border-radius: var(
     --clay-ds-button-muted-root-rest-border-radius,
     var(--clay-ds-button-default-root-rest-border-radius, 0)

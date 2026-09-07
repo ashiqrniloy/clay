@@ -80,21 +80,64 @@ fn transcript_entry_message(index: usize, entry: &AgentTranscriptEntry) -> Value
             "id": id, "role": "assistant", "content": entry.text,
             "metadata": { "clayKind": "usage" }
         }),
+        // Plan 109 I5: standard AG-UI tool role; the box label/shape ride
+        // metadata so the client stays on standard roles + clayKind. The
+        // message id is the tool call id so live CUSTOM rows and snapshot
+        // rows reconcile to the same box.
+        AgentTranscriptKind::Tool => {
+            let mut value = serde_json::json!({
+                "id": if entry.tool_call_id.is_empty() {
+                    id
+                } else {
+                    format!("clay-tool-{}", entry.tool_call_id)
+                },
+                "role": "tool", "content": entry.text,
+            });
+            let mut metadata = serde_json::json!({
+                "clayKind": if entry.skill_name.is_some() { "skill" } else { "tool" },
+            });
+            if !entry.tool_call_id.is_empty() {
+                metadata["toolCallId"] = serde_json::json!(entry.tool_call_id);
+            }
+            if let Some(skill) = &entry.skill_name {
+                metadata["skillName"] = serde_json::json!(skill);
+            }
+            value["metadata"] = metadata;
+            value
+        }
     }
 }
 
 fn snapshot_events(snapshot: &AgentSessionSnapshot) -> Vec<AgUiEvent> {
+    let mut state_value = serde_json::json!({
+        "sessionId": snapshot.session_id,
+        "profile": snapshot.profile,
+        "provider": snapshot.provider,
+        "model": snapshot.model,
+        "mcpServers": snapshot.mcp_servers,
+        // Context-used-vs-window numerator (plan 108 task 9):
+        // bounded counter only, never transcript content.
+        "contextTokens": snapshot.context_tokens,
+        // Reasoning-effort control state (plan 109 I4): declared
+        // levels for the model (empty = no control) + active level.
+        "effortLevels": snapshot.effort_levels,
+        "effort": snapshot.effort,
+    });
+    // Plan 109 R1/R2/R3: environment + branch ride the same snapshot when
+    // known. Empty keys are OMITTED so the client's state merge keeps the
+    // previous values (settled-run republishes carry no environment fetch).
+    if !snapshot.commands.is_empty() {
+        state_value["commands"] =
+            serde_json::to_value(&snapshot.commands).unwrap_or(serde_json::Value::Null);
+    }
+    if !snapshot.branch.is_empty() {
+        state_value["branch"] = serde_json::json!(snapshot.branch);
+    }
+    if !snapshot.extensions.is_empty() {
+        state_value["extensions"] = serde_json::json!(snapshot.extensions);
+    }
     let state = AgUiEvent::StateSnapshot {
-        snapshot: serde_json::json!({
-            "sessionId": snapshot.session_id,
-            "profile": snapshot.profile,
-            "provider": snapshot.provider,
-            "model": snapshot.model,
-            "mcpServers": snapshot.mcp_servers,
-            // Context-used-vs-window numerator (plan 108 task 9):
-            // bounded counter only, never transcript content.
-            "contextTokens": snapshot.context_tokens,
-        }),
+        snapshot: state_value,
     };
     // Book snapshots (empty session id — published by provider/model/profile
     // switches) carry no transcript: emitting a MessagesSnapshot here would
@@ -201,15 +244,34 @@ fn adapt_wire_event(session_id: &str, event: &AgentWireEvent) -> Vec<AgUiEvent> 
             phase,
             name,
             tool_call_id,
+            args_digest,
+            output_digest,
+            skill_name,
             ..
-        } => vec![AgUiEvent::Custom {
-            name: "clay.toolPhase".into(),
-            value: serde_json::json!({
+        } => {
+            // Plan 109 I5: bounded payload digests + skill name ride the
+            // custom row event; the client evolves one transcript box per
+            // tool call from it (the server transcript stays authoritative
+            // and reconciles at snapshot boundaries).
+            let mut value = serde_json::json!({
                 "phase": phase,
                 "name": name,
                 "toolCallId": tool_call_id,
-            }),
-        }],
+            });
+            if let Some(args) = args_digest {
+                value["argsDigest"] = serde_json::json!(args);
+            }
+            if let Some(output) = output_digest {
+                value["outputDigest"] = serde_json::json!(output);
+            }
+            if let Some(skill) = skill_name {
+                value["skillName"] = serde_json::json!(skill);
+            }
+            vec![AgUiEvent::Custom {
+                name: "clay.toolPhase".into(),
+                value,
+            }]
+        }
         AgentWireEvent::Permission {
             session_id,
             run_id,
@@ -244,6 +306,8 @@ pub fn diagnostic_is_terminal(code: &str, message: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::protocol::AgentSlashCommand;
+
     use super::*;
     use crate::protocol::{
         AgentModelInfo, AgentProfileInfo, AgentProviderInfo, AgentSessionInfo, AgentToolPhase,
@@ -251,6 +315,8 @@ mod tests {
 
     fn sample_snapshot() -> AgentSessionSnapshot {
         AgentSessionSnapshot {
+            effort_levels: Vec::new(),
+            effort: None,
             session_id: "sess-1".into(),
             profile: "chat".into(),
             provider: "mock".into(),
@@ -265,6 +331,9 @@ mod tests {
             ],
             mcp_servers: Vec::new(),
             context_tokens: None,
+            commands: Vec::new(),
+            branch: String::new(),
+            extensions: Vec::new(),
         }
     }
 
@@ -315,6 +384,32 @@ mod tests {
             snapshot["mcpServers"],
             serde_json::json!(["files", "search"])
         );
+    }
+
+    #[test]
+    fn state_snapshot_carries_effort_levels_and_active_level() {
+        // Plan 109 I4: STATE carries the model's declared levels (empty =
+        // no control) and the session's active level.
+        let mut snapshot = sample_snapshot();
+        snapshot.effort_levels = vec!["low".into(), "medium".into(), "high".into()];
+        snapshot.effort = Some("medium".into());
+        let events = snapshot_events(&snapshot);
+        let AgUiEvent::StateSnapshot { snapshot } = &events[1] else {
+            panic!("state snapshot expected");
+        };
+        assert_eq!(
+            snapshot["effortLevels"],
+            serde_json::json!(["low", "medium", "high"])
+        );
+        assert_eq!(snapshot["effort"], serde_json::json!("medium"));
+        // Non-reasoning model: empty levels and no active level.
+        let snapshot = sample_snapshot();
+        let events = snapshot_events(&snapshot);
+        let AgUiEvent::StateSnapshot { snapshot } = &events[1] else {
+            panic!("state snapshot expected");
+        };
+        assert_eq!(snapshot["effortLevels"], serde_json::json!([]));
+        assert_eq!(snapshot["effort"], serde_json::json!(null));
     }
 
     #[test]
@@ -395,6 +490,9 @@ mod tests {
                 phase: AgentToolPhase::Started,
                 name: "read".into(),
                 tool_call_id: "t1".into(),
+                args_digest: Some("{\"path\":\"src/main.rs\"}".into()),
+                output_digest: None,
+                skill_name: None,
             },
         });
         let AgUiEvent::Custom { name, value } = &tool[0] else {
@@ -403,9 +501,45 @@ mod tests {
         assert_eq!(name, "clay.toolPhase");
         assert_eq!(value["phase"], "started");
         assert_eq!(value["toolCallId"], "t1");
-        // No execution surface leaks: the custom payload has no args/result.
+        // Plan 109 I5: the bounded args digest rides the row event.
+        assert_eq!(value["argsDigest"], r#"{"path":"src/main.rs"}"#);
+        // No execution surface leaks: the custom payload has no raw args/result.
         assert!(value.get("arguments").is_none());
         assert!(value.get("result").is_none());
+    }
+
+    #[test]
+    fn tool_transcript_entries_map_to_standard_tool_role_messages() {
+        // Plan 109 I5: bounded tool rows render through the standard AG-UI
+        // tool role with clayKind metadata; load_skill rows carry the skill
+        // name and reconcile to the same message id as the live CUSTOM row.
+        let mut snapshot = sample_snapshot();
+        snapshot.entries.push(AgentTranscriptEntry::new_tool(
+            "read {\"path\":\"src/main.rs\"} -> fn main()",
+            "t1",
+            None,
+        ));
+        snapshot.entries.push(AgentTranscriptEntry::new_tool(
+            "load_skill {\"name\":\"rust-review\"} -> Loaded skill",
+            "t2",
+            Some("rust-review".into()),
+        ));
+        let events = adapt_agent_message(&AgentServerMessage::Snapshot(snapshot));
+        let AgUiEvent::MessagesSnapshot { messages } = &events[0] else {
+            panic!("messages snapshot expected");
+        };
+        let tool = messages
+            .iter()
+            .find(|message| message["id"] == "clay-tool-t1")
+            .expect("tool row");
+        assert_eq!(tool["role"], "tool");
+        assert_eq!(tool["metadata"]["clayKind"], "tool");
+        let skill = messages
+            .iter()
+            .find(|message| message["id"] == "clay-tool-t2")
+            .expect("skill row");
+        assert_eq!(skill["metadata"]["clayKind"], "skill");
+        assert_eq!(skill["metadata"]["skillName"], "rust-review");
     }
 
     #[test]
@@ -448,6 +582,7 @@ mod tests {
                 model: "mock-mini".into(),
                 display_name: "Mock Mini".into(),
                 context_window: None,
+                thinking_levels: Vec::new(),
             }],
             profiles: vec![AgentProfileInfo {
                 name: "chat".into(),
@@ -457,6 +592,7 @@ mod tests {
                 id: "sess-1".into(),
                 profile: "chat".into(),
                 updated_at: "2026-08-23T00:00:00Z".into(),
+                label: String::new(),
             }],
             provider: "mock".into(),
             model: "mock-mini".into(),
@@ -485,6 +621,50 @@ mod tests {
             })
             .expect("state snapshot");
         assert_eq!(state["contextTokens"], 12);
+    }
+
+    #[test]
+    fn snapshot_state_carries_environment_only_when_known() {
+        // Plan 109 R1/R2/R3: completion commands, the git branch, and the
+        // extension list ride STATE when present; empty values are omitted
+        // so the client's merge keeps the last known good ones.
+        let plain = sample_snapshot();
+        let events = adapt_agent_message(&AgentServerMessage::Snapshot(plain));
+        let state = events
+            .iter()
+            .find_map(|event| match event {
+                AgUiEvent::StateSnapshot { snapshot } => Some(snapshot.clone()),
+                _ => None,
+            })
+            .expect("state snapshot");
+        assert!(state.get("commands").is_none());
+        assert!(state.get("branch").is_none());
+        assert!(state.get("extensions").is_none());
+
+        let full = AgentSessionSnapshot {
+            commands: vec![AgentSlashCommand {
+                name: "/new".into(),
+                description: "Start a fresh session.".into(),
+            }],
+            branch: "main".into(),
+            extensions: vec!["wiki".into()],
+            ..sample_snapshot()
+        };
+        let events = adapt_agent_message(&AgentServerMessage::Snapshot(full));
+        let state = events
+            .iter()
+            .find_map(|event| match event {
+                AgUiEvent::StateSnapshot { snapshot } => Some(snapshot.clone()),
+                _ => None,
+            })
+            .expect("state snapshot");
+        assert_eq!(state["commands"][0]["name"], "/new");
+        assert_eq!(
+            state["commands"][0]["description"],
+            "Start a fresh session."
+        );
+        assert_eq!(state["branch"], "main");
+        assert_eq!(state["extensions"][0], "wiki");
     }
 
     #[test]

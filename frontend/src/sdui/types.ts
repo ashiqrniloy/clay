@@ -187,8 +187,21 @@ export interface RuntimeSnapshot {
   activeTheme: ThemeSnapshot;
   activeTypography: TypographySnapshot;
   activeDesignSystem: DesignSystemSnapshot;
+  /** Server-enumerated Settings selections (plan 110 task 10). */
+  uiChoices?: UiChoicesSnapshot;
   sduiTree: SduiTree;
   packageUi: PackageUiSnapshot;
   documents: Array<Record<string, unknown>>;
   diagnostics: Array<{ severity: string; code: string; message: string }>;
+}
+
+export interface UiChoiceOption {
+  specifier: string;
+  displayName?: string;
+}
+
+export interface UiChoicesSnapshot {
+  themes: UiChoiceOption[];
+  designSystems: UiChoiceOption[];
+  appearance?: string;
 }

@@ -13,9 +13,12 @@ import {
   ClayKbd,
   ClayList,
   ClayModal,
+  ClayTabStrip,
+  ClayTabBar,
   ClayText,
   ClayTextField,
 } from "../components";
+import { TabBar } from "../app/layout/tab-bar";
 
 describe("ClayButton keyboard semantics", () => {
   it("activates on Enter and Space with native button behavior", async () => {
@@ -316,5 +319,137 @@ describe("host recipe attributes and state mapping", () => {
     document.documentElement.style.removeProperty(
       "--clay-ds-collapse-default-header-rest-border-radius",
     );
+  });
+});
+
+describe("ClayTabStrip catalog primitive and unification", () => {
+  it("renders strip-only layout with recipe attributes, active selection, and new tab affordance", async () => {
+    const user = userEvent.setup();
+    const onActivate = vi.fn();
+    const onClose = vi.fn();
+    const onNew = vi.fn();
+
+    render(
+      <ClayTabStrip
+        ariaLabel="Window tabs"
+        activeId="2"
+        onActivate={onActivate}
+        onClose={onClose}
+        onNew={onNew}
+        tabs={[
+          { id: "1", label: "main.rs", closable: true },
+          { id: "2", label: "lib.rs", dirty: true, closable: true },
+          { id: "3", label: "readonly.rs", disabled: true },
+        ]}
+      />,
+    );
+
+    const tablist = screen.getByRole("tablist", { name: "Window tabs" });
+    expect(tablist).toBeInTheDocument();
+    expect(tablist).toHaveAttribute("data-clay-component", "tabList");
+    expect(tablist).toHaveAttribute("data-clay-slot", "strip");
+
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(3);
+
+    expect(tabs[0]).toHaveAttribute("data-clay-component", "tabList");
+    expect(tabs[0]).toHaveAttribute("data-clay-slot", "tab");
+    expect(tabs[1]).toHaveAttribute("data-selected", "true");
+    expect(tabs[2]).toHaveAttribute("data-disabled", "true");
+
+    // Click tab 1
+    await user.click(tabs[0]!);
+    expect(onActivate).toHaveBeenCalledWith("1");
+
+    // Click close button on tab 1
+    const closeBtn = screen.getByRole("button", { name: "Close main.rs" });
+    await user.click(closeBtn);
+    expect(onClose).toHaveBeenCalledWith("1");
+
+    // Click new tab button
+    const newBtn = screen.getByRole("button", { name: "New tab" });
+    await user.click(newBtn);
+    expect(onNew).toHaveBeenCalled();
+  });
+
+  it("renders empty strip state cleanly when no tabs exist", async () => {
+    const user = userEvent.setup();
+    const onNew = vi.fn();
+
+    render(
+      <ClayTabStrip
+        tabs={[]}
+        emptyLabel="No open buffers"
+        onNew={onNew}
+      />,
+    );
+
+    expect(screen.getByText("No open buffers")).toBeInTheDocument();
+    const newBtn = screen.getByRole("button", { name: "New tab" });
+    await user.click(newBtn);
+    expect(onNew).toHaveBeenCalled();
+  });
+
+  it("renders panels and coordinates widget-local selection without server round-trip", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ClayTabStrip
+        ariaLabel="Settings tabs"
+        defaultActiveId="general"
+        tabs={[
+          {
+            id: "general",
+            label: "General",
+            content: <div>General Options</div>,
+          },
+          {
+            id: "editor",
+            label: "Editor",
+            content: <div>Editor Preferences</div>,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("General Options")).toBeInTheDocument();
+    expect(screen.queryByText("Editor Preferences")).not.toBeInTheDocument();
+
+    const editorTab = screen.getByRole("tab", { name: "Editor" });
+    await user.click(editorTab);
+
+    expect(screen.getByText("Editor Preferences")).toBeInTheDocument();
+    expect(screen.queryByText("General Options")).not.toBeInTheDocument();
+  });
+
+  it("proves shell TabBar delegates directly to the ClayTabStrip catalog primitive (single source)", () => {
+    expect(TabBar).toBeDefined();
+    expect(ClayTabBar).toBe(ClayTabStrip);
+    const { container: shellContainer } = render(
+      <TabBar
+        tabs={[{ id: "1", label: "buffer.rs" }]}
+        activeId="1"
+      />,
+    );
+    const { container: stripContainer } = render(
+      <ClayTabStrip
+        ariaLabel="Window tabs"
+        tabs={[{ id: "1", label: "buffer.rs" }]}
+        activeId="1"
+      />,
+    );
+
+    expect(
+      shellContainer.querySelector('[data-clay-slot="strip"]'),
+    ).toBeInTheDocument();
+    expect(
+      stripContainer.querySelector('[data-clay-slot="strip"]'),
+    ).toBeInTheDocument();
+    expect(
+      shellContainer.querySelector('[data-clay-slot="tab"]')?.textContent,
+    ).toBe("buffer.rs");
+    expect(
+      stripContainer.querySelector('[data-clay-slot="tab"]')?.textContent,
+    ).toBe("buffer.rs");
   });
 });

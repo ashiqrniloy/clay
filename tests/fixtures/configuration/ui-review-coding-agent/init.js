@@ -1,0 +1,27 @@
+// Plan 109 visual/a11y review fixture (isolated capture run only).
+// Registers the coding profile, enables wiki/graft knowledge bases
+// (extension strip truth), and auto-opens the coding-agent surface
+// through the Command Centre command catalogue.
+
+import { profileRegister, commandDispatch } from "clay:agent";
+import { knowledgeSetOptions } from "clay:agent";
+
+await profileRegister({
+  name: "chat",
+  description: "Review profile",
+  instructions: "You are the review assistant.",
+});
+
+await knowledgeSetOptions({
+  workspaceRoot: "/tmp/clay-agent-review",
+  wiki: true,
+  graft: true,
+  graftMode: "pull",
+});
+
+try {
+  await commandDispatch({ name: "coding-agent.profile" });
+} catch {
+  // Live dispatch only: if the daemon was not yet ready the shell entry
+  // point remains; the review proceeds with the surface opener visible.
+}

@@ -51,14 +51,30 @@
 
 .left {
   border-right: var(
-      --clay-ds-panel-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
+      --clay-ds-file-browser-default-root-rest-border-width,
+      var(
+        --clay-ds-panel-default-root-rest-border-width,
+        var(--clay-dimension-border-hairline, 1px)
+      )
     )
-    var(--clay-ds-panel-default-root-rest-border-style, solid)
     var(
-      --clay-ds-panel-default-root-rest-border-color,
-      var(--clay-border-subtle)
+      --clay-ds-file-browser-default-root-rest-border-style,
+      var(--clay-ds-panel-default-root-rest-border-style, solid)
+    )
+    var(
+      --clay-ds-file-browser-default-root-rest-border-color,
+      var(
+        --clay-ds-panel-default-root-rest-border-color,
+        var(--clay-border-subtle)
+      )
     );
+  background: var(
+    --clay-ds-file-browser-default-root-rest-background-color,
+    var(
+      --clay-ds-panel-default-root-rest-background-color,
+      transparent
+    )
+  );
 }
 
 .right {
@@ -115,17 +131,29 @@
   gap: var(--clay-spacing-sm, 12px);
   padding-inline: var(--clay-spacing-sm, 12px);
   border-top: var(
-      --clay-ds-panel-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
+      --clay-ds-status-bar-default-root-rest-border-width,
+      var(
+        --clay-ds-panel-default-root-rest-border-width,
+        var(--clay-dimension-border-hairline, 1px)
+      )
     )
-    var(--clay-ds-panel-default-root-rest-border-style, solid)
     var(
-      --clay-ds-panel-default-root-rest-border-color,
-      var(--clay-border-hairline)
+      --clay-ds-status-bar-default-root-rest-border-style,
+      var(--clay-ds-panel-default-root-rest-border-style, solid)
+    )
+    var(
+      --clay-ds-status-bar-default-root-rest-border-color,
+      var(
+        --clay-ds-panel-default-root-rest-border-color,
+        var(--clay-border-hairline)
+      )
     );
   background: var(
-    --clay-ds-panel-default-root-rest-background-color,
-    var(--clay-surface-panel)
+    --clay-ds-status-bar-default-root-rest-background-color,
+    var(
+      --clay-ds-panel-default-root-rest-background-color,
+      var(--clay-surface-panel)
+    )
   );
 }
 

@@ -46,6 +46,9 @@ use super::{
     workspace::{open_selected_file_response, path_browser_relist},
 };
 
+/// Plan 109 I9: bounded resume list page size (daemon clamps further).
+const RESUME_LIST_LIMIT: u32 = 20;
+
 #[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn open_command_centre_session(
     command_id: &str,
@@ -93,10 +96,31 @@ pub(super) async fn open_command_centre_session(
         let (snapshot, replaced_id) = menu_sessions.open_path_browser(session, generation_id);
         Ok((replaced_id, snapshot))
     } else if let Some(kind) = picker_kind_for_command(command_id) {
-        let inventory = match agent {
+        let mut inventory = match agent {
             Some(host) => host.picker_inventory().await,
             None => crate::server::agent::AgentPickerInventory::default(),
         };
+        // Plan 109 I9: the resume list is workspace-scoped server-side.
+        // The root comes from the tab registry (authoritative server
+        // state), never from webview input; a tab without a workspace
+        // (or a fresh workspace with no sessions yet) yields an empty
+        // list rather than a cross-workspace dump.
+        if kind == AgentPickerKind::Session {
+            let root: Option<String> = {
+                let registry = tab_registry.lock().await;
+                bound_tab_id
+                    .and_then(|tab_id| registry.entry(tab_id))
+                    .map(|entry| entry.workspace_root)
+                    .filter(|root| !root.is_empty())
+            };
+            inventory.sessions = match (agent, root) {
+                (Some(host), Some(root)) => host
+                    .resumable_sessions(&root, RESUME_LIST_LIMIT)
+                    .await
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            };
+        }
         let document_id = document.lock().await.document_id();
         let active_manifest = behavior.lock().await.manifest_for(document_id).clone();
         let (generation_id, profiles) = match runtime_generation
@@ -624,8 +648,12 @@ where
                     return push_active_picker(codec, stream, menu_sessions, client_id, session_id)
                         .await;
                 }
-                host.select_picker(crate::protocol::AgentPickerKind::Provider, &provider)
-                    .await;
+                host.select_picker(
+                    crate::protocol::AgentPickerKind::Provider,
+                    &provider,
+                    bound_tab_id,
+                )
+                .await;
                 let models = host
                     .picker_inventory()
                     .await
@@ -696,7 +724,7 @@ where
         }
         AgentPickerActivate::Select { kind, id } => {
             if let Some(host) = host {
-                host.select_picker(kind, &id).await;
+                host.select_picker(kind, &id, bound_tab_id).await;
                 // Visible confirmation: without this, choosing a model or
                 // provider just closes the modal with no shell-visible
                 // change (silent-success reads as a dead button).

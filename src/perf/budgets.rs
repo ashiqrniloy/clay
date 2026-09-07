@@ -232,6 +232,9 @@ pub const LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES: usize = 64 * 1024;
 pub const RUNTIME_STATE_BROADCAST_CAPACITY: usize = 16;
 pub const RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS: usize = 64;
 pub const RUNTIME_STATE_SNAPSHOT_MAX_DIAGNOSTICS: usize = 32;
+/// Plan 110 task 10: per-list cap on installable theme/design-system choices
+/// so the Settings selection snapshot stays bounded.
+pub const RUNTIME_STATE_SNAPSHOT_MAX_UI_CHOICES: usize = 64;
 pub const RUNTIME_STATE_SNAPSHOT_DIFF_REVIEW_PAYLOAD_BYTES: usize = 768 * 1024;
 pub const RUNTIME_STATE_INSTALL_DIFF_REVIEW_P95_MS: u64 = 16;
 /// Fixed stale-edit grace after a successful runtime-generation commit.

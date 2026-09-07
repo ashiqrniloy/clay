@@ -17,6 +17,12 @@ export {
   type ListItem,
 } from "./controls";
 export { ClayModal } from "./modal";
+export {
+  ClayTabStrip,
+  ClayTabStrip as ClayTabBar,
+  type TabItem,
+  type ClayTabStripProps,
+} from "./tab-strip";
 export { ClayBadge, ClayKbd, ClayDivider } from "./chrome";
 export {
   recipeAttributes,

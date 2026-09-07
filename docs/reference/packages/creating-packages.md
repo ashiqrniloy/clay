@@ -1366,7 +1366,24 @@ See [UI Design Systems](../ui-design-systems.md) and [theme.setDesignSystem](../
 - **Namespaced Non-Color Values:** Reusable scalars (radii, border widths, dimensions, opacities, blur, saturation, motion durations) are declared under `values` with strict domain validation.
 - **Payload Budget:** The serialized declaration is checked against `UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES` (64 KiB) at record assembly time.
 - **Deterministic Fallback Inheritance:** Unspecified recipe properties inherit down a deterministic 5-step fallback chain (exact recipe -> rest state -> default variant -> parent `extends` system -> Neobrutal core fallbacks).
-- **Activation API:** End users and packages activate a design system via `import { setDesignSystem } from "clay:theme"`.
+- **Activation API:** End users and packages activate a design system via `import { setDesignSystem } from "clay:theme"`; the Settings panel and `settings.setDesignSystem` persist the choice and reload the runtime.
+
+#### Canonical recipe keys and consumption-tested contract (plan 110)
+
+Package recipe keys must use the canonical, CSS-consumed slot names (plan 110 task 3 unified one canonical name per component kind and deleted every alias):
+
+| Canonical key family | Renamed from | Notes |
+| --- | --- | --- |
+| `tab.default.item.{rest,hover,selected,focus,disabled}` | `tab.default.root.*` | Tab items in `ClayTabStrip`; `tabBar.default.root.rest` remains the strip-chrome key |
+| `list.default.row.{rest,hover,active,focus,selected}` | `list.default.root.*` | List rows; the `list.default.item.*` alias was deleted |
+| `modal.default.{dialog,scrim}.rest` | `modal.default.root.*` / `modal.default.surface.*` | `dialog` is the canonical surface slot |
+| `textInput.default.input.*` | `textInput.default.root.*` | The field wrapper keeps `textInput.default.field.rest` |
+
+**Consumption-tested contract:** a shipped recipe key exists only if host CSS consumes it. `frontend/src/test/design-system-consumption.test.ts` enforces, permanently, that every `tokens.css` `--clay-ds-*` fallback variable has a CSS consumer and that the fallback set matches the DS package key set — zero unconsumed fallbacks. The host matrix (`docs/development/ui-design-system-recipe-matrix.md`) is the source of truth for slot names; misspelled or speculative package keys are drift, not extensibility, and fail the gates.
+
+**Chrome-slot coverage expectations:** design systems are whole-shell contracts, not control skins. Both reference packages ship 142 recipes covering, beyond the interactive controls, the chrome and agent surfaces: `shell.*` (root/header/brand/workingArea/footer), `editor.*` (10 chrome slots incl. gutter, activeLine, selection, findMatch, tooltip), `chat.*` (12 slots incl. transcript, userBubble, assistantBubble, composer), `commandCentre.*`, `settingsPanel.*`, `paneSplitTree.*`, `fileBrowser.*`, `statusBar.*`, `menu.*`, `card`, `popover`, `badge`/`kbd`/`divider`/`tooltip`, `tab`/`tabBar`, and `statusItem`. `tests/package_ui_conformance.rs` pins the 142-recipe baseline and both packages' mutual key consistency; a design system that skips chrome surfaces leaves those regions on core fallbacks, which is a visible downgrade, not an error.
+
+**Legible-neobrutal direction (plan 110):** the default `@clay/design-neobrutal` system keeps its identity — 0px radii, 1px structural borders, 2px hard offset shadows with 0px blur, 100ms snappy motion — while prioritizing legibility: distinct surface hierarchy (text inputs fill `surface.main`, visually distinct from `surface.control` controls), transparent list rows with hairline separators and `surface.hover`/`surface.selected` state fills, muted buttons as bordered ghosts (1px `border.subtle`) instead of flat panel fills, and a slightly larger default UI type hierarchy (title 15/13, detail 12/13, ui base 13px) with medium-weight labels. New design systems should treat these as the legibility floor, not as a style to imitate.
 
 ```json
 {

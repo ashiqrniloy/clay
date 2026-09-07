@@ -360,7 +360,7 @@ pub(super) fn ensure_first_party_record(
     ensure_first_party_record_locked(&mut service, specifier)
 }
 
-fn ensure_first_party_record_locked(
+pub(super) fn ensure_first_party_record_locked(
     service: &mut crate::packages::service::PackageService,
     specifier: &str,
 ) -> Result<(crate::packages::record::PackageRecord, PathBuf, String), JsErrorBox> {

@@ -1,6 +1,6 @@
 # clay-agent
 
-Clay-owned Node >= 20 child that hosts Prism **0.4.0**. Not a Clay JS package.
+Clay-owned Node >= 20 child that hosts Prism **0.5.0**. Not a Clay JS package.
 Packages never spawn or speak to this process; the Clay server does.
 
 ## Spawn
@@ -43,7 +43,7 @@ The daemon does not hard-code Chat. Clay (`@clay/chat`) registers profiles throu
 
 ## Credentials
 
-Encrypted file vault is the source of truth. OS keychain is used when the secret service answers; there is no plaintext fallback. `credential.put` never echoes the secret. Logs and errors run through secret-shape redaction.
+Encrypted file vault is the source of truth. OS keychain is used when the secret service answers; a locked/denied keychain fails closed at initialize (Prism 0.5 typed `CredentialStoreLockedError` — never treated as an empty vault), while an unavailable backend degrades to vault-only; there is no plaintext fallback. `credential.put` never echoes the secret. Logs and errors run through secret-shape redaction.
 
 Native addon: the `@arnilo/prism-core/sessions/sqlite` subpath uses `better-sqlite3` (pinned directly in this package). If install scripts are blocked, run `npm rebuild better-sqlite3` in this directory.
 
@@ -76,22 +76,25 @@ Named strategies on the kernel: `default` (local), `llm` (provider summary), `om
 
 ## Pins
 
-Exact `0.4.0` for `@arnilo/prism`, `@arnilo/prism-core`,
+Exact `0.5.0` for `@arnilo/prism`, `@arnilo/prism-core`,
 `@arnilo/prism-providers`, `@arnilo/prism-coding-tools`,
 `@arnilo/prism-web-tools`, `@arnilo/prism-memory`, and `@arnilo/prism-mcp`,
-plus exact `better-sqlite3@12.11.1` and `playwright-core@1.61.0` (CDP
+plus exact `better-sqlite3@13.0.3` and `playwright-core@1.61.0` (CDP
 composition for Obscura only; never browser launch). Imports use family
 subpaths only
 (`@arnilo/prism-core/credentials/node`, `@arnilo/prism-core/sessions/sqlite`,
 `@arnilo/prism-core/validation/json-schema`,
 `@arnilo/prism-providers/<adapter>`, `@arnilo/prism-web-tools/obscura`,
 `@arnilo/prism-web-tools/browser`, and
-`@arnilo/prism-coding-tools/agent`); retired 0.3 package names must not
-reappear. No ACP, AG-UI, coding-agent, or Antigravity dependencies. MCP is a
-package-declared bridge (`@arnilo/prism-mcp`), never a first-party agent bus.
-The `/brave`, `/exa`, and `/firecrawl` subpaths are not imported — direct
-Brave/Exa/Firecrawl providers are rejected for Phase 1. Antigravity lands in
-Phase 6.
+`@arnilo/prism-coding-tools/agent`); retired 0.3 package names and the 27
+exports removed in 0.5 (`docs/migrate-to-0.5.md` §3) must not reappear. No
+ACP, AG-UI, office, coding-agent, or Antigravity dependencies. MCP is a
+package-declared bridge (`@arnilo/prism-mcp`, transitive
+`@modelcontextprotocol/client` + `/server` 2.0.0), never a first-party
+agent bus — clay-agent never imports SDK modules. hyper/commandcode adapters
+are loaded explicitly with the other providers. The `/brave`, `/exa`, and
+`/firecrawl` subpaths are not imported — direct Brave/Exa/Firecrawl
+providers are rejected for Phase 1. Antigravity lands in Phase 6.
 
 ## MCP and Obscura (fail-closed)
 
@@ -111,15 +114,18 @@ Phase 6.
 
 ## Upgrade Prism
 
-1. Read `docs/migrate-to-0.4.md` (0.4.x: family consolidation; 0.3.x notes
-   inside it) and the changelog for the target line.
+1. Read `docs/migrate-to-0.5.md` (0.5.x: lockstep cut, MCP SDK v2 module
+   move, model-aware thinking effort, 27 removed exports) and the changelog
+   for the target line.
 2. Bump the family pins in `package.json` together. Do not mix versions or
    reintroduce retired `@arnilo/prism-provider-*` / `-credentials-node` /
-   `-session-store-sqlite` / `-tool-validator-json-schema` names.
+   `-session-store-sqlite` / `-tool-validator-json-schema` names or the 27
+   exports removed in 0.5.
 3. `npm install` in this directory. Rebuild `better-sqlite3` if install scripts
    were skipped.
 4. `npm test` here, then `cargo test --test protocol agent_protocol`.
-5. Confirm `package.json` still has no ACP, AG-UI, coding-agent, or
+5. Confirm `package.json` still has no ACP, AG-UI, office, coding-agent, or
    Antigravity deps, and that MCP appears only as the `@arnilo/prism-mcp`
-   bridge (never `prism-acp`, `prism-ag-ui`, or retired names).
+   bridge (never `@modelcontextprotocol/*` direct, `prism-acp`,
+   `prism-ag-ui`, or retired names).
 6. Update the version strings in this README if the pin changed.

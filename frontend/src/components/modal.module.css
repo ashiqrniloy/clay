@@ -25,54 +25,42 @@
   position: relative;
   background: var(
     --clay-ds-modal-default-dialog-rest-background-color,
-    var(
-      --clay-ds-modal-default-surface-rest-background-color,
-      var(--clay-surface-overlay)
-    )
+    var(--clay-surface-overlay)
   );
   color: var(
     --clay-ds-modal-default-dialog-rest-text-color,
-    var(
-      --clay-ds-modal-default-surface-rest-text-color,
-      var(--clay-text-primary)
-    )
+    var(--clay-text-primary)
   );
   border: var(
       --clay-ds-modal-default-dialog-rest-border-width,
-      var(
-        --clay-ds-modal-default-surface-rest-border-width,
-        var(--clay-dimension-border-hairline, 1px)
-      )
+      var(--clay-dimension-border-hairline, 1px)
     )
     var(
       --clay-ds-modal-default-dialog-rest-border-style,
-      var(--clay-ds-modal-default-surface-rest-border-style, solid)
+      solid
     )
     var(
       --clay-ds-modal-default-dialog-rest-border-color,
-      var(
-        --clay-ds-modal-default-surface-rest-border-color,
-        var(--clay-border-strong)
-      )
+      var(--clay-border-strong)
     );
   border-radius: var(
     --clay-ds-modal-default-dialog-rest-border-radius,
-    var(--clay-ds-modal-default-surface-rest-border-radius, 0)
+    0
   );
   box-shadow: var(
     --clay-ds-modal-default-dialog-rest-shadow,
-    var(--clay-ds-modal-default-surface-rest-shadow, none)
+    none
   );
   backdrop-filter: blur(
       var(
         --clay-ds-modal-default-dialog-rest-backdrop-blur,
-        var(--clay-ds-modal-default-surface-rest-backdrop-blur, 0px)
+        0px
       )
     )
     saturate(
       var(
         --clay-ds-modal-default-dialog-rest-backdrop-saturate,
-        var(--clay-ds-modal-default-surface-rest-backdrop-saturate, 1)
+        1
       )
     );
   min-width: 320px;
@@ -81,10 +69,7 @@
   overflow-y: auto;
   padding: var(
     --clay-ds-modal-default-dialog-rest-padding,
-    var(
-      --clay-ds-modal-default-surface-rest-padding,
-      var(--clay-spacing-md, 16px)
-    )
+    var(--clay-spacing-md, 16px)
   );
 }
 
@@ -115,7 +100,7 @@
   background: transparent;
   color: var(
     --clay-ds-modal-default-close-rest-text-color,
-    var(--clay-text-secondary)
+    var(--clay-text-muted)
   );
   cursor: pointer;
 }

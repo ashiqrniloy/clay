@@ -281,8 +281,12 @@ pub(crate) fn apply_design_system(
             .lock()
             .expect("package service mutex poisoned");
         if trimmed.starts_with("@clay/") {
+            // Resolve under the already-held service guard. Calling the
+            // public `ensure_first_party_record` here re-locked the same
+            // non-reentrant mutex on the current thread and deadlocked the
+            // worker for every non-core specifier (plan 110 task 18).
             let (record, _root, _name) =
-                super::packages::ensure_first_party_record(clay_state, trimmed)?;
+                super::packages::ensure_first_party_record_locked(&mut service, trimmed)?;
             record
         } else {
             // Adopted third-party package

@@ -227,6 +227,11 @@ impl AgentPicker {
                     id: id.to_string(),
                 })
             }
+            // Plan 109 I8: OM worker models are panel dropdowns, not
+            // transient-picker flows — never activated here.
+            AgentPickerKind::OmObservation | AgentPickerKind::OmReflection => {
+                Ok(AgentPickerActivate::StayOpen)
+            }
             AgentPickerKind::Session => {
                 let session_id = id.strip_prefix("session:").unwrap_or(id).to_string();
                 if secondary {
@@ -348,6 +353,8 @@ impl AgentPicker {
             (AgentPickerKind::Session, _) => "Sessions",
             (AgentPickerKind::SessionSearch, _) => "Search sessions (workspace)",
             (AgentPickerKind::ProviderSetup, _) => "Configure provider",
+            (AgentPickerKind::OmObservation, _) => "Observation worker models",
+            (AgentPickerKind::OmReflection, _) => "Reflection worker models",
         }
     }
 
@@ -458,6 +465,9 @@ impl AgentPicker {
             AgentPickerKind::ProviderSetup => {
                 self.inventory.providers.iter().map(provider_item).collect()
             }
+            // Plan 109 I8: OM worker models are panel dropdowns (no
+            // transient-picker list).
+            AgentPickerKind::OmObservation | AgentPickerKind::OmReflection => vec![],
         }
     }
 
@@ -591,7 +601,7 @@ pub(crate) fn picker_kind_for_command(command_id: &str) -> Option<AgentPickerKin
         "agent.clientOpenModelPicker" | "chat.openModelPicker" => Some(AgentPickerKind::Model),
         "agent.clientOpenAgentPicker" | "chat.openAgentPicker" => Some(AgentPickerKind::Agent),
         "agent.clientOpenProviderSetup" => Some(AgentPickerKind::ProviderSetup),
-        "agent.clientOpenSessionPicker" => Some(AgentPickerKind::Session),
+        "agent.clientOpenSessionPicker" | "coding-agent.resume" => Some(AgentPickerKind::Session),
         "agent.clientOpenSessionSearchPicker" => Some(AgentPickerKind::SessionSearch),
         _ => None,
     }
@@ -648,12 +658,14 @@ mod tests {
                     model: "claude".into(),
                     display_name: "Claude".into(),
                     context_window: None,
+                    thinking_levels: Vec::new(),
                 },
                 AgentModelInfo {
                     provider: "openai".into(),
                     model: "gpt".into(),
                     display_name: "GPT".into(),
                     context_window: None,
+                    thinking_levels: Vec::new(),
                 },
             ],
             profiles: vec![AgentProfileInfo {
@@ -664,6 +676,7 @@ mod tests {
                 id: "sess-1".into(),
                 profile: "Chat".into(),
                 updated_at: "now".into(),
+                label: String::new(),
             }],
         }
     }
@@ -909,6 +922,21 @@ mod tests {
                 entry_id: None,
             }
         );
+    }
+
+    #[test]
+    fn resume_command_ids_map_to_the_session_picker() {
+        // Plan 109 I9: the package's /resume palette entry rides the same
+        // Command Centre session-picker flow as the core client command.
+        assert_eq!(
+            picker_kind_for_command("agent.clientOpenSessionPicker"),
+            Some(AgentPickerKind::Session)
+        );
+        assert_eq!(
+            picker_kind_for_command("coding-agent.resume"),
+            Some(AgentPickerKind::Session)
+        );
+        assert_eq!(picker_kind_for_command("coding-agent.new"), None);
     }
 
     #[test]

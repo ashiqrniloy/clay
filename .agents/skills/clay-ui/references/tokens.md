@@ -199,11 +199,11 @@ UI text variants (`UiTextVariant`, `src/editor/typography.rs`) scale from the co
 | Variant | Default scale vs role base | Use |
 |---------|----------------------------|-----|
 | `Display` | 1.5 (Phase 20.1) | Hero/top-level text |
-| `Title` | 14/12 | Panel/section titles |
+| `Title` | 15/13 (plan 110 task 9; was 14/12) | Panel/section titles |
 | `Section` | 13/12 (Phase 20.1) | Sub-section headings |
 | `Body` | 1.0 | Main UI text |
 | `Status` | 1.0 | Status bar |
-| `Detail` | 10/12 | Secondary/detail text |
+| `Detail` | 12/13 (plan 110 task 9; was 10/12) | Secondary/detail text |
 | `Caption` | 0.75 (Phase 20.1) | Hint/footnote text |
 
 The seven scale ratios form `UiTypographyHierarchy`, which is user-owned and travels atomically with `ActiveTypography` via [`clay.theme.setTypography`](../../../docs/reference/clay-js-api/theme/set-typography.md). Each scale must be finite, positive, and at most 4. Omitting `hierarchy` keeps Clay defaults; a partial hierarchy (any missing field) is rejected atomically so half-installed scales never reach layout. A changed hierarchy increments the typography revision and invalidates editor/UI layout once; an unchanged hierarchy does not churn layout.

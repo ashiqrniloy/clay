@@ -21,11 +21,11 @@ Declared in `src/shell/components.rs` (`ComponentKind`). Packages compose these;
 | `scroll` | implemented | Scrollable region | Scrollbar chrome from `paint_scroll_chrome`; container, no body chrome |
 | `portal` | implemented | Renders outside normal slot flow | For transient surfaces; container, no chrome of its own |
 | `statusItem` | implemented | Status bar entry | Supports text font role; disabled → `text.disabled` × `opacity.disabled` |
-| `dropdown` | implemented | Single-select drop-down | Phase 20.5: button-like trigger row; `Role::ComboBox`; keyboard nav (ArrowUp/Down cycles the widget's `selected_index`, Enter/Space confirms); open list painted by `PackageDropdown`; fill via `component_state_color("surface.control", state)` |
+| `dropdown` | implemented | Single-select drop-down | Phase 20.5: button-like trigger row; `Role::ComboBox`; keyboard nav (ArrowUp/Down cycles the widget's `selected_index`, Enter/Space confirms); open list painted by `PackageDropdown`; fill via `component_state_color("surface.control", state)`; React `ClayDropdown` accepts optional `groups` (labeled `Section`s, plan 109 I3) for grouped option lists |
 | `collapse` | implemented | Expand/collapse section | Phase 20.5: title row with `clay.ui.collapseToggle` action; `Role::Group`; Enter/Space toggles `PackageCollapse.expanded`; content shown/hidden via a layout clip |
 | `modal` | implemented | Blocking dialog | Phase 20.5: `paint_tooltip_shell` chrome (painted by the overlay host) + title + children; `Role::Dialog`; Tab focus-trap cycles the modal's widget-local focusable descendants; `z.modal` stacking |
 | `textInput` | implemented | Single-line editable text field | Phase 20.5: bordered field, placeholder in `text.muted`, focus ring, validation-state border (`diagnostic.error`/`warning`/`success` or `border.subtle`); `Role::TextInput`; `style.validationState` and `style.placeholderColor` style variables; `multiline: true` node field switches to a growing textarea substrate (Enter submits, Shift+Enter newline; plan 108 G3) |
-| `tabList` | implemented | Tab strip hosting per-tab children | Plan 108 task 8 (G2): `items` carry tab metadata (`id`/`label`/`selected`/`disabled`), `children` render as tab panels in order; selection is widget-local (React Aria Tabs, like `dropdown`), no server round-trip; interactive states per tab |
+| `tabList` | implemented | Tab strip hosting per-tab children | Plan 108 task 8 (G2), Plan 110 Task 5: Unified `ClayTabStrip` component (`frontend/src/components/tab-strip.tsx`), shared across shell window tab bar, SDUI `PackageTabList`, and `CodingAgentPanel`. Supports strip-only and with-panels layouts, closed recipe attributes (`tabList.root`, `tabList.strip`, `tabList.tab`, `tabList.panel`), and token-driven hover/selected/focused/disabled states |
 | `table` | reserved | Tabular data | Deferred; no first-party package need identified as of Phase 20.5 |
 
 ### Phase 20.4 interaction-state and spacing rhythm notes
@@ -253,21 +253,24 @@ Package contributions (`clay.contributions.uiDesignSystem`) style host component
 | `dropdown` | `dropdown` | `trigger`, `triggerLabel`, `indicator`, `popover`, `list`, `item`, `itemLabel` | States `rest`, `hover`, `active`, `focus`, `disabled`, `open`, `selected` |
 | `list` | `list` | `root`, `row`, `rowTitle`, `rowDetail` | States `rest`, `hover`, `active`, `focus`, `selected`, `disabled` |
 | `collapse` | `collapse` | `root`, `header`, `title`, `chevron`, `body` | States `rest`, `hover`, `focus`, `expanded` |
-| `modal` | `modal` | `scrim`, `dialog`, `title`, `body` | Z-modal stacking, focus trap, and Escape dismissal |
+| `modal` | `modal` | `scrim`, `dialog`, `title`, `body` | Z-modal stacking, focus trap, and Escape dismissal. Plan 110 task 3 canonicalized the package recipe slot to `modal.default.dialog.*` (the `modal.default.root.*` alias was deleted) |
 | `panel` | `panel` | `root`, `header`, `title`, `body` | Fixed and transient panel slots |
 | `label` | `label` | `root` | Semantic typography variant scales |
 | `statusItem` | `statusItem` | `root` | Status bar text item |
 | `flex` / `stack` / `overlay` / `portal` | Layout containers | `root` | Layout and layer containers |
 | `scroll` | `scroll` | `root`, `scrollbarTrack`, `scrollbarThumb` | Native scrollable area + token-styled scrollbars |
 | `editorView` | `editorView` | `root`, `canvas` | Host editor pane container and CodeMirror view |
-| `tabBar` | `tabBar` | `bar`, `card`, `cardLabel`, `closeButton`, `dirtyIndicator` | Window tab strip and tab cards |
+| `tab` / `tabBar` | `tab` items + `tabBar` strip chrome | `item` (states `rest`, `hover`, `selected`, `focus`, `disabled`) + `root` | Plan 110 task 3 canonicalized `tab.default.item.*` (was `tab.default.root.*`); the `bar`/`card`/`cardLabel`/`closeButton`/`dirtyIndicator` package slots were removed. Host component: `ClayTabStrip` (plan 110 task 5) |
 | `paneSplitTree` | `paneSplitTree` | `group`, `pane`, `handle`, `indicator` | Split tree panes and draggable separator handles |
 | `statusBar` | `statusBar` | `root`, `item` | App landmark footer |
 | `commandCentre` | `commandCentre` | `scrim`, `dialog`, `input`, `listBox`, `item`, `status`, `empty` | Centered modal Command Centre and Path Browser |
 | `fileBrowser` | `fileBrowser` | `root`, `header`, `tree`, `item`, `itemIcon`, `itemLabel` | Workspace file tree surface |
 | `settingsPanel` | `settingsPanel` | `panel`, `heading`, `actions`, `fields` | Trusted presentation module for `@clay/settings` |
 | `chatPanel` | `chatPanel` | `root`, `header`, `transcript`, `userMessage`, `assistantMessage`, `thinking`, `composer`, `statusLine` | Main empty-tab pane content |
+| `shell` / `editor` / `chat` / `menu` / `card` / `popover` | Plan 110 task 6/8 package recipe kinds for chrome + agent surfaces | `shell`: `root`/`header`/`brand`/`workingArea`/`footer`; `editor`: `root`/`container`/`chrome`/`gutter`/`activeLine`/`selection`/`findMatch`/`matchingBracket`/`path`/`tooltip`; `chat`: `root`/`header`/`sessions`/`sessionList`/`sessionRow`/`transcript`/`userBubble`/`assistantBubble`/`composer`/`actions`/`footerCommands`/`status`; `menu`: `root`/`item`; `card`/`popover`: `root` | 142 recipes per reference package; core fallbacks stay at `<surface>.default.root.rest` granularity |
 | `badge` / `kbd` / `divider` / `tooltip` / `scrim` / `focusRing` / `scrollChrome` / `iconSlot` | Chrome primitives | `root`, `label`, `ring`, `track`, `thumb`, `content` | Chrome primitives |
+
+**Consumption-tested contract (plan 110 task 3):** every shipped recipe key must be consumed by host CSS — `frontend/src/test/design-system-consumption.test.ts` fails when a `tokens.css` fallback variable has no CSS consumer or a CSS recipe variable has no shipped key. The host matrix above is the source of truth for slot names; packages shipping unconsumed or misspelled keys are drift, not extensibility.
 
 ## Rules for Adding Components
 

@@ -158,6 +158,7 @@ fn every_client_command() -> Vec<AgentClientCommand> {
             text: "hi".into(),
             provider: None,
             model: None,
+            thinking_level: None,
         },
         AgentClientCommand::Cancel {
             session_id: "s1".into(),
@@ -173,6 +174,8 @@ fn every_client_command() -> Vec<AgentClientCommand> {
             model: "demo".into(),
             workspace_root: None,
             full_autonomy: None,
+            om_observation: None,
+            om_reflection: None,
         },
         AgentClientCommand::NewSession {
             profile: "coding".into(),
@@ -180,10 +183,21 @@ fn every_client_command() -> Vec<AgentClientCommand> {
             model: "demo".into(),
             workspace_root: Some("/tmp/workspace".into()),
             full_autonomy: Some(true),
+            om_observation: None,
+            om_reflection: None,
         },
         AgentClientCommand::LoadSession {
             session_id: "s1".into(),
             entry_id: None,
+        },
+        // Plan 109 I7: context inspector list + item-detail fetches.
+        AgentClientCommand::Context {
+            session_id: "s1".into(),
+            item_id: None,
+        },
+        AgentClientCommand::Context {
+            session_id: "s1".into(),
+            item_id: Some("clay-entry-0#1".into()),
         },
         AgentClientCommand::ResumeSession {
             session_id: "s1".into(),
@@ -271,12 +285,17 @@ fn every_server_message() -> Vec<AgentServerMessage> {
             provider: "mock".into(),
             model: "demo".into(),
             leaf_id: None,
-            entries: vec![clay::protocol::AgentTranscriptEntry {
-                kind: clay::protocol::AgentTranscriptKind::User,
-                text: "hi".into(),
-            }],
+            entries: vec![clay::protocol::AgentTranscriptEntry::new(
+                clay::protocol::AgentTranscriptKind::User,
+                "hi",
+            )],
             mcp_servers: Vec::new(),
             context_tokens: None,
+            effort_levels: Vec::new(),
+            effort: None,
+            commands: Vec::new(),
+            branch: String::new(),
+            extensions: Vec::new(),
         }),
         AgentServerMessage::Event {
             session_id: "s1".into(),
@@ -294,6 +313,9 @@ fn every_server_message() -> Vec<AgentServerMessage> {
                 phase: AgentToolPhase::Started,
                 name: "read".into(),
                 tool_call_id: "c1".into(),
+                args_digest: None,
+                output_digest: None,
+                skill_name: None,
             },
         },
         AgentServerMessage::Event {
@@ -507,6 +529,8 @@ async fn mock_daemon_prompt_persists_no_secret_on_ack() {
             model: "demo".into(),
             workspace_root: None,
             full_autonomy: None,
+            om_observation: None,
+            om_reflection: None,
         })
         .await;
     let AgentServerMessage::Snapshot(snapshot) = created else {
@@ -521,6 +545,7 @@ async fn mock_daemon_prompt_persists_no_secret_on_ack() {
             text: "Hi".into(),
             provider: None,
             model: None,
+            thinking_level: None,
         })
         .await;
     assert!(matches!(prompted, AgentServerMessage::Snapshot(_)));
@@ -601,6 +626,7 @@ async fn slow_daemon_submit_does_not_block_caller() {
         text: "Hi".into(),
         provider: None,
         model: None,
+        thinking_level: None,
     });
     assert!(started.elapsed() < Duration::from_millis(KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS));
     host.shutdown().await;
@@ -621,6 +647,10 @@ fn phase25_dependencies_deny_acp_agui_mcp() {
         "agentclientprotocol",
         "prism-coding-agent",
         "@arnilo/prism-coding-agent",
+        // 0.5: office + antigravity stay out of the daemon graph; exact
+        // needles catch a future accidental adoption.
+        "@arnilo/prism-office",
+        "prism-antigravity-agent",
     ] {
         assert!(
             !cargo.contains(needle),
@@ -637,21 +667,33 @@ fn phase25_dependencies_deny_acp_agui_mcp() {
             "Cargo.toml must not depend on {needle}"
         );
     }
-    assert!(agent_readme.contains("0.4.0"));
+    // MCP SDK v2 (2026-07-28) lives transitively inside @arnilo/prism-mcp;
+    // clay-agent must never depend on the monolithic SDK directly.
+    for needle in [
+        "\"@modelcontextprotocol/sdk\"",
+        "\"@modelcontextprotocol/client\"",
+        "\"@modelcontextprotocol/server\"",
+    ] {
+        assert!(
+            !agent_pkg.contains(needle),
+            "clay-agent/package.json must not depend directly on {needle}"
+        );
+    }
+    assert!(agent_readme.contains("0.5.0"));
     assert!(agent_readme.contains("Upgrade Prism"));
     assert!(agent_readme.contains("no tools and no sandbox"));
     assert!(chat_docs.contains("no tools, no sandbox"));
-    // Phase 0 + Phase 1 (Prism 0.4.0): exact family pins, no retired 0.3
+    // Phase 0 + Phase 1 (Prism 0.5.0): exact family pins, no retired 0.3
     // package names.
     for pin in [
-        "\"@arnilo/prism\": \"0.4.0\"",
-        "\"@arnilo/prism-core\": \"0.4.0\"",
-        "\"@arnilo/prism-providers\": \"0.4.0\"",
-        "\"@arnilo/prism-coding-tools\": \"0.4.0\"",
-        "\"@arnilo/prism-web-tools\": \"0.4.0\"",
-        "\"@arnilo/prism-memory\": \"0.4.0\"",
-        "\"@arnilo/prism-mcp\": \"0.4.0\"",
-        "\"better-sqlite3\": \"12.11.1\"",
+        "\"@arnilo/prism\": \"0.5.0\"",
+        "\"@arnilo/prism-core\": \"0.5.0\"",
+        "\"@arnilo/prism-providers\": \"0.5.0\"",
+        "\"@arnilo/prism-coding-tools\": \"0.5.0\"",
+        "\"@arnilo/prism-web-tools\": \"0.5.0\"",
+        "\"@arnilo/prism-memory\": \"0.5.0\"",
+        "\"@arnilo/prism-mcp\": \"0.5.0\"",
+        "\"better-sqlite3\": \"13.0.3\"",
     ] {
         assert!(
             agent_pkg.contains(pin),
@@ -689,6 +731,10 @@ fn phase25_dependencies_deny_acp_agui_mcp() {
     assert!(agent_src.contains("@arnilo/prism-core/sessions/sqlite"));
     assert!(agent_src.contains("@arnilo/prism-core/validation/json-schema"));
     assert!(agent_src.contains("@arnilo/prism-providers/openai"));
+    // 0.5 adds hyper/commandcode to the explicit first-party loads; office
+    // and antigravity stay out of clay-agent sources too.
+    assert!(agent_src.contains("@arnilo/prism-providers/hyper"));
+    assert!(agent_src.contains("@arnilo/prism-providers/commandcode"));
 }
 
 #[test]
@@ -769,6 +815,8 @@ for line in sys.stdin:
             model: "demo".into(),
             workspace_root: None,
             full_autonomy: None,
+            om_observation: None,
+            om_reflection: None,
         })
         .await;
     match snapshot {
@@ -818,6 +866,8 @@ async fn registration_rpc_queues_without_spawning_then_drains_after_initialize()
             model: "demo".into(),
             workspace_root: None,
             full_autonomy: None,
+            om_observation: None,
+            om_reflection: None,
         })
         .await;
     assert!(matches!(created, AgentServerMessage::Snapshot(_)));
@@ -888,6 +938,8 @@ async fn command_registration_queues_then_live_dispatch_reaches_daemon() {
             model: "demo".into(),
             workspace_root: None,
             full_autonomy: None,
+            om_observation: None,
+            om_reflection: None,
         })
         .await;
     assert!(matches!(created, AgentServerMessage::Snapshot(_)));

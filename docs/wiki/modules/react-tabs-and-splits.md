@@ -5,6 +5,7 @@
 - `frontend/src/shell/{split-tree,tab-store,persist,workspace-controller}.ts`
 - `frontend/src/shell/{PaneTree,WorkspacePanes}.tsx`
 - `frontend/src/app/layout/{tab-bar,app-shell}.tsx`
+- `frontend/src/components/tab-strip.tsx` (unified strip primitive)
 - `src-tauri/src/bridge/{session,layout}.rs`
 - `src/shell/layout_persist.rs`
 - `frontend/src/shell/*.test.ts`
@@ -39,6 +40,17 @@ package SDUI slots (Phase 7), native Masonry chrome (delete after parity).
 5. Dirty tab close is a Clay modal (Save all / Discard / Cancel). Last tab
    cannot close.
 6. `layout_save` / `layout_load` run `parse_window_state` on the Rust side.
+
+### Unified tab-strip primitive (Plan 108 G2 / Plan 110 task 5)
+
+`ClayTabStrip` (`frontend/src/components/tab-strip.tsx`) is the one React Aria
+`Tabs` implementation shared by three hosts: this shell window tab bar
+(`frontend/src/app/layout/tab-bar.tsx`), the SDUI `PackageTabList` registry
+entry (packages render tab UI through the `tabList` kind — never custom tab
+strips), and `CodingAgentPanel`. It exposes closed recipe attributes
+(`tabList.root`/`strip`/`tab`/`panel`); visual styling flows through the
+`tab.default.item.*` and `tabBar.default.root.rest` design-system recipes, so
+all three hosts restyle together under a design-system switch with no remount.
 
 ```ts
 workspace.split("horizontal"); // Ctrl+\

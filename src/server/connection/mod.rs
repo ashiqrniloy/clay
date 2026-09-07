@@ -13,8 +13,9 @@ use tokio::{
 use crate::perf::metrics::{MetricMetadata, MetricValue, SERVER_RECEIVE, global_recorder};
 use crate::protocol::ViewportRenderPatch;
 use crate::protocol::{
-    AgentServerMessage, ClientId, ClientMessage, DocumentId, PROTOCOL_VERSION, ProtocolErrorCode,
-    RuntimeDiagnostic, ServerMessage, TabCommand, TabId, TabRegistrySnapshot, WorkspaceRootId,
+    AgentClientCommand, AgentPickerKind, AgentServerMessage, ClientId, ClientMessage, DocumentId,
+    PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic, ServerMessage, TabCommand, TabId,
+    TabRegistrySnapshot, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
@@ -1453,9 +1454,40 @@ where
                     )
                     .await?;
             }
-            ClientMessage::Agent { command, .. } => {
+            ClientMessage::Agent { client_id, command } => {
                 if let Some(server) = reload_server.as_ref() {
-                    server.agent.dispatch(*command);
+                    // Plan 109 I3: a panel model/provider/agent selection
+                    // (dropdown) applies through the same book path as the
+                    // Command Centre picker, with the connection's bound tab
+                    // so the per-workspace selection (I2) is written.
+                    match &*command {
+                        AgentClientCommand::Select { kind, id }
+                            if matches!(
+                                kind,
+                                AgentPickerKind::Model
+                                    | AgentPickerKind::Provider
+                                    | AgentPickerKind::Agent
+                            ) =>
+                        {
+                            let tab = server.tab_registry.lock().await.tab_for_client(client_id);
+                            server.agent.select_picker(*kind, id, tab).await;
+                        }
+                        // Plan 109 I8: OM worker model selection — the same
+                        // per-workspace book path plus the daemon's
+                        // per-session `session.om.set`.
+                        AgentClientCommand::SelectWorker {
+                            worker,
+                            id,
+                            session_id,
+                        } => {
+                            let tab = server.tab_registry.lock().await.tab_for_client(client_id);
+                            server
+                                .agent
+                                .select_worker(*worker, id, session_id.clone(), tab)
+                                .await;
+                        }
+                        _ => server.agent.dispatch(*command),
+                    }
                 } else {
                     codec
                         .write_server_message(

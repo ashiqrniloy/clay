@@ -526,6 +526,9 @@ pub struct RuntimeSnapshotDto {
     pub active_theme: ThemeSnapshotDto,
     pub active_typography: TypographySnapshotDto,
     pub active_design_system: DesignSystemSnapshotDto,
+    /// Server-enumerated Settings selections (plan 110 task 10); passed
+    /// through untouched — the bridge owns no package inventory.
+    pub ui_choices: clay::protocol::UiChoicesSnapshot,
     pub sdui_tree: SduiTree,
     pub package_ui: PackageUiSnapshotDto,
     pub documents: Vec<clay::protocol::DocumentRuntimeRenderState>,
@@ -593,6 +596,7 @@ impl RuntimeSnapshotDto {
             )?,
             active_typography: TypographySnapshotDto::from(&snapshot.active_typography),
             active_design_system: DesignSystemSnapshotDto::resolve(&snapshot.active_design_system)?,
+            ui_choices: snapshot.ui_choices,
             sdui_tree: snapshot.sdui_tree,
             package_ui: PackageUiSnapshotDto::parse(snapshot.package_ui)?,
             documents: snapshot.documents,
@@ -747,6 +751,7 @@ mod runtime_projection_tests {
             },
             active_typography: ActiveTypography::default(),
             active_design_system: ActiveDesignSystem::core_fallback(3),
+            ui_choices: clay::protocol::UiChoicesSnapshot::default(),
             sdui_tree: SduiTree {
                 ui_version: 3,
                 root_id: SduiNodeId(1),

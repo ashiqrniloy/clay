@@ -20,7 +20,9 @@ Fixtures:
   ui-review-design-system   explicit core design-system activation (dark)
   ui-review-design-system-light explicit core design-system activation (light)
   ui-review-design-neobrutal default Neobrutal design-system activation (dark)
+  ui-review-design-neobrutal-light Neobrutal design-system activation (light)
   ui-review-design-glass    Glass reference design-system activation (dark)
+  ui-review-design-glass-light Glass reference design-system activation (light)
   ui-review-large-typography user-owned large typography state
   ui-review-completion      completion-ready document (interactive capture)
   ui-review-command-centre command centre (interactive capture)
@@ -62,7 +64,7 @@ while (($#)); do
 done
 
 case "$fixture" in
-    ui-review-default|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-design-system|ui-review-design-system-light|ui-review-design-neobrutal|ui-review-design-glass|ui-review-large-typography|ui-review-completion|ui-review-command-centre|ui-review-rust) ;;
+    ui-review-default|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-design-system|ui-review-design-system-light|ui-review-design-neobrutal|ui-review-design-neobrutal-light|ui-review-design-glass|ui-review-design-glass-light|ui-review-large-typography|ui-review-completion|ui-review-command-centre|ui-review-rust|ui-review-coding-agent) ;;
     *)
         echo "unknown --fixture: ${fixture:-<missing>}" >&2
         usage >&2
@@ -227,6 +229,64 @@ def walk(node, depth):
 walk(application, 0)
 PY
 
+cat > "$root/crop_window.py" <<'PY'
+import sys
+import gi
+
+gi.require_version("Atspi", "2.0")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Atspi, GdkPixbuf
+
+if len(sys.argv) != 3:
+    raise SystemExit("usage: crop_window.py FULL_PNG OUTPUT_PNG")
+source, destination = sys.argv[1:]
+
+desktop = Atspi.get_desktop(0)
+extents = None
+for i in range(desktop.get_child_count()):
+    application = desktop.get_child_at_index(i)
+    if str(application.get_name() or "").strip().upper() != "CLAY-DESKTOP":
+        continue
+    try:
+        pid = application.get_process_id()
+    except Exception:
+        pid = 0
+    if pid and not __import__("pathlib").Path(f"/proc/{pid}").exists():
+        continue
+    for j in range(application.get_child_count()):
+        child = application.get_child_at_index(j)
+        if str(child.get_name() or "").strip() == "Clay":
+            frame = child.get_extents(0)
+            if frame.width > 0 and frame.height > 0:
+                extents = (frame.x, frame.y, frame.width, frame.height)
+                break
+    if extents:
+        break
+
+full = GdkPixbuf.Pixbuf.new_from_file(source)
+if extents is None:
+    raise SystemExit("Clay window extents not found in AT-SPI tree")
+x, y, width, height = extents
+# Wayland AT-SPI frame extents include invisible shadow/border padding that
+# overshoots the visible window. Inset the right/bottom edges so no host
+# window pixels can bleed into retained captures (plan 097 privacy rule).
+# ponytail: fixed 3% inset; switch to pixel-accurate edge detection if the
+# trimmed chrome ever matters.
+width -= max(1, width // 32)
+height -= max(1, height // 32)
+print(
+    f"extents=({x},{y},{width},{height}) full={full.get_width()}x{full.get_height()}",
+    file=sys.stderr,
+)
+x = max(0, x)
+y = max(0, y)
+width = min(width, full.get_width() - x)
+height = min(height, full.get_height() - y)
+if width <= 0 or height <= 0:
+    raise SystemExit(f"Clay window {extents} outside {full.get_width()}x{full.get_height()} screenshot")
+full.new_subpixbuf(x, y, width, height).savev(destination, "png", [], [])
+PY
+
 cat > "$root/portal_capture.py" <<'PY'
 import sys
 try:
@@ -301,8 +361,6 @@ if [[ "$fixture" == ui-review-rust ]]; then
     cp "$repo/tests/fixtures/lsp/rust/src/main.rs" "$workspace/src/main.rs"
 elif [[ "$fixture" == ui-review-loading || "$fixture" == ui-review-design-system || "$fixture" == ui-review-design-system-light ]]; then
     printf 'Fixture document\n' > "$workspace/loading.txt"
-else
-    printf 'Loading workspace…\n' > "$workspace/loading.txt"
 fi
 
 document_name=""
@@ -529,6 +587,24 @@ sdui_states=enabled,disabled
 EOF
         printf '\nRuntime evidence: `runtime-tree.txt` records explicit core activation and host-owned states.\n' >> "$output/instructions.md"
         ;;
+    ui-review-design-neobrutal|ui-review-design-neobrutal-light)
+        wait_for_tree 'Neobrutal Design System' || unresolved "neobrutal design-system SDUI tree did not appear"
+        cat > "$output/runtime-tree.txt" <<'EOF'
+RuntimeStateSnapshot=PASS
+active_design_system=@clay/design-neobrutal
+sdui_panel=Neobrutal Design System
+sdui_states=enabled,disabled
+EOF
+        ;;
+    ui-review-design-glass|ui-review-design-glass-light)
+        wait_for_tree 'Frosted Glass Reference System' || unresolved "glass design-system SDUI tree did not appear"
+        cat > "$output/runtime-tree.txt" <<'EOF'
+RuntimeStateSnapshot=PASS
+active_design_system=@clay/design-glass
+sdui_panel=Frosted Glass Reference System
+sdui_states=enabled,disabled
+EOF
+        ;;
     ui-review-recovery)
         stop_child "$server_pid"
         server_pid=""
@@ -580,9 +656,15 @@ EOF
 esac
 
 cp "$latest_dump" "$output/accessibility.txt"
-if ! python3 "$root/portal_capture.py" "$output/screenshot.png" > "$root/portal.out" 2> "$root/portal.err"; then
+if ! python3 "$root/portal_capture.py" "$root/full-screenshot.png" > "$root/portal.out" 2> "$root/portal.err"; then
     printf 'UNRESOLVED\nreason=xdg-desktop-portal Screenshot is unavailable\n' > "$output/review.status"
     echo "UI review unresolved: xdg-desktop-portal Screenshot is unavailable" >&2
+    exit_status=2
+elif ! python3 "$root/crop_window.py" "$root/full-screenshot.png" "$output/screenshot.png" > "$root/crop.out" 2> "$root/crop.err"; then
+    # Never retain full-desktop captures: they can contain unrelated host
+    # windows (plan 097 privacy rule).
+    printf 'UNRESOLVED\nreason=Clay window crop failed; full-desktop capture discarded\n' > "$output/review.status"
+    echo "UI review unresolved: Clay window crop failed" >&2
     exit_status=2
 else
     printf 'PASS\nfixture=%s\n' "$fixture" > "$output/review.status"

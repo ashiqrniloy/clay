@@ -117,6 +117,41 @@ test("profile with an active skill gets the load_skill tool; catalog stays progr
   host.close();
 });
 
+test("environment.list lists registered commands normalized to /name (plan 109 R1)", async () => {
+  const host = await ClayAgentHost.create({
+    dataDir: await tempDir(),
+    passphrase: "pass-phrase-ok",
+    mock: true,
+  });
+  await host.handle("agentProfile.register", { name: "chat" });
+  // Package-style registration lands in the kernel registry; the package's
+  // slash commands (registered the same way at load) ride the same list.
+  await host.handle("command.register", {
+    name: "/new",
+    handler: "newSession",
+    description: "Start a fresh session.",
+  });
+  await host.handle("command.register", {
+    name: "wiki",
+    handler: "startWorkflow",
+    description: "x".repeat(200),
+  });
+  const environment = (await host.handle("environment.list", {})) as {
+    commands: Array<{ name: string; description: string }>;
+    extensions: string[];
+  };
+  const names = environment.commands.map((command) => command.name);
+  assert.ok(names.includes("/new"));
+  // Bare kernel commands normalize to slash names (slash invocation
+  // reaches them through the same registry).
+  assert.ok(names.includes("/wiki"));
+  const wiki = environment.commands.find((command) => command.name === "/wiki");
+  assert.ok(wiki);
+  assert.ok(wiki.description.length <= 96, "descriptions are bounded");
+  // Nothing opt-in loaded yet: no extensions report.
+  assert.deepEqual(environment.extensions, []);
+});
+
 test("command.register + dispatch a /steer-like command calls host drivers.steer", async () => {
   const provider: AIProvider = {
     id: "mock",

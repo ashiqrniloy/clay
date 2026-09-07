@@ -2071,6 +2071,20 @@ fn configuration_api_documents_phase22_8_workspace_surface_without_new_keys() {
         1,
         "canonical init.js must contain one active Ctrl+B workspace-toggle example"
     );
+    // Plan 109 I4: the effort cycle ships from the package manifest
+    // (Shift+Tab); the example references the id and keeps its rebind
+    // example commented so the active, copy-paste-safe part stays safe.
+    assert!(
+        example.contains("coding-agent.clientCycleEffort"),
+        "canonical init.js must reference the plan 109 effort-cycle default"
+    );
+    assert_eq!(
+        example
+            .matches("// bindKey(\"Ctrl+M\", \"coding-agent.clientCycleEffort\"")
+            .count(),
+        1,
+        "canonical init.js must keep a single commented effort-rebind example"
+    );
     assert!(
         root.join("docs/index.md").is_file()
             && std::fs::read_to_string(root.join("docs/index.md"))
@@ -2145,11 +2159,11 @@ fn canonical_example_covers_theme_typography_and_modular_configuration() {
     }
     for hierarchy_field in [
         "    display: 1.5,",
-        "    title: 14 / 12,",
+        "    title: 15 / 13,",
         "    section: 13 / 12,",
         "    body: 1,",
         "    status: 1,",
-        "    detail: 10 / 12,",
+        "    detail: 12 / 13,",
         "    caption: 0.75,",
     ] {
         assert_eq!(
@@ -2634,4 +2648,76 @@ fn plan102_set_design_system_is_registered_public_theme_api() {
     // The doc keeps its generated registry entry current.
     check_generated_registry_current(&root)
         .unwrap_or_else(|error| panic!("{error}\nRepair command: {UPDATE_COMMAND}"));
+}
+
+#[test]
+fn plan109_coding_agent_client_command_docs_and_internal_rpc_boundary() {
+    let root = repository_root();
+    let bind_key =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey API doc");
+
+    // Plan 109 I4: the package-contributed effort-cycle command is a
+    // documented, runtime-bindable client command with a shipped
+    // package-manifest default chord. Docs must keep the id, the default,
+    // and the reasoning-effort purpose.
+    for marker in [
+        "coding-agent.clientCycleEffort",
+        "Shift+Tab",
+        "reasoning-effort",
+    ] {
+        assert!(
+            bind_key.contains(marker),
+            "bindKey docs must document plan 109 marker {marker}"
+        );
+    }
+
+    // Plan 109 I6: the workspace file-browser toggle default is documented.
+    for marker in ["workspace.toggleFileBrowser", "Ctrl+B"] {
+        assert!(
+            bind_key.contains(marker),
+            "bindKey docs must document plan 109 I6 marker {marker}"
+        );
+    }
+
+    // Boundary: no public JS facade may expose the coding-agent's internal
+    // daemon RPCs (context inspection, OM activity/worker selection,
+    // workspace-scoped resume listing, environment facts) or a facade
+    // wrapper for the client command — the UI trusted module and the
+    // bindKey manifest route are the only surfaces.
+    let runtime_dir = root.join("runtime/js");
+    let rpc_markers = [
+        "session.context",
+        "session.om.",
+        "session.resumable",
+        "environment.list",
+        "clientCycleEffort",
+        "omActivity",
+        "selectWorker",
+        "setOmWorkers",
+    ];
+    let mut leaked: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&runtime_dir).expect("read runtime/js") {
+        let path = entry.expect("runtime/js entry").path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("ts") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).unwrap_or_default();
+        for marker in rpc_markers {
+            if source.contains(marker) {
+                leaked.push(format!(
+                    "{} exposes internal marker {marker}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    assert!(
+        leaked.is_empty(),
+        "internal coding-agent RPCs leaked into public JS facades: {leaked:?}"
+    );
+    assert!(
+        !runtime_dir.join("coding-agent.ts").exists(),
+        "no coding-agent facade module may exist; daemon RPCs stay internal"
+    );
 }

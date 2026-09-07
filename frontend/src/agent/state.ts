@@ -18,21 +18,6 @@ export interface ChatStatus {
   status: string | null;
 }
 
-/** One bounded tool-activity row for the Coding Agent transcript strip. */
-export interface ToolActivityRow {
-  /** Stable id: toolCallId + phase. */
-  id: string;
-  name: string;
-  phase: string;
-}
-
-/** Cumulative tool counters for the Coding Agent Context tab (counts only). */
-export interface ToolStats {
-  total: number;
-  skills: number;
-  files: number;
-}
-
 interface ChatAgentModule {
   readonly agent: TauriClayAgent;
   /** Subscribe to versioned notifications for useSyncExternalStore. */
@@ -43,6 +28,9 @@ interface ChatAgentModule {
   clearPendingApproval(): void;
   /** Starts relay processing; call once per surface mount. */
   start(): () => void;
+  /** Runs one prompt turn: awaits the run pipeline, then flushes the
+   *  deferred server snapshot so the server list wins at the boundary. */
+  runTurn(): Promise<void>;
   /** DEV-only fixture seam (no-op outside dev builds). */
   seedForDev(input: {
     messages?: Message[];
@@ -57,10 +45,6 @@ export interface ChatSnapshot {
   status: ChatStatus;
   /** Agent/conversation state from STATE_SNAPSHOT events. */
   state: Record<string, unknown>;
-  /** Rolling recent tool activity (last 8 phases), Coding Agent strip. */
-  tools: ToolActivityRow[];
-  /** Cumulative tool counters (plan 108 task 8); never content. */
-  toolStats: ToolStats;
   /** Pending tool approval from a suspended durable run; cleared when the
    *  resumed run starts or the run settles. */
   pendingApproval: {
@@ -76,15 +60,13 @@ function createChatAgent(): ChatAgentModule {
   let version = 0;
   const listeners = new Set<() => void>();
   let status: ChatStatus = { streaming: false, status: null };
-  let tools: ToolActivityRow[] = [];
-  let toolStats: ToolStats = { total: 0, skills: 0, files: 0 };
+  /** Last server transcript seen mid-run; flushed when the run settles. */
+  let pendingServerMessages: Message[] | null = null;
   let pendingApproval: ChatSnapshot["pendingApproval"] = null;
   let snapshot: ChatSnapshot = {
     messages: [],
     state: {},
     status,
-    tools,
-    toolStats,
     pendingApproval,
   };
 
@@ -94,8 +76,6 @@ function createChatAgent(): ChatAgentModule {
       messages: [...agent.messages],
       state: { ...agent.state },
       status,
-      tools: [...tools],
-      toolStats: { ...toolStats },
       pendingApproval,
     };
   };
@@ -114,9 +94,101 @@ function createChatAgent(): ChatAgentModule {
   // Run-pipeline mutations (chunks, finished snapshot) live on AbstractAgent.
   // Without this, the panel only paints applyOutOfRun snapshots and looks idle
   // while the run is actually streaming.
+  //
+  // Plan 109 I5 lifecycle fix (recorded root cause): the run pipeline's
+  // RUN_STARTED handler re-inserts `input.messages` — a stale pre-prompt
+  // copy captured before the server snapshot carrying the new user row
+  // arrived — which clobbered the prompt-time transcript, leaving only the
+  // initial user message plus the live run's deltas. The hooks keep the
+  // live (server-authoritative) list at run start and reconcile every
+  // snapshot boundary against the server list while preserving this run's
+  // in-flight delta messages.
+  const runScopedId = (id: unknown): boolean =>
+    typeof id === "string" &&
+    (id.startsWith("clay-text-") ||
+      id.startsWith("clay-reasoning-") ||
+      id.startsWith("clay-tool-"));
   agent.subscribe({
     onMessagesChanged: () => notify(),
     onStateChanged: () => notify(),
+    onRunStartedEvent: ({ agent: live }) => ({
+      messages: [...live.messages],
+      stopPropagation: true,
+    }),
+    onMessagesSnapshotEvent: ({ agent: live, event }) => {
+      const incoming = event.messages;
+      const serverIds = new Set(incoming.map((message) => message.id));
+      // The server transcript coalesces the run's deltas live, so a settled
+      // run's rows can already be represented in the snapshot — keep only
+      // in-flight run messages the server list does not contain yet.
+      const represented = new Set(
+        incoming.map((message) => `${message.role}:${String(message.content ?? "")}`),
+      );
+      const inFlight = live.messages.filter(
+        (message) =>
+          !serverIds.has(message.id) &&
+          runScopedId(message.id) &&
+          !represented.has(`${message.role}:${String(message.content ?? "")}`),
+      );
+      console.log("SNAPHOOK", JSON.stringify({ incoming: incoming.map(m=>[m.id,m.role,m.content]), live: live.messages.map(m=>[m.id,m.role,m.content]), inFlight: inFlight.map(m=>m.id) }));
+      return {
+        messages: [...incoming, ...inFlight],
+        stopPropagation: true,
+      };
+    },
+    onCustomEvent: ({ event, messages }) => {
+      if (event.name !== "clay.toolPhase") return undefined;
+      const value = (
+        event as { value?: Record<string, unknown> }
+      ).value;
+      if (!value) return undefined;
+      const name = typeof value.name === "string" ? value.name : "";
+      const toolCallId =
+        typeof value.toolCallId === "string" ? value.toolCallId : "";
+      const phase = typeof value.phase === "string" ? value.phase : "";
+      // Plan 109 I5: one evolving tool row per call, mirroring the
+      // server's transcript evolution (progress rows are transient).
+      if (!name || !toolCallId || !phase || phase === "progress") {
+        return undefined;
+      }
+      const id = `clay-tool-${toolCallId}`;
+      const existing = messages.find((message) => message.id === id);
+      const args =
+        typeof value.argsDigest === "string" ? value.argsDigest : "";
+      const output =
+        typeof value.outputDigest === "string" ? value.outputDigest : "";
+      const prior =
+        typeof existing?.content === "string" ? existing.content : "";
+      const text =
+        phase === "started"
+          ? args
+            ? `${name} ${args}`
+            : `${name} - running`
+          : `${prior.replace(/ - running$/, "") || name}${
+              output ? ` -> ${output}` : ""
+            }`;
+      const row = {
+        id,
+        role: "tool",
+        toolCallId,
+        content: text,
+        metadata: {
+          clayKind: name === "load_skill" ? "skill" : "tool",
+          toolName: name,
+          toolCallId,
+          ...(name === "load_skill" &&
+          typeof value.skillName === "string" &&
+          value.skillName
+            ? { skillName: value.skillName }
+            : {}),
+        },
+      } as Message;
+      return {
+        messages: existing
+          ? messages.map((message) => (message.id === id ? row : message))
+          : [...messages, row],
+      };
+    },
   });
 
   function errorStatusFromMessages(): string | null {
@@ -142,6 +214,19 @@ function createChatAgent(): ChatAgentModule {
   function applyOutOfRun(event: AgentStreamEvent) {
     switch (event.type) {
       case "MESSAGES_SNAPSHOT": {
+        // Plan 109 I5: while a run pipeline is active, its async delta
+        // publishes would race an immediate setMessages (a late chunk
+        // publish could resurrect stale rows after the snapshot). Defer —
+        // the in-pipeline reconcile hook covers mid-run rendering, and the
+        // last queued snapshot flushes right after runAgent() resolves
+        // (pipeline quiescent), so the server list always wins at the
+        // boundary.
+        if (agent.isRunning) {
+          pendingServerMessages = (
+            event as unknown as { messages: Message[] }
+          ).messages.map(cloneMessage);
+          break;
+        }
         agent.setMessages(
           (event as unknown as { messages: Message[] }).messages.map(
             cloneMessage,
@@ -162,34 +247,10 @@ function createChatAgent(): ChatAgentModule {
       }
       case "CUSTOM": {
         const name = (event as { name?: string }).name;
-        if (name === "clay.toolPhase") {
-          // Plan 108 task 8: bounded tool-activity rows (names + phase only,
-          // never payloads) for the Coding Agent transcript strip and the
-          // Context tab's category counts.
-          const value = (
-            event as { value?: { name?: string; phase?: string; toolCallId?: string } }
-          ).value;
-          if (value?.name && value.phase && value.toolCallId) {
-            const row: ToolActivityRow = {
-              id: `${value.toolCallId}:${value.phase}`,
-              name: String(value.name),
-              phase: String(value.phase),
-            };
-            tools = [...tools.filter((existing) => existing.id !== row.id), row].slice(-8);
-            toolStats = {
-              total: toolStats.total + 1,
-              skills:
-                toolStats.skills + (row.name === "load_skill" ? 1 : 0),
-              files:
-                toolStats.files +
-                (["read", "glob", "repo_search", "repo_list"].includes(row.name)
-                  ? 1
-                  : 0),
-            };
-            notify();
-          }
-          break;
-        }
+        // clay.toolPhase rows (plan 109 I5) evolve transcript boxes through
+        // the run pipeline's onCustomEvent hook; out-of-run tool activity
+        // lands in the server transcript and reconciles at the next
+        // snapshot boundary.
         if (name === "clay.permissionRequest") {
           // Durable-run tool approval (plan 108): the run suspended on a
           // side-effect gate. Surface it for the Allow/Deny strip; cleared
@@ -205,6 +266,68 @@ function createChatAgent(): ChatAgentModule {
               toolName: value.toolName,
             };
             notify();
+          }
+          break;
+        }
+        if (name === "clay.agentRpc") {
+          // Plan 109 I7: the daemon's context-inspector response rides the
+          // generic agent-RPC custom event. The fetch is session-scoped and
+          // idempotent (no correlation needed): the payload IS the latest
+          // server-authoritative view, cached by version in agent state.
+          const rpc = (event as { value?: { code?: string; result?: unknown } }).value;
+          if (
+            rpc?.code === "session.context" &&
+            rpc.result &&
+            typeof rpc.result === "object"
+          ) {
+            const result = rpc.result as Record<string, unknown>;
+            const current = (agent.state ?? {}) as Record<string, unknown>;
+            if (typeof result.itemId === "string") {
+              // Drawer detail (`session.context { itemId }`).
+              agent.setState({ ...current, contextItemDetail: result });
+            } else if (Array.isArray(result.categories)) {
+              // Category list (`session.context`).
+              agent.setState({ ...current, contextView: result });
+            }
+            notify();
+          }
+          // Plan 109 I8: the Observational Memory tab's read model —
+          // worker selection + bounded observer activity (drops included),
+          // session-scoped and idempotent like the context view.
+          if (
+            rpc?.code === "session.om.activity" &&
+            rpc.result &&
+            typeof rpc.result === "object"
+          ) {
+            const result = rpc.result as Record<string, unknown>;
+            if (typeof result.sessionId === "string") {
+              const current = (agent.state ?? {}) as Record<string, unknown>;
+              agent.setState({ ...current, omView: result });
+              notify();
+            }
+          }
+          // The `session.om.set` response carries the effective selection;
+          // mirror it into the view so the dropdowns reflect it immediately.
+          if (
+            rpc?.code === "session.om.set" &&
+            rpc.result &&
+            typeof rpc.result === "object"
+          ) {
+            const result = rpc.result as Record<string, unknown>;
+            if (typeof result.sessionId === "string") {
+              const current = (agent.state ?? {}) as Record<string, unknown>;
+              const view = (current.omView ?? {}) as Record<string, unknown>;
+              agent.setState({
+                ...current,
+                omView: {
+                  ...view,
+                  sessionId: result.sessionId,
+                  observation: result.observation ?? null,
+                  reflection: result.reflection ?? null,
+                },
+              });
+              notify();
+            }
           }
           break;
         }
@@ -224,7 +347,6 @@ function createChatAgent(): ChatAgentModule {
       }
       case "RUN_STARTED": {
         status = { ...status, streaming: true };
-        tools = [];
         pendingApproval = null;
         notify();
         break;
@@ -284,6 +406,14 @@ function createChatAgent(): ChatAgentModule {
         };
       }
       notify();
+    },
+    async runTurn(): Promise<void> {
+      await agent.runAgent();
+      if (pendingServerMessages) {
+        agent.setMessages(pendingServerMessages);
+        pendingServerMessages = null;
+        notify();
+      }
     },
     start: () => {
       const release = agentStream.retain();

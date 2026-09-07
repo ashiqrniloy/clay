@@ -5120,7 +5120,7 @@ async fn each_language_mode_registers_indent_electric_pairs_comment_triggers() {
             vec!["}"],
             vec![".", ":"],
             false,
-            6400,
+            6540,
         ),
         (
             "@clay/typescript",
@@ -5131,7 +5131,7 @@ async fn each_language_mode_registers_indent_electric_pairs_comment_triggers() {
             vec!["}", ")", "]"],
             vec!["."],
             false,
-            6400,
+            6540,
         ),
         (
             "@clay/javascript",
@@ -5142,7 +5142,7 @@ async fn each_language_mode_registers_indent_electric_pairs_comment_triggers() {
             vec!["}", ")", "]"],
             vec!["."],
             false,
-            6400,
+            6540,
         ),
         (
             "@clay/markdown",
@@ -5153,7 +5153,7 @@ async fn each_language_mode_registers_indent_electric_pairs_comment_triggers() {
             vec![],
             vec!["#", "[", "`"],
             true,
-            6600,
+            6740,
         ),
     ];
 
@@ -10566,10 +10566,10 @@ await loadPackage("@clay/coding-agent");
         .into_iter()
         .filter(|command| command.package_name == "@clay/coding-agent")
         .count();
-    // Twelve manifest commands (profile + close + ten slash surface)
-    // register once.
+    // Fourteen manifest commands (profile + close + cycle-effort client
+    // command + resume + ten slash surface) register once.
     assert_eq!(
-        commands, 12,
+        commands, 14,
         "double load must not duplicate the package commands"
     );
 }

@@ -7,14 +7,30 @@
 // hot path. Control actions emit inert `settings.*` command intents
 // validated by the server-side settings command executor.
 import { serverRegisterPanelContribution } from "clay:ui";
+import { serverExecuteCommand } from "clay:commands";
 
 export const packageName = "@clay/settings";
 export const apiPrefix = "settings";
+
+// Programmatic facade for the settings.setDesignSystem command surface: sends
+// the same inert command intent as the Settings panel dropdown. The server
+// validates the specifier, persists the designSystem preference, and reloads
+// the runtime generation.
+export async function setDesignSystem(specifier) {
+  const result = await serverExecuteCommand("settings.setDesignSystem", { specifier });
+  if (result.status.kind !== "accepted") {
+    throw new Error(
+      `settings.invalid_request: expected accepted status, got ${JSON.stringify(result.status)}`
+    );
+  }
+  return result.status;
+}
 
 const SETTINGS_COMMANDS = Object.freeze([
   { id: "settings.open", displayName: "Open Settings", routingPolicy: "server-first" },
   { id: "settings.close", displayName: "Close Settings", routingPolicy: "server-first" },
   { id: "settings.setTheme", displayName: "Set Theme", routingPolicy: "server-first" },
+  { id: "settings.setDesignSystem", displayName: "Set Design System", routingPolicy: "server-first" },
   { id: "settings.setAppearance", displayName: "Set Appearance", routingPolicy: "server-first" },
   { id: "settings.setTypography", displayName: "Set Typography", routingPolicy: "server-first" },
   { id: "settings.reset", displayName: "Reset Settings", routingPolicy: "server-first" }
@@ -31,6 +47,7 @@ const SETTINGS_PANEL = Object.freeze({
   actionTargets: [
     "settings.close",
     "settings.setTheme",
+    "settings.setDesignSystem",
     "settings.setAppearance",
     "settings.setTypography",
     "settings.reset"
@@ -58,6 +75,17 @@ const SETTINGS_PANEL = Object.freeze({
               { id: "@clay/theme-modus-vivendi", label: "Modus Vivendi", action: { commandId: "settings.setTheme" } },
               { id: "@clay/theme-gruvbox-material-light", label: "Gruvbox Material Light", action: { commandId: "settings.setTheme" } },
               { id: "@clay/theme-gruvbox-material-dark", label: "Gruvbox Material Dark", action: { commandId: "settings.setTheme" } }
+            ]
+          },
+          { kind: "label", id: "settings.label.designSystem", text: "Design system", style: { typography: "typography.title" } },
+          {
+            kind: "dropdown",
+            id: "settings.dropdown.designSystem",
+            title: "Design system",
+            items: [
+              { id: "@clay/core", label: "Core baseline", action: { commandId: "settings.setDesignSystem" } },
+              { id: "@clay/design-neobrutal", label: "Neobrutal (Default)", action: { commandId: "settings.setDesignSystem" } },
+              { id: "@clay/design-glass", label: "Glass (Reference)", action: { commandId: "settings.setDesignSystem" } }
             ]
           },
           { kind: "label", id: "settings.label.appearance", text: "Appearance", style: { typography: "typography.title" } },

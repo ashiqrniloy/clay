@@ -91,9 +91,27 @@
           "routingPolicy": "server-first"
         },
         {
+          "id": "coding-agent.resume",
+          "displayName": "/resume",
+          "title": "Resume Session",
+          "routingPolicy": "server-first"
+        },
+        {
           "id": "coding-agent.close",
           "displayName": "Close Coding Agent",
           "routingPolicy": "server-first"
+        },
+        {
+          "id": "coding-agent.clientCycleEffort",
+          "displayName": "Cycle Reasoning Effort",
+          "title": "Cycle the reasoning-effort level for the coding agent",
+          "routingPolicy": "server-first"
+        }
+      ],
+      "keyRouting": [
+        {
+          "commandId": "coding-agent.clientCycleEffort",
+          "key": "Shift+Tab"
         }
       ],
       "ui": {

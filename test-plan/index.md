@@ -68,6 +68,38 @@ Stale native-era step references (deleted Masonry unit tests and wiki deep
 references) were replaced with current equivalents in modules 01, 04, 07, 10,
 13, and 14 — no existing behavior step was weakened.
 
+## Plan 110 manual-test-plan execution record (2026-09-06, task 14)
+
+Module 15 gained UI-DS-21…26 for plan 110 task 10's design-system selection UX
+(Settings dropdown, command surface, invalid-specifier surface, server-enumerated
+type list, appearance persistence, DS × theme visible differences). Executed on a
+freshly rebuilt desktop build:
+
+| Check | Result | Evidence/notes |
+|---|---|---|
+| UI-DS-21…26 automated legs | PASS | Settings-panel snapshot-driven choices + no-remount switch, validator allowlist/rejection, persistence + appearance-across-restart e2e, theme enumeration from enabled records (see module 15 record) |
+| Real-app captures (`ui-review-default`, `ui-review-design-system`, `ui-review-design-system-light`, `ui-review-error`) | PASS | `test-plan/artifacts/110-ui-design-systems/`; window-cropped portal screenshots |
+| Real-app package activation (`ui-review-design-neobrutal`, `ui-review-design-glass`) | UNRESOLVED | Blocked by the plan-110 task-18 pre-existing reload deadlock (`setDesignSystem("@clay/design-*")` inside `init.js` evaluation hangs the JS runtime; `@clay/core` applies instantly). Fixture-layer DS × theme visual evidence: `.impeccable/reviews/110-final/` |
+| Capture tooling | IMPROVED | `scripts/capture-ui-review.sh`: waits for fixture SDUI trees, crops portal screenshots to the Clay window (never retains full-desktop captures with host windows), new `ui-review-design-neobrutal-light` / `ui-review-design-glass-light` fixtures for the full matrix once task 18 lands |
+| Build hygiene | NEW CEILING | Mixed stale/fresh binaries fail client-side rkyv deserialization (`ArchivedSduiTree` subtree pointer overran) and surface as `Session lost` — rebuild both `clay` and `clay-desktop` before captures |
+
+## Plan 109 manual-test-plan execution record (2026-09-06)
+
+Module 17 gained steps C1–C20 and negative checks C-N1–N4 covering every
+user-visible plan 109 behavior (workspace binding, model/effort controls
+and rebinding, full transcript with tool/skill/thinking/steer rows, Files
+tab editor view + Ctrl+B toggle, context inspector with compaction
+reflection, OM activity + worker-model retention, /resume restore,
+Session Info auto-select, branch/extension strip, daemon-sourced slash
+completion). Executed on a freshly rebuilt Linux build:
+
+| Check | Result | Evidence/notes |
+|---|---|---|
+| Automated legs C1–C20, C-N1–N4 | PASS | cargo test green (lib 1227, protocol 208); clay-agent 97/1 skip; frontend 250; per-step suite citations in the module 17 record |
+| Live-build launch gate | PASS | `test-plan/artifacts/109-coding-agent/launch-gate/` (fresh `cargo build --bin clay`, isolated config/socket, AT-SPI tree exposes the Coding Agent entry, window-cropped portal screenshot) |
+| Interactive keyboard steps | UNRESOLVED | Documented host ceiling (no TTY/uinput input path) — unchanged since plan 097 |
+| Real-provider streaming legs (C3/C4/C6/C10) | UNRESOLVED | Standing manual step pending a configured provider credential; mock-provider suites pin the same code paths |
+
 ## Module map
 
 | # | Module file | Covers | Deep-reference doc |
@@ -86,9 +118,9 @@ references) were replaced with current equivalents in modules 01, 04, 07, 10,
 | 12 | [Platform: Windows](12-platform-windows.md) | MSVC toolchain, named pipes, native dialogs | `docs/development/windows.md` |
 | 13 | [Window splits](13-window-splits.md) | split/close/add-equal/move/resize panes, pane focus policies, per-pane document views + concurrent modes (22.2), Phase 22.8 per-tab multi-document isolation, shell keybinding overrides (per active tab since 22.3), direction-named split aliases (22.7), per-tab persistence cross-check (22.5), pane a11y roles + split/pane announcements (22.6) | `docs/reference/primitives/shell-layout-strategy.md`, `docs/development/accessibility.md` |
 | 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, selected-root tab binding and per-tab workspace/document isolation (22.8), open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), tab a11y (TabList/Tab roles, activate/create/close announcements) + cross-tab grant isolation/denial checks (22.6/22.8), tab-bar overflow scroll (22.7), active-typography geometry and sanitized tab labels (Plan 088), single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/react-tabs-and-splits.md`, `docs/wiki/modules/tabs-and-clients.md`, `docs/development/accessibility.md` |
-| 15 | [UI design systems](15-ui-design-systems.md) | built-in fallback startup, default `@clay/design-neobrutal` selection, `@clay/design-glass` reference system with solid fallbacks, watcher reload switching, invalid/revoked selection recovery with sanitized diagnostics and previous-generation retention, no-adoption security checks, color-authority conformance, restart persistence through `init.js`, 25-component recipe migration, DOM/state continuity, forced-colors/reduced-motion/transparency accessibility fallbacks, and cross-theme recoloring consistency (Plans 102, 103 & 104) | `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `.impeccable/review/plan-104/` |
+| 15 | [UI design systems](15-ui-design-systems.md) | built-in fallback startup, default `@clay/design-neobrutal` selection, `@clay/design-glass` reference system with solid fallbacks, watcher reload switching, Settings-panel + command-surface design-system selection with server-enumerated theme/DS choices and appearance persistence (plan 110), invalid/revoked selection recovery with sanitized diagnostics and previous-generation retention, no-adoption security checks, color-authority conformance, restart persistence through `init.js`, 25-component recipe migration, DOM/state continuity, forced-colors/reduced-motion/transparency accessibility fallbacks, and cross-theme recoloring consistency (Plans 102, 103 & 104) | `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/clay-js-api/settings/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `.impeccable/review/plan-104/` |
 | 16 | [Agent host (clay-agent)](16-agent-host.md) | `clay:agent` facade configuration (autonomy default-off 2157, compaction strategies + OM `compactAfterTokens` 2158, workspace-scoped search metadata-only, session tree/checkout/fork/clone/checkpoint), init.js section 12 documentation cross-check, no-credential/no-hidden-key checks, MCP allow-list fail-closed validation, Obscura hidden-when-missing, Chat UI chrome unchanged; coding-tool dirty-buffer/approval/durable-run behavior pinned by automated suites | `clay-agent/README.md`, `docs/wiki/modules/clay-agent.md`, `docs/reference/clay-js-api/agent/`, `examples/init.js` (section 12) |
-| 17 | [Coding agent pi-parity (@clay/coding-agent)](17-coding-agent-parity.md) | Phase 2 pi-parity conformance: prompt→stream→tool ordering, steering, cancel, /compact manual+auto, /new, session list/resume/delete, provider/model switch, /tree+/fork+/clone, session-picker/open-as-fork equivalents, plan-file round-trip, composer growth, Shift+Tab effort cycle, status-row truth, extension strip; negative checks (cross-workspace search invisibility, disabled knowledge bases, secrets, unknown slash command, search-hit context) and stream-latency/UI-responsiveness budgets (plan 108 task 15) | `packages/coding-agent/docs/parity-checklist.md`, `packages/coding-agent/docs/index.md`, `docs/wiki/modules/clay-agent.md`, plan 108 |
+| 17 | [Coding agent pi-parity (@clay/coding-agent)](17-coding-agent-parity.md) | Phase 2 pi-parity conformance: prompt→stream→tool ordering, steering, cancel, /compact manual+auto, /new, session list/resume/delete, provider/model switch, /tree+/fork+/clone, session-picker/open-as-fork equivalents, plan-file round-trip, composer growth, Shift+Tab effort cycle, status-row truth, extension strip; negative checks (cross-workspace search invisibility, disabled knowledge bases, secrets, unknown slash command, search-hit context) and stream-latency/UI-responsiveness budgets (plan 108 task 15); plan 109 C1–C20 + C-N1–N4: per-tab workspace binding + per-workspace model auto-load, /model + dropdown, effort control + rebinding, full chronological transcript (tools/skills/thinking/steer), Files-tab editor view + Ctrl+B tree toggle, context inspector drawer + compaction reflection, OM activity + worker-model retention, /resume restore, Session Info auto-select, real git branch + truthful extension strip + daemon-sourced slash completion, and negative checks (cross-workspace session leakage, unconfigured-provider filtering, redaction, fail-closed effort) | `packages/coding-agent/docs/parity-checklist.md`, `packages/coding-agent/docs/index.md`, `docs/wiki/modules/clay-agent.md`, plan 108 |
 
 ## Coverage matrix (what to run when)
 
@@ -126,6 +158,7 @@ references) were replaced with current equivalents in modules 01, 04, 07, 10,
 | Plan 098 chunked document loading | 01 (L23–L24), 03 (F48–F52), 11 (Q34–Q37) |
 | Plan 099 server-authoritative editor performance and manual matrix | 01 (L25–L26), 03 (F53–F54), 04 (E37–E38), 08 (S33–S34), 11 (M1–M7), 13 (D20–D21), 14 (T77–T78); deep reference: `docs/development/performance.md` |
 | Agent host configuration surfaces (`clay:agent` facades, autonomy/compaction defaults, init.js agent section, MCP/Obscura fail-closed wiring) | 16, 02 (C24 raw-op denial still applies) |
+| Plan 109 coding-agent defects/UX + Prism 0.5.0 (I2–I10, R1–R3) | 17 (C1–C20, C-N1–N4), 16 (host config), 10 (effort + file-browser bindings), 14 (per-tab workspace binding), 01 (launch gate) |
 
 ## Plan 097 Phase 9 Linux execution record (2026-08-23)
 

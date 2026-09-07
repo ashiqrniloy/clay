@@ -23,6 +23,7 @@
 .title {
   font-size: var(--clay-text-title-size);
   line-height: var(--clay-text-title-line-height);
+  font-weight: 600;
 }
 .section {
   font-size: var(--clay-text-section-size);

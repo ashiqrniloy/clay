@@ -65,7 +65,7 @@ Plan 071 (task 7) adds per-role ligature control without a new delivery path: `F
 
 `document_line_height()` computes `max(monospace.size, proportional.size) * DOCUMENT_LINE_HEIGHT_MULTIPLIER` (1.4), intentionally excluding the UI profile. This is the conservative shared baseline for viewport extraction, pixel-scroll progression, and logical scrollbar progress; visible Parley `Layout::height()` and caret geometry remain the exact rendered authority. `document_line_height_uses_largest_document_profile_not_ui` locks that the UI profile cannot influence document geometry.
 
-`UiTextVariant` (`Body`, `Status`, `Title`, `Detail`, `Display`, `Section`, `Caption`) is a semantic scale, never a package-provided point size. `from_typography_token` maps shell theme tokens (`typography.display`, `typography.title`, `typography.section`, `typography.status`, `typography.detail`, `typography.caption`, otherwise `typography.body`). Each variant resolves its scale from the installed `UiTypographyHierarchy` (defaults preserve legacy ratios: display 1.5, title 14/12, section 13/12, body/status 1.0, detail 10/12, caption 0.75; each field bounded `(0, 4.0]`). `ui_text_metrics(role, variant)` returns `UiTextMetrics` with `font_size = profile.size * variant.scale(&hierarchy)`, `line_height = font_size * 1.2`, and `row_height = line_height + vertical_padding`. Packages cannot override hierarchy scales through theme `designTokens`; all seven `typography.*` tokens reject scalar/color overrides with `TypographyNotOverridable`.
+`UiTextVariant` (`Body`, `Status`, `Title`, `Detail`, `Display`, `Section`, `Caption`) is a semantic scale, never a package-provided point size. `from_typography_token` maps shell theme tokens (`typography.display`, `typography.title`, `typography.section`, `typography.status`, `typography.detail`, `typography.caption`, otherwise `typography.body`). Each variant resolves its scale from the installed `UiTypographyHierarchy` (defaults per plan 110 task 9: display 1.5, title 15/13, section 13/12, body/status 1.0, detail 12/13, caption 0.75; each field bounded `(0, 4.0]`; the default `ui` profile base size is 13px). `ui_text_metrics(role, variant)` returns `UiTextMetrics` with `font_size = profile.size * variant.scale(&hierarchy)`, `line_height = font_size * 1.2`, and `row_height = line_height + vertical_padding`. Packages cannot override hierarchy scales through theme `designTokens`; all seven `typography.*` tokens reject scalar/color overrides with `TypographyNotOverridable`.
 
 ### Editor layout and role normalization
 
@@ -119,14 +119,14 @@ import { setTypography } from "clay:theme";
 setTypography({
   monospace: { families: ["JetBrains Mono", "monospace"], size: 20 },
   proportional: { families: ["Inter", "sans-serif"], size: 20 },
-  ui: { families: ["system-ui"], size: 12 },
+  ui: { families: ["system-ui"], size: 13 },
   hierarchy: {
     display: 1.5,
-    title: 14 / 12,
+    title: 15 / 13,
     section: 13 / 12,
     body: 1.0,
     status: 1.0,
-    detail: 10 / 12,
+    detail: 12 / 13,
     caption: 0.75,
   },
 });

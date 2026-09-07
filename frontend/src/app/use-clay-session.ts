@@ -72,6 +72,7 @@ export function useClaySession(): SessionHandle {
           if (envelope.kind === "runtimeSnapshot") {
             themeStore.setTheme(envelope.data.snapshot.activeTheme);
             themeStore.setTypography(envelope.data.snapshot.activeTypography);
+            themeStore.setUiChoices(envelope.data.snapshot.uiChoices ?? null);
             designSystemStore.setDesignSystem(
               envelope.data.snapshot.activeDesignSystem,
             );

@@ -2838,6 +2838,29 @@ current_rust_owner = "src/server/ops/theme.rs::op_clay_theme_set_design_system"
 registry_public = true
 
 [[api]]
+id = "settings.setDesignSystem"
+category = "theme"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:settings"
+js_export = "setDesignSystem"
+user_facing_name = "Set Design System"
+authority = "inert-recipe-activation-persisted-preference-active-theme-color-sourcing"
+runtime_path = "server-first-command-intent-persist-reload-apply"
+hot_path_policy = "Configuration-time only; validates the specifier, persists the designSystem preference, and reloads the runtime generation. Activation reuses the theme.setDesignSystem inert-recipe path; paint performs no JS, filesystem, package resolution, or server IPC."
+facade_path = "packages/settings/dist/load.js::setDesignSystem"
+backing_rust = "src/server/command_execution.rs::execute_settings; src/server/connection/runtime.rs::persist_settings_change; src/server/js_runtime/evaluation.rs::apply_persisted_preferences; src/server/ops/theme.rs::apply_design_system"
+deno_op = "op_clay_commands_execute_command"
+deno_op_path = "src/server/ops/commands.rs::op_clay_commands_execute_command"
+documentation_path = "docs/reference/clay-js-api/settings/set-design-system.md"
+key_bindings = []
+custom_properties = ["specifier:string=required"]
+permissions = []
+security_notes = "Validates the specifier server-side and persists an inert preference only; activation applies through the same inert-recipe path as theme.setDesignSystem with active-theme color sourcing and no raw CSS. Accepts @clay/core or a bundled @clay/design-* contributor and never promotes package trust. On failure or package revocation the previous valid design system is preserved and a sanitized diagnostic surfaces. Does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority."
+current_rust_owner = "src/server/command_execution.rs::execute_settings"
+registry_public = true
+
+[[api]]
 id = "language.serverRegisterLanguageIntelligenceProvider"
 category = "language-intelligence"
 visibility = "public"

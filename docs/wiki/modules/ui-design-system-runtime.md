@@ -1,7 +1,7 @@
 # UI Design System Runtime
 
 **Files:** `src/shell/design_system.rs`, `src/packages/record/theme.rs`, `src/packages/conflict.rs`, `src/server/ops/theme.rs`, `src/server/mod.rs`, `src-tauri/src/bridge/dto.rs`, `frontend/src/theme/design-system-adapter.ts`, `frontend/src/state/design-system-store.ts`, `packages/clay-design-neobrutal/package.json`, `packages/clay-design-glass/package.json`  
-**Tests:** `tests/theme_packages.rs`, `tests/package_ui_conformance.rs`, `tests/package_loading.rs`, `tests/runtime_update_protocol.rs`, `src-tauri/tests/dto_roundtrips.rs`, `frontend/src/test/design-system-adapter.test.ts`, `frontend/src/test/design-system-conformance.test.tsx`  
+**Tests:** `tests/theme_packages.rs`, `tests/package_ui_conformance.rs`, `tests/package_loading.rs`, `tests/runtime_update_protocol.rs`, `src-tauri/tests/dto_roundtrips.rs`, `frontend/src/test/design-system-adapter.test.ts`, `frontend/src/test/design-system-conformance.test.tsx`, `frontend/src/test/design-system-consumption.test.ts`  
 **Reference Docs:** `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `docs/development/ui-design-system-recipe-matrix.md`, `docs/reference/packages/creating-packages.md`, `.agents/skills/clay-ui/references/tokens.md`, `DESIGN.md`  
 
 ---
@@ -193,6 +193,11 @@ init.js: setDesignSystem("@clay/design-glass")    (runtime/js/theme.js facade)
   -> generation commit in src/server/mod.rs:
        revalidate selection against enabled_records(); on revocation fallback to core_fallback()
   -> RuntimeSnapshot.active_design_system -> DesignSystemSnapshotDto projection
+  -> RuntimeSnapshot.ui_choices (UiChoicesSnapshot: themes, design_systems, appearance)
+       built by IpcServer::enumerate_ui_choices (src/server/mod.rs): enabled @clay/theme-*
+       packages sorted by specifier; @clay/core pinned first in design_systems followed by
+       enabled uiDesignSystem contributors with manifest display names; the persisted
+       appearance preference; validated against RUNTIME_STATE_SNAPSHOT_MAX_UI_CHOICES (64)
   -> frontend designSystemStore.setDesignSystem(snapshot)
   -> designSystemCssVariables -> one root-style batch write per generation (<0.3ms)
 ```
@@ -200,9 +205,56 @@ init.js: setDesignSystem("@clay/design-glass")    (runtime/js/theme.js facade)
 ### DOM & State Continuity Invariant
 Switching design systems mutates only CSS custom properties on `:root`. It causes **zero** React component unmounting, tree re-creation, focus loss, or scroll jump in open editor documents.
 
+### Settings command surface (interactive selection)
+
+The Settings panel selects a design system through the `settings.setDesignSystem` command ([API doc](../../reference/clay-js-api/settings/set-design-system.md)):
+
+```text
+Settings dropdown / command centre: settings.setDesignSystem("@clay/design-neobrutal")
+  -> execute_settings validator   (src/server/command_execution.rs)
+       accepts @clay/core or a bundled @clay/design-* contributor; else InvalidArguments
+  -> persist_settings_change      (src/server/connection/runtime.rs)
+       designSystem preference -> ~/.config/clay/preferences.json + reload_runtime_generation()
+  -> apply_persisted_preferences  (src/server/js_runtime/evaluation.rs)
+       re-applies through apply_design_system on every reload (preference wins over init.js)
+```
+
+The persisted choice survives restarts; a stored specifier that later fails activation (revoked or invalid package) preserves the previous valid design system and records a sanitized diagnostic. The Settings panel renders its Theme/Design system/Appearance dropdowns from the snapshot's `ui_choices` list instead of hardcoded options.
+
 ---
 
-## 7. Package Security and Authority Boundaries
+## 7. Canonical Recipe Slots and Consumption Gate (Plan 110)
+
+### One canonical name per slot
+
+Plan 110 task 3 unified one canonical name per component-kind slot and deleted every alias. Packages must ship these canonical keys (the fallback-resolution chain resolves only these names):
+
+| Canonical key family | Renamed from | Notes |
+| --- | --- | --- |
+| `tab.default.item.{rest,hover,selected,focus,disabled}` | `tab.default.root.*` | Tab items in `ClayTabStrip`; `tabBar.default.root.rest` remains the strip-chrome key |
+| `list.default.row.{rest,hover,active,focus,selected}` | `list.default.root.*` | List rows; the `list.default.item.*` alias was deleted |
+| `modal.default.{dialog,scrim}.rest` | `modal.default.root.*` / `modal.default.surface.*` | `dialog` is the canonical surface slot |
+| `textInput.default.input.*` | `textInput.default.root.*` | The field wrapper keeps `textInput.default.field.rest` |
+
+### Chrome and agent surface coverage
+
+Plan 110 tasks 6 and 8 extended package-facing recipes beyond the interactive controls to the whole shell. Both reference packages ship **exactly 142 recipe keys** each, covering `shell.*` (root/header/brand/workingArea/footer), `editor.*` (10 chrome slots: root, container, chrome, gutter, activeLine, selection, findMatch, matchingBracket, path, tooltip), `chat.*` (12 agent slots incl. transcript, userBubble, assistantBubble, composer), plus `menu`, `card`, `popover`, `badge`, `kbd`, `divider`, `tooltip`, `tab`/`tabBar`, `commandCentre`, `settingsPanel`, `paneSplitTree`, `fileBrowser`, `statusBar`, and `statusItem`. `plan110_design_system_packages_mutual_recipe_key_consistency` (`tests/package_ui_conformance.rs`) pins the 142-key baseline and both packages' mutual key sets. Core fallbacks stay at `<surface>.default.root.rest` granularity (`chatPanel`, `editorChrome`, `tabBar`, …), so a skipped chrome surface falls through the 5-step chain to the core baseline rather than erroring — a visible downgrade, not a validation failure.
+
+### Consumption-tested contract
+
+`frontend/src/test/design-system-consumption.test.ts` makes recipe-key drift a test failure instead of a review catch. It scans every `*.module.css` file plus `tokens.css` and asserts, bidirectionally:
+
+1. Every `tokens.css` `--clay-ds-*` fallback variable is consumed by at least one CSS module (zero unconsumed fallbacks — this is what let task 3 delete 21 dead speculative fallbacks).
+2. Every CSS-consumed recipe variable is backed by either a host fallback recipe or a shipped package recipe.
+3. Canonical keys (e.g. `tab.default.item.*`) are declared in both package manifests and consumed by the owning component CSS.
+
+The host recipe matrix (`docs/development/ui-design-system-recipe-matrix.md`) is the source of truth for slot names; misspelled or speculative package keys are drift, not extensibility.
+
+### Legible-neobrutal baseline (plan 110 task 9)
+
+`@clay/design-neobrutal` keeps its identity (0px radii, 1px structural borders, 2px hard offset shadows with 0px blur, 100ms snappy motion) while prioritizing legibility: text inputs fill `surface.main` (distinct from `surface.control` controls), list rows are transparent with hairline separators and `surface.hover`/`surface.selected` fills, muted buttons are 1px `border.subtle` ghosts, and the default UI type hierarchy is slightly larger (title 15/13, detail 12/13, ui base 13px) with medium-weight labels. The `@clay/core` fallback in `core_design_system_fallbacks()` mirrors these values so pre-bootstrap paint matches post-activation rendering.
+
+## 8. Package Security and Authority Boundaries
 
 1. **Zero Permissions Required:** Design system packages request `permissions: []` in `package.json`.
 2. **Zero Code Execution:** Declarations are purely inert JSON records; no client-side or server-side scripts are executed during recipe installation.
@@ -217,13 +269,16 @@ Switching design systems mutates only CSS custom properties on `:root`. It cause
 
 ---
 
-## 8. Testing Strategy & Conformance Matrix
+## 9. Testing Strategy & Conformance Matrix
 
-- `tests/theme_packages.rs`: Validates full 25-component recipe coverage for `@clay/design-neobrutal` and `@clay/design-glass`.
-- `tests/package_ui_conformance.rs`: Hard color authority denial (`plan104_design_system_packages_cover_all_25_components_and_enforce_color_authority`), bounds enforcement, and source-independence guards.
+- `tests/theme_packages.rs`: Validates full recipe coverage for `@clay/design-neobrutal` and `@clay/design-glass`.
+- `tests/package_ui_conformance.rs`: Hard color authority denial (`plan104_design_system_packages_cover_all_25_components_and_enforce_color_authority`), plan-110 mutual 142-recipe-key consistency, bounds enforcement, and source-independence guards.
+- `frontend/src/test/design-system-consumption.test.ts`: Bidirectional recipe-key ↔ CSS-consumption ↔ tokens.css-fallback gate (plan 110 task 3).
+- `frontend/src/test/core-baseline-hierarchy.test.ts`: Core-fallback + typography-default gate for the legible-neobrutal baseline (plan 110 task 9).
+- `frontend/src/test/settings-panel-choices.test.tsx`: Server-enumerated `ui_choices` dropdowns and design-system switching (plan 110 task 10).
 - `frontend/src/test/design-system-conformance.test.tsx`: End-to-end component rendering and DOM continuity across design system switches.
 - `frontend/src/test/design-system-adapter.test.ts`: CSS custom property projection, color role translation, and install idempotence.
-- `.impeccable/review/plan-104/`: Visual review fixtures and AT-SPI dumps across 8 desktop states.
+- `.impeccable/reviews/110-final/`: Plan 110 visual review — 61 captures (36 base matrix, 14 interaction states, 12 responsive splits) plus CDP accessibility trees across core/neobrutal × modus-operandi/modus-vivendi.
 
 Public documentation:
 - API reference: [`docs/reference/clay-js-api/theme/set-design-system.md`](../../reference/clay-js-api/theme/set-design-system.md)

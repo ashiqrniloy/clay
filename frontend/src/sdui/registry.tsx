@@ -1,13 +1,12 @@
 import { Fragment, useState, type CSSProperties, type ReactNode } from "react";
 
-import { TabList, Tab, Tabs, TabPanel } from "react-aria-components";
-
 import {
   ClayButton,
   ClayCollapse,
   ClayDropdown,
   ClayList,
   ClayModal,
+  ClayTabStrip,
   ClayText,
   ClayTextField,
   recipeAttributes,
@@ -297,56 +296,43 @@ function PackageTextInput({ node, uiVersion, send }: RegistryProps) {
 }
 
 /**
- * Catalog `tabList` kind (plan 108 G2): React Aria Tabs over declared items
- * (tab metadata) + children (tab panels, order-matched). Selection is
- * widget-local like `dropdown`; no server round-trip.
+ * Catalog `tabList` kind (plan 108 G2, plan 110 task 5):
+ * React Aria Tabs over declared items (tab metadata) + children (tab panels, order-matched).
+ * Delegates to catalog `ClayTabStrip` primitive. Selection is widget-local; no server round-trip.
  */
 function PackageTabList({ node, uiVersion, send }: RegistryProps) {
   const items = node.items ?? [];
   const panels = node.children ?? [];
   const firstSelected = items.find((item) => item.selected)?.id ?? items[0]?.id;
+
+  const tabs = items.map((item, index) => {
+    const panel = panels[index];
+    return {
+      id: item.id,
+      label: (
+        <ClayText variant="detail" role={role(node)} muted={item.disabled}>
+          {item.label}
+        </ClayText>
+      ),
+      disabled: item.disabled,
+      content: panel ? (
+        <PackageComponent
+          node={panel}
+          uiVersion={uiVersion}
+          send={send}
+        />
+      ) : undefined,
+    };
+  });
+
   return (
-    <Tabs
-      className={styles.tabs}
-      defaultSelectedKey={firstSelected}
-      isDisabled={node.disabled}
-      {...recipeAttributes("tabList", "root")}
-    >
-      <TabList
-        aria-label={node.title ?? node.label ?? "Package tabs"}
-        className={styles.tabStrip}
-        {...recipeAttributes("tabList", "strip")}
-      >
-        {items.map((item) => (
-          <Tab
-            key={item.id}
-            id={item.id}
-            isDisabled={item.disabled}
-            className={styles.tab}
-            style={componentStyle(node)}
-            {...recipeAttributes("tabList", "tab")}
-          >
-            <ClayText variant="detail" role={role(node)} muted={item.disabled}>
-              {item.label}
-            </ClayText>
-          </Tab>
-        ))}
-      </TabList>
-      {panels.map((panel, index) => (
-        <TabPanel
-          key={panel.id}
-          id={items[index]?.id}
-          className={styles.tabPanel}
-          {...recipeAttributes("tabList", "panel")}
-        >
-          <PackageComponent
-            node={panel}
-            uiVersion={uiVersion}
-            send={send}
-          />
-        </TabPanel>
-      ))}
-    </Tabs>
+    <ClayTabStrip
+      tabs={tabs}
+      defaultActiveId={firstSelected}
+      disabled={node.disabled}
+      ariaLabel={node.title ?? node.label ?? "Package tabs"}
+      style={componentStyle(node)}
+    />
   );
 }
 

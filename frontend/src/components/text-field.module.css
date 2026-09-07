@@ -7,10 +7,7 @@
   flex-direction: column;
   gap: var(
     --clay-ds-text-input-default-field-rest-gap,
-    var(
-      --clay-ds-text-input-default-root-rest-gap,
-      var(--clay-spacing-xxs, 4px)
-    )
+    var(--clay-spacing-xxs, 4px)
   );
 }
 
@@ -20,83 +17,49 @@
     var(--clay-text-muted)
   );
   font-size: var(--clay-text-detail-size);
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
 .input {
   background: var(
     --clay-ds-text-input-default-input-rest-background-color,
-    var(
-      --clay-ds-text-input-default-root-rest-background-color,
-      var(--clay-surface-control)
-    )
+    var(--clay-surface-control)
   );
   color: var(
     --clay-ds-text-input-default-input-rest-text-color,
-    var(
-      --clay-ds-text-input-default-root-rest-text-color,
-      var(--clay-text-primary)
-    )
+    var(--clay-text-primary)
   );
   border: var(
       --clay-ds-text-input-default-input-rest-border-width,
-      var(
-        --clay-ds-text-input-default-root-rest-border-width,
-        var(--clay-dimension-border-thin, 2px)
-      )
+      var(--clay-dimension-border-thin, 2px)
     )
-    var(
-      --clay-ds-text-input-default-input-rest-border-style,
-      var(--clay-ds-text-input-default-root-rest-border-style, solid)
-    )
+    var(--clay-ds-text-input-default-input-rest-border-style, solid)
     var(
       --clay-ds-text-input-default-input-rest-border-color,
-      var(
-        --clay-ds-text-input-default-root-rest-border-color,
-        var(--clay-border-subtle)
-      )
+      var(--clay-border-subtle)
     );
-  border-radius: var(
-    --clay-ds-text-input-default-input-rest-border-radius,
-    var(--clay-ds-text-input-default-root-rest-border-radius, 0)
-  );
+  border-radius: var(--clay-ds-text-input-default-input-rest-border-radius, 0);
   padding: var(
     --clay-ds-text-input-default-input-rest-padding,
-    var(
-      --clay-ds-text-input-default-root-rest-padding,
-      var(--clay-spacing-xs, 8px)
-    )
+    var(--clay-spacing-xs, 8px)
   );
   font-family: inherit;
   font-size: var(--clay-text-body-size);
-  box-shadow: var(
-    --clay-ds-text-input-default-input-rest-shadow,
-    var(--clay-ds-text-input-default-root-rest-shadow, none)
-  );
+  box-shadow: var(--clay-ds-text-input-default-input-rest-shadow, none);
   transition:
     border-color
       var(
         --clay-ds-text-input-default-input-rest-transition-duration,
-        var(
-          --clay-ds-text-input-default-root-rest-transition-duration,
-          var(--clay-motion-fast, 100ms)
-        )
+        var(--clay-motion-fast, 100ms)
       )
-      var(
-        --clay-ds-text-input-default-input-rest-transition-timing,
-        var(--clay-ds-text-input-default-root-rest-transition-timing, linear)
-      ),
+      var(--clay-ds-text-input-default-input-rest-transition-timing, linear),
     background-color
       var(
         --clay-ds-text-input-default-input-rest-transition-duration,
-        var(
-          --clay-ds-text-input-default-root-rest-transition-duration,
-          var(--clay-motion-fast, 100ms)
-        )
+        var(--clay-motion-fast, 100ms)
       )
-      var(
-        --clay-ds-text-input-default-input-rest-transition-timing,
-        var(--clay-ds-text-input-default-root-rest-transition-timing, linear)
-      );
+      var(--clay-ds-text-input-default-input-rest-transition-timing, linear);
 }
 
 .input::placeholder {
@@ -110,21 +73,24 @@
 .input:focus-visible {
   border-color: var(
     --clay-ds-text-input-default-input-focus-border-color,
-    var(
-      --clay-ds-text-input-default-root-focus-border-color,
-      var(--clay-border-focus)
-    )
+    var(--clay-border-focus)
   );
-  outline: none;
+  outline: var(--clay-ds-text-input-default-input-focus-outline-width, 2px)
+    var(--clay-ds-text-input-default-input-focus-outline-style, solid)
+    var(
+      --clay-ds-text-input-default-input-focus-outline-color,
+      var(--clay-focus-ring)
+    );
+  outline-offset: var(
+    --clay-ds-text-input-default-input-focus-outline-offset,
+    1px
+  );
 }
 
 .error {
   border-color: var(
     --clay-ds-text-input-default-input-invalid-border-color,
-    var(
-      --clay-ds-text-input-default-root-invalid-border-color,
-      var(--clay-diagnostic-error)
-    )
+    var(--clay-diagnostic-error)
   );
 }
 .warning {
@@ -137,24 +103,15 @@
 .input[data-disabled] {
   background: var(
     --clay-ds-text-input-default-input-disabled-background-color,
-    var(
-      --clay-ds-text-input-default-root-disabled-background-color,
-      var(--clay-surface-disabled)
-    )
+    var(--clay-surface-disabled)
   );
   color: var(
     --clay-ds-text-input-default-input-disabled-text-color,
-    var(
-      --clay-ds-text-input-default-root-disabled-text-color,
-      var(--clay-text-disabled)
-    )
+    var(--clay-text-disabled)
   );
   opacity: var(
     --clay-ds-text-input-default-input-disabled-opacity,
-    var(
-      --clay-ds-text-input-default-root-disabled-opacity,
-      var(--clay-opacity-disabled)
-    )
+    var(--clay-opacity-disabled)
   );
   cursor: default;
 }

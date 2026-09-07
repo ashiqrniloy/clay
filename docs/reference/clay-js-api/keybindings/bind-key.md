@@ -59,6 +59,12 @@ Use this API when JavaScript configuration, extensions, or future Clay automatio
 
 ## JavaScript usage
 
+> Plan 109 I4: `coding-agent.clientCycleEffort` (cycle the coding agent's
+> reasoning-effort level) is runtime-bindable and ClientUiCommand-routed.
+> Its default binding comes from the `@clay/coding-agent` manifest
+> `keyRouting` (`Shift+Tab`); a `bindKey` override changes the composer's
+> cycle key on the coding-agent surface.
+
 ```ts
 import { bindKey } from "clay:keybindings";
 import { clientCopySelection, clientCutSelection, clientPasteClipboard, clientUndo, clientRedo, clientShowOpenDocuments, clientRequestResync, clientDismissRecovery } from "clay:editor";
@@ -151,7 +157,9 @@ bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" });
 bindKey("Ctrl+Space", "completion.trigger", { scope: "editor" });
 // Configure Phase 18.12 file-browser/fuzzy-open routes from ~/.config/clay/init.js.
 bindKey("Ctrl+P", "workspace.openFuzzyFile", { scope: "editor" });
-bindKey("Ctrl+B", "workspace.toggleFileBrowser", { scope: "editor" });
+// Ctrl+B ships as the Global default for the toggle (plan 109 I6); the
+// bindKey form overrides or restores it.
+bindKey("Ctrl+B", "workspace.toggleFileBrowser", { scope: "global" });
 // Configure the end-to-end file-browser workflow folder picker and copy routes.
 bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
 bindKey("Ctrl+Shift+C", clientCopySelection(), { scope: "editor" });
@@ -191,7 +199,7 @@ bindKey({ scope: "global", bindings: { "Ctrl+Shift+R": "runtime.reloadConfigurat
 
 Phase 18.8 note: `controlCenter.open` is a fixed built-in server-first command id (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`). Phase 24.5 ships the default `Ctrl+X Ctrl+P` chord (Global scope, `ServerFirst` routing; the pre-24.5 single-stroke default was `Ctrl+Shift+P`) in the default behavior manifest; binding it (again) through `bindKey` is the documented configuration surface for overriding the Control Center launch route, and `unbindKey` removes the default. Activating the bound key enqueues an inert command intent that the server-owned `CommandExecutor` validates before any side effect. The transient menu session itself is Clay-owned internal state and is not a callable `clay:configuration` API; see `docs/reference/clay-js-api/configuration.md`.
 
-Phase 18.12/22.8 note: `workspace.openFuzzyFile` and `workspace.toggleFileBrowser` are fixed built-in server-first workspace file-browser command ids. Binding them through `bindKey` is the documented configuration surface for fuzzy-open and file-browser toggle routes. The canonical `examples/init.js` binds `Ctrl+B` to the toggle; the pane starts hidden and the server retains visibility per tab. Activation is revalidated by `CommandExecutor`, and file opening still routes through server workspace roots or selected-file grants. The left file-browser panel, bottom transient fuzzy-open menu, workspace marker set, ignore set, and listing budgets are Clay-owned internals, not callable `clay:configuration` APIs.
+Phase 18.12/22.8 note: `workspace.openFuzzyFile` and `workspace.toggleFileBrowser` are fixed built-in server-first workspace file-browser command ids. Binding them through `bindKey` is the documented configuration surface for fuzzy-open and file-browser toggle routes. Plan 109 (Phase 2.1 I6) ships the default `Ctrl+B` chord for `workspace.toggleFileBrowser` (Global scope, `ServerFirst` routing) in the default behavior manifest, so the left workspace tab toggle is reachable without a user init.js; the canonical `examples/init.js` re-declares it, and the server retains visibility per tab. The workspace tree renders only in that left workspace tab — the coding-agent Files tab hosts the selected document's editor view (no second tree instance). Activation is revalidated by `CommandExecutor`, and file opening still routes through server workspace roots or selected-file grants. The left file-browser panel, bottom transient fuzzy-open menu, workspace marker set, ignore set, and listing budgets are Clay-owned internals, not callable `clay:configuration` APIs.
 
 Phase 24.3 note: `controlCenter.openPath` (display name “Browse Filesystem”) is a fixed built-in server-first command id that opens the Path Browser session — the dired-style path-mode surface. Use the bare id `"controlCenter.openPath"` with `bindKey`/`unbindKey`; `clay.controlCenter.openPath` is never valid. Phase 24.3 shipped a temporary default `Ctrl+Alt+P` chord; Phase 24.5 replaced it with the `Ctrl+X Ctrl+F` sequence default (Global scope, `ServerFirst` routing) without changing the command id — both the single and multi-stroke forms are accepted as overrides. Activating the bound key enqueues an inert command intent that the connection's server-intent handler converts into a session; packages cannot open, drive, intercept, or receive paths from the session, and the browse listing/session/grant helpers are `pub(crate)` Rust internals with no Clay JS facade. Browse authority is ephemeral and user-authorized by the built-in surface itself; opening a file converts it into one `SingleFile` grant and Alt+Enter on a directory converts it into one `Directory` root grant for the bound tab only (see `docs/development/file-open-save-reload-workflow.md`).
 
@@ -221,17 +229,28 @@ remain behavior-manifest data.
 ## Options
 
 - `key` (`string`): Key chord or space-separated multi-stroke sequence, for example `"Ctrl+I"` or `"Ctrl+X Ctrl+P"`.
-- `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"editor.serverInsertText"`, `"documents.clientOpenFileDialog"`, `"documents.serverSaveDocument"`, `"documents.serverReloadDocument"`, `"workspace.clientOpenFolderDialog"`, `"editor.clientCopySelection"`, `"editor.clientCutSelection"`, `"editor.clientPasteClipboard"`, `"editor.clientUndo"`, `"editor.clientRedo"`, `"editor.clientShowOpenDocuments"`, `"editor.clientRequestResync"`, `"editor.clientDismissRecovery"`, the built-in server-first command ids `"controlCenter.open"`, `"controlCenter.openPath"`, `"workspace.openFuzzyFile"`, `"workspace.toggleFileBrowser"`, or the built-in `UiReactivePriority` completion command id `"completion.trigger"`; future extension commands must be registered and permissioned before they can be bound.
+- `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"editor.serverInsertText"`, `"documents.clientOpenFileDialog"`, `"documents.serverSaveDocument"`, `"documents.serverReloadDocument"`, `"workspace.clientOpenFolderDialog"`, `"editor.clientCopySelection"`, `"editor.clientCutSelection"`, `"editor.clientPasteClipboard"`, `"editor.clientUndo"`, `"editor.clientRedo"`, `"editor.clientShowOpenDocuments"`, `"editor.clientRequestResync"`, `"editor.clientDismissRecovery"`, the built-in server-first command ids `"controlCenter.open"`, `"controlCenter.openPath"`, `"workspace.openFuzzyFile"`, `"workspace.toggleFileBrowser"`, the built-in `UiReactivePriority` completion command id `"completion.trigger"`, or the package-contributed coding-agent command id `"coding-agent.clientCycleEffort"`; future extension commands must be registered and permissioned before they can be bound.
 - `scope` (`"global" | "editor"`): Binding scope; defaults to `"editor"`.
 - `when` (`string`): Optional future condition expression for context-sensitive bindings; conditions are metadata for server-owned manifest routing, not executable client JavaScript.
 
 ## Key bindings
 
-The canonical `examples/init.js` re-declares shipped defaults, including global
-`Ctrl+Shift+R` for `runtime.reloadConfiguration`, and binds `Ctrl+B` to
-`workspace.toggleFileBrowser`; users may copy, override, or unbind those
-bindings in `~/.config/clay/init.js`. The pane is hidden by default when no
-file-browser binding is run.
+Shipped defaults include global `Ctrl+Shift+R` for `runtime.reloadConfiguration`
+and, since plan 109 (Phase 2.1 I6), global `Ctrl+B` for
+`workspace.toggleFileBrowser` — Global scope, so the left workspace tab toggle
+fires wherever focus sits (editor, coding-agent surface, or the tree itself).
+`Ctrl+B` collides with no shipped default and no editor-internal binding (the
+editor does not install the CodeMirror emacs keymap). Since plan 109 (Phase
+2.1 I4) the coding-agent surface also ships a package-manifest default:
+`Shift+Tab` for `coding-agent.clientCycleEffort`, which cycles the session
+model's declared reasoning-effort levels from the composer (a `bindKey`
+rebind changes that chord on the coding-agent surface). The canonical
+`examples/init.js` re-declares these shipped defaults; users may copy, override,
+or unbind them in `~/.config/clay/init.js` (`bindKey("Ctrl+B",
+"workspace.toggleFileBrowser", { scope: "global" })` or another chord). The
+workspace tree renders only in the left workspace tab; the coding-agent Files
+tab hosts the selected document's editor view instead (plan 109 I6), so the
+toggle is the tree's only visibility control.
 
 ## Custom properties
 
@@ -254,7 +273,7 @@ The runtime fails if arguments are malformed, the referenced document or editor 
 
 No additional permission is required beyond access to the running editor session.
 
-May bind only documented Clay command/API IDs unless a future permissioned extension command is registered. Binding `documents.clientOpenFileDialog` grants only an inert client UI command route; the dialog still uses fixed Markdown/all-files filter defaults and the server validates any selected file before granting only that file. Binding `workspace.clientOpenFolderDialog` grants only an inert native folder-picker route; the server still validates the selected directory through the selected-path capability flow. Binding `editor.clientCopySelection` / `clientCutSelection` / `clientPasteClipboard` / `clientUndo` / `clientRedo` / `clientShowOpenDocuments` / `clientRequestResync` / `clientDismissRecovery` grants only the corresponding user-mediated clipboard, history, open-documents, or sync-recovery command after an explicit user key route; it does not invent package/configuration/AI clipboard-contents or history mutation APIs or let those surfaces set arbitrary clipboard text. `bindKey` does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
+May bind only documented Clay command/API IDs unless a future permissioned extension command is registered. Binding `documents.clientOpenFileDialog` grants only an inert client UI command route; the dialog still uses fixed Markdown/all-files filter defaults and the server validates any selected file before granting only that file. Binding `workspace.clientOpenFolderDialog` grants only an inert native folder-picker route; the server still validates the selected directory through the selected-path capability flow. Binding `editor.clientCopySelection` / `clientCutSelection` / `clientPasteClipboard` / `clientUndo` / `clientRedo` / `clientShowOpenDocuments` / `clientRequestResync` / `clientDismissRecovery` grants only the corresponding user-mediated clipboard, history, open-documents, or sync-recovery command after an explicit user key route; it does not invent package/configuration/AI clipboard-contents or history mutation APIs or let those surfaces set arbitrary clipboard text. Binding `coding-agent.clientCycleEffort` grants only the user-mediated effort-cycle route on the coding-agent surface (cycling among the session model's declared levels); it exposes no model-provider management, OM worker-model selection, or context-inspection daemon RPC, which stay internal. `bindKey` does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 

@@ -4,6 +4,31 @@
     --clay-ds-command-centre-default-root-rest-gap,
     var(--clay-spacing-sm, 12px)
   );
+  padding: var(
+    --clay-ds-command-centre-default-root-rest-padding,
+    0
+  );
+  border: var(
+      --clay-ds-command-centre-default-root-rest-border-width,
+      0
+    )
+    var(--clay-ds-command-centre-default-root-rest-border-style, solid)
+    var(
+      --clay-ds-command-centre-default-root-rest-border-color,
+      transparent
+    );
+  border-radius: var(
+    --clay-ds-command-centre-default-root-rest-border-radius,
+    0
+  );
+  background: var(
+    --clay-ds-command-centre-default-root-rest-background-color,
+    transparent
+  );
+  box-shadow: var(
+    --clay-ds-command-centre-default-root-rest-shadow,
+    none
+  );
   width: min(
     calc(
       var(--clay-dimension-overlay-centered-width, 640px) - 2 *
@@ -29,20 +54,32 @@
   display: grid;
   place-items: center;
   border-top: var(
-      --clay-ds-command-centre-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
+      --clay-ds-command-centre-default-empty-rest-border-width,
+      var(
+        --clay-ds-command-centre-default-root-rest-border-width,
+        var(--clay-dimension-border-hairline, 1px)
+      )
     )
-    solid
     var(
-      --clay-ds-command-centre-default-root-rest-border-color,
-      var(--clay-border-subtle)
+      --clay-ds-command-centre-default-empty-rest-border-style,
+      solid
+    )
+    var(
+      --clay-ds-command-centre-default-empty-rest-border-color,
+      var(
+        --clay-ds-command-centre-default-root-rest-border-color,
+        var(--clay-border-subtle)
+      )
     );
 }
 
 .status {
   color: var(
-    --clay-ds-command-centre-default-root-rest-text-color,
-    var(--clay-text-muted)
+    --clay-ds-command-centre-default-status-rest-text-color,
+    var(
+      --clay-ds-command-centre-default-root-rest-text-color,
+      var(--clay-text-muted)
+    )
   );
   font-family: var(--clay-font-ui);
   font-size: var(--clay-text-status-size);

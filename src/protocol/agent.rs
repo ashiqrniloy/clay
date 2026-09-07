@@ -43,6 +43,44 @@ impl fmt::Debug for AgentSecret {
     }
 }
 
+/// Observational Memory worker slot (plan 109 I8).
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentOmWorkerKind {
+    Observation,
+    Reflection,
+}
+
+/// A worker model binding (`provider/model`), distinct from the session
+/// model (decision 2158).
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentOmWorkerModel {
+    pub provider: String,
+    pub model: String,
+}
+
 #[derive(
     rkyv::Archive,
     rkyv::Serialize,
@@ -65,6 +103,11 @@ pub enum AgentPickerKind {
     /// Workspace-scoped `session.search` picker (plan 108 task 11): the
     /// query runs against the shared Phase 1 FTS index, not a local filter.
     SessionSearch,
+    /// Observational Memory worker model pickers (plan 109 I8): the same
+    /// model-listing logic as the session model, retained per workspace
+    /// (book) and per session (daemon record metadata).
+    OmObservation,
+    OmReflection,
 }
 
 #[derive(
@@ -133,6 +176,16 @@ pub enum AgentWireEvent {
         phase: AgentToolPhase,
         name: String,
         tool_call_id: String,
+        /// Bounded, redacted argument summary (plan 109 I5). Server-built
+        /// from the daemon's `call.arguments`; never trusted from the client.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args_digest: Option<String>,
+        /// Bounded, redacted output excerpt / error reason (plan 109 I5).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_digest: Option<String>,
+        /// Skill name for `load_skill` rows (plan 109 I5).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skill_name: Option<String>,
     },
     Permission {
         session_id: String,
@@ -167,6 +220,9 @@ pub enum AgentTranscriptKind {
     Thinking,
     Error,
     Usage,
+    /// Bounded tool-call rows (plan 109 I5): args summary + output excerpt
+    /// in one entry per `tool_call_id`, evolved in place per phase.
+    Tool,
 }
 
 #[derive(
@@ -184,6 +240,13 @@ pub enum AgentTranscriptKind {
 pub struct AgentTranscriptEntry {
     pub kind: AgentTranscriptKind,
     pub text: String,
+    /// Tool rows only (plan 109 I5): the call id that groups phase events
+    /// into one evolving entry. Empty for non-tool entries.
+    #[serde(default)]
+    pub tool_call_id: String,
+    /// `load_skill` rows carry the loaded skill's name (plan 109 I5).
+    #[serde(default)]
+    pub skill_name: Option<String>,
 }
 
 impl AgentTranscriptEntry {
@@ -191,6 +254,21 @@ impl AgentTranscriptEntry {
         Self {
             kind,
             text: text.into(),
+            tool_call_id: String::new(),
+            skill_name: None,
+        }
+    }
+
+    pub(crate) fn new_tool(
+        text: impl Into<String>,
+        tool_call_id: &str,
+        skill_name: Option<String>,
+    ) -> Self {
+        Self {
+            kind: AgentTranscriptKind::Tool,
+            text: text.into(),
+            tool_call_id: tool_call_id.to_string(),
+            skill_name,
         }
     }
 }
@@ -216,9 +294,24 @@ pub fn apply_transcript_event(entries: &mut Vec<AgentTranscriptEntry>, event: &A
         AgentWireEvent::Overflow => {
             push_entry(entries, AgentTranscriptKind::Error, "event overflow");
         }
-        AgentWireEvent::Started { .. }
-        | AgentWireEvent::Tool { .. }
-        | AgentWireEvent::Permission { .. } => {}
+        AgentWireEvent::Tool {
+            phase,
+            name,
+            tool_call_id,
+            args_digest,
+            output_digest,
+            skill_name,
+            ..
+        } => apply_tool_event(
+            entries,
+            *phase,
+            name,
+            tool_call_id,
+            args_digest.as_deref(),
+            output_digest.as_deref(),
+            skill_name.clone(),
+        ),
+        AgentWireEvent::Started { .. } | AgentWireEvent::Permission { .. } => {}
     }
 }
 
@@ -246,6 +339,61 @@ fn push_entry(entries: &mut Vec<AgentTranscriptEntry>, kind: AgentTranscriptKind
     cap_snapshot(entries);
 }
 
+/// Tool rows evolve one entry per `tool_call_id` (plan 109 I5): the started
+/// phase records the args summary, terminal phases append the output excerpt
+/// in place. Progress rows are transient and carry no content.
+fn apply_tool_event(
+    entries: &mut Vec<AgentTranscriptEntry>,
+    phase: AgentToolPhase,
+    name: &str,
+    tool_call_id: &str,
+    args_digest: Option<&str>,
+    output_digest: Option<&str>,
+    skill_name: Option<String>,
+) {
+    if tool_call_id.is_empty() || matches!(phase, AgentToolPhase::Progress) {
+        return;
+    }
+    let existing = entries
+        .iter_mut()
+        .find(|entry| entry.tool_call_id == tool_call_id);
+    let skill = skill_name.filter(|skill| !skill.is_empty());
+    let text = match phase {
+        AgentToolPhase::Started => match args_digest.filter(|args| !args.is_empty()) {
+            Some(args) => format!("{name} {args}"),
+            None => format!("{name} - running"),
+        },
+        AgentToolPhase::Finished | AgentToolPhase::Error | AgentToolPhase::Blocked => {
+            let prior = existing
+                .as_ref()
+                .map(|entry| {
+                    entry
+                        .text
+                        .strip_suffix(" - running")
+                        .unwrap_or(&entry.text)
+                        .to_string()
+                })
+                .unwrap_or_else(|| name.to_string());
+            let suffix = match output_digest.filter(|output| !output.is_empty()) {
+                Some(output) => format!(" -> {output}"),
+                None => String::new(),
+            };
+            format!("{prior}{suffix}")
+        }
+        AgentToolPhase::Progress => unreachable!("progress rows return above"),
+    };
+    let text = truncate_bytes(&text, AGENT_MAX_ENTRY_TEXT_BYTES);
+    if let Some(entry) = existing {
+        entry.text = text.to_string();
+        if skill.is_some() {
+            entry.skill_name = skill;
+        }
+    } else {
+        entries.push(AgentTranscriptEntry::new_tool(text, tool_call_id, skill));
+        cap_snapshot(entries);
+    }
+}
+
 fn cap_snapshot(entries: &mut Vec<AgentTranscriptEntry>) {
     if entries.len() > AGENT_MAX_SNAPSHOT_ENTRIES {
         let drop = entries.len() - AGENT_MAX_SNAPSHOT_ENTRIES;
@@ -260,6 +408,12 @@ fn cap_snapshot(entries: &mut Vec<AgentTranscriptEntry>) {
 
 fn snapshot_text_bytes(entries: &[AgentTranscriptEntry]) -> usize {
     entries.iter().map(|entry| entry.text.len()).sum()
+}
+
+/// Public bounded-truncation for server-side digest builders (plan 109 I5):
+/// same char-boundary-safe cut the transcript uses internally.
+pub fn truncate_transcript_text(text: &str, max: usize) -> String {
+    truncate_bytes(text, max).to_string()
 }
 
 fn truncate_bytes(text: &str, max: usize) -> &str {
@@ -310,6 +464,50 @@ pub struct AgentSessionSnapshot {
     /// args, or env.
     #[serde(default)]
     pub mcp_servers: Vec<String>,
+    /// Declared portable thinking levels for the session's model, ascending
+    /// (plan 109 I4). Empty for non-reasoning / undeclared models — no
+    /// effort control.
+    #[serde(default)]
+    pub effort_levels: Vec<String>,
+    /// Active thinking level for the session (plan 109 I4): the last level
+    /// a prompt carried. `None` until set; the status row shows it.
+    #[serde(default)]
+    pub effort: Option<String>,
+    /// Daemon-registered slash commands (plan 109 R1), the composer
+    /// completion's single source. Bounded server-side; empty on snapshots
+    /// that predate the first environment fetch (state merges keep the
+    /// previous list).
+    #[serde(default)]
+    pub commands: Vec<AgentSlashCommand>,
+    /// Workspace git branch (plan 109 R2): a bounded direct read of the
+    /// workspace's `.git` HEAD — no subprocess. Empty = not a repo or not
+    /// yet read; the status row renders `—`.
+    #[serde(default)]
+    pub branch: String,
+    /// Active daemon extensions (plan 109 R3): loaded opt-in extensions
+    /// (wiki, graft). Empty = none report; the strip omits the segment.
+    #[serde(default)]
+    pub extensions: Vec<String>,
+}
+
+/// One daemon-registered slash command (plan 109 R1): bounded completion
+/// data — names and descriptions only, never handlers or args shapes.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSlashCommand {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 impl AgentSessionSnapshot {
@@ -355,6 +553,10 @@ pub struct AgentModelInfo {
     /// reports one (plan 108 task 9): status-row context-used-vs-window.
     #[serde(default)]
     pub context_window: Option<u64>,
+    /// Declared portable thinking levels, ascending (plan 109 I4), from the
+    /// daemon's Prism registry metadata. Empty = no effort control.
+    #[serde(default)]
+    pub thinking_levels: Vec<String>,
 }
 
 #[derive(
@@ -390,6 +592,11 @@ pub struct AgentSessionInfo {
     pub id: String,
     pub profile: String,
     pub updated_at: String,
+    /// Plan 109 I9: display label (first user-message summary) for the
+    /// workspace-scoped resume list. Empty when the store has no label —
+    /// pickers fall back to the profile name.
+    #[serde(default)]
+    pub label: String,
 }
 
 #[derive(
@@ -455,6 +662,11 @@ pub enum AgentClientCommand {
         provider: Option<String>,
         #[serde(default)]
         model: Option<String>,
+        /// Plan 109 I4: portable thinking level for this run. `None` keeps
+        /// the session's current effort; the daemon fail-closes invalid
+        /// strings at its boundary (Prism `parseThinkingLevel`).
+        #[serde(default)]
+        thinking_level: Option<String>,
     },
     Cancel {
         session_id: String,
@@ -473,12 +685,27 @@ pub enum AgentClientCommand {
         /// autonomy off).
         workspace_root: Option<String>,
         full_autonomy: Option<bool>,
+        /// Observational Memory worker model defaults for the new session
+        /// (plan 109 I8): the workspace book's last selection, `None` when
+        /// unset (workers stay off via requireExplicitModel).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        om_observation: Option<AgentOmWorkerModel>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        om_reflection: Option<AgentOmWorkerModel>,
     },
     LoadSession {
         session_id: String,
         /// Open the transcript at a specific tree entry (search-result
         /// opens, plan 108 task 11). `None` loads the default tail.
         entry_id: Option<String>,
+    },
+    /// Plan 109 I7: live context inspector. `item_id: None` fetches the
+    /// categorized list (bounded, redacted); `Some(id)` fetches one item's
+    /// full redacted content for the drawer detail.
+    Context {
+        session_id: String,
+        #[serde(default)]
+        item_id: Option<String>,
     },
     ResumeSession {
         session_id: String,
@@ -493,6 +720,29 @@ pub enum AgentClientCommand {
     Select {
         kind: AgentPickerKind,
         id: String,
+    },
+    /// Plan 109 I8: OM worker model selection (Observation/Reflection).
+    /// Applied through the same book path as `Select` (per-workspace
+    /// retention) plus the daemon's per-session `session.om.set`.
+    SelectWorker {
+        worker: AgentOmWorkerKind,
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+    },
+    /// Plan 109 I8: the Observational Memory tab's read model — worker
+    /// selection + bounded observer activity log (drops included).
+    OmActivity {
+        session_id: String,
+    },
+    /// Plan 109 I8: apply one worker's model binding to a session (the
+    /// daemon-side half of `SelectWorker`; the book half is server-side).
+    SetOmWorkers {
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation: Option<AgentOmWorkerModel>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reflection: Option<AgentOmWorkerModel>,
     },
     CredentialPut {
         provider: String,
@@ -676,6 +926,9 @@ mod tests {
                 phase: AgentToolPhase::Started,
                 name: "read".into(),
                 tool_call_id: "t".into(),
+                args_digest: None,
+                output_digest: None,
+                skill_name: None,
             },
         );
         apply_transcript_event(
@@ -697,13 +950,171 @@ mod tests {
                 context_tokens: None,
             },
         );
+        // Plan 109 I5: the started tool phase upserts a bounded tool row;
+        // the permission event stays invisible.
         assert_eq!(
-            entries,
-            vec![
-                AgentTranscriptEntry::new(AgentTranscriptKind::Assistant, "Hello"),
-                AgentTranscriptEntry::new(AgentTranscriptKind::Usage, "1 token"),
-            ]
+            entries[0],
+            AgentTranscriptEntry::new(AgentTranscriptKind::Assistant, "Hello")
         );
+        assert_eq!(entries[1].kind, AgentTranscriptKind::Tool);
+        assert_eq!(entries[1].tool_call_id, "t");
+        assert_eq!(entries[1].text, "read - running");
+        assert_eq!(
+            entries[2],
+            AgentTranscriptEntry::new(AgentTranscriptKind::Usage, "1 token")
+        );
+    }
+
+    #[test]
+    fn tool_rows_evolve_one_entry_per_call_with_bounded_digests() {
+        // Plan 109 I5: started -> finished evolves the row in place (args
+        // kept, output excerpt appended); progress rows are transient.
+        let mut entries = Vec::new();
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Started,
+                name: "read".into(),
+                tool_call_id: "t1".into(),
+                args_digest: Some(String::from(r#"{"path":"src/main.rs"}"#)),
+                output_digest: None,
+                skill_name: None,
+            },
+        );
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Progress,
+                name: "read".into(),
+                tool_call_id: "t1".into(),
+                args_digest: None,
+                output_digest: None,
+                skill_name: None,
+            },
+        );
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Finished,
+                name: "read".into(),
+                tool_call_id: "t1".into(),
+                args_digest: None,
+                output_digest: Some("fn main()".into()),
+                skill_name: None,
+            },
+        );
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, AgentTranscriptKind::Tool);
+        assert_eq!(entries[0].tool_call_id, "t1");
+        assert_eq!(
+            entries[0].text,
+            r#"read {"path":"src/main.rs"} -> fn main()"#
+        );
+
+        // Error rows carry the failure reason on the same evolving row.
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Started,
+                name: "write".into(),
+                tool_call_id: "t2".into(),
+                args_digest: Some(String::from(r#"{"path":"out.txt"}"#)),
+                output_digest: None,
+                skill_name: None,
+            },
+        );
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Error,
+                name: "write".into(),
+                tool_call_id: "t2".into(),
+                args_digest: None,
+                output_digest: Some("permission denied".into()),
+                skill_name: None,
+            },
+        );
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[1].text,
+            r#"write {"path":"out.txt"} -> permission denied"#
+        );
+
+        // Skill rows carry the skill name.
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Started,
+                name: "load_skill".into(),
+                tool_call_id: "t3".into(),
+                args_digest: Some(String::from(r#"{"name":"rust-review"}"#)),
+                output_digest: None,
+                skill_name: Some("rust-review".into()),
+            },
+        );
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Finished,
+                name: "load_skill".into(),
+                tool_call_id: "t3".into(),
+                args_digest: None,
+                output_digest: Some("Loaded skill".into()),
+                skill_name: None,
+            },
+        );
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[2].skill_name.as_deref(), Some("rust-review"));
+        assert_eq!(
+            entries[2].text,
+            r#"load_skill {"name":"rust-review"} -> Loaded skill"#
+        );
+
+        // Oversized digests stay within the per-entry budget.
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Started,
+                name: "read".into(),
+                tool_call_id: "t4".into(),
+                args_digest: Some("x".repeat(AGENT_MAX_ENTRY_TEXT_BYTES + 64)),
+                output_digest: None,
+                skill_name: None,
+            },
+        );
+        assert!(entries[3].text.len() <= AGENT_MAX_ENTRY_TEXT_BYTES);
+
+        // Empty tool call ids never produce rows.
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Started,
+                name: "read".into(),
+                tool_call_id: String::new(),
+                args_digest: Some(String::from(r#"{} "#)),
+                output_digest: None,
+                skill_name: None,
+            },
+        );
+        assert_eq!(entries.len(), 4);
     }
 
     #[test]

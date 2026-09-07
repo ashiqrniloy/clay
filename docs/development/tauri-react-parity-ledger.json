@@ -766,7 +766,8 @@
         "theme.setTheme",
         "theme.setAppearance",
         "theme.setTypography",
-        "theme.setDesignSystem"
+        "theme.setDesignSystem",
+        "settings.setDesignSystem"
       ],
       "protocol_messages": {
         "client": [],

@@ -33,7 +33,18 @@ function chatIntentPayload(
   uiVersion: number,
   commandId: string,
   value?: string,
+  thinkingLevel?: string,
 ): string {
+  // Plan 109 I4: the prompt's portable thinking level rides the intent as a
+  // second named argument; the server forwards it to the daemon, which
+  // fail-closes invalid strings at its boundary.
+  const args: Array<{ name: string; value: { string: string } }> =
+    value === undefined
+      ? []
+      : [{ name: "value", value: { string: value } }];
+  if (thinkingLevel !== undefined) {
+    args.push({ name: "thinkingLevel", value: { string: thinkingLevel } });
+  }
   return JSON.stringify({
     family: "sduiAction",
     payload: {
@@ -42,10 +53,7 @@ function chatIntentPayload(
       intent: {
         commandId,
         source: { button: { nodeId: 1 } },
-        arguments:
-          value === undefined
-            ? []
-            : [{ name: "value", value: { string: value } }],
+        arguments: args,
       },
     },
   });
@@ -55,6 +63,7 @@ type AgentSender = (payload: string) => Promise<void>;
 
 export class TauriClayAgent extends AbstractAgent {
   private pendingPrompt: string | null = null;
+  private pendingEffort: string | undefined = undefined;
   private uiVersion = 0;
   private sender: AgentSender = sendRequest;
 
@@ -68,8 +77,9 @@ export class TauriClayAgent extends AbstractAgent {
   }
 
   /** Queues composer text for the next `runAgent()` call. */
-  sendPrompt(text: string) {
+  sendPrompt(text: string, thinkingLevel?: string) {
     this.pendingPrompt = text;
+    this.pendingEffort = thinkingLevel;
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
@@ -78,6 +88,8 @@ export class TauriClayAgent extends AbstractAgent {
     void input;
     const prompt = this.pendingPrompt ?? "";
     this.pendingPrompt = null;
+    const effort = this.pendingEffort;
+    this.pendingEffort = undefined;
     const uiVersion = this.uiVersion;
     return new Observable<BaseEvent>((subscriber) => {
       // Empty submits are server-side no-ops: nothing will stream.
@@ -115,7 +127,7 @@ export class TauriClayAgent extends AbstractAgent {
       });
       // Fire the validated server intent; streaming arrives over the relay.
       void this.sender(
-        chatIntentPayload(uiVersion, "chat.submit", prompt),
+        chatIntentPayload(uiVersion, "chat.submit", prompt, effort),
       ).catch((error) => {
         if (!subscriber.closed) subscriber.error(error);
       });

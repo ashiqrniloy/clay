@@ -470,6 +470,17 @@ fn default_keymaps() -> Vec<KeyBindingRule> {
                 ctrl_key(KeyCode::Character("f".to_string())),
             ],
         ),
+        // Plan 109 I6: the left workspace tab (file browser) toggles on the
+        // documented `Ctrl+B` chord, Global scope so it fires wherever
+        // focus sits (the coding-agent surface, the tree itself) — the
+        // workspace tree is chrome, not editor text. Rebindable via
+        // bindKey/unbindKey like every default; `Ctrl+B` collides with no
+        // shipped default and no editor-internal binding (the CodeMirror
+        // emacs keymap is not installed).
+        KeyBindingRule::global_server_first(
+            "workspace.toggleFileBrowser",
+            ctrl_key(KeyCode::Character("b".to_string())),
+        ),
         // Phase 22.1: shell pane-management defaults (all overridable via bindKey
         // in init.js with { scope: "global" }). "vertical" = side by side,
         // "horizontal" = stacked (vim-style vsplit / split).
@@ -639,6 +650,11 @@ fn default_commands() -> Vec<CommandDeclaration> {
         // (Phase 24.5), same command id as the temporary single-stroke
         // default.
         CommandDeclaration::server_intent("controlCenter.openPath", "Browse Filesystem"),
+        // Plan 109 I6: the workspace file-browser toggle is a built-in
+        // server intent (visibility is server-owned per tab); declared so
+        // the default Global `Ctrl+B` chord routes like the Control Center
+        // family.
+        CommandDeclaration::server_intent("workspace.toggleFileBrowser", "Toggle File Browser"),
         CommandDeclaration::ui_reactive("completion.trigger", "Trigger Completion"),
         // Phase 18.20: discoverable language-intelligence commands with empty
         // default key bindings. Client captures cursor/version locally and
@@ -2388,8 +2404,8 @@ pub struct ActiveTypography {
     /// Phase 20.1: user-owned bounded hierarchy of UI variant scale ratios
     /// carried atomically with the typography snapshot. Packages/components
     /// select a semantic role plus variant only; concrete scales stay
-    /// user-owned here. Defaults preserve the legacy `Title = 14/12`,
-    /// `Body/Status = 1`, `Detail = 10/12` behavior.
+    /// user-owned here. Defaults give the host baseline rhythm:
+    /// Title 15/13, Body/Status = 1, Detail 12/13 (plan 110 task 9).
     pub hierarchy: UiTypographyHierarchy,
 }
 
@@ -2430,15 +2446,17 @@ pub enum UiTypographyHierarchyValidationError {
 }
 
 impl UiTypographyHierarchy {
-    /// Default hierarchy preserving legacy variant metrics plus restrained
-    /// defaults for the three new Phase 20.1 variants.
+    /// Default hierarchy for the host baseline (ui base size 13): Display
+    /// 19.5px, Title 15px semibold, Section ≈14px, Body/Status 13px regular,
+    /// Detail/label 12px medium. Concrete sizes stay user-owned through
+    /// `theme.setTypography`; these scales only set the default rhythm.
     pub const DEFAULT: Self = Self {
         display: 1.5,
-        title: 14.0 / 12.0,
+        title: 15.0 / 13.0,
         section: 13.0 / 12.0,
         body: 1.0,
         status: 1.0,
-        detail: 10.0 / 12.0,
+        detail: 12.0 / 13.0,
         caption: 0.75,
     };
 
@@ -2516,7 +2534,7 @@ impl Default for ActiveTypography {
             },
             ui: FontProfile {
                 families: vec!["system-ui".to_string()],
-                size: 12.0,
+                size: 13.0,
                 ligatures: Box::new(LigaturePolicy::default()),
             },
             hierarchy: UiTypographyHierarchy::DEFAULT,
@@ -3180,6 +3198,23 @@ mod tests {
     }
 
     #[test]
+    fn default_keymaps_contain_workspace_file_browser_toggle_binding() {
+        // Plan 109 I6: the documented `Ctrl+B` default ships for
+        // `workspace.toggleFileBrowser` (Global, ServerFirst), keeping the
+        // left workspace tab reachable without a user init.js.
+        let rule = default_keymaps()
+            .into_iter()
+            .find(|rule| rule.command_id == "workspace.toggleFileBrowser")
+            .expect("default keymaps missing workspace.toggleFileBrowser");
+        assert_eq!(
+            rule.sequence,
+            vec![ctrl_key(KeyCode::Character("b".to_string()))]
+        );
+        assert_eq!(rule.context, KeyBindingContext::Global);
+        assert_eq!(rule.routing_policy, RoutingPolicy::ServerFirst);
+    }
+
+    #[test]
     fn default_keymaps_contain_path_browser_open_binding() {
         let keymaps = default_keymaps();
         let rules: Vec<_> = keymaps
@@ -3222,6 +3257,20 @@ mod tests {
             .expect("default keymap must be prefix-collision free");
         crate::behavior::manifest::validate_manifest(&BehaviorManifest::core_code_editing(1))
             .expect("core.code keymap must be prefix-collision free");
+    }
+
+    #[test]
+    fn default_commands_declare_workspace_file_browser_toggle_as_server_intent() {
+        // Plan 109 I6: the toggle is declared so the default `Ctrl+B`
+        // keymap rule resolves against the manifest command set.
+        let commands = default_commands();
+        let command = commands
+            .iter()
+            .find(|command| command.command_id == "workspace.toggleFileBrowser")
+            .expect("default commands missing workspace.toggleFileBrowser");
+        assert_eq!(command.display_name, "Toggle File Browser");
+        assert_eq!(command.authority, CommandAuthority::ServerIntent);
+        assert_eq!(command.routing_policy, RoutingPolicy::ServerFirst);
     }
 
     #[test]

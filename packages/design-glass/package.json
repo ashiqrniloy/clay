@@ -43,24 +43,23 @@
             "backgroundColor": "surface.control",
             "backgroundOpacity": 0.8,
             "textColor": "text.primary",
-            "borderColor": "border.subtle",
+            "borderColor": "border.strong",
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 6.0,
             "padding": "spacing.sm",
             "gap": "spacing.xs",
-            "backdropBlur": 8.0,
-            "backdropSaturate": 1.2,
             "innerHighlight": {
               "colorRole": "text.primary",
               "opacity": 0.12,
               "width": 1.0
             },
             "shadow": [
-              { "x": 0.0, "y": 2.0, "blur": 6.0, "spread": 0.0, "colorRole": "border.strong", "opacity": 0.15 }
+              { "x": 0.0, "y": 1.0, "blur": 3.0, "spread": 0.0, "colorRole": "border.strong", "opacity": 0.15 }
             ],
             "transitionDuration": 150.0,
-            "transitionTiming": "ease-out"
+            "transitionTiming": "ease-out",
+            "transformPreset": "none"
           },
           "button.default.root.hover": {
             "backgroundColor": "surface.hover",
@@ -70,8 +69,6 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 6.0,
-            "backdropBlur": 10.0,
-            "backdropSaturate": 1.3,
             "innerHighlight": {
               "colorRole": "text.primary",
               "opacity": 0.18,
@@ -92,8 +89,6 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 6.0,
-            "backdropBlur": 6.0,
-            "backdropSaturate": 1.1,
             "shadow": [
               { "x": 0.0, "y": 1.0, "blur": 2.0, "spread": 0.0, "colorRole": "border.strong", "opacity": 0.15 }
             ],
@@ -116,7 +111,6 @@
             "borderStyle": "solid",
             "borderRadius": 6.0,
             "opacity": 0.5,
-            "backdropBlur": 0.0,
             "shadow": []
           },
           "button.primary.root.rest": {
@@ -129,8 +123,6 @@
             "borderRadius": 6.0,
             "padding": "spacing.sm",
             "gap": "spacing.xs",
-            "backdropBlur": 8.0,
-            "backdropSaturate": 1.3,
             "innerHighlight": {
               "colorRole": "surface.main",
               "opacity": 0.25,
@@ -150,8 +142,6 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 6.0,
-            "backdropBlur": 10.0,
-            "backdropSaturate": 1.4,
             "shadow": [
               { "x": 0.0, "y": 6.0, "blur": 16.0, "spread": 0.0, "colorRole": "accent.primary", "opacity": 0.45 }
             ],
@@ -195,15 +185,14 @@
             "backgroundColor": "surface.panel",
             "backgroundOpacity": 0.7,
             "textColor": "text.muted",
-            "borderColor": "border.subtle",
+            "borderColor": "border.strong",
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 6.0,
             "padding": "spacing.sm",
             "gap": "spacing.xs",
-            "backdropBlur": 6.0,
             "shadow": [
-              { "x": 0.0, "y": 1.0, "blur": 3.0, "spread": 0.0, "colorRole": "border.subtle", "opacity": 0.1 }
+              { "x": 0.0, "y": 1.0, "blur": 3.0, "spread": 0.0, "colorRole": "border.strong", "opacity": 0.15 }
             ],
             "transitionDuration": 150.0,
             "transitionTiming": "ease-out"
@@ -216,7 +205,6 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 6.0,
-            "backdropBlur": 8.0,
             "transformPreset": "hover-lift",
             "transitionDuration": 150.0,
             "transitionTiming": "ease-out"
@@ -260,8 +248,6 @@
             "borderRadius": 6.0,
             "padding": "spacing.sm",
             "gap": "spacing.xs",
-            "backdropBlur": 8.0,
-            "backdropSaturate": 1.3,
             "innerHighlight": {
               "colorRole": "surface.main",
               "opacity": 0.25,
@@ -281,7 +267,6 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 6.0,
-            "backdropBlur": 10.0,
             "transformPreset": "hover-lift",
             "transitionDuration": 150.0,
             "transitionTiming": "ease-out"
@@ -315,22 +300,6 @@
             "opacity": 0.5,
             "shadow": []
           },
-          "textInput.default.root.rest": {
-            "backgroundColor": "surface.control",
-            "backgroundOpacity": 0.75,
-            "textColor": "text.primary",
-            "borderColor": "border.subtle",
-            "borderWidth": 1.0,
-            "borderStyle": "solid",
-            "borderRadius": 6.0,
-            "padding": "spacing.sm",
-            "backdropBlur": 8.0,
-            "shadow": [
-              { "x": 0.0, "y": 1.0, "blur": 3.0, "spread": 0.0, "colorRole": "border.subtle", "opacity": 0.15 }
-            ],
-            "transitionDuration": 150.0,
-            "transitionTiming": "ease-out"
-          },
           "textInput.default.field.rest": {
             "backgroundColor": "transparent",
             "gap": "spacing.xs"
@@ -339,14 +308,13 @@
             "backgroundColor": "surface.control",
             "backgroundOpacity": 0.75,
             "textColor": "text.primary",
-            "borderColor": "border.subtle",
+            "borderColor": "border.strong",
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 6.0,
             "padding": "spacing.sm",
-            "backdropBlur": 8.0,
             "shadow": [
-              { "x": 0.0, "y": 1.0, "blur": 3.0, "spread": 0.0, "colorRole": "border.subtle", "opacity": 0.15 }
+              { "x": 0.0, "y": 1.0, "blur": 3.0, "spread": 0.0, "colorRole": "border.strong", "opacity": 0.15 }
             ]
           },
           "textInput.default.input.hover": {
@@ -388,29 +356,27 @@
             "backgroundColor": "surface.control",
             "backgroundOpacity": 0.8,
             "textColor": "text.primary",
-            "borderColor": "border.subtle",
+            "borderColor": "border.strong",
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 6.0,
             "padding": "spacing.sm",
-            "backdropBlur": 8.0,
             "shadow": [
-              { "x": 0.0, "y": 2.0, "blur": 6.0, "spread": 0.0, "colorRole": "border.strong", "opacity": 0.15 }
+              { "x": 0.0, "y": 1.0, "blur": 3.0, "spread": 0.0, "colorRole": "border.strong", "opacity": 0.15 }
             ]
           },
           "dropdown.default.trigger.rest": {
             "backgroundColor": "surface.control",
             "backgroundOpacity": 0.8,
             "textColor": "text.primary",
-            "borderColor": "border.subtle",
+            "borderColor": "border.strong",
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 6.0,
             "padding": "spacing.sm",
             "gap": "spacing.xs",
-            "backdropBlur": 8.0,
             "shadow": [
-              { "x": 0.0, "y": 2.0, "blur": 6.0, "spread": 0.0, "colorRole": "border.strong", "opacity": 0.15 }
+              { "x": 0.0, "y": 1.0, "blur": 3.0, "spread": 0.0, "colorRole": "border.strong", "opacity": 0.15 }
             ],
             "transitionDuration": 150.0,
             "transitionTiming": "ease-out"
@@ -419,7 +385,6 @@
             "backgroundColor": "surface.hover",
             "backgroundOpacity": 0.9,
             "borderColor": "border.strong",
-            "backdropBlur": 10.0,
             "transformPreset": "hover-lift"
           },
           "dropdown.default.trigger.active": {
@@ -490,17 +455,6 @@
             "outlineOffset": 0.0,
             "outlineStyle": "solid"
           },
-          "list.default.root.rest": {
-            "backgroundColor": "surface.panel",
-            "backgroundOpacity": 0.8,
-            "textColor": "text.primary",
-            "borderColor": "border.subtle",
-            "borderWidth": 1.0,
-            "borderStyle": "solid",
-            "borderRadius": 8.0,
-            "padding": "spacing.xs",
-            "backdropBlur": 8.0
-          },
           "list.default.row.rest": {
             "backgroundColor": "transparent",
             "textColor": "text.primary",
@@ -544,10 +498,12 @@
             "backgroundColor": "surface.panel",
             "backgroundOpacity": 0.8,
             "textColor": "text.primary",
+            "borderColor": "border.strong",
+            "borderWidth": 1.0,
+            "borderStyle": "solid",
             "borderRadius": 8.0,
             "padding": "spacing.sm",
-            "gap": "spacing.xs",
-            "backdropBlur": 8.0
+            "gap": "spacing.xs"
           },
           "collapse.default.header.hover": {
             "backgroundColor": "surface.hover",
@@ -565,12 +521,6 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "padding": "spacing.md"
-          },
-          "modal.default.root.rest": {
-            "backgroundColor": "transparent",
-            "borderWidth": 0.0,
-            "borderStyle": "none",
-            "borderRadius": 0.0
           },
           "modal.default.scrim.rest": {
             "backgroundColor": "surface.scrim",
@@ -611,8 +561,6 @@
             "borderRadius": 8.0,
             "padding": "spacing.md",
             "gap": "spacing.sm",
-            "backdropBlur": 12.0,
-            "backdropSaturate": 1.2,
             "innerHighlight": {
               "colorRole": "text.primary",
               "opacity": 0.1,
@@ -629,8 +577,6 @@
             "borderRadius": 8.0,
             "padding": "spacing.md",
             "gap": "spacing.sm",
-            "backdropBlur": 12.0,
-            "backdropSaturate": 1.2,
             "innerHighlight": {
               "colorRole": "text.primary",
               "opacity": 0.1,
@@ -775,8 +721,7 @@
           "scroll.default.root.rest": {
             "backgroundColor": "transparent",
             "borderWidth": 0.0,
-            "borderStyle": "none",
-            "backdropBlur": 0.0
+            "borderStyle": "none"
           },
           "scroll.default.scrollbarTrack.rest": {
             "backgroundColor": "transparent",
@@ -798,7 +743,7 @@
             "borderRadius": 9999.0,
             "opacity": 1.0
           },
-          "tab.default.root.rest": {
+          "tab.default.item.rest": {
             "backgroundColor": "surface.panel",
             "backgroundOpacity": 0.7,
             "textColor": "text.muted",
@@ -808,25 +753,22 @@
             "borderRadius": 6.0,
             "padding": "spacing.sm",
             "gap": "spacing.xs",
-            "backdropBlur": 6.0,
             "transitionDuration": 150.0,
             "transitionTiming": "ease-out"
           },
-          "tab.default.root.hover": {
+          "tab.default.item.hover": {
             "backgroundColor": "surface.hover",
             "backgroundOpacity": 0.85,
             "textColor": "text.primary",
-            "borderColor": "border.strong",
-            "backdropBlur": 8.0
+            "borderColor": "border.strong"
           },
-          "tab.default.root.selected": {
+          "tab.default.item.selected": {
             "backgroundColor": "surface.control",
             "backgroundOpacity": 0.95,
             "textColor": "text.primary",
             "borderColor": "border.strong",
             "borderWidth": 1.0,
             "borderStyle": "solid",
-            "backdropBlur": 10.0,
             "innerHighlight": {
               "colorRole": "text.primary",
               "opacity": 0.15,
@@ -836,13 +778,13 @@
               { "x": 0.0, "y": -2.0, "blur": 0.0, "spread": 0.0, "colorRole": "accent.primary", "opacity": 1.0, "inset": true }
             ]
           },
-          "tab.default.root.focus": {
+          "tab.default.item.focus": {
             "outlineColor": "focus.ring",
             "outlineWidth": 2.0,
             "outlineOffset": -2.0,
             "outlineStyle": "solid"
           },
-          "tab.default.root.disabled": {
+          "tab.default.item.disabled": {
             "backgroundColor": "surface.disabled",
             "backgroundOpacity": 0.5,
             "textColor": "text.disabled",
@@ -856,28 +798,25 @@
             "borderStyle": "solid",
             "borderRadius": 8.0,
             "padding": "spacing.xs",
-            "gap": "spacing.xxs",
-            "backdropBlur": 8.0
+            "gap": "spacing.xxs"
           },
           "card.default.root.rest": {
             "backgroundColor": "surface.panel",
             "backgroundOpacity": 0.8,
             "textColor": "text.primary",
-            "borderColor": "border.subtle",
+            "borderColor": "border.strong",
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 8.0,
             "padding": "spacing.md",
             "gap": "spacing.sm",
-            "backdropBlur": 12.0,
-            "backdropSaturate": 1.2,
             "innerHighlight": {
               "colorRole": "text.primary",
               "opacity": 0.12,
               "width": 1.0
             },
             "shadow": [
-              { "x": 0.0, "y": 4.0, "blur": 12.0, "spread": 0.0, "colorRole": "border.strong", "opacity": 0.2 }
+              { "x": 0.0, "y": 1.0, "blur": 3.0, "spread": 0.0, "colorRole": "border.strong", "opacity": 0.15 }
             ],
             "transitionDuration": 150.0,
             "transitionTiming": "ease-out"
@@ -898,8 +837,7 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 9999.0,
-            "padding": "spacing.xxs",
-            "backdropBlur": 6.0
+            "padding": "spacing.xxs"
           },
           "badge.accent.root.rest": {
             "backgroundColor": "accent.primary",
@@ -909,8 +847,7 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 9999.0,
-            "padding": "spacing.xxs",
-            "backdropBlur": 6.0
+            "padding": "spacing.xxs"
           },
           "badge.muted.root.rest": {
             "backgroundColor": "surface.panel",
@@ -920,8 +857,7 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 9999.0,
-            "padding": "spacing.xxs",
-            "backdropBlur": 6.0
+            "padding": "spacing.xxs"
           },
           "badge.error.root.rest": {
             "backgroundColor": "diagnostic.error",
@@ -931,8 +867,7 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 9999.0,
-            "padding": "spacing.xxs",
-            "backdropBlur": 6.0
+            "padding": "spacing.xxs"
           },
           "badge.warning.root.rest": {
             "backgroundColor": "diagnostic.warning",
@@ -942,8 +877,7 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 9999.0,
-            "padding": "spacing.xxs",
-            "backdropBlur": 6.0
+            "padding": "spacing.xxs"
           },
           "badge.success.root.rest": {
             "backgroundColor": "diagnostic.success",
@@ -953,8 +887,7 @@
             "borderWidth": 1.0,
             "borderStyle": "solid",
             "borderRadius": 9999.0,
-            "padding": "spacing.xxs",
-            "backdropBlur": 6.0
+            "padding": "spacing.xxs"
           },
           "kbd.default.root.rest": {
             "backgroundColor": "surface.control",
@@ -1062,6 +995,7 @@
             "borderStyle": "solid",
             "borderRadius": 14.0,
             "padding": "spacing.md",
+            "gap": "spacing.xs",
             "backdropBlur": 20.0,
             "backdropSaturate": 1.4,
             "innerHighlight": {
@@ -1082,9 +1016,7 @@
             "borderStyle": "solid",
             "borderRadius": 8.0,
             "padding": "spacing.md",
-            "gap": "spacing.sm",
-            "backdropBlur": 12.0,
-            "backdropSaturate": 1.2
+            "gap": "spacing.sm"
           },
           "editor.default.container.rest": {
             "backgroundColor": "surface.main",
@@ -1092,8 +1024,7 @@
             "textColor": "text.primary",
             "borderWidth": 0.0,
             "borderStyle": "none",
-            "borderRadius": 0.0,
-            "backdropBlur": 0.0
+            "borderRadius": 0.0
           },
           "editor.default.gutter.rest": {
             "backgroundColor": "surface.panel",
@@ -1101,22 +1032,19 @@
             "textColor": "text.muted",
             "borderColor": "border.subtle",
             "borderWidth": 1.0,
-            "borderStyle": "solid",
-            "backdropBlur": 0.0
+            "borderStyle": "solid"
           },
           "editor.default.activeLine.rest": {
             "backgroundColor": "surface.control",
             "backgroundOpacity": 1.0,
             "borderWidth": 0.0,
-            "borderStyle": "none",
-            "backdropBlur": 0.0
+            "borderStyle": "none"
           },
           "editor.default.selection.rest": {
             "backgroundColor": "surface.active",
             "backgroundOpacity": 1.0,
             "borderWidth": 0.0,
-            "borderStyle": "none",
-            "backdropBlur": 0.0
+            "borderStyle": "none"
           },
           "editor.default.matchingBracket.rest": {
             "borderColor": "border.strong",
@@ -1129,6 +1057,177 @@
             "backgroundOpacity": 1.0,
             "borderWidth": 0.0,
             "borderStyle": "none"
+          },
+          "shell.default.root.rest": {
+            "backgroundColor": "surface.panel"
+          },
+          "shell.default.header.rest": {
+            "backgroundColor": "surface.panel",
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0,
+            "borderStyle": "solid"
+          },
+          "shell.default.brand.rest": {
+            "backgroundColor": "transparent",
+            "textColor": "text.muted",
+            "padding": "spacing.sm"
+          },
+          "shell.default.workingArea.rest": {
+            "backgroundColor": "surface.main"
+          },
+          "shell.default.footer.rest": {
+            "backgroundColor": "surface.panel",
+            "textColor": "text.muted",
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0,
+            "borderStyle": "solid",
+            "padding": "spacing.xxs"
+          },
+          "statusBar.default.root.rest": {
+            "backgroundColor": "surface.panel",
+            "textColor": "text.muted",
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0,
+            "borderStyle": "solid",
+            "padding": "spacing.xxs"
+          },
+          "fileBrowser.default.root.rest": {
+            "backgroundColor": "surface.panel",
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0,
+            "borderStyle": "solid"
+          },
+          "paneSplitTree.default.group.rest": {
+            "backgroundColor": "surface.main"
+          },
+          "paneSplitTree.default.pane.rest": {
+            "backgroundColor": "surface.panel",
+            "outlineColor": "transparent",
+            "outlineWidth": 1.0,
+            "outlineStyle": "solid",
+            "borderRadius": 8.0
+          },
+          "paneSplitTree.default.pane.active": {
+            "outlineColor": "focus.ring"
+          },
+          "paneSplitTree.default.handle.rest": {
+            "backgroundColor": "border.hairline",
+            "borderWidth": 1.0
+          },
+          "paneSplitTree.default.handle.focus": {
+            "outlineColor": "focus.ring",
+            "outlineWidth": 2.0,
+            "outlineStyle": "solid"
+          },
+          "settingsPanel.default.panel.rest": {
+            "backgroundColor": "surface.panel",
+            "textColor": "text.primary",
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0,
+            "borderStyle": "solid"
+          },
+          "settingsPanel.default.heading.rest": {
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0,
+            "borderStyle": "solid"
+          },
+          "settingsPanel.default.actions.rest": {
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0,
+            "borderStyle": "solid"
+          },
+          "editor.default.chrome.rest": {
+            "backgroundColor": "surface.panel",
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0,
+            "borderStyle": "solid",
+            "padding": "spacing.xs",
+            "gap": "spacing.xs"
+          },
+          "editor.default.path.rest": {
+            "backgroundColor": "surface.control",
+            "textColor": "text.muted",
+            "borderColor": "border.hairline",
+            "borderWidth": 1.0,
+            "borderStyle": "solid"
+          },
+          "editor.default.root.rest": {
+            "backgroundColor": "surface.main"
+          },
+          "editor.default.tooltip.rest": {
+            "backgroundColor": "surface.overlay",
+            "textColor": "text.primary",
+            "borderColor": "border.strong",
+            "borderWidth": 1.0
+          },
+          "editor.default.tooltip.selected": {
+            "backgroundColor": "surface.selected",
+            "textColor": "text.primary"
+          },
+          "commandCentre.default.empty.rest": {
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0,
+            "borderStyle": "dashed"
+          },
+          "commandCentre.default.status.rest": {
+            "textColor": "text.muted"
+          },
+          "chat.default.header.rest": {
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0,
+            "borderStyle": "solid",
+            "padding": "spacing.sm",
+            "gap": "spacing.xs"
+          },
+          "chat.default.userBubble.rest": {
+            "backgroundColor": "surface.control",
+            "borderColor": "border.strong",
+            "borderWidth": 1.0,
+            "borderStyle": "solid",
+            "borderRadius": 8.0
+          },
+          "chat.default.assistantBubble.rest": {
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0,
+            "borderStyle": "solid"
+          },
+          "chat.default.composer.rest": {
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0
+          },
+          "chat.default.status.rest": {
+            "backgroundColor": "surface.panel",
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0
+          },
+          "chat.default.actions.rest": {
+            "backgroundColor": "surface.panel",
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0
+          },
+          "chat.default.footerCommands.rest": {
+            "backgroundColor": "surface.panel",
+            "borderColor": "border.hairline",
+            "borderWidth": 1.0
+          },
+          "chat.default.transcript.rest": {
+            "backgroundColor": "surface.main",
+            "padding": "spacing.sm"
+          },
+          "chat.default.sessions.rest": {
+            "borderColor": "border.subtle",
+            "borderWidth": 1.0
+          },
+          "chat.default.sessionList.rest": {
+            "backgroundColor": "surface.panel"
+          },
+          "chat.default.sessionRow.rest": {
+            "backgroundColor": "transparent"
+          },
+          "divider.default.root.rest": {
+            "borderColor": "border.hairline",
+            "borderWidth": 1.0,
+            "borderStyle": "solid"
           }
         }
       }

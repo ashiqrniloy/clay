@@ -12,6 +12,8 @@ import { createOpenCodeGoProviderPackage } from "@arnilo/prism-providers/opencod
 import { createOpenRouterProviderPackage } from "@arnilo/prism-providers/openrouter";
 import { createXaiProviderPackage } from "@arnilo/prism-providers/xai";
 import { createZaiProviderPackage } from "@arnilo/prism-providers/zai";
+import { createHyperProviderPackage } from "@arnilo/prism-providers/hyper";
+import { createCommandCodeProviderPackage } from "@arnilo/prism-providers/commandcode";
 
 function hostConfigStub(name: string, provider: string, credentialName: string): Extension {
   return {
@@ -27,7 +29,7 @@ function hostConfigStub(name: string, provider: string, credentialName: string):
   };
 }
 
-/** Load first-party Prism 0.4.0 provider packages. Azure/Bedrock/Vertex need host
+/** Load first-party Prism 0.5.0 provider packages. Azure/Bedrock/Vertex need host
  *  endpoint/region/project before their factories can run; stubs expose auth only. */
 export async function loadProviderPackages(kernel: ExtensionKernel, apiKey: CredentialValueSource): Promise<void> {
   await kernel.load([
@@ -44,6 +46,8 @@ export async function loadProviderPackages(kernel: ExtensionKernel, apiKey: Cred
     createZaiProviderPackage({ apiKey }),
     createAlibabaProviderPackage({ apiKey }),
     createOpenRouterProviderPackage({ apiKey }),
+    createHyperProviderPackage({ apiKey }),
+    createCommandCodeProviderPackage({ apiKey }),
     hostConfigStub("@arnilo/prism-providers/azure", "azure", "credential"),
     hostConfigStub("@arnilo/prism-providers/bedrock", "bedrock", "credential"),
     hostConfigStub("@arnilo/prism-providers/vertex", "vertex", "credential"),

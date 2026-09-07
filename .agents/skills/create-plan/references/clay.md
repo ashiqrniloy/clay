@@ -179,21 +179,44 @@ Each Clay plan document that introduces or materially changes a user-facing conf
 
 The task should require:
 
-- Update `examples/init.js`, the canonical example configuration users copy to `~/.config/clay/init.js`. It must stay comprehensive: every supported configuration surface appears exactly once, in its section, with all documented options annotated in comments.
+- Update `examples/config/init.js`, the canonical example configuration users copy to `~/.config/clay/init.js`. It must stay comprehensive: every supported configuration surface appears exactly once, in its section, with all documented options annotated in comments.
 - Add the new option/API with the same documentation style: section comment explaining purpose and ownership, every option name/type/default/allowed value, and a commented example for non-default variants.
-- Keep the file valid JavaScript (`node --check examples/init.js`) and keep the active (uncommented) part safe to copy verbatim: heavy or environment-specific setup (LSP grants, optional packages, behavior overrides) stays commented with instructions.
+- Keep the file valid JavaScript (`node --check examples/config/init.js`) and keep the active (uncommented) part safe to copy verbatim: heavy or environment-specific setup (LSP grants, optional packages, behavior overrides) stays commented with instructions.
 - Preserve the documented ordering constraints (e.g. `authorizeLanguageServer` before the first `loadPackage`) and the planned-but-not-callable section at the end when a facade is promoted from planned to implemented.
 - Cross-check the example against the Clay JS API docs and `api-inventory.toml` custom properties for the touched APIs; option names, enums, and defaults must match the validated server-side parsers, not prose.
 
 Recommended task title:
 
 ```markdown
-- [ ] Update the canonical example configuration (examples/init.js)
+- [ ] Update the canonical example configuration (examples/config/init.js)
 ```
 
 Place this task next to the Clay Configuration task and before the final project-wiki task when present.
 
-Decision source: user instruction 2026-08-03 (canonical `examples/init.js` + per-plan maintenance duty).
+Decision source: user instruction 2026-08-03 (canonical `examples/config/init.js` + per-plan maintenance duty).
+
+## Example Configuration Live Launch-Test Task
+
+Each Clay plan document that includes an Example Configuration Maintenance Task (any plan touching a user-facing configuration surface) must also include a separate task that launch-tests the real app against a copy of the canonical example config. Updating the example file without running the app is not sufficient: configuration APIs change, `init.js` semantics change, and new configuration surfaces ship in the example config, so the example must be proven to keep the app working, not just syntactically valid.
+
+The task should require:
+
+- Copy `examples/config/init.js` (plus `examples/config/packages/` when present) to an isolated scratch config root (e.g. a temp `HOME`/`.config/clay`); never launch the test instance against the developer's real profile.
+- Launch a real Linux GUI build (server + client) with that config and verify a healthy startup: the client reaches Connected, configuration evaluation commits a generation with no `configuration failed` diagnostics, and the shell responds to interaction (open a pane, run a command, open a menu).
+- Exercise the surfaces the plan changed as loaded from the example config: theme/appearance/typography apply visually, `bindKey`-registered commands fire, `loadPackage`'d packages register their contributions (profiles, commands, language modes), and any newly added option values take effect.
+- Verify design-system/theme selections made through the example config render as the selected system (e.g. `setDesignSystem("@clay/design-glass")` shows glass recipes — rounded 1px-border controls — not the neobrutal fallback), because a failed design-system activation silently falls back and users report it as "the wrong design system".
+- Record the launch command, scratch config path, and observed results in the task evidence. A broken or degraded app under the example config is a product defect (or an explicitly prioritized follow-up), never a docs-only fix.
+- If a headless/sandboxed environment blocks the GUI launch, record the blocker, run the strongest available automated check (start the server against the copied config, assert the runtime generation commits without diagnostics), and leave live interactive acceptance unresolved rather than claiming it passed.
+
+Recommended task title:
+
+```markdown
+- [ ] Launch-test the app with the canonical example config
+```
+
+Place this task immediately after the Example Configuration Maintenance Task and before the manual-test-plan task; both tasks belong to the same phase as the configuration change so example-config drift is caught in-phase.
+
+Decision source: user instruction 2026-09-07 (example config must stay stable; plan 109 review found the app reported broken under a copied example config because config changes had never been launch-tested).
 
 ## Manual Test Plan Task
 

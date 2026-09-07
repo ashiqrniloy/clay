@@ -99,7 +99,7 @@ export function AppShell({
           <Outlet />
         </WorkingArea>
       </main>
-      <footer className={styles.footer}>
+      <footer className={styles.footer} data-clay-ds="statusBar.root">
         <ClayText variant="status" muted>
           {location.pathname}
         </ClayText>

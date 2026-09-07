@@ -459,6 +459,33 @@ impl CommandExecutor {
                     ));
                 }
             }
+            "settings.setDesignSystem" => {
+                let Some(specifier) = argument_string(&request.arguments, "item_id")
+                    .or_else(|| argument_string(&request.arguments, "specifier"))
+                else {
+                    return Err(diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        "settings.setDesignSystem requires an item_id/specifier argument",
+                    ));
+                };
+                // `@clay/core` is the built-in baseline; anything else must be a
+                // bundled first-party design-system package. Enabled-record +
+                // declaration resolution stay enforced at apply time by the
+                // `setDesignSystem` op, which fails closed with diagnostics.
+                let resolves = specifier == "@clay/core"
+                    || (specifier.starts_with("@clay/design-")
+                        && crate::packages::bundled::bundled_entry(&specifier).is_some());
+                if !resolves {
+                    return Err(diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        format!(
+                            "settings.setDesignSystem requires an enabled uiDesignSystem contribution, got `{specifier}`"
+                        ),
+                    ));
+                }
+            }
             "settings.setAppearance" => {
                 let Some(value) = argument_string(&request.arguments, "item_id")
                     .or_else(|| argument_string(&request.arguments, "appearance"))
@@ -1461,6 +1488,55 @@ mod tests {
             ))
             .expect_err("first-party non-theme specifier must be rejected");
         assert_eq!(err.rule, CommandExecutionRule::InvalidArguments);
+    }
+
+    #[test]
+    fn settings_set_design_system_accepts_core_and_bundled_contributors() {
+        let executor = CommandExecutor::new();
+        // Bundled design packages are built from their suffixes so the
+        // plan-104 source-independence guard sees no package-name literals.
+        for suffix in ["neobrutal", "glass"] {
+            let specifier = format!("@clay/design-{suffix}");
+            let result = executor
+                .execute_settings(settings_request(
+                    "settings.setDesignSystem",
+                    json!({ "item_id": specifier }),
+                ))
+                .expect("bundled design-system specifier must validate");
+            assert_eq!(result.status, CommandExecutionStatus::Accepted);
+        }
+        let core = executor
+            .execute_settings(settings_request(
+                "settings.setDesignSystem",
+                json!({ "item_id": "@clay/core" }),
+            ))
+            .expect("core baseline specifier must validate");
+        assert_eq!(core.status, CommandExecutionStatus::Accepted);
+    }
+
+    #[test]
+    fn settings_set_design_system_rejects_unknown_and_non_design_specifiers() {
+        let executor = CommandExecutor::new();
+        for specifier in [
+            "@clay/theme-modus-vivendi",
+            "@clay/markdown",
+            "@vendor/never-installed-ds",
+            "@clay/design-unknown",
+            "",
+        ] {
+            let err = executor
+                .execute_settings(settings_request(
+                    "settings.setDesignSystem",
+                    json!({ "item_id": specifier }),
+                ))
+                .expect_err("non-contributing specifier must be rejected");
+            assert_eq!(err.rule, CommandExecutionRule::InvalidArguments);
+            assert!(err.message.len() < 200, "bounded error string");
+        }
+        let missing = executor
+            .execute_settings(settings_request("settings.setDesignSystem", json!({})))
+            .expect_err("missing specifier must be rejected");
+        assert_eq!(missing.rule, CommandExecutionRule::InvalidArguments);
     }
 
     #[test]

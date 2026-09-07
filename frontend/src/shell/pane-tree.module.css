@@ -2,7 +2,7 @@
   height: 100%;
   min-height: 0;
   background: var(
-    --clay-ds-pane-default-group-rest-background-color,
+    --clay-ds-pane-split-tree-default-group-rest-background-color,
     var(--clay-border-hairline)
   );
 }
@@ -11,42 +11,48 @@
   height: 100%;
   min-height: 0;
   background: var(
-    --clay-ds-pane-default-root-rest-background-color,
+    --clay-ds-pane-split-tree-default-pane-rest-background-color,
     var(--clay-surface-main)
   );
   outline: var(
-      --clay-ds-pane-default-root-rest-outline-width,
+      --clay-ds-pane-split-tree-default-pane-rest-outline-width,
       var(--clay-dimension-border-hairline, 1px)
     )
-    var(--clay-ds-pane-default-root-rest-outline-style, solid)
-    var(--clay-ds-pane-default-root-rest-outline-color, transparent);
-  border-radius: var(--clay-ds-pane-default-root-rest-border-radius, 0);
+    var(--clay-ds-pane-split-tree-default-pane-rest-outline-style, solid)
+    var(--clay-ds-pane-split-tree-default-pane-rest-outline-color, transparent);
+  border-radius: var(
+    --clay-ds-pane-split-tree-default-pane-rest-border-radius,
+    0
+  );
 }
 
 .pane.active {
   outline-color: var(
-    --clay-ds-pane-default-root-active-outline-color,
+    --clay-ds-pane-split-tree-default-pane-active-outline-color,
     var(--clay-border-focus)
   );
 }
 
 .separator {
   background: var(
-    --clay-ds-pane-default-divider-rest-background-color,
+    --clay-ds-pane-split-tree-default-handle-rest-background-color,
     var(--clay-border-strong)
   );
   flex: 0 0
     var(
-      --clay-ds-pane-default-divider-rest-width,
+      --clay-ds-pane-split-tree-default-handle-rest-border-width,
       var(--clay-dimension-border-thin, 2px)
     );
 }
 
 .separator:focus-visible {
-  outline: var(--clay-ds-pane-default-divider-focus-outline-width, 2px)
-    var(--clay-ds-pane-default-divider-focus-outline-style, solid)
+  outline: var(
+      --clay-ds-pane-split-tree-default-handle-focus-outline-width,
+      2px
+    )
+    var(--clay-ds-pane-split-tree-default-handle-focus-outline-style, solid)
     var(
-      --clay-ds-pane-default-divider-focus-outline-color,
+      --clay-ds-pane-split-tree-default-handle-focus-outline-color,
       var(--clay-focus-ring)
     );
   outline-offset: 0;

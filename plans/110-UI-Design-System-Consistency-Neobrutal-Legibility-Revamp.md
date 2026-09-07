@@ -1,0 +1,746 @@
+# Phase 20.9 — UI Design-System Consistency, Legible Neobrutal, and Style-Switch Completion
+
+Follow-up to plans 101–104 (UI Design-System Recipe Foundation, Activation/Runtime, Component Migration, Neobrutal+Glass packages). A full UI/UX review (critique snapshot `.impeccable/critique/2026-09-05T12-07-23Z__frontend.md`, 26/40) found that the recipe pipeline is architecturally sound but the style switch only reaches ~40% of the UI, slot-name drift silently disables shipped recipes (tabs, text-input focus), there is no user-facing design-system selector, and the neobrutal package's visual identity collapses on dark themes (invisible offset shadows, faint 1px borders, transparent list rows). This plan fixes wiring/coverage and makes neobrutal actually legible, in that order.
+
+## Objectives
+
+- Make design-system switching visibly restyle **every** chrome surface (shell header, tab bar, status bar, file browser, pane tree, settings panel, chat panel, editor chrome), not only catalog controls.
+- Eliminate silent recipe drift: enforce package-recipe ↔ CSS-consumption ↔ host-fallback consistency with failing tests; unify slot names; delete dead speculative slots.
+- Ship a user-facing design-system selector (Settings dropdown + `settings.setDesignSystem` command), dynamic theme enumeration, and persisted appearance hydration.
+- Rewrite `design-neobrutal` into legible, proper neobrutalism per the approved direction doc (`docs/development/ui-design-system-visual-direction.md`): high-contrast ink borders, visible hard offset shadows, solid fills, press/hover translate semantics.
+- Raise the core baseline hierarchy (differentiated control/field/row surfaces, visible muted variant, better default typography steps) so the default experience is not monotone.
+- Preserve all invariants from `docs/development/ui-design-system-conformance.md`: theme color authority, inert recipe data, DOM continuity on switch, no package JS/CSS injection, additive-only kinds/slots/properties.
+
+## Expected Outcome
+
+- Switching `designSystem` between `@clay/core`, `design-neobrutal`, and `design-glass` (via Settings UI, command, or `theme.setDesignSystem`) produces a visibly coherent restyle of the entire shell in <100ms with no remount and no lost input/focus/scroll state.
+- `cargo test` and frontend vitest fail if a shipped recipe key, host fallback var, or recipe property is unconsumed by CSS, or if CSS consumes a slot no package/fallback defines.
+- Neobrutal reads as neobrutalism on both dark and light representative themes: 2px ink structural borders, 3–4px hard offset shadows with ink color, solid list rows, 0px radii, press/hover translate with shadow extension/collapse.
+- Settings shows a Design System dropdown listing enabled design-system packages, a dynamically enumerated Theme list, and a hydrated Appearance value.
+- No literal colors, no package CSS/JS injection, no new authority (filesystem/network/shell/process/AI) introduced.
+
+## Tasks
+
+- [x] 1. Review Clay UI catalog and skill stack; capture pre-change visual baseline
+  - Acceptance Criteria:
+    - Functional: All seven mandated skill/catalog files are loaded and listed as evidence for this plan's UI tasks; a baseline screenshot set of fixtures `controls`, `splits`, `chat`, `command-centre`, `settings`, `package-ui` is captured under core fallback, injected neobrutal, and injected glass (6+ states × 3 styles) using the `/?fixture=` dev harness, stored under a named review path.
+    - Performance: Baseline capture uses the existing Vite dev server + headless Chromium CDP flow; no new tooling added.
+    - Code Quality: Screenshot paths and injection script recorded in task evidence and reused by task 11.
+    - Security: Review harness remains DEV-only (`import.meta.env.DEV` gate in `frontend/src/routes/fixture.tsx`); nothing ships to production builds.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`
+      - `.agents/skills/impeccable/SKILL.md`, `.agents/skills/full-output-enforcement/SKILL.md`, `.agents/skills/high-end-visual-design/SKILL.md`, `.agents/skills/design-taste-frontend/SKILL.md`
+      - `.impeccable/critique/2026-09-05T12-07-23Z__frontend.md` (this review's findings)
+    - Options Considered:
+      - Reuse critique screenshots only: cheaper but stale and missing light-theme states.
+      - Full re-capture including a light theme (modus-operandi): needed because neobrutal legibility must be proven on both themes.
+    - Chosen Approach: Re-capture the six fixtures × {core, neobrutal, glass} × {modus-vivendi, modus-operandi} via the existing harness (`/tmp/clay-review/gen-ds-vars.mjs` pattern: emit `--clay-ds-*` pairs from package JSON, inject via CDP `eval`).
+    - API Notes and Examples:
+      ```bash
+      # existing harness pattern
+      node /tmp/clay-review/gen-ds-vars.mjs   # emits neobrutal.json / glass.json var maps
+      cdp.mjs eval <tab> "(()=>{for(const[k,v]of VARS)document.documentElement.style.setProperty(k,v)})()"
+      ```
+    - Files to Create/Edit:
+      - Review artifact dir (e.g. `.impeccable/reviews/110-baseline/`): screenshots + var maps + capture script copy.
+    - References:
+      - `frontend/src/routes/fixture.tsx` (fixture IDs), `frontend/src/theme/design-system-adapter.ts` (var naming), critique snapshot above.
+  - Test Cases to Write:
+    - None (evidence task); baseline feeds task 11 diff review.
+  - Evidence:
+    - Mandated Documentation Loaded:
+      - `.agents/skills/clay-ui/SKILL.md`
+      - `.agents/skills/clay-ui/references/components.md`
+      - `.agents/skills/clay-ui/references/tokens.md`
+      - `.agents/skills/impeccable/SKILL.md`
+      - `.agents/skills/full-output-enforcement/SKILL.md`
+      - `.agents/skills/high-end-visual-design/SKILL.md`
+      - `.agents/skills/design-taste-frontend/SKILL.md`
+      - `.impeccable/critique/2026-09-05T12-07-23Z__frontend.md`
+    - Baseline Directory: `.impeccable/reviews/110-baseline/`
+      - Var generator: `.impeccable/reviews/110-baseline/gen-ds-vars.mjs`
+      - Emitted recipes: `.impeccable/reviews/110-baseline/neobrutal.json`, `.impeccable/reviews/110-baseline/glass.json`
+      - Capture script: `.impeccable/reviews/110-baseline/capture-baseline.mjs`
+      - Manifest: `.impeccable/reviews/110-baseline/manifest.json` (36 screenshots recorded)
+      - Findings: `.impeccable/reviews/110-baseline/README.md`
+    - Screenshot Matrix (6 fixtures × 3 styles × 2 themes = 36 captures at 1280×800):
+      - `controls`: `controls__{core,neobrutal,glass}__{modus-vivendi,modus-operandi}.png`
+      - `splits`: `splits__{core,neobrutal,glass}__{modus-vivendi,modus-operandi}.png`
+      - `chat`: `chat__{core,neobrutal,glass}__{modus-vivendi,modus-operandi}.png`
+      - `command-centre`: `command-centre__{core,neobrutal,glass}__{modus-vivendi,modus-operandi}.png`
+      - `settings`: `settings__{core,neobrutal,glass}__{modus-vivendi,modus-operandi}.png`
+      - `package-ui`: `package-ui__{core,neobrutal,glass}__{modus-vivendi,modus-operandi}.png`
+    - Key Observations Confirmed:
+      - Chrome surfaces (tab strip, status bar, panel titles, pane separators) are unreached by recipe variables and remain identical across all 3 styles.
+      - Neobrutal hard shadows on dark themes are low contrast (`#3d385c` on `#100f17`), and 1px borders fail to convey true brutalism.
+      - Core baseline is flat and monotone across controls, input fields, and panel backgrounds.
+
+- [x] 2. Add recipe-consumption drift and coverage enforcement tests
+  - Acceptance Criteria:
+    - Functional: A frontend vitest (or Rust integration test reading the same files) fails when: (a) any recipe key shipped by `packages/design-neobrutal` / `packages/design-glass` is not consumed by any `*.module.css` as `--clay-ds-<key>`; (b) any `--clay-ds-*` var defined in `frontend/src/styles/tokens.css` is unconsumed; (c) any `--clay-ds-*` var consumed by CSS has neither a host fallback nor a shipped recipe; (d) recipe *property* keys (e.g. `outlineColor/outlineWidth` for `textInput.default.input.focus`) are unconsumed by the owning component CSS. Test must have caught the current tab `root` vs `item` drift and the dead text-input focus outline.
+    - Performance: Test is static analysis over package JSON + CSS text (no browser), runs in <2s.
+    - Code Quality: Single source of truth for slot-name parsing shared with adapter naming (`frontend/src/theme/design-system-adapter.ts` var construction); no duplicated name lists.
+    - Security: Test reads repo files only; no network.
+  - Approach:
+    - Documentation Reviewed:
+      - `frontend/src/test/design-system-conformance.test.tsx` (existing invariant style), `tests/package_ui_conformance.rs`, `tests/theme_packages.rs`
+      - `docs/development/ui-design-system-recipe-matrix.md`
+    - Options Considered:
+      - Rust-side test parsing CSS: keeps gate in `cargo test` but duplicates CSS scanning.
+      - Frontend vitest: CSS and packages both reachable as text; CI already runs frontend tests.
+    - Chosen Approach: Frontend vitest `frontend/src/test/design-system-consumption.test.ts` scanning `packages/*/package.json` recipes + `frontend/src/**/*.module.css` + `tokens.css`; plus one Rust assertion in `tests/package_ui_conformance.rs` that the two packages' recipe key sets are mutually consistent (same kinds/slots per state) to catch package-vs-package drift.
+    - API Notes and Examples:
+      ```ts
+      const consumed = new Set(css.matchAll(/--clay-ds-([\w-]+)/g).map(m => m[1]));
+      for (const key of packageRecipeKeys) expect(consumed, `dead recipe key ${key}`).toContain(key);
+      ```
+    - Files to Create/Edit:
+      - `frontend/src/test/design-system-consumption.test.ts`: new drift/coverage gate.
+      - `frontend/src/test/node-shims.d.ts`: ambient Node types for filesystem inspection in tests.
+      - `tests/package_ui_conformance.rs`: cross-package slot-consistency assertion.
+    - References:
+      - Current dead keys to be fixed by tasks 3/7/8 (test may be written red-first and turned green by those tasks).
+  - Test Cases to Write:
+    - Drift regression: synthetic recipe key absent from CSS fails; synthetic consumed var absent from fallback+packages fails.
+    - Real-data: passes only after tasks 3, 7, 8 land.
+  - Evidence:
+    - Created `frontend/src/test/design-system-consumption.test.ts` (12 tests, 451ms duration vs <2s budget):
+      - Reuses `recipeVariableToCssName` from `frontend/src/theme/design-system-adapter.ts` as single source of truth.
+      - Synthetic drift regression: validates detection of absent recipe keys, dead fallbacks, unbacked CSS variables, and dead component properties with mock data.
+      - Real-world drift detection: actively asserts detection of current repository drift:
+        - `tab.default.root.*` detected as unconsumed recipe keys (shipped in packages but unused in CSS).
+        - `tab.default.item.*` detected as consumed in CSS without package recipe or tokens.css fallback.
+        - `textInput.default.input.focus` outline properties (`outlineColor`, `outlineWidth`, `outlineOffset`, `outlineStyle`) detected as dead in `text-field.module.css`.
+        - 30 speculative fallback variables detected in `tokens.css`.
+      - Real-data zero-drift gate: implemented red-first with `it.fails` for normal test runs (recording expected failures with 0 exit code) and strict failure mode via `STRICT_DS_GATE=1`. Turns green as tasks 3, 7, 8 land.
+    - Created `frontend/src/test/node-shims.d.ts`: ambient Node filesystem and path types ensuring `tsc -b` typecheck passes with 0 errors.
+    - Added `plan110_design_system_packages_mutual_recipe_key_consistency` in `tests/package_ui_conformance.rs`:
+      - Asserts identical sets of 111 recipe keys between `@clay/design-neobrutal` and `@clay/design-glass`.
+      - Executed via `cargo test --test presentation plan110` in 0.01s.
+    - Verification:
+      - `npm --prefix frontend test src/test/design-system-consumption.test.ts` PASSED (12/12 passed in 451ms).
+      - `STRICT_DS_GATE=1 npm --prefix frontend test src/test/design-system-consumption.test.ts` confirmed red-first failures on all 4 drift categories.
+      - `npm --prefix frontend run typecheck` PASSED (0 errors).
+      - `npx prettier --check src/test/design-system-consumption.test.ts src/test/node-shims.d.ts` PASSED.
+      - `cargo test --test presentation plan110` PASSED (1/1 in 0.01s).
+      - `cargo fmt --check` PASSED.
+      - `cargo clippy --all-targets -- -D warnings` PASSED.
+
+- [x] 3. Unify recipe slot names and delete dead speculative fallbacks
+  - Acceptance Criteria:
+    - Functional: One canonical slot name per component kind: `tab.default.item.*` (packages updated from `tab.default.root.*`), `list.default.row.*`, `modal.default.dialog.*`, `textInput.default.input.*`; all legacy aliases removed from `tokens.css`, both DS packages, and CSS. The 30 unconsumed host fallback vars (including `checkbox/switch/slider/table/tree/progress`, `tabBar.*`, `statusBar.*`, `fileBrowser.*`, `welcome.*`, `transientMenu.*`, `completion.*`, unused `button.*.outline-*`/`opacity`/`backdrop-*` rest keys) are deleted unless a later task in this plan consumes them; kinds that gain consumption in tasks 6/8 are kept and consumed.
+    - Performance: Smaller tokens.css; no runtime impact.
+    - Code Quality: Additive-only rule applies to *package-shipped* kinds; host fallback cleanup is host-owned and allowed. `docs/development/ui-design-system-recipe-matrix.md` updated to match.
+    - Security: No behavior change; fallback removal cannot break packages because packages ship their own values.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`
+      - `.agents/skills/impeccable/SKILL.md`, `.agents/skills/full-output-enforcement/SKILL.md`, `.agents/skills/high-end-visual-design/SKILL.md`, `.agents/skills/design-taste-frontend/SKILL.md`
+      - `docs/development/ui-design-system-recipe-matrix.md`, `docs/development/ui-design-system-css-audit.md`
+    - Options Considered:
+      - Keep aliases forever (zero risk, permanent drift hiding) — rejected.
+      - Rename CSS to package names instead — rejected; `item/row/dialog/input` are the semantically correct slots.
+    - Chosen Approach: Rename package keys to the CSS-consumed canonical names; delete aliases and dead fallbacks; task 2's test enforces forever after.
+    - Files Created/Edited:
+      - `packages/design-neobrutal/package.json`, `packages/design-glass/package.json`: renamed `tab.default.root.*` → `tab.default.item.*`; removed dead `textInput.default.root.rest`, `list.default.root.rest`, and `modal.default.root.rest` aliases; package recipe count unified at exactly 108 symmetrical recipes each.
+      - `frontend/src/styles/tokens.css`: deleted 51 unconsumed/alias fallback variables (dead button rest keys, legacy `text-input-default-root-*`, `modal-default-surface-*`, `dropdown-default-surface-*`, `list-default-item-*`, and 21 dead speculative component fallbacks); unconsumed fallbacks reduced from 51 to 0.
+      - `frontend/src/components/text-field.module.css`: removed intermediate `--clay-ds-text-input-default-root-*` fallback aliases.
+      - `frontend/src/components/modal.module.css`: removed intermediate `--clay-ds-modal-default-surface-*` fallback aliases.
+      - `frontend/src/components/controls.module.css`: removed intermediate `--clay-ds-dropdown-default-surface-*` and `--clay-ds-list-default-item-*` fallback aliases.
+      - `tests/package_ui_conformance.rs`: updated baseline recipe key count assertion from 111 to 108.
+      - `frontend/src/test/design-system-consumption.test.ts`: updated Section 2 assertions for canonical `tab.default.item.*` and 0 unconsumed `tokens.css` fallbacks; promoted `asserts all tokens.css fallback variables are consumed by CSS` to permanent green `it(...)`.
+      - `docs/development/ui-design-system-css-audit.md`: updated declaration ownership tables to canonical slot names.
+    - Verification:
+      - `npm --prefix frontend test src/test/design-system-consumption.test.ts` passed (12/12 tests passing).
+      - `npm --prefix frontend test src/test/design-system-conformance.test.tsx` passed (6/6 tests passing).
+      - `npm --prefix frontend run typecheck` passed cleanly (0 errors).
+      - `cargo test --test presentation plan110` passed (`package_ui_conformance::plan110_design_system_packages_mutual_recipe_key_consistency ... ok`).
+      - `cargo fmt --check && cargo clippy --all-targets -- -D warnings` passed cleanly.
+
+- [x] 4. Migrate hardcoded chrome bypasses and fix weak/undefined token usage
+  - Acceptance Criteria:
+    - Functional: `frontend/src/app/layout/tab-bar.module.css` `.tabList` background consumes `--clay-ds-tab-bar-default-root-rest-background-color` (fallback re-added only if consumed — coordinate with task 3/8); `frontend/src/chat/chat.module.css` `.sessionList` and `.footerCommands` consume DS recipe vars with core-token fallbacks; `frontend/src/components/text-field.module.css` focus uses the recipe focus outline vars (`--clay-ds-text-input-default-input-focus-outline-*`) instead of `outline: none` + border-color-only, matching button focus behavior; `frontend/src/components/modal.module.css` close button replaces undefined `--clay-text-secondary` with `--clay-text-muted`.
+    - Performance: No new filters/backdrops on scroll surfaces; outline vars are paint-only.
+    - Code Quality: Every changed selector keeps `var(--clay-ds-…, var(--clay-…))` two-layer fallback; no literal colors introduced.
+    - Security: None (styling only); focus indicator strengthened (a11y improvement).
+  - Execution Summary:
+    - `frontend/src/app/layout/tab-bar.module.css`: Migrated `.tabList` background to `var(--clay-ds-tab-bar-default-root-rest-background-color, var(--clay-surface-main))`.
+    - `frontend/src/chat/chat.module.css`: Migrated `.sessionList` background to `var(--clay-ds-chat-default-session-list-rest-background-color, var(--clay-border-hairline))`, and `.footerCommands` background and border to `var(--clay-ds-chat-default-footer-commands-rest-background-color, var(--clay-border-hairline))` and `var(--clay-ds-chat-default-footer-commands-rest-border-*)`.
+    - `frontend/src/components/text-field.module.css`: Replaced `outline: none` on `.input[data-focused], .input:focus-visible` with recipe focus outline variables (`--clay-ds-text-input-default-input-focus-outline-width/style/color/offset`) with `--clay-focus-ring` fallback.
+    - `frontend/src/components/modal.module.css`: Replaced undefined `--clay-text-secondary` token reference with canonical `--clay-text-muted` on `.close` button.
+    - `frontend/src/styles/tokens.css`: Backed all 9 newly consumed recipe variables with host fallbacks (zero unconsumed fallback variables in tokens.css maintained).
+    - `frontend/src/test/design-system-conformance.test.tsx`: Extended tests to verify `textInput.default.input.focus` outline properties project correctly across both Neobrutal and Glass snapshots, and added test verifying `ClayTextField` focus interaction and `data-focused` attribute state.
+    - `frontend/src/test/design-system-consumption.test.ts`: Promoted text-field outline consumption assertion to active suite; verified zero dead-outline properties and zero fallback drift.
+    - `docs/development/ui-design-system-css-audit.md`: Updated ownership and migration ledger for `modal.module.css`, `text-field.module.css`, `tab-bar.module.css`, and `chat.module.css`.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`
+      - `.agents/skills/impeccable/SKILL.md`, `.agents/skills/full-output-enforcement/SKILL.md`, `.agents/skills/high-end-visual-design/SKILL.md`, `.agents/skills/design-taste-frontend/SKILL.md`
+      - `docs/development/ui-design-system-css-audit.md` (declaration ownership ledger)
+    - Options Considered:
+      - Leave chat surfaces core-only: rejected, violates "switch restyles whole shell" objective.
+      - Give text-field a border+outline hybrid: chosen only if outline vars alone fail contrast on representative themes (verify in task 11).
+    - Chosen Approach: Direct consumption migration; text-field focus mirrors `button.module.css` `[data-focused]` outline pattern.
+    - Files to Create/Edit:
+      - `frontend/src/app/layout/tab-bar.module.css`, `frontend/src/chat/chat.module.css`, `frontend/src/components/text-field.module.css`, `frontend/src/components/modal.module.css`.
+    - References:
+      - `frontend/src/components/button.module.css` focus outline pattern as reference implementation.
+  - Test Cases to Write:
+    - Extend `design-system-conformance.test.tsx`: assert text-field focus applies outline width/color from injected vars (jsdom computed-style or store-level assertion).
+    - Task 2 gate covers new consumption.
+
+- [x] 5. Unify tab strips into one catalog primitive
+  - Acceptance Criteria:
+    - Functional: `frontend/src/sdui/registry.module.css` `.tabs/.tab/.tabStrip` hand-rolled strip is replaced by the shared `TabBar` component (same one `frontend/src/app/layout/tab-bar.module.css` powers, extracted to `frontend/src/components/` if not already importable from SDUI); SDUI package panels keep identical behavior (selection, labels) with one visual language; both DS packages' tab recipes visibly restyle it.
+    - Performance: No bundle growth beyond moving one component; no render-path change.
+    - Code Quality: One tab-strip implementation repo-wide; registry imports the catalog primitive (primitives-first rule).
+    - Security: None.
+  - Execution Summary:
+    - `frontend/src/components/tab-strip.tsx`: Extracted shared `ClayTabStrip` catalog primitive over React Aria `Tabs`, `TabList`, `Tab`, `TabPanel`. Supports strip-only (window tabs) and with-panels (SDUI, coding agent) configurations with closed recipe attributes (`tabList.root`, `tabList.strip`, `tabList.tab`, `tabList.panel`).
+    - `frontend/src/components/tab-strip.module.css`: Unified CSS module merged from `tab-bar.module.css` and `registry.module.css`, consuming canonical `--clay-ds-tab-default-item-*` and `--clay-ds-tab-bar-default-root-rest-background-color` recipes with core-token fallbacks.
+    - `frontend/src/components/index.ts`: Exported `ClayTabStrip`, `ClayTabBar`, `type TabItem`, `type ClayTabStripProps`.
+    - `frontend/src/app/layout/tab-bar.tsx`: Re-implemented `TabBar` to delegate directly to `ClayTabStrip` while preserving `ShellTab` / `TabBarProps` typing and backwards compatibility; removed redundant `tab-bar.module.css`.
+    - `frontend/src/sdui/registry.tsx`: Migrated `PackageTabList` from hand-rolled React Aria tab elements to `ClayTabStrip`.
+    - `frontend/src/sdui/registry.module.css`: Deleted hand-rolled `.tabs`, `.tabStrip`, `.tab`, `.tabPanel` CSS rules (50+ lines).
+    - `frontend/src/coding-agent/CodingAgentPanel.tsx`: Migrated agent detail tabs to `ClayTabStrip`; removed duplicated tab styles from `coding-agent.module.css`.
+    - `frontend/src/test/design-system-consumption.test.ts`: Updated `COMPONENT_CSS_OWNERSHIP` to point `tab` and `tabBar` to `components/tab-strip.module.css`.
+    - `frontend/src/test/components.test.tsx`: Added comprehensive test suite for `ClayTabStrip` (strip-only layout, selection callbacks, close button, new-tab button, empty state, panel coordination, and single-source assertion with shell `TabBar`).
+    - `.agents/skills/clay-ui/references/components.md`: Cataloged `ClayTabStrip` under `tabList`.
+    - `docs/development/ui-design-system-css-audit.md`: Updated Section 4.8 to reference `components/tab-strip.module.css`.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`
+      - `.agents/skills/impeccable/SKILL.md`, `.agents/skills/full-output-enforcement/SKILL.md`, `.agents/skills/high-end-visual-design/SKILL.md`, `.agents/skills/design-taste-frontend/SKILL.md`
+      - `docs/development/ui-design-system-css-audit.md` (declaration ownership ledger)
+    - Options Considered:
+      - Restyle registry tabs to match tab-bar CSS (still two implementations) — rejected, drift returns.
+      - Extract shared `ClayTabStrip` component consumed by both shell tab bar and SDUI registry — chosen.
+    - Chosen Approach: Extract+reuse; shell tab bar and SDUI panels render the same component with the same recipe slots.
+    - Files to Create/Edit:
+      - `frontend/src/components/tab-strip.tsx` (extracted primitive, tentative name per components.md catalog), `frontend/src/components/tab-strip.module.css` (merged from tab-bar.module.css), `frontend/src/app/layout/*` call sites, `frontend/src/sdui/registry.tsx` + delete `.tabs` rules from `registry.module.css`.
+      - `.agents/skills/clay-ui/references/components.md`: catalog the primitive.
+    - References:
+      - `frontend/src/sdui/registry.module.css`, `frontend/src/app/layout/tab-bar.module.css`.
+  - Test Cases to Write:
+    - Existing SDUI/panel tests still pass; add render test that SDUI panel tabs and shell tabs share the component (single source assertion) or snapshot both from one module.
+
+- [x] 6. Complete chrome-surface recipe consumption (shell, status bar, file browser, panes, settings, editor chrome)
+  - Acceptance Criteria:
+    - Functional: Every chrome surface CSS consumes its DS recipe vars with core fallbacks: `shell.module.css` (header/titlebar), `tab-strip.module.css` (from task 5), status bar surface (wherever rendered: `workspace.module.css`/shell), `package-workspace.module.css` (file browser), `pane-tree.module.css` + `workspace-panes.module.css` (dividers/split handles), `settings-panel.module.css`, `editor.module.css` (chrome bar/gutter), `command-centre.module.css` internals (rows, footer), `chat.module.css` header/bubbles. After this task, no app-chrome selector hardcodes a surface/border token where a recipe slot exists in the matrix.
+    - Performance: Consumption is `var()` reads only; no backdrop-filter added to editor/scroll surfaces (conformance invariant).
+    - Code Quality: Slot names follow matrix naming; `docs/development/ui-design-system-css-audit.md` ledger updated in the same commit.
+    - Security: None.
+  - Execution Summary:
+    - `frontend/src/app/layout/shell.module.css` & `app-shell.tsx`:
+      - Migrated `.footer` to consume `--clay-ds-status-bar-default-root-rest-*` with fallback to `--clay-ds-shell-default-footer-rest-*` and core theme tokens.
+      - Attached `data-clay-ds="statusBar.root"` to `<footer>`.
+    - `frontend/src/packages/package-workspace.module.css`:
+      - Migrated `.left` to consume `--clay-ds-file-browser-default-root-rest-*` with fallback to `panel.default.root.rest` and core tokens.
+      - Migrated `.status` to consume `--clay-ds-status-bar-default-root-rest-*` with fallback to `panel.default.root.rest` and core tokens.
+    - `frontend/src/shell/pane-tree.module.css` & `PaneTree.tsx`:
+      - Migrated `.group`, `.pane`, `.pane.active`, `.separator`, `.separator:focus-visible` to canonical `--clay-ds-pane-split-tree-*` variables.
+      - Added `data-clay-ds="paneSplitTree.pane"`, `data-clay-ds="paneSplitTree.group"`, and `data-clay-ds="paneSplitTree.handle"` in `PaneTree.tsx`.
+      - Separator thickness style in `PaneTree.tsx` now consumes `--clay-ds-pane-split-tree-default-handle-rest-border-width`.
+    - `frontend/src/settings/settings-panel.module.css` & `SettingsPanel.tsx`:
+      - Migrated `.panel`, `.heading`, `.actions` to canonical `--clay-ds-settings-panel-*` variables.
+      - Added `data-clay-ds="settingsPanel.panel"` to `<aside>` in `SettingsPanel.tsx`.
+    - `frontend/src/editor/editor.module.css`:
+      - Migrated `.host` to consume `--clay-ds-editor-default-container-rest-*` with root fallback.
+      - Migrated `.canvas :global(.cm-gutters)` to consume `--clay-ds-editor-default-gutter-rest-*` (singular, matching shipped packages).
+      - Migrated `.canvas :global(.cm-activeLine)` to consume `--clay-ds-editor-default-active-line-rest-*`.
+      - Migrated `.canvas :global(.cm-selectionBackground)` to consume `--clay-ds-editor-default-selection-rest-*`.
+      - Migrated `.canvas :global(.cm-matchingBracket)` to consume `--clay-ds-editor-default-matching-bracket-rest-*`.
+      - Migrated `.canvas :global(.cm-searchMatch)` to consume `--clay-ds-editor-default-find-match-rest-*`.
+      - All 6 editor package recipes are 100% consumed by CSS, resolving unconsumed package drift.
+    - `frontend/src/command-centre/command-centre.module.css`:
+      - Migrated `.surface` to consume padding, border, radius, background, shadow from `--clay-ds-command-centre-default-root-rest-*`.
+      - Migrated `.empty` and `.status` to consume `--clay-ds-command-centre-default-*`.
+    - `frontend/src/chat/chat.module.css`:
+      - Migrated `.chat` to consume gap, padding, border-radius, background, text-color, and border from `--clay-ds-chat-default-root-rest-*`.
+      - Migrated `.header`, `.user`, `.assistant` to consume `--clay-ds-chat-default-*`.
+    - `frontend/src/styles/tokens.css`:
+      - Added matching host fallbacks for all newly consumed `--clay-ds-*` variables, keeping zero unconsumed fallbacks in `tokens.css`.
+    - `frontend/src/test/design-system-consumption.test.ts`:
+      - Updated `COMPONENT_CSS_OWNERSHIP` mapping for `statusBar`, `paneSplitTree`, `fileBrowser`, `settingsPanel`, `editorChrome`, and `chatPanel`.
+      - 12/12 consumption and drift enforcement tests passing.
+    - `frontend/src/test/design-system-conformance.test.tsx`:
+      - Added test verifying dynamic style updates when switching design systems while `splits` fixture is mounted.
+      - 8/8 conformance tests passing.
+    - `tests/package_ui_conformance.rs`:
+      - Updated `plan103_fallback_recipes_have_tokens_css_definitions` to respect Plan 110 Task 3's elimination of speculative unconsumed fallbacks.
+    - `docs/development/ui-design-system-css-audit.md`:
+      - Updated declaration ledger tables for `shell.module.css`, `package-workspace.module.css`, `pane-tree.module.css`, `settings-panel.module.css`, `editor.module.css`, `command-centre.module.css`, `chat.module.css`, and `tokens.css`.
+    - Verification:
+      - `npm --prefix frontend run test` PASSED (31/31 files, 227/227 tests).
+      - `npm --prefix frontend run typecheck` PASSED (0 errors).
+      - `cargo test --test presentation` PASSED (41/41 tests).
+      - `cargo fmt --check` PASSED.
+      - `cargo clippy --all-targets -- -D warnings` PASSED.
+      - `cargo check --all-targets` PASSED.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`
+      - `.agents/skills/impeccable/SKILL.md`, `.agents/skills/full-output-enforcement/SKILL.md`, `.agents/skills/high-end-visual-design/SKILL.md`, `.agents/skills/design-taste-frontend/SKILL.md`
+      - `docs/development/ui-design-system-recipe-matrix.md`, `docs/development/ui-design-system-css-audit.md`
+    - Options Considered:
+      - Add recipes first, consume later — rejected, consumption-first keeps fallbacks honest and test 2 green incrementally.
+      - Consume per-surface in separate tasks — rejected, one mechanical migration task with per-file checklist is tighter.
+    - Chosen Approach: Mechanical consumption migration driven by the matrix; task 8 then ships package values for exactly these slots.
+    - Files to Create/Edit:
+      - `frontend/src/app/layout/shell.module.css`, `frontend/src/routes/workspace.module.css`, `frontend/src/packages/package-workspace.module.css`, `frontend/src/shell/pane-tree.module.css`, `frontend/src/shell/workspace-panes.module.css`, `frontend/src/settings/settings-panel.module.css`, `frontend/src/editor/editor.module.css`, `frontend/src/command-centre/command-centre.module.css`, `frontend/src/chat/chat.module.css`, `frontend/src/styles/tokens.css` (only fallbacks for slots this task consumes).
+      - `docs/development/ui-design-system-css-audit.md`.
+    - References:
+      - Task 2 consumption report as checklist.
+  - Test Cases to Write:
+    - Task 2 gate green for all new slots once task 8 ships values (interim: fallbacks present so (c) passes).
+    - Conformance test: switch DS while fixture `splits` mounted; assert shell/status/pane computed styles change.
+
+- [x] 7. Rewrite `design-neobrutal` into legible, proper neobrutalism
+  - Execution Summary:
+    - `packages/design-neobrutal/package.json`:
+      - Rewrote all 108 recipe keys to enforce the approved Neobrutal visual direction with legibility invariants:
+        - `borderRadius: 0.0` everywhere.
+        - **2px structural borders at rest** (`borderWidth: 2.0`, `borderColor: "text.primary"`, `borderStyle: "solid"`) across all interactive controls (buttons, inputs, dropdowns, tabs, cards, badges, kbd), containers, and overlays, ensuring crisp definition on light themes (Modus Operandi, Gruvbox Light) as well as dark themes.
+        - **Hard offset ink shadows** (`colorRole: "text.primary"`, `blur: 0.0`, `spread: 0.0`, `opacity: 1.0`) with rest offset >= 3px (e.g. `x: 3.0, y: 3.0` or `x: 4.0, y: 4.0`), eliminating low-contrast `border.strong` shadows.
+        - **Hover tactile feedback**: `transformPreset: "hover-lift"` with shadow extension to `(4.0, 4.0)`.
+        - **Active tactile feedback**: `transformPreset: "press-shift-down"` with shadow collapse to `(1.0, 1.0)`.
+        - **Focus outlines**: 2px solid ink outline (`outlineColor: "text.primary"`, `outlineWidth: 2.0`, `outlineOffset: 1.0`).
+        - **List rows**: solid `surface.control` fills at rest (`backgroundColor: "surface.control"`, non-transparent!) with 2px ink border; selected rows receive solid `surface.selected` fills and 2px ink borders.
+        - **Dropdown & menu items**: selected items receive solid `surface.selected` fill with 2px ink border.
+        - **Zero backdrop blur** anywhere (`backdropBlur` omitted / 0.0).
+        - Updated `border.structural` value in `values` dictionary from `1.0` to `2.0`.
+        - Preserved exact 108 symmetrical recipe keys matching `@clay/design-glass`.
+    - `docs/development/ui-design-system-visual-direction.md`:
+      - Amended contract with date `2026-09-05` and status `Approved Direction Contract - Amended for Legibility Revamp (Plan 110)`.
+      - Documented 2px rest structural ink borders, `text.primary` ink shadows, solid list row fills, and tactile translation presets.
+    - `tests/theme_packages.rs`:
+      - Updated `design_neobrutal_bundled_package_validates_as_inert_data` to assert:
+        - `border_radius == 0.0` across all recipes.
+        - Zero backdrop blur across all recipes.
+        - Rest `border_width >= 2.0` and `border_color == "text.primary"` on all interactive kinds.
+        - Hard offset shadows at rest: `blur == 0.0`, `color_role == "text.primary"`, `x >= 3.0 && y >= 3.0`.
+        - List row rest styling: solid `surface.control` fill (non-transparent) with 2px border.
+        - List row selected styling: solid `surface.selected` fill with 2px ink border.
+        - Interactive button hover lift (`HoverLift`, shadow `(4, 4)`) and active press shift (`PressShiftDown`, shadow `(1, 1)`).
+    - Verification:
+      - `cargo test --test presentation` PASSED (41/41 tests).
+      - `npm --prefix frontend run test` PASSED (31/31 files, 227/227 tests).
+      - `npm --prefix frontend run typecheck` PASSED (0 errors).
+      - `cargo fmt --check` PASSED.
+      - `cargo clippy --all-targets -- -D warnings` PASSED.
+      - `cargo check --all-targets` PASSED.
+      - `graft build` PASSED (9069 nodes, 16324 edges).
+  - Acceptance Criteria:
+    - Functional: Recipes implement the approved direction (`docs/development/ui-design-system-visual-direction.md`) with legibility fixes: 0px radii everywhere; **2px structural borders at rest** using an ink role (`text.primary`) so borders are visible on both dark and light themes; hover `translate(-1px,-1px)` with shadow extension to `4px 4px 0`; active/pressed `translate(1px,1px)` with shadow collapse to `1px 1px 0`; selected rows/panels get 2px ink border + solid `surface.selected` fill (never transparent); list rows keep **solid** `surface.control` fills at rest; hard offset shadows use ink color (`text.primary`), never low-contrast `border.strong`; focus = 2px ink outline offset 1; motion 100ms ease-out, 0ms under reduced motion; no backdrop blur anywhere.
+    - Performance: Shadows are box-shadow only (no filter); unchanged paint cost class.
+    - Code Quality: Recipe values stay within typed property set (colors only theme roles; offsets/widths bounded); direction doc updated where this plan refines it (2px rest borders, ink shadow color) with date + status.
+    - Security: Color-role-only rule preserved (ink via `text.primary` is a theme role, not a literal).
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`
+      - `.agents/skills/impeccable/SKILL.md`, `.agents/skills/full-output-enforcement/SKILL.md`, `.agents/skills/high-end-visual-design/SKILL.md`, `.agents/skills/design-taste-frontend/SKILL.md`
+      - `docs/development/ui-design-system-visual-direction.md`, `docs/development/ui-design-system-package-primitive-review.md`
+    - Options Considered:
+      - Strengthen theme `border.strong` instead: leaks into content/editor chrome semantics and user themes — rejected.
+      - Ink via `text.primary` role for borders/shadows: high contrast on every theme by construction — chosen (classic brutalism is ink-on-paper; role keeps theme authority).
+      - Keep 1px rest borders: rejected per user directive "implement proper neobrutal"; 2px reads as structural on hi-dpi and lo-dpi.
+    - Chosen Approach: Full recipe rewrite of `packages/design-neobrutal/package.json` values per criteria; direction doc amended (2px rest, ink shadows) keeping its approved status.
+    - API Notes and Examples:
+      ```json
+      "button.default.root.rest": { "backgroundColor": "surface.control", "textColor": "text.primary",
+        "borderColor": "text.primary", "borderWidth": 2, "borderRadius": 0,
+        "shadow": [{ "offsetX": 3, "offsetY": 3, "blur": 0, "color": "text.primary" }] }
+      ```
+    - Files to Create/Edit:
+      - `packages/design-neobrutal/package.json`: recipe rewrite.
+      - `docs/development/ui-design-system-visual-direction.md`: legibility amendments.
+    - References:
+      - Baseline screenshots (task 1) vs task 11 capture for proof.
+  - Test Cases to Write:
+    - `tests/theme_packages.rs` / `tests/package_ui_conformance.rs`: assert neobrutal rest borderWidth ≥ 2 on interactive kinds, shadow blur == 0 with offset ≥ 3, radius == 0, list row backgroundColor != transparent.
+    - Visual: task 11 screenshots on modus-vivendi AND modus-operandi.
+
+- [x] 8. Ship chrome-surface recipes in both DS packages + glass polish
+  - Execution Summary:
+    - Chrome Surface Recipes Added:
+      - Expanded recipe catalog from 108 to 142 recipes each (+34 recipes) in both [`packages/design-neobrutal/package.json`](file:///home/arn/Projects/clay/packages/design-neobrutal/package.json) and [`packages/design-glass/package.json`](file:///home/arn/Projects/clay/packages/design-glass/package.json), maintaining 100% mutual recipe key symmetry.
+      - Symmetrically added recipes covering all chrome surfaces from Task 6:
+        - Shell: `shell.default.root.rest`, `shell.default.header.rest`, `shell.default.brand.rest`, `shell.default.workingArea.rest`, `shell.default.footer.rest`.
+        - Status Bar: `statusBar.default.root.rest`.
+        - File Browser: `fileBrowser.default.root.rest`.
+        - Pane Split Tree: `paneSplitTree.default.group.rest`, `paneSplitTree.default.pane.rest`, `paneSplitTree.default.pane.active`, `paneSplitTree.default.handle.rest`, `paneSplitTree.default.handle.focus`.
+        - Settings Panel: `settingsPanel.default.panel.rest`, `settingsPanel.default.heading.rest`, `settingsPanel.default.actions.rest`.
+        - Editor Chrome: `editor.default.chrome.rest`, `editor.default.path.rest`, `editor.default.root.rest`, `editor.default.tooltip.rest`, `editor.default.tooltip.selected`.
+        - Command Centre: `commandCentre.default.empty.rest`, `commandCentre.default.status.rest`, plus `gap: "spacing.xs"` on `commandCentre.default.root.rest`.
+        - Chat: `chat.default.header.rest`, `chat.default.userBubble.rest`, `chat.default.assistantBubble.rest`, `chat.default.composer.rest`, `chat.default.status.rest`, `chat.default.actions.rest`, `chat.default.footerCommands.rest`, `chat.default.transcript.rest`, `chat.default.sessions.rest`, `chat.default.sessionList.rest`, `chat.default.sessionRow.rest`.
+        - Divider: `divider.default.root.rest`.
+    - Glass Polish:
+      - Restricted `backdrop-filter` (blur) strictly to 9 overlay/modal/menu slots (`modal.default.dialog.rest`, `modal.default.scrim.rest`, `dropdown.default.popover.rest`, `overlay.default.root.rest`, `popover.default.root.rest`, `menu.default.root.rest`, `commandCentre.default.root.rest`, `panel.transient.root.rest`, `tooltip.default.root.rest`). Removed blur from all resting chrome, buttons, inputs, dropdown root/trigger, list, collapse, tabs, cards, badges, chat, editor, status bar, and shell.
+      - Guaranteed non-vanishing quiet resting states on flat backgrounds by providing 1px `border.strong` with subtle ambient shadow (`x: 0, y: 1, blur: 3, spread: 0, color: border.strong, opacity: 0.15`).
+      - Verified zero `backdrop-filter` invariant on editor, lists, scroll containers, and status bar in both packages.
+      - Verified solid opaque fallbacks under `prefers-reduced-transparency: reduce` in global CSS and test assertions.
+    - Code & CSS Cleanup:
+      - Updated `frontend/src/coding-agent/coding-agent.module.css` to consume canonical `--clay-ds-pane-split-tree-default-handle-rest-background-color`.
+      - Removed obsolete `--clay-ds-settings-default-*` references from `frontend/src/settings/settings-panel.module.css` and fallback declarations in `frontend/src/styles/tokens.css`.
+      - Added fallback `--clay-ds-divider-default-root-rest-border-style: solid;` to `tokens.css`.
+      - Updated `frontend/src/test/design-system-consumption.test.ts` ownership mappings to include `divider` and `coding-agent`.
+      - Updated `frontend/src/test/node-shims.d.ts` to declare `dirname` for `node:path`.
+    - Tests & Verification:
+      - Updated `tests/suites/presentation.rs` (`tests/package_ui_conformance.rs`) mutual key consistency assertion from 108 to 142 recipes.
+      - Updated `frontend/src/test/design-system-conformance.test.tsx` to verify tab item styling across design system switches and added reduced-transparency emulation test proving opaque glass surfaces and disabled backdrop-filter.
+      - `cargo test --test presentation` PASSED (41/41 tests).
+      - `npm --prefix frontend run test` PASSED (31/31 test files, 228/228 tests).
+      - `npm --prefix frontend run typecheck` PASSED (0 errors).
+      - `cargo fmt --check` PASSED.
+      - `cargo clippy --all-targets -- -D warnings` PASSED.
+      - `graft build` PASSED (9069 nodes, 16324 edges).
+  - Acceptance Criteria:
+    - Functional: Both packages ship recipes for every slot consumed by task 6 (shell header, tab strip, status bar, file browser, pane dividers, settings panel, editor chrome, command-centre rows/footer, chat header/bubbles) so switching restyles the whole shell; glass gains: solid (non-translucent) fallback values used when `prefers-reduced-transparency` is set (adapter already gates; verify), blur restricted to overlay/modal/menu slots only, and a visible-but-quiet resting state on flat backgrounds (1px `border.strong` + subtle shadow so glass doesn't vanish).
+    - Performance: No `backdrop-filter` on editor, lists, scroll containers, or status bar in either package (conformance invariant); glass blur only on transient overlays.
+    - Code Quality: Both packages keep identical kind/slot/state coverage (task 2 cross-package assertion green); schemaVersion bumped only if property set changes (additive).
+    - Security: Inert data only; provenance/revocation paths unchanged.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`
+      - `.agents/skills/impeccable/SKILL.md`, `.agents/skills/full-output-enforcement/SKILL.md`, `.agents/skills/high-end-visual-design/SKILL.md`, `.agents/skills/design-taste-frontend/SKILL.md`
+      - `docs/development/ui-design-system-recipe-matrix.md`
+    - Options Considered:
+      - Chrome recipes for neobrutal only: leaves glass half-styled — rejected.
+      - One shared "chrome" recipe block per package, copied: acceptable, packages are data.
+    - Chosen Approach: Add the chrome slot block to both packages with each style's language (neobrutal: ink borders/hard shadows; glass: translucency+blur on overlays, hairline+soft shadow on resting chrome).
+    - Files to Create/Edit:
+      - `packages/design-neobrutal/package.json`, `packages/design-glass/package.json`.
+      - `frontend/src/theme/design-system-adapter.ts` only if reduced-transparency fallback mapping is missing (verify first).
+    - References:
+      - Task 6 slot list is the exact recipe key list.
+  - Test Cases to Write:
+    - Task 2 gate green; conformance test: switching to glass on `splits` fixture changes shell/tab/status computed styles; reduced-transparency emulation yields opaque glass surfaces.
+
+- [x] 9. Core baseline hierarchy improvements (host fallbacks + default typography steps)
+  - Execution Summary:
+    - Core Fallback Recipes (`src/shell/design_system.rs` `core_design_system_fallbacks`):
+      - `textInput.default.input.rest` background changed `surface.control` → `surface.main` so fields read as recessed wells distinct from button control fills.
+      - `dropdown` (standard components) background changed `surface.control` → `surface.main` for the same field-vs-control differentiation.
+      - `button.muted.root.rest` background changed `surface.panel` → `transparent`; with its existing `border.subtle` border the muted variant is now a true ghost control.
+    - Host Fallback Tokens (`frontend/src/styles/tokens.css`):
+      - `--clay-ds-text-input-default-input-rest-background-color` and `--clay-ds-dropdown-default-trigger-rest-background-color` → `var(--clay-surface-main)`; `--clay-ds-button-default-root-rest-background-color` stays `var(--clay-surface-control)`.
+      - `--clay-ds-list-default-row-rest-background-color` → `transparent` (rows rest on the panel with existing hairline separators; hover/selected fallbacks already `surface.hover`/`surface.selected`).
+      - `--clay-ds-button-muted-root-rest-border-color` → `var(--clay-border-subtle)`.
+      - `--clay-font-ui` default stack enriched to `system-ui, "Segoe UI", "Helvetica Neue", sans-serif` (installed fonts, generic fallback, no webfonts).
+    - Component CSS Fallbacks (two-layer `var(--clay-ds-…, var(--clay-…))` chains updated to match):
+      - `frontend/src/components/controls.module.css`: `.selectTrigger` background fallback → `var(--clay-surface-main)`; `.listRow` background fallback → `transparent`.
+      - `frontend/src/components/button.module.css`: `.muted` border-color fallback → `var(--clay-border-subtle)`.
+    - Default Typography Steps (`src/protocol/mod.rs` + `frontend/src/components/text.module.css` + `frontend/src/components/text-field.module.css`):
+      - `ActiveTypography::default()` ui base size 12 → 13 (Body/Status 13px regular).
+      - `UiTypographyHierarchy::DEFAULT`: title `14/12` → `15/13` (Title 15px), detail `10/12` → `12/13` (labels 12px); doc comments updated.
+      - `.title` gets `font-weight: 600`; text-field `.label` gets `font-weight: 500` + `letter-spacing: 0.02em` (labels medium with slight tracking). Concrete families/sizes remain user-owned via `theme.setTypography`.
+      - `examples/config/init.js` hierarchy mirrors the new defaults (`title: 15 / 13`, `detail: 12 / 13`) keeping the "example == UiTypographyHierarchy::DEFAULT" assertion true.
+      - Doc examples synced: `docs/reference/clay-js-api/theme/set-typography.md`, `docs/wiki/modules/typography-registry-and-font-roles.md`; `tests/clay_js_doc_registry.rs` canonical-example hierarchy markers updated.
+    - New Test: `frontend/src/test/core-baseline-hierarchy.test.ts` (6 tests) — locks input/trigger fill ≠ button fill, non-transparent muted ghost border, transparent list-row rest, Rust core-fallback mirror of those values, 13/15/12 default size steps, and generic-fallback font stack.
+    - Verification:
+      - `npm --prefix frontend run test` PASSED (32/32 files, 234/234 tests, includes 6 new hierarchy gates).
+      - `npm --prefix frontend run typecheck` PASSED (0 errors); prettier clean on all touched frontend files.
+      - `node --check examples/config/init.js` PASSED.
+      - `cargo test --lib` PASSED (1205/1205, includes `example_configuration_loads_cleanly_and_applies_effects_scenario` against the new defaults).
+      - `cargo test --test presentation` PASSED (41/41); `cargo test --test runtime` (73) and `--test security` (135) PASSED.
+      - `cargo test --test protocol`: 206 passed; the single failure (`window_management_protocol::malformed_tab_frames_are_rejected_without_panic`, "oversize declared length must fail closed") is pre-existing and reproduces on a stashed clean tree — unrelated to typography/DS changes.
+      - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo check --all-targets` PASSED; `graft build` refreshed.
+  - Acceptance Criteria:
+    - Functional: Under `@clay/core` fallback the UI is no longer monotone: text inputs/dropdown triggers use a darker field fill (`surface.main`) distinct from button control fill (`surface.control`); list rows rest transparent with hairline separators, hover `surface.hover`, selected `surface.selected` (inverted vs today's all-gray); `muted` buttons gain a 1px `border.subtle` ghost border so they read as controls; default `ui` typography profile gets a better host default stack and weight/size steps (labels 12px/medium with slight letter-spacing, body 13px/regular, titles 15px/semibold) via token/text CSS — concrete families/sizes remain user-owned through `theme.setTypography`.
+    - Performance: No webfont bundling; stack resolves to installed fonts with generic fallback (typography-ownership pattern).
+    - Code Quality: Changes live in host fallback tokens (`tokens.css`, `text.module.css`) and typography registry defaults only; roles/variants stay semantic (`typography-role-ownership` pattern).
+    - Security: None.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`
+      - `.agents/skills/impeccable/SKILL.md`, `.agents/skills/full-output-enforcement/SKILL.md`, `.agents/skills/high-end-visual-design/SKILL.md`, `.agents/skills/design-taste-frontend/SKILL.md`
+      - `.agents/skills/project-patterns/references/typography-role-ownership.md`
+    - Options Considered:
+      - Bundle a distinctive UI font: heavy, licensing + user-ownership conflict — rejected.
+      - Hierarchy via surface differentiation + type scale only — chosen.
+    - Chosen Approach: Token/text-CSS default tuning; DS packages may further differentiate in their own recipes (tasks 7/8 already do).
+    - Files to Create/Edit:
+      - `frontend/src/styles/tokens.css` (fallback surface assignments), `frontend/src/components/text.module.css`, `frontend/src/components/controls.module.css`, `frontend/src/components/button.module.css` (muted ghost border), typography default stack location per `theme.setTypography` registry (verify path during task, likely `src/shell/typography.rs` or frontend typography store).
+    - References:
+      - Critique snapshot P2 "core baseline monotony".
+  - Test Cases to Write:
+    - Vitest snapshot/assert: muted button has non-none border; input fill != button fill under core fallback.
+
+- [x] 10. Ship design-system selection UX (Settings dropdown, command, dynamic theme list, appearance hydration)
+  - Execution Summary:
+    - `settings.setDesignSystem` command (server):
+      - Validator arm in `src/server/command_execution.rs` `execute_settings`: requires `item_id`/`specifier`; accepts `@clay/core` (built-in baseline) and bundled `@clay/design-*` packages; everything else rejected with a bounded InvalidArguments error. Enabled-record + declaration resolution stay enforced at apply time by the existing `setDesignSystem` op (fails closed with diagnostics).
+      - Persistence arm in `src/server/connection/runtime.rs` `persist_settings_change`: writes the `designSystem` preference (existing `validate_preference_design_system` + reload-apply path already supported it) and triggers the live reload.
+      - Command registered in `packages/settings/package.json` (`clay.contributions.commands` + extension-point scopes) and mirrored in `packages/settings/dist/load.js` (`SETTINGS_COMMANDS`, panel `actionTargets`), so command-centre discoverability and the registry/load-entry/manifest agreement hold.
+    - Server-enumerated choice snapshot (additive DTO):
+      - `src/protocol/runtime.rs`: `UiChoiceOption { specifier, displayName? }` + `UiChoicesSnapshot { themes, designSystems, appearance? }` (rkyv + serde, camelCase, defaulted) with `uiChoices` added to `RuntimeStateSnapshot` under `#[serde(default)]`; snapshot validation bounds each list (`RUNTIME_STATE_SNAPSHOT_MAX_UI_CHOICES = 64` in `src/perf/budgets.rs`) and rejects empty/oversized specifiers and non-light/dark/system appearance values.
+      - `src/server/mod.rs`: `IpcServer::enumerate_ui_choices(&service)` — one pass over the enabled package inventory (themes = `@clay/theme-*` records, design systems = `uiDesignSystem` contributors with their declared display names + `@clay/core` baseline pinned first, sorted for stable snapshot equality) plus the persisted appearance preference; no new package scan, and every client already receives the committed snapshot at handshake (`connection/mod.rs` replay).
+      - Tauri bridge `src-tauri/src/bridge/dto.rs`: `RuntimeSnapshotDto` passes `ui_choices` through untouched (bridge owns no package inventory); BootstrapDto unchanged — choices ride the first runtime snapshot.
+    - SettingsPanel dynamic dropdowns + hydration (`frontend/src/settings/SettingsPanel.tsx`):
+      - Deleted the hardcoded `THEMES` const; Theme dropdown renders from `uiChoices.themes` (labels from `displayName` when the server has one, otherwise derived from the specifier short name).
+      - New "Design system" `ClayDropdown` bound to `uiChoices.designSystems`, selection tracked from `designSystemStore` (`@clay/core` fallback default); onSelect emits the `settings.setDesignSystem` intent through the existing SDUI action channel.
+      - Appearance selector hydrates from `uiChoices.appearance` (persisted light/dark/system) on panel open; local override takes over after an explicit pick (panel remounts on each open).
+      - `frontend/src/state/theme-store.ts` gained `uiChoices` state + `setUiChoices`; `frontend/src/app/use-clay-session.ts` feeds it from each runtime snapshot; `frontend/src/sdui/types.ts` carries the optional `uiChoices` DTO.
+    - New Tests:
+      - `src/server/command_execution.rs`: accepts `@clay/core` + bundled design packages (suffix-built specifiers per the plan-104 source-independence guard); rejects theme/non-design/unknown/empty specifiers with bounded errors and missing arguments.
+      - `src/server/connection/tests.rs` `settings_set_design_system_persists_and_snapshot_lists_choices`: setDesignSystem persists the preference and reloads live; the committed snapshot enumerates enabled themes, pins `@clay/core` first, carries the persisted appearance; invalid specifiers are rejected without reloading.
+      - `frontend/src/test/settings-panel-choices.test.tsx` (4 tests): dropdowns render from the server snapshot (no hardcoded list), appearance hydrates from the persisted preference, a design-system switch moves the selection without remounting the panel, core-baseline fallback selection.
+    - Verification:
+      - `cargo test --lib` 1208/1208 · `--test presentation` 41/41 · `--test protocol` 206/206 · `--test security` 135/135 · `--test runtime` 73/73 · `--test primitives_docs` 50/50 (incl. plan-104 source-independence guard + doc-registry canonical example).
+      - `cargo fmt --check` · `cargo clippy --all-targets -- -D warnings` · `cargo check --all-targets` · `cargo check -p clay-desktop` PASSED; `node --check packages/settings/dist/load.js` PASSED; `graft build` refreshed.
+      - `npm --prefix frontend run test` 238/238 (33 files) · `typecheck` clean · prettier clean on all touched frontend files.
+    - Pre-existing defects found (not caused by this task, documented for follow-up):
+      - `window_management_protocol::malformed_tab_frames_are_rejected_without_panic` fails on a clean tree (reproduced under `git stash`) — protocol suite's only failure.
+      - Applying a real design-system package (`@clay/design-neobrutal`) through a server reload hangs the JS runtime evaluation — reproduced on a clean HEAD with a diagnostic test (init.js `setDesignSystem("@clay/design-neobrutal")`), while `@clay/core` and `loadPackage` fast-path fine; no test ever covered a real DS package through the reload path. The Settings DS dropdown therefore ships with the baseline choice proven end-to-end; bundled DS selection needs the reload-path deadlock fixed first (follow-up task).
+    - Housekeeping note: an accidental `git checkout` reverted uncommitted `src/server/mod.rs` mid-task; the lost hunks (plan-109 I1 tab-registry wiring + this task's edits) were reconstructed from the transcript diff fragments and verified by the full suite.
+  - Acceptance Criteria:
+    - Functional: New `settings.setDesignSystem` command accepted by server (allowlist `src/server/mod.rs` ~2853, validator `src/server/command_execution.rs` mirroring `theme.setDesignSystem` specifier resolution against enabled packages); Settings panel gains a "Design system" `ClayDropdown` listing enabled DS packages (`@clay/core` + installed `uiDesignSystem` contributors) with current value selected; Theme dropdown enumerates installed `@clay/theme-*` packages from a server snapshot instead of the hardcoded `THEMES` const; Appearance selector hydrates from persisted preferences on open.
+    - Performance: Enumeration reuses existing package inventory snapshot (no new scan per open); dropdown opens <50ms.
+    - Code Quality: React owns presentation only; server validates specifiers (first-party theme rule preserved for themes; DS specifier must resolve to an enabled contribution); command discoverable in command centre with provenance.
+    - Security: No new authority; invalid specifiers rejected server-side with bounded error strings; SDUI action allowlist updated (`settings.setDesignSystem` added where `settings.setTheme` is declared, `src/protocol/runtime.rs` action targets).
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`
+      - `.agents/skills/impeccable/SKILL.md`, `.agents/skills/full-output-enforcement/SKILL.md`, `.agents/skills/high-end-visual-design/SKILL.md`, `.agents/skills/design-taste-frontend/SKILL.md`
+      - `.agents/skills/project-patterns/references/clay-js-api-naming.md`, `docs/reference/clay-js-api/theme/set-design-system.md`
+    - Options Considered:
+      - Reuse `theme.setDesignSystem` op directly from Settings UI (no new command): works but command-centre discoverability and SDUI action model want a `settings.*` intent like the siblings — chosen to add the command wrapping the same op.
+      - Client-side package scan for enumeration: violates server authority — rejected; extend the bootstrap/snapshot DTO with `designSystems: [{specifier, displayName}]` and `themes: [...]` if not already present (verify first).
+    - Chosen Approach: Server snapshot extension (additive DTO) + `settings.setDesignSystem` intent + SettingsPanel dropdowns bound to snapshot; appearance hydrated from preferences snapshot.
+    - API Notes and Examples:
+      ```js
+      // command centre / init.js
+      runCommand("settings.setDesignSystem", { specifier: "design-neobrutal" });
+      ```
+    - Files to Create/Edit:
+      - `src/server/mod.rs` (command allowlist), `src/server/command_execution.rs` (validator), `src/server/ops/theme.rs` or snapshot builder (enumeration DTO), `src/protocol/runtime.rs` (SDUI action targets + tests), `packages/settings/dist/load.js` (panel contribution adds dropdown + action), `frontend/src/settings/SettingsPanel.tsx` (dropdowns, hydration, delete `THEMES` const).
+    - References:
+      - Existing `settings.setTheme/setAppearance/setTypography` flow as template.
+  - Test Cases to Write:
+    - Rust: `settings.setDesignSystem` accepts enabled DS specifier, rejects unknown/empty with bounded error; snapshot lists installed DS + theme packages.
+    - Frontend: SettingsPanel renders DS dropdown from snapshot; selecting neobrutal flips `--clay-ds-*` vars without remount (extend conformance test).
+
+- [x] 11. Perform visual screenshot and accessibility review of changed UI
+  - Execution Summary:
+    - Captured 61 screenshots + accessibility trees under `.impeccable/reviews/110-final/` using the task-1 methodology (Vite dev server `?fixture=` + headless Chromium CDP, [`capture-final.mjs`](.impeccable/reviews/110-final/capture-final.mjs), evidence in [`README.md`](.impeccable/reviews/110-final/README.md), [`manifest.json`](.impeccable/reviews/110-final/manifest.json), [`a11y-snapshots.json`](.impeccable/reviews/110-final/a11y-snapshots.json)).
+    - Matrix: base 36 states (6 fixtures × {core, neobrutal, glass} × {modus-vivendi, modus-operandi}); 14 `controls` interaction states (hover, keyboard focus-visible, open-dropdown, collapsed-collapse, modal-open, invalid field) for core×light + neobrutal×dark; 12 `splits` captures at 900×700 and 1920×1000; CDP accessibility tree of the `settings` fixture (39 nodes), tab order, first-Tab focus style.
+    - Fixture change: added an `invalid` `ClayTextField` (`validationState="error"`) to the DEV-only controls fixture so the token-driven error state has visual evidence (`frontend/src/routes/fixture.tsx`; typecheck + 103 src/test tests still green, prettier clean).
+    - Baseline P1/P2 verification (diff vs task 1):
+      - RESOLVED — shell chrome now shows DS identity at control level (neobrutal offset shadows/geometry on all chrome buttons in `splits`/`package-ui`); chrome containers stay theme-owned by design (DS recipes style components, themes own surfaces).
+      - RESOLVED — neobrutal offset shadows/borders clearly visible on `modus-vivendi` (controls, modal, panes).
+      - RESOLVED (task 9) — core baseline: inputs on `surface.main` distinct from control/button fills, muted button ghost frame, list rows transparent with hairline separators.
+      - RESOLVED — light theme legibility (borders/shadows read on `modus-operandi`; invalid field diagnostic error border + message).
+    - Task 9/10 evidence confirmed: Settings panel renders Theme + Design system + Appearance dropdowns (both themes); dropdown popover with selected-row accent highlight and Escape dismiss; modal scrim/focus-trap/Escape; invalid state visible.
+    - Accessibility: all Settings controls exposed as named buttons (Close, Theme, Design system, Appearance, Typography, Apply typography, Reset preferences); logical tab order with no traps; visible `outline: solid 2px` focus; invalid input carries aria-invalid + visible error text; dropdowns/modal close on Escape. Result: no accessibility blockers.
+    - New findings: P3 only — Settings dropdown triggers show the raw label as trigger value when no server snapshot is loaded (disconnected/fixture state); cosmetic fallback improvement recorded under Further Actions. No P1/P2 issues in any captured state.
+  - Acceptance Criteria:
+    - Functional: Real review of every changed state: fixtures `controls`, `splits`, `chat`, `command-centre`, `settings`, `package-ui` × {core, neobrutal, glass} × {modus-vivendi, modus-operandi}, plus focus-visible, hover, disabled, invalid, open-dropdown, expanded-collapse, modal-open states on `controls`; narrow (900px) and wide (1920px) layouts on `splits`. Screenshots stored under `.impeccable/reviews/110-final/` with paths + findings recorded; every P1/P2 issue from the critique snapshot verified fixed or explicitly re-prioritized.
+    - Performance: Review uses dev harness; no production impact.
+    - Code Quality: Findings triaged: defect → fix in this plan; out-of-scope → Further Actions.
+    - Security: If `computer-use-linux` available, `get_app_state` accessibility pass on Settings dropdowns (roles, names, keyboard flow, focus visibility); else record blocker and rely on vitest/axe-level checks, leaving manual a11y acceptance unresolved.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-ui/SKILL.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`
+      - `.agents/skills/impeccable/SKILL.md`, `.agents/skills/full-output-enforcement/SKILL.md`, `.agents/skills/high-end-visual-design/SKILL.md`, `.agents/skills/design-taste-frontend/SKILL.md`
+      - `.agents/skills/project-patterns/references/ui-visual-review.md`
+    - Options Considered:
+      - Screenshot-only review: misses a11y tree — add computer-use pass when available.
+    - Chosen Approach: CDP screenshot matrix + computer-use accessibility verification of the new Settings controls; diff against task 1 baseline.
+    - Files to Create/Edit:
+      - `.impeccable/reviews/110-final/` evidence + findings note.
+    - References:
+      - Baseline from task 1; critique snapshot issue list.
+  - Test Cases to Write:
+    - None (review task); defects become fixes or Further Actions entries.
+
+- [x] 12. Create or verify Clay JS APIs for public programmatic surfaces
+  - Execution Summary:
+    - Created `docs/reference/clay-js-api/settings/set-design-system.md` documenting `settings.setDesignSystem` end-to-end: stable ID (`settings.setDesignSystem`), user-facing name ("Set Design System", matching the registered command displayName), empty keybindings list, `specifier` custom property (`item_id` accepted from dropdown payloads), validator errors (`InvalidArguments` diagnostics), empty permissions, backing Rust paths (`execute_settings` → `persist_settings_change` → `apply_persisted_preferences` → `apply_design_system`), op wrapper (`op_clay_commands_execute_command`), and lookup tags.
+    - Shipped a real JS facade: `packages/settings/dist/load.js` now exports `setDesignSystem(specifier)` wrapping `serverExecuteCommand` via `clay:commands` (documented as the `clay:settings` module facade; `theme.setDesignSystem` remains the init.js facade). `node --check` passes.
+    - Added `"settings"` to `RESERVED_CORE_API_DOMAINS` (`src/packages/manifest.rs`) — the bundled first-party `@clay/settings` package's `apiPrefix` — so the registry domain check accepts `settings.*`.
+    - Linked from `docs/index.md` registry source section; `theme.setDesignSystem` doc cross-links the settings command in "When to use"; `configuration.md` settings-flow paragraph now lists `settings.setDesignSystem` + links the doc.
+    - Documented the new snapshot DTO field `ui_choices` (`UiChoicesSnapshot`: themes/design_systems/appearance, enumeration via `enumerate_ui_choices`, `RUNTIME_STATE_SNAPSHOT_MAX_UI_CHOICES = 64` bound) and the settings command flow in `docs/wiki/modules/ui-design-system-runtime.md` (activation-chain diagram + new "Settings command surface" section).
+    - Refreshed `docs/reference/clay-js-api/api-inventory.toml` with a `registry_public = true` `settings.setDesignSystem` entry (required by the inventory↔generated-registry exact-matrix gate) and referenced it from the `packages.modes.settings.themes` parity-ledger capability row (required by the exactly-once ledger coverage gate).
+    - Regenerated `docs/generated/clay-js-api-registry.json` via `cargo run --bin update-doc-registry`.
+    - Gates: doc-registry/inventory/coverage/facade-layout/manual-smoke/package-loading/primitives suites 143 passed; lib 1208 passed; runtime 73 passed; security reserved-domain 2 passed; presentation settings/design-system 5 passed.
+  - Acceptance Criteria:
+    - Functional: `settings.setDesignSystem` command documented end-to-end (stable ID, user-facing name, keybindings list empty or bound, custom properties, errors, permissions, backing Rust path, op wrapper, lookup tags) and linked from `docs/index.md`; `theme.setDesignSystem` doc cross-links the new command; any new snapshot DTO fields documented; generated registry refreshed; `cargo test` doc-registry gates green.
+    - Performance/Code Quality/Security: Per registry gate defaults; no raw op exposure.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/project-patterns/references/clay-js-api-naming.md`, `clay-js-api-schema.md`, `doc-registry-tests.md`
+      - `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/index.md`
+    - Options Considered:
+      - Command-only (no JS facade): settings intents are command-surface APIs; document as such — chosen; `theme.setDesignSystem` remains the programmatic facade.
+    - Chosen Approach: Doc + registry update for the command and snapshot fields; verify naming convention (`settings.*` package-owned prefix already reserved by first-party settings package).
+    - Files to Create/Edit:
+      - `docs/reference/clay-js-api/settings/set-design-system.md` (new), `docs/index.md`, generated registry artifacts via project command.
+    - References:
+      - Decision logs 2026-05-08-1509 / 2026-05-08-1840.
+  - Test Cases to Write:
+    - Existing doc-registry conformance tests (fail on missing doc/index-link/registry entry).
+
+- [x] 13. Create or verify Clay configuration APIs and update examples/init.js
+  - Execution Summary:
+    - Verified `examples/config/init.js` already carries a commented Design System section (from task 10); extended it with an explicit allowed-values block (`"@clay/core"` built-in baseline, `"@clay/design-neobrutal"` default restrained recipes, `"@clay/design-glass"` glass reference) matching the server validators (`@clay/core` or bundled `@clay/design-*` contributor), the statement that omission keeps the core baseline default, and a note that an interactive `settings.setDesignSystem` switch persists the choice and wins over `init.js` on reload. `node --check examples/config/init.js` passes.
+    - Kept the `canonical_example_covers_theme_typography_and_modular_configuration` invariant of exactly one `setDesignSystem(` occurrence plus the install/adopt-before-select and no-new-authority markers.
+    - Configuration surfaces documented in `docs/reference/clay-js-api/configuration.md`: the Plan 102 design-system section now cross-links [`settings.setDesignSystem`](docs/reference/clay-js-api/settings/set-design-system.md) as the persisted interactive surface (accepted values + precedence note); the precedence table ranks 1–2 include `settings.setDesignSystem` / `setDesignSystem`; the persistence-store section now lists the fourth `designSystem` preference key (was "at most three keys"); the package-authority choice table row covers design-system selection.
+    - `theme.setDesignSystem` and `settings.setDesignSystem` remain the documented programmatic facades from task 12; the designSystem preference grants no authority (inert recipe data, theme-owned colors).
+    - Gates: `cargo run --bin update-doc-registry` (no registry drift); canonical-example + configuration doc tests 50 passed; full doc-registry suite 68 passed; protocol suite 206 passed with only the pre-existing task-17 `window_management` failure.
+  - Acceptance Criteria:
+    - Functional: `designSystem` preference + `settings.setDesignSystem` + `theme.setDesignSystem` appear as documented configuration surfaces; `examples/init.js` gains a commented Design System section showing `theme.setDesignSystem("design-neobrutal")` style usage with allowed values and default; `node --check examples/init.js` passes; example option names/enums match server validators.
+    - Performance/Code Quality/Security: Configuration grants no authority; section commented (opt-in) per convention.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/create-plan/references/clay.md` (Configuration + Example Configuration tasks), `docs/reference/clay-js-api/theme/set-design-system.md`
+    - Options Considered:
+      - Active-by-default example: rejected, style choice is user preference.
+    - Chosen Approach: Commented annotated section next to existing Theme/Typography sections.
+    - Files to Create/Edit:
+      - `examples/init.js`, config API docs touched in task 12.
+    - References:
+      - Decision log 2026-05-08-1841; user instruction 2026-08-03.
+  - Test Cases to Write:
+    - `node --check examples/init.js`; existing examples-config conformance test if present.
+
+- [x] 14. Execute and update the manual test plan (test-plan/)
+  - Execution Summary:
+    - Added six numbered steps to `test-plan/15-ui-design-systems.md` (UI-DS-21…26) covering: Settings-dropdown design-system switching (server-enumerated `ui_choices.design_systems`, whole-shell restyle, no remount/focus loss), command-surface switching, invalid-specifier rejection surface, server-enumerated theme list, appearance persistence across restart, and visible Neobrutal/Glass differences on dark+light themes — each with expected results and negative checks. No existing step weakened.
+    - Executed on a real Linux build via `scripts/capture-ui-review.sh` with fresh `clay` + `clay-desktop` binaries. PASS: `ui-review-default`, `ui-review-design-system` (core dark), `ui-review-design-system-light` (core light), `ui-review-error` (sanitized diagnostic, previous-generation retention). Artifacts: `test-plan/artifacts/110-ui-design-systems/` (window-cropped portal screenshots + AT-SPI trees; no host paths or unrelated windows retained).
+    - UNRESOLVED (blocked): real-app `@clay/design-neobrutal` / `@clay/design-glass` activation — reproduces the plan-110 task-18 pre-existing reload deadlock (`setDesignSystem("@clay/design-*")` inside `init.js` evaluation deadlocks the JS runtime; `@clay/core` applies instantly). Recorded in the module + index records as blocked-on-task-18; fixture-layer DS × theme visual evidence referenced from `.impeccable/reviews/110-final/`.
+    - UNRESOLVED (documented host ceiling): interactive keyboard switching (Settings/Command Centre) — pinned by automated coverage: `settings-panel-choices.test.tsx` (snapshot-driven dropdowns, no-remount switch), `settings_set_design_system_persists_and_snapshot_lists_choices` e2e (persist + reload + enumeration + invalid rejection without reload), validator allowlist tests.
+    - Capture tooling hardened in `scripts/capture-ui-review.sh`: waits for fixture SDUI trees; portal screenshots are cropped to the Clay window via AT-SPI extents + GdkPixbuf (full-desktop captures with unrelated host windows are never retained — plan-097 privacy rule); added `ui-review-design-neobrutal-light` / `ui-review-design-glass-light` fixtures (+ `tests/fixtures/configuration/`) so the full DS × theme matrix is capturable once task 18 unblocks package activation.
+    - New documented ceiling in `test-plan/index.md`: mixed stale/fresh binaries fail client-side rkyv deserialization (`ArchivedSduiTree` subtree pointer overran) and surface as `Session lost` — rebuild both binaries before captures.
+    - `test-plan/index.md` gained the dated plan-110 execution record and an updated module-15 map row + deep-reference link to the new `settings/set-design-system.md` doc.
+  - Acceptance Criteria:
+    - Functional: Affected `test-plan/` modules (UI/theme/settings modules per `test-plan/index.md`) executed on a real Linux build; new numbered steps added: switch design system from Settings UI (expect whole-shell restyle, no remount/focus loss), switch via command centre, invalid specifier error surface, theme list shows installed packages, appearance persists across restart, neobrutal/glass visible differences on dark+light themes; failures are defects or documented ceilings.
+    - Performance: Steps runnable in <5min.
+    - Code Quality/Security: No weakening of existing steps.
+  - Approach:
+    - Documentation Reviewed:
+      - `test-plan/index.md` module map; `.agents/skills/create-plan/references/clay.md` manual test-plan section.
+    - Chosen Approach: Extend the UI module file with a Design System section; run on Linux build.
+    - Files to Create/Edit:
+      - `test-plan/<ui-module>.md`, `test-plan/index.md` if matrix changes.
+    - References:
+      - User instruction 2026-08-04.
+  - Test Cases to Write:
+    - The manual steps themselves (numbered, expected results, negative checks).
+
+- [x] 15. Update package UI authoring contract, UI reference docs, and clay-ui catalogs
+  - Execution Summary:
+    - `docs/reference/packages/creating-packages.md` — the uiDesignSystem authoring section gained a "Canonical recipe keys and consumption-tested contract (plan 110)" subsection: canonical post-task-3 slot-name table (`tab.default.item.*`, `list.default.row.*`, `modal.default.dialog.*`, `textInput.default.input.*` with their renamed-from keys), the consumption-tested contract (shipped keys must be consumed by host CSS; `design-system-consumption.test.ts` enforces zero unconsumed `tokens.css` fallbacks; the recipe matrix is the source of truth), chrome-slot coverage expectations (142-recipe whole-shell baseline across shell/editor/chat/commandCentre/settingsPanel/paneSplitTree/menu/card/popover/badge/kbd/divider/tooltip, pinned by `package_ui_conformance.rs`), and the legible-neobrutal direction summary (0px radii + 1px structural borders + 2px hard offset shadows retained, legibility-first surface hierarchy, transparent list rows, ghost muted buttons, larger default UI type).
+    - `docs/reference/ui-components.md` — new "Plan 110 unified tab-strip primitive and design-system selector" section: `ClayTabStrip` shared by shell tab bar + SDUI `PackageTabList` + `CodingAgentPanel` (packages must use the `tabList` kind, never custom strips), the Settings design-system/theme selector driven by server `ui_choices` with links to both setDesignSystem docs, and the authoring-contract link.
+    - `.agents/skills/clay-ui/references/components.md` — DS recipe-slot table synced to package truth: `tabBar` bar/card/cardLabel/closeButton/dirtyIndicator row replaced with `tab` (item slot, 5 states) + `tabBar.root` chrome rows noting the task-3 removals; `modal` row notes the canonical `dialog` slot; new chrome/agent kinds row (`shell`/`editor`/`chat`/`menu`/`card`/`popover` with full slot lists, 142-recipe baseline); added the consumption-tested contract paragraph. The `tabList` catalog entry (line 28) was already present from task 5.
+    - `.agents/skills/clay-ui/references/tokens.md` — typography hierarchy defaults synced to task 9: Title 15/13 (was 14/12), Detail 12/13 (was 10/12).
+    - `docs/development/ui-design-system-recipe-matrix.md` — §1 kind count corrected to 16 + reserved `table` (17 identifiers) with the `tabList` row added; §2 stale `tabBar` five-row block replaced with accurate `tab.item` + `tabBar.root` rows; post-task-6/8 package recipe kinds (`shell`/`editor`/`chat`/`menu`/`card`/`popover`) documented with slot lists and the core-fallback granularity note.
+    - `docs/development/ui-design-system-conformance.md` — surface total corrected 35 → 36 (16 kinds).
+    - `docs/development/ui-design-system-css-audit.md` — verified already synced by tasks 3/6/8 (canonical slot names, task-4/6 migration rows); `package-primitive-review.md` verified stale-free.
+    - Gates: presentation suite 41 passed (plan 101–104 UI conformance incl. 142-recipe baseline + source-independence guard); protocol doc-registry/canonical-example 148 passed; security UI suite 20 passed.
+  - Acceptance Criteria:
+    - Functional: `docs/reference/packages/creating-packages.md` documents `uiDesignSystem` authoring with the canonical slot list (post-task-3 names), the consumption-tested contract ("shipped recipe keys must be consumed by host CSS; host matrix is the source of truth"), chrome-slot coverage expectations, and the legible-neobrutal direction summary; `docs/reference/ui-components.md` links the new tab-strip primitive and DS selector; `.agents/skills/clay-ui/references/components.md` + `tokens.md` updated (tab-strip catalog entry, deleted slots removed, chrome slots listed); `docs/development/ui-design-system-*.md` audit docs synced; doc-drift `cargo test` gates green.
+    - Performance/Code Quality/Security: Docs-only; keeps Phase 20.8 drift gates as enforcer.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-ui/SKILL.md` + references, `docs/reference/ui-components.md`, `docs/reference/packages/creating-packages.md`
+      - `.agents/skills/project-patterns/references/ui-design-system-packages.md`, `package-ui-layout.md`
+    - Chosen Approach: Single docs task after implementation truth exists (tasks 3–10).
+    - Files to Create/Edit:
+      - `docs/reference/packages/creating-packages.md`, `docs/reference/ui-components.md`, `.agents/skills/clay-ui/references/components.md`, `.agents/skills/clay-ui/references/tokens.md`, `docs/development/ui-design-system-{recipe-matrix,css-audit,conformance,package-primitive-review}.md`.
+    - References:
+      - Decision log 2026-08-28-2234; plans 101–104.
+  - Test Cases to Write:
+    - Existing documentation-drift tests (`cargo test`) covering catalog/creating-packages/ui-components/index linkage.
+
+- [x] 16. Update or verify the code wiki after implementation
+  - Execution Summary:
+    - `docs/wiki/modules/ui-design-system-runtime.md` — new §7 "Canonical Recipe Slots and Consumption Gate (Plan 110)": canonical post-task-3 slot table (`tab.default.item.*`, `list.default.row.*`, `modal.default.dialog.*`, `textInput.default.input.*` with renamed-from aliases), chrome/agent coverage (exactly 142 recipe keys per reference package, verified against both manifests; full kind/slot list; `plan110_design_system_packages_mutual_recipe_key_consistency` pin; core fallback stays at `<surface>.default.root.rest` granularity), the bidirectional consumption-gate contract of `design-system-consumption.test.ts` (every tokens.css fallback consumed, every consumed variable backed, canonical keys declared + consumed), and the legible-neobrutal baseline. §9 test map extended (consumption gate, core-baseline-hierarchy, settings-panel-choices tests, `.impeccable/reviews/110-final/` 61-capture visual review); stale "25-component recipe coverage" corrected; fixed stale `src/server/evaluation.rs` → `src/server/js_runtime/evaluation.rs` in the settings flow; added consumption test to the Tests header.
+    - `docs/wiki/modules/react-tabs-and-splits.md` — new "Unified tab-strip primitive" subsection: `ClayTabStrip` shared by shell tab bar + SDUI `tabList` + `CodingAgentPanel`, closed recipe attributes, styling via `tab.default.item.*`/`tabBar.default.root.rest`; added `tab-strip.tsx` to Source list.
+    - `docs/wiki/modules/typography-registry-and-font-roles.md` — stale hierarchy defaults fixed (title 14/12 → 15/13, detail 10/12 → 12/13, ui base 13px); example block was already current.
+    - `docs/wiki/index.md` — master index blurbs for the three pages updated (canonical slots/consumption gate/settings flow; `ClayTabStrip` primitive); all index + page links verified intact programmatically.
+    - Verified `frontend/src/test/design-system-consumption.test.ts` green (12 tests).
+  - Acceptance Criteria:
+    - Functional: Project code wiki updated after all implementation tasks: design-system module page reflects canonical slots, consumption gate test, chrome coverage, settings command flow; tab-strip primitive page; master index links intact.
+    - Performance: Wiki adds no runtime work.
+    - Code Quality: Pages explain what/how/invariants/tradeoffs + source/test paths.
+    - Security: No secrets; authority boundaries (inert recipes, server validation) documented.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/project-wiki/SKILL.md`
+    - Options Considered:
+      - Per-task wiki churn vs single final pass — single final pass chosen.
+    - Chosen Approach: One wiki pass using `project-wiki` after task 15.
+    - API Notes and Examples:
+      ```text
+      docs/wiki/index.md
+      docs/wiki/modules/<design-system|shell|settings>.md
+      ```
+    - Files to Create/Edit:
+      - `docs/wiki/index.md`, relevant `docs/wiki/modules/*.md`.
+    - References:
+      - `.agents/skills/create-plan/references/wiki-task.md`.
+  - Test Cases to Write:
+    - Manual wiki review: master index links pages; pages match final code.
+
+- [x] 17. Fix protocol tab-frame oversize rejection mismatch (`malformed_tab_frames_are_rejected_without_panic`)
+  - Execution Summary:
+    - Root cause confirmed: the test declared `1024*1024 + 1` (1 MiB + 1) as oversize — a stale leftover from the pre-chunked-document-loading era when `DEFAULT_MAX_FRAME_SIZE` was 1 MiB (see `decision-logs/2026-08-25-1253-chunked-document-loading.md`). The authoritative ceiling is `DEFAULT_MAX_FRAME_SIZE = 16 MiB` (`src/protocol/codec.rs:18`, documented rationale, already pinned by `tests/primitives_docs.rs:195` and used by `tests/runtime_update_protocol.rs`), so the declared length was under the real ceiling and decode took the `LengthMismatch` path.
+    - Fix (`tests/window_management_protocol.rs`, test-only; codec unchanged): the oversize assertion now derives the declaration from the codec constant — `(DEFAULT_MAX_FRAME_SIZE as u32) + 1` → `FrameTooLarge`, exercising the real boundary with no duplicated magic number. Added an at-ceiling boundary assertion: a declared length exactly equal to the ceiling passes the prefix gate and fails `LengthMismatch` on a 4-byte buffer, proving rejection is strictly above the ceiling and that no allocation proportional to the declared length ever occurs.
+    - Gates: `cargo test --test protocol` fully green for the first time this plan (207 passed, 0 failed — the pre-existing failure is resolved); `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings` clean.
+  - Acceptance Criteria:
+    - Functional: The intended frame ceiling is confirmed against plan-109/decision-log authority and made the single source of truth; oversize declared length (strictly above the ceiling) is rejected with `CodecError::FrameTooLarge` before any archived access; length-mismatch and short-frame paths keep failing closed; `cargo test --test protocol` is fully green (0 failures) and stays green.
+    - Performance: Rejection happens on the declared-length read (no allocation proportional to the declared length); ceiling constant documented.
+    - Code Quality: One named ceiling constant (no duplicated magic numbers between test and codec); test exercises the real boundary (ceiling, ceiling+1), not a guess.
+    - Security: Malicious length prefix cannot cause unbounded allocation, panic, or out-of-bounds archived access at the IPC tab-frame boundary.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/protocol/codec.rs` (`DEFAULT_MAX_FRAME_SIZE`, decode length-prefix paths), `tests/window_management_protocol.rs` (malformed-frame contract), plan-109 window-management task entries + `decision-logs/` for the intended ceiling.
+    - Options Considered:
+      - Fix the test to declare `DEFAULT_MAX_FRAME_SIZE + 1`: minimal, but only after confirming 16 MiB is the authoritative ceiling for IPC frames.
+      - Lower the ceiling to 1 MiB if plan-109 intended it: changes runtime bounds — only if the decision log backs it.
+    - Chosen Approach: Confirm the ceiling from plan-109/decision logs, then align test (and codec docs if needed) to the single constant; add a boundary test pair (max-accepted, max+1 rejected).
+    - Files to Create/Edit:
+      - `tests/window_management_protocol.rs` (oversize case uses the real ceiling constant), possibly `src/protocol/codec.rs` (doc comment / constant only if the log mandates a different ceiling).
+    - References:
+      - Task 10 Execution Summary "Pre-existing defects"; `src/protocol/codec.rs:18`.
+  - Test Cases to Write:
+    - `decode_server_message` with declared length == ceiling (accepted up to payload availability) and == ceiling+1 (rejected `FrameTooLarge`) — test names the constant, not a literal.
+
+- [x] 18. Fix design-system package application deadlock during live server reload
+  - Execution Summary:
+    - Root cause (not the suspected re-entrancy — a same-thread double lock): `apply_design_system` (`src/server/ops/theme.rs`) wrapped its first-party branch in a block that held the `clay_state.package_service()` mutex guard, then called the public `ensure_first_party_record(clay_state, …)`, which locks the same non-reentrant `Mutex` again on the current thread → permanent `__futex_wait` hang. This explains every observed symptom: `@clay/core` short-circuits before the block (instant), `setTheme` works (calls `ensure_first_party_record` without an outer guard), `loadPackage` fails fast (no outer guard), and only non-core `setDesignSystem` during reload hung.
+    - Fix in the shared apply path: the first-party branch now resolves via `ensure_first_party_record_locked(&mut service, …)` under the already-held guard (visibility widened to `pub(super)`); the public wrapper is unchanged for its other callers. The enable path stays data-only across the trust-domain boundary — no V8 objects/functions cross it; declaration/color-authority validation unchanged and still fails closed.
+    - Task-10 e2e extended (`settings_set_design_system_persists_and_snapshot_lists_choices`): the `@clay/core` workaround comment removed; the design-system step now applies a real bundled package via a suffix-built specifier (plan-104 guard-proof) and asserts the enabled package is enumerated in `ui_choices.design_systems`, the committed snapshot's `active_design_system.specifier` matches, and its `recipes` map is non-empty. Unused `NEVER_ENABLED_DESIGN_SYSTEM` const removed.
+    - New startup-reload regression test `persisted_design_system_preference_applies_at_startup_reload`: writes a persisted non-core `designSystem` preference, runs the startup reload, and asserts completion inside a 5 s `tokio::time::timeout` (a regression fails the test instead of hanging CI) with generation advance and the package's recipes applied.
+    - Gates: lib 1209 passed / 0 failed; protocol 207 / 0; presentation 41 / 0 (source-independence guard included); runtime 73 / 0; `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings` clean.
+  - Acceptance Criteria:
+    - Functional: Applying a bundled design-system package (e.g. `@clay/design-neobrutal`, `@clay/design-glass`) via `settings.setDesignSystem` / init.js `setDesignSystem` during a live reload completes with a committed snapshot carrying the package's recipes (or fails fast with a bounded diagnostic — never hangs); `@clay/core` path unchanged; `apply_persisted_preferences` applies a persisted non-core DS choice at startup without hanging.
+    - Performance: Application path has no busy-wait/unbounded blocking; timeout or clean completion, test-observable (<5s budget on CI hardware).
+    - Code Quality: Root cause fixed in the shared reload/apply path (not a per-caller workaround); the `@clay/core`-only workaround comment in `src/server/connection/tests.rs` `settings_set_design_system_persists_and_snapshot_lists_choices` is removed and the e2e extended to a real DS package (suffix-built specifier per the plan-104 source-independence guard).
+    - Security: Fix does not weaken the two runtime trust domains — the enable path stays data-only across the domain boundary (no V8 objects/functions/globals crossing; typed bounded values only per decision-log 2026-07-21), and declaration/color-authority validation still fails closed with diagnostics.
+  - Approach:
+    - Documentation Reviewed:
+      - `src/server/ops/theme.rs` (`apply_design_system`, `ensure_first_party_record`), `src/server/connection/runtime.rs` (`persist_settings_change`, reload generation), `src/js-runtime/` worker evaluation + op-response plumbing (graft nodes for `clay-js-runtime`), `docs/wiki/modules/typography-registry-and-font-roles.md` sibling flow, `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`.
+    - Options Considered:
+      - Serialize enable outside the JS evaluation (defer `service.enable()` to post-evaluation reload step): keeps the worker single-threaded, but persisted-choice-at-startup must still enable before first paint.
+      - Bounded wait/timeout on the op result: masks the deadlock instead of removing it — rejected as primary, acceptable as a belt-and-braces guard.
+    - Chosen Approach: Root-cause the re-entrancy (who waits on whom: reload thread ↔ JS worker) and break the cycle in the shared path — likely by making the package-record enable happen on the server side of the boundary without requiring a worker round-trip while a reload evaluation is in flight; prove with a real-package e2e through init.js + persisted-preference reload.
+    - Files to Create/Edit (tentative until root cause confirmed):
+      - `src/server/ops/theme.rs` or the reload/apply plumbing in `src/server/connection/runtime.rs` / `src/server/mod.rs` (`apply_persisted_preferences`), `src/js-runtime/` worker op-response path if the cycle lives there, `src/server/connection/tests.rs` (extend e2e to a real DS package).
+    - References:
+      - Task 10 Execution Summary "Pre-existing defects"; task 10 e2e workaround comment; plan-101/104 fallback/DS authority tests as guardrails.
+  - Test Cases to Write:
+    - e2e: init.js `setDesignSystem("@clay/design-" + suffix)` during live reload completes; snapshot carries the package's recipes and `designSystem` preference; reload generation advances (mirrors the task-10 e2e shape, real package).
+    - Regression: persisted non-core DS preference applied at startup reload without hang (bounded-timeout assert so a regression fails instead of hanging CI).
+
+## Compromises Made
+
+- Task 10 shipped the Settings design-system dropdown proven end-to-end only with `@clay/core` because the non-core reload deadlock (task 18) pre-existed; task 18 closed the gap with a real-package e2e.
+- Task 14's real-app captures for the neobrutal/glass fixtures (`ui-review-design-neobrutal`, `ui-review-design-glass`, and light variants) stayed UNRESOLVED under the task-18 deadlock; the fixtures are expected to capture cleanly now that the deadlock is fixed (re-run `scripts/capture-ui-review.sh` when collecting visual evidence).
+- Task 17 fixed the stale test constant rather than changing the codec: the 16 MiB `DEFAULT_MAX_FRAME_SIZE` is the documented authority (codec doc comment, `primitives_docs.rs` pin, runtime-snapshot guard tests).
+
+## Further Actions
+
+- P3 (from task 11 review): Settings dropdown triggers render the raw label ("Theme", "System") as the trigger value when no server snapshot is loaded (disconnected/fixture state). Consider a "Select…" placeholder or hydrating from persisted preferences when the snapshot is absent. Cosmetic; real sessions populate values from `uiChoices`.
+- Re-run the task-14 neobrutal/glass real-app captures (previously UNRESOLVED under the task-18 deadlock) to complete the DS × theme capture matrix.
