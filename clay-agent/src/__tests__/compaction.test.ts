@@ -256,6 +256,7 @@ test("compactAfterTokens override validates and reaches the OM settings provider
   await host.handle("session.prompt", { sessionId: created.sessionId, text: "remember threshold" });
   const compacted = (await host.handle("session.compact", {
     sessionId: created.sessionId,
+    strategy: "om",
     compactAfterTokens: 80_000,
   })) as { strategy: string; entryId?: string };
   assert.equal(compacted.strategy, "om");

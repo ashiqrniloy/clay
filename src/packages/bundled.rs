@@ -71,6 +71,10 @@ pub(crate) fn bundled_entry(name: &str) -> Option<&'static BundledPackageEntry> 
     BUNDLED_PACKAGES.iter().find(|entry| entry.name == name)
 }
 
+pub(crate) fn bundled_package_names() -> impl Iterator<Item = &'static str> {
+    BUNDLED_PACKAGES.iter().map(|entry| entry.name)
+}
+
 /// Look up a helper inventory entry by directory name.
 pub(crate) fn bundled_helper(root: &str) -> Option<&'static BundledPackageEntry> {
     BUNDLED_HELPERS.iter().find(|entry| entry.root == root)

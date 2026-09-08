@@ -13,8 +13,8 @@ mod launch;
 
 use cli::{CLI_USAGE, ClayCommand, extract_profile_perf_flag, parse_command};
 use launch::{
-    run_desktop, run_launch, run_package_subcommand, run_perf_fixture, run_restart, run_server,
-    run_smoke_gui,
+    run_desktop, run_install, run_launch, run_list, run_package_subcommand, run_perf_fixture,
+    run_remove, run_restart, run_server, run_smoke_gui, run_update,
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -43,6 +43,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("{CLI_USAGE}");
             Ok(())
         }
+        ClayCommand::Install { target } => run_install(target),
+        ClayCommand::Remove { package_name } => run_remove(package_name),
+        ClayCommand::List { bundled } => run_list(bundled),
+        ClayCommand::Update { mode } => run_update(mode),
         ClayCommand::Package { subcommand } => run_package_subcommand(subcommand),
     }
 }

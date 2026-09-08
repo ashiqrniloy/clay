@@ -88,12 +88,12 @@ A tab whose connection drops auto-reconnects (driver `start_tab_reconnect` → `
 
 ## Related
 
-- [Pane Document Views](pane-document-views.md) — per-pane session stores and cross-pane aggregation (22.2)
+- [Pane Document Views](../archive/pane-document-views.md) — per-pane session stores and cross-pane aggregation (22.2)
 - [Tabs and Independent Client Views](tabs-and-clients.md) — per-tab connections and reconnect/reclaim (22.3)
-- [Masonry Editor Widget Status Observability](masonry-editor.md)
+- [Masonry Editor Widget Status Observability](../archive/masonry-editor.md)
 - [Client Snapshot Bootstrap](client-snapshot-bootstrap.md)
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
-- [Phase 20 Daily Editing Product Hardening Primitive Review](phase20-daily-editing-product-hardening-primitive-review.md)
+- [Phase 20 Daily Editing Product Hardening Primitive Review](../archive/phase20-daily-editing-product-hardening-primitive-review.md)
 - [File Open, Save, and Reload Workflow](../../development/file-open-save-reload-workflow.md)
 - `src/editor/document_session.rs`
 - `src/masonry_editor.rs`

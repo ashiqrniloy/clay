@@ -119,6 +119,44 @@ log.
 | C23 | PASS automated / NOT RUN manually | `invalid_init_typography_reports_actionable_validation_error` and existing atomic-install tests pass; targeted GUI reload is blocked by the host input backend |
 | C24 | PASS automated / NOT RUN manually | Existing raw-op/authority-denial and configuration registry tests pass; no manual raw-op execution was attempted |
 
+## Plan 115 install-appended load line steps (2026-09-08)
+
+`clay install npm:<spec>` appends an exact two-line block to
+`~/.config/clay/init.js` (marker comment + one `await loadPackage("<name>")`
+call); `clay remove` strips exactly that block. Full CLI step coverage lives
+in module 09 (P43–P54); the steps here cover the configuration-reload side.
+
+| # | Action | Expected |
+|---|--------|----------|
+| C30 | Run `clay install npm:clay-fixture-pkg` (scratch HOME, local registry), server running | Watcher auto-reloads the appended line within ~2 s; because the package is installed but NOT adopted, the reload fails closed with a typed diagnostic; the previous generation stays active; the app stays healthy (same contract as C18, adoption-flavored) |
+| C31 | `clay package adopt clay-fixture-pkg`, then touch `init.js` | Next reload is clean (no failure diagnostics); the package activates through the appended line; no other config content is disturbed |
+| C32 | `clay remove npm:clay-fixture-pkg` | The Clay block is stripped; every hand-edited line (comments, bindings) survives byte-for-byte; the following reload is clean |
+| C33 | Stale hand-written line pointing at a removed package, reload | Bounded typed `packages.load_failed` diagnostic; previous generation retained; app alive (fail-closed, C18 family) |
+| C34 | Startup with the appended adopted line present | No measurable startup regression — one existing-API call per boot; drill measured 33 ms to socket-listening vs 60 ms baseline without the line |
+
+Deep reference for the install CLI side (ledger, pinned-vs-floating, binary
+provisioning): module 09 P43–P54. `init.js` grants no package-install
+authority — installing stays a CLI action; the config file only carries the
+one-line load request the user can read and delete.
+
+## Plan 115 Linux execution record (2026-09-08)
+
+Same drill run as module 09's P43–P54 record (fresh build, scratch HOME,
+live `clay server`).
+
+| Checks | Result | Evidence |
+|---|---|---|
+| C30 | PASS | Watcher reload after install: typed `runtime.exception` failure (un-adopted), previous generation active, server alive |
+| C31 | PASS | Adopt + reload: clean, no failure diagnostics; package active |
+| C32 | PASS | Remove stripped exactly the Clay block; user comment lines survived; clean reload |
+| C33 | PASS | Stale line for a removed package: bounded `packages.load_failed: … could not be canonicalized` diagnostic, app alive |
+| C34 | PASS | 33 ms boot-to-listening with appended line (60 ms baseline without) |
+
+Drill note: C30/C31 initially exposed a real defect — the production server
+never discovered store-installed packages (`packages.not_installed` even
+after adoption). Fixed via `PackageService::open_production` (one manager
+discovery pass at boot); see the module 09 execution record for gates.
+
 ## Cleanup
 
 ```bash

@@ -415,7 +415,8 @@ fn wiki_index_links_every_wiki_page() {
     let mut files = Vec::new();
     collect(&wiki_root, &mut files);
     for path in files {
-        if path == wiki_root.join("index.md") {
+        if path == wiki_root.join("index.md") || path.starts_with(wiki_root.join("archive")) {
+            // Archive pages are pull-only history: intentionally not indexed.
             continue;
         }
         let relative = path
@@ -432,7 +433,7 @@ fn wiki_index_links_every_wiki_page() {
 
 #[test]
 fn phase20_1_ui_design_language_primitive_review_is_linked_and_complete() {
-    let path = "docs/wiki/modules/phase20.1-ui-design-language-primitive-review.md";
+    let path = "docs/wiki/modules/ui-design-language-primitive-review.md";
     let review = read(path);
 
     assert!(
@@ -519,7 +520,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 97);
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 98);
 
     let facades = read("src/server/facades.rs")
         .lines()
@@ -556,7 +557,7 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
 #[test]
 fn phase20_1_token_catalog_is_complete_and_matches_core_registry() {
     let theme_source = read("src/shell/theme.rs");
-    let tokens_doc = read(".agents/skills/clay-ui/references/tokens.md");
+    let tokens_doc = read(".agents/skills/clay-execution/references/tokens.md");
 
     // Extract every implemented core token name from `core_theme_value`.
     let mut core_tokens = BTreeSet::new();
@@ -684,8 +685,8 @@ fn component_catalog_status_partition_is_current() {
     // truth; this guard fails if an implemented kind is demoted, a reserved/
     // planned kind is prematurely promoted, or the token consumption markers
     // drift.
-    let components = read(".agents/skills/clay-ui/references/components.md");
-    let tokens = read(".agents/skills/clay-ui/references/tokens.md");
+    let components = read(".agents/skills/clay-execution/references/components.md");
+    let tokens = read(".agents/skills/clay-execution/references/tokens.md");
 
     // `table` is the only reserved package-facing kind.
     assert!(
@@ -806,7 +807,7 @@ fn package_guide_documents_phase20_4_uplift() {
 fn clay_ui_catalog_notes_state_completeness() {
     // Plan 065 task 8: components.md notes all five interaction states and the
     // spacing rhythm for each implemented kind.
-    let components = read(".agents/skills/clay-ui/references/components.md");
+    let components = read(".agents/skills/clay-execution/references/components.md");
     assert!(
         components.contains("Phase 20.4 interaction-state and spacing rhythm notes"),
         "components.md must have a Phase 20.4 interaction-state/spacing section"
@@ -1080,7 +1081,7 @@ fn phase20_2_primitive_documentation_exists_and_is_linked() {
     );
 
     // Verify components.md lists all eight primitives plus the Phase 24.4 scrim.
-    let components = read(".agents/skills/clay-ui/references/components.md");
+    let components = read(".agents/skills/clay-execution/references/components.md");
     assert!(
         components.contains("## Clay-Native Chrome Primitives (internal)"),
         "components.md must have a Clay-Native Chrome Primitives section"
@@ -1106,17 +1107,12 @@ fn phase20_2_primitive_documentation_exists_and_is_linked() {
 
 #[test]
 fn phase20_4_core_component_uplift_primitive_review_is_linked_and_complete() {
-    // Plan 065 (Phase 20.4) task 12: verify the Phase 20.4 primitive-review
-    // wiki page exists, is linked from the wiki index, and records the restyle-
-    // only uplift inventory, state helpers, compatibility contract, and phase
-    // boundary.
-    let path = "docs/wiki/modules/phase20.4-core-component-uplift-primitive-review.md";
+    // Plan 065 (Phase 20.4) task 12: the Phase 20.4 primitive-review record
+    // exists in the pull-only wiki archive with its uplift inventory, state
+    // helpers, compatibility contract, and phase boundary intact.
+    let path = "docs/wiki/archive/phase20.4-core-component-uplift-primitive-review.md";
     let review = read(path);
 
-    assert!(
-        index_links("docs/wiki/index.md", path),
-        "Phase 20.4 primitive review must be linked from the wiki index"
-    );
     for section in [
         "## Reusable Capability Before New Code",
         "## Locked Generic Phase 20.4 Gaps (closed)",
@@ -1169,9 +1165,9 @@ fn no_component_kind_or_token_renamed() {
     // also enforced by `tests/package_ui_conformance.rs::catalog_is_drift_free_across_doc_enum_and_paint_path`;
     // this test additionally pins specific kind names and the Phase 20.1 tokens.
     let components_src = read("src/shell/components.rs");
-    let components_doc = read(".agents/skills/clay-ui/references/components.md");
+    let components_doc = read(".agents/skills/clay-execution/references/components.md");
     let tokens_src = read("src/shell/theme.rs");
-    let tokens_doc = read(".agents/skills/clay-ui/references/tokens.md");
+    let tokens_doc = read(".agents/skills/clay-execution/references/tokens.md");
 
     // 15 implemented ComponentKind entries still parse and are cataloged implemented.
     for kind in [
@@ -1401,11 +1397,11 @@ fn ui_components_page_links_catalog_and_token_tables() {
 #[test]
 fn creating_packages_status_markers_match_clay_ui_catalog() {
     // Phase 20.8 task 4/6: the `creating-packages.md` Components table status
-    // markers agree with the `clay-ui` component catalog partition. A kind
+    // markers agree with the `clay-execution` component catalog partition. A kind
     // marked implemented/reserved in the catalog must be marked implemented/
     // reserved in the guide (not planned/deferred), and vice versa.
     let guide = read("docs/reference/packages/creating-packages.md");
-    let catalog = read(".agents/skills/clay-ui/references/components.md");
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
 
     let guide_rows = parse_component_table(&guide, "## Components");
     let catalog_rows = parse_component_table(&catalog, "## Package-Facing Component Kinds");
@@ -1447,7 +1443,7 @@ fn creating_packages_status_markers_match_clay_ui_catalog() {
     for kind in guide_status.keys() {
         assert!(
             catalog_status.contains_key(kind),
-            "creating-packages.md lists kind `{kind}` absent from the clay-ui catalog"
+            "creating-packages.md lists kind `{kind}` absent from the clay-execution catalog"
         );
     }
     // Sanity: the partition is non-trivial (implemented and reserved both present).
@@ -1464,7 +1460,7 @@ fn creating_packages_status_markers_match_clay_ui_catalog() {
 
 #[test]
 fn plan087_ui_authoring_contract_is_consistent_across_catalog_and_guides() {
-    let catalog = read(".agents/skills/clay-ui/references/components.md");
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
     let guide = read("docs/reference/packages/creating-packages.md");
     let navigation = read("docs/reference/ui-components.md");
     let strategy = read("docs/reference/primitives/shell-layout-strategy.md");
@@ -1544,8 +1540,8 @@ fn plan087_ui_authoring_contract_is_consistent_across_catalog_and_guides() {
 
 #[test]
 fn plan088_ui_catalog_and_package_authoring_contract_are_consistent() {
-    let catalog = read(".agents/skills/clay-ui/references/components.md");
-    let tokens = read(".agents/skills/clay-ui/references/tokens.md");
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
+    let tokens = read(".agents/skills/clay-execution/references/tokens.md");
     let guide = read("docs/reference/packages/creating-packages.md");
     let navigation = read("docs/reference/ui-components.md");
     let strategy = read("docs/reference/primitives/shell-layout-strategy.md");
@@ -1651,7 +1647,7 @@ fn plan088_ui_catalog_and_package_authoring_contract_are_consistent() {
 #[test]
 fn phase28_package_authoring_contract_is_consistent() {
     let guide = read("docs/reference/packages/creating-packages.md");
-    let catalog = read(".agents/skills/clay-ui/references/components.md");
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
     let navigation = read("docs/reference/ui-components.md");
     let chrome = read("docs/reference/primitives/ui-chrome-primitives.md");
     let registry = read("docs/reference/primitives/registry.md");
@@ -1737,7 +1733,7 @@ fn phase28_package_authoring_contract_is_consistent() {
 #[test]
 fn phase25_package_authoring_contract_is_consistent() {
     let guide = read("docs/reference/packages/creating-packages.md");
-    let catalog = read(".agents/skills/clay-ui/references/components.md");
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
     let navigation = read("docs/reference/ui-components.md");
     for marker in [
         "## Phase 25 authoring contract",
@@ -1776,12 +1772,10 @@ fn phase25_package_authoring_contract_is_consistent() {
 #[test]
 fn plan088_code_wiki_documents_modernization_contract() {
     let index = read("docs/wiki/index.md");
+    let archive_dir = root().join("docs/wiki/archive");
     for page in [
         "modules/editor-theme-registry.md",
         "modules/typography-registry-and-font-roles.md",
-        "modules/masonry-shell.md",
-        "modules/pane-document-views.md",
-        "modules/masonry-sdui-region.md",
         "modules/slot-aware-package-ui.md",
         "modules/workspace-file-browser.md",
         "modules/performance-fixtures.md",
@@ -1790,6 +1784,17 @@ fn plan088_code_wiki_documents_modernization_contract() {
         assert!(
             index.contains(&format!("]({page})")),
             "docs/wiki/index.md must link Plan 088 implementation page {page}"
+        );
+    }
+    // Masonry-era Plan 088 pages are pull-only archive records now.
+    for page in [
+        "masonry-shell.md",
+        "masonry-sdui-region.md",
+        "pane-document-views.md",
+    ] {
+        assert!(
+            archive_dir.join(page).is_file(),
+            "docs/wiki/archive/ must retain Plan 088 record {page}"
         );
     }
     assert!(
@@ -1806,14 +1811,14 @@ fn plan088_code_wiki_documents_modernization_contract() {
             ],
         ),
         (
-            "docs/wiki/modules/masonry-shell.md",
+            "docs/wiki/archive/masonry-shell.md",
             [
                 "## Plan 088 shell verification and boundaries",
                 "tab_card_display_name",
             ],
         ),
         (
-            "docs/wiki/modules/masonry-sdui-region.md",
+            "docs/wiki/archive/masonry-sdui-region.md",
             [
                 "set_clips_children()",
                 "### Plan 088 Task 6 responsive layout",
@@ -1855,7 +1860,7 @@ fn create_plan_ui_requirements_name_existing_catalog_files() {
         "tokens.md",
         "creating-packages.md",
         "ui-components.md",
-        ".agents/skills/clay-ui",
+        ".agents/skills/clay-execution",
     ] {
         assert!(
             requirements.contains(reference),
@@ -1863,8 +1868,8 @@ fn create_plan_ui_requirements_name_existing_catalog_files() {
         );
         // Each referenced path that is a concrete file must exist.
         if let Some(path) = match reference {
-            "components.md" => Some(".agents/skills/clay-ui/references/components.md"),
-            "tokens.md" => Some(".agents/skills/clay-ui/references/tokens.md"),
+            "components.md" => Some(".agents/skills/clay-execution/references/components.md"),
+            "tokens.md" => Some(".agents/skills/clay-execution/references/tokens.md"),
             "creating-packages.md" => Some("docs/reference/packages/creating-packages.md"),
             "ui-components.md" => Some("docs/reference/ui-components.md"),
             _ => None,
@@ -1880,7 +1885,7 @@ fn create_plan_ui_requirements_name_existing_catalog_files() {
 #[test]
 fn plan101_recipe_matrix_covers_every_component_kind_and_internal_surface() {
     let matrix = read("docs/development/ui-design-system-recipe-matrix.md");
-    let components = read(".agents/skills/clay-ui/references/components.md");
+    let components = read(".agents/skills/clay-execution/references/components.md");
 
     // All 15 implemented kinds plus reserved table
     let kinds = [
@@ -1979,7 +1984,7 @@ fn plan101_documentation_cross_links_and_token_synchronization() {
     let ui_components = read("docs/reference/ui-components.md");
     let react_mapping = read("docs/development/react-ui-catalog-mapping.md");
     let creating_packages = read("docs/reference/packages/creating-packages.md");
-    let tokens_md = read(".agents/skills/clay-ui/references/tokens.md");
+    let tokens_md = read(".agents/skills/clay-execution/references/tokens.md");
     let product_md = read("PRODUCT.md");
 
     assert!(

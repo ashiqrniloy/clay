@@ -166,3 +166,38 @@ export interface KnowledgeSetOptionsResult {
 /** Per-workspace knowledge options, forwarded to the daemon (queued while
  *  the daemon is down so load entries never block on its boot). */
 export declare function knowledgeSetOptions(options: KnowledgeSetOptionsOptions): Promise<KnowledgeSetOptionsResult>;
+export interface SetRunOptionsOptions {
+    /** Prism policy cap. Positive safe integer, or `null` to disable. Default `null`. */
+    maxInputTokens?: number | null;
+    /** Prism policy cap. Positive safe integer, or `null` to disable. Default `null`. */
+    maxOutputTokens?: number | null;
+    /** Fork-bomb fence. Positive safe integer, or `null` to disable. Default 64. */
+    maxTurns?: number | null;
+    /** Fork-bomb fence. Positive safe integer, or `null` to disable. Default 64. */
+    maxToolRounds?: number | null;
+    /** Fork-bomb fence. Positive safe integer, or `null` to disable. Default 256. */
+    maxToolCalls?: number | null;
+    /** Wall-clock fence in ms. Positive safe integer, or `null` to disable. Default 1_800_000 (30 min). */
+    maxWallTimeMs?: number | null;
+    /** Auto-compact trigger in tokens. Default 800_000. Stored; unused until
+     *  auto-compact is wired. Distinct from agent.compact compactAfterTokens
+     *  (OM threshold, decision 2158 default 80000). */
+    compactAfterTokens?: number;
+    /** Default compaction when agent.compact / /compact omit strategy.
+     *  `default` (local), `llm` (provider summary), `om`. Default `llm`. */
+    compaction?: "default" | "llm" | "om";
+}
+export interface SetRunOptionsResult {
+    maxInputTokens: number | null;
+    maxOutputTokens: number | null;
+    maxTurns: number | null;
+    maxToolRounds: number | null;
+    maxToolCalls: number | null;
+    maxWallTimeMs: number | null;
+    compactAfterTokens: number;
+    compaction: "default" | "llm" | "om";
+    queued?: boolean;
+}
+/** Coding-run policy caps and default compact strategy. Queued while the
+ *  daemon is down so init.js / package config never block on boot. */
+export declare function setRunOptions(options: SetRunOptionsOptions): Promise<SetRunOptionsResult>;

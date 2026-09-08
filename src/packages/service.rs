@@ -72,6 +72,8 @@ pub enum PackageServiceError {
     ContributionConflict(Box<PackageConflictDiagnostic>),
     /// The package is not installed.
     NotInstalled { package_name: String },
+    /// The specifier was rejected by the v1 npm-registry spec model.
+    InvalidSpecifier { message: String },
     /// The package is already enabled.
     AlreadyEnabled { package_name: String },
     /// The package is not currently enabled.
@@ -111,6 +113,8 @@ pub enum PackageServiceError {
     },
     /// The durable package approval store failed to load or persist.
     ApprovalStore { message: String },
+    /// The durable install ledger failed to load or persist.
+    InstallLedger { message: String },
     /// Rollback requested for a package with no active replacement.
     NoActiveReplacement { target: String },
 }
@@ -129,6 +133,9 @@ impl std::fmt::Display for PackageServiceError {
             }
             Self::NotInstalled { package_name } => {
                 write!(f, "package `{package_name}` is not installed")
+            }
+            Self::InvalidSpecifier { message } => {
+                write!(f, "unsupported package specifier: {message}")
             }
             Self::AlreadyEnabled { package_name } => {
                 write!(f, "package `{package_name}` is already enabled")
@@ -189,6 +196,7 @@ impl std::fmt::Display for PackageServiceError {
                 "{code}: package `{package_name}` requires explicit user adoption before execution ({detail}); inspect with `clay package inspect {package_name}` and approve with `clay package adopt {package_name}`"
             ),
             Self::ApprovalStore { message } => write!(f, "{message}"),
+            Self::InstallLedger { message } => write!(f, "{message}"),
             Self::NoActiveReplacement { target } => {
                 write!(f, "no enabled package currently replaces `{target}`")
             }
@@ -316,14 +324,19 @@ fn contribution_ids_of(record: &PackageRecord) -> Vec<String> {
         .collect()
 }
 
+/// Default configuration root: `~/.config/clay`.
+pub fn default_config_root() -> std::path::PathBuf {
+    match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+        Some(home) => std::path::PathBuf::from(home).join(".config").join("clay"),
+        None => std::path::PathBuf::from(".clay-config"),
+    }
+}
+
 /// Default on-disk package store root shared by the CLI and the production
 /// server runtime: `~/.config/clay/packages`.
 pub fn default_store_root() -> std::path::PathBuf {
-    let base = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(std::path::PathBuf::from);
-    match base {
-        Some(home) => home.join(".config").join("clay").join("packages"),
+    match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+        Some(_) => default_config_root().join("packages"),
         None => std::path::PathBuf::from(".clay-packages"),
     }
 }
@@ -353,6 +366,8 @@ pub struct PackageService {
     revocations: HashMap<String, PackageRevocationRecord>,
     /// Durable host-owned user approvals (`clay-package-approval-v1`).
     approvals: crate::packages::approvals::PackageApprovalStore,
+    /// Clay-initiated install ledger (pinned/floating provenance).
+    ledger: crate::packages::ledger::InstallLedger,
 }
 
 impl PackageService {
@@ -375,6 +390,7 @@ impl PackageService {
             package_generation: 0,
             revocations: HashMap::new(),
             approvals: crate::packages::approvals::PackageApprovalStore::in_memory(),
+            ledger: crate::packages::ledger::InstallLedger::in_memory(),
         }
     }
 
@@ -392,9 +408,50 @@ impl PackageService {
             .map_err(|error| PackageServiceError::ApprovalStore {
                 message: error.to_string(),
             })?;
+        let ledger =
+            crate::packages::ledger::InstallLedger::open(&store_root).map_err(|error| {
+                PackageServiceError::InstallLedger {
+                    message: error.to_string(),
+                }
+            })?;
         let mut service = Self::new(store_root, backend);
         service.approvals = approvals;
+        service.ledger = ledger;
         Ok(service)
+    }
+
+    /// Production server service: durable stores plus REAL manager discovery.
+    /// The server never spawns package managers per request; this runs one
+    /// manager process at boot so the configuration `loadPackage` path can
+    /// resolve store-installed packages (Plan 115). Discovery failure or a
+    /// missing manager falls back to the previous no-discovery behavior:
+    /// third-party store packages stay `packages.not_installed` (fail-closed).
+    pub fn open_production(store_root: impl Into<PathBuf>) -> Self {
+        let store_root = store_root.into();
+        let fallback_error = |error: String| -> Self {
+            eprintln!(
+                "clay: package discovery unavailable ({error}); store packages stay unloaded"
+            );
+            Self::new(
+                PathBuf::new(),
+                Box::new(crate::packages::manager::FakeBackend::new()),
+            )
+        };
+        let (_, backend) = match crate::packages::manager::resolve_manager_backend() {
+            Ok(resolved) => resolved,
+            Err(error) => return fallback_error(error.message),
+        };
+        let mut service = match Self::open(&store_root, backend) {
+            Ok(service) => service,
+            Err(error) => return fallback_error(error.to_string()),
+        };
+        if let Err(error) = service.refresh_installed() {
+            eprintln!(
+                "clay: package discovery failed ({}); store packages stay unloaded",
+                error
+            );
+        }
+        service
     }
 
     /// The approval store (read-only) for host-side coverage checks.
@@ -624,7 +681,7 @@ impl PackageService {
     ///
     /// Each CLI invocation is a fresh process with a fresh [`PackageService`],
     /// so without this call `installed` is empty even though packages were
-    /// installed by a previous `clay package add`. Discovery delegates to the
+    /// installed by a previous `clay install`. Discovery delegates to the
     /// backend's `list_installed` (e.g. `pnpm list --json`) and does **not**
     /// execute package code; it only reads `package.json` metadata. Enabled
     /// state is intentionally kept in memory per process.
@@ -665,6 +722,15 @@ impl PackageService {
         package_spec: &str,
         options: crate::packages::manager::PackageInstallOptions,
     ) -> Result<(), PackageServiceError> {
+        // v1 gate: only `npm:` registry specifiers install. Parsing happens
+        // before any backend process is spawned and fails closed otherwise;
+        // the parsed model also drives exact-name discovery below.
+        let spec = crate::packages::manager::PackageSpec::parse(package_spec).map_err(|error| {
+            PackageServiceError::InvalidSpecifier {
+                message: error.to_string(),
+            }
+        })?;
+
         // Ensure the store directory exists before invoking the backend; pnpm
         // needs a valid current working directory.
         std::fs::create_dir_all(&self.store.root).map_err(|error| {
@@ -689,18 +755,18 @@ impl PackageService {
             .list_installed(&self.store)
             .map_err(PackageServiceError::BackendError)?;
 
-        // Find the newly installed package in the discovery list.
-        // Match by the package spec prefix or name field.
-        let base_name = package_spec.split('@').next().unwrap_or(package_spec);
+        // Find the newly installed package in the discovery list by exact
+        // resolved name. Manager `list` output reports the bare name
+        // (`@arnilo/st`), never the `npm:` spec (and never a `@`-split
+        // prefix), which is why string-splitting the spec never matched;
+        // requested-spec equality is retained for in-memory/fake backends
+        // that echo the spec verbatim.
         let found = discovered.into_iter().find(|d| {
             d.provenance.requested_spec == package_spec
                 || d.package_json
                     .get("name")
                     .and_then(Value::as_str)
-                    .map(|name| {
-                        name == package_spec || name == base_name || package_spec.starts_with(name)
-                    })
-                    .unwrap_or(false)
+                    .is_some_and(|name| name == spec.name)
         });
 
         if let Some(pkg) = found {
@@ -717,6 +783,20 @@ impl PackageService {
                 pkg.package_root.clone(),
                 diagnostics,
             );
+            self.ledger
+                .record(crate::packages::ledger::InstallRecord {
+                    name: name.clone(),
+                    spec: package_spec.to_string(),
+                    pinned: spec.version.is_some(),
+                    version: provenance.resolved_version.clone(),
+                    source: crate::packages::manager::PackageSourceKind::NpmRegistry
+                        .as_str()
+                        .to_string(),
+                    installed_at: crate::packages::approvals::rfc3339_now(),
+                })
+                .map_err(|error| PackageServiceError::InstallLedger {
+                    message: error.to_string(),
+                })?;
             self.installed.insert(
                 name,
                 InstalledPackage {
@@ -1143,7 +1223,25 @@ impl PackageService {
         self.installed.remove(package_name);
         self.authorizations.remove(package_name);
         self.revoke_language_server_grants(package_name);
+        self.ledger
+            .remove(package_name)
+            .map_err(|error| PackageServiceError::InstallLedger {
+                message: error.to_string(),
+            })?;
         Ok(())
+    }
+
+    /// Clay-initiated install record, if any. Absent means unmanaged
+    /// (discovered in the store but not installed through Clay).
+    pub fn install_record(
+        &self,
+        package_name: &str,
+    ) -> Option<&crate::packages::ledger::InstallRecord> {
+        self.ledger.get(package_name)
+    }
+
+    pub fn install_records(&self) -> Vec<&crate::packages::ledger::InstallRecord> {
+        self.ledger.records().collect()
     }
 
     /// List all installed packages with their enabled status.
@@ -1170,6 +1268,14 @@ impl PackageService {
         self.installed
             .get(package_name)
             .map(|installed| self.inspection_from_installed(package_name, installed, false))
+    }
+
+    /// Inspect every compiled bundled inventory package. Does not enable,
+    /// authorize, or execute anything.
+    pub fn list_bundled_inventory() -> Vec<PackageInspection> {
+        crate::packages::bundled::bundled_package_names()
+            .filter_map(Self::inspect_bundled_inventory)
+            .collect()
     }
 
     /// Inspect a compiled bundled inventory package without a store or pnpm.

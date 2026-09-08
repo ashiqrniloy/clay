@@ -67,15 +67,20 @@ function readPage(text: string, options: ReadTextOptions): ReadTextResult {
   if (totalBytes > options.maxScanBytes) {
     throw new Error(`Text read exceeded ${options.maxScanBytes} byte scan limit`);
   }
+  const start = Math.max(0, options.offset - 1);
+  if (start >= lines.length) {
+    throw new Error(`Offset ${options.offset} is beyond end of file (${lines.length} lines total)`);
+  }
   const output: string[] = [];
   let outputBytes = 0;
   let truncatedBy: "lines" | "bytes" | null = null;
   let firstLineExceedsLimit = false;
-  for (const line of lines) {
+  for (let i = start; i < lines.length; i++) {
     if (output.length >= requestedLines) {
       truncatedBy = "lines";
       break;
     }
+    const line = lines[i];
     const lineBytes = Buffer.byteLength(line, "utf8");
     if (output.length === 0 && lineBytes > options.maxBytes) {
       firstLineExceedsLimit = true;
@@ -90,10 +95,13 @@ function readPage(text: string, options: ReadTextOptions): ReadTextResult {
     output.push(line);
     outputBytes += withSeparator;
   }
-  const clientReturnedPage = lines.length >= requestedLines && requestedLines > 0;
-  const hasMore = !firstLineExceedsLimit && (output.length < lines.length || clientReturnedPage);
-  const nextOffset = hasMore && output.length > 0 ? options.offset + output.length : undefined;
-  const totalLines = clientReturnedPage ? undefined : lines.length;
+  const consumed = start + output.length;
+  const hasMore = firstLineExceedsLimit || consumed < lines.length;
+  const nextOffset = !hasMore
+    ? undefined
+    : firstLineExceedsLimit
+      ? options.offset
+      : options.offset + output.length;
   return {
     content: firstLineExceedsLimit ? "" : output.join("\n"),
     startLine: options.offset,
@@ -103,7 +111,7 @@ function readPage(text: string, options: ReadTextOptions): ReadTextResult {
     truncatedBy,
     firstLineExceedsLimit,
     scannedBytes: totalBytes,
-    totalLines,
+    totalLines: lines.length,
     totalBytes,
   };
 }

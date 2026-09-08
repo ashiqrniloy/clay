@@ -76,4 +76,4 @@ Publication requires `render-decorations`, matching package provenance, current 
 
 ## Coverage
 
-Deterministic coverage: `tests/range_diagnostics.rs`, `tests/syntax_grammar.rs`, `tests/parse_coordinator.rs`, `tests/performance_protocol.rs`, `tests/editor_performance_invariants.rs`, `tests/package_loading_docs.rs`, and `tests/manual_smoke_docs.rs`. Manual invalid/repair matrix: `docs/development/launch-and-gui-smoke.md` Phase 18.17 section. Implementation wiki: `docs/wiki/modules/phase18.17-range-diagnostics-primitive-review.md`.
+Deterministic coverage: `tests/range_diagnostics.rs`, `tests/syntax_grammar.rs`, `tests/parse_coordinator.rs`, `tests/performance_protocol.rs`, `tests/editor_performance_invariants.rs`, `tests/package_loading_docs.rs`, and `tests/manual_smoke_docs.rs`. Manual invalid/repair matrix: `docs/development/launch-and-gui-smoke.md` Phase 18.17 section. Implementation wiki: `docs/wiki/archive/phase18.17-range-diagnostics-primitive-review.md`.

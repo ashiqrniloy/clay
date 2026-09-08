@@ -64,8 +64,8 @@ Extensibility is achieved through inert declarative manifests and typed IPC APIs
 - **Design-System Recipe Separation:** Separation of content themes, user-owned typography (`UiTextVariant`), and UI design-system component recipes.
 - **Recipe Matrix & Catalogs:**
   - Recipe matrix: `docs/development/ui-design-system-recipe-matrix.md`
-  - Component catalog: `.agents/skills/clay-ui/references/components.md`
-  - Token catalog: `.agents/skills/clay-ui/references/tokens.md`
+  - Component catalog: `.agents/skills/clay-execution/references/components.md`
+  - Token catalog: `.agents/skills/clay-execution/references/tokens.md`
   - React UI mapping: `docs/development/react-ui-catalog-mapping.md`
 - **Absences & Fabrication Prohibitions:** No artificial testimonials, fabricated user counts, or invented commercial benchmarks.
 

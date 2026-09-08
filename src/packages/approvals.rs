@@ -478,7 +478,7 @@ impl PackageApprovalStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(ApprovalStoreError::Io)?;
         }
-        atomic_write_owner_only(path, &bytes)
+        atomic_write_owner_only(path, &bytes).map_err(ApprovalStoreError::Io)
     }
 
     /// Check that a current, unrevoked approval covers the exact request.
@@ -626,15 +626,15 @@ fn validate_record(record: &PackageApprovalRecord) -> Result<(), String> {
 // ponytail: no parent-directory fsync; the atomic rename already guarantees
 // the store is never torn, matching src/server/workspace/mod.rs atomic saves.
 // Plan 060 filesystem-integrity work may consolidate this helper later.
-fn atomic_write_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ApprovalStoreError> {
+pub(crate) fn atomic_write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let stem = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "clay-approvals".to_string());
+        .unwrap_or_else(|| "clay-store".to_string());
     let temp_path = parent.join(format!(".{stem}.tmp-{}", std::process::id()));
 
-    let result = (|| -> Result<(), ApprovalStoreError> {
+    let result = (|| -> std::io::Result<()> {
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -642,19 +642,18 @@ fn atomic_write_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ApprovalStor
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        let mut file = options.open(&temp_path).map_err(ApprovalStoreError::Io)?;
-        file.write_all(bytes).map_err(ApprovalStoreError::Io)?;
-        file.sync_all().map_err(ApprovalStoreError::Io)?;
+        let mut file = options.open(&temp_path)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
         drop(file);
         #[cfg(unix)]
         {
             // Ensure owner-only mode even if a previous store existed with
             // wider permissions (rename preserves the temp's mode).
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600))
-                .map_err(ApprovalStoreError::Io)?;
+            fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600))?;
         }
-        fs::rename(&temp_path, path).map_err(ApprovalStoreError::Io)?;
+        fs::rename(&temp_path, path)?;
         Ok(())
     })();
     if result.is_err() {

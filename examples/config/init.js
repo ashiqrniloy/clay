@@ -620,6 +620,16 @@ import { clientExecuteEditorCommand } from "clay:editor";
 // Clay". The grant-before-loadPackage ordering constraint lives INSIDE
 // packages/first-party.js (see its header).
 //
+// `clay install npm:<spec>` appends its own block to ~/.config/clay/init.js
+// (not this file):
+//
+//   // clay install npm:@scope/name — remove with `clay remove npm:@scope/name`
+//   await loadPackage("@scope/name");
+//
+// Idempotent, removed by `clay remove npm:<spec>`, and inert until
+// `clay package adopt` — see packages/third-party.js for the full
+// install/remove/update/adopt contract.
+//
 // Optional modules may not exist at evaluation time; paths are still
 // validated to stay inside the config root.
 await loadConfigurationModule({
@@ -660,7 +670,22 @@ await loadConfigurationModule({
 // Commented safe examples (uncomment deliberately; the active part of this
 // file stays copy-safe):
 //
-// import { compact, searchSessions, setFullAutonomy } from "clay:agent";
+// import { compact, searchSessions, setFullAutonomy, setRunOptions } from "clay:agent";
+//
+// // Coding-run policy caps (Prism 0.5.5: number or null; null disables).
+// // Defaults: everything unbounded (tokens, turns, tool rounds, tool calls,
+// // wall). compactAfterTokens here is the future auto-compact
+// // trigger (default 800000, unused until wired) — not the OM
+// // agent.compact threshold (decision 2158, 80000):
+// await setRunOptions({
+//   maxInputTokens: null,
+//   maxOutputTokens: null,
+//   // Example fence for chat-like hosts (all optional):
+//   maxTurns: 64,
+//   maxWallTimeMs: 1_800_000,
+//   compactAfterTokens: 800_000,
+//   compaction: "llm",
+// });
 //
 // // Full autonomy (decision 2157) defaults to false: gated tool calls
 // // (out-of-workspace writes, shell metacharacters, …) require approval.

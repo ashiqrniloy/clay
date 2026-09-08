@@ -69,13 +69,13 @@ assert!(index.contains("reference/primitives/markdown-mode-requirements.md"));
 ## Related
 
 - [Primitive Architecture](primitive-architecture.md)
-- [Rendering Primitives](rendering-primitives.md)
+- [Rendering Primitives](../archive/rendering-primitives.md)
 - [Parse Task Lifecycle](parse-task-lifecycle.md)
 - [Behavior Manifests](behavior-manifests.md)
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [Clay JS Documentation Registry](clay-js-doc-registry.md)
 - [Icon Pack Runtime](icon-pack-runtime.md) (Plan 112 React realization of the icon-slot/tooltip-shell primitive gaps: ClayIcon, ClayIconButton, ClayTooltip)
 - `plans/016-Phase16-Mode-and-Package-Primitive-Architecture-Analysis.md`
-- `.agents/skills/project-patterns/references/package-distribution.md`
-- `.agents/skills/project-patterns/references/behavior-manifests.md`
-- `.agents/skills/project-patterns/references/protocol-and-performance.md`
+- `.agents/skills/clay-execution/references/packages.md`
+- `.agents/skills/clay-execution/references/protocol-perf.md`
+- `.agents/skills/clay-execution/references/protocol-perf.md`

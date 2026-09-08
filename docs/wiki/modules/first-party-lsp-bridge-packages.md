@@ -291,7 +291,7 @@ Base packages remain usable without bridge grants. Removing a bridge `loadPackag
 
 ## Related
 
-- [Phase 18.21 LSP Bridge Primitive Review](phase18.21-lsp-bridge-primitive-review.md)
+- [Phase 18.21 LSP Bridge Primitive Review](../archive/phase18.21-lsp-bridge-primitive-review.md)
 - [Language Intelligence](language-intelligence.md)
 - [Language Server Process Service](language-server-process-service.md)
 - [Embedded JavaScript Runtime](embedded-js-runtime.md)

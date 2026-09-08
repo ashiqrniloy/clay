@@ -3,7 +3,7 @@
 Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md`.  
 Plan reference: `plans/103-UI-Design-System-Component-and-Surface-Migration.md` (Task 1).  
 Recipe Matrix: `docs/development/ui-design-system-recipe-matrix.md`.  
-Catalog reference: `.agents/skills/clay-ui/references/components.md` and `.agents/skills/clay-ui/references/tokens.md`.
+Catalog reference: `.agents/skills/clay-execution/references/components.md` and `.agents/skills/clay-execution/references/tokens.md`.
 
 ---
 

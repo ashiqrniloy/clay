@@ -317,7 +317,7 @@ Save-as, file watchers, and autosave remain deferred. When implemented, they wil
 - [Server File Workspace Model](../wiki/modules/server-file-workspace.md) — server workspace roots, grants, open/save/reload internals
 - [Client File Dialog Backend](../wiki/modules/client-file-dialog.md) — platform dialog implementations
 - [Launch and GUI Smoke Validation](launch-and-gui-smoke.md) — command-first smoke paths and fixtures
-- [Client/Server Edit Acknowledgement Flow](../wiki/flows/client-server-edit-ack.md) — edit queue, acks, resync
+- [Client/Server Edit Acknowledgement Flow](../wiki/archive/client-server-edit-ack.md) — edit queue, acks, resync
 - [Clay JS API: serverSaveDocument](../reference/clay-js-api/documents/server-save-document.md)
 - [Clay JS API: serverReloadDocument](../reference/clay-js-api/documents/server-reload-document.md)
 - [Clay JS API: clientOpenFileDialog](../reference/clay-js-api/documents/client-open-file-dialog.md)

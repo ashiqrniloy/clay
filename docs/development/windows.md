@@ -47,7 +47,7 @@ Implementation details are documented in:
 
 - [Server IPC Skeleton](../wiki/modules/server-ipc-skeleton.md)
 - [Client Snapshot Bootstrap](../wiki/modules/client-snapshot-bootstrap.md)
-- [Client/Server Edit Acknowledgement Flow](../wiki/flows/client-server-edit-ack.md)
+- [Client/Server Edit Acknowledgement Flow](../wiki/archive/client-server-edit-ack.md)
 
 ## Validation Commands
 

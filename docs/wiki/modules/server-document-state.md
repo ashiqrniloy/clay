@@ -140,7 +140,7 @@ The response is an `EditAck` with confirmed version `2`, and the canonical rope 
 - [Server IPC Skeleton](server-ipc-skeleton.md)
 - [Tabs and Independent Client Views](tabs-and-clients.md) — `TabServerState` routing and per-tab document ownership
 - [Protocol Codec](protocol-codec.md)
-- [Client/Server Edit Acknowledgement Flow](../flows/client-server-edit-ack.md)
+- [Client/Server Edit Acknowledgement Flow](../archive/client-server-edit-ack.md)
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
 - [Document Leases and Region Locks](../flows/document-leases-and-region-locks.md)
 - `plans/005-Phase4-IPC-Client-Server-Skeleton.md`

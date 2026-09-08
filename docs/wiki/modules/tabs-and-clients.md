@@ -8,8 +8,8 @@ and reclaim, the isolation invariants, and the Phase 22.5 client-owned
 window-state persistence (restore of tabs, workspaces, split trees, and
 per-pane documents). The shell chrome (tab bar, inactive-tab retention,
 per-tab `TabChrome`) lives in
-[Masonry Shell Runtime](masonry-shell.md); per-pane document hosting in
-[Pane Document Views](pane-document-views.md); reconnect session restoration
+[Masonry Shell Runtime](../archive/masonry-shell.md); per-pane document hosting in
+[Pane Document Views](../archive/pane-document-views.md); reconnect session restoration
 in [Multi-Document Sessions](multi-document-sessions.md).
 
 ## Source
@@ -209,7 +209,7 @@ and `tests/rust_visibility_api_mapping.rs::phase22_8_per_tab_state_has_no_new_pu
 ## Client side: the multi-connection Driver
 
 The driver lives in `src/driver/` (Phase 22.7 extraction — see the
-[driver module map](driver.md)); this section summarizes its shape.
+[driver module map](../archive/driver.md)); this section summarizes its shape.
 
 - The `Driver` owns `tabs: BTreeMap<ClientId, TabState>` — keyed by
   `ClientId`, **not** `TabId`, because the server-assigned `TabId` arrives
@@ -506,13 +506,13 @@ Verification lives in `src/masonry_shell/mod.rs` tab-bar/typography/accessibilit
 
 ## Related
 
-- [Driver Module Map](driver.md) — the `src/driver/` tab subsystem
+- [Driver Module Map](../archive/driver.md) — the `src/driver/` tab subsystem
   (lifecycle, reconcile, restore).
-- [Masonry Shell Runtime](masonry-shell.md) — tab chrome, tab bar, stashed
+- [Masonry Shell Runtime](../archive/masonry-shell.md) — tab chrome, tab bar, stashed
   inactive retention, per-tab routing queries.
 - [Multi-Document Sessions](multi-document-sessions.md) — reconnect document
   identity retention and re-open.
-- [Pane Document Views](pane-document-views.md) — per-pane views and the
+- [Pane Document Views](../archive/pane-document-views.md) — per-pane views and the
   close guard reused for dirty tabs.
 - [Client Snapshot Bootstrap](client-snapshot-bootstrap.md) — connection
   bootstrap each tab reuses.
@@ -618,7 +618,7 @@ rejected-close fix:
   `src/driver/` (`mod` / `reconcile` / `restore`), shrinking the root from
   6194 to 3603 lines with the `with_shell`/`with_editor`/`with_view` typed
   helpers replacing the `edit_widget` + `try_downcast` boilerplate — see
-  the [driver module map](driver.md). No logic changed; the bin test set is
+  the [driver module map](../archive/driver.md). No logic changed; the bin test set is
   identical to the pre-move baseline.
 - **Split aliases**: `shell.clientSplitPaneRight`/`Down` joined the
   bindable `client_ui` surface, resolving to the canonical split handlers

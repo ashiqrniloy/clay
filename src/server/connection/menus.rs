@@ -687,17 +687,53 @@ where
             Ok(())
         }
         AgentPickerActivate::StartOauth { provider } => {
-            if let Some(host) = host
-                && let Ok(start) = host.start_oauth(&provider).await
-                && let Some(session) = menu_sessions.get_mut(session_id)
-                && let Some(picker) = session.agent_picker_mut()
-            {
-                let uri = if start.user_code.is_empty() {
-                    start.authorization_url
-                } else {
-                    start.verification_uri
-                };
-                picker.enter_oauth(start.login_id, start.user_code, uri);
+            if let Some(host) = host {
+                match host.start_oauth(&provider).await {
+                    Ok(start) => {
+                        if let Some(session) = menu_sessions.get_mut(session_id)
+                            && let Some(picker) = session.agent_picker_mut()
+                        {
+                            let uri = if start.user_code.is_empty() {
+                                start.authorization_url
+                            } else {
+                                start.verification_uri
+                            };
+                            picker.enter_oauth(start.login_id, start.user_code, uri.clone());
+                            // Plan 116: automatically try the default OS
+                            // browser once the OAuth stage appears; if that
+                            // fails the stage itself offers "Open in
+                            // browser" / "Copy URL" fallbacks.
+                            if let Err(error) = crate::server::open::open_url(&uri) {
+                                codec
+                                    .write_server_message(
+                                        stream,
+                                        &ServerMessage::RuntimeDiagnostic(
+                                            crate::protocol::RuntimeDiagnostic::warning(
+                                                "agent.oauth_auto_open_failed",
+                                                format!(
+                                                    "Could not open the authorization URL automatically: {error}. Use 'Open in browser' or 'Copy URL' below."
+                                                ),
+                                            ),
+                                        ),
+                                    )
+                                    .await?;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        codec
+                            .write_server_message(
+                                stream,
+                                &ServerMessage::RuntimeDiagnostic(
+                                    crate::protocol::RuntimeDiagnostic::error(
+                                        "agent.oauth_start_failed",
+                                        error.to_string(),
+                                    ),
+                                ),
+                            )
+                            .await?;
+                    }
+                }
             }
             push_active_picker(codec, stream, menu_sessions, client_id, session_id).await
         }
@@ -721,6 +757,73 @@ where
             } else {
                 push_active_picker(codec, stream, menu_sessions, client_id, session_id).await
             }
+        }
+        // Plan 116: manual browser-open and clipboard-copy fallbacks for the
+        // OAuth authorization URL. Both keep the stage open so the user can
+        // switch browsers, re-open, or check authorization afterwards.
+        AgentPickerActivate::OpenOauthUrl { uri } => {
+            match crate::server::open::open_url(&uri) {
+                Ok(()) => {
+                    codec
+                        .write_server_message(
+                            stream,
+                            &ServerMessage::RuntimeDiagnostic(
+                                crate::protocol::RuntimeDiagnostic::info(
+                                    "agent.oauth_open_url",
+                                    "Opened the authorization URL in your default browser.",
+                                ),
+                            ),
+                        )
+                        .await?;
+                }
+                Err(error) => {
+                    codec
+                        .write_server_message(
+                            stream,
+                            &ServerMessage::RuntimeDiagnostic(
+                                crate::protocol::RuntimeDiagnostic::error(
+                                    "agent.oauth_open_url_failed",
+                                    format!(
+                                        "Could not open the authorization URL: {error}. Use 'Copy URL' to open it in another browser."
+                                    ),
+                                ),
+                            ),
+                        )
+                        .await?;
+                }
+            }
+            push_active_picker(codec, stream, menu_sessions, client_id, session_id).await
+        }
+        AgentPickerActivate::CopyOauthUrl { uri } => {
+            match crate::server::open::copy_to_clipboard(&uri) {
+                Ok(()) => {
+                    codec
+                        .write_server_message(
+                            stream,
+                            &ServerMessage::RuntimeDiagnostic(
+                                crate::protocol::RuntimeDiagnostic::info(
+                                    "agent.oauth_copy_url",
+                                    "Authorization URL copied to the clipboard.",
+                                ),
+                            ),
+                        )
+                        .await?;
+                }
+                Err(error) => {
+                    codec
+                        .write_server_message(
+                            stream,
+                            &ServerMessage::RuntimeDiagnostic(
+                                crate::protocol::RuntimeDiagnostic::error(
+                                    "agent.oauth_copy_url_failed",
+                                    format!("Could not copy the authorization URL: {error}."),
+                                ),
+                            ),
+                        )
+                        .await?;
+                }
+            }
+            push_active_picker(codec, stream, menu_sessions, client_id, session_id).await
         }
         AgentPickerActivate::Select { kind, id } => {
             if let Some(host) = host {

@@ -36,6 +36,7 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [Range Diagnostics](reference/primitives/diagnostics.md) — Phase 18.17 byte-range diagnostic primitive for explicit analyzers, theme-owned squiggles, and future LSP bridges; Tree-sitter highlighting has no diagnostic authority.
 - [Language Intelligence and LSP 3.17 Bridge Contract](reference/primitives/language-intelligence.md) — Phase 18.20 analyzer-neutral intelligence primitives, `language-server` authority, and the LSP 3.17 → Clay mapping contract for Phase 18.21 bridge packages.
 - [Launch and GUI Smoke Validation](development/launch-and-gui-smoke.md) — command-first `cargo run`, tiered syntax-engine smoke, `smoke-gui`, foreground server/client, GUI status, and local IPC validation.
+- [Distribution](development/distribution.md) — `@arnilo/clay` npm wrapper, curl installer, channel marker contract, publish dry-run verification, and rollback.
 - [File Open, Save, and Reload Workflow](development/file-open-save-reload-workflow.md) — selected-file and workspace open, server-first save/reload, dirty-state tracking, conflict recovery menus, multi-document sessions, capability tokens, platform support matrices, and manual smoke steps.
 - [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixtures, Plan 099 traces/matrix, incremental editor bounds, Criterion baselines, opt-in profiling, and validation commands.
 - [UI Observability and SDUI Structural Regression](development/ui-observability.md) — headless SDUI structural regression coverage, status observability, window-driver smoke relationship, and deferred GPU-backed pixel snapshot path.
@@ -184,6 +185,7 @@ The generated documentation registry must read this section as the explicit incl
 - [commandRegister](reference/clay-js-api/agent/command-register.md) — `agent.commandRegister`
 - [commandDispatch](reference/clay-js-api/agent/command-dispatch.md) — `agent.commandDispatch`
 - [knowledgeSetOptions](reference/clay-js-api/agent/knowledge-set-options.md) — `agent.knowledgeSetOptions`
+- [setRunOptions](reference/clay-js-api/agent/set-run-options.md) — `agent.setRunOptions`
 - [serverAddWorkspaceRoot](reference/clay-js-api/workspace/server-add-workspace-root.md) — `workspace.serverAddWorkspaceRoot`
 - [serverCancelListing](reference/clay-js-api/workspace/server-cancel-listing.md) — `workspace.serverCancelListing`
 - [serverCreateListingCancelToken](reference/clay-js-api/workspace/server-create-listing-cancel-token.md) — `workspace.serverCreateListingCancelToken`

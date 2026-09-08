@@ -264,7 +264,7 @@ cargo test --test protocol primitives_docs::
 ## Related
 
 - [First-Party LSP Bridge Packages](first-party-lsp-bridge-packages.md)
-- [Phase 18.14 First-Party Rust, TypeScript, and JavaScript Language Package Expansion Primitive Review](phase18.14-language-package-expansion-primitive-review.md)
+- [Phase 18.14 First-Party Rust, TypeScript, and JavaScript Language Package Expansion Primitive Review](../archive/phase18.14-language-package-expansion-primitive-review.md)
 - [Mode Registry](mode-registry.md)
 - [Command Registry](command-registry.md)
 - [Syntax Grammar Registry](syntax-grammar-registry.md)
@@ -278,5 +278,5 @@ cargo test --test protocol primitives_docs::
 - `docs/reference/packages/javascript.md`
 - `docs/reference/packages/creating-packages.md`
 - `docs/development/launch-and-gui-smoke.md`
-- [End-to-End File Browser Workflow Primitive Review](end-to-end-file-browser-workflow-primitive-review.md)
+- [End-to-End File Browser Workflow Primitive Review](../archive/end-to-end-file-browser-workflow-primitive-review.md)
 - [Workspace Discovery and File Browser](workspace-file-browser.md)

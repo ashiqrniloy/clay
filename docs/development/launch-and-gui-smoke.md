@@ -881,4 +881,4 @@ Advanced endpoint arguments are optional debugging aids only, for example when r
 
 ## Implementation Details
 
-For code-level behavior, see the [Client/Server Edit Acknowledgement Flow](../wiki/flows/client-server-edit-ack.md), [Client Snapshot Bootstrap](../wiki/modules/client-snapshot-bootstrap.md), and [Server IPC Skeleton](../wiki/modules/server-ipc-skeleton.md).
+For code-level behavior, see the [Client/Server Edit Acknowledgement Flow](../wiki/archive/client-server-edit-ack.md), [Client Snapshot Bootstrap](../wiki/modules/client-snapshot-bootstrap.md), and [Server IPC Skeleton](../wiki/modules/server-ipc-skeleton.md).

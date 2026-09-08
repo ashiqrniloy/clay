@@ -38,6 +38,7 @@ import {
   createSessionEntry,
   createSkillRegistry,
   DEFAULT_SESSION_SEARCH_LIMIT,
+  HARD_RUN_LIMITS,
   listSessionBranches,
   SESSION_SEARCH_WORKSPACE_METADATA_KEY,
   providerDone,
@@ -74,6 +75,7 @@ import {
   createNamedCompactionStrategy,
   isCompactionStrategyName,
   registerCompactionStrategies,
+  type CompactionStrategyName,
 } from "./compaction.js";
 import {
   WIKI_READ_PAGE_TOOL_NAME,
@@ -90,6 +92,37 @@ import {
   type GraftExtensionOptions,
   type GraftMode,
 } from "@arnilo/prism-memory/graft";
+
+/** Auto-compact trigger. Stored by run.setOptions; unused until wired. */
+const DEFAULT_COMPACT_TRIGGER_TOKENS = 800_000;
+
+/** Policy cap: finite positive integer or `null` (Prism 0.5.5: disable that axis). */
+type PolicyCap = number | null;
+
+interface RunConfig {
+  maxTurns: PolicyCap;
+  maxToolRounds: PolicyCap;
+  maxToolCalls: PolicyCap;
+  maxWallTimeMs: PolicyCap;
+  maxInputTokens: PolicyCap;
+  maxOutputTokens: PolicyCap;
+  compactAfterTokens: number;
+  compaction: CompactionStrategyName;
+}
+
+/** Coding envelope (Prism 0.5.5): fence axes disabled (`null`); the only
+ *  hard caps left are Prism's per-frame request/response bytes. A host that
+ *  wants a fence sets finite values via `run.setOptions`. */
+const DEFAULT_RUN_CONFIG: RunConfig = {
+  maxTurns: null,
+  maxToolRounds: null,
+  maxToolCalls: null,
+  maxWallTimeMs: null,
+  maxInputTokens: null,
+  maxOutputTokens: null,
+  compactAfterTokens: DEFAULT_COMPACT_TRIGGER_TOKENS,
+  compaction: "llm",
+};
 
 /** Per-session OM auto-compaction threshold override (2158 default 80000).
  *  Only meaningful for OM-attached sessions. */
@@ -176,6 +209,8 @@ const MAX_COMPLETION_COMMANDS = 64;
 const MAX_COMPLETION_NAME_CHARS = 48;
 const MAX_COMPLETION_DESCRIPTION_CHARS = 96;
 const MAX_OM_SUMMARY_CHARS = 160;
+/** Device-code request is one POST. Stay under agent RPC_TIMEOUT (30s). */
+const OAUTH_START_TIMEOUT_MS = 20_000;
 
 export type EmitFn = (method: string, params: unknown) => void;
 
@@ -346,6 +381,31 @@ function optString(params: Record<string, unknown>, key: string): string | undef
   return value;
 }
 
+function optPolicyCap(params: Record<string, unknown>, key: string): PolicyCap | undefined {
+  const value = params[key];
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw rpcError(-32602, `${key} must be a positive safe integer or null`);
+  }
+  return value;
+}
+
+function optPositiveInt(params: Record<string, unknown>, key: string): number | undefined {
+  const value = params[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw rpcError(-32602, `${key} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function derivedTotalTokens(input: PolicyCap, output: PolicyCap): PolicyCap {
+  if (input === null || output === null) return null;
+  const sum = input + output;
+  return Number.isSafeInteger(sum) && sum >= 1 ? sum : null;
+}
+
 function isOauth(method: AuthMethod): method is OAuthAuthMethod {
   return method.kind === "oauth";
 }
@@ -414,6 +474,8 @@ export class ClayAgentHost {
   private readonly toolCaps: RepositoryToolCaps;
   /** Caps file path cited in truncation errors. */
   private readonly capsFile: string;
+  /** Coding-run ceilings + default compact strategy (init.js run.setOptions). */
+  private runConfig: RunConfig = { ...DEFAULT_RUN_CONFIG };
 
   private constructor(
     readonly dataDir: string,
@@ -678,6 +740,8 @@ export class ClayAgentHost {
         return this.environmentList();
       case "knowledge.setOptions":
         return this.knowledgeSetOptions(asRecord(params));
+      case "run.setOptions":
+        return this.runSetOptions(asRecord(params));
       default:
         throw rpcError(-32601, `unknown method: ${method}`);
     }
@@ -800,17 +864,24 @@ export class ClayAgentHost {
       runLedger: this.persistence,
       redactor: this.redactor,
       validator: createJsonSchemaToolArgumentValidator(),
-      // Coding-run ceilings: Prism's defaults (2min wall, 16 turns, 8 tool
-      // rounds) abort real tool-using runs on slow cloud models mid-stream.
-      // Under Prism's hard caps (30min wall / 1M input / 250k output).
+      // Coding-run ceilings from run.setOptions. Prism 0.5.5: omit
+      // maxProviderAttempts (lifts to maxTurns); pass null tokens so
+      // DEFAULT 40k/10k/50k cannot apply. Bytes are per-frame HARD
+      // (null rejected); 64 MiB is the ceiling on any single provider
+      // frame, never a run-lifetime sum (0.5.5 fixed cumulative charging).
       limits: {
-        maxTurns: 32,
-        maxToolRounds: 16,
-        maxToolCalls: 64,
-        maxWallTimeMs: 15 * 60_000,
-        maxInputTokens: 200_000,
-        maxOutputTokens: 100_000,
-        maxTotalTokens: 300_000,
+        maxTurns: this.runConfig.maxTurns,
+        maxToolRounds: this.runConfig.maxToolRounds,
+        maxToolCalls: this.runConfig.maxToolCalls,
+        maxWallTimeMs: this.runConfig.maxWallTimeMs,
+        maxInputTokens: this.runConfig.maxInputTokens,
+        maxOutputTokens: this.runConfig.maxOutputTokens,
+        maxTotalTokens: derivedTotalTokens(
+          this.runConfig.maxInputTokens,
+          this.runConfig.maxOutputTokens,
+        ),
+        maxRequestBytes: HARD_RUN_LIMITS.maxRequestBytes,
+        maxResponseBytes: HARD_RUN_LIMITS.maxResponseBytes,
       },
       // Host-verified identity default for every session and resumed run: the
       // daemon is the trust boundary that owns the workspace root and
@@ -1711,7 +1782,7 @@ export class ClayAgentHost {
 
   private async sessionCompact(params: Record<string, unknown>): Promise<unknown> {
     const sessionId = reqString(params, "sessionId");
-    const strategyName = optString(params, "strategy");
+    const strategyName = optString(params, "strategy") ?? this.runConfig.compaction;
     const threshold = params.compactAfterTokens;
     if (
       threshold !== undefined &&
@@ -1723,7 +1794,7 @@ export class ClayAgentHost {
     const live = await this.ensureLive(sessionId);
     try {
       const result = await live.session.compact({
-        ...(strategyName ? { strategy: this.resolveCompaction(strategyName, live) } : {}),
+        strategy: this.resolveCompaction(strategyName, live),
         secrets: [...this.secrets],
       });
       const entry = result.entries?.[0];
@@ -1731,7 +1802,7 @@ export class ClayAgentHost {
         sessionId,
         summary: result.summary,
         entryId: entry?.id,
-        strategy: strategyName ?? (live.observationalMemory ? "om" : "default"),
+        strategy: strategyName,
       };
     } catch (error) {
       throw rpcError(-32000, error instanceof Error ? error.message : String(error));
@@ -2204,9 +2275,12 @@ export class ClayAgentHost {
     const done = new Promise<void>((resolve) => {
       settle = resolve;
     });
+    let loginError: unknown;
+    const abort = new AbortController();
     const pending: PendingOauth = { provider, done, promise: Promise.resolve({} as OAuthCredentials) };
     pending.promise = Promise.resolve(
       method.oauth.login({
+        signal: abort.signal,
         onDeviceCode(code) {
           pending.info = { userCode: code.userCode, verificationUri: code.verificationUri };
           settle();
@@ -2217,16 +2291,33 @@ export class ClayAgentHost {
         },
       }),
     );
-    void pending.promise.then(settle, settle);
+    void pending.promise.then(settle, (error) => {
+      loginError = error;
+      settle();
+    });
     this.oauth.set(loginId, pending);
-    const timeout = new Promise<void>((resolve) => setTimeout(resolve, 50));
-    await Promise.race([pending.done, timeout]);
-    return {
-      loginId,
-      provider,
-      status: "started",
-      ...(pending.info ?? {}),
-    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        abort.abort();
+        reject(rpcError(-32000, `OAuth start timed out for ${provider}`));
+      }, OAUTH_START_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([pending.done, timeout]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    if (pending.info) {
+      return { loginId, provider, status: "started", ...pending.info };
+    }
+    this.oauth.delete(loginId);
+    abort.abort();
+    if (loginError) {
+      const message = loginError instanceof Error ? loginError.message : String(loginError);
+      throw rpcError(-32000, message);
+    }
+    throw rpcError(-32000, `OAuth start produced no device code or authorization URL for ${provider}`);
   }
 
   private async oauthPoll(params: Record<string, unknown>): Promise<unknown> {
@@ -2413,6 +2504,53 @@ export class ClayAgentHost {
       ? (params.args as JsonObject)
       : {};
     return command.execute(args, context);
+  }
+
+  /** Coding-run policy caps + default compact strategy. Partial update;
+   *  `null` disables that Prism axis. compactAfterTokens is stored and
+   *  unused until auto-compact is wired. */
+  private runSetOptions(params: Record<string, unknown>): unknown {
+    const maxTurns = optPolicyCap(params, "maxTurns");
+    const maxToolRounds = optPolicyCap(params, "maxToolRounds");
+    const maxToolCalls = optPolicyCap(params, "maxToolCalls");
+    const maxWallTimeMs = optPolicyCap(params, "maxWallTimeMs");
+    const maxInputTokens = optPolicyCap(params, "maxInputTokens");
+    const maxOutputTokens = optPolicyCap(params, "maxOutputTokens");
+    const compactAfterTokens = optPositiveInt(params, "compactAfterTokens");
+    const compactionRaw = params.compaction;
+    let compaction: CompactionStrategyName | undefined;
+    if (compactionRaw !== undefined) {
+      if (typeof compactionRaw !== "string" || !isCompactionStrategyName(compactionRaw)) {
+        throw rpcError(-32602, "compaction must be one of default|llm|om");
+      }
+      compaction = compactionRaw;
+    }
+    if (
+      maxTurns === undefined &&
+      maxToolRounds === undefined &&
+      maxToolCalls === undefined &&
+      maxWallTimeMs === undefined &&
+      maxInputTokens === undefined &&
+      maxOutputTokens === undefined &&
+      compactAfterTokens === undefined &&
+      compaction === undefined
+    ) {
+      throw rpcError(
+        -32602,
+        "run.setOptions requires a policy cap, compactAfterTokens, and/or compaction",
+      );
+    }
+    this.runConfig = {
+      maxTurns: maxTurns !== undefined ? maxTurns : this.runConfig.maxTurns,
+      maxToolRounds: maxToolRounds !== undefined ? maxToolRounds : this.runConfig.maxToolRounds,
+      maxToolCalls: maxToolCalls !== undefined ? maxToolCalls : this.runConfig.maxToolCalls,
+      maxWallTimeMs: maxWallTimeMs !== undefined ? maxWallTimeMs : this.runConfig.maxWallTimeMs,
+      maxInputTokens: maxInputTokens !== undefined ? maxInputTokens : this.runConfig.maxInputTokens,
+      maxOutputTokens: maxOutputTokens !== undefined ? maxOutputTokens : this.runConfig.maxOutputTokens,
+      compactAfterTokens: compactAfterTokens ?? this.runConfig.compactAfterTokens,
+      compaction: compaction ?? this.runConfig.compaction,
+    };
+    return { ...this.runConfig };
   }
 
   /** Opt-in wiki knowledge base (decision 2156, plan 108 task 12). Disabled

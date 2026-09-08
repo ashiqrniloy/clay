@@ -237,8 +237,8 @@ cargo test --test protocol primitives_docs::
 - [First-Party LSP Bridge Packages](first-party-lsp-bridge-packages.md)
 - [Transient Menu Session](transient-menu-session.md) — completion accept path and `CompletionMenuAcceptAction`
 - [First-Party Language Packages](first-party-language-packages.md) — `rust.snippets` / `typescript.snippets` providers
-- [Phase 18.19 Completion Extensions Primitive Review](phase18.19-completion-extensions-primitive-review.md)
-- [Phase 18.11 Completion Provider Framework Primitive Review](phase18.11-completion-provider-primitive-review.md)
+- [Phase 18.19 Completion Extensions Primitive Review](../archive/phase18.19-completion-extensions-primitive-review.md)
+- [Phase 18.11 Completion Provider Framework Primitive Review](../archive/phase18.11-completion-provider-primitive-review.md)
 - [Embedded JavaScript Runtime](embedded-js-runtime.md) — JS facade and op extension registration
 - [Language Intelligence](language-intelligence.md) — LSP completion maps back onto this primitive
 - [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `cancel_older_generations` removes stale provider registrations and aborts in-flight completion work after generation swap.

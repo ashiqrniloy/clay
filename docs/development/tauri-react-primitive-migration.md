@@ -3,8 +3,8 @@
 Plan 097 Phase 1 — review of existing editor, package, protocol, and runtime
 primitives before port work. Sources:
 `docs/reference/primitives/registry.md`,
-`docs/wiki/modules/{primitive-architecture,server-driven-ui,decoration-transport,parse-coordinator,embedded-js-runtime,phase25-agent-host-primitive-review}.md`,
-`.agents/skills/project-patterns/references/{mode-primitive-first,authority-boundaries}.md`,
+`docs/wiki/modules/{primitive-architecture,server-driven-ui,decoration-transport,parse-coordinator,embedded-js-runtime,phase25-agent-host-primitive-review}.md` (now under `docs/wiki/archive/`),
+`.agents/skills/clay-execution/references/packages.md`,
 and the parity ledger `docs/development/tauri-react-parity-ledger.json`.
 
 Approved architecture: `decision-logs/2026-08-23-0052-tauri-react-client-architecture.md`.

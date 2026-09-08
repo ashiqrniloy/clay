@@ -4,7 +4,7 @@ This guide explains how to design a Clay package and how packages are expected t
 
 Clay package APIs are evolving. This document intentionally distinguishes **current implemented public behavior**, **Phase 18.2 internal shell runtime behavior**, **Phase 18.3 runtime-backed slot UI contribution behavior**, **Phase 18.12 Clay-owned file browser behavior**, and **planned package-facing shell/layout/configuration behavior** so package authors and phase plans can update it iteratively as Clay's package architecture lands.
 
-The canonical inventory of reusable UI components, primitives, style variables, and theme tokens lives in the clay-ui skill catalog (`.agents/skills/clay-ui/references/components.md` and `.agents/skills/clay-ui/references/tokens.md`). Package UI must be composed from that catalog; update the catalog in the same change as any component or token addition.
+The canonical inventory of reusable UI components, primitives, style variables, and theme tokens lives in the clay-execution catalog (`.agents/skills/clay-execution/references/components.md` and `.agents/skills/clay-execution/references/tokens.md`). Package UI must be composed from that catalog; update the catalog in the same change as any component or token addition.
 
 ## Goals
 
@@ -316,6 +316,21 @@ Boundary rules (enforced per call, deny-by-default):
 - Keybinding-driven behavior needs no push channel: a package that owns a mode contributes `keyRouting` and `editorRules` through its mode declaration. `keyRouting.key` uses the same shared chord parser as `bindKey`; manifest routing takes precedence over built-in defaults once the package is activated.
 - Conflicts: multiple packages may hold `editor-control` for the same mode; Clay does not arbitrate. If two packages fight over behavior in a mode, deactivate one (package disable/adoption revoke applies live via runtime reload).
 - Revocation is immediate: disabling or unadopting the package removes the capability on the next runtime generation.
+
+## Installing Packages (host CLI)
+
+Package installation is a host CLI operation, not a JS API:
+`clay install npm:<spec>` fetches through the npm-compatible manager into
+the Clay-owned store and appends `await loadPackage("<name>")` to
+`~/.config/clay/init.js` (idempotent; `clay remove npm:<spec>` strips it).
+Install never enables, adopts, or executes the package.
+
+Configuration and `init.js` grant **no package-install authority**: config
+can only call `loadPackage` for already-installed packages, and
+`loadPackage` of an un-adopted third-party package fails closed with an
+adoption diagnostic — package JavaScript does not run until the user
+adopts it (`clay package adopt`). See
+`docs/development/distribution.md` for the distribution surfaces.
 
 ## Loading Packages from init.js
 
@@ -893,7 +908,7 @@ Packages should use these generic contribution APIs instead of teaching users to
 
 Clay components are package-facing declarations mapped to native widgets internally.
 
-Component catalog status (single source of truth: [`.agents/skills/clay-ui/references/components.md`](../../../.agents/skills/clay-ui/references/components.md); see also the [UI Components, Tokens, and Conformance](../ui-components.md) navigation page):
+Component catalog status (single source of truth: [`.agents/skills/clay-execution/references/components.md`](../../../.agents/skills/clay-execution/references/components.md); see also the [UI Components, Tokens, and Conformance](../ui-components.md) navigation page):
 
 | Component kind | Status | Purpose |
 | --- | --- | --- |
@@ -935,7 +950,7 @@ Phase 20.2 introduced a native chrome primitive layer (`src/shell/primitives.rs`
 - Package components map onto primitives by construction (SDUI paint routes chrome through primitive helpers).
 - Each primitive is token-driven and renders all declared interaction states.
 
-See `.agents/skills/clay-ui/references/components.md` for the full primitive inventory and token mappings.
+See `.agents/skills/clay-execution/references/components.md` for the full primitive inventory and token mappings.
 
 Component text defaults to the user-owned `ui` typography profile. Text-bearing `panel`, `label`, `button`, `list`, and `statusItem` declarations may request only a semantic `style.fontRole` of `"ui"`, `"monospace"`, or `"proportional"`; it selects the user-configured family stack and size together. Structural components and `editorView` cannot set `fontRole`. Packages must not provide `fontFamily`, `fontSize`, font stacks, raw renderer properties, CSS, font files, URLs, or renderer callbacks. `style.typography` remains a semantic Clay variant such as `typography.body`, `typography.title`, `typography.status`, `typography.display`, `typography.section`, `typography.detail`, or `typography.caption`, scaled from the configured role rather than an absolute size.
 
@@ -1328,7 +1343,7 @@ Theme packages themselves declare **inert style data only** (`clay.contributions
 
 ### Phase 20.1 authoring contract: typed token catalog, typography hierarchy, and token-backed defaults
 
-Phase 20.1 expanded the typed token catalog additively from five domains to ten. The full implemented catalog lives in the clay-ui skill reference (`.agents/skills/clay-ui/references/tokens.md`); this section records the package authoring contract.
+Phase 20.1 expanded the typed token catalog additively from five domains to ten. The full implemented catalog lives in the clay-execution reference (`.agents/skills/clay-execution/references/tokens.md`); this section records the package authoring contract.
 
 **Typed domains** (`ThemeTokenType`, ten): `color-role`, `spacing`, `radius`, `typography`, `opacity`, `dimension`, `elevation`, `motion-duration`, `z-level`, `density`. Every package token `type` must be one of these, and every `fallback` must be a same-typed Clay core token. The original five domains are unchanged; `dimension`, `elevation`, `motion-duration`, `z-level`, and `density` are additive.
 
@@ -1549,7 +1564,7 @@ This is rejected at `assemble_package_record` with `InvalidContributionDescripto
 - Conformance is host authority, not package-facing: validation runs inside Clay's Rust host validator at parse/install/theme-apply time; no `ui.validate*` op or `clay:*` facade exposes it.
 - Trusted classification comes from the compiled bundled inventory and provenance/integrity, never package naming or `@clay/*` prefix.
 
-See `.agents/skills/clay-ui/references/components.md` (conformance contract) and `.agents/skills/clay-ui/references/tokens.md` (rules) for the enforced-check lists. The conformance suite lives at `tests/package_ui_conformance.rs` and `tests/ui_primitive_conformance.rs`.
+See `.agents/skills/clay-execution/references/components.md` (conformance contract) and `.agents/skills/clay-execution/references/tokens.md` (rules) for the enforced-check lists. The conformance suite lives at `tests/package_ui_conformance.rs` and `tests/ui_primitive_conformance.rs`.
 
 ### Plan 088 UI modernization authoring contract
 
@@ -1606,8 +1621,8 @@ announcements, action provenance, and contrast remain Clay responsibilities;
 package declarations provide labels, inert command IDs, and bounded values only.
 
 The authoritative catalog and token consumption note are
-[components.md](../../../.agents/skills/clay-ui/references/components.md#plan-088-package-ui-layout-contract)
-and [tokens.md](../../../.agents/skills/clay-ui/references/tokens.md#plan-088-token-consumption-no-additions).
+[components.md](../../../.agents/skills/clay-execution/references/components.md#plan-088-package-ui-layout-contract)
+and [tokens.md](../../../.agents/skills/clay-execution/references/tokens.md#plan-088-token-consumption-no-additions).
 The navigation contract is [UI Components, Tokens, and Conformance](../ui-components.md).
 Relevant checks are:
 
@@ -2584,7 +2599,7 @@ Trigger classification is local manifest lookup: typing a trigger character edit
 
 Phase 18.11 ships one built-in `core.bufferWords` provider that suggests unique words from the bounded server-prepared document window around the cursor prefix; it is always available and is not removed by package disable/reload. Phase 28.6 ranks matching results with one host-owned scorer: exact/case-sensitive prefix, case-insensitive prefix, shorter labels, then a bounded in-memory recency hint from accepted insert text. Provider priority and exclusive suppression remain authoritative; the scorer only orders candidates within an eligible provider/tier. The recency ring is process-local, sent on the next request, capped at `COMPLETION_RECENCY_MAX_ITEMS` / `COMPLETION_RECENCY_MAX_ITEM_CHARS`, and never persisted. Phase 18.18 package providers registered through `completion.serverRegisterCompletionProvider` remain callback-free: registered static strings normalize to provenance-bearing `CompletionItem` text replacements, and the connection path filters the active package's Rust snapshot by replacement prefix without running package JavaScript. A future constrained handler bridge may add computed package providers; current package execution is limited to bounded static text. Any future provider needing workspace, network, AI, shell, or filesystem authority must introduce explicit permissions and an approved decision log before implementation.
 
-See [`completion.serverRegisterCompletionProvider`](../clay-js-api/completion/server-register-completion-provider.md) for the authoritative API reference, and [`docs/wiki/modules/phase18.11-completion-provider-primitive-review.md`](../../wiki/modules/phase18.11-completion-provider-primitive-review.md) for the implementation review.
+See [`completion.serverRegisterCompletionProvider`](../clay-js-api/completion/server-register-completion-provider.md) for the authoritative API reference, and [`docs/wiki/archive/phase18.11-completion-provider-primitive-review.md`](../../wiki/archive/phase18.11-completion-provider-primitive-review.md) for the implementation review.
 
 ## Phase 18.19 authoring contract: snippets, exclusive claim, and disable-native
 
@@ -3283,7 +3298,7 @@ dependency edges cannot silently re-enable a replaced target
 (`package_replacement.target_replaced`).
 The full interaction contract (states, keyboard/focus, motion,
 layout) lives in
-`docs/wiki/modules/first-party-package-extension-api-review.md#adoption-and-replacement-interaction-contract-plan-061-task-9`.
+`docs/wiki/archive/first-party-package-extension-api-review.md#adoption-and-replacement-interaction-contract-plan-061-task-9`.
 
 ### `packages/lsp-shared`
 

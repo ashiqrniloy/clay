@@ -123,6 +123,30 @@ bounded feedback. Args are JSON `{ ... }` after the command name.
 `/model` is intentionally not re-declared: the core built-in
 `agent.clientOpenModelPicker` already provides the model-picker hook.
 
+## Run options (policy caps and default compact)
+
+From `init.js` or a trusted config module, after `loadPackage("@clay/coding-agent")`:
+
+```js
+import { setRunOptions } from "clay:agent";
+
+await setRunOptions({
+  maxInputTokens: null,          // default; cumulative billed, or a positive int
+  maxOutputTokens: null,         // default
+  maxTurns: null,                // default; null = run until done
+  maxToolRounds: null,
+  maxToolCalls: null,
+  maxWallTimeMs: null,           // default; set e.g. 1_800_000 for a 30-min fence
+  compactAfterTokens: 800_000,   // stored; unused until auto-compact
+  compaction: "llm",             // default for /compact when strategy omitted
+});
+```
+
+Omit the call to keep those defaults: every policy axis (tokens, turns,
+tool rounds, tool calls, wall) is unbounded (`null`); the only hard caps
+are Prism's per-frame request/response bytes (64 MiB). `compactAfterTokens` here is **not** the
+OM `agent.compact` threshold (decision 2158, 80_000).
+
 ## Knowledge options (opt-in wiki)
 
 The wiki knowledge base (`@arnilo/prism-memory/wiki`, decision 2156) is

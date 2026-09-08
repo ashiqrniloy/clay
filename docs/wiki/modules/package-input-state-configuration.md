@@ -144,7 +144,7 @@ Representative coverage:
 - [Package Loading](package-loading.md)
 - [Command Registry](command-registry.md)
 - [Primitive Architecture](primitive-architecture.md)
-- [Phase 18.4 Input, State, and Configuration Primitive Review](phase18.4-input-state-config-primitive-review.md)
+- [Phase 18.4 Input, State, and Configuration Primitive Review](../archive/phase18.4-input-state-config-primitive-review.md)
 - [Clay JS Documentation Registry](clay-js-doc-registry.md)
 - [Package Authoring Guide](../../reference/packages/creating-packages.md)
 - [Package Security Reference](../../reference/primitives/package-security.md)

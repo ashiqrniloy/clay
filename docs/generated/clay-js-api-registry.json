@@ -260,6 +260,82 @@
       "async": true
     },
     {
+      "id": "agent.setRunOptions",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/set-run-options.md",
+      "js_module": "clay:agent",
+      "js_export": "setRunOptions",
+      "js_facade": "runtime/js/agent.js::setRunOptions",
+      "backing_rust": "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::runSetOptions",
+      "deno_op": "op_clay_agent_run_set_options",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_run_set_options",
+      "name": "setRunOptions",
+      "user_facing_name": "Set Agent Run Options",
+      "summary": "Set coding-run policy caps and the default compaction strategy for the clay-agent daemon.",
+      "owner": "server",
+      "phase": "Phase 2",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "maxInputTokens",
+          "type": "number",
+          "default": "null",
+          "description": "Cumulative billed input-token cap. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "maxOutputTokens",
+          "type": "number",
+          "default": "null",
+          "description": "Cumulative billed output-token cap. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "maxTurns",
+          "type": "number",
+          "default": "null",
+          "description": "Turn cap. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "maxToolRounds",
+          "type": "number",
+          "default": "null",
+          "description": "Tool-round cap. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "maxToolCalls",
+          "type": "number",
+          "default": "null",
+          "description": "Tool-call cap. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "maxWallTimeMs",
+          "type": "number",
+          "default": "null",
+          "description": "Wall-clock cap in milliseconds. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "compactAfterTokens",
+          "type": "number",
+          "default": "800000",
+          "description": "Auto-compact trigger in tokens. Stored; unused until auto-compact is wired. Distinct from agent.compact compactAfterTokens (OM threshold, decision 2158 default 80000)."
+        },
+        {
+          "name": "compaction",
+          "type": "string",
+          "default": "llm",
+          "description": "Default compaction when agent.compact or /compact omit strategy. One of default, llm, om."
+        }
+      ],
+      "security": "Forwards a configuration intent (policy caps and a named compaction strategy) to the daemon. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority to package JavaScript.",
+      "agent_guidance": "Use `agent.setRunOptions` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. The call is queued while the daemon is down and applies after the daemon initializes, so init.js never blocks on daemon startup.",
+      "lookup_tags": ["agent", "run", "limits", "tokens", "compaction", "options", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
       "id": "agent.skillRegister",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/agent/skill-register.md",

@@ -219,19 +219,7 @@ impl ClayJsRuntimeService {
     /// execution until the store is repaired.
     pub(crate) fn production() -> Self {
         let store_root = crate::packages::service::default_store_root();
-        let service = crate::packages::service::PackageService::open(
-            store_root,
-            Box::new(crate::packages::manager::FakeBackend::new()),
-        )
-        .unwrap_or_else(|error| {
-            eprintln!(
-                "clay: package approval store unavailable ({error}); third-party packages stay unadopted"
-            );
-            crate::packages::service::PackageService::new(
-                PathBuf::new(),
-                Box::new(crate::packages::manager::FakeBackend::new()),
-            )
-        });
+        let service = crate::packages::service::PackageService::open_production(store_root);
         Self::with_package_service(
             Duration::from_millis(JS_RUNTIME_EVALUATION_TIMEOUT_MS),
             JS_RUNTIME_HEAP_LIMIT_BYTES,

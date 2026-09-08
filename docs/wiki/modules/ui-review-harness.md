@@ -259,7 +259,7 @@ budgets are 160.6 kB shell / 343.2 kB total gzip against 180 / 400 kB limits;
 
 - [docs/development/launch-and-gui-smoke.md](../../development/launch-and-gui-smoke.md) — harness reference (fixture/state/capture table, `WINDOW_WIDTH`/`WINDOW_HEIGHT` constants, UNRESOLVED semantics)
 - [docs/development/ui-observability.md](../../development/ui-observability.md) — observability entry point
-- [Masonry Shell Runtime](masonry-shell.md) — shell/chrome hosting the states the harness captures
-- [Pane Document Views](pane-document-views.md) — welcome entry state and completion projection
+- [Masonry Shell Runtime](../archive/masonry-shell.md) — shell/chrome hosting the states the harness captures
+- [Pane Document Views](../archive/pane-document-views.md) — welcome entry state and completion projection
 - [Centered Command Centre Surface](centered-command-centre-surface.md) — the centered modal the harness captures
 - [test-plan/index.md](../../../test-plan/index.md) — manual step IDs per state (L12–L14, F32–F37, E16–E21, K69–K72, Q11–Q14, S33–S35)

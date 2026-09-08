@@ -123,8 +123,8 @@ Before 22.2, one `ActiveBehaviorManifest` slot per connection meant the most rec
 - [Behavior Runtime Registration](behavior-runtime-registration.md)
 - [Sequence Keybindings](sequence-keybindings.md) — Phase 24.5 matcher, pending-chord state, prefix-collision validation
 - [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `BehaviorGraceState` stale-edit grace and `InvalidBehaviorVersion` resync.
-- [Pane Document Views](pane-document-views.md) — per-pane manifest application (22.2)
+- [Pane Document Views](../archive/pane-document-views.md) — per-pane manifest application (22.2)
 - [Client Behavior Routing](../flows/client-behavior-routing.md)
-- [Client Edit Emission](../flows/client-edit-emission.md)
+- [Client Edit Emission](../archive/client-edit-emission.md)
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
-- `.agents/skills/project-patterns/references/behavior-manifests.md`
+- `.agents/skills/clay-execution/references/protocol-perf.md`

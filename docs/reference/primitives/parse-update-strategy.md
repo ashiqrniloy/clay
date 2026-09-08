@@ -5,9 +5,9 @@ Clay parsing is **server-side, cancellable background work**. Package parsers ma
 ## Goals
 
 - Let packages provide syntax trees, syntax spans, semantic spans, diagnostic spans, folding inputs, and Markdown mode decoration data.
-- Preserve `.agents/skills/project-patterns/references/authority-boundaries.md`: the server owns canonical document versions and JavaScript execution; the client owns immediate editing and rendering.
-- Preserve `.agents/skills/project-patterns/references/behavior-manifests.md`: parse work is `Background`, not `ClientFirstPredictable`.
-- Preserve `.agents/skills/project-patterns/references/protocol-and-performance.md`: no full-document IPC for ordinary edits, no synchronous server/JavaScript round trip before local paint, bounded queues, cancellable server work, and viewport-bounded result delivery.
+- Preserve `.agents/skills/clay-execution/references/packages.md`: the server owns canonical document versions and JavaScript execution; the client owns immediate editing and rendering.
+- Preserve `.agents/skills/clay-execution/references/protocol-perf.md`: parse work is `Background`, not `ClientFirstPredictable`.
+- Preserve `.agents/skills/clay-execution/references/protocol-perf.md`: no full-document IPC for ordinary edits, no synchronous server/JavaScript round trip before local paint, bounded queues, cancellable server work, and viewport-bounded result delivery.
 
 ## Non-Blocking Hot-Path Contract
 
@@ -190,7 +190,7 @@ Open scheduling is enqueue-only: text and the initial mode state return before p
 
 ## Phase 18.5 Large-File Parse-Window Primitives
 
-The Phase 18.5 [large-file Markdown primitive review](../../wiki/modules/phase18-large-file-markdown-primitive-review.md) identified bounded parse input as a reusable primitive gap. Clay now defines generic parse-window and memory-budget shapes in `src/protocol/parse.rs`, validates them through `src/server/parse_coordinator.rs`, and schedules them through `SyntaxSession`; the names and validation rules are intentionally mode-neutral.
+The Phase 18.5 [large-file Markdown primitive review](../../wiki/archive/phase18-large-file-markdown-primitive-review.md) identified bounded parse input as a reusable primitive gap. Clay now defines generic parse-window and memory-budget shapes in `src/protocol/parse.rs`, validates them through `src/server/parse_coordinator.rs`, and schedules them through `SyntaxSession`; the names and validation rules are intentionally mode-neutral.
 
 Implemented reusable primitives:
 

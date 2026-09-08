@@ -7284,6 +7284,102 @@ async fn third_party_config_load_fails_with_pending_adoption_diagnostic() {
     );
 }
 
+/// Plan 115 task 4: the Clay-appended init.js block is still just
+/// `loadPackage`; an installed-but-unadopted third-party package fails
+/// closed and executes no package JS.
+#[tokio::test]
+async fn clay_appended_load_line_fails_closed_without_adoption() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let service = ClayJsRuntimeService::default();
+    let root = config_fixture("third-party-config-adoption")
+        .join(format!("init-line-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    write_loadable_package(
+        &root,
+        r#"
+        import { serverRegisterCompletionProvider } from "clay:completion";
+        Deno.core.ops.op_clay_runtime_record("package-js-ran");
+        serverRegisterCompletionProvider({
+          module: {
+            provideCompletion: async () => ({
+              status: "ok",
+              items: [{ label: "init-line", insertText: "init-line" }]
+            })
+          }
+        });
+        export default function load() {}
+        "#,
+    );
+    let mut package_json = loadable_package_fixture("@vendor/init-line", "initline");
+    package_json["clay"]["permissions"] = serde_json::json!(["completion-provider"]);
+    package_json["clay"]["contributions"] = serde_json::json!({
+        "completionProviders": [{
+            "id": "initline.provider",
+            "triggerCharacters": ["."],
+            "budgets": { "timeoutMs": 500, "maxItems": 8 }
+        }]
+    });
+    {
+        let op_state = service.test_op_state();
+        let mut locked = op_state
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned");
+        locked
+            .install_from_value_at_root_with_spec(
+                package_json,
+                root.clone(),
+                "npm:@vendor/init-line",
+            )
+            .expect("synthetic package installs");
+        locked
+            .authorize_package(
+                "@vendor/init-line",
+                vec![crate::packages::permissions::PackagePermission::CompletionProvider],
+                crate::packages::authorization::RuntimeProfile::Restricted,
+                "test",
+            )
+            .expect("synthetic package authorizes");
+    }
+    let config_root = config_fixture("third-party-config-adoption").join("config-init-line");
+    fs::create_dir_all(&config_root).unwrap();
+    fs::write(
+        config_root.join("init.js"),
+        "import { loadPackage } from \"clay:packages\";\n",
+    )
+    .unwrap();
+    crate::packages::init_lines::append_load_line(
+        &config_root.join("init.js"),
+        "@vendor/init-line",
+    )
+    .expect("clay load line appends");
+    let error = service
+        .load_configuration_from_root(config_root)
+        .await
+        .expect_err("unadopted clay-appended load line must not execute");
+    let message = error.to_string();
+    assert!(
+        message.contains("adoption") || message.contains("missing"),
+        "expected adoption diagnostic, got: {message}"
+    );
+    assert!(
+        !message.contains("package-js-ran"),
+        "package JS must not run: {message}"
+    );
+    assert!(
+        !service
+            .test_op_state()
+            .package_service()
+            .lock()
+            .unwrap()
+            .inspect("@vendor/init-line")
+            .unwrap()
+            .is_enabled,
+        "pending package must stay disabled"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// Plan 061 task 15: after CLI adoption, a one-line `loadPackage` from
 /// `init.js` succeeds — the package executes in the third-party runtime
 /// and its registration payload is absorbed into the trusted worker.

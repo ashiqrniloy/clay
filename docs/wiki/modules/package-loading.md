@@ -148,4 +148,4 @@ Relevant tests:
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [Package Input, State, and Configuration Integration](package-input-state-configuration.md)
 - `docs/reference/primitives/package-security.md`
-- `.agents/skills/project-patterns/references/package-distribution.md`
+- `.agents/skills/clay-execution/references/packages.md`

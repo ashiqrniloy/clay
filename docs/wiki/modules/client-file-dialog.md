@@ -117,8 +117,8 @@ native client and were never wired into this bridge.)
 
 - [Client Behavior Routing](../flows/client-behavior-routing.md)
 - [Path Browser](path-browser.md) — the built-in browse alternative
-- [Phase 19 Windows File Open Primitive Review](phase19-windows-file-open-primitive-review.md)
+- [Phase 19 Windows File Open Primitive Review](../archive/phase19-windows-file-open-primitive-review.md)
 - [Server File Workspace Model](server-file-workspace.md)
 - [Client Open File Dialog Clay JS API](../../reference/clay-js-api/documents/client-open-file-dialog.md)
 - [Client Open Folder Dialog Clay JS API](../../reference/clay-js-api/workspace/client-open-folder-dialog.md)
-- [End-to-End File Browser Workflow Primitive Review](end-to-end-file-browser-workflow-primitive-review.md)
+- [End-to-End File Browser Workflow Primitive Review](../archive/end-to-end-file-browser-workflow-primitive-review.md)

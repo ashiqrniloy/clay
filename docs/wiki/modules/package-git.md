@@ -124,6 +124,6 @@ Key coverage:
 ## Related
 
 - [Git Discovery Service](git-discovery-service.md)
-- [Phase 18.13 Git Discovery Service Primitive Review](phase18.13-git-discovery-primitive-review.md)
+- [Phase 18.13 Git Discovery Service Primitive Review](../archive/phase18.13-git-discovery-primitive-review.md)
 - [serverListGitStatuses API](../../reference/clay-js-api/git/server-list-git-statuses.md)
 - [serverRefreshGitStatus API](../../reference/clay-js-api/git/server-refresh-git-status.md)

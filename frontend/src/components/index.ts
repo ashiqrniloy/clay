@@ -2,7 +2,7 @@
  * Clay component registry (React renderer).
  *
  * Single import surface for cataloged components; see
- * `.agents/skills/clay-ui/references/components.md` and the React mapping in
+ * `.agents/skills/clay-execution/references/components.md` and the React mapping in
  * `docs/development/react-ui-catalog-mapping.md`. Components are composable,
  * token-styled, and state-complete; packages never see these names.
  */

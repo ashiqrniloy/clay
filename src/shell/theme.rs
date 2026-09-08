@@ -2451,7 +2451,7 @@ mod tests {
 // performs the mechanical name → `--clay-*` projection.
 
 /// Every core token name, mirroring `core_theme_value` and the Core Tokens
-/// tables in `.agents/skills/clay-ui/references/tokens.md` (drift is pinned
+/// tables in `.agents/skills/clay-execution/references/tokens.md` (drift is pinned
 /// by conformance tests).
 pub const CORE_TOKEN_NAMES: &[&str] = &[
     "accent.muted",

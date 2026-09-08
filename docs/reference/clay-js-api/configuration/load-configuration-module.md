@@ -110,6 +110,27 @@ Local modular configuration contract only; Phase 13 executes only server-side co
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 
+## Appended `loadPackage` lines (`clay install`)
+
+`clay install npm:<spec>` appends exactly two lines to `~/.config/clay/init.js`:
+
+```js
+// clay install npm:<name> — remove with `clay remove npm:<name>`
+await loadPackage("<name>");
+```
+
+The write is idempotent (one block per package even if `clay install` runs
+again), survives CRLF files, and the standard configuration watcher picks the
+change up as a normal configuration reload. `clay remove npm:<spec>` strips
+the block it wrote and leaves hand-edited lines untouched.
+
+Configuration grants **no package-install authority**: these lines are the
+only configuration surface install touches, and `loadPackage` of an
+un-adopted third-party package fails closed with an adoption diagnostic —
+package JavaScript never runs until the user adopts it (`clay package
+adopt`), which is the reviewable execution gate. Opt out by deleting the
+lines or running `clay remove npm:<spec>`.
+
 ## Agent guidance
 
 Use `configuration.loadConfigurationModule` when the user asks how to split Clay configuration from `~/.config/clay/init.js` into local modules. Avoid inventing direct Rust calls, raw op names, filesystem effects beyond the documented local configuration contract, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution.

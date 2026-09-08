@@ -19,6 +19,11 @@ const CONFIGURE_ID: &str = "configure";
 const STORE_SECRET_ID: &str = "store_secret";
 const STORE_URL_ID: &str = "store_url";
 const POLL_OAUTH_ID: &str = "poll_oauth";
+/// Plan 116: manual browser-open and clipboard-copy fallbacks in the OAuth
+/// device-code stage, so the authorization URL never dead-ends even when the
+/// auto-open attempt fails or the user prefers another browser.
+const OPEN_OAUTH_URL_ID: &str = "open_oauth_url";
+const COPY_OAUTH_URL_ID: &str = "copy_oauth_url";
 const SEARCH_HINT_ID: &str = "search_hint";
 /// Bounded result page for the session-search picker (plan 108 task 11).
 pub(crate) const AGENT_SESSION_SEARCH_LIMIT: u32 = 50;
@@ -77,6 +82,16 @@ pub(crate) enum AgentPickerActivate {
     },
     PollOauth {
         login_id: String,
+    },
+    /// Plan 116: open the OAuth authorization URL in the OS default browser
+    /// (manual fallback after the automatic attempt).
+    OpenOauthUrl {
+        uri: String,
+    },
+    /// Plan 116: copy the OAuth authorization URL to the OS clipboard so the
+    /// user can paste it into a browser of their choice.
+    CopyOauthUrl {
+        uri: String,
     },
     Resume {
         session_id: String,
@@ -330,14 +345,22 @@ impl AgentPicker {
     }
 
     fn activate_oauth(&self, id: &str) -> AgentPickerActivate {
-        if id != POLL_OAUTH_ID {
-            return AgentPickerActivate::StayOpen;
-        }
-        match &self.oauth_login_id {
-            Some(login_id) => AgentPickerActivate::PollOauth {
-                login_id: login_id.clone(),
+        match id {
+            OPEN_OAUTH_URL_ID => match &self.oauth_uri {
+                Some(uri) => AgentPickerActivate::OpenOauthUrl { uri: uri.clone() },
+                None => AgentPickerActivate::StayOpen,
             },
-            None => AgentPickerActivate::StayOpen,
+            COPY_OAUTH_URL_ID => match &self.oauth_uri {
+                Some(uri) => AgentPickerActivate::CopyOauthUrl { uri: uri.clone() },
+                None => AgentPickerActivate::StayOpen,
+            },
+            _ if id == POLL_OAUTH_ID => match &self.oauth_login_id {
+                Some(login_id) => AgentPickerActivate::PollOauth {
+                    login_id: login_id.clone(),
+                },
+                None => AgentPickerActivate::StayOpen,
+            },
+            _ => AgentPickerActivate::StayOpen,
         }
     }
 
@@ -380,11 +403,30 @@ impl AgentPicker {
                 } else {
                     uri
                 };
-                if code.is_empty() {
-                    vec![item(POLL_OAUTH_ID, "Open authorization URL", detail)]
+                // Plan 116: the primary row carries the device code and
+                // checks authorization on Enter/click; the two action rows
+                // are manual fallbacks when the automatic browser open fails
+                // or the user prefers a different browser. The URL is the
+                // detail of every row, so it stays visible and copyable.
+                let mut items = vec![if code.is_empty() {
+                    item(POLL_OAUTH_ID, "Open authorization URL", detail)
                 } else {
-                    vec![item(POLL_OAUTH_ID, &format!("Device code {code}"), detail)]
+                    item(POLL_OAUTH_ID, &format!("Device code {code}"), detail)
+                }];
+                if !uri.is_empty() {
+                    items.push(
+                        item(OPEN_OAUTH_URL_ID, "Open in browser", detail)
+                            .with_accessibility_label(
+                                "Open the authorization URL in the default browser",
+                            ),
+                    );
+                    items.push(
+                        item(COPY_OAUTH_URL_ID, "Copy URL", detail).with_accessibility_label(
+                            "Copy the authorization URL to the clipboard",
+                        ),
+                    );
                 }
+                items
             }
         };
         filter_items(
@@ -845,6 +887,71 @@ mod tests {
             Some("https://example.test/authorize")
         );
         assert!(!format!("{session:?}").contains("pending"));
+    }
+
+    #[test]
+    fn oauth_stage_offers_browser_open_and_copy_url_actions() {
+        let mut picker =
+            AgentPicker::open(1, AgentPickerKind::ProviderSetup, inventory(), Vec::new());
+        picker.enter_oauth(
+            "login-1".into(),
+            "ABCD-EFGH".into(),
+            "https://example.test/device".into(),
+        );
+        let session = picker.session();
+        let ids: Vec<_> = session
+            .items()
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            vec![POLL_OAUTH_ID, OPEN_OAUTH_URL_ID, COPY_OAUTH_URL_ID]
+        );
+        // Every row keeps the URL visible as its detail text.
+        for row in session.items() {
+            assert_eq!(row.detail.as_deref(), Some("https://example.test/device"));
+        }
+        // Selecting the action rows maps to the server-side open/copy intents.
+        picker.move_selection(1);
+        assert_eq!(
+            picker.activate(false).unwrap(),
+            AgentPickerActivate::OpenOauthUrl {
+                uri: "https://example.test/device".into()
+            }
+        );
+        picker.move_selection(1);
+        assert_eq!(
+            picker.activate(false).unwrap(),
+            AgentPickerActivate::CopyOauthUrl {
+                uri: "https://example.test/device".into()
+            }
+        );
+        // The primary row still polls for completion (wraps back to row 0).
+        picker.move_selection(1);
+        assert_eq!(
+            picker.activate(false).unwrap(),
+            AgentPickerActivate::PollOauth {
+                login_id: "login-1".into()
+            }
+        );
+    }
+
+    #[test]
+    fn oauth_stage_without_url_keeps_only_the_poll_row() {
+        let mut picker =
+            AgentPicker::open(1, AgentPickerKind::ProviderSetup, inventory(), Vec::new());
+        picker.enter_oauth("login-1".into(), "ABCD-EFGH".into(), String::new());
+        let session = picker.session();
+        assert_eq!(session.items().len(), 1);
+        assert_eq!(session.items()[0].id, POLL_OAUTH_ID);
+        // No URL means no open/copy rows, and their activations stay open.
+        assert_eq!(
+            picker.activate(false).unwrap(),
+            AgentPickerActivate::PollOauth {
+                login_id: "login-1".into()
+            }
+        );
     }
 
     #[test]

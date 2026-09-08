@@ -2,8 +2,12 @@
 mod decoration_intent_authority;
 #[path = "../language_server_authority.rs"]
 mod language_server_authority;
+#[path = "../package_cli.rs"]
+mod package_cli;
 #[path = "../package_conflicts.rs"]
 mod package_conflicts;
+#[path = "../package_exit_gate.rs"]
+mod package_exit_gate;
 #[path = "../package_graph.rs"]
 mod package_graph;
 #[path = "../package_loading.rs"]

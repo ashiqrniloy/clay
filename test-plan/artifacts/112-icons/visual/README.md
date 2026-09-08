@@ -1,6 +1,6 @@
 # Plan 112 Task 11 — Visual Screenshot and Accessibility Review Index
 
-Date: 2026-09-07 · Linux (Wayland/GNOME) · Real matched server+client (`target/debug/clay server` + `clay client`, private mode-700 config roots via `scripts/capture-ui-review.sh`). Review methodology per `.agents/skills/project-patterns/references/ui-visual-review.md`; capture per `scripts/capture-ui-review.sh` (xdg-desktop-portal screenshots cropped to the Clay window + AT-SPI accessibility dumps).
+Date: 2026-09-07 · Linux (Wayland/GNOME) · Real matched server+client (`target/debug/clay server` + `clay client`, private mode-700 config roots via `scripts/capture-ui-review.sh`). Review methodology per `.agents/skills/clay-execution/references/planning-checklist.md`; capture per `scripts/capture-ui-review.sh` (xdg-desktop-portal screenshots cropped to the Clay window + AT-SPI accessibility dumps).
 
 ## Capture matrix (all PASS, app-only screenshots)
 

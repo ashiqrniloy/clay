@@ -5,8 +5,8 @@ Rendering customization is **server-validated inert declarations**. Packages may
 ## Goals
 
 - Let mode and package authors provide syntax highlighting, semantic emphasis, diagnostics, layout hints, render intents, and package UI contributions.
-- Preserve the authority boundary from `.agents/skills/project-patterns/references/authority-boundaries.md`: the server validates package output; the client owns native rendering and local UI state.
-- Preserve `.agents/skills/project-patterns/references/protocol-and-performance.md`: no full-document IPC for ordinary edits, no synchronous JavaScript/server round trip before normal typing is painted locally, no IPC work in render or input handlers, and viewport-bounded updates.
+- Preserve the authority boundary from `.agents/skills/clay-execution/references/packages.md`: the server validates package output; the client owns native rendering and local UI state.
+- Preserve `.agents/skills/clay-execution/references/protocol-perf.md`: no full-document IPC for ordinary edits, no synchronous JavaScript/server round trip before normal typing is painted locally, no IPC work in render or input handlers, and viewport-bounded updates.
 
 ## Rendering Primitive Paths
 
@@ -207,7 +207,7 @@ All package rendering flows through validated server-produced declarations. The 
 
 ## Phase 18.5 Large-File Decoration-Cache Primitive
 
-The Phase 18.5 [large-file Markdown primitive review](../../wiki/modules/phase18-large-file-markdown-primitive-review.md) records that decoration publication validates bounded `DecorationSet` chunks, while large-file modes need reusable chunk/cache primitives for retained near-viewport state. Runtime code treats each validated `DecorationSet` as a versioned decoration chunk; Plan 056 emits stable 128-byte chunks from one parse/capture pass rather than scheduling parser work per chunk.
+The Phase 18.5 [large-file Markdown primitive review](../../wiki/archive/phase18-large-file-markdown-primitive-review.md) records that decoration publication validates bounded `DecorationSet` chunks, while large-file modes need reusable chunk/cache primitives for retained near-viewport state. Runtime code treats each validated `DecorationSet` as a versioned decoration chunk; Plan 056 emits stable 128-byte chunks from one parse/capture pass rather than scheduling parser work per chunk.
 
 Implemented reusable primitives:
 

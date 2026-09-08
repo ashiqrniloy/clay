@@ -37,7 +37,7 @@ Request a mid-session compaction of the agent conversation history.
 
 ## Description
 
-`compact` is the runtime-backed public API for **Compact Agent Session**. It forwards a compaction request for one live agent session to the clay-agent daemon, which resolves the named strategy (or the session default) and appends a compaction entry to the persisted session. Authority: `user-intent-forwarding`. Runtime path: `server-first-rpc-forwarding`. Compaction is a background/programmatic control and never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths.
+`compact` is the runtime-backed public API for **Compact Agent Session**. It forwards a compaction request for one live agent session to the clay-agent daemon, which resolves the named strategy (or `agent.setRunOptions` `compaction`, default `llm`) and appends a compaction entry to the persisted session. Authority: `user-intent-forwarding`. Runtime path: `server-first-rpc-forwarding`. Compaction is a background/programmatic control and never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths.
 
 ## When to use
 
@@ -63,7 +63,7 @@ console.log(result.entryId, result.strategy);
 ## Options
 
 - `sessionId` (string, required): the live agent session to compact.
-- `strategy` (string, optional): `default`, `llm`, or `om`. Defaults to the session's configured strategy (`om` for OM-attached sessions, otherwise `default`).
+- `strategy` (string, optional): `default`, `llm`, or `om`. Defaults to `agent.setRunOptions` `compaction` (default `llm`).
 - `compactAfterTokens` (number, optional): observational-memory auto-compaction threshold override in tokens. Positive integer; default 80000 (decision 2158). Persisted for the session and also applied by post-run auto-compaction; ignored for non-OM sessions.
 
 ## Key bindings

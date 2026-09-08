@@ -196,7 +196,7 @@ test("compaction drill: active context shrinks and the summary appears; checkout
     const before = (await host.handle("session.context", { sessionId })) as ContextResponse;
     assert.ok(category(before, "userMessage").count >= 1);
 
-    await host.handle("session.compact", { sessionId });
+    await host.handle("session.compact", { sessionId, strategy: "default" });
     const after = (await host.handle("session.context", { sessionId })) as ContextResponse;
     // Compacted-away items left the active list; the summary stays.
     assert.equal(category(after, "userMessage").count, 0);

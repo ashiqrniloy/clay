@@ -5,11 +5,11 @@ Status: Phase 18.1 architecture reference with Phase 18.2 internal shell runtime
 ## Sources and Evidence
 
 - Approved decision: `decision-logs/2026-06-09-1431-clay-owned-shell-layout-and-package-ui-contribution-model.md`.
-- Primitive review: `docs/wiki/modules/phase18.1-shell-layout-primitive-review.md`.
+- Primitive review: `docs/wiki/archive/phase18.1-shell-layout-primitive-review.md`.
 - Phase 18.2 runtime baseline (historical native form; carried forward at Plan 097 Phase 12): `src/shell/layout/mod.rs` retains the internal `WorkingAreaLayout`, `PaneSplitTree`, and `PaneSlotLayout` state; the Tauri/React client (`frontend/src/shell`) owns the editor host, status chrome, and slot composition; `src/protocol/sdui.rs` defines inert SDUI panels, actions, and editor views.
 - Phase 18.3 runtime-backed package UI baseline: `runtime/js/ui.js` exposes `serverRegisterPanelContribution`, `serverRegisterComponentContribution`, `serverRegisterTransientOverlayContribution`, and `serverRegisterThemeToken`; `src/server/ops/ui.rs` owns the op wrappers; `src/server/ui.rs` validates package provenance, declarations, registered action targets, typed style variables, and package theme tokens; `src/shell/components.rs` owns the Clay component catalog; `src/shell/theme.rs` owns typed core/package token resolution; `src/shell/package_ui.rs` composes accepted panels/overlays through shell-owned runtime state into generation-stamped snapshots; the React registry (`frontend/src/sdui`) projects them.
 - Current package authoring guide: `docs/reference/packages/creating-packages.md`.
-- Phase 18.12 file-browser composition: `src/shell/file_browser.rs`, `src/server/workspace/mod.rs`, `src/server/command_execution.rs`, and `docs/wiki/modules/phase18.12-workspace-discovery-primitive-review.md`.
+- Phase 18.12 file-browser composition: `src/shell/file_browser.rs`, `src/server/workspace/mod.rs`, `src/server/command_execution.rs`, and `docs/wiki/archive/phase18.12-workspace-discovery-primitive-review.md`.
 - Historical implementation note: the pre-cutover native client used a Rust native widget toolkit as its substrate. Since Plan 097 Phase 12 the desktop substrate is Tauri v2 + React; the substrate is never the package author API.
 
 ## Phase 18.2/18.3 Runtime Status

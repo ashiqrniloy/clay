@@ -5,9 +5,9 @@ This Phase 16 document is the canonical security surface for package-provided pr
 Security rules are traceable to:
 
 - `roadmap.md` Phase 16 package primitive security directive.
-- `.agents/skills/project-patterns/references/package-distribution.md` and `decision-logs/2026-05-08-1958-clay-js-api-naming-and-package-distribution.md`.
-- `.agents/skills/project-patterns/references/extensions-and-ai.md` and `decision-logs/2026-05-08-0408-server-authoritative-documents-client-behavior-manifests.md`.
-- `.agents/skills/project-patterns/references/clay-js-api-boundary.md` and `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`.
+- `.agents/skills/clay-execution/references/packages.md` and `decision-logs/2026-05-08-1958-clay-js-api-naming-and-package-distribution.md`.
+- `.agents/skills/clay-execution/references/packages.md` and `decision-logs/2026-05-08-0408-server-authoritative-documents-client-behavior-manifests.md`.
+- `.agents/skills/clay-execution/references/js-api.md` and `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`.
 
 ## Baseline Rules
 

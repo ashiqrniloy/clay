@@ -519,10 +519,10 @@ fn collect_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Package-facing `ComponentKind` names from the clay-ui component catalog
+/// Package-facing `ComponentKind` names from the clay-execution component catalog
 /// (`## Package-Facing Component Kinds` table).
 fn catalog_component_kinds() -> Vec<String> {
-    let text = read(".agents/skills/clay-ui/references/components.md");
+    let text = read(".agents/skills/clay-execution/references/components.md");
     let section = text
         .split("## Package-Facing Component Kinds")
         .nth(1)
@@ -601,7 +601,7 @@ fn core_tokens_project_to_css_variables_or_internal_codemirror_values() {
 /// Core token names from the `tokens.md` implemented-token tables (rows whose
 /// first cell is a dotted lowercase token).
 fn core_theme_token_names() -> Vec<String> {
-    let text = read(".agents/skills/clay-ui/references/tokens.md");
+    let text = read(".agents/skills/clay-execution/references/tokens.md");
     let mut names = Vec::new();
     for line in text.lines() {
         if !line.starts_with("| `") {
@@ -817,9 +817,11 @@ fn plan099_reference_docs_are_cross_linked_and_current() {
     }
 }
 
-/// Wiki navigation contract: every wiki page is linked from the master
-/// index, every intra-wiki link resolves, and current-state wiki pages name
-/// only source/test paths that exist.
+/// Wiki navigation contract: every evergreen wiki page (everything outside
+/// `docs/wiki/archive/`) is linked from the master index, every intra-wiki
+/// link resolves (archive pages included), and current-state wiki pages name
+/// only source/test paths that exist. Archive pages are pull-only history:
+/// they are not indexed, but their links must still resolve.
 #[test]
 fn wiki_navigation_is_complete_and_current_page_paths_resolve() {
     fn walk(dir: &str, out: &mut Vec<String>) {
@@ -839,7 +841,7 @@ fn wiki_navigation_is_complete_and_current_page_paths_resolve() {
     let index = read("docs/wiki/index.md");
 
     for page in &pages {
-        if page == "docs/wiki/index.md" {
+        if page == "docs/wiki/index.md" || page.starts_with("docs/wiki/archive/") {
             continue;
         }
         let name = page.rsplit('/').next().expect("filename");

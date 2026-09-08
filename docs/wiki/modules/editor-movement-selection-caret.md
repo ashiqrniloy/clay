@@ -108,7 +108,7 @@ First- and third-party packages may access the editor ops and trigger execution 
 
 ## Related
 
-- [Masonry Editor Widget Status Observability](masonry-editor.md)
+- [Masonry Editor Widget Status Observability](../archive/masonry-editor.md)
 - [Editor Theme Registry](editor-theme-registry.md)
 - [Typography Registry and Font Roles](typography-registry-and-font-roles.md)
 - [Mode Registry](mode-registry.md)

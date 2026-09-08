@@ -137,4 +137,4 @@ Bridge packages (`@clay/lsp-rust`, `@clay/lsp-typescript`, `@clay/lsp-javascript
 
 ## Coverage
 
-Deterministic coverage: `tests/language_intelligence.rs`, `tests/language_server_authority.rs`, `tests/range_diagnostics.rs`, `tests/completion_provider.rs`, `tests/editor_performance_invariants.rs`, `tests/performance_protocol.rs`, `tests/primitives_docs.rs`, and `tests/package_loading_docs.rs`. Manual smoke markers: `docs/development/launch-and-gui-smoke.md` Phase 18.20/18.21 sections. Architecture review: `docs/wiki/modules/phase18.20-language-intelligence-primitive-review.md`.
+Deterministic coverage: `tests/language_intelligence.rs`, `tests/language_server_authority.rs`, `tests/range_diagnostics.rs`, `tests/completion_provider.rs`, `tests/editor_performance_invariants.rs`, `tests/performance_protocol.rs`, `tests/primitives_docs.rs`, and `tests/package_loading_docs.rs`. Manual smoke markers: `docs/development/launch-and-gui-smoke.md` Phase 18.20/18.21 sections. Architecture review: `docs/wiki/archive/phase18.20-language-intelligence-primitive-review.md`.

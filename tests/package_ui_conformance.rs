@@ -118,7 +118,7 @@ fn bundled_theme_conformance_matrix() {
 /// names in the deferred-components table do not leak in.
 fn catalog_doc_kinds() -> Vec<String> {
     let path = format!(
-        "{}/.agents/skills/clay-ui/references/components.md",
+        "{}/.agents/skills/clay-execution/references/components.md",
         manifest_dir()
     );
     let src = fs::read_to_string(&path)
@@ -273,7 +273,7 @@ fn style_variable_catalog_matches_components_md() {
     code_vars.dedup();
 
     let doc_path = format!(
-        "{}/.agents/skills/clay-ui/references/components.md",
+        "{}/.agents/skills/clay-execution/references/components.md",
         manifest_dir()
     );
     let doc_src =
@@ -360,7 +360,7 @@ fn core_token_catalog_matches_tokens_md() {
     // type names (`color-role`, `spacing`) without a dot, so the `.` filter
     // excludes them.
     let tokens_path = format!(
-        "{}/.agents/skills/clay-ui/references/tokens.md",
+        "{}/.agents/skills/clay-execution/references/tokens.md",
         manifest_dir()
     );
     let tokens_src =
@@ -553,7 +553,7 @@ fn reserved_component_kind_names_kind_and_reserved() {
 // cannot bypass validation, and no conformance helper is exposed as a deno_core
 // op or JS facade. These tests pin the adopted-boundary rejection (raw values
 // + oversized payloads never reach the trusted runtime) and the op/facade
-// absence. See `.agents/skills/project-patterns/references/package-runtime-trust-domains.md`
+// absence. See `.agents/skills/clay-execution/references/packages.md`
 // and `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`.
 
 /// Third-party package fixture: a non-`@clay/*` package (so it is not

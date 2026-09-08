@@ -170,6 +170,38 @@ test("normalizeToolCaps drops malformed entries and keeps valid ones", () => {
   });
 });
 
+test("read findText advances offset past the first page", async () => {
+  const root = await tempDir();
+  const target = join(root, "big.txt");
+  const lines = Array.from({ length: 2500 }, (_, i) => `line ${i + 1}`);
+  lines[2259] = "private async oauthStart unique-needle";
+  const text = `${lines.join("\n")}\n`;
+  let reads = 0;
+  const state: MockServerState = {
+    docs: new Map([[target, { text, version: 1, dirty: false, writable: true }]]),
+    writes: [],
+  };
+  const request = mockReverseServer(state);
+  const tools = buildCodingTools({
+    workspaceRoot: root,
+    request: async (method, params) => {
+      if (method === "document.read") {
+        reads += 1;
+        assert.ok(reads <= 20, "readPage ignored offset; findText looped");
+      }
+      return request(method, params);
+    },
+    fullAutonomy: () => true,
+  });
+  const read = tools.find((tool) => tool.name === "read");
+  assert.ok(read);
+  const result = await read.execute({ path: target, findText: "unique-needle" }, context());
+  assert.ok(!result?.error, result?.error?.message);
+  const body = (result.content?.[0] as { text?: string } | undefined)?.text ?? "";
+  assert.match(body, /unique-needle/);
+  assert.ok(!body.startsWith("line 1"), "page must start at the hit, not line 1");
+});
+
 test("read returns the dirty buffer of an open document, not disk bytes", async () => {
   const state: MockServerState = {
     docs: new Map([["/tmp/ws/notes.md", { text: "dirty buffer text", version: 3, dirty: true, writable: true }]]),

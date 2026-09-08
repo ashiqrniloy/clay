@@ -42,6 +42,9 @@ pub mod syntax;
 pub mod syntax_session;
 mod tab_registry;
 mod ui;
+// OS default-browser / clipboard helpers for the agent OAuth journey
+// (plan 116): open the authorization URL and copy it as a fallback.
+mod open;
 pub(crate) mod workspace;
 
 use std::{

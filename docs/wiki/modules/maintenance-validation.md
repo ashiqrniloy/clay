@@ -50,7 +50,7 @@ The 2026-07-19 P0–P3 review is closed through executable evidence recorded in 
 | Bounded reads, atomic save identity, directory traversal/ignore grammar | [Server File Workspace](server-file-workspace.md), [Workspace File Browser](workspace-file-browser.md) |
 | Bounded LSP actors and process I/O | [Language Server Process Service](language-server-process-service.md) |
 | Single-source facades and public/configuration API closure | [Embedded JavaScript Runtime](embedded-js-runtime.md), [Clay JS Documentation Registry](clay-js-doc-registry.md), [Configuration Runtime](configuration-runtime.md) |
-| Native dialog generations and clipboard limitation | [Client File Dialog](client-file-dialog.md), [Masonry Editor](masonry-editor.md) |
+| Native dialog generations and clipboard limitation | [Client File Dialog](client-file-dialog.md), [Masonry Editor](../archive/masonry-editor.md) |
 
 Routine dev/test profiles use line-table debug information, with full DWARF under `--profile debugging`. Consolidating 33 integration source modules into four suite roots reduced the clean all-target artifact snapshot from roughly 22 GiB/43 expected harness executables/89 s to 6.1 GiB/14 Cargo harnesses/68 s on the same Linux host; times are advisory, while suite inventory and artifact topology are deterministic. Runtime/resource ceilings remain compiled host policy rather than configuration. `cargo audit` currently passes with the documented unmaintained warnings and expiring quick-xml exceptions enforced by `audit_exceptions_are_documented_and_unexpired`.
 
@@ -136,8 +136,8 @@ Current cleanup verification: Clippy passed with no issues under `-D warnings`. 
 
 - `plans/031-Phase18.7-Persistent-Server-Runtime-and-JS-ParseHandler-Bridge.md`
 - `plans/032-All-Target-Clippy-Cleanup.md`
-- `.agents/skills/project-patterns/references/maintenance-validation.md`
-- `.agents/skills/project-patterns/references/authority-boundaries.md`
+- `.agents/skills/clay-execution/references/protocol-perf.md`
+- `.agents/skills/clay-execution/references/packages.md`
 - `docs/development/build-and-test.md`
 - `Cargo.toml`
 - `tests/suites/`

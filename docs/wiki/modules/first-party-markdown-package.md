@@ -138,7 +138,7 @@ Relevant tests:
 
 ## Related
 
-- [Phase 18.5 Markdown Replan Primitive Review](phase18.5-markdown-replan-primitive-review.md)
+- [Phase 18.5 Markdown Replan Primitive Review](../archive/phase18.5-markdown-replan-primitive-review.md)
 - [Package Loading](package-loading.md)
 - [Package Primitive Gate](package-primitive-gate.md)
 - [Mode Registry](mode-registry.md)

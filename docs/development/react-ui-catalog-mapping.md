@@ -1,8 +1,8 @@
 # React UI Catalog Mapping (Tauri/React Migration)
 
 Plan 097 Phase 1/4 — locked before any React UI implementation. Sources:
-`.agents/skills/clay-ui/references/components.md`,
-`.agents/skills/clay-ui/references/tokens.md`, `docs/reference/ui-components.md`,
+`.agents/skills/clay-execution/references/components.md`,
+`.agents/skills/clay-execution/references/tokens.md`, `docs/reference/ui-components.md`,
 React Aria Components, and WAI-ARIA Authoring Practices. Architecture decision:
 `decision-logs/2026-08-23-0052-tauri-react-client-architecture.md`.
 

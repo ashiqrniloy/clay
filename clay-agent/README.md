@@ -1,6 +1,6 @@
 # clay-agent
 
-Clay-owned Node >= 20 child that hosts Prism **0.5.3**. Not a Clay JS package.
+Clay-owned Node >= 20 child that hosts Prism **0.5.5**. Not a Clay JS package.
 Packages never spawn or speak to this process; the Clay server does.
 
 ## Spawn
@@ -76,7 +76,7 @@ Named strategies on the kernel: `default` (local), `llm` (provider summary), `om
 
 ## Pins
 
-Exact `0.5.3` for `@arnilo/prism`, `@arnilo/prism-core`,
+Exact `0.5.5` for `@arnilo/prism`, `@arnilo/prism-core`,
 `@arnilo/prism-providers`, `@arnilo/prism-coding-tools`,
 `@arnilo/prism-web-tools`, `@arnilo/prism-memory`, and `@arnilo/prism-mcp`,
 plus exact `better-sqlite3@13.0.3` and `playwright-core@1.61.0` (CDP

@@ -146,7 +146,7 @@ cargo test --test editor editor_performance_invariants::
 
 - [First-Party LSP Bridge Packages](first-party-lsp-bridge-packages.md)
 - [Language Intelligence](language-intelligence.md)
-- [Phase 18.20 Primitive Review](phase18.20-language-intelligence-primitive-review.md)
+- [Phase 18.20 Primitive Review](../archive/phase18.20-language-intelligence-primitive-review.md)
 - [Embedded JavaScript Runtime](embedded-js-runtime.md)
 - [Third-Party Runtime Authority](third-party-runtime-authority.md)
 - [Package Loading](package-loading.md)

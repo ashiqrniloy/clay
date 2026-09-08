@@ -100,19 +100,36 @@ completion). Executed on a freshly rebuilt Linux build:
 | Interactive keyboard steps | UNRESOLVED | Documented host ceiling (no TTY/uinput input path) — unchanged since plan 097 |
 | Real-provider streaming legs (C3/C4/C6/C10) | UNRESOLVED | Standing manual step pending a configured provider credential; mock-provider suites pin the same code paths |
 
+## Plan 115 manual-test-plan execution record (2026-09-08)
+
+Module 09 gained P43–P54 (install/remove/list/update CLI round-trips against
+a local fixture registry, appended load line, adopt boundary, pinned-skip,
+binary provisioning approval) and module 02 gained C30–C34 (install-appended
+line reload semantics + startup budget). Coverage matrix row added.
+
+| Modules/steps | Result | Evidence/notes |
+|---|---|---|
+| 09 P43–P54 (CLI legs) | PASS | Live drill, scratch HOME + local registry + real npm backend; per-step details in the module 09 record |
+| 09 P46/P47, 02 C30/C31 | DEFECT FOUND + FIXED | Production server never discovered store packages (`packages.not_installed` after adoption). Fixed via `PackageService::open_production` (one discovery pass at boot); lib 1284 / security 116 green, fmt + clippy clean |
+| 02 C30–C34 | PASS | Reload fail-closed/recovery semantics + 33 ms vs 60 ms startup budget (module 02 record) |
+| Interactive GUI legs | UNRESOLVED | Standing host ceiling (no input-synthesis backend); package contribution rendering is covered by P16–P21 / Plan 097 records — no new GUI step was added for the CLI-only verb surface |
+
+No existing manual step was deleted or weakened. Developer profile untouched;
+all scratch state removed after the drill.
+
 ## Module map
 
 | # | Module file | Covers | Deep-reference doc |
 |---|-------------|--------|-------------------|
 | 01 | [Launch and connection](01-launch-and-connection.md) | server/client lifecycle, lease, read-only observer, restart, status line | `docs/development/launch-and-gui-smoke.md` |
-| 02 | [Configuration (init.js)](02-configuration-init-js.md) | init.js evaluation, modular loading, diagnostics, live reload, watcher auto-reload, default reload chord, planned-API denial | `docs/reference/clay-js-api/configuration.md`, `examples/` tree, `tests/fixtures/configuration/plan080-manual/` |
+| 02 | [Configuration (init.js)](02-configuration-init-js.md) | init.js evaluation, modular loading, diagnostics, live reload, watcher auto-reload, default reload chord, planned-API denial, install-appended load line (C30–C34) | `docs/reference/clay-js-api/configuration.md`, `examples/` tree, `tests/fixtures/configuration/plan080-manual/` |
 | 03 | [Files and workspace](03-files-and-workspace.md) | open/save/reload, dirty state, conflicts, sanitized file-browser/workspace labels, hidden-pane toggle, `Ctrl+O` while hidden, multi-document (incl. pane-scoped switcher, duplicate-open focus routing), Path Browser (24.3): seed fallback, fuzzy filter, descend/ascend/direct jump, invalid-path recovery, file open + duplicate-open focus + active-pane targeting, `Alt+Enter` current-tab workspace load, cancellation, tab-switch/reload dismissal, native-dialog fallback, navigation-no-grant/symlink/cross-tab security checks, centered modal surface/accessibility/containment (24.4) | `docs/development/file-open-save-reload-workflow.md`, `docs/reference/clay-js-api/configuration.md` (Phase 24.3 review) |
 | 04 | [Core editing](04-core-editing.md) | typing, undo/redo, clipboard, newline/indent rules, IME preedit, completion projection/ranking, Phase 28 comment/list/heading transforms and inlay toggle, bounded AT-SPI/AccessKit editable-text semantics | `docs/reference/clay-js-api/editor/` command docs, `docs/development/accessibility.md` |
 | 05 | [Movement and selection](05-movement-and-selection.md) | word/paragraph/line movement, sticky column, line/word selection, prose vs code | `docs/development/manual-editor-capabilities-test-plan.md` |
 | 06 | [Multi-cursor editing](06-multi-cursor.md) | Ctrl+D match selection, column select, add-cursor, cursor undo, escape priority | `docs/development/manual-editor-capabilities-test-plan.md` |
 | 07 | [Caret and typography](07-caret-and-typography.md) | caret shape/blink, width, ligature policies per font role, user-owned hierarchy, large/small UI typography and theme contrast | `docs/development/manual-editor-capabilities-test-plan.md` |
 | 08 | [Syntax and text objects](08-syntax-and-textobjects.md) | grammar highlighting, textobject/smart-select, engine tiers, advisory degrade, Phase 28 folding ranges, link intent, and inlay overlays | `docs/development/manual-editor-capabilities-test-plan.md`, `docs/reference/primitives/ui-chrome-primitives.md` |
-| 09 | [Packages and modes](09-packages-and-modes.md) | package loading, mode classification/activation, settings UI, theme switching, clipped/scrollable package panels, state/disabled/provenance semantics, Phase 27 inspect/preset/one-line load, Phase 28 behavior/keymap/LSP contributions | `docs/development/launch-and-gui-smoke.md`, `docs/reference/packages/creating-packages.md` |
+| 09 | [Packages and modes](09-packages-and-modes.md) | package loading, mode classification/activation, settings UI, theme switching, clipped/scrollable package panels, state/disabled/provenance semantics, Phase 27 inspect/preset/one-line load, Phase 28 behavior/keymap/LSP contributions, package install/remove/list/update CLI + adopt boundary + binary provisioning (P43–P54) | `docs/development/launch-and-gui-smoke.md`, `docs/reference/packages/creating-packages.md`, `docs/development/distribution.md` |
 | 10 | [Keybindings and commands](10-keybindings-and-commands.md) | bindKey override, unbind, deny-by-default, execution push channel, Global-scope tab command bindings (22.4), Control Center menu round trip + tab-switch dismissal (24.1), Control Center command execution mode (24.2), Path Browser keybinding surface (24.3), centered modal surface/accessibility/input containment (24.4), sequence chords (24.5), and Phase 28 client-command aliases/package keymaps | `docs/development/manual-editor-capabilities-test-plan.md`, `docs/reference/primitives/shell-layout-strategy.md`, `docs/reference/clay-js-api/keybindings/bind-key.md` |
 | 11 | [Performance](11-performance.md) | large files, scroll/type latency, parse feel, window-model budgets (22.6: pane paint / tab switch / decoration aggregate), centered Command Centre rendering feel (24.4: one panel + scrim, width clamping, no duplicate overlays, no blur jank), Command Centre open/filter feel + chord pending feel (24.5 advisory budgets), completion popup feel/caps (Plan 087), Plan 088 responsive/high-DPI/typography geometry, and Phase 28 fold/link/inlay/ranking budgets | `docs/development/performance.md` |
 | 12 | [Platform: Windows](12-platform-windows.md) | MSVC toolchain, named pipes, native dialogs | `docs/development/windows.md` |
@@ -136,6 +153,7 @@ completion). Executed on a freshly rebuilt Linux build:
 | Icon packs / `setIconPack` / icon-only controls / semantic icon references | 18, 02 (selection persistence), 09 (package trust), 15 (theme/DS independence) |
 | Syntax / grammar / decorations | 08 |
 | Package loading / modes / trust boundary | 09, 02 |
+| Package install/remove/list/update CLI (`clay install` family, adopt boundary, appended load line, binary provisioning) | 09 (P43–P54), 02 (C30–C34), 01 (launch gate) |
 | File IO / save / dialogs | 03 |
 | Keybinding routing / commands | 10, 05, 11 |
 | Shell layout / panes / splits / pane focus / split aliases | 13, 10, 01 |

@@ -227,8 +227,8 @@ Coverage:
 
 ## Related
 
-- [Phase 18.16 Tiered Tree-sitter Engine Primitive Review](phase18.16-tiered-tree-sitter-engine-primitive-review.md)
-- [Phase 18.10 Tree-sitter Grammar Primitive Review](phase18.10-tree-sitter-grammar-primitive-review.md)
+- [Phase 18.16 Tiered Tree-sitter Engine Primitive Review](../archive/phase18.16-tiered-tree-sitter-engine-primitive-review.md)
+- [Phase 18.10 Tree-sitter Grammar Primitive Review](../archive/phase18.10-tree-sitter-grammar-primitive-review.md)
 - [Package Loading](package-loading.md)
 - [Package Primitive Gate](package-primitive-gate.md)
 - [Parse Coordinator](parse-coordinator.md)

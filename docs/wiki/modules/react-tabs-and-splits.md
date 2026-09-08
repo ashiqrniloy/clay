@@ -75,6 +75,6 @@ cargo test -p clay-desktop --all-targets
 ## Related
 
 - [Tabs and Independent Client Views](tabs-and-clients.md)
-- [Pane Document Views](pane-document-views.md)
+- [Pane Document Views](../archive/pane-document-views.md)
 - [React CodeMirror Editor](react-codemirror-editor.md)
 - [React Shell](react-shell.md)

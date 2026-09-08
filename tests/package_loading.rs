@@ -442,26 +442,16 @@ fn markdown_package_does_not_execute_on_install() {
     }
 }
 
+/// Install does not execute package runtimes and records npm-registry
+/// provenance for every accepted v1 spec form (floating/pinned, scoped and
+/// unscoped).
 #[test]
 fn source_aware_install_records_provenance_without_enabling_runtime() {
-    for (spec, expected_kind, expected_name) in [
-        (
-            "@vendor/mode",
-            PackageSourceKind::NpmRegistry,
-            "@vendor/mode",
-        ),
-        ("github:user/mode", PackageSourceKind::GitHub, "github-mode"),
-        (
-            "https://github.com/user/mode.git",
-            PackageSourceKind::GitUrl,
-            "git-mode",
-        ),
-        ("./local-mode", PackageSourceKind::LocalPath, "local-mode"),
-        (
-            "https://example.test/mode.tgz",
-            PackageSourceKind::Tarball,
-            "tarball-mode",
-        ),
+    for (spec, expected_name) in [
+        ("npm:@vendor/mode", "@vendor/mode"),
+        ("npm:@vendor/mode@2.3.4", "@vendor/mode"),
+        ("npm:plain-mode", "plain-mode"),
+        ("npm:plain-mode@2.3.4", "plain-mode"),
     ] {
         let mut package = full_markdown_fixture();
         package["name"] = json!(expected_name);
@@ -484,7 +474,11 @@ fn source_aware_install_records_provenance_without_enabling_runtime() {
             .expect("installed package can be inspected by resolved name");
         assert!(!inspection.is_enabled, "install must not enable `{spec}`");
         assert_eq!(inspection.provenance.requested_spec, spec);
-        assert_eq!(inspection.provenance.source_kind, expected_kind);
+        assert_eq!(
+            inspection.provenance.source_kind,
+            PackageSourceKind::NpmRegistry,
+            "`{spec}` is an npm registry source"
+        );
         assert_eq!(inspection.provenance.resolved_name, expected_name);
         assert_eq!(inspection.provenance.resolved_version, "2.3.4");
         assert!(
@@ -493,7 +487,7 @@ fn source_aware_install_records_provenance_without_enabling_runtime() {
                 .package_root
                 .display()
                 .to_string()
-                .contains(spec),
+                .contains(expected_name),
             "package root should come from package-manager discovery"
         );
         assert!(
@@ -501,6 +495,143 @@ fn source_aware_install_records_provenance_without_enabling_runtime() {
             "package-manager diagnostics must be bounded"
         );
     }
+}
+
+/// v1 gate: non-npm sources (bare specs, `github:`, git URLs, tarballs,
+/// local paths, and range versions) are rejected at parse time with a
+/// typed error naming the accepted form — no install path accepts a
+/// non-npm source (plan 115 task 2).
+#[test]
+fn non_npm_sources_are_rejected_before_any_backend_call() {
+    for spec in [
+        "github:user/mode",
+        "https://github.com/user/mode.git",
+        "./local-mode",
+        "https://example.test/mode.tgz",
+        "@vendor/mode",
+        "mode",
+        "npm:mode@^1.2.3",
+    ] {
+        // The FakeBackend has no configured results, so a backend call
+        // would fail differently; the parse gate must reject first.
+        let backend = FakeBackend::new();
+        let mut service =
+            PackageService::new("target/test-package-store/rejected", Box::new(backend));
+        let error = service
+            .install(spec, Default::default())
+            .expect_err("`{spec}` must be rejected by the v1 npm gate");
+        let PackageServiceError::InvalidSpecifier { message } = &error else {
+            panic!("`{spec}`: expected InvalidSpecifier, got {error:?}");
+        };
+        assert!(
+            message.contains("npm:"),
+            "`{spec}`: message must name the accepted v1 form; got {message}"
+        );
+    }
+}
+
+/// Plan 115 task 3: Clay-initiated install writes a durable ledger entry that
+/// survives `PackageService::open` across processes; remove deletes it.
+#[test]
+fn install_ledger_round_trips_across_service_reopen() {
+    let root = format!(
+        "target/test-package-store/ledger-roundtrip-{}",
+        std::process::id()
+    );
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+
+    let mut package = full_markdown_fixture();
+    package["name"] = json!("plain-mode");
+    package["version"] = json!("1.2.3");
+
+    let spec = "npm:plain-mode";
+    let backend = FakeBackend::new().will_install(spec, package);
+    {
+        let mut service =
+            PackageService::open(&root, Box::new(backend)).expect("fresh store opens");
+        service
+            .install(spec, Default::default())
+            .expect("install records ledger");
+        let rec = service
+            .install_record("plain-mode")
+            .expect("in-process ledger entry");
+        assert!(!rec.pinned, "floating spec is not pinned");
+        assert_eq!(rec.spec, spec);
+        assert_eq!(rec.version, "1.2.3");
+        assert_eq!(rec.source, "npm");
+    }
+
+    let service = PackageService::open(&root, Box::new(FakeBackend::new())).expect("store reopens");
+    let rec = service
+        .install_record("plain-mode")
+        .expect("ledger survives reopen");
+    assert!(!rec.pinned);
+    assert_eq!(rec.spec, spec);
+    assert_eq!(rec.version, "1.2.3");
+
+    let mut service = PackageService::open(&root, Box::new(FakeBackend::new()))
+        .expect("store reopens for remove");
+    service.remove("plain-mode").expect("remove deletes ledger");
+    assert!(service.install_record("plain-mode").is_none());
+    drop(service);
+
+    let service = PackageService::open(&root, Box::new(FakeBackend::new()))
+        .expect("store reopens after remove");
+    assert!(
+        service.install_record("plain-mode").is_none(),
+        "removed entry must not reappear"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn install_ledger_pinned_flag_follows_spec_and_unmanaged_has_no_entry() {
+    let root = format!(
+        "target/test-package-store/ledger-pinned-{}",
+        std::process::id()
+    );
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+
+    let mut pinned_pkg = full_markdown_fixture();
+    pinned_pkg["name"] = json!("@arnilo/st");
+    pinned_pkg["version"] = json!("1.2.3");
+    let pinned_spec = "npm:@arnilo/st@1.2.3";
+
+    let mut floating_pkg = full_markdown_fixture();
+    floating_pkg["name"] = json!("plain-mode");
+    floating_pkg["version"] = json!("0.1.0");
+    let floating_spec = "npm:plain-mode";
+
+    let backend = FakeBackend::new()
+        .will_install(pinned_spec, pinned_pkg)
+        .will_install(floating_spec, floating_pkg);
+    let mut service = PackageService::open(&root, Box::new(backend)).expect("store opens");
+    service
+        .install(pinned_spec, Default::default())
+        .expect("pinned install");
+    service
+        .install(floating_spec, Default::default())
+        .expect("floating install");
+    assert!(service.install_record("@arnilo/st").unwrap().pinned);
+    assert!(!service.install_record("plain-mode").unwrap().pinned);
+
+    let mut outsider = full_markdown_fixture();
+    outsider["name"] = json!("outsider");
+    outsider["version"] = json!("9.9.9");
+    let unmanaged = FakeBackend::new().will_install("npm:outsider", outsider);
+    let mut discovered = PackageService::new(format!("{root}/unmanaged"), Box::new(unmanaged));
+    discovered.refresh_installed().expect("discovery");
+    assert!(
+        discovered.inspect("outsider").is_some(),
+        "unmanaged package is visible via discovery"
+    );
+    assert!(
+        discovered.install_record("outsider").is_none(),
+        "discovery without clay install must not create a ledger entry"
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]

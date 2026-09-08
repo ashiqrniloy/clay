@@ -2,7 +2,7 @@
 
 **Files:** `src/shell/design_system.rs`, `src/packages/record/theme.rs`, `src/packages/conflict.rs`, `src/server/ops/theme.rs`, `src/server/mod.rs`, `src-tauri/src/bridge/dto.rs`, `frontend/src/theme/design-system-adapter.ts`, `frontend/src/state/design-system-store.ts`, `packages/clay-design-neobrutal/package.json`, `packages/clay-design-glass/package.json`  
 **Tests:** `tests/theme_packages.rs`, `tests/package_ui_conformance.rs`, `tests/package_loading.rs`, `tests/runtime_update_protocol.rs`, `src-tauri/tests/dto_roundtrips.rs`, `frontend/src/test/design-system-adapter.test.ts`, `frontend/src/test/design-system-conformance.test.tsx`, `frontend/src/test/design-system-consumption.test.ts`  
-**Reference Docs:** `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `docs/development/ui-design-system-recipe-matrix.md`, `docs/reference/packages/creating-packages.md`, `.agents/skills/clay-ui/references/tokens.md`, `DESIGN.md`  
+**Reference Docs:** `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `docs/development/ui-design-system-recipe-matrix.md`, `docs/reference/packages/creating-packages.md`, `.agents/skills/clay-execution/references/tokens.md`, `DESIGN.md`  
 
 ---
 

@@ -3757,3 +3757,26 @@ permissions = ["agent-host"]
 security_notes = "Forwards a workspace-scoped configuration intent (opt-in wiki and graft knowledge bases, decision 2156) to the daemon, which owns activation via kernel.load; wiki writes stay inside the workspace .wiki/ tree, the optional qmd binary is never spawned unless explicitly configured, and the graft CLI runs as a host-owned bounded child process (fail-closed resolution, never spawned by package JavaScript). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::knowledgeSetOptions"
 registry_public = true
+
+[[api]]
+id = "agent.setRunOptions"
+category = "agent-run-options"
+visibility = "public"
+status = "runtime-backed"
+js_module = "clay:agent"
+js_export = "setRunOptions"
+user_facing_name = "Set Agent Run Options"
+authority = "user-intent-forwarding-to-daemon-rpc"
+runtime_path = "server-first-op-wrapper"
+hot_path_policy = "One-shot configuration from workspace init; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths."
+facade_path = "runtime/js/agent.js::setRunOptions"
+backing_rust = "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::runSetOptions"
+deno_op = "op_clay_agent_run_set_options"
+deno_op_path = "src/server/ops/agent.rs::op_clay_agent_run_set_options"
+documentation_path = "docs/reference/clay-js-api/agent/set-run-options.md"
+key_bindings = []
+custom_properties = ["maxInputTokens:number=null", "maxOutputTokens:number=null", "maxTurns:number=null", "maxToolRounds:number=null", "maxToolCalls:number=null", "maxWallTimeMs:number=null", "compactAfterTokens:number=800000", "compaction:string=llm"]
+permissions = ["agent-host"]
+security_notes = "Forwards a configuration intent (policy caps and a named compaction strategy) to the daemon. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority to package JavaScript."
+current_rust_owner = "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::runSetOptions"
+registry_public = true

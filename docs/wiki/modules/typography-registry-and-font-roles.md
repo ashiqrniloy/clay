@@ -19,7 +19,7 @@
 - Authoritative public API: [`theme.setTypography`](../../reference/clay-js-api/theme/set-typography.md).
 - Authoritative package/mode contract: [Semantic Typography Roles](../../reference/primitives/typography.md).
 - Decision: `decision-logs/2026-07-11-1418-semantic-font-roles-and-user-owned-typography.md`.
-- Pattern: `.agents/skills/project-patterns/references/typography-role-ownership.md`.
+- Pattern: `.agents/skills/clay-execution/references/config.md`.
 
 ## Overview
 
@@ -209,12 +209,12 @@ cargo test --test protocol manual_smoke_docs::
 - [Editor Theme Registry](editor-theme-registry.md) — Phase 20.1 `ResolvedUiTheme`, `designTokens`, and editor color boundary.
 - [Decoration Transport](decoration-transport.md) — `DecorationSpan.font_role` transport and role overrides.
 - [Mode Registry](mode-registry.md) — `defaultFontRole` propagation.
-- [Masonry Editor Widget Status Observability](masonry-editor.md) — status-line typography and layout invalidation.
+- [Masonry Editor Widget Status Observability](../archive/masonry-editor.md) — status-line typography and layout invalidation.
 - [Slot-Aware Package UI](slot-aware-package-ui.md) — component `style.fontRole` catalog.
 - [Server-Driven UI Protocol Schema](server-driven-ui.md) — SDUI typography metrics and accessibility bounds.
 - [Client Snapshot Bootstrap](client-snapshot-bootstrap.md) — pre-bind typography handshake, tab binding, deferred document snapshot, and registry revalidation.
 - [Protocol Codec](protocol-codec.md) — `ServerMessage::ActiveTypography` and variant ordering.
 - [Configuration Runtime](configuration-runtime.md) — `setTypography` atomicity and reload behavior.
-- [Phase 18.16.5 Semantic Typography Primitive Review](phase18.16.5-typography-primitive-review.md) — pre-implementation inventory and rejected shapes.
+- [Phase 18.16.5 Semantic Typography Primitive Review](../archive/phase18.16.5-typography-primitive-review.md) — pre-implementation inventory and rejected shapes.
 - [Semantic Typography Roles](../../reference/primitives/typography.md) — authoritative package/mode contract.
 - [`theme.setTypography`](../../reference/clay-js-api/theme/set-typography.md) — authoritative public API.

@@ -120,7 +120,7 @@ async function main(): Promise<void> {
           });
           process.exit(1);
         }
-        write({ jsonrpc: "2.0", id, result: { ok: true, mock: args.mock, prism: "0.5.3", mcpServers: mcpAllowList.length } });
+        write({ jsonrpc: "2.0", id, result: { ok: true, mock: args.mock, prism: "0.5.5", mcpServers: mcpAllowList.length } });
         return;
       }
       if (method === "shutdown") {

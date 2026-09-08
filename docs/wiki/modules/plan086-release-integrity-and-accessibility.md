@@ -142,9 +142,9 @@ The prior transient-menu item-label ceiling follow-up remains resolved by Plan
 
 ## Related
 
-- [Masonry Shell Runtime](masonry-shell.md)
-- [Masonry Editor Widget Status Observability](masonry-editor.md)
-- [SDUI / Package-UI Retained Masonry Reconciliation](masonry-sdui-region.md)
+- [Masonry Shell Runtime](../archive/masonry-shell.md)
+- [Masonry Editor Widget Status Observability](../archive/masonry-editor.md)
+- [SDUI / Package-UI Retained Masonry Reconciliation](../archive/masonry-sdui-region.md)
 - [Tabs and Independent Client Views](tabs-and-clients.md)
 - [Protocol Codec](protocol-codec.md)
 - [Configuration Runtime](configuration-runtime.md)

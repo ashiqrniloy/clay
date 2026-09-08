@@ -16,7 +16,9 @@ function agentOps() {
         typeof ops?.op_clay_agent_profile_register !== "function" ||
         typeof ops?.op_clay_agent_skill_register !== "function" ||
         typeof ops?.op_clay_agent_command_register !== "function" ||
-        typeof ops?.op_clay_agent_command_dispatch !== "function") {
+        typeof ops?.op_clay_agent_command_dispatch !== "function" ||
+        typeof ops?.op_clay_agent_knowledge_set_options !== "function" ||
+        typeof ops?.op_clay_agent_run_set_options !== "function") {
         throw new Error("clay:agent runtime ops are unavailable in this environment");
     }
     return ops;
@@ -50,4 +52,7 @@ export async function commandDispatch(options) {
 }
 export async function knowledgeSetOptions(options) {
     return JSON.parse(await agentOps().op_clay_agent_knowledge_set_options(JSON.stringify(options)));
+}
+export async function setRunOptions(options) {
+    return JSON.parse(await agentOps().op_clay_agent_run_set_options(JSON.stringify(options)));
 }

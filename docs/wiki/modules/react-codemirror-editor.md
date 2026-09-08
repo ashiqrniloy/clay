@@ -234,7 +234,7 @@ cd frontend && npm test
 
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
 - [Editor Viewport Render Patch](../flows/editor-viewport-render-patch.md)
-- [Client Edit Emission](../flows/client-edit-emission.md)
+- [Client Edit Emission](../archive/client-edit-emission.md)
 - [UI Design System Runtime](ui-design-system-runtime.md)
 - [Desktop Typed Bridge](desktop-typed-bridge.md)
 - [React Shell](react-shell.md)

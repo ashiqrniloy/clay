@@ -128,7 +128,12 @@
             "C26",
             "C27",
             "C28",
-            "C29"
+            "C29",
+            "C30",
+            "C31",
+            "C32",
+            "C33",
+            "C34"
           ]
         }
       ],
@@ -751,7 +756,19 @@
             "P39",
             "P40",
             "P41",
-            "P42"
+            "P42",
+            "P43",
+            "P44",
+            "P45",
+            "P46",
+            "P47",
+            "P48",
+            "P49",
+            "P50",
+            "P51",
+            "P52",
+            "P53",
+            "P54"
           ]
         }
       ],
@@ -1524,7 +1541,8 @@
         "agent.skillRegister",
         "agent.commandRegister",
         "agent.commandDispatch",
-        "agent.knowledgeSetOptions"
+        "agent.knowledgeSetOptions",
+        "agent.setRunOptions"
       ],
       "protocol_messages": {
         "client": [],
@@ -1603,7 +1621,10 @@
             "C17",
             "C18",
             "C19",
-            "C20"
+            "C20",
+            "C21",
+            "C22",
+            "C23"
           ]
         }
       ],

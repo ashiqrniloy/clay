@@ -29,7 +29,7 @@ function hostConfigStub(name: string, provider: string, credentialName: string):
   };
 }
 
-/** Load first-party Prism 0.5.3 provider packages. Azure/Bedrock/Vertex need host
+/** Load first-party Prism 0.5.5 provider packages. Azure/Bedrock/Vertex need host
  *  endpoint/region/project before their factories can run; stubs expose auth only. */
 export async function loadProviderPackages(kernel: ExtensionKernel, apiKey: CredentialValueSource): Promise<void> {
   await kernel.load([

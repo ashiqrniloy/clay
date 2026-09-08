@@ -639,13 +639,12 @@ fn phase19_code_wiki_documents_open_dialog_path() {
     let index = wiki_doc("docs/wiki/index.md");
     let client_dialog = wiki_doc("docs/wiki/modules/client-file-dialog.md");
     let workspace = wiki_doc("docs/wiki/modules/server-file-workspace.md");
-    let edit_ack = wiki_doc("docs/wiki/flows/client-server-edit-ack.md");
+    let edit_ack = wiki_doc("docs/wiki/archive/client-server-edit-ack.md");
     let markdown = wiki_doc("docs/wiki/modules/first-party-markdown-package.md");
 
     for linked_page in [
         "modules/client-file-dialog.md",
         "modules/server-file-workspace.md",
-        "flows/client-server-edit-ack.md",
         "modules/first-party-markdown-package.md",
     ] {
         assert!(

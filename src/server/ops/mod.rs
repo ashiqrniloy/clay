@@ -50,8 +50,9 @@ use self::{
     agent::{
         op_clay_agent_command_dispatch, op_clay_agent_command_register,
         op_clay_agent_compact_session, op_clay_agent_knowledge_set_options,
-        op_clay_agent_profile_register, op_clay_agent_resume_run, op_clay_agent_search_sessions,
-        op_clay_agent_session_tree, op_clay_agent_set_autonomy, op_clay_agent_skill_register,
+        op_clay_agent_profile_register, op_clay_agent_resume_run, op_clay_agent_run_set_options,
+        op_clay_agent_search_sessions, op_clay_agent_session_tree, op_clay_agent_set_autonomy,
+        op_clay_agent_skill_register,
     },
     behavior::{op_clay_behavior_get_active_manifest, op_clay_behavior_list_routes},
     commands::{
@@ -2045,7 +2046,7 @@ fn op_clay_runtime_record(state: &mut OpState, #[string] value: String) -> Resul
 }
 
 // Trusted domain: configuration evaluation and bundled first-party packages.
-// This is the full trusted op set (86 ops).
+// This is the full trusted op set (98 ops).
 extension!(
     clay_runtime_trusted_extension,
     ops = [
@@ -2060,6 +2061,7 @@ extension!(
         op_clay_agent_command_register,
         op_clay_agent_command_dispatch,
         op_clay_agent_knowledge_set_options,
+        op_clay_agent_run_set_options,
         op_clay_runtime_record,
         op_clay_configuration_load_module,
         op_clay_configuration_record_module_error,
@@ -2265,7 +2267,7 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 97);
+        assert_eq!(trusted.len(), 98);
         // 46 = 38 public contribution ops (including folding publication) +
         // the seven shared `editor-control` gated editor ops + the gated
         // programmatic execution op (follow-up round); visibility grants
@@ -2320,6 +2322,7 @@ mod domain_extension_tests {
             "op_clay_agent_command_register",
             "op_clay_agent_command_dispatch",
             "op_clay_agent_knowledge_set_options",
+            "op_clay_agent_run_set_options",
             "op_clay_modes_classify_document",
             "op_clay_modes_activate_major_mode",
             "op_clay_completion_providers_for_trigger",

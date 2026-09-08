@@ -212,7 +212,7 @@ cargo test --test protocol primitives_docs:: --quiet
 
 ## Related
 
-- [Masonry Shell Runtime](masonry-shell.md)
+- [Masonry Shell Runtime](../archive/masonry-shell.md)
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [Package Loading](package-loading.md)
 - [Configuration Runtime](configuration-runtime.md)
@@ -220,9 +220,9 @@ cargo test --test protocol primitives_docs:: --quiet
 - [Clay JS Facade Skeleton](clay-js-facade-skeleton.md)
 - [Clay JS Documentation Registry](clay-js-doc-registry.md)
 - [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `PackageUiRuntimeState::install_runtime_snapshot` atomically replaces package UI version during live reload.
-- [Phase 18.3 Slot-Aware Package UI Primitive Review](phase18.3-slot-ui-primitive-review.md)
+- [Phase 18.3 Slot-Aware Package UI Primitive Review](../archive/phase18.3-slot-ui-primitive-review.md)
 - [Shell/Layout Strategy Reference](../../reference/primitives/shell-layout-strategy.md)
 - [Package Authoring Guide](../../reference/packages/creating-packages.md) — includes Phase 20 multi-document / dirty-save / recovery chrome non-goals for package UI
-- [Phase 20 Daily Editing Product Hardening Primitive Review](phase20-daily-editing-product-hardening-primitive-review.md)
-- [Phase 20.5 Overlay, Menu, and Input Components](phase20.5-overlay-menu-input-components.md) — new kinds, z-level stacking, keyboard nav, `TransientMenuOrigin`
+- [Phase 20 Daily Editing Product Hardening Primitive Review](../archive/phase20-daily-editing-product-hardening-primitive-review.md)
+- [Phase 20.5 Overlay, Menu, and Input Components](../archive/phase20.5-overlay-menu-input-components.md) — new kinds, z-level stacking, keyboard nav, `TransientMenuOrigin`
 - [File Open, Save, and Reload Workflow](../../development/file-open-save-reload-workflow.md)

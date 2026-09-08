@@ -112,8 +112,8 @@ do not add another command-centre renderer or a package-facing centered anchor.
 
 - [Transient Menu Session](transient-menu-session.md)
 - [Transient Menu Round Trip](transient-menu-round-trip.md)
-- [Masonry Shell Runtime](masonry-shell.md)
-- [SDUI / Package-UI Retained Masonry Reconciliation](masonry-sdui-region.md)
+- [Masonry Shell Runtime](../archive/masonry-shell.md)
+- [SDUI / Package-UI Retained Masonry Reconciliation](../archive/masonry-sdui-region.md)
 - [Accessibility contract](../../development/accessibility.md)
 - [Performance workflow](../../development/performance.md)
 - [UI Chrome Primitives](../../reference/primitives/ui-chrome-primitives.md)

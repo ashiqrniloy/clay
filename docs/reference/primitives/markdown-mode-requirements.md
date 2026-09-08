@@ -198,7 +198,7 @@ Phase 18 must measure Markdown mode against existing typed constants in `src/per
 - `docs/reference/primitives/registry.md`.
 - `docs/reference/primitives/rendering-strategy.md`.
 - `docs/reference/primitives/parse-update-strategy.md`.
-- `.agents/skills/project-patterns/references/package-distribution.md`.
-- `.agents/skills/project-patterns/references/behavior-manifests.md`.
-- `.agents/skills/project-patterns/references/protocol-and-performance.md`.
+- `.agents/skills/clay-execution/references/packages.md`.
+- `.agents/skills/clay-execution/references/protocol-perf.md`.
+- `.agents/skills/clay-execution/references/protocol-perf.md`.
 - `src/perf/budgets.rs`.

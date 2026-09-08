@@ -158,8 +158,8 @@ See [Creating Clay Packages](../packages/creating-packages.md#ui-chrome-conforma
 
 ## References
 
-- `.agents/skills/clay-ui/references/components.md` — full primitive inventory and token mappings
-- `.agents/skills/clay-ui/references/tokens.md` — typed token catalog
+- `.agents/skills/clay-execution/references/components.md` — full primitive inventory and token mappings
+- `.agents/skills/clay-execution/references/tokens.md` — typed token catalog
 - `docs/reference/packages/creating-packages.md` — package authoring contract
-- `docs/wiki/modules/phase20.2-ui-primitive-library-primitive-review.md` — primitive review wiki page
+- `docs/wiki/archive/phase20.2-ui-primitive-library-primitive-review.md` — primitive review wiki page
 - `tests/ui_primitive_conformance.rs` — conformance tests

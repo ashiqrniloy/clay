@@ -47,6 +47,61 @@ fn validate_registration_shape(method: &str, params: &Value) -> Result<(), JsErr
         }
         return Ok(());
     }
+    if method == "run.setOptions" {
+        let compaction = params.get("compaction");
+        let compact_after = params.get("compactAfterTokens");
+        const POLICY: &[&str] = &[
+            "maxInputTokens",
+            "maxOutputTokens",
+            "maxTurns",
+            "maxToolRounds",
+            "maxToolCalls",
+            "maxWallTimeMs",
+        ];
+        if POLICY.iter().all(|name| params.get(*name).is_none())
+            && compact_after.is_none()
+            && compaction.is_none()
+        {
+            return Err(invalid(
+                "requires a policy cap, compactAfterTokens, and/or compaction",
+            ));
+        }
+        for name in POLICY {
+            let Some(value) = params.get(*name) else {
+                continue;
+            };
+            if value.is_null() {
+                continue;
+            }
+            let Some(n) = value.as_u64() else {
+                return Err(invalid(&format!(
+                    "`{name}` must be a positive integer or null"
+                )));
+            };
+            if n < 1 {
+                return Err(invalid(&format!(
+                    "`{name}` must be a positive integer or null"
+                )));
+            }
+        }
+        if let Some(value) = compact_after {
+            let Some(n) = value.as_u64() else {
+                return Err(invalid("`compactAfterTokens` must be a positive integer"));
+            };
+            if n < 1 {
+                return Err(invalid("`compactAfterTokens` must be a positive integer"));
+            }
+        }
+        if let Some(value) = compaction {
+            let Some(name) = value.as_str() else {
+                return Err(invalid("`compaction` must be one of default|llm|om"));
+            };
+            if !matches!(name, "default" | "llm" | "om") {
+                return Err(invalid("`compaction` must be one of default|llm|om"));
+            }
+        }
+        return Ok(());
+    }
     let name = params
         .get("name")
         .and_then(Value::as_str)
@@ -293,6 +348,18 @@ pub(super) async fn op_clay_agent_knowledge_set_options(
     // Queued (never spawned) while the daemon is down so a load entry
     // configuring knowledge options applies after the host initializes.
     agent_registration_rpc("knowledge.setOptions", params).await
+}
+
+#[op2]
+#[string]
+pub(super) async fn op_clay_agent_run_set_options(
+    #[string] params_json: String,
+) -> Result<String, JsErrorBox> {
+    let params: Value = serde_json::from_str(&params_json)
+        .map_err(|error| JsErrorBox::generic(format!("agent.invalid_params: {error}")))?;
+    // Daemon owns policy caps (Prism 0.5.4: number | null, no product HARD).
+    // Queued while the daemon is down so init.js never blocks on boot.
+    agent_registration_rpc("run.setOptions", params).await
 }
 
 #[op2]

@@ -88,6 +88,6 @@ let response = document.apply_edit(
 
 - [Versioned Text Synchronization](versioned-text-synchronization.md)
 - [Server Document State](../modules/server-document-state.md)
-- [Client Edit Emission](client-edit-emission.md)
+- [Client Edit Emission](../archive/client-edit-emission.md)
 - [Protocol Codec](../modules/protocol-codec.md)
 - `plans/006-Phase5-Versioned-Text-Synchronization-and-Leases.md`

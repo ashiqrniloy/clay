@@ -15,7 +15,10 @@ Governing decisions already made:
   Its original 0.3.0 pin was superseded by the 0.4.0 migration in Phase 0;
   live pins moved to exact `0.5.0` in Phase 2.1 (`plans/109`), to
   `0.5.1` in plan 113, to `0.5.2` (stream-token coalesce), and to
-  `0.5.3` (content-only tool results on the provider wire).
+  `0.5.3` (content-only tool results on the provider wire), to
+  `0.5.4` (run-limit HARD split: process-safety bytes only; policy axes
+  `number | null`), and to `0.5.5` (byte caps per-frame, not run-lifetime
+  sums).
 - `decision-logs/2026-09-02-1440-direct-external-coding-agent-adapters.md`:
   Claude Code and Antigravity are direct, capability-declared external
   runtimes with Clay policy bundles, not Prism delegation.
@@ -31,7 +34,7 @@ Governing decisions already made:
 Three layers, strict separation:
 
 1. **`clay-agent` daemon (Clay core, Node ≥ 20).** Hosts `@arnilo/prism`
-   0.5.3 plus explicitly selected 0.5 family packages/subpaths. Owns native
+   0.5.5 plus explicitly selected 0.5 family packages/subpaths. Owns native
    providers, models, credentials (vault + keychain), SQLite persistence,
    run ledger, tools, compaction strategies, skills, commands, workflows,
    supervision, and external-runtime lifecycle/policy projection. It does
@@ -52,7 +55,7 @@ The base agent stays minimal by design (pi-like). All autonomy policy
 agent delegation, memory cadence) lives in `st` or in host-free orchestration
 helpers the daemon exposes generically.
 
-## Prism Capability Review (0.4.0 historical; live pins are 0.5.3)
+## Prism Capability Review (0.4.0 historical; live pins are 0.5.5)
 
 Review method for the 0.4 cut: read the 0.4 migration guide,
 package-consolidation plan, all then-11 published package manifests and
@@ -63,9 +66,11 @@ migration. Phase 0 owned the Clay consumer smoke for that cut.
 **Live pins (Phase 2.1 / plan 109):** Prism 0.5.0 lockstep, released
 2026-09-06; bumped to exact **0.5.1** (additive, 2026-09-07) by plan 113;
 bumped to exact **0.5.2** (stream-token coalesce, 2026-09-08);
-bumped to exact **0.5.3** (content-only tool results, 2026-09-08).
+bumped to exact **0.5.3** (content-only tool results, 2026-09-08);
+bumped to exact **0.5.4** (run-limit host policy, 2026-09-08);
+bumped to exact **0.5.5** (per-frame byte caps, 2026-09-08).
 Authoritative sources: `/home/arn/Projects/prism/docs/migrate-to-0.5.md`
-(§8 covers 0.5.1), `CHANGELOG.md` `[0.5.0]`/`[0.5.1]`/`[0.5.2]`/`[0.5.3]`,
+(§8 covers 0.5.1), `CHANGELOG.md` `[0.5.0]`/`[0.5.1]`/`[0.5.2]`/`[0.5.3]`/`[0.5.4]`/`[0.5.5]`,
 `docs/thinking-and-reasoning.md`, `docs/mcp-tools.md`,
 `docs/provider-request-policies.md`.
 Package names and 0.4 subpaths stay valid. Breaking host surface: 27 dead
@@ -265,11 +270,29 @@ poisoning assistant output into one token per line. No Clay host-API or
 transcript change (`append_delta` already concatenates). No persisted-schema
 migration; already-poisoned session rows stay as stored.
 
-**Prism 0.5.3 increment (live):** exact `0.5.3` seven-family pins. Upstream
+**Prism 0.5.3 increment:** exact `0.5.3` seven-family pins. Upstream
 folds `ToolResult.content` text onto `tool_result.result` and serializers
 join sibling `type:text` blocks when `value` is missing, so content-only
 coding tools (`repo_list`/`glob`/`shell`/`read`) stop sending JSON `"null"`
 on the provider wire. No Clay host-API or persisted-schema change.
+
+**Prism 0.5.4 increment (live in 0.5.4, superseded by 0.5.5):** exact
+`0.5.4` seven-family pins. Upstream
+splits process-safety HARD (`maxRequestBytes`/`maxResponseBytes` 64 MiB)
+from host policy: turns/attempts/tools/wall/tokens accept `number | null`
+(`null` disables; omit uses DEFAULT). `HARD_MAX_RUN_COST` removed.
+Omitted `maxProviderAttempts` lifts to at least `maxTurns`. Clay coding
+envelope: tokens `null`, turns/tool-rounds 64, tool-calls 256, wall 30 min.
+
+**Prism 0.5.5 increment (live):** exact `0.5.5` seven-family pins. Upstream
+fixes the byte axes to
+per-frame charging: `maxRequestBytes`/`maxResponseBytes` compare each
+individual provider frame against the cap instead of a run-lifetime sum,
+so long autonomous runs (many megabyte-scale frames, each far under
+64 MiB) no longer trip `Run limit exceeded: maxRequestBytes` after ~40
+turns. Token/turn/wall/cost axes stay cumulative. No Clay host-API
+change — Clay's 64 MiB HARD bytes carry over; Clay policy defaults are
+now fully unbounded (`null` on every axis; fence via `run.setOptions`).
 
 Host-visible 0.5 work Clay must do:
 
@@ -684,8 +707,8 @@ pi model. Must land before any third-party package (`st`) is planned.
   combined create-plan is the principle source; `st` splits plan vs execute.
 - **Project patterns are not a skill.** They are `execute-plan/references/`
   (and the matching execute-tests/validation refs). No generic base — always
-  built from the project. This repo's `project-patterns` skill is the old
-  shape; `st` folds that content into execution references.
+  built from the project. This repo's old `project-patterns` skill is folded into `clay-execution`;
+  `st` folds that content into execution references.
 - **`create-decision-log` is a skill and is embedded.** `create-plan` and
   `execute-plan` always run the decision gate (auto-prompted). Critical =
   architecture, security, or performance with real tradeoffs. Surface to the
@@ -1002,6 +1025,12 @@ pi model. Must land before any third-party package (`st`) is planned.
   Prism kernel + replay serializers. No Clay host-API change.
 - Prism 0.5.3 increment: exact `0.5.3` pins. Content-only tool results
   fold onto the provider wire. No Clay host-API change.
+- Prism 0.5.4 increment: exact `0.5.4` pins. Run-limit HARD is bytes-only;
+  policy axes are host-owned (`number | null`). Clay coding envelope uses
+  unbounded tokens plus a 64/64/256/30min fork-bomb fence.
+- Prism 0.5.5 increment: exact `0.5.5` seven-family pins. Byte caps are
+  per-frame, not run-lifetime sums; long autonomous runs no longer die on
+  cumulative request bytes.
 
 ## Open Decisions (need `decision-logs/` before implementation)
 

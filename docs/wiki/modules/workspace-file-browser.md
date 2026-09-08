@@ -150,7 +150,7 @@ cargo test --test protocol clay_js_facade_layout:: --quiet
 - [Command Registry](command-registry.md)
 - [Transient Menu Session](transient-menu-session.md)
 - [Path Browser](path-browser.md) — Phase 24.3 built-in browse listing lives beside the workspace listing and refreshes this browser on workspace open
-- [Masonry Shell Runtime](masonry-shell.md)
+- [Masonry Shell Runtime](../archive/masonry-shell.md)
 - [Configuration Runtime](configuration-runtime.md)
-- [Phase 18.12 Workspace Discovery and File Browser Foundation Primitive Review](phase18.12-workspace-discovery-primitive-review.md)
+- [Phase 18.12 Workspace Discovery and File Browser Foundation Primitive Review](../archive/phase18.12-workspace-discovery-primitive-review.md)
 - `plans/040-Phase18.12-Workspace-Discovery-and-File-Browser-Foundation.md`

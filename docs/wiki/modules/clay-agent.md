@@ -27,7 +27,7 @@
 
 ## Overview
 
-`clay-agent` is Clay’s Node >= 20 child process that hosts Prism 0.5.3. It is
+`clay-agent` is Clay’s Node >= 20 child process that hosts Prism 0.5.5. It is
 **not** a Clay JS package and is not loaded by Deno. `AgentHost` in
 `src/server/agent.rs` lazy-spawns one daemon per server. Package JS cannot
 spawn or speak to it.
@@ -38,12 +38,12 @@ spawn or speak to it.
 - SQLite session store under `--data-dir/sessions.sqlite`.
 - Encrypted credential vault under `--data-dir/credentials.vault`; OS keychain
   when the secret service answers. No plaintext fallback.
-- Load first-party Prism 0.5.3 provider packages through the extension kernel
+- Load first-party Prism 0.5.5 provider packages through the extension kernel
   with a stored credential resolver (never `process.env`). Imports use family
   subpaths only: `@arnilo/prism` (agent/kernel API),
   `@arnilo/prism-core/{credentials/node,sessions/sqlite,validation/json-schema}`,
   `@arnilo/prism-memory/compaction/{observational-memory,llm}`, and
-  `@arnilo/prism-providers/<adapter>`. All seven 0.5.3 family pins are exact
+  `@arnilo/prism-providers/<adapter>`. All seven 0.5.5 family pins are exact
   (`prism`, `prism-core`, `prism-providers`, `coding-tools`, `web-tools`,
   `memory`, `mcp`) plus direct `better-sqlite3@13.0.3` for the SQLite subpath
   and `playwright-core@1.61.0` for CDP composition. The unused 0.3
@@ -52,6 +52,16 @@ spawn or speak to it.
 - Host-registered `AgentDefinition`s. Chat is a tool-free chat session
   (Phase 2 ships the `@clay/coding-agent` UI); coding profiles get the Phase 1
   tool surface described below.
+- Coding-run options (`run.setOptions`, Clay JS `agent.setRunOptions`): Prism
+  0.5.5 policy caps, all defaulting to `null` (unbounded) — tokens, turns,
+  tool rounds, tool calls, wall time. A host that wants a fence sets finite
+  values via `run.setOptions`. Provider
+  request/response bytes are Prism HARD 64 MiB (null not allowed; omitting
+  them used to leave DEFAULT 8 MiB). `compaction` defaults
+  to `llm`. Call from `init.js` or a trusted config module; queued while the
+  daemon is down. `compactAfterTokens` default 800_000 is stored and unused
+  until auto-compact is wired (OM still uses decision 2158 / 80_000 via
+  `agent.compact`).
 - Opt-in wiki knowledge base (plan 108 task 12, decision 2156): off by
   default. `knowledge.setOptions { workspaceRoot, wiki }` — forwarded by the
   trusted `op_clay_agent_knowledge_set_options` (queued while the daemon is
@@ -376,8 +386,8 @@ no-vendor-imports). Rust side: `tests/protocol.rs` `agent_protocol::*`
 
 ## Related
 
-- [Phase 25 Agent Host and Pane Content Primitive Review](phase25-agent-host-primitive-review.md)
-- [Agent Host project pattern](../../../.agents/skills/project-patterns/references/agent-host.md)
+- [Phase 25 Agent Host and Pane Content Primitive Review](../archive/phase25-agent-host-primitive-review.md)
+- [Agent Host project pattern](../../../.agents/skills/clay-execution/references/packages.md)
 - Reference docs (authoritative for public usage): `docs/reference/clay-js-api/agent/`
 - Manual test module: `test-plan/16-agent-host.md`
 - `decision-logs/2026-08-21-1758-native-prism-host-no-acp-cli-parity.md`

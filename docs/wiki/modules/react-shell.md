@@ -92,6 +92,6 @@ const router = createMemoryRouter(routes, {
 ## Related
 
 - [Desktop Typed Bridge](desktop-typed-bridge.md)
-- [Phase 20.1 UI Design Language](phase20.1-ui-design-language-primitive-review.md)
+- [Phase 20.1 UI Design Language](../modules/ui-design-language-primitive-review.md)
 - `docs/development/react-ui-catalog-mapping.md`
-- `.agents/skills/clay-ui/references/{components,tokens}.md`
+- `.agents/skills/clay-execution/references/{components,tokens}.md`

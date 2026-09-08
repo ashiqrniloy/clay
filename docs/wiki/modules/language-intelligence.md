@@ -164,7 +164,7 @@ cargo test --test protocol performance_protocol::
 
 ## Related
 
-- [Phase 18.20 Primitive Review](phase18.20-language-intelligence-primitive-review.md)
+- [Phase 18.20 Primitive Review](../archive/phase18.20-language-intelligence-primitive-review.md)
 - [Language Server Process Service](language-server-process-service.md)
 - [Transient Menu Session](transient-menu-session.md)
 - [Command Registry](command-registry.md)

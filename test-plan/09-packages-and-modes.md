@@ -117,6 +117,81 @@ Linux `computer-use-linux_get_app_state` ran first. AT-SPI exposed only the Chro
 | P40 | PASS interaction + automated | `settings-validation-error.png`; CDP confirmed Apply disabled at invalid size; frontend and Rust independently reject invalid/partial transactions |
 | P42 | PASS structural/security | Phase 8 provenance/trust suites remain green; settings module is gated by exact host snapshot provenance and no broad Tauri plugin capability was added |
 
+## Plan 115 package install/update/remove CLI steps (2026-09-08)
+
+Deep references: `docs/reference/packages/creating-packages.md` (install
+semantics, adopt boundary), `docs/development/distribution.md` (channels,
+binary provisioning). Setup: isolated scratch `HOME` (never the developer
+profile); a local fixture registry (fixture tarballs with `package/` root,
+npm registry metadata document with `dist.tarball` + shasum/integrity, served
+with `python3 -m http.server`, `npm_config_registry` pointing at it) so no
+step needs the network; a scratch `init.js` with one benign comment line
+(watch the user line survive every step).
+
+| # | Action | Expected |
+|---|--------|----------|
+| P43 | `clay install npm:clay-fixture-pkg` (scratch HOME, local registry) | Installs into `<config>/packages` through the real npm backend; prints `Installed <name>@<version>`, `Not enabled, not adopted — will not run until \`clay package adopt <name>\``, and `Appended loadPackage("<name>") to <init.js>`; ledger records floating spec + resolved version; package is NOT enabled |
+| P44 | `clay list` | Fixture listed with spec, `floating`, source `npm`, `[installed] [pending]` |
+| P45 | Re-run the same `clay install` | Exactly ONE appended block in init.js (`Load line already present`); install is idempotent |
+| P46 | Launch `clay server` with the appended line, package installed but NOT adopted | Typed failure diagnostic on stderr/status strip; previous generation retained; app stays healthy; package JS never runs (negative: un-adopted load fails closed) |
+| P47 | `clay package adopt clay-fixture-pkg`, then reload | Clean reload (no failure diagnostics); package active via the appended line; no new grants beyond the adopted capabilities |
+| P48 | `clay remove npm:clay-fixture-pkg` | Store package removed, ledger entry removed, the exact Clay-appended block stripped; user-written init.js lines untouched (`Left user-written loadPackage(...)` when the line is hand-written); a stale hand-written line for a removed package reloads as a bounded typed `packages.load_failed` diagnostic, app alive |
+| P49 | `clay install npm:clay-fixture-pkg@0.1.0` (pinned), then `clay update --extensions` | Pinned install records `pinned: true`; `--extensions` SKIPS it with the hint `pinned; reinstall with a new version to move it` (negative check) |
+| P50 | `clay update npm:clay-fixture-pkg@0.1.0` and `clay update npm:@vendor/nope` | Pinned single-spec update skips with the same hint; un-managed/absent package reports `Skipped … not a Clay-managed install` |
+| P51 | `clay update` (self) in a dev checkout | Documented no-op: `not managed by an install channel (no channel marker)`; nothing downloaded or replaced |
+| P52 | `clay install` (no arguments) | Full binary presence report (obscura/graft/qmd/ripgrep) with resolved paths or manual-install commands; never spawns anything |
+| P53 | `clay install --bin obscura` (presence-only), then `clay install --bin graft` WITHOUT `--yes` | Presence-only binaries are never installed by Clay — prints the manual command. Graft refusal names the exact command it would run (`npm install --prefix <store> npm:@nanonets/graft --ignore-scripts`) and the `--yes` re-run instruction (negative: no install without explicit approval) |
+| P54 | `clay install npm:clay-fixture-pkg --allow-scripts` | Warning printed: lifecycle scripts ENABLED (remote install scripts ran); default installs stay silent (scripts suppressed server-side via `--ignore-scripts`) |
+
+Negative checks (all verified by the execution record below):
+
+- `clay install` NEVER enables, adopts, or executes — the printed contract
+  says so and the load only happens through the user's reviewed `init.js`.
+- The appended block is exactly two lines (marker comment + one
+  `await loadPackage` call); hand-edited lines are never touched by install
+  or remove.
+- Lifecycle scripts never run without `--allow-scripts`; `--yes` is required
+  per provisioning invocation and approves exactly the printed command.
+
+Known ceilings:
+
+- Real-registry steps require either the local fixture registry described in
+  the setup or network access; CI never depends on the network.
+- `clay install --bin graft --yes` provisions the real `@nanonets/graft` npm
+  package and needs network + explicit approval; the refusal path (P53) is
+  the manually verified half.
+- GUI-side pane rendering of package contributions is covered by P16–P21 and
+  the Plan 097 records, not by the CLI steps above.
+
+## Plan 115 Linux execution record (2026-09-08)
+
+Executed against a fresh `cargo build --bin clay` on Linux with an isolated
+scratch `HOME`, a local fixture registry (`clay-fixture-pkg` 0.1.0/0.2.0 with
+valid `clay` manifests, `python3 -m http.server`), and a live `clay server`
+for P46–P48. Developer profile untouched; all scratch state removed after.
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P43–P45 | PASS | Real npm-backend install from the local registry: ledger `{pinned:false, version:0.2.0, source:npm}`; exact two-line appended block; re-install reports `Load line already present`, block count stays 1 |
+| P46 | PASS | Un-adopted boot: `configuration failed [runtime.exception]` diagnostic; server stayed up; no package execution. (Drill initially surfaced a REAL defect — see below — fixed before this record) |
+| P47 | PASS | After `clay package adopt` + reload: clean reload, no failure diagnostics, package active |
+| P48 | PASS | Store package, ledger entry, and Clay block all removed; user comment lines untouched; hand-written stale line reloads as bounded `packages.load_failed: … could not be canonicalized`, app alive |
+| P49/P50 | PASS | Pinned 0.1.0 install → ledger `pinned:true`; `update --extensions` and single-spec update skip with `pinned; reinstall with a new version to move it`; absent package reports `Skipped @vendor/nope: not a Clay-managed install` |
+| P51 | PASS | `clay update` on the dev checkout: documented no-op (no channel marker) |
+| P52/P53 | PASS | Binary report renders all four rows with resolved PATH/fallback or manual commands, nothing spawned; presence-only refusal prints the manual command; graft refusal prints the exact `npm install --prefix … npm:@nanonets/graft --ignore-scripts` command and `--yes` instruction |
+| P54 | PASS | `--allow-scripts` prints the lifecycle-scripts-ENABLED warning; default install prints no warning (scripts suppressed) |
+| Startup budget (module 02 C34) | PASS | Boot-to-listening 33 ms with the appended adopted line vs 60 ms baseline without — no measurable regression |
+
+**Defect found and fixed during P46/P47 (2026-09-08):** the production server
+opened its `PackageService` with a `FakeBackend` and never ran
+`refresh_installed()`, so `loadPackage` of ANY store-installed package failed
+`packages.not_installed` even after adoption — `clay install` → adopt →
+activate could never complete end to end. Fixed by
+`PackageService::open_production` (`src/packages/service.rs`): one real
+manager discovery pass at boot, fail-closed fallback to the previous
+no-discovery behavior when no manager is available. Automated gates after the
+fix: lib 1284 passed, security package suites 116 passed, fmt/clippy clean.
+
 ## Negative checks
 
 - Packages never create native widgets or run client-side JavaScript;

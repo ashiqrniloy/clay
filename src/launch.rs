@@ -14,69 +14,153 @@ use clay::perf::fixtures::{FixtureKind, FixtureSpec, default_fixture_path, gener
 #[cfg(any(unix, windows))]
 use clay::server::{IpcServer, ServerConfig};
 
-use crate::cli::PackageCliSubcommand;
+use crate::cli::{PackageCliSubcommand, UpdateMode};
 
-pub(crate) fn run_package_subcommand(
-    subcommand: PackageCliSubcommand,
-) -> Result<(), Box<dyn Error>> {
-    use clay::packages::manager::PnpmBackend;
+fn open_package_service() -> Result<
+    (
+        clay::packages::manager::ManagerKind,
+        clay::packages::service::PackageService,
+    ),
+    Box<dyn Error>,
+> {
+    use clay::packages::manager::resolve_manager_backend;
     use clay::packages::service::PackageService;
 
     // Default store: ~/.config/clay/packages. The durable approval store
     // under the same root fails closed on corruption/unsafe permissions.
+    // Manager selection: pnpm when present on PATH, else npm (v1 policy);
+    // fails closed with a typed message when neither is available.
     let store_root = clay::packages::service::default_store_root();
-    let mut service = PackageService::open(store_root, Box::new(PnpmBackend::new()))?;
+    let (kind, backend) = resolve_manager_backend().map_err(|error| error.message)?;
+    Ok((kind, PackageService::open(store_root, backend)?))
+}
+
+fn allow_lifecycle_scripts(flag: bool) -> bool {
+    flag || std::env::var_os("CLAY_ALLOW_LIFECYCLE_SCRIPTS")
+        .is_some_and(|value| value == "1" || value == "true")
+}
+
+pub(crate) fn run_install(target: crate::cli::InstallTarget) -> Result<(), Box<dyn Error>> {
+    use crate::cli::InstallTarget;
+    match target {
+        InstallTarget::BinariesCheck => {
+            clay::packages::binaries::check(&mut std::io::stdout()).map_err(Into::into)
+        }
+        InstallTarget::Binary {
+            name,
+            approved,
+            allow_scripts,
+        } => {
+            let entry = clay::packages::binaries::BINARY_INVENTORY
+                .iter()
+                .find(|entry| entry.name == name)
+                .expect("parser validates binary names against the inventory");
+            clay::packages::binaries::provision(
+                entry,
+                approved,
+                allow_lifecycle_scripts(allow_scripts),
+                &mut std::io::stdout(),
+            )
+            .map_err(Into::into)
+        }
+        InstallTarget::Package {
+            spec,
+            allow_scripts,
+        } => {
+            let (kind, mut service) = open_package_service()?;
+            clay::packages::verbs::install(
+                &mut service,
+                &spec,
+                clay::packages::manager::PackageInstallOptions {
+                    allow_lifecycle_scripts: allow_lifecycle_scripts(allow_scripts),
+                },
+                &clay::packages::service::default_config_root(),
+                kind.as_str(),
+                &mut std::io::stdout(),
+            )
+            .map_err(Into::into)
+        }
+    }
+}
+
+pub(crate) fn run_remove(package_name: String) -> Result<(), Box<dyn Error>> {
+    let (_, mut service) = open_package_service()?;
+    service.refresh_installed()?;
+    clay::packages::verbs::remove(
+        &mut service,
+        &package_name,
+        &clay::packages::service::default_config_root(),
+        &mut std::io::stdout(),
+    )
+    .map_err(Into::into)
+}
+
+pub(crate) fn run_list(bundled: bool) -> Result<(), Box<dyn Error>> {
+    let (_, mut service) = open_package_service()?;
+    service.refresh_installed()?;
+    clay::packages::verbs::list(&service, bundled, &mut std::io::stdout()).map_err(Into::into)
+}
+
+fn spawn_channel_command(argv: &[String]) -> Result<i32, String> {
+    let Some(program) = argv.first() else {
+        return Err("channel command is empty".into());
+    };
+    let status = Command::new(program)
+        .args(&argv[1..])
+        .status()
+        .map_err(|error| format!("failed to spawn channel command `{program}`: {error}"))?;
+    Ok(status.code().unwrap_or(1))
+}
+
+fn run_self_update_cli() -> Result<(), Box<dyn Error>> {
+    let path = clay::packages::self_update::default_marker_path();
+    let channel = clay::packages::self_update::resolve_channel(&path);
+    clay::packages::self_update::run_self_update(
+        &channel,
+        spawn_channel_command,
+        &mut std::io::stdout(),
+    )
+    .map_err(Into::into)
+}
+
+fn run_extension_update_cli() -> Result<(), Box<dyn Error>> {
+    let (_, mut service) = open_package_service()?;
+    clay::packages::verbs::update_extensions(&mut service, &mut std::io::stdout())
+        .map_err(Into::into)
+}
+
+pub(crate) fn run_update(mode: UpdateMode) -> Result<(), Box<dyn Error>> {
+    match mode {
+        UpdateMode::SelfOnly => run_self_update_cli(),
+        UpdateMode::Extensions => run_extension_update_cli(),
+        UpdateMode::All => {
+            run_self_update_cli()?;
+            run_extension_update_cli()
+        }
+        UpdateMode::Package { spec } => {
+            let (_, mut service) = open_package_service()?;
+            clay::packages::verbs::update_package(&mut service, &spec, &mut std::io::stdout())
+                .map_err(Into::into)
+        }
+    }
+}
+
+pub(crate) fn run_package_subcommand(
+    subcommand: PackageCliSubcommand,
+) -> Result<(), Box<dyn Error>> {
+    let (_, mut service) = open_package_service()?;
 
     // A fresh service starts with an empty installed map. Repopulate it from
-    // the package-manager store so `list`/`enable`/`disable`/`inspect`/`remove`
-    // reflect packages installed by previous `clay package add` invocations.
-    // `add` skips this: it installs via the backend (which re-discovers
-    // internally) and a missing pnpm binary should fail at `pnpm add`, not at
-    // the pre-list step.
-    if !matches!(&subcommand, PackageCliSubcommand::Add { .. })
-        && let Err(error) = service.refresh_installed()
+    // the package-manager store so lifecycle verbs reflect packages installed
+    // by previous `clay install` invocations. Inspect still proceeds when the
+    // store is empty so bundled inventory lookups work.
+    if let Err(error) = service.refresh_installed()
         && !matches!(&subcommand, PackageCliSubcommand::Inspect { .. })
     {
         return Err(error.into());
     }
 
     match subcommand {
-        PackageCliSubcommand::Add {
-            package_spec,
-            allow_scripts,
-        } => {
-            let allow_scripts = allow_scripts
-                || std::env::var_os("CLAY_ALLOW_LIFECYCLE_SCRIPTS")
-                    .is_some_and(|value| value == "1" || value == "true");
-            println!("Installing {package_spec}…");
-            service.install(
-                &package_spec,
-                clay::packages::manager::PackageInstallOptions {
-                    allow_lifecycle_scripts: allow_scripts,
-                },
-            )?;
-            println!("Installed {package_spec}");
-        }
-        PackageCliSubcommand::Remove { package_name } => {
-            println!("Removing {package_name}…");
-            service.remove(&package_name)?;
-            println!("Removed {package_name}");
-        }
-        PackageCliSubcommand::List => {
-            let packages = service.list();
-            if packages.is_empty() {
-                println!("No packages installed.");
-            } else {
-                for pkg in &packages {
-                    let status = if pkg.is_enabled {
-                        "[enabled]"
-                    } else {
-                        "[installed]"
-                    };
-                    println!("  {} {} {} {status}", pkg.name, pkg.version, pkg.api_prefix);
-                }
-            }
-        }
         PackageCliSubcommand::Enable { package_name } => {
             println!("Enabling {package_name}…");
             service.enable(&package_name)?;
@@ -90,7 +174,9 @@ pub(crate) fn run_package_subcommand(
         PackageCliSubcommand::Inspect { package_name } => {
             let from_store = service.inspect(&package_name);
             let store_hit = from_store.is_some();
-            match from_store.or_else(|| PackageService::inspect_bundled_inventory(&package_name)) {
+            match from_store.or_else(|| {
+                clay::packages::service::PackageService::inspect_bundled_inventory(&package_name)
+            }) {
                 Some(inspection) => {
                     println!("Package:     {}", inspection.name);
                     println!("Version:     {}", inspection.version);

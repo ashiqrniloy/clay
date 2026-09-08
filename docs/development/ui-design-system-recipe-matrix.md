@@ -1,7 +1,7 @@
 # UI Design-System Recipe Matrix
 
 Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md`.
-Pattern reference: `.agents/skills/project-patterns/references/ui-design-system-packages.md`.
+Pattern reference: `.agents/skills/clay-execution/references/config.md`.
 
 ## Overview and Authority Invariants
 

@@ -221,7 +221,7 @@ Packages cannot override `typography.*` design tokens (`DesignTokenError::Typogr
 
 Phase 20.4/20.5 defer consuming elevation/motion/z-level tokens in component paint; Phase 20.4 also owns density spacing-rhythm consumption beyond the resolved `spacing_scale()` multiplier.
 
-Authoritative token catalog: `.agents/skills/clay-ui/references/tokens.md`. Package authoring: [Phase 20.1 authoring contract](../../reference/packages/creating-packages.md#phase-201-authoring-contract-typed-token-catalog-typography-hierarchy-and-token-backed-defaults).
+Authoritative token catalog: `.agents/skills/clay-execution/references/tokens.md`. Package authoring: [Phase 20.1 authoring contract](../../reference/packages/creating-packages.md#phase-201-authoring-contract-typed-token-catalog-typography-hierarchy-and-token-backed-defaults).
 
 ### Phase 20.1 tests
 
@@ -235,7 +235,7 @@ Commands: `cargo test --lib shell::theme`, `cargo test --test editor editor_perf
 
 ## Phase 20.6 canonical Modus defaults and appearance
 
-Phase 20.6 segregates the canonical default themes into dedicated first-party packages `@clay/theme-modus-operandi` (canonical light default) and `@clay/theme-modus-vivendi` (canonical dark default), shipped alongside the existing Gruvbox packages using the same inert `textStyles` + no-op ESM structure. A bounded `light` | `dark` | `system` appearance preference (`src/protocol/mod.rs::Appearance`) resolves these canonical defaults without any `loadPackage` call: `src/server/ops/theme.rs::canonical_default_specifier` + `resolve_canonical_default_theme` build the `ActiveTheme` snapshot from the bundled inventory, injected into the evaluation harvest in `src/server/js_runtime/mod.rs` when no explicit theme was set. `System` falls back to dark (Modus Vivendi) when no OS signal is present. An explicit `setTheme` sets `explicit_theme_active = true` and always wins over the appearance-derived default. The new `theme.setAppearance` facade (`op_clay_theme_set_appearance`) exposes the preference; `settings.setTheme`/`settings.setAppearance` from the `@clay/settings` panel persist to `~/.config/clay/preferences.json` and reload the runtime so changes apply live via the existing `ServerMessage::ActiveTheme` / `RuntimeStateSnapshot` fanout. Full implementation, persistence/precedence, and settings surface details: [Phase 20.6 Theme Package Segregation and Settings UI](phase20.6-theme-segregation-settings-ui.md).
+Phase 20.6 segregates the canonical default themes into dedicated first-party packages `@clay/theme-modus-operandi` (canonical light default) and `@clay/theme-modus-vivendi` (canonical dark default), shipped alongside the existing Gruvbox packages using the same inert `textStyles` + no-op ESM structure. A bounded `light` | `dark` | `system` appearance preference (`src/protocol/mod.rs::Appearance`) resolves these canonical defaults without any `loadPackage` call: `src/server/ops/theme.rs::canonical_default_specifier` + `resolve_canonical_default_theme` build the `ActiveTheme` snapshot from the bundled inventory, injected into the evaluation harvest in `src/server/js_runtime/mod.rs` when no explicit theme was set. `System` falls back to dark (Modus Vivendi) when no OS signal is present. An explicit `setTheme` sets `explicit_theme_active = true` and always wins over the appearance-derived default. The new `theme.setAppearance` facade (`op_clay_theme_set_appearance`) exposes the preference; `settings.setTheme`/`settings.setAppearance` from the `@clay/settings` panel persist to `~/.config/clay/preferences.json` and reload the runtime so changes apply live via the existing `ServerMessage::ActiveTheme` / `RuntimeStateSnapshot` fanout. Full implementation, persistence/precedence, and settings surface details: [Phase 20.6 Theme Package Segregation and Settings UI](../archive/phase20.6-theme-segregation-settings-ui.md).
 
 ## Plan 088 theme/token modernization
 
@@ -284,7 +284,7 @@ Scale applies **only** to `Syntax` and `Semantic` `DecorationKind` spans (`style
 
 ### Chrome colors (26.5)
 
-Five `BaseUiColorKey` variants were added: `GutterFg`, `GutterFgActive`, `LineHighlight`, `IndentGuide`, `BracketMatch`, with `clay_default()` values (gutter `0x8d86a3`, gutter-active `0xf4f1ff`, line highlight `0xffffff12`, indent guide `0xffffff22`, bracket match `0x8a6fff55`). Theme packages override them through ordinary `textStyles` entries; the editor chrome layer (`src/editor/surface/chrome.rs`) reads them via `gutter_foreground`/`gutter_foreground_active`/`line_highlight`/`indent_guide`/`bracket_match` accessors. `with_text_overrides` handles `SearchMatch`/`Unused` base keys and applies `set_syntax_background` for Syntax targets with a background field. See [Editor Chrome and Layout Geometry](editor-chrome-and-layout.md).
+Five `BaseUiColorKey` variants were added: `GutterFg`, `GutterFgActive`, `LineHighlight`, `IndentGuide`, `BracketMatch`, with `clay_default()` values (gutter `0x8d86a3`, gutter-active `0xf4f1ff`, line highlight `0xffffff12`, indent guide `0xffffff22`, bracket match `0x8a6fff55`). Theme packages override them through ordinary `textStyles` entries; the editor chrome layer (`src/editor/surface/chrome.rs`) reads them via `gutter_foreground`/`gutter_foreground_active`/`line_highlight`/`indent_guide`/`bracket_match` accessors. `with_text_overrides` handles `SearchMatch`/`Unused` base keys and applies `set_syntax_background` for Syntax targets with a background field. See [Editor Chrome and Layout Geometry](../archive/editor-chrome-and-layout.md).
 
 ### Phase 26 tests
 
@@ -297,9 +297,9 @@ Five `BaseUiColorKey` variants were added: `GutterFg`, `GutterFgActive`, `LineHi
 
 ## Related
 
-- [Phase 20.1 UI Design Language Primitive Review](phase20.1-ui-design-language-primitive-review.md)
-- [Token catalog reference](../../../.agents/skills/clay-ui/references/tokens.md)
-- [Masonry Editor Widget Status Observability](masonry-editor.md)
+- [Phase 20.1 UI Design Language Primitive Review](../modules/ui-design-language-primitive-review.md)
+- [Token catalog reference](../../../.agents/skills/clay-execution/references/tokens.md)
+- [Masonry Editor Widget Status Observability](../archive/masonry-editor.md)
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [Decoration Transport](decoration-transport.md)
 - [Range Diagnostics](range-diagnostics.md)

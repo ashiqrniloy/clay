@@ -204,12 +204,12 @@ cargo test --lib masonry_pane_document --quiet
 
 - [Command Registry](command-registry.md)
 - [Slot-Aware Package UI](slot-aware-package-ui.md)
-- [Masonry Shell Runtime](masonry-shell.md)
-- [Phase 18.8 Transient Menu and Command Execution Primitive Review](phase18.8-transient-menu-command-execution-primitive-review.md)
+- [Masonry Shell Runtime](../archive/masonry-shell.md)
+- [Phase 18.8 Transient Menu and Command Execution Primitive Review](../archive/phase18.8-transient-menu-command-execution-primitive-review.md)
 - [Completion Snippet Expansion](completion-snippet-expansion.md) — Phase 18.19 snippet accept path and session
 - [Language Intelligence](language-intelligence.md) — Phase 18.20 hover/signature/definition/code-action projection
 - [Transient Menu Round Trip](transient-menu-round-trip.md) — Phase 24.1/24.2 server-owned sessions: protocol, store, lifecycle, client routing
 - [Fuzzy Matching](fuzzy-matching.md) — the shared bounded query scorer (Phase 24.2)
-- [Phase 20.5 Overlay, Menu, and Input Components](phase20.5-overlay-menu-input-components.md) — `TransientMenuOrigin`, z-level stacking, new component kinds
+- [Phase 20.5 Overlay, Menu, and Input Components](../archive/phase20.5-overlay-menu-input-components.md) — `TransientMenuOrigin`, z-level stacking, new component kinds
 - [Shell/Layout Strategy Reference](../../reference/primitives/shell-layout-strategy.md)
 - [Repeatable UI Review Harness](ui-review-harness.md) — plan 087 fixture/capture workflow exercising completion and centered menus live

@@ -76,5 +76,5 @@ Configuration keybindings validate against a closed runtime-bindable command set
 ## Related
 
 - [Behavior Manifests](../modules/behavior-manifests.md)
-- [Client Edit Emission](client-edit-emission.md)
-- [Client/Server Edit Acknowledgement Flow](client-server-edit-ack.md)
+- [Client Edit Emission](../archive/client-edit-emission.md)
+- [Client/Server Edit Acknowledgement Flow](../archive/client-server-edit-ack.md)

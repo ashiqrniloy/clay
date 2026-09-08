@@ -17,7 +17,7 @@ Pinned upstream: `phosphor-icons/core` release **v2.0.8** (verified via GitHub A
 | Contribution validation + budgets | `src/packages/record/mod.rs` (`assemble_package_record`), `src/perf/budgets.rs` (`UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES = 64 KiB`) | Icon-pack contribution validated at load with its own bounded schema/budgets. |
 | Bundled inventory + extension-point scope checks | `src/packages/bundled.rs` L371–448, `build.rs` | Icon packs embed through the existing compiled inventory; bundled scope test extended to iconPack contributions. |
 | Bounded contribution deny-list precedent (raw CSS/colors/URLs rejected) | `src/packages/record/mod.rs`, `src/shell/components.rs` style-variable validation | Same reject philosophy for raw SVG/URLs/CSS. |
-| Trust domains (two runtimes, typed inert crossings) | `.agents/skills/project-patterns/references/authority-boundaries.md` | Third-party icon packs ride the adopted-package path; no new authority. |
+| Trust domains (two runtimes, typed inert crossings) | `.agents/skills/clay-execution/references/packages.md` | Third-party icon packs ride the adopted-package path; no new authority. |
 
 ## 2. Generic gaps (new work, all inside this plan)
 

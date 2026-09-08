@@ -4,10 +4,10 @@ Navigation and contract entry for Clay's reusable UI surface. This page links th
 
 ## Single Source of Truth
 
-The `clay-ui` skill references are the authoritative catalog. This page links them; it does not duplicate them. When a UI phase adds, removes, or changes a component, primitive, style variable, token, or layout rule, the phase updates the catalog in the same change and this page stays a navigation entry.
+The `clay-execution` catalog references are the authoritative catalog. This page links them; it does not duplicate them. When a UI phase adds, removes, or changes a component, primitive, style variable, token, or layout rule, the phase updates the catalog in the same change and this page stays a navigation entry.
 
-- [Component catalog](../../.agents/skills/clay-ui/references/components.md) — every package-facing `ComponentKind`, typed style variable, Clay-native surface, chrome primitive, planned component, typography variant, and the rules for adding components. Status legend: **implemented** / **reserved** / **planned** / **internal**.
-- [Token catalog](../../.agents/skills/clay-ui/references/tokens.md) — the ten typed token domains, every implemented core token, typography hierarchy, package token contributions, and the rules for adding tokens.
+- [Component catalog](../../.agents/skills/clay-execution/references/components.md) — every package-facing `ComponentKind`, typed style variable, Clay-native surface, chrome primitive, planned component, typography variant, and the rules for adding components. Status legend: **implemented** / **reserved** / **planned** / **internal**.
+- [Token catalog](../../.agents/skills/clay-execution/references/tokens.md) — the ten typed token domains, every implemented core token, typography hierarchy, package token contributions, and the rules for adding tokens.
 
 ## Plan 087 package authoring boundary
 
@@ -70,7 +70,7 @@ points:
   renderer mutation. `table` remains reserved.
 
 See [Creating Clay Packages — Plan 088 UI modernization authoring contract](packages/creating-packages.md#plan-088-ui-modernization-authoring-contract)
-and the [token catalog](../../.agents/skills/clay-ui/references/tokens.md#plan-088-token-consumption-no-additions).
+and the [token catalog](../../.agents/skills/clay-execution/references/tokens.md#plan-088-token-consumption-no-additions).
 
 ## Phase 28 editor-intelligence chrome
 
@@ -124,11 +124,11 @@ Clay is the host authority for UI conformance. Validation runs inside Clay's Rus
 - **Author diagnostics:** rejection messages name the rejected value, expected token type, and offending field via `ComponentCatalogError::reject`.
 - **Trust domains:** third-party raw values and oversized payloads are rejected at `assemble_package_record` without reaching the trusted runtime; no conformance op or `clay:*` facade is exposed.
 
-See the [Phase 20.7 wiki page](../wiki/modules/phase20.7-package-ui-conformance-and-aesthetic-guardrails.md) for the full implementation detail.
+See the [Phase 20.7 wiki record](../wiki/archive/phase20.7-package-ui-conformance-and-aesthetic-guardrails.md) for the full implementation detail.
 
 ## Agent and Plan Conventions
 
-Agents and plan documents that touch app UI must follow the create-plan UI requirements, which route through this page and the `clay-ui` catalog before proposing new UI code.
+Agents and plan documents that touch app UI must follow the create-plan UI requirements, which route through this page and the `clay-execution` catalog before proposing new UI code.
 
 - [Create-plan UI requirements](../../.agents/skills/create-plan/references/clay.md) — the Clay UI Primitives-First Task, package UI/layout authoring contract task, and the catalog files every UI plan must read first.
 

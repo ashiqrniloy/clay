@@ -304,5 +304,5 @@ cargo test --lib server::connection::tests --quiet
 - `docs/reference/primitives/registry.md` — BuiltInUserBrowseListing row
 - `docs/reference/clay-js-api/configuration.md` — Phase 24.3 configuration review
 - `docs/development/file-open-save-reload-workflow.md` — browse → grant conversion
-- `.agents/skills/project-patterns/references/authority-boundaries.md` — built-in browse grant
+- `.agents/skills/clay-execution/references/packages.md` — built-in browse grant
 - `plans/083-Phase24.3-Path-Mode-Dired-Style-Filesystem-Browsing.md`

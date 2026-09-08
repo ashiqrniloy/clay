@@ -85,8 +85,8 @@ ClientMessage::RequestResync {
 
 ## Related
 
-- [Client Edit Emission](client-edit-emission.md)
-- [Client/Server Edit Acknowledgement Flow](client-server-edit-ack.md)
+- [Client Edit Emission](../archive/client-edit-emission.md)
+- [Client/Server Edit Acknowledgement Flow](../archive/client-server-edit-ack.md)
 - [Document Leases and Region Locks](document-leases-and-region-locks.md)
 - [Server Document State](../modules/server-document-state.md)
 - [Protocol Codec](../modules/protocol-codec.md)

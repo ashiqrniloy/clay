@@ -117,5 +117,5 @@ Future packages should reuse `loadPackage`, `clay:modes`, and `clay:parse` regis
 - [Parse Task Lifecycle](parse-task-lifecycle.md)
 - [Server IPC Skeleton](server-ipc-skeleton.md)
 - [Server File Workspace Model](server-file-workspace.md)
-- [Phase 19 Persistent Runtime Hot Reload Primitive Review](phase19-persistent-runtime-hot-reload-primitive-review.md)
+- [Phase 19 Persistent Runtime Hot Reload Primitive Review](../archive/phase19-persistent-runtime-hot-reload-primitive-review.md)
 - `plans/033-Phase19-Persistent-Runtime-Hot-Reload-Semantics.md`
