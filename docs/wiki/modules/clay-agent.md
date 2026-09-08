@@ -27,7 +27,7 @@
 
 ## Overview
 
-`clay-agent` is Clay’s Node >= 20 child process that hosts Prism 0.5.1. It is
+`clay-agent` is Clay’s Node >= 20 child process that hosts Prism 0.5.3. It is
 **not** a Clay JS package and is not loaded by Deno. `AgentHost` in
 `src/server/agent.rs` lazy-spawns one daemon per server. Package JS cannot
 spawn or speak to it.
@@ -38,12 +38,12 @@ spawn or speak to it.
 - SQLite session store under `--data-dir/sessions.sqlite`.
 - Encrypted credential vault under `--data-dir/credentials.vault`; OS keychain
   when the secret service answers. No plaintext fallback.
-- Load first-party Prism 0.5.1 provider packages through the extension kernel
+- Load first-party Prism 0.5.3 provider packages through the extension kernel
   with a stored credential resolver (never `process.env`). Imports use family
   subpaths only: `@arnilo/prism` (agent/kernel API),
   `@arnilo/prism-core/{credentials/node,sessions/sqlite,validation/json-schema}`,
   `@arnilo/prism-memory/compaction/{observational-memory,llm}`, and
-  `@arnilo/prism-providers/<adapter>`. All seven 0.5.1 family pins are exact
+  `@arnilo/prism-providers/<adapter>`. All seven 0.5.3 family pins are exact
   (`prism`, `prism-core`, `prism-providers`, `coding-tools`, `web-tools`,
   `memory`, `mcp`) plus direct `better-sqlite3@13.0.3` for the SQLite subpath
   and `playwright-core@1.61.0` for CDP composition. The unused 0.3
@@ -110,6 +110,9 @@ Coding sessions register nine Prism tool factories from
 `coding-tools.ts` — `shell`, `read`, `write`, `edit`, `repo_list`,
 `repo_search`, `glob`, `delete`, `move` — plus `ask_user_decision`, all
 backed by Clay document operations instead of direct filesystem access.
+`withCapErrors` turns walk/scan truncation (`entries`/`files`/`depth`/`bytes`/`time`)
+into a tool-caps.json remedy error. Pagination (`results`/`matches`, including
+per-call `maxResults`) stays a successful truncated result.
 `document-ops.ts` implements the tool side of a daemon-initiated reverse
 RPC: `document.read` (dirty buffer via server snapshot), `document.write`
 (`apply_edit` + CAS save), `document.edit` (same via Prism edit ops), and
@@ -141,7 +144,10 @@ workflows (`startWorkflow` driver errors until then), Phase 6 supervisors.
 
 ## How It Works
 
-1. `main.ts` refuses Node < 20, requires `--data-dir`, reads NDJSON JSON-RPC.
+1. `main.ts` refuses Node < 20, requires `--data-dir`, reads NDJSON JSON-RPC
+   concurrently (`readNdjsonConcurrent`). Reverse-RPC replies share stdin with
+   long `session.prompt` calls; awaiting each line handler before the next
+   line deadlocks `document.stat` / `document.read` until the 30s reverse timeout.
 2. `initialize { passphrase }` opens the vault (exit 1 if unreadable) and SQLite.
 3. `--mock` registers `createMockProvider`; production loads `providers.ts`.
 4. Azure/Bedrock/Vertex packages are installed but only register auth stubs

@@ -32,6 +32,7 @@ Rust.
 | `Event::Error` | `RUN_ERROR {message}` |
 | `Picker` | dropped (pickers are Command Centre domain) |
 | `CredentialAck` / `Diagnostic` | `CUSTOM clay.credentialAck` / `clay.diagnostic` (no secret fields exist on these variants) |
+| `AgentRpc` | `CUSTOM clay.agentRpc { code, result }` — `result_json` is parsed into a JSON object so the Context / Memory tabs can apply it (`typeof result === "object"`). A non-JSON payload stays a string and is ignored. |
 
 The adapter is pure, total, and bounded by upstream caps (transcript entry
 caps, delta byte caps, inventory limits).

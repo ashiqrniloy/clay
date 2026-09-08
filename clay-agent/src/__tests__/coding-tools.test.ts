@@ -138,6 +138,27 @@ test("tool caps from toolCaps flow into repo tools; truncation surfaces a remedy
   assert.match(last, /repository scan cap/);
 });
 
+test("repo_list per-call maxResults pagination is not a scan-cap error", async () => {
+  const wsRoot = await tempDir();
+  await writeFile(join(wsRoot, "a.txt"), "a\n");
+  await writeFile(join(wsRoot, "b.txt"), "b\n");
+  const tools = buildCodingTools({
+    workspaceRoot: wsRoot,
+    request: async () => {
+      throw new Error("unused");
+    },
+    fullAutonomy: () => true,
+    capsFile: join(wsRoot, "tool-caps.json"),
+  });
+  const list = tools.find((tool) => tool.name === "repo_list");
+  assert.ok(list, "repo_list present");
+  const result = await list.execute({ maxResults: 1 }, context());
+  assert.ok(!result?.error, "per-call maxResults is pagination, not a cap");
+  const text = JSON.stringify(result);
+  assert.ok(!/repository scan cap/.test(text));
+  assert.match(text, /truncated by results/);
+});
+
 test("normalizeToolCaps drops malformed entries and keeps valid ones", () => {
   assert.deepEqual(normalizeToolCaps({ maxEntries: 5000, maxFiles: -1, bogus: 3, exclude: ["a", 4] }), {
     maxEntries: 5000,

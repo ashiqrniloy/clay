@@ -13,8 +13,9 @@ Governing decisions already made:
   Clay-owned Node `clay-agent` daemon wraps Prism directly; no ACP/AG-UI as
   the first-party agent bus; coding agent must reach CLI-parity inside Clay.
   Its original 0.3.0 pin was superseded by the 0.4.0 migration in Phase 0;
-  live pins moved to exact `0.5.0` in Phase 2.1 (`plans/109`) and to
-  `0.5.1` in plan 113.
+  live pins moved to exact `0.5.0` in Phase 2.1 (`plans/109`), to
+  `0.5.1` in plan 113, to `0.5.2` (stream-token coalesce), and to
+  `0.5.3` (content-only tool results on the provider wire).
 - `decision-logs/2026-09-02-1440-direct-external-coding-agent-adapters.md`:
   Claude Code and Antigravity are direct, capability-declared external
   runtimes with Clay policy bundles, not Prism delegation.
@@ -30,7 +31,7 @@ Governing decisions already made:
 Three layers, strict separation:
 
 1. **`clay-agent` daemon (Clay core, Node ≥ 20).** Hosts `@arnilo/prism`
-   0.5.1 plus explicitly selected 0.5 family packages/subpaths. Owns native
+   0.5.3 plus explicitly selected 0.5 family packages/subpaths. Owns native
    providers, models, credentials (vault + keychain), SQLite persistence,
    run ledger, tools, compaction strategies, skills, commands, workflows,
    supervision, and external-runtime lifecycle/policy projection. It does
@@ -51,7 +52,7 @@ The base agent stays minimal by design (pi-like). All autonomy policy
 agent delegation, memory cadence) lives in `st` or in host-free orchestration
 helpers the daemon exposes generically.
 
-## Prism Capability Review (0.4.0 historical; live pins are 0.5.1)
+## Prism Capability Review (0.4.0 historical; live pins are 0.5.3)
 
 Review method for the 0.4 cut: read the 0.4 migration guide,
 package-consolidation plan, all then-11 published package manifests and
@@ -60,9 +61,11 @@ Prism 0.4 was a package/import migration with no persisted-store shape
 migration. Phase 0 owned the Clay consumer smoke for that cut.
 
 **Live pins (Phase 2.1 / plan 109):** Prism 0.5.0 lockstep, released
-2026-09-06; bumped to exact **0.5.1** (additive, 2026-09-07) by plan 113.
+2026-09-06; bumped to exact **0.5.1** (additive, 2026-09-07) by plan 113;
+bumped to exact **0.5.2** (stream-token coalesce, 2026-09-08);
+bumped to exact **0.5.3** (content-only tool results, 2026-09-08).
 Authoritative sources: `/home/arn/Projects/prism/docs/migrate-to-0.5.md`
-(§8 covers 0.5.1), `CHANGELOG.md` `[0.5.0]`/`[0.5.1]`,
+(§8 covers 0.5.1), `CHANGELOG.md` `[0.5.0]`/`[0.5.1]`/`[0.5.2]`/`[0.5.3]`,
 `docs/thinking-and-reasoning.md`, `docs/mcp-tools.md`,
 `docs/provider-request-policies.md`.
 Package names and 0.4 subpaths stay valid. Breaking host surface: 27 dead
@@ -246,7 +249,7 @@ adopted families at exact `0.5.0` plus `better-sqlite3@13.0.3`. Plan:
 `plans/109-Phase2.1-Coding-Agent-Defects-and-UX-Improvements.md`. Decision
 log: `2026-09-06-0432`.
 
-**Prism 0.5.1 increment (live, plan 113, log `2026-09-07-2149`):** exact
+**Prism 0.5.1 increment (plan 113, log `2026-09-07-2149`):** exact
 `0.5.1` seven-family pins; kernel fills `options.sessionId`/`cacheKey` and
 default cache breakpoints, so Clay deletes the `createSessionCachePolicy()`
 stopgap from both `createAgent` sites (closes the 1325 follow-up); per-prompt
@@ -254,6 +257,19 @@ effort moves to `RunOptions.thinkingLevel` on `session.stream`;
 `parseThinkingLevel`/`thinkingLevelsForModel` stay; no Clay `cache.mode`
 knob; no `applyDefaultProviderRequestOptions` (no raw `provider.generate`
 site in clay-agent).
+
+**Prism 0.5.2 increment:** exact `0.5.2` seven-family pins. Upstream
+coalesces adjacent `text`/`thinking` stream tokens on persist and joins
+replay parts with `""` instead of `"\n"`, so multi-turn tool loops stop
+poisoning assistant output into one token per line. No Clay host-API or
+transcript change (`append_delta` already concatenates). No persisted-schema
+migration; already-poisoned session rows stay as stored.
+
+**Prism 0.5.3 increment (live):** exact `0.5.3` seven-family pins. Upstream
+folds `ToolResult.content` text onto `tool_result.result` and serializers
+join sibling `type:text` blocks when `value` is missing, so content-only
+coding tools (`repo_list`/`glob`/`shell`/`read`) stop sending JSON `"null"`
+on the provider wire. No Clay host-API or persisted-schema change.
 
 Host-visible 0.5 work Clay must do:
 
@@ -982,6 +998,10 @@ pi model. Must land before any third-party package (`st`) is planned.
   `createSessionCachePolicy()` stopgap deleted — kernel constructs
   session/cache keys, default cache breakpoints, and thinking-level run
   options. Log `2026-09-07-2149`.
+- Prism 0.5.2 increment: exact `0.5.2` pins. Stream-token coalesce in
+  Prism kernel + replay serializers. No Clay host-API change.
+- Prism 0.5.3 increment: exact `0.5.3` pins. Content-only tool results
+  fold onto the provider wire. No Clay host-API change.
 
 ## Open Decisions (need `decision-logs/` before implementation)
 

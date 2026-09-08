@@ -33,14 +33,16 @@ export interface RepositoryToolCaps {
 
 const BASE_REPO_EXCLUDE = Object.freeze([".git", "node_modules", "dist", "target"]);
 
-/** truncatedBy value → config key + Prism hard cap, for wall-hit errors. */
+/** truncatedBy value → config key + Prism hard cap, for walk/scan wall-hits.
+ *  Pagination (`results`, `matches`) is not a cap: the tool already tells the
+ *  model to pass offset/maxResults. Stamping those as errors made repo_list
+ *  with maxResults:1 look broken. */
 const CAP_REMEDY: Record<string, { key: string; hard: number }> = {
   entries: { key: "maxEntries", hard: 100_000 },
   files: { key: "maxFiles", hard: 100_000 },
   depth: { key: "maxDepth", hard: 128 },
-  results: { key: "maxResults", hard: 10_000 },
   bytes: { key: "maxScanBytes", hard: 1_073_741_824 },
-  matches: { key: "maxMatches", hard: 10_000 },
+  scan: { key: "maxScanBytes", hard: 1_073_741_824 },
   time: { key: "maxTimeMs", hard: 3_600_000 },
 };
 

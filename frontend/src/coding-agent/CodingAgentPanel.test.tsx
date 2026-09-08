@@ -634,6 +634,49 @@ describe("CodingAgentPanel", () => {
     }
   });
 
+  it("Context tab accepts AgentRpc result as a JSON string", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: { sessionId: "s-string", provider: "mock", model: "mini" },
+        clientId: 1,
+      } as never);
+      fireEvent.click(screen.getByRole("tab", { name: "Context" }));
+      await screen.findByText("Loading context…");
+      harness.emit({
+        type: "CUSTOM",
+        name: "clay.agentRpc",
+        value: {
+          code: "session.context",
+          result: JSON.stringify({
+            sessionId: "s-string",
+            version: 1,
+            categories: [
+              {
+                kind: "userMessage",
+                label: "User prompts",
+                count: 1,
+                items: [{ id: "e1#0", title: "User prompt", preview: "hello" }],
+              },
+            ],
+          }),
+        },
+      } as never);
+      expect(await screen.findByText("User prompts")).toBeInTheDocument();
+    } finally {
+      release();
+    }
+  });
+
   it("Memory tab (plan 109 I8): activity log with drops plus OM worker-model dropdowns", async () => {
     render(
       <CodingAgentPanel

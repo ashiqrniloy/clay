@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Clay-owned Node daemon hosting Prism 0.5.1 over stdio JSON-RPC.",
+  "description": "Clay-owned Node daemon hosting Prism 0.5.3 over stdio JSON-RPC.",
   "bin": {
     "clay-agent": "./dist/main.js"
   },
@@ -19,13 +19,13 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@arnilo/prism": "0.5.1",
-    "@arnilo/prism-coding-tools": "0.5.1",
-    "@arnilo/prism-core": "0.5.1",
-    "@arnilo/prism-mcp": "0.5.1",
-    "@arnilo/prism-memory": "0.5.1",
-    "@arnilo/prism-providers": "0.5.1",
-    "@arnilo/prism-web-tools": "0.5.1",
+    "@arnilo/prism": "0.5.3",
+    "@arnilo/prism-coding-tools": "0.5.3",
+    "@arnilo/prism-core": "0.5.3",
+    "@arnilo/prism-mcp": "0.5.3",
+    "@arnilo/prism-memory": "0.5.3",
+    "@arnilo/prism-providers": "0.5.3",
+    "@arnilo/prism-web-tools": "0.5.3",
     "better-sqlite3": "13.0.3",
     "playwright-core": "1.61.0"
   },

@@ -786,7 +786,7 @@ fn stamp_client_id(
             client_id,
             session_id,
         },
-        msg @ ClientMessage::Agent { .. } => msg,
+        ClientMessage::Agent { command, .. } => ClientMessage::Agent { client_id, command },
     })
 }
 
@@ -828,6 +828,31 @@ mod identity_tests {
         assert_eq!(
             serde_json::to_value(stamped).unwrap()["payload"]["request"]["clientId"],
             7
+        );
+    }
+
+    #[test]
+    fn agent_requests_cannot_forge_client_identity() {
+        // Panel agent commands (context / listSessions / omActivity) send
+        // clientId: 0; the bridge must stamp the handshake id or the server
+        // identity gate rejects them as "client identity mismatch" and the
+        // Context tab stays on Loading context… forever.
+        let agent: ClientMessage = serde_json::from_value(serde_json::json!({
+            "family": "agent",
+            "payload": {
+                "clientId": 0,
+                "command": { "context": { "sessionId": "s1" } }
+            }
+        }))
+        .unwrap();
+        let stamped = stamp_client_id(agent, 7).unwrap();
+        assert_eq!(
+            serde_json::to_value(&stamped).unwrap()["payload"]["clientId"],
+            7
+        );
+        assert!(
+            matches!(stamped, ClientMessage::Agent { client_id: 7, .. }),
+            "stamped Agent must carry the connection client id"
         );
     }
 }

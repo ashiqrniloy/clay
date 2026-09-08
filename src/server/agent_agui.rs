@@ -195,7 +195,14 @@ pub fn adapt_agent_message(message: &AgentServerMessage) -> Vec<AgUiEvent> {
         }],
         AgentServerMessage::AgentRpc { code, result_json } => vec![AgUiEvent::Custom {
             name: "clay.agentRpc".into(),
-            value: serde_json::json!({ "code": code, "result": result_json }),
+            // Daemon stores an opaque JSON string on the wire; the Context /
+            // Memory tabs require `result` as an object. Leave a string only
+            // if the payload is not JSON.
+            value: serde_json::json!({
+                "code": code,
+                "result": serde_json::from_str::<Value>(result_json)
+                    .unwrap_or_else(|_| Value::String(result_json.clone())),
+            }),
         }],
         AgentServerMessage::ApprovalRequest {
             request_id,
@@ -540,6 +547,25 @@ mod tests {
             .expect("skill row");
         assert_eq!(skill["metadata"]["clayKind"], "skill");
         assert_eq!(skill["metadata"]["skillName"], "rust-review");
+    }
+
+    #[test]
+    fn agent_rpc_parses_result_json_into_an_object() {
+        let events = adapt_agent_message(&AgentServerMessage::AgentRpc {
+            code: "session.context".into(),
+            result_json: r#"{"sessionId":"s1","version":1,"categories":[]}"#.into(),
+        });
+        let AgUiEvent::Custom { name, value } = &events[0] else {
+            panic!("custom expected");
+        };
+        assert_eq!(name, "clay.agentRpc");
+        assert_eq!(value["code"], "session.context");
+        assert!(
+            value["result"].is_object(),
+            "result must be an object, not a JSON string"
+        );
+        assert_eq!(value["result"]["sessionId"], "s1");
+        assert!(value["result"]["categories"].is_array());
     }
 
     #[test]

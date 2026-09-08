@@ -50,7 +50,8 @@ only renders and forwards composer input.
 ## Tests
 
 - Rust mapping: `cargo test agent_agui` (`src/server/agent_agui.rs` tests:
-  snapshot mapping, run lifecycle chunk-id stability, error/tool mapping).
+  snapshot mapping, run lifecycle chunk-id stability, error/tool mapping,
+  AgentRpc `result_json` parsed to an object).
 - Relay: `cargo test -p clay-desktop agent`.
 - Frontend transport: `frontend/src/agent/transport.test.ts`; component:
   `frontend/src/chat/ChatPanel.test.tsx`.

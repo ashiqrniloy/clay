@@ -333,10 +333,10 @@ async fn document_stat(
     params: &Value,
 ) -> Result<Value, String> {
     let path = param_string(params, "path")?;
-    let canonical = {
+    let (root_id, open_handle) = {
         let workspace = workspace.lock().await;
         let root_id = resolve_root(params, &workspace)?;
-        let open = workspace
+        let open_handle = workspace
             .contained_existing_path(root_id, Path::new(&path))
             .ok()
             .and_then(|canonical| {
@@ -344,10 +344,14 @@ async fn document_stat(
                     .find_open_document_by_canonical_path(&canonical)
                     .and_then(|document_id| workspace.document_handle(document_id))
             });
-        if let Some(handle) = open {
-            let document = handle.lock().await;
-            return Ok(json!({ "size": document.byte_len(), "open": true }));
-        }
+        (root_id, open_handle)
+    };
+    if let Some(handle) = open_handle {
+        let document = handle.lock().await;
+        return Ok(json!({ "size": document.byte_len(), "open": true }));
+    }
+    let canonical = {
+        let workspace = workspace.lock().await;
         match workspace.contained_existing_path(root_id, Path::new(&path)) {
             Ok(canonical) => canonical,
             Err(_) => workspace
@@ -406,6 +410,15 @@ mod tests {
         .expect("write");
         assert_eq!(written["version"], 2);
         assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), "replaced");
+
+        let stat = handler(
+            "document.stat".to_string(),
+            json!({ "path": path.to_str().unwrap() }),
+        )
+        .await
+        .expect("stat");
+        assert_eq!(stat["size"], 8);
+        assert_eq!(stat["open"], false);
     }
 
     #[tokio::test]

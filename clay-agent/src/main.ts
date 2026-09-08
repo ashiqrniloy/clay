@@ -2,7 +2,7 @@
 import { stderr, stdin, stdout } from "node:process";
 import { ClayAgentHost } from "./host.js";
 import { redactText } from "./redact.js";
-import { encodeFrame, FrameTooLargeError, parseFrame, readNdjson } from "./rpc.js";
+import { encodeFrame, FrameTooLargeError, parseFrame, readNdjsonConcurrent } from "./rpc.js";
 
 const MIN_NODE = 20;
 
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
           });
           process.exit(1);
         }
-        write({ jsonrpc: "2.0", id, result: { ok: true, mock: args.mock, prism: "0.5.1", mcpServers: mcpAllowList.length } });
+        write({ jsonrpc: "2.0", id, result: { ok: true, mock: args.mock, prism: "0.5.3", mcpServers: mcpAllowList.length } });
         return;
       }
       if (method === "shutdown") {
@@ -150,7 +150,7 @@ async function main(): Promise<void> {
   });
 
   try {
-    await readNdjson(stdin, handleLine);
+    await readNdjsonConcurrent(stdin, handleLine);
   } catch (error) {
     if (error instanceof FrameTooLargeError) {
       write({ jsonrpc: "2.0", id: null, error: { code: -32600, message: error.message } });

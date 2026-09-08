@@ -57,3 +57,21 @@ export async function readNdjson(
     await onLine(buf.replace(/\r$/, ""));
   }
 }
+
+/**
+ * Same framing as `readNdjson`, but later lines are delivered while an earlier
+ * handler is still awaiting. Required for clay-agent stdio: `session.prompt`
+ * holds the turn until tools finish, and `document.*` reverse-RPC replies
+ * arrive on this same stdin. Awaiting the prompt handler before reading the
+ * next line deadlocks every reverse request until `REVERSE_TIMEOUT_MS`.
+ */
+export async function readNdjsonConcurrent(
+  input: AsyncIterable<Buffer | string>,
+  onLine: (line: string) => Promise<void>,
+): Promise<void> {
+  const pending: Promise<void>[] = [];
+  await readNdjson(input, async (line) => {
+    pending.push(onLine(line));
+  });
+  await Promise.all(pending);
+}

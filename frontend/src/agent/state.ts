@@ -40,6 +40,25 @@ interface ChatAgentModule {
   }): void;
 }
 
+/** AgentRpc `result` is an object after the AG-UI adapter parse, or a JSON
+ *  string if an older server left it opaque. */
+function parseAgentRpcResult(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export interface ChatSnapshot {
   messages: Message[];
   status: ChatStatus;
@@ -275,12 +294,8 @@ function createChatAgent(): ChatAgentModule {
           // idempotent (no correlation needed): the payload IS the latest
           // server-authoritative view, cached by version in agent state.
           const rpc = (event as { value?: { code?: string; result?: unknown } }).value;
-          if (
-            rpc?.code === "session.context" &&
-            rpc.result &&
-            typeof rpc.result === "object"
-          ) {
-            const result = rpc.result as Record<string, unknown>;
+          const result = parseAgentRpcResult(rpc?.result);
+          if (rpc?.code === "session.context" && result) {
             const current = (agent.state ?? {}) as Record<string, unknown>;
             if (typeof result.itemId === "string") {
               // Drawer detail (`session.context { itemId }`).
@@ -294,12 +309,7 @@ function createChatAgent(): ChatAgentModule {
           // Plan 109 I8: the Observational Memory tab's read model —
           // worker selection + bounded observer activity (drops included),
           // session-scoped and idempotent like the context view.
-          if (
-            rpc?.code === "session.om.activity" &&
-            rpc.result &&
-            typeof rpc.result === "object"
-          ) {
-            const result = rpc.result as Record<string, unknown>;
+          if (rpc?.code === "session.om.activity" && result) {
             if (typeof result.sessionId === "string") {
               const current = (agent.state ?? {}) as Record<string, unknown>;
               agent.setState({ ...current, omView: result });
@@ -308,12 +318,7 @@ function createChatAgent(): ChatAgentModule {
           }
           // The `session.om.set` response carries the effective selection;
           // mirror it into the view so the dropdowns reflect it immediately.
-          if (
-            rpc?.code === "session.om.set" &&
-            rpc.result &&
-            typeof rpc.result === "object"
-          ) {
-            const result = rpc.result as Record<string, unknown>;
+          if (rpc?.code === "session.om.set" && result) {
             if (typeof result.sessionId === "string") {
               const current = (agent.state ?? {}) as Record<string, unknown>;
               const view = (current.omView ?? {}) as Record<string, unknown>;
